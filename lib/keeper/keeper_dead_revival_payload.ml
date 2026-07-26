@@ -1,0 +1,746 @@
+type payload =
+  { transaction_id : string
+  ; owner_id : string
+  ; keeper_name : string
+  ; expected_trace_id : Keeper_id.Trace_id.t
+  ; expected_generation : int
+  ; original : Keeper_meta_contract.keeper_meta
+  ; candidate : Keeper_meta_contract.keeper_meta
+  }
+
+type immutable_ref =
+  { authority_leaf : string
+  ; transaction_leaf : string
+  ; sha256 : string
+  ; byte_count : int64
+  }
+
+type error =
+  | Invalid_binding of string
+  | Malformed_payload of string
+  | Unsupported_payload_schema of string
+  | Noncanonical_payload
+  | Malformed_ref of string
+  | Unsupported_ref_schema of string
+  | Noncanonical_ref
+  | Filesystem_capability_unavailable
+  | Directory_prepare_failed of string
+  | Parent_open_failed of string
+  | Create_failed of Fs_compat.capability_write_error
+  | Read_failed of Fs_compat.Capability_exact_read.failure
+  | Read_settlement_failed of
+      Fs_compat.Capability_exact_read.settlement_warning list
+  | Payload_digest_mismatch
+  | Payload_binding_mismatch
+  | Delete_failed of Keeper_fs.durable_remove_error
+
+let payload_schema = "masc.keeper-dead-revival-payload.v1"
+let ref_schema = "masc.keeper-dead-revival-payload-ref.v1"
+let transaction_domain = "keeper-dead-revival-transaction-v1"
+let payload_digest_domain = "masc.keeper-dead-revival-payload-digest.v1"
+let transaction_leaf_domain =
+  "masc.keeper-dead-revival-payload-transaction-leaf.v1"
+;;
+
+let payload_root_leaf = "payloads"
+let authority_leaf_prefix = "revival-"
+let transaction_leaf_prefix = "transaction-"
+let json_leaf_suffix = ".json"
+
+let ( let* ) result fn =
+  match result with
+  | Ok value -> fn value
+  | Error error -> Error error
+;;
+
+let sha256 value =
+  Digestif.SHA256.(digest_string value |> to_hex)
+;;
+
+let length_delimited value =
+  Printf.sprintf "%d:%s" (String.length value) value
+;;
+
+let domain_digest domain values =
+  domain :: values
+  |> List.map length_delimited
+  |> String.concat "\000"
+  |> sha256
+;;
+
+let is_lowercase_sha256 value =
+  match Digestif.SHA256.consistent_of_hex_opt value with
+  | Some digest -> String.equal value (Digestif.SHA256.to_hex digest)
+  | None -> false
+;;
+
+let exact_fields ~kind expected = function
+  | `Assoc fields ->
+    let expected = List.sort String.compare expected in
+    let observed =
+      List.map fst fields
+      |> List.sort String.compare
+    in
+    if List.equal String.equal expected observed
+    then Ok fields
+    else
+      Error
+        (Printf.sprintf
+           "%s fields differ expected=[%s] observed=[%s]"
+           kind
+           (String.concat "," expected)
+           (String.concat "," observed))
+  | _ -> Error (kind ^ " must be a JSON object")
+;;
+
+let required_field ~kind key fields =
+  match List.assoc_opt key fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s field %s is missing" kind key)
+;;
+
+let required_string ~kind key fields =
+  let* value = required_field ~kind key fields in
+  match value with
+  | `String value when not (String.equal (String.trim value) "") -> Ok value
+  | _ ->
+    Error
+      (Printf.sprintf
+         "%s field %s must be a non-empty string"
+         kind
+         key)
+;;
+
+let required_int ~kind key fields =
+  let* value = required_field ~kind key fields in
+  match value with
+  | `Int value -> Ok value
+  | _ -> Error (Printf.sprintf "%s field %s must be an integer" kind key)
+;;
+
+let required_positive_int64 ~kind key fields =
+  let* value = required_field ~kind key fields in
+  match value with
+  | `Int value when value > 0 -> Ok (Int64.of_int value)
+  | `Intlit raw ->
+    (match Int64.of_string_opt raw with
+     | Some value
+       when Int64.compare value 0L > 0
+            && String.equal raw (Int64.to_string value) ->
+       Ok value
+     | Some _ | None ->
+       Error
+         (Printf.sprintf
+            "%s field %s must be a canonical positive int64"
+            kind
+            key))
+  | _ ->
+    Error
+      (Printf.sprintf
+         "%s field %s must be a canonical positive int64"
+         kind
+         key)
+;;
+
+let transaction_digest
+      ~owner_id
+      ~keeper_name
+      ~expected_trace_id
+      ~expected_generation
+      ~candidate_nonce
+  =
+  [ transaction_domain
+  ; length_delimited owner_id
+  ; length_delimited keeper_name
+  ; length_delimited
+      (Keeper_id.Trace_id.to_string expected_trace_id)
+  ; string_of_int expected_generation
+  ; string_of_int candidate_nonce
+  ]
+  |> String.concat "\000"
+  |> sha256
+;;
+
+let validate_payload (payload : payload) =
+  if String.equal (String.trim payload.transaction_id) ""
+  then Error (Invalid_binding "transaction_id must be non-empty")
+  else if not (is_lowercase_sha256 payload.transaction_id)
+  then Error (Invalid_binding "transaction_id must be a lowercase SHA-256")
+  else if String.equal (String.trim payload.owner_id) ""
+  then Error (Invalid_binding "owner_id must be non-empty")
+  else if String.equal (String.trim payload.keeper_name) ""
+  then Error (Invalid_binding "keeper_name must be non-empty")
+  else if payload.expected_generation < 0
+  then Error (Invalid_binding "expected_generation must be non-negative")
+  else if
+    not (String.equal payload.original.name payload.keeper_name)
+    || not (String.equal payload.candidate.name payload.keeper_name)
+  then Error (Invalid_binding "metadata does not match keeper_name")
+  else if
+    not
+      (Keeper_id.Trace_id.equal
+         payload.original.runtime.trace_id
+         payload.expected_trace_id)
+  then Error (Invalid_binding "original metadata does not match expected_trace_id")
+  else if
+    not
+      (Int.equal
+         payload.original.runtime.nonce
+         payload.expected_generation)
+  then Error (Invalid_binding "original metadata does not match expected_generation")
+  else
+    let expected_transaction_id =
+      transaction_digest
+        ~owner_id:payload.owner_id
+        ~keeper_name:payload.keeper_name
+        ~expected_trace_id:payload.expected_trace_id
+        ~expected_generation:payload.expected_generation
+        ~candidate_nonce:payload.candidate.runtime.nonce
+    in
+    if not (String.equal payload.transaction_id expected_transaction_id)
+    then
+      Error
+        (Invalid_binding
+           "transaction_id does not bind owner and lifecycle metadata")
+    else Ok ()
+;;
+
+let make_payload
+      ~transaction_id
+      ~owner_id
+      ~keeper_name
+      ~expected_trace_id
+      ~expected_generation
+      ~original
+      ~candidate
+  =
+  let payload =
+    { transaction_id
+    ; owner_id
+    ; keeper_name
+    ; expected_trace_id
+    ; expected_generation
+    ; original
+    ; candidate
+    }
+  in
+  let* () = validate_payload payload in
+  Ok payload
+;;
+
+let payload_to_json payload =
+  `Assoc
+    [ "schema", `String payload_schema
+    ; "transaction_id", `String payload.transaction_id
+    ; "owner_id", `String payload.owner_id
+    ; "keeper_name", `String payload.keeper_name
+    ; ( "expected_trace_id"
+      , `String
+          (Keeper_id.Trace_id.to_string payload.expected_trace_id) )
+    ; "expected_generation", `Int payload.expected_generation
+    ; "original", Keeper_meta_json.meta_to_json payload.original
+    ; "candidate", Keeper_meta_json.meta_to_json payload.candidate
+    ]
+;;
+
+let payload_to_bytes payload =
+  Yojson.Safe.to_string (payload_to_json payload)
+;;
+
+let payload_of_json json =
+  let malformed detail = Error (Malformed_payload detail) in
+  let* fields =
+    exact_fields
+      ~kind:"revival payload"
+      [ "schema"
+      ; "transaction_id"
+      ; "owner_id"
+      ; "keeper_name"
+      ; "expected_trace_id"
+      ; "expected_generation"
+      ; "original"
+      ; "candidate"
+      ]
+      json
+    |> Result.map_error (fun detail -> Malformed_payload detail)
+  in
+  let* schema =
+    required_string ~kind:"revival payload" "schema" fields
+    |> Result.map_error (fun detail -> Malformed_payload detail)
+  in
+  if not (String.equal schema payload_schema)
+  then Error (Unsupported_payload_schema schema)
+  else
+    let* transaction_id =
+      required_string ~kind:"revival payload" "transaction_id" fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* owner_id =
+      required_string ~kind:"revival payload" "owner_id" fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* keeper_name =
+      required_string ~kind:"revival payload" "keeper_name" fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* trace_id_raw =
+      required_string ~kind:"revival payload" "expected_trace_id" fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* expected_trace_id =
+      Keeper_id.Trace_id.of_string trace_id_raw
+      |> Result.map_error (fun detail ->
+        Malformed_payload ("invalid expected_trace_id: " ^ detail))
+    in
+    let* expected_generation =
+      required_int ~kind:"revival payload" "expected_generation" fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* original_json =
+      required_field ~kind:"revival payload" "original" fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* original =
+      Keeper_meta_json.meta_of_json original_json
+      |> Result.map_error (fun detail ->
+        Malformed_payload ("invalid original metadata: " ^ detail))
+    in
+    let* candidate_json =
+      required_field ~kind:"revival payload" "candidate" fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* candidate =
+      Keeper_meta_json.meta_of_json candidate_json
+      |> Result.map_error (fun detail ->
+        Malformed_payload ("invalid candidate metadata: " ^ detail))
+    in
+    match
+      make_payload
+        ~transaction_id
+        ~owner_id
+        ~keeper_name
+        ~expected_trace_id
+        ~expected_generation
+        ~original
+        ~candidate
+    with
+    | Ok payload -> Ok payload
+    | Error (Invalid_binding detail) -> malformed detail
+    | Error error -> Error error
+;;
+
+let payload_of_bytes raw =
+  let parsed =
+    try Ok (Yojson.Safe.from_string raw) with
+    | Yojson.Json_error detail -> Error (Malformed_payload detail)
+  in
+  let* json = parsed in
+  let* payload = payload_of_json json in
+  if String.equal raw (payload_to_bytes payload)
+  then Ok payload
+  else Error Noncanonical_payload
+;;
+
+let payload_transaction_id payload = payload.transaction_id
+let payload_owner_id payload = payload.owner_id
+let payload_keeper_name payload = payload.keeper_name
+let payload_expected_trace_id payload = payload.expected_trace_id
+let payload_expected_generation payload = payload.expected_generation
+let payload_original payload = payload.original
+let payload_candidate payload = payload.candidate
+
+let payload_digest bytes =
+  domain_digest payload_digest_domain [ bytes ]
+;;
+
+let transaction_leaf ~transaction_digest =
+  let* () =
+    if is_lowercase_sha256 transaction_digest
+    then Ok ()
+    else Error (Invalid_binding "transaction digest must be a lowercase SHA-256")
+  in
+  Ok
+    (transaction_leaf_prefix
+     ^ domain_digest
+         transaction_leaf_domain
+         [ transaction_digest ]
+     ^ json_leaf_suffix)
+;;
+
+let valid_digest_leaf ~prefix leaf =
+  let prefix_length = String.length prefix in
+  let suffix_length = String.length json_leaf_suffix in
+  let expected_length = prefix_length + 64 + suffix_length in
+  String.length leaf = expected_length
+  && String.starts_with ~prefix leaf
+  && String.ends_with ~suffix:json_leaf_suffix leaf
+  && is_lowercase_sha256 (String.sub leaf prefix_length 64)
+;;
+
+let valid_authority_leaf =
+  valid_digest_leaf ~prefix:authority_leaf_prefix
+;;
+
+let valid_transaction_leaf =
+  valid_digest_leaf ~prefix:transaction_leaf_prefix
+;;
+
+let immutable_ref_to_json reference =
+  `Assoc
+    [ "schema", `String ref_schema
+    ; "authority_leaf", `String reference.authority_leaf
+    ; "transaction_leaf", `String reference.transaction_leaf
+    ; "sha256", `String reference.sha256
+    ; "byte_count", `Intlit (Int64.to_string reference.byte_count)
+    ]
+;;
+
+let immutable_ref_to_bytes reference =
+  Yojson.Safe.to_string (immutable_ref_to_json reference)
+;;
+
+let immutable_ref_of_json json =
+  let* fields =
+    exact_fields
+      ~kind:"revival payload ref"
+      [ "schema"
+      ; "authority_leaf"
+      ; "transaction_leaf"
+      ; "sha256"
+      ; "byte_count"
+      ]
+      json
+    |> Result.map_error (fun detail -> Malformed_ref detail)
+  in
+  let* schema =
+    required_string ~kind:"revival payload ref" "schema" fields
+    |> Result.map_error (fun detail -> Malformed_ref detail)
+  in
+  if not (String.equal schema ref_schema)
+  then Error (Unsupported_ref_schema schema)
+  else
+    let* authority_leaf =
+      required_string
+        ~kind:"revival payload ref"
+        "authority_leaf"
+        fields
+      |> Result.map_error (fun detail -> Malformed_ref detail)
+    in
+    let* transaction_leaf =
+      required_string
+        ~kind:"revival payload ref"
+        "transaction_leaf"
+        fields
+      |> Result.map_error (fun detail -> Malformed_ref detail)
+    in
+    let* sha256 =
+      required_string ~kind:"revival payload ref" "sha256" fields
+      |> Result.map_error (fun detail -> Malformed_ref detail)
+    in
+    let* byte_count =
+      required_positive_int64
+        ~kind:"revival payload ref"
+        "byte_count"
+        fields
+      |> Result.map_error (fun detail -> Malformed_ref detail)
+    in
+    if not (valid_authority_leaf authority_leaf)
+    then Error (Malformed_ref "authority_leaf is not a canonical revival authority leaf")
+    else if not (valid_transaction_leaf transaction_leaf)
+    then
+      Error
+        (Malformed_ref
+           "transaction_leaf is not a canonical revival transaction leaf")
+    else if not (is_lowercase_sha256 sha256)
+    then Error (Malformed_ref "sha256 must be a lowercase SHA-256")
+    else Ok { authority_leaf; transaction_leaf; sha256; byte_count }
+;;
+
+let immutable_ref_of_bytes raw =
+  let parsed =
+    try Ok (Yojson.Safe.from_string raw) with
+    | Yojson.Json_error detail -> Error (Malformed_ref detail)
+  in
+  let* json = parsed in
+  let* reference = immutable_ref_of_json json in
+  if String.equal raw (immutable_ref_to_bytes reference)
+  then Ok reference
+  else Error Noncanonical_ref
+;;
+
+let immutable_ref_authority_leaf reference = reference.authority_leaf
+let immutable_ref_transaction_leaf reference = reference.transaction_leaf
+let immutable_ref_sha256 reference = reference.sha256
+let immutable_ref_byte_count reference = reference.byte_count
+
+let payload_directory config =
+  Filename.concat
+    (Filename.concat
+       (Workspace.masc_root_dir config)
+       "keeper-lifecycle-transactions")
+    payload_root_leaf
+;;
+
+let payload_shard_directory config authority_leaf =
+  Filename.concat (payload_directory config) authority_leaf
+;;
+
+let reraise_fatal exception_ backtrace =
+  match exception_ with
+  | Out_of_memory | Stack_overflow | Sys.Break ->
+    Printexc.raise_with_backtrace exception_ backtrace
+  | _ -> ()
+;;
+
+let directory_failure_to_string = function
+  | Keeper_fs_durable_directory.Directory_chain_failed
+      (Keeper_fs_durable_directory.Non_directory_ancestor { path }) ->
+    "non-directory ancestor: " ^ path
+  | Directory_chain_failed (Outside_ownership_root { ownership_root; path }) ->
+    Printf.sprintf
+      "path %s is outside ownership root %s"
+      path
+      ownership_root
+  | Directory_chain_failed (Missing_root { path }) ->
+    "ownership root is missing: " ^ path
+  | Directory_chain_failed (Creation_not_observed { path }) ->
+    "directory creation was not observed: " ^ path
+  | Operation_failed (exception_, backtrace) ->
+    reraise_fatal exception_ backtrace;
+    Printexc.to_string exception_
+;;
+
+let rec prepare_payload_shard config authority_leaf =
+  if not (valid_authority_leaf authority_leaf)
+  then Error (Invalid_binding "authority_leaf is not a canonical revival authority leaf")
+  else
+  match Fs_compat.get_fs_opt () with
+  | None -> Error Filesystem_capability_unavailable
+  | Some _ ->
+    let ownership_root = Workspace.masc_root_dir config in
+    let directory = payload_shard_directory config authority_leaf in
+    (match
+       Keeper_fs_durable_directory.ensure
+         ~before_prepare:Fun.id
+         ~before_directory_fsync:(fun _ -> ())
+         ~ownership_root
+         directory
+     with
+     | Error failure ->
+       Error
+         (Directory_prepare_failed
+            (directory_failure_to_string failure))
+     | Ok lease ->
+       if Keeper_fs_durable_directory.lease_is_current lease
+       then Ok directory
+       else prepare_payload_shard config authority_leaf)
+;;
+
+let with_parent directory fn =
+  match Fs_compat.get_fs_opt () with
+  | None -> Error Filesystem_capability_unavailable
+  | Some fs ->
+    (try Eio.Path.with_open_dir Eio.Path.(fs / directory) fn with
+     | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+     | exception_ ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       reraise_fatal exception_ backtrace;
+       Error (Parent_open_failed (Printexc.to_string exception_)))
+;;
+
+let create config ~authority_leaf payload =
+  let* () = validate_payload payload in
+  let* transaction_leaf =
+    transaction_leaf ~transaction_digest:payload.transaction_id
+  in
+  let bytes = payload_to_bytes payload in
+  let reference =
+    { authority_leaf
+    ; transaction_leaf
+    ; sha256 = payload_digest bytes
+    ; byte_count = Int64.of_int (String.length bytes)
+    }
+  in
+  let* directory = prepare_payload_shard config authority_leaf in
+  let* () =
+    with_parent directory (fun parent ->
+      Fs_compat.create_capability_file_exclusive
+        ~parent
+        ~leaf:transaction_leaf
+        ~permissions:0o600
+        bytes
+      |> Result.map_error (fun failure -> Create_failed failure))
+  in
+  Ok reference
+;;
+
+let payload_matches left right =
+  String.equal (payload_to_bytes left) (payload_to_bytes right)
+;;
+
+let read
+      config
+      ~expected_ref
+      ~authority_leaf
+      ~transaction_id
+      ~owner_id
+      ~keeper_name
+      ~expected_trace_id
+      ~expected_generation
+      ~original
+      ~candidate
+  =
+  let* expected_payload =
+    make_payload
+      ~transaction_id
+      ~owner_id
+      ~keeper_name
+      ~expected_trace_id
+      ~expected_generation
+      ~original
+      ~candidate
+  in
+  let* expected_transaction_leaf =
+    transaction_leaf ~transaction_digest:transaction_id
+  in
+  if
+    not (valid_authority_leaf authority_leaf)
+    || not (String.equal expected_ref.authority_leaf authority_leaf)
+    || not
+         (String.equal
+            expected_ref.transaction_leaf
+            expected_transaction_leaf)
+  then Error Payload_binding_mismatch
+  else
+    let directory = payload_shard_directory config authority_leaf in
+    let* observation =
+      with_parent directory (fun parent ->
+        Fs_compat.Capability_exact_read.read
+          ~parent
+          ~leaf:expected_ref.transaction_leaf
+          ~expected_length:expected_ref.byte_count
+          ~max_length:(Int64.of_int Sys.max_string_length)
+        |> Result.map_error (fun failure -> Read_failed failure))
+    in
+    let warnings =
+      Fs_compat.Capability_exact_read.observation_settlement_warnings
+        observation
+    in
+    if warnings <> []
+    then Error (Read_settlement_failed warnings)
+    else
+      let bytes =
+        Fs_compat.Capability_exact_read.observation_bytes observation
+      in
+      if not (String.equal expected_ref.sha256 (payload_digest bytes))
+      then Error Payload_digest_mismatch
+      else
+        let* observed_payload = payload_of_bytes bytes in
+        if payload_matches observed_payload expected_payload
+        then Ok observed_payload
+        else Error Payload_binding_mismatch
+;;
+
+let delete config reference =
+  if
+    not (valid_authority_leaf reference.authority_leaf)
+    || not (valid_transaction_leaf reference.transaction_leaf)
+  then Error (Invalid_binding "payload ref contains a non-canonical storage leaf")
+  else
+    let directory =
+      payload_shard_directory config reference.authority_leaf
+    in
+    let path = Filename.concat directory reference.transaction_leaf in
+    Keeper_fs.remove_file_durable
+      ~ownership_root:(Workspace.masc_root_dir config)
+      path
+    |> Result.map_error (fun failure -> Delete_failed failure)
+;;
+
+let exact_read_operation_to_string = function
+  | Fs_compat.Capability_exact_read.Pin_parent -> "pin_parent"
+  | Open_parent_descriptor -> "open_parent_descriptor"
+  | Open_leaf -> "open_leaf"
+  | Inspect_opened -> "inspect_opened"
+  | Allocate -> "allocate"
+  | Read_exact -> "read_exact"
+  | Inspect_after_read -> "inspect_after_read"
+  | Close_leaf -> "close_leaf"
+  | Settle_parent_resources -> "settle_parent_resources"
+  | Observe_parent_cancellation -> "observe_parent_cancellation"
+;;
+
+let exact_read_error_to_string = function
+  | Fs_compat.Capability_exact_read.Invalid_leaf detail ->
+    "invalid leaf: " ^ detail
+  | Invalid_length_bounds { expected_length; max_length } ->
+    Printf.sprintf
+      "invalid length bounds expected=%Ld max=%Ld"
+      expected_length
+      max_length
+  | Length_not_representable length ->
+    Printf.sprintf "length is not representable: %Ld" length
+  | Cancelled diagnostic ->
+    Printf.sprintf
+      "%s cancelled: %s"
+      (exact_read_operation_to_string diagnostic.operation)
+      diagnostic.detail
+  | Parent_descriptor_unavailable ->
+    "parent descriptor is unavailable"
+  | Missing -> "payload is missing"
+  | Symbolic_link -> "payload is a symbolic link"
+  | Not_regular _ -> "payload is not a regular file"
+  | Unsafe_link_count count ->
+    Printf.sprintf "payload has unsafe link count: %d" count
+  | Unsafe_mode mode ->
+    Printf.sprintf "payload has unsafe mode: 0o%o" mode
+  | Length_exceeds_max { max_length; observed_length } ->
+    Printf.sprintf
+      "payload length exceeds representation limit max=%Ld observed=%Ld"
+      max_length
+      observed_length
+  | Length_mismatch { expected_length; observed_length } ->
+    Printf.sprintf
+      "payload length mismatch expected=%Ld observed=%Ld"
+      expected_length
+      observed_length
+  | Changed_during_read -> "payload changed during read"
+  | Io_error diagnostic ->
+    Printf.sprintf
+      "%s failed: %s"
+      (exact_read_operation_to_string diagnostic.operation)
+      diagnostic.detail
+;;
+
+let error_to_string = function
+  | Invalid_binding detail -> "invalid revival payload binding: " ^ detail
+  | Malformed_payload detail -> "malformed revival payload: " ^ detail
+  | Unsupported_payload_schema schema ->
+    "unsupported revival payload schema: " ^ schema
+  | Noncanonical_payload -> "revival payload is not exact canonical JSON"
+  | Malformed_ref detail -> "malformed revival payload ref: " ^ detail
+  | Unsupported_ref_schema schema ->
+    "unsupported revival payload ref schema: " ^ schema
+  | Noncanonical_ref -> "revival payload ref is not exact canonical JSON"
+  | Filesystem_capability_unavailable ->
+    "revival payload filesystem capability is unavailable"
+  | Directory_prepare_failed detail ->
+    "revival payload directory preparation failed: " ^ detail
+  | Parent_open_failed detail ->
+    "revival payload parent open failed: " ^ detail
+  | Create_failed failure ->
+    "revival payload create failed: "
+    ^ Fs_compat.capability_write_error_to_string failure
+  | Read_failed failure ->
+    "revival payload read failed: "
+    ^ exact_read_error_to_string failure.error
+  | Read_settlement_failed warnings ->
+    Printf.sprintf
+      "revival payload read settlement failed warning_count=%d"
+      (List.length warnings)
+  | Payload_digest_mismatch -> "revival payload digest mismatch"
+  | Payload_binding_mismatch -> "revival payload binding mismatch"
+  | Delete_failed failure ->
+    "revival payload delete failed: "
+    ^ Keeper_fs.durable_remove_error_to_string failure
+;;

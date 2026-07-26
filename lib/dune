@@ -4,7 +4,8 @@
  (public_name masc)
  (private_modules
   keeper_fs_durable_directory
-  keeper_exact_flow_scope)
+  keeper_exact_flow_scope
+  keeper_dead_revival_payload)
  (libraries
   mcp_protocol
   mcp_protocol.eio

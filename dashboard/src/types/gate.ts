@@ -59,12 +59,50 @@ export type HitlSummaryStatus =
   | { status: 'not_requested' }
   | { status: 'pending' }
   | { status: 'available'; summary: HitlContextSummary }
-  | { status: 'failed'; reason: string; retryable: boolean }
+  | { status: 'failed'; reason: string }
+
+export type KeeperExactAttemptStatus =
+  | 'dispatch_uncertain'
+  | 'released_before_dispatch'
+  | 'released_recovery_required'
+  | 'quarantined'
+  | 'restart_quarantined'
+  | 'completed'
+
+export type KeeperExactAttemptQuarantineCause =
+  | 'flow_execution_failed'
+  | 'cancellation'
+  | 'attempt_replay'
+  | 'domain_invalid_output'
+  | 'terminal_persistence_failure'
+
+export type KeeperExactAttemptState =
+  | { state: 'unbound' }
+  | {
+      state: 'bound'
+      approval_id: string
+      input_hash: string
+      sequence: number
+      slot_id: string
+      call_id: string
+      plan_fingerprint: string
+      request_body_sha256: string
+      status: KeeperExactAttemptStatus
+      quarantine_cause: KeeperExactAttemptQuarantineCause | null
+    }
+
+export type KeeperSummaryAttemptDisposition =
+  | { code: 'ready' }
+  | { code: 'in_flight' }
+  | { code: 'settled' }
+  | { code: 'identity_unbound'; operator_detail: string }
+  | { code: 'persistence_uncertain'; operator_detail: string }
 
 export interface KeeperApprovalQueueItem {
   id: string
   keeper_name: string
   tool_name: string
+  sequence?: number | null
   requested_at?: string | null
   waiting_s?: number
   turn_id?: number | null
@@ -76,6 +114,8 @@ export interface KeeperApprovalQueueItem {
   /** HITL operator briefing state. `null` when the backend payload omits it or
    *  the wire shape violates the contract — never coerced into a fake state. */
   summary_status?: HitlSummaryStatus | null
+  exact_attempt?: KeeperExactAttemptState | null
+  summary_attempt_disposition?: KeeperSummaryAttemptDisposition | null
 }
 
 export interface KeeperResolvedApprovalItem {

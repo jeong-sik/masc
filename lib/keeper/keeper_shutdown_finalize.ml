@@ -700,21 +700,31 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
     | Dead_tombstone_cleanup
     | Dashboard_keeper_purge _ ->
       (match
-         Keeper_approval_queue.list_pending_entries ()
-         |> List.find_opt
-              (fun (pending : Keeper_approval_queue.pending_approval) ->
-                 String.equal pending.audit_base_path config.base_path
-                 && String.equal
-                      pending.keeper_name
-                      operation.keeper_name)
+         Keeper_approval_queue.list_pending_entries_for_workspace
+           ~base_path:config.base_path
        with
-       | None -> Ok ()
-       | Some pending ->
+       | Error error ->
          Error
-           (`Draining
+           (`Failed
               (Printf.sprintf
-                 "Keeper cleanup is blocked by pending approval %s; resolve the approval before permanent retirement"
-                 pending.id)))
+                 "Keeper cleanup cannot prove approval-summary release: %s"
+                 (Keeper_approval_queue.storage_error_to_string error)))
+       | Ok pending_entries ->
+         (match
+            List.find_opt
+              (fun (pending : Keeper_approval_queue.pending_approval) ->
+                 String.equal
+                   pending.keeper_name
+                   operation.keeper_name)
+              pending_entries
+          with
+          | None -> Ok ()
+          | Some pending ->
+            Error
+              (`Draining
+                 (Printf.sprintf
+                    "Keeper cleanup is blocked by pending approval %s; resolve the approval before permanent retirement"
+                    pending.id))))
   in
   let finish registry_unregistered =
     match remove_meta_file ~config operation with

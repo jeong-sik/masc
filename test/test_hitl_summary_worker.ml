@@ -478,6 +478,89 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
        | _ -> fail "pre-dispatch failover did not complete the predetermined successor")
 ;;
 
+let test_cancellation_between_candidates_terminalizes_released_identity () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-between-candidate-cancellation" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let successor =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       let fixtures : F.target_fixture list =
+         [ { id = "hitl-cancel-between-unreachable"
+           ; base_url = "http://127.0.0.1:1"
+           }
+         ; { id = "hitl-cancel-between-successor"
+           ; base_url = successor.base_url
+           }
+         ]
+       in
+       publish_lane
+         [ "hitl-cancel-between-unreachable"
+         ; "hitl-cancel-between-successor"
+         ]
+         (F.resolver_snapshot
+            ~source:"hitl-between-candidate-cancellation"
+            fixtures);
+       let entry = pending_entry ~base_path () in
+       let bind_calls = ref 0 in
+       let expected_backtrace = ref None in
+       let payload =
+         Failure "injected cancellation before successor bind"
+       in
+       let bind_writer path body =
+         incr bind_calls;
+         if !bind_calls = 2
+         then raise_injected_cancellation expected_backtrace payload
+         else Fs_compat.save_file_atomic_strict_staged path body
+       in
+       let observed_payload =
+         match
+           Worker.For_testing.execute_prepared_flow_with_writers
+             ~bind_writer
+             ~net
+             ~clock
+             ~on_summary:(fun _ ->
+               fail "between-candidate cancellation delivered a summary")
+             (prepare_exn entry)
+         with
+         | exception Eio.Cancel.Cancelled observed -> observed
+         | Worker.Executed
+         | Worker.Identity_unbound_blocked
+         | Worker.Deferred_unregistered ->
+           fail "between-candidate cancellation did not leave the flow"
+       in
+       check bool
+         "between-candidate cancellation payload is preserved"
+         true
+         (observed_payload == payload);
+       check int "successor bind was attempted exactly once" 2 !bind_calls;
+       check int "cancelled successor made no POST" 0 (F.post_count successor);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound
+                 { slot_id = "hitl-cancel-between-unreachable"
+                 ; status = Q.Exact_quarantined Q.Exact_cancellation
+                 ; _
+                 }
+           ; summary_attempt_disposition = Q.Summary_attempt_settled
+           ; _
+           } ->
+         ()
+       | _ ->
+         fail
+           "between-candidate cancellation lost or misclassified the released identity")
+;;
+
 let incapable_snapshot base_url =
   let contents =
     Printf.sprintf
@@ -1716,6 +1799,10 @@ let () =
             "all candidates reject before network"
             `Quick
             test_all_candidates_rejected_before_network
+        ; test_case
+            "between-candidate cancellation terminalizes released identity"
+            `Quick
+            test_cancellation_between_candidates_terminalizes_released_identity
         ; test_case
             "visible bind blocks dispatch"
             `Quick

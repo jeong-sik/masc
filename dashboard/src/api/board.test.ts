@@ -225,14 +225,19 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       tool_name: 'shell_exec',
       requested_at: 1_776_427_200,
       waiting_s: 30,
+      sequence: 7,
       input: { cmd: 'ls' },
       input_preview: 'ls -la',
+      exact_attempt: { state: 'unbound' },
+      summary_attempt_disposition: { code: 'ready' },
     })
     expect(result!.id).toBe('q-1')
     expect(result!.keeper_name).toBe('janitor')
     expect(result!.tool_name).toBe('shell_exec')
     expect(result!.waiting_s).toBe(30)
     expect(result!.input_preview).toBe('ls -la')
+    expect(result!.exact_attempt).toEqual({ state: 'unbound' })
+    expect(result!.summary_attempt_disposition).toEqual({ code: 'ready' })
   })
 
   const baseItem = {
@@ -281,13 +286,51 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     ).toEqual({ status: 'not_requested' })
   })
 
-  it('parses a failed status with retryable flag', () => {
+  it('parses only the current terminal failed status', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: { status: 'failed', reason: 'exact attempt quarantined', retryable: false },
+      })!.summary_status,
+    ).toEqual({ status: 'failed', reason: 'exact attempt quarantined' })
     expect(
       normalizeKeeperApprovalQueueItem({
         ...baseItem,
         summary_status: { status: 'failed', reason: 'provider down', retryable: true },
       })!.summary_status,
-    ).toEqual({ status: 'failed', reason: 'provider down', retryable: true })
+    ).toBeNull()
+  })
+
+  it('parses exact attempt and blocked disposition without defaults', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      ...baseItem,
+      sequence: 3,
+      exact_attempt: {
+        state: 'bound',
+        approval_id: baseItem.id,
+        input_hash: 'a'.repeat(64),
+        sequence: 3,
+        slot_id: 'slot-3',
+        call_id: 'call-3',
+        plan_fingerprint: 'plan-3',
+        request_body_sha256: 'b'.repeat(64),
+        status: 'released_recovery_required',
+        quarantine_cause: null,
+      },
+      summary_attempt_disposition: {
+        code: 'persistence_uncertain',
+        operator_detail: 'Exact-output terminalization durability is not confirmed.',
+      },
+    })
+    expect(result!.exact_attempt).toMatchObject({
+      state: 'bound',
+      slot_id: 'slot-3',
+      status: 'released_recovery_required',
+    })
+    expect(result!.summary_attempt_disposition).toEqual({
+      code: 'persistence_uncertain',
+      operator_detail: 'Exact-output terminalization durability is not confirmed.',
+    })
   })
 
   it('returns null summary_status for absent or malformed shapes (no fabricated state)', () => {

@@ -2086,6 +2086,73 @@ let test_recovered_exact_unbound_is_rejected_without_completion () =
          (Option.is_some (AQ.get_pending_entry ~id)))
 ;;
 
+let test_blocked_disposition_requires_operator_rearm_before_bind () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-blocked-bind"
+           ~input:(`String "blocked-bind")
+       in
+       check_update
+         "mark blocked bind pending"
+         true
+         (AQ.mark_summary_pending ~id);
+       let entry = pending_entry_exn id in
+       (match
+          AQ.mark_summary_attempt_identity_unbound
+            ~base_path
+            ~id
+            ~input_hash:entry.input_hash
+            ~sequence:entry.sequence
+        with
+        | Ok true -> ()
+        | Ok false -> Alcotest.fail "identity-unbound disposition was not stored"
+        | Error error ->
+          Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       let identity =
+         exact_identity
+           ~slot_id:"slot-blocked-bind"
+           ~call_id:"call-blocked-bind"
+           id
+       in
+       (match run_exact_transition AQ.bind_summary_exact_attempt identity with
+        | Error
+            (AQ.Exact_attempt_rejected
+               (AQ.Exact_attempt_disposition_conflict
+                  { disposition = AQ.Summary_attempt_identity_unbound; _ })) ->
+          ()
+        | Error error ->
+          Alcotest.fail
+            ("blocked bind returned the wrong rejection: "
+             ^ AQ.exact_attempt_error_to_string error)
+        | Ok _ ->
+          Alcotest.fail "blocked disposition bound without operator rearm");
+       (match
+          AQ.rearm_summary_attempt
+            ~base_path
+            ~id
+            ~input_hash:entry.input_hash
+            ~sequence:entry.sequence
+            ~requested_by:"operator:test"
+        with
+        | Ok true -> ()
+        | Ok false -> Alcotest.fail "operator rearm did not change blocked row"
+        | Error error ->
+          Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       check_exact_update
+         "rearmed disposition permits one exact bind"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt identity);
+       reject_and_cleanup ~base_path id)
+;;
+
 let test_operator_recovery_skips_terminal_exact_failure () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-operator-recovery" in
@@ -2752,6 +2819,10 @@ let () =
             "recovered Exact_unbound rejects completion"
             `Quick
             test_recovered_exact_unbound_is_rejected_without_completion
+        ; Alcotest.test_case
+            "blocked disposition requires operator rearm before bind"
+            `Quick
+            test_blocked_disposition_requires_operator_rearm_before_bind
         ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick

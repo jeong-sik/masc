@@ -514,6 +514,16 @@ let mark_persistence_uncertain (entry : pending_approval) =
     ~sequence:entry.sequence
 ;;
 
+let persist_identity_unbound (entry : pending_approval) =
+  match mark_identity_unbound entry with
+  | Ok true -> Ok ()
+  | Ok false ->
+    Error
+      "identity-unbound transition did not match the current durable exact state"
+  | Error error ->
+    Error (Keeper_approval_queue.exact_attempt_error_to_string error)
+;;
+
 let signal_terminalization_persistence_failure
       (entry : pending_approval)
       operation
@@ -656,16 +666,16 @@ let settle_current ?quarantine_writer (entry : pending_approval) ~reason ~cause 
 
 let signal_settlement_error (entry : pending_approval) = function
   | Exact_settlement_identity_unbound detail ->
-    (match mark_identity_unbound entry with
-     | Ok _ ->
+    (match persist_identity_unbound entry with
+     | Ok () ->
        record_outcome "exact_identity_unbound";
        log_exact_error entry "terminalization blocked" detail;
        raise (Exact_terminalization_identity_unbound detail)
-     | Error error ->
+     | Error marker_detail ->
        signal_terminalization_persistence_failure
          entry
          "identity-unbound observation"
-         (Keeper_approval_queue.exact_attempt_error_to_string error))
+         marker_detail)
   | Exact_settlement_persistence_failed detail ->
     signal_terminalization_persistence_failure
       entry
@@ -912,7 +922,6 @@ let execute_prepared_flow_with_queue_writers_current
       ~on_summary
       (prepared : prepared_flow)
   =
-  let bound = ref false in
   let guarded_before_dispatch candidate =
     match with_current_generation prepared (fun () ->
       before_dispatch ~queue_writers prepared.entry candidate)
@@ -922,7 +931,6 @@ let execute_prepared_flow_with_queue_writers_current
     | Keeper_exact_flow_scope.Current (Error cause) ->
       Error (Durable_flow_callback_failed cause)
     | Keeper_exact_flow_scope.Current (Ok ()) ->
-      bound := true;
       Option.iter (fun after_bind -> after_bind ()) queue_writers.after_bind;
       Ok ()
   in
@@ -934,9 +942,7 @@ let execute_prepared_flow_with_queue_writers_current
       Error Owner_generation_unregistered
     | Keeper_exact_flow_scope.Current (Error cause) ->
       Error (Durable_flow_callback_failed cause)
-    | Keeper_exact_flow_scope.Current (Ok ()) ->
-      bound := false;
-      Ok ()
+    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
   in
   let settle_current_generation callback =
     match with_settlement_generation prepared callback with
@@ -980,69 +986,54 @@ let execute_prepared_flow_with_queue_writers_current
         (Cancelled_uncertain
            (cancellation, cancellation_backtrace, detail))
     in
-    if not !bound
-    then (
-      match
+    let settlement =
+      try
         Eio.Cancel.protect
-        @@ fun () -> mark_identity_unbound prepared.entry
-      with
-      | Ok _ ->
-        raise
-          (Cancelled_identity_unbound
-             (cancellation, cancellation_backtrace))
-      | Error error ->
-        cancelled_uncertain
-          (Keeper_approval_queue.exact_attempt_error_to_string error))
-    else (
-      let settlement =
-        try
-          Eio.Cancel.protect
-          @@ fun () ->
-          match
-            with_settlement_generation prepared (fun () ->
-              record_outcome "exact_cancellation";
-              settle_current
-                ?quarantine_writer:queue_writers.quarantine_writer
-                prepared.entry
-                ~reason:"HITL exact-output flow was cancelled"
-                ~cause:Exact_cancellation)
-          with
-          | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-            Cancellation_owner_generation_deferred
-          | Keeper_exact_flow_scope.Current (Ok ()) ->
-            Cancellation_settled
-          | Keeper_exact_flow_scope.Current (Error error) ->
-            Cancellation_exact_settlement_failed error
+        @@ fun () ->
+        match
+          with_settlement_generation prepared (fun () ->
+            record_outcome "exact_cancellation";
+            settle_current
+              ?quarantine_writer:queue_writers.quarantine_writer
+              prepared.entry
+              ~reason:"HITL exact-output flow was cancelled"
+              ~cause:Exact_cancellation)
         with
-        | exn ->
-          Cancellation_settlement_raised
-            ("cancellation settlement raised: " ^ Printexc.to_string exn)
-      in
-      match settlement with
-      | Cancellation_settled ->
-        Printexc.raise_with_backtrace cancellation cancellation_backtrace
-      | Cancellation_exact_settlement_failed
-          (Exact_settlement_identity_unbound _) ->
-        (match mark_identity_unbound prepared.entry with
-         | Ok _ ->
-           raise
-             (Cancelled_identity_unbound
-                (cancellation, cancellation_backtrace))
-         | Error error ->
-           cancelled_uncertain
-             (Keeper_approval_queue.exact_attempt_error_to_string error))
-      | Cancellation_exact_settlement_failed
-          (Exact_settlement_persistence_failed detail)
-      | Cancellation_settlement_raised detail ->
-        record_outcome "exact_cancellation_settlement_failed";
-        log_exact_error
-          prepared.entry
-          "cancellation terminalization persistence"
-          detail;
-        cancelled_uncertain detail
-      | Cancellation_owner_generation_deferred ->
-        cancelled_uncertain
-          "exact owner generation was replaced before cancellation settlement")
+        | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+          Cancellation_owner_generation_deferred
+        | Keeper_exact_flow_scope.Current (Ok ()) ->
+          Cancellation_settled
+        | Keeper_exact_flow_scope.Current (Error error) ->
+          Cancellation_exact_settlement_failed error
+      with
+      | exn ->
+        Cancellation_settlement_raised
+          ("cancellation settlement raised: " ^ Printexc.to_string exn)
+    in
+    (match settlement with
+     | Cancellation_settled ->
+       Printexc.raise_with_backtrace cancellation cancellation_backtrace
+     | Cancellation_exact_settlement_failed
+         (Exact_settlement_identity_unbound _) ->
+       (match persist_identity_unbound prepared.entry with
+        | Ok () ->
+          raise
+            (Cancelled_identity_unbound
+               (cancellation, cancellation_backtrace))
+        | Error marker_detail ->
+          cancelled_uncertain marker_detail)
+     | Cancellation_exact_settlement_failed
+         (Exact_settlement_persistence_failed detail)
+     | Cancellation_settlement_raised detail ->
+       record_outcome "exact_cancellation_settlement_failed";
+       log_exact_error
+         prepared.entry
+         "cancellation terminalization persistence"
+         detail;
+       cancelled_uncertain detail
+     | Cancellation_owner_generation_deferred ->
+       cancelled_uncertain
+         "exact owner generation was replaced before cancellation settlement")
   | Exact_terminalization_persistence_failed _ as persistence_failure ->
     raise persistence_failure
   | Exact_terminalization_identity_unbound _ ->
@@ -1064,8 +1055,24 @@ let execute_prepared_flow_with_queue_writers_current
      | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
        Deferred_unregistered
      | Keeper_exact_flow_scope.Current (Ok ()) -> Executed
-     | Keeper_exact_flow_scope.Current (Error error) ->
-       signal_settlement_error prepared.entry error)
+     | Keeper_exact_flow_scope.Current
+         (Error (Exact_settlement_identity_unbound detail)) ->
+       (match persist_identity_unbound prepared.entry with
+        | Ok () ->
+          record_outcome "exact_identity_unbound";
+          log_exact_error prepared.entry "terminalization blocked" detail;
+          Identity_unbound_blocked
+        | Error marker_detail ->
+          signal_terminalization_persistence_failure
+            prepared.entry
+            "identity-unbound observation"
+            marker_detail)
+     | Keeper_exact_flow_scope.Current
+         (Error (Exact_settlement_persistence_failed detail)) ->
+       signal_terminalization_persistence_failure
+         prepared.entry
+         "crash terminalization persistence"
+         detail)
 ;;
 
 let execute_prepared_flow_with_queue_writers

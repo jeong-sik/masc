@@ -20,6 +20,8 @@ import type {
   GateMode,
   HitlContextSummary,
   HitlSummaryStatus,
+  KeeperExactAttemptState,
+  KeeperSummaryAttemptDisposition,
 } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
@@ -194,6 +196,12 @@ function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
 }
 
 function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: string; value: string }> {
+  const disposition =
+    item.summary_attempt_disposition?.code ?? 'contract_unavailable'
+  const exact =
+    item.exact_attempt?.state === 'bound'
+      ? `${item.exact_attempt.slot_id} · ${item.exact_attempt.status}`
+      : item.exact_attempt?.state ?? 'contract_unavailable'
   return [
     { label: '키퍼', value: item.keeper_name },
     { label: '작업', value: item.tool_name },
@@ -203,6 +211,8 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
     { label: '턴', value: typeof item.turn_id === 'number' ? `turn ${item.turn_id}` : null },
     { label: '요청시각', value: compactText(item.requested_at) },
     { label: '입력', value: compactText(item.input_preview) || '입력 미리보기 없음' },
+    { label: 'Auto Judge', value: disposition },
+    { label: 'Exact attempt', value: exact },
   ].filter((row): row is { label: string; value: string } => Boolean(row.value))
 }
 
@@ -235,18 +245,82 @@ function renderAvailableSummary(summary: HitlContextSummary) {
   `
 }
 
-function approvalSummaryBlock(status: HitlSummaryStatus | null | undefined) {
-  if (!status) return null
+function exactAttemptLabel(attempt: KeeperExactAttemptState): string {
+  return attempt.state === 'unbound'
+    ? 'exact identity unbound'
+    : `exact ${attempt.slot_id} · ${attempt.status}`
+}
+
+function canRearmSummaryAttempt(item: KeeperApprovalQueueItem): boolean {
+  const disposition = item.summary_attempt_disposition
+  const exactAttempt = item.exact_attempt
+  if (!disposition || !exactAttempt || item.summary_status?.status !== 'pending') {
+    return false
+  }
+  if (disposition.code === 'identity_unbound') {
+    return exactAttempt.state === 'unbound'
+  }
+  if (disposition.code !== 'persistence_uncertain') return false
+  return exactAttempt.state === 'unbound'
+    || exactAttempt.status === 'released_recovery_required'
+}
+
+function blockedSummaryAttempt(
+  disposition:
+    Extract<
+      KeeperSummaryAttemptDisposition,
+      { code: 'identity_unbound' | 'persistence_uncertain' }
+    >,
+  exactAttempt: KeeperExactAttemptState,
+) {
+  const label = disposition.code === 'identity_unbound'
+    ? 'Auto Judge 중단 · exact identity 미결합'
+    : 'Auto Judge 중단 · durability 확인 필요'
+  return html`
+    <div
+      class="ap-summary ap-summary-failed"
+      data-testid="approval-summary"
+      data-summary-state=${disposition.code}
+    >
+      <span class="ap-summary-label">${label}</span>
+      <span class="ap-summary-reason">${disposition.operator_detail}</span>
+      <span class="ap-summary-reason mono">${exactAttemptLabel(exactAttempt)}</span>
+    </div>
+  `
+}
+
+function approvalSummaryBlock(item: KeeperApprovalQueueItem) {
+  const status = item.summary_status
+  const disposition = item.summary_attempt_disposition
+  const exactAttempt = item.exact_attempt
+  if (!status || !disposition || !exactAttempt) {
+    return html`
+      <div
+        class="ap-summary ap-summary-failed"
+        data-testid="approval-summary"
+        data-summary-state="contract_unavailable"
+      >
+        <span class="ap-summary-label">Auto Judge durable state 확인 불가</span>
+        <span class="ap-summary-reason">현재 queue contract를 다시 확인해야 합니다.</span>
+      </div>
+    `
+  }
+  if (
+    disposition.code === 'identity_unbound'
+    || disposition.code === 'persistence_uncertain'
+  ) {
+    return blockedSummaryAttempt(disposition, exactAttempt)
+  }
   switch (status.status) {
     case 'not_requested':
       return null
     case 'pending':
       return html`<div class="ap-summary ap-summary-pending" data-testid="approval-summary" data-summary-state="pending">
-        <span class="ap-summary-label">🧭 컨텍스트 요약 생성 중…</span>
+        <span class="ap-summary-label">${disposition.code === 'ready' ? '컨텍스트 요약 재개 대기' : '컨텍스트 요약 생성 중…'}</span>
       </div>`
     case 'failed':
       return html`<div class="ap-summary ap-summary-failed" data-testid="approval-summary" data-summary-state="failed">
-        <span class="ap-summary-label">컨텍스트 요약 실패 · ${status.retryable ? '수동 재시도 가능' : '재시도 불가'}</span>
+        <span class="ap-summary-label">컨텍스트 요약 terminal 실패 · Human 판단 필요</span>
         ${status.reason ? html`<span class="ap-summary-reason">${status.reason}</span>` : null}
       </div>`
     case 'available':
@@ -272,6 +346,7 @@ function ApprovalCard({
   const busy = actingId === item.id
   const anyBusy = Boolean(actingId)
   const title = approvalTitle(item)
+  const canRearm = canRearmSummaryAttempt(item)
 
   return html`
     <article
@@ -297,7 +372,7 @@ function ApprovalCard({
         </div>
         <h3 class="ap-title">${title}</h3>
         <p class="ap-detail">Keeper lane은 계속 진행하며 이 요청만 판단을 기다립니다.</p>
-        ${approvalSummaryBlock(item.summary_status)}
+        ${approvalSummaryBlock(item)}
         <div class="ap-req">
           <${AgentAvatar} name=${item.keeper_name} size="sm" />
           <div class="ap-req-body">
@@ -326,14 +401,14 @@ function ApprovalCard({
           </div>
         </div>
         <div class="ap-actions">
-          ${item.summary_status?.status === 'failed' && item.summary_status.retryable
+          ${canRearm
             ? html`<button
                 type="button"
                 class="ap-act retry"
                 onClick=${() => void retryKeeperAutoJudge(item.id)}
-                title="자동 반복 없이 Auto Judge를 정확히 한 번 다시 요청합니다"
+                title="durable blocked state를 operator CAS로 한 번 재개합니다"
                 disabled=${anyBusy}
-              >${busy ? '요청 중…' : 'Auto Judge 재시도'}</button>`
+              >${busy ? '요청 중…' : 'Auto Judge 재개'}</button>`
             : null}
           <button
             type="button"

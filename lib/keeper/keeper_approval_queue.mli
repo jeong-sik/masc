@@ -28,6 +28,10 @@ type exact_attempt_rejection =
   | Exact_attempt_invalid_identity of string
   | Exact_attempt_summary_not_pending of string
   | Exact_attempt_unbound_state of string
+  | Exact_attempt_disposition_conflict of
+      { approval_id : string
+      ; disposition : summary_attempt_disposition
+      }
   | Exact_attempt_identity_conflict of exact_attempt_binding
   | Exact_attempt_status_conflict of exact_attempt_binding
   | Exact_attempt_provenance_mismatch of
@@ -330,6 +334,10 @@ val resolve_with_policy :
 val list_pending_json : unit -> Yojson.Safe.t
 val list_pending_dashboard_json : unit -> Yojson.Safe.t
 val list_pending_entries : unit -> pending_approval list
+val list_pending_entries_for_workspace :
+  base_path:string -> (pending_approval list, storage_error) result
+(** Read one workspace's pending rows without collapsing an unavailable,
+    malformed, or reset-required durable store into an empty projection. *)
 val get_pending_entry : id:string -> pending_approval option
 
 val bind_summary_exact_attempt :

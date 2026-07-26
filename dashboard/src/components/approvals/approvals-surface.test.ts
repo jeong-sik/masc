@@ -21,7 +21,32 @@ function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string })
     waiting_s: 92,
     input_preview: '{"path":"config.json","content":"hello"}',
     task_id: 'T-1',
+    summary_status: { status: 'not_requested' },
+    exact_attempt: { state: 'unbound' },
+    summary_attempt_disposition: { code: 'ready' },
     ...overrides,
+  }
+}
+
+function completedExactAttempt(id: string, callId: string) {
+  return {
+    state: 'bound' as const,
+    approval_id: id,
+    input_hash: 'a'.repeat(64),
+    sequence: 1,
+    slot_id: 'slot-1',
+    call_id: callId,
+    plan_fingerprint: 'plan-1',
+    request_body_sha256: 'b'.repeat(64),
+    status: 'completed' as const,
+    quarantine_cause: null,
+  }
+}
+
+function releasedRecoveryAttempt(id: string) {
+  return {
+    ...completedExactAttempt(id, 'call-recovery'),
+    status: 'released_recovery_required' as const,
   }
 }
 
@@ -186,6 +211,8 @@ describe('ApprovalsSurface', () => {
             rationale: 'A Human should confirm the intended target.',
           },
         },
+        exact_attempt: completedExactAttempt('appr-summary', 'run-1'),
+        summary_attempt_disposition: { code: 'settled' },
       }),
     ])
 
@@ -201,12 +228,26 @@ describe('ApprovalsSurface', () => {
     expect(container.textContent).toContain('Human 판단 필요')
   }, 20000)
 
-  it('surfaces pending and failed summary states rather than hiding them', async () => {
+  it('surfaces in-flight and terminal summary states rather than hiding them', async () => {
     const { ApprovalsSurface } = await loadSurface([
-      queueItem({ id: 'appr-pending', summary_status: { status: 'pending' } }),
+      queueItem({
+        id: 'appr-pending',
+        summary_status: { status: 'pending' },
+        exact_attempt: {
+          ...releasedRecoveryAttempt('appr-pending'),
+          status: 'dispatch_uncertain',
+        },
+        summary_attempt_disposition: { code: 'in_flight' },
+      }),
       queueItem({
         id: 'appr-failed',
-        summary_status: { status: 'failed', reason: 'provider unavailable', retryable: true },
+        summary_status: { status: 'failed', reason: 'exact attempt quarantined' },
+        exact_attempt: {
+          ...completedExactAttempt('appr-failed', 'call-failed'),
+          status: 'quarantined',
+          quarantine_cause: 'flow_execution_failed',
+        },
+        summary_attempt_disposition: { code: 'settled' },
       }),
     ])
 
@@ -218,35 +259,28 @@ describe('ApprovalsSurface', () => {
     ).map(el => el.getAttribute('data-summary-state'))
     expect(states).toContain('pending')
     expect(states).toContain('failed')
-    expect(container.textContent).toContain('provider unavailable')
-    expect(container.textContent).toContain('수동 재시도 가능')
+    expect(container.textContent).toContain('exact attempt quarantined')
+    expect(container.textContent).toContain('Human 판단 필요')
   }, 20000)
 
-  it('retries a failed Auto Judge only after an explicit operator click', async () => {
+  it('rearms typed blocked Auto Judge states only after an explicit operator click', async () => {
     const { ApprovalsSurface, retryGateAutoJudge } = await loadSurface([
       queueItem({
         id: 'appr-retry',
-        summary_status: { status: 'failed', reason: 'provider unavailable', retryable: true },
+        summary_status: { status: 'pending' },
+        exact_attempt: { state: 'unbound' },
+        summary_attempt_disposition: {
+          code: 'identity_unbound',
+          operator_detail: 'Exact-output terminalization stopped before an attempt identity was bound.',
+        },
       }),
-    ])
-
-    render(html`<${ApprovalsSurface} />`, container)
-    await flushUi()
-
-    expect(retryGateAutoJudge).not.toHaveBeenCalled()
-    container.querySelector<HTMLButtonElement>('.ap-card .ap-act.retry')?.click()
-    await flushUi()
-    expect(retryGateAutoJudge).toHaveBeenCalledWith('appr-retry')
-  }, 20000)
-
-  it('does not offer retry for a terminal non-retryable Auto Judge failure', async () => {
-    const { ApprovalsSurface, retryGateAutoJudge } = await loadSurface([
       queueItem({
-        id: 'appr-terminal',
-        summary_status: {
-          status: 'failed',
-          reason: 'exact attempt quarantined',
-          retryable: false,
+        id: 'appr-recovery',
+        summary_status: { status: 'pending' },
+        exact_attempt: releasedRecoveryAttempt('appr-recovery'),
+        summary_attempt_disposition: {
+          code: 'persistence_uncertain',
+          operator_detail: 'Exact-output terminalization durability is not confirmed.',
         },
       }),
     ])
@@ -254,19 +288,57 @@ describe('ApprovalsSurface', () => {
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('재시도 불가')
+    expect(retryGateAutoJudge).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('exact identity 미결합')
+    expect(container.textContent).toContain('durability 확인 필요')
+    container
+      .querySelector<HTMLButtonElement>('[data-approval-id="appr-retry"] .ap-act.retry')
+      ?.click()
+    await flushUi()
+    expect(retryGateAutoJudge).toHaveBeenCalledWith('appr-retry')
+  }, 20000)
+
+  it('does not offer rearm for a terminal exact Auto Judge failure', async () => {
+    const { ApprovalsSurface, retryGateAutoJudge } = await loadSurface([
+      queueItem({
+        id: 'appr-terminal',
+        summary_status: {
+          status: 'failed',
+          reason: 'exact attempt quarantined',
+        },
+        exact_attempt: {
+          ...completedExactAttempt('appr-terminal', 'call-terminal'),
+          status: 'quarantined',
+          quarantine_cause: 'flow_execution_failed',
+        },
+        summary_attempt_disposition: { code: 'settled' },
+      }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Human 판단 필요')
     expect(container.querySelector('.ap-card .ap-act.retry')).toBeNull()
     expect(retryGateAutoJudge).not.toHaveBeenCalled()
   }, 20000)
 
-  it('renders no summary block when the approval has no summary status', async () => {
-    const { ApprovalsSurface } = await loadSurface([queueItem({ id: 'appr-nosummary' })])
+  it('renders an explicit contract failure when typed durable state is absent', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({
+        id: 'appr-nosummary',
+        summary_status: null,
+        exact_attempt: null,
+        summary_attempt_disposition: null,
+      }),
+    ])
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
     expect(container.querySelector('[data-testid="approval-card"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="approval-summary"]')).toBeNull()
+    expect(container.querySelector('[data-summary-state="contract_unavailable"]')).not.toBeNull()
+    expect(container.textContent).toContain('durable state 확인 불가')
   }, 20000)
 
   it('reports the observed Keeper count without classifying the queue', async () => {

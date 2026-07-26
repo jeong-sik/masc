@@ -24,6 +24,10 @@ type exact_attempt_rejection =
   | Exact_attempt_invalid_identity of string
   | Exact_attempt_summary_not_pending of string
   | Exact_attempt_unbound_state of string
+  | Exact_attempt_disposition_conflict of
+      { approval_id : string
+      ; disposition : summary_attempt_disposition
+      }
   | Exact_attempt_identity_conflict of exact_attempt_binding
   | Exact_attempt_status_conflict of exact_attempt_binding
   | Exact_attempt_provenance_mismatch of
@@ -150,6 +154,20 @@ let exact_attempt_error_to_string = function
     Printf.sprintf "exact attempt approval %s summary is not pending" approval_id
   | Exact_attempt_rejected (Exact_attempt_unbound_state approval_id) ->
     Printf.sprintf "exact attempt approval %s has no bound identity" approval_id
+  | Exact_attempt_rejected
+      (Exact_attempt_disposition_conflict { approval_id; disposition }) ->
+    let disposition =
+      match disposition with
+      | Summary_attempt_ready -> "ready"
+      | Summary_attempt_in_flight -> "in_flight"
+      | Summary_attempt_identity_unbound -> "identity_unbound"
+      | Summary_attempt_persistence_uncertain -> "persistence_uncertain"
+      | Summary_attempt_settled -> "settled"
+    in
+    Printf.sprintf
+      "exact attempt approval %s rejects dispatch from disposition %s"
+      approval_id
+      disposition
   | Exact_attempt_rejected (Exact_attempt_identity_conflict binding) ->
     "exact attempt identity conflicts with durable binding: "
     ^ exact_attempt_binding_to_string binding
@@ -1911,6 +1929,16 @@ let bind_summary_exact_attempt_with
                   (Exact_attempt_summary_not_pending entry.id))
            | Summary_pending ->
              (match entry.exact_attempt with
+               | Exact_unbound
+                 when entry.summary_attempt_disposition
+                      <> Summary_attempt_ready ->
+                 Error
+                   (Exact_attempt_rejected
+                      (Exact_attempt_disposition_conflict
+                         { approval_id = entry.id
+                         ; disposition =
+                             entry.summary_attempt_disposition
+                         }))
                | Exact_unbound ->
                  persist_exact_attempt_entry_unlocked
                    ~save_file_atomic_strict_staged
@@ -1922,6 +1950,16 @@ let bind_summary_exact_attempt_with
                    ; summary_attempt_disposition =
                        Summary_attempt_in_flight
                    }
+                | Exact_bound _
+                  when entry.summary_attempt_disposition
+                       <> Summary_attempt_in_flight ->
+                  Error
+                    (Exact_attempt_rejected
+                       (Exact_attempt_disposition_conflict
+                          { approval_id = entry.id
+                          ; disposition =
+                              entry.summary_attempt_disposition
+                          }))
                 | Exact_bound existing
                   when exact_attempt_identity_matches existing candidate ->
                   (match existing.status with
@@ -2357,7 +2395,7 @@ let mark_summary_attempt_identity_unbound
            }
        | Summary_pending, Exact_unbound,
          Summary_attempt_identity_unbound ->
-         None
+         Some entry
        | _ -> None)
 ;;
 
@@ -3192,6 +3230,17 @@ let list_pending_dashboard_json () : Yojson.Safe.t =
 
 let list_pending_entries () : pending_approval list =
   pending_entries_in_sequence_order ()
+;;
+
+let list_pending_entries_for_workspace ~base_path =
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+    | Some error -> Error error
+    | None ->
+      pending_entries_in_sequence_order ()
+      |> List.filter (fun (entry : pending_approval) ->
+        String.equal entry.audit_base_path base_path)
+      |> fun entries -> Ok entries)
 ;;
 
 let pending_count_for_keeper ~keeper_name : int =

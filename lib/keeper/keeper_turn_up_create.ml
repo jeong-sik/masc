@@ -205,12 +205,13 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          reservation for metadata and checkpoint creation so they cannot
          diverge. *)
       let nonce_result =
-        Keeper_lifecycle_nonce.next_for_base_path
-          ~base_path:ctx.config.base_path
-          ~keeper_id:p.name
-          ~owner_id:trace_id
-          ()
-        |> Result.bind Keeper_lifecycle_nonce.runtime_int_of_nonce
+        Result.bind
+          (Keeper_lifecycle_nonce.next_for_base_path
+             ~base_path:ctx.config.base_path
+             ~keeper_id:p.name
+             ~owner_id:trace_id
+             ())
+          Keeper_lifecycle_nonce.runtime_int_of_nonce
       in
       match nonce_result with
       | Error error ->

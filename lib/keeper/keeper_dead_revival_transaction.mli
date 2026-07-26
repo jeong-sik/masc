@@ -61,3 +61,11 @@ type recovery_summary =
     mutation paths become available. A journal whose keeper identity changed
     is retained and reported as unresolved. *)
 val recover_pending : Workspace.config -> recovery_summary
+
+module For_testing : sig
+  val with_boundary_hooks :
+    ?after_nonce_allocation:(unit -> unit) ->
+    ?after_journal_write:(unit -> unit) ->
+    (unit -> 'a) ->
+    'a
+end

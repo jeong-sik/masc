@@ -1,6 +1,42 @@
 open Keeper_meta_contract
 open Keeper_types_profile
 
+let after_nonce_allocation_hook : (unit -> unit) Atomic.t =
+  Atomic.make (fun () -> ())
+;;
+
+let after_journal_write_hook : (unit -> unit) Atomic.t =
+  Atomic.make (fun () -> ())
+;;
+
+let invoke_after_nonce_allocation_hook () =
+  (Atomic.get after_nonce_allocation_hook) ()
+;;
+
+let invoke_after_journal_write_hook () =
+  (Atomic.get after_journal_write_hook) ()
+;;
+
+module For_testing = struct
+  let with_boundary_hooks
+        ?(after_nonce_allocation = fun () -> ())
+        ?(after_journal_write = fun () -> ())
+        fn
+    =
+    let previous_nonce =
+      Atomic.exchange after_nonce_allocation_hook after_nonce_allocation
+    in
+    let previous_journal =
+      Atomic.exchange after_journal_write_hook after_journal_write
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set after_nonce_allocation_hook previous_nonce;
+        Atomic.set after_journal_write_hook previous_journal)
+      fn
+  ;;
+end
+
 type registry_conflict =
   | Registry_phase_conflict of Keeper_state_machine.phase
   | Registry_identity_conflict of
@@ -377,14 +413,41 @@ let revive (ctx : _ context) ~original ~candidate =
     Error (Reservation_conflict owner)
   | Ok token ->
     observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
+    let journal_write_started = ref false in
+    let cleanup_pre_journal_cancellation () =
+      Eio.Cancel.protect (fun () ->
+        (if !journal_write_started
+         then
+           match delete_journal ctx.config original.name with
+           | Ok () -> ()
+           | Error detail ->
+             Log.Keeper.error
+               "keeper lifecycle pre-journal cancellation cleanup failed keeper=%s error=%s"
+               original.name
+               detail);
+        release_observed token original.name)
+    in
+    let protect_pre_journal fn =
+      try fn () with
+      | Eio.Cancel.Cancelled _ as cancelled ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        cleanup_pre_journal_cancellation ();
+        Printexc.raise_with_backtrace cancelled backtrace
+    in
     let nonce_result =
-      Keeper_lifecycle_nonce.next_for_base_path
-        ~base_path:ctx.config.base_path
-        ~floor:(Int64.succ (Int64.of_int original.runtime.nonce))
-        ~keeper_id:original.name
-        ~owner_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
-        ()
-      |> Result.bind Keeper_lifecycle_nonce.runtime_int_of_nonce
+      protect_pre_journal (fun () ->
+        let result =
+          Result.bind
+            (Keeper_lifecycle_nonce.next_for_base_path
+               ~base_path:ctx.config.base_path
+               ~floor:(Int64.succ (Int64.of_int original.runtime.nonce))
+               ~keeper_id:original.name
+               ~owner_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
+               ())
+            Keeper_lifecycle_nonce.runtime_int_of_nonce
+        in
+        invoke_after_nonce_allocation_hook ();
+        result)
     in
     match nonce_result with
     | Error error ->
@@ -410,7 +473,14 @@ let revive (ctx : _ context) ~original ~candidate =
       ; stage = Reserved
       }
     in
-    (match save_journal ctx.config journal with
+    let journal_result =
+      protect_pre_journal (fun () ->
+        journal_write_started := true;
+        let result = save_journal ctx.config journal in
+        invoke_after_journal_write_hook ();
+        result)
+    in
+    (match journal_result with
      | Error detail ->
        release_observed token original.name;
        Error (Journal_write_failed detail)
@@ -574,6 +644,7 @@ let revive (ctx : _ context) ~original ~candidate =
        in
        try run () with
        | Eio.Cancel.Cancelled _ as cancelled ->
+         let backtrace = Printexc.get_raw_backtrace () in
          Eio.Cancel.protect (fun () ->
            let errors =
              rollback token ctx.config journal !original_entry_for_rollback
@@ -585,7 +656,7 @@ let revive (ctx : _ context) ~original ~candidate =
                original.name
                (String.concat "; " (List.map rollback_error_to_string errors));
            release_observed token original.name);
-         raise cancelled)
+         Printexc.raise_with_backtrace cancelled backtrace)
 ;;
 
 let recover_one config path =

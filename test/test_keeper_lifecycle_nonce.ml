@@ -100,16 +100,57 @@ let test_floor_and_pair_independence () =
 
 let test_concurrent_allocations_are_exclusive () =
   with_base "masc_lifecycle_nonce_concurrent_" @@ fun base_path ->
-  let left, right =
-    Eio.Fiber.both
-      (fun () -> next ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" ())
-      (fun () -> next ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-b" ())
+  let left = ref None in
+  let right = ref None in
+  Eio.Fiber.both
+    (fun () ->
+      left :=
+        Some (next ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" ()))
+    (fun () ->
+      right :=
+        Some (next ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-b" ()));
+  let require_result side = function
+    | Some value -> value
+    | None -> failf "%s allocation did not complete" side
   in
+  let left = require_result "left" !left in
+  let right = require_result "right" !right in
   check
     (list int64)
     "concurrent callers receive distinct monotonic values"
     [ 1L; 2L ]
     (List.sort Int64.compare [ left; right ])
+;;
+
+let test_keeper_id_surrounding_whitespace_is_rejected () =
+  with_base "masc_lifecycle_nonce_keeper_id_" @@ fun base_path ->
+  List.iter
+    (fun keeper_id ->
+      match
+        Nonce.next_for_base_path
+          ~base_path
+          ~keeper_id
+          ~owner_id:"trace-a"
+          ()
+      with
+      | Error Nonce.Invalid_keeper_id -> ()
+      | Error error ->
+        failf
+          "unexpected keeper identity error for %S: %s"
+          keeper_id
+          (Nonce.error_to_string error)
+      | Ok nonce ->
+        failf
+          "noncanonical keeper identity %S allocated nonce %Ld"
+          keeper_id
+          nonce)
+    [ " keeper-a"; "keeper-a " ];
+  check
+    bool
+    "invalid aliases do not create authority root"
+    false
+    (Fs_compat.file_exists
+       (Nonce.For_testing.root_path_for_base_path ~base_path))
 ;;
 
 let test_schema_mismatch_fails_closed () =
@@ -201,6 +242,10 @@ let () =
             "concurrent exclusive allocation"
             `Quick
             test_concurrent_allocations_are_exclusive
+        ; test_case
+            "keeper identity whitespace aliases rejected"
+            `Quick
+            test_keeper_id_surrounding_whitespace_is_rejected
         ; test_case
             "schema mismatch fails closed"
             `Quick

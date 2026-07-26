@@ -969,6 +969,104 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
       Alcotest.(check bool) "successful rollback clears journal" false
         (Fs_compat.file_exists journal_path))
 
+type dead_revival_cancellation_boundary =
+  | After_nonce_allocation
+  | After_journal_write
+
+let test_dead_revival_cancellation_releases_reservation boundary () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name =
+    match boundary with
+    | After_nonce_allocation -> "dead-revival-cancel-after-nonce"
+    | After_journal_write -> "dead-revival-cancel-after-journal"
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let original =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
+              ; "trace_id", `String ("trace-" ^ keeper_name)
+              ; "runtime_id", `String "runtime.primary"
+              ])
+        with
+        | Error detail -> Alcotest.fail detail
+        | Ok meta ->
+          { meta with
+            paused = true
+          ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+          }
+      in
+      let candidate =
+        { original with
+          paused = false
+        ; latched_reason = None
+        }
+      in
+      let ctx : _ Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      let cancel () =
+        raise (Eio.Cancel.Cancelled (Failure "injected revival boundary cancellation"))
+      in
+      let invoke () =
+        match boundary with
+        | After_nonce_allocation ->
+          Keeper_dead_revival_transaction.For_testing.with_boundary_hooks
+            ~after_nonce_allocation:cancel
+            (fun () ->
+              Keeper_dead_revival_transaction.revive ctx ~original ~candidate)
+        | After_journal_write ->
+          Keeper_dead_revival_transaction.For_testing.with_boundary_hooks
+            ~after_journal_write:cancel
+            (fun () ->
+              Keeper_dead_revival_transaction.revive ctx ~original ~candidate)
+      in
+      let cancelled =
+        try
+          ignore (invoke ());
+          false
+        with
+        | Eio.Cancel.Cancelled _ -> true
+      in
+      Alcotest.(check bool) "injected cancellation propagated" true cancelled;
+      Alcotest.(check bool)
+        "cancellation released lifecycle reservation"
+        true
+        (Option.is_none
+           (Keeper_lifecycle_reservation.current
+              ~base_path:base_dir
+              ~keeper_name));
+      let journal_path =
+        List.fold_left Filename.concat base_dir
+          [ ".masc"; "keeper-lifecycle-transactions"; keeper_name ^ ".json" ]
+      in
+      Alcotest.(check bool)
+        "cancellation left no Reserved journal"
+        false
+        (Fs_compat.file_exists journal_path))
+;;
+
 let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1854,6 +1952,16 @@ let () =
             "rejected revival rolls back durable and registry authorities"
             `Quick
             test_dead_revival_launch_failure_rolls_back_both_authorities;
+          Alcotest.test_case
+            "nonce-boundary cancellation releases revival reservation"
+            `Quick
+            (test_dead_revival_cancellation_releases_reservation
+               After_nonce_allocation);
+          Alcotest.test_case
+            "journal-boundary cancellation clears revival reservation"
+            `Quick
+            (test_dead_revival_cancellation_releases_reservation
+               After_journal_write);
           Alcotest.test_case
             "operator resume clears persisted dead-tombstone state"
             `Quick

@@ -296,7 +296,9 @@ let next_for_base_path
   =
   if Filename.is_relative base_path
   then Error (Invalid_base_path base_path)
-  else if String.equal (String.trim keeper_id) ""
+  else if
+    String.equal (String.trim keeper_id) ""
+    || not (String.equal keeper_id (String.trim keeper_id))
   then Error Invalid_keeper_id
   else if String.equal (String.trim owner_id) ""
   then Error Invalid_owner_id
@@ -366,7 +368,8 @@ let corruption_to_string = function
 
 let error_to_string = function
   | Invalid_base_path path -> "lifecycle nonce base path is not absolute: " ^ path
-  | Invalid_keeper_id -> "lifecycle nonce keeper_id must be non-empty"
+  | Invalid_keeper_id ->
+    "lifecycle nonce keeper_id must be non-empty and have no surrounding whitespace"
   | Invalid_owner_id -> "lifecycle nonce owner_id must be non-empty"
   | Invalid_floor floor ->
     Printf.sprintf

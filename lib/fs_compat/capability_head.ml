@@ -744,7 +744,7 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
                   effect := Durable evidence;
                   invoke_hook Verify_publication hooks.after_verified;
                   Ok { evidence; settlement_warnings = [] }
-                | _ -> fail (Corrupt_head "published HEAD does not match the staged row")))
+                | _ -> fail (Corrupt_head "published HEAD does not match the staged row"))))
 
 let compare_and_swap ~secure_random ~parent ~leaf ~expected ~row =
   compare_and_swap_internal ~hooks:no_hooks ~secure_random ~parent ~leaf ~expected ~row

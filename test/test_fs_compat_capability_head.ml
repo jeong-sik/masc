@@ -337,28 +337,46 @@ let test_before_rename_failure_and_cancellation_are_unchanged
   =
   with_tmp_dir "masc_capability_head_before_rename_" @@ fun directory ->
   with_parent ~fs directory @@ fun parent ->
-  List.iter
-    (fun (leaf, label, inject) ->
-       let absent = read ~secure_random ~parent ~leaf (label ^ " read") in
-       let hooks = Head.For_testing.hooks ~before_rename:inject () in
-       publish_for_testing
-         hooks
-         ~secure_random
-         ~parent
-         ~leaf
-         ~expected:absent
-         ~row:"must-not-publish"
-       |> require_unchanged_failure label;
-       read ~secure_random ~parent ~leaf (label ^ " final read")
-       |> check_row (label ^ " keeps HEAD absent") None)
-    [ "HEAD-exception", "before-rename exception", (fun () -> raise Exit)
-    ; ( "HEAD-cancellation"
-      , "before-rename cancellation"
-      , (fun () ->
-          raise
-            (Eio.Cancel.Cancelled
-               (Failure "injected before-rename cancellation"))) )
-    ]
+  let exception_leaf = "HEAD-exception" in
+  let exception_label = "before-rename exception" in
+  let absent = read ~secure_random ~parent ~leaf:exception_leaf (exception_label ^ " read") in
+  let hooks = Head.For_testing.hooks ~before_rename:(fun () -> raise Exit) () in
+  publish_for_testing
+    hooks
+    ~secure_random
+    ~parent
+    ~leaf:exception_leaf
+    ~expected:absent
+    ~row:"must-not-publish"
+  |> require_unchanged_failure exception_label;
+  read ~secure_random ~parent ~leaf:exception_leaf (exception_label ^ " final read")
+  |> check_row (exception_label ^ " keeps HEAD absent") None;
+  let cancellation_leaf = "HEAD-cancellation" in
+  let cancellation_label = "before-rename cancellation" in
+  let absent =
+    read ~secure_random ~parent ~leaf:cancellation_leaf (cancellation_label ^ " read")
+  in
+  let hooks =
+    Head.For_testing.hooks
+      ~before_rename:(fun () ->
+        raise
+          (Eio.Cancel.Cancelled
+             (Failure "injected before-rename cancellation")))
+      ()
+  in
+  (match
+     publish_for_testing
+       hooks
+       ~secure_random
+       ~parent
+       ~leaf:cancellation_leaf
+       ~expected:absent
+       ~row:"must-not-publish"
+   with
+   | exception Eio.Cancel.Cancelled _ -> ()
+   | _ -> Alcotest.fail "pre-publication cancellation was swallowed");
+  read ~secure_random ~parent ~leaf:cancellation_leaf (cancellation_label ^ " final read")
+  |> check_row (cancellation_label ^ " keeps HEAD absent") None
 ;;
 
 let test_after_rename_failure_is_indeterminate ~fs ~secure_random () =

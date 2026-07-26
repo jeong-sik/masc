@@ -1,23 +1,16 @@
 (include_subdirs no)
 
 (library
- (name server_grpc_tool_dispatch_internal)
- (wrapped false)
- (modules server_grpc_tool_dispatch)
- (libraries yojson))
-
-(library
  (name masc_server)
  (public_name masc.server)
  (wrapped false)
- (modules (:standard \ server_grpc_tool_dispatch))
  (private_modules
   keeper_grpc_heartbeat
+  server_grpc_tool_dispatch
   server_dashboard_http_schedule_actions
   server_schedule_runner_policy)
  (flags :standard -open Masc)
  (libraries
-  server_grpc_tool_dispatch_internal
   masc
   masc.dashboard
   masc.fd_accountant

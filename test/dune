@@ -1250,7 +1250,6 @@
  (libraries
   masc_test_deps
   masc.embedded_config
-  server_grpc_tool_dispatch_internal
   bigstringaf)
  (deps ../bin/main_eio.exe))
 

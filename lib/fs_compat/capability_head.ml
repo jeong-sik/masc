@@ -331,7 +331,7 @@ let try_lock file =
          Eio_unix.run_in_systhread
            ~label:"capability_head.try_lock"
            (fun () ->
-             ignore (Unix.lseek raw_fd 0 Unix.SEEK_SET);
+             let _position = Unix.lseek raw_fd 0 Unix.SEEK_SET in
              Unix.lockf raw_fd Unix.F_TLOCK 0));
        Ok ()
      with
@@ -347,7 +347,7 @@ let fresh_epoch secure_random =
 
 let write_initial_marker file epoch =
   protect_io Initialize_lock_marker (fun () ->
-    ignore (Eio.File.seek file (Optint.Int63.of_int 0) `Set);
+    let _position = Eio.File.seek file (Optint.Int63.of_int 0) `Set in
     Eio.Flow.copy_string (marker epoch) file;
     Eio.File.sync file)
 
@@ -679,6 +679,9 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
           in
           let cleanup_stage = ref true in
           let stage_identity = ref None in
+          (* fun-protect-finally-ok: identity-checked stage cleanup must run
+             while the protected Eio switch is alive; cleanup failures are
+             caught and retained as settlement warnings. *)
           Fun.protect
             ~finally:(fun () ->
               if !cleanup_stage

@@ -11,12 +11,20 @@ let after_journal_write_hook : (unit -> unit) Atomic.t =
   Atomic.make (fun () -> ())
 ;;
 
+let final_clear_failure_hook : (unit -> string option) Atomic.t =
+  Atomic.make (fun () -> None)
+;;
+
 let invoke_after_nonce_allocation_hook () =
   (Atomic.get after_nonce_allocation_hook) ()
 ;;
 
 let invoke_after_journal_write_hook () =
   (Atomic.get after_journal_write_hook) ()
+;;
+
+let invoke_final_clear_failure_hook () =
+  (Atomic.get final_clear_failure_hook) ()
 ;;
 
 module Boundary_hooks_for_testing = struct
@@ -35,6 +43,15 @@ module Boundary_hooks_for_testing = struct
       ~finally:(fun () ->
         Atomic.set after_nonce_allocation_hook previous_nonce;
         Atomic.set after_journal_write_hook previous_journal)
+      fn
+  ;;
+
+  let with_final_clear_failure ~detail fn =
+    let previous =
+      Atomic.exchange final_clear_failure_hook (fun () -> Some detail)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set final_clear_failure_hook previous)
       fn
   ;;
 end
@@ -1056,7 +1073,11 @@ let revive (ctx : _ context) ~original ~candidate =
                                 let cleanup_result =
                                   Eio.Cancel.protect (fun () ->
                                     let result =
-                                      clear_journal ctx.config launch_journal
+                                      match invoke_final_clear_failure_hook () with
+                                      | Some detail ->
+                                        Error (Journal_write_failed detail)
+                                      | None ->
+                                        clear_journal ctx.config launch_journal
                                     in
                                     release_observed token committed.name;
                                     result)

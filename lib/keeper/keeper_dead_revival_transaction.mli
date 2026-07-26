@@ -85,6 +85,11 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 
+  val with_final_clear_failure :
+    detail:string ->
+    (unit -> 'a) ->
+    'a
+
   val reserved_journal_row :
     owner_id:string ->
     original:Keeper_meta_contract.keeper_meta ->

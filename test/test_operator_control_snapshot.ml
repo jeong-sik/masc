@@ -969,6 +969,269 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
       Alcotest.(check bool) "successful rollback clears journal" false
         (Fs_compat.file_exists journal_path))
 
+let with_settled_dead_revival_fixture ~keeper_name fn =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let original_seed =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
+              ; "trace_id", `String ("trace-" ^ keeper_name)
+              ; "runtime_id", `String "runtime.primary"
+              ])
+        with
+        | Error detail -> Alcotest.fail detail
+        | Ok meta ->
+          { meta with
+            paused = true
+          ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+          }
+      in
+      (match Keeper_meta_store.write_meta config original_seed with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let original =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "dead revival fixture metadata disappeared"
+        | Error detail -> Alcotest.fail detail
+      in
+      let dead_entry =
+        Keeper_registry.register_offline ~base_path:base_dir keeper_name original
+      in
+      Keeper_registry.mark_dead
+        ~base_path:base_dir
+        keeper_name
+        ~at:(Time_compat.now ());
+      (match
+         Keeper_lane.reject_before_start
+           dead_entry.lane
+           ~reason:(Failure "seed settled dead revival fixture")
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail (Keeper_lane.start_error_to_string error));
+      ignore
+        (Keeper_registry.resolve_done
+           dead_entry
+           ~source:"settled_dead_revival_fixture"
+           (`Crashed "seed")
+          : Keeper_registry.done_resolve_result);
+      let ctx : _ Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      fn base_dir config original dead_entry ctx)
+;;
+
+let test_dead_revival_final_clear_failure_preserves_commit () =
+  let keeper_name = "dead-revival-final-clear" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original dead_entry ctx ->
+  let detail = "injected final clear failure after launch commit" in
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  let committed, entry =
+    match
+      Keeper_dead_revival_transaction.For_testing.with_final_clear_failure
+        ~detail
+        (fun () ->
+          Keeper_dead_revival_transaction.revive
+            ctx
+            ~original
+            ~candidate)
+    with
+    | Error
+        (Keeper_dead_revival_transaction.Post_commit_cleanup_required
+           { committed
+           ; entry
+           ; cleanup_error =
+               Keeper_dead_revival_transaction.Journal_write_failed observed
+           })
+      when String.equal observed detail ->
+      committed, entry
+    | Error error ->
+      Alcotest.fail
+        ("unexpected final clear result: "
+         ^ Keeper_dead_revival_transaction.error_to_string error)
+    | Ok _ ->
+      Alcotest.fail "final clear failure was collapsed to clean revival success"
+  in
+  Alcotest.(check bool)
+    "committed metadata is not paused"
+    false
+    committed.paused;
+  Alcotest.(check bool)
+    "committed metadata has no Dead tombstone"
+    true
+    (Option.is_none committed.latched_reason);
+  Alcotest.(check bool)
+    "committed lifecycle nonce advanced"
+    true
+    (committed.runtime.nonce > original.runtime.nonce);
+  Alcotest.(check string)
+    "returned registry entry retains exact committed metadata"
+    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json committed))
+    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json entry.meta));
+  let current_entry =
+    match Keeper_registry.get ~base_path:config.base_path keeper_name with
+    | Some current -> current
+    | None -> Alcotest.fail "committed revival registry entry disappeared"
+  in
+  Alcotest.(check bool)
+    "returned lane remains the registered lane"
+    true
+    (Keeper_lane.Id.equal
+       (Keeper_lane.id entry.lane)
+       (Keeper_lane.id current_entry.lane));
+  Alcotest.(check bool)
+    "dead lane was not restored"
+    false
+    (Keeper_lane.Id.equal
+       (Keeper_lane.id dead_entry.lane)
+       (Keeper_lane.id current_entry.lane));
+  Alcotest.(check bool)
+    "committed registry phase is not Dead"
+    false
+    (current_entry.phase = Keeper_state_machine.Dead);
+  let persisted_before_recovery =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "committed metadata disappeared"
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check int)
+    "durable lifecycle nonce remains committed"
+    committed.runtime.nonce
+    persisted_before_recovery.runtime.nonce;
+  Alcotest.(check bool)
+    "durable Dead state was not restored"
+    true
+    (not persisted_before_recovery.paused
+     && Option.is_none persisted_before_recovery.latched_reason);
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Launch_committed -> ()
+   | Ok _ -> Alcotest.fail "journal did not retain exact Launch_committed stage"
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
+  Alcotest.(check bool)
+    "post-commit failure released lifecycle reservation"
+    true
+    (Option.is_none
+       (Keeper_lifecycle_reservation.current
+          ~base_path:config.base_path
+          ~keeper_name));
+  let recovery =
+    Keeper_dead_revival_transaction.recover_pending config
+  in
+  Alcotest.(check int) "forward recovery does not roll back metadata" 0 recovery.recovered;
+  Alcotest.(check int) "forward recovery clears launch journal" 1 recovery.cleared;
+  Alcotest.(check int) "forward recovery is fully resolved" 0
+    (List.length recovery.unresolved);
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Cleared -> ()
+   | Ok _ -> Alcotest.fail "startup recovery did not forward-clear journal"
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
+  let persisted_after_recovery =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "forward recovery removed committed metadata"
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check int)
+    "forward recovery preserves committed nonce"
+    committed.runtime.nonce
+    persisted_after_recovery.runtime.nonce
+;;
+
+let test_update_keeper_surfaces_committed_cleanup_required () =
+  let keeper_name = "dead-revival-update-cleanup" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir _config original _dead_entry ctx ->
+  let parsed : Keeper_turn_up_args.parsed_args =
+    { name = keeper_name
+    ; runtime_id_opt = None
+    ; allowed_paths_opt = None
+    ; autoboot_enabled_opt = None
+    ; mention_targets_opt = None
+    ; active_goal_ids_opt = None
+    ; max_context_override_opt = None
+    ; max_context_override_present = false
+    ; proactive_enabled_opt = None
+    ; sandbox_profile_opt = None
+    ; network_mode_opt = None
+    ; instructions_arg = None
+    ; profile_defaults = Keeper_types_profile.empty_keeper_profile_defaults
+    ; instructions_opt = None
+    }
+  in
+  let result =
+    Keeper_dead_revival_transaction.For_testing.with_final_clear_failure
+      ~detail:"injected update_keeper final clear failure"
+      (fun () ->
+        Keeper_turn_up_update.update_keeper ctx parsed original)
+  in
+  Alcotest.(check bool)
+    "committed cleanup-required result is successful"
+    true
+    (Keeper_types_profile.tool_result_success result);
+  let data = Tool_result.data result in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "typed committed outcome"
+    "dead_revival_committed_with_cleanup_required"
+    (data |> member "outcome" |> to_string);
+  Alcotest.(check string)
+    "ordinary revival retry is forbidden"
+    "do_not_retry_revival"
+    (data |> member "retry_disposition" |> to_string);
+  Alcotest.(check bool)
+    "launch success is explicit"
+    true
+    (data |> member "launch_committed" |> to_bool);
+  Alcotest.(check string)
+    "cleanup error retains typed constructor"
+    "journal_write_failed"
+    (data |> member "cleanup_error" |> member "kind" |> to_string);
+  Alcotest.(check string)
+    "registry evidence retains committed metadata"
+    (Yojson.Safe.to_string (data |> member "committed"))
+    (Yojson.Safe.to_string
+       (data |> member "registry_entry" |> member "meta"))
+;;
+
 type dead_revival_cancellation_boundary =
   | After_nonce_allocation
   | After_journal_write
@@ -2117,6 +2380,14 @@ let () =
             "rejected revival rolls back durable and registry authorities"
             `Quick
             test_dead_revival_launch_failure_rolls_back_both_authorities;
+          Alcotest.test_case
+            "final clear failure preserves committed revival"
+            `Quick
+            test_dead_revival_final_clear_failure_preserves_commit;
+          Alcotest.test_case
+            "keeper update preserves committed cleanup-required outcome"
+            `Quick
+            test_update_keeper_surfaces_committed_cleanup_required;
           Alcotest.test_case
             "nonce-boundary cancellation releases revival reservation"
             `Quick

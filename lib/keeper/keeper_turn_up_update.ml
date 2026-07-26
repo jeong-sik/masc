@@ -53,6 +53,62 @@ let revival_decision ~(latched_reason : Keeper_latched_reason.t option)
     clear_pause_state = dead_revival_requested;
   }
 
+let dead_revival_error_kind error =
+  let open Keeper_dead_revival_transaction in
+  match error with
+  | Reservation_conflict _ -> "reservation_conflict"
+  | Nonce_allocation_failed _ -> "nonce_allocation_failed"
+  | Journal_conflict _ -> "journal_conflict"
+  | Journal_ownership_changed _ -> "journal_ownership_changed"
+  | Journal_publication_indeterminate _ -> "journal_publication_indeterminate"
+  | Journal_published_with_failure _ -> "journal_published_with_failure"
+  | Journal_published_with_warnings _ -> "journal_published_with_warnings"
+  | Journal_read_settlement_failed _ -> "journal_read_settlement_failed"
+  | Journal_write_failed _ -> "journal_write_failed"
+  | Post_commit_cleanup_required _ -> "post_commit_cleanup_required"
+  | Durable_snapshot_missing -> "durable_snapshot_missing"
+  | Durable_snapshot_changed -> "durable_snapshot_changed"
+  | Registry_conflict _ -> "registry_conflict"
+  | Durable_commit_failed _ -> "durable_commit_failed"
+  | Durable_commit_unreadable _ -> "durable_commit_unreadable"
+  | Launch_failed _ -> "launch_failed"
+  | Rollback_failed _ -> "rollback_failed"
+;;
+
+let registry_entry_commit_evidence_json
+      (entry : Keeper_registry.registry_entry)
+  =
+  `Assoc
+    [ "name", `String entry.name
+    ; "meta", Keeper_meta_json.meta_to_json entry.meta
+    ; "phase", `String (Keeper_state_machine.phase_to_string entry.phase)
+    ; "transition_seq", `Int entry.transition_seq
+    ]
+;;
+
+let committed_with_cleanup_required_json
+      ~(committed : keeper_meta)
+      ~(entry : Keeper_registry.registry_entry)
+      ~(cleanup_error : Keeper_dead_revival_transaction.error)
+  =
+  `Assoc
+    [ "outcome", `String "dead_revival_committed_with_cleanup_required"
+    ; "launch_committed", `Bool true
+    ; "journal_cleanup_required", `Bool true
+    ; "retry_disposition", `String "do_not_retry_revival"
+    ; "committed", Keeper_meta_json.meta_to_json committed
+    ; "registry_entry", registry_entry_commit_evidence_json entry
+    ; ( "cleanup_error"
+      , `Assoc
+          [ "kind", `String (dead_revival_error_kind cleanup_error)
+          ; ( "message"
+            , `String
+                (Keeper_dead_revival_transaction.error_to_string
+                   cleanup_error) )
+          ] )
+    ]
+;;
+
 let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
@@ -225,6 +281,15 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    ~original:old
                    ~candidate:updated
                with
+               | Error
+                   (Keeper_dead_revival_transaction.Post_commit_cleanup_required
+                      { committed; entry; cleanup_error }) ->
+                 enqueue_goal_assignment_wakes committed;
+                 tool_result_ok_data
+                   (committed_with_cleanup_required_json
+                      ~committed
+                      ~entry
+                      ~cleanup_error)
                | Error error ->
                  Otel_metric_store.inc_counter
                    Keeper_metrics.(to_string TurnUpUpdateFailures)

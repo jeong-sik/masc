@@ -69,10 +69,8 @@ val next_action : t -> string option
     - [Unknown { raw_error }] → [raw_error] verbatim *)
 val to_wire : t -> string
 
-(** Display-only deserialiser. Canonical application strings round-trip
-    exactly. The lossy current wire [stale_turn_timeout] maps directly to
-    [Turn_wall_clock_timeout] without constructing a typed terminal cause.
-    Other strings are promoted through
+(** Canonical operator-disposition deserialiser. Application strings round-trip
+    exactly. Other strings are promoted through
     [Keeper_turn_terminal_code.of_wire_exact] only when their meaning is
     one-to-one; ambiguous and unknown strings remain [Unknown] with their
     original bytes. *)

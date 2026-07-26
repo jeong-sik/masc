@@ -8,16 +8,6 @@ type t =
   | Healthy
   (** Turn ended without error and reached the configured terminal
           runtime. *)
-  | Stale_turn_timeout_idle
-  (** [Keeper_registry.Stale_turn_timeout (Idle_turn _)]: the keeper
-          was [Running] but never observed a turn-start. *)
-  | Stale_turn_timeout_no_progress
-  (** [Keeper_registry.Stale_turn_timeout (Mid_turn_no_progress _)]: a live
-          turn stayed inside its outer timeout but stopped producing
-          streaming/tool progress. *)
-  | Stale_turn_timeout_noop
-  (** [Keeper_registry.Stale_turn_timeout (Noop_failure_loop _)]:
-          turns kept firing but produced no tool calls. *)
   | Stale_termination_storm
   (** [Keeper_registry.Stale_termination_storm]: cohort window
           escalation threshold reached. *)
@@ -51,29 +41,16 @@ type t =
           a follow-up RFC will split it once production traces narrow
           the actual sub-kind set. *)
 
-(** Stable wire format. The strings produced here are byte-for-byte
-    compatible with the receipt JSON consumed by dashboards,
-    [bin/masc-trace], and external consumers.
-
-    The [Stale_turn_timeout_*] variants intentionally collapse to the
-    [stale_turn_timeout] wire string; the typed sub-class is still available
-    to OCaml callers. *)
+(** Stable wire format consumed by receipt JSON, dashboards,
+    [bin/masc-trace], and external consumers. *)
 val to_wire : t -> string
 
 (** Decode only current wire values with a one-to-one typed meaning.
 
-    Lossy values such as [stale_turn_timeout] and [exception], payload-bearing
-    codes, and unknown strings return [None]. They must remain display-only or
-    produce a typed decode failure; this function never invents missing
-    evidence. *)
+    Lossy values such as [exception], payload-bearing codes, and unknown strings
+    return [None]. They must remain display-only or produce a typed decode
+    failure; this function never invents missing evidence. *)
 val of_wire_exact : string -> t option
-
-(** Canonical bridge from the existing typed source.
-
-    Exhaustive over [Keeper_registry.failure_reason]: adding a new
-    constructor there is a compile error here, which is the property
-    this RFC is meant to provide. *)
-val of_failure_reason : Keeper_registry.failure_reason -> t
 
 (** Wrap an [Agent_sdk.Error.t] wire string produced by
     [Keeper_agent_error.terminal_reason_code_of_sdk_error] /

@@ -1,14 +1,10 @@
 (* RFC-0042 PR-1: closed sum type for keeper turn terminal code.
 
    See [.mli] for the public contract. This file holds the type
-   definition, the wire-format serialisation, and the canonical bridge
-   from [Keeper_registry.failure_reason]. *)
+   definition and the wire-format serialisation. *)
 
 type t =
   | Healthy
-  | Stale_turn_timeout_idle
-  | Stale_turn_timeout_no_progress
-  | Stale_turn_timeout_noop
   | Stale_termination_storm
   | Heartbeat_failures
   | Turn_failures
@@ -21,13 +17,6 @@ type t =
 
 let to_wire = function
   | Healthy -> "healthy"
-  | Stale_turn_timeout_idle
-  | Stale_turn_timeout_no_progress
-  | Stale_turn_timeout_noop ->
-    (* Existing wire emission collapses the three sub-classes into one
-         cohort key. Preserved here so dashboards / Otel_metric_store labels do
-         not see a sudden cardinality change at PR-3 cutover. *)
-    "stale_turn_timeout"
   | Stale_termination_storm -> "stale_termination_storm"
   | Heartbeat_failures -> "heartbeat_failures"
   | Turn_failures -> "turn_failures"
@@ -48,23 +37,6 @@ let of_wire_exact = function
   | "turn_overflow_failure" -> Some Turn_overflow_failure
   | "operator_interrupt" -> Some Operator_interrupt
   | _ -> None
-;;
-
-let of_failure_reason : Keeper_registry.failure_reason -> t = function
-  | Keeper_registry.Heartbeat_consecutive_failures _ -> Heartbeat_failures
-  | Keeper_registry.Turn_consecutive_failures _ -> Turn_failures
-  | Keeper_registry.Stale_turn_timeout (Keeper_registry.Idle_turn _) ->
-    Stale_turn_timeout_idle
-  | Keeper_registry.Stale_turn_timeout (Keeper_registry.Mid_turn_no_progress _) ->
-    Stale_turn_timeout_no_progress
-  | Keeper_registry.Stale_turn_timeout (Keeper_registry.Noop_failure_loop _) ->
-    Stale_turn_timeout_noop
-  | Keeper_registry.Stale_termination_storm _ -> Stale_termination_storm
-  | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code
-  | Keeper_registry.Fiber_unresolved _ -> Fiber_unresolved
-  | Keeper_registry.Turn_overflow_failure -> Turn_overflow_failure
-  | Keeper_registry.Operator_interrupt -> Operator_interrupt
-  | Keeper_registry.Exception msg -> Exception_unhandled msg
 ;;
 
 let of_sdk_error_wire wire = Sdk_error wire

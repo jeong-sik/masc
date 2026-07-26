@@ -53,6 +53,24 @@ let test_invalid_request_is_auto_recoverable () =
     (EC.is_auto_recoverable_turn_error (invalid_request "bad body"))
 ;;
 
+let test_transport_400_bridges_to_typed_api_invalid_request () =
+  let classified =
+    Llm_provider.Retry.classify_error
+      ~retry_after_header:None
+      ~status:400
+      ~body:"transport rejection"
+  in
+  match classified with
+  | Llm_provider.Retry.InvalidRequest _ ->
+    check
+      bool
+      "transport-classified 400 reaches the typed API predicate"
+      true
+      (EC.is_invalid_request_error (Agent_sdk.Error.Api classified))
+  | _ ->
+    fail "HTTP 400 transport classification did not produce InvalidRequest"
+;;
+
 let test_consecutive_counter_bounds_exemption () =
   let keeper = Printf.sprintf "test-ir-bounded-%d" (Unix.getpid ()) in
   KUF.reset_invalid_request_failures ~keeper_name:keeper;
@@ -116,6 +134,10 @@ let () =
             "Api InvalidRequest is auto-recoverable"
             `Quick
             test_invalid_request_is_auto_recoverable
+        ; test_case
+            "HTTP 400 transport classification bridges to typed Api InvalidRequest"
+            `Quick
+            test_transport_400_bridges_to_typed_api_invalid_request
         ; test_case
             "consecutive counter bounds the crash-accounting exemption"
             `Quick

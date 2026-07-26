@@ -205,16 +205,24 @@ let sort_paused_keeper_details details =
       String.compare (name left) (name right))
     details
 
-let keeper_fleet_meta_scan ?(include_paused_details = true) config =
+let keeper_fleet_meta_scan
+    ?(include_paused_details = true)
+    ?current_meta_discovery
+    config =
   (* The dashboard light shell needs fleet counts on every header refresh.
      Keep this as a single pass over keeper meta so it does not repeat the
      paused, autoboot, and bootable scans on the hot path. *)
   (* NDT-OK: request-boundary wall clock only for dashboard pause-age display. *)
   let now = Unix.gettimeofday () in
   let configured_names = Keeper_meta_store.configured_keeper_names config in
+  let current_meta_discovery =
+    match current_meta_discovery with
+    | Some discovery -> discovery
+    | None -> Keeper_meta_store.discover_current_meta config
+  in
   let all_names =
     sorted_unique_strings
-      (configured_names @ (Keeper_meta_store.keeper_names config).names)
+      (configured_names @ current_meta_discovery.keeper_names)
   in
   let is_configured name = List.exists (String.equal name) configured_names in
   let should_count_autoboot_target name = is_configured name in
@@ -236,8 +244,8 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
              if is_configured name then { acc with bootable_names = name :: acc.bootable_names }
              else acc
            in
-           match Keeper_meta_store.read_meta config name with
-           | Ok (Some meta) ->
+           match List.assoc_opt name current_meta_discovery.metas with
+           | Some meta ->
              let autoboot_enabled = effective_autoboot_enabled config name meta in
              let acc =
                if
@@ -277,21 +285,23 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
                    };
                }
              else acc
-           | Ok None ->
-             if
-               should_count_autoboot_target name
-               && Keeper_meta_store.declarative_autoboot_enabled_by_default config name
-             then add_autoboot acc name |> fun acc -> add_bootable acc name
-             else acc
-           | Error err ->
-             (* Preserve the existing conservative behavior: unreadable meta is
-                still counted as autoboot/bootable for configured keepers so
-                the operator sees a degraded fleet instead of a silently
-                shrinking target. *)
-             let acc =
-               if should_count_autoboot_target name
-               then add_autoboot acc name |> fun acc -> add_bootable acc name
-               else acc
+           | None ->
+             let path_identity =
+               Keeper_meta_store.keeper_meta_path config name
+               |> Filename.basename
+             in
+             let err =
+               match
+                 current_meta_discovery.unavailable
+                 |> List.find_opt
+                      (fun
+                        (unavailable : Keeper_meta_store.current_meta_unavailable)
+                      ->
+                        String.equal unavailable.path_identity path_identity)
+               with
+               | Some unavailable ->
+                 Keeper_meta_store.current_meta_unavailable_message unavailable
+               | None -> "keeper current metadata is unavailable"
              in
              let autoboot_read_errors =
                if should_count_autoboot_target name
@@ -584,12 +594,17 @@ let configured_keeper_is_materializable config name =
   Keeper_types_profile.keeper_profile_defaults_materializable_for_name
     ~base_path:config.Workspace.base_path name
 
-let keeper_identity_drift_scan config =
+let keeper_identity_drift_scan ?current_meta_discovery config =
   let configured_names =
     Keeper_meta_store.configured_keeper_names config |> sorted_unique_strings
   in
+  let current_meta_discovery =
+    match current_meta_discovery with
+    | Some discovery -> discovery
+    | None -> Keeper_meta_store.discover_current_meta config
+  in
   let persisted_meta_names =
-    (Keeper_meta_store.persisted_keeper_names config).names
+    current_meta_discovery.persisted_keeper_names
     |> sorted_unique_strings
   in
   let materializable_configured_names =
@@ -660,8 +675,9 @@ let keeper_identity_drift_health_json_of_scan scan =
            else "none") );
     ]
 
-let keeper_identity_drift_health_json config =
-  keeper_identity_drift_scan config |> keeper_identity_drift_health_json_of_scan
+let keeper_identity_drift_health_json ?current_meta_discovery config =
+  keeper_identity_drift_scan ?current_meta_discovery config
+  |> keeper_identity_drift_health_json_of_scan
 
 let json_string_list_field field = function
   | `Assoc fields -> (

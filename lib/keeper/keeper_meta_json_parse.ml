@@ -361,8 +361,16 @@ let decode_current_meta fields =
   let* meta_version = int_field fields "meta_version" in
   if not (validate_name name)
   then invalidf "name is invalid: %S" name
+  else if
+    not
+      (String.equal
+         agent_name
+         (Keeper_identity.keeper_agent_name name))
+  then invalidf "agent_name does not match canonical keeper identity"
   else if not (validate_name (Keeper_id.Trace_id.to_string trace_id))
   then invalidf "trace_id is invalid: %S" trace_id_raw
+  else if meta_version < 0
+  then invalidf "meta_version must be nonnegative"
   else
     let usage : usage_metrics =
       { total_turns

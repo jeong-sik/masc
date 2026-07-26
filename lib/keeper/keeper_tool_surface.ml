@@ -27,18 +27,21 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
         let discovery = discover_current_meta config in
-        let names =
-          registry_names @ discovery.keeper_names
+        let candidate_names =
+          registry_names @ List.map fst discovery.metas
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
+        in
+        let visible =
+          candidate_names
+          |> List.filter_map (fun name ->
+               keeper_list_row_json ~runtime_class:"keeper" config name
+               |> Option.map (fun row -> name, row))
           |> take limit
         in
-        let rows =
-          names
-          |> List.filter_map (fun name ->
-               keeper_list_row_json ~runtime_class:"keeper" config name)
-        in
+        let names = List.map fst visible in
+        let rows = List.map snd visible in
         let json =
           if not detailed then
             `Assoc

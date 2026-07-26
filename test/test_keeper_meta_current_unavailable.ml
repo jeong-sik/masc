@@ -149,6 +149,30 @@ let test_terminal_latch_requires_pause () =
     | Ok _ -> Alcotest.fail "unpaused terminal latch unexpectedly decoded")
 ;;
 
+let test_agent_name_must_match_canonical_identity () =
+  let json =
+    Masc_test_deps.current_meta_json_fixture ~name:"agent-identity" ()
+    |> replace_field "agent_name" (`String "different-agent")
+  in
+  with_temp_json json (fun path ->
+    match Keeper_meta_store.read_meta_file_path_current path with
+    | Error { reason = Keeper_meta_store.Invalid_current; _ } -> ()
+    | Error _ -> Alcotest.fail "agent identity mismatch had the wrong typed reason"
+    | Ok _ -> Alcotest.fail "agent identity mismatch unexpectedly decoded")
+;;
+
+let test_meta_version_must_be_nonnegative () =
+  let json =
+    Masc_test_deps.current_meta_json_fixture ~name:"negative-version" ()
+    |> replace_field "meta_version" (`Int (-1))
+  in
+  with_temp_json json (fun path ->
+    match Keeper_meta_store.read_meta_file_path_current path with
+    | Error { reason = Keeper_meta_store.Invalid_current; _ } -> ()
+    | Error _ -> Alcotest.fail "negative meta version had the wrong typed reason"
+    | Ok _ -> Alcotest.fail "negative meta version unexpectedly decoded")
+;;
+
 let () =
   run
     "keeper_meta_current_unavailable"
@@ -161,6 +185,10 @@ let () =
             test_embedded_name_must_match_canonical_path
         ; test_case "terminal latch requires pause" `Quick
             test_terminal_latch_requires_pause
+        ; test_case "agent identity is canonical" `Quick
+            test_agent_name_must_match_canonical_identity
+        ; test_case "meta version is nonnegative" `Quick
+            test_meta_version_must_be_nonnegative
         ] )
     ]
 ;;

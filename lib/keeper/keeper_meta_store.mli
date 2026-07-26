@@ -127,9 +127,9 @@ val read_effective_meta_resolved :
 val read_effective_meta :
   Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
 
-(** Read keeper meta only if the canonical [name] file's mtime exceeds
-    [last_mtime]. Unchanged/missing is [Ok None]; an unreadable current row is
-    a typed error and can never masquerade as unchanged. *)
+(** Revalidate the canonical [name] row on every observation. [last_mtime] is
+    retained only for caller compatibility and never authorizes a cached row.
+    Missing, unreadable, or unstatable current state is a typed error. *)
 val read_meta_if_changed :
   Workspace.config ->
   string ->

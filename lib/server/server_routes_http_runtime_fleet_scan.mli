@@ -67,12 +67,19 @@ val sort_paused_keeper_details :
   'a list
 val keeper_fleet_meta_scan :
   ?include_paused_details:bool ->
+  ?current_meta_discovery:Keeper_meta_store.current_meta_discovery ->
   Workspace.config -> keeper_fleet_meta_scan
 val configured_keeper_is_materializable : Workspace.config -> string -> bool
-val keeper_identity_drift_scan : Workspace.config -> keeper_identity_drift_scan
+val keeper_identity_drift_scan :
+  ?current_meta_discovery:Keeper_meta_store.current_meta_discovery ->
+  Workspace.config ->
+  keeper_identity_drift_scan
 val keeper_identity_drift_health_json_of_scan :
   keeper_identity_drift_scan -> Yojson.Safe.t
-val keeper_identity_drift_health_json : Workspace.config -> Yojson.Safe.t
+val keeper_identity_drift_health_json :
+  ?current_meta_discovery:Keeper_meta_store.current_meta_discovery ->
+  Workspace.config ->
+  Yojson.Safe.t
 val autoboot_enabled_keeper_scan :
   Workspace.config -> autoboot_keeper_scan
 type keeper_phase_counts = {

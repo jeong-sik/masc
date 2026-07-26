@@ -517,18 +517,28 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   (* Single-pass fleet meta scan: reads each keeper meta file once,
      shared by paused-keepers and fleet-safety sections. *)
   let fleet_meta_scan =
-    match server_state with
-    | Some state ->
-      Some (keeper_fleet_meta_scan (Mcp_server.workspace_config state))
-    | None -> None
+    match server_state, current_meta_discovery with
+    | Some state, Some discovery ->
+      Some
+        (keeper_fleet_meta_scan
+           ~current_meta_discovery:discovery
+           (Mcp_server.workspace_config state))
+    | None, None
+    | Some _, None
+    | None, Some _ ->
+      None
   in
   let keeper_identity_drift_json =
     compute_section ~name:"keeper_identity_drift" ?section_timings_ref
       (fun () ->
-        match server_state with
-        | Some state ->
-          keeper_identity_drift_health_json (Mcp_server.workspace_config state)
-        | None ->
+        match server_state, current_meta_discovery with
+        | Some state, Some discovery ->
+          keeper_identity_drift_health_json
+            ~current_meta_discovery:discovery
+            (Mcp_server.workspace_config state)
+        | None, None
+        | Some _, None
+        | None, Some _ ->
           `Assoc
             [
               ("schema", `String "masc.keeper_identity_drift.v1");

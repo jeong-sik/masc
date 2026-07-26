@@ -331,7 +331,7 @@ let current_meta_unavailable_facts config =
   (discover_current_meta config).unavailable
 ;;
 
-let discover_configured_keepers config ~include_missing =
+let discover_configured_keepers config ~include_missing:_ =
   configured_keeper_names config
   |> List.fold_left
        (fun discovery name ->
@@ -340,9 +340,16 @@ let discover_configured_keepers config ~include_missing =
             when (not meta.paused) && effective_autoboot_enabled config name meta ->
             { discovery with names = meta.name :: discovery.names }
           | Ok (Some _) -> discovery
-          | Ok None when include_missing config name ->
-            { discovery with names = name :: discovery.names }
-          | Ok None -> discovery
+          | Ok None ->
+            let unavailable =
+              current_meta_unavailable
+                ~path:(keeper_meta_path config name)
+                ~reason:Missing_current
+                ~detail:"missing"
+            in
+            { discovery with
+              unavailable = unavailable :: discovery.unavailable
+            }
           | Error unavailable ->
             Log.Keeper.warn
               "keeper discovery observed %s"
@@ -418,8 +425,8 @@ let read_effective_meta config name
   | Error _ as err -> err
 ;;
 
-(** Read keeper meta only if the file's mtime has changed since [last_mtime]. *)
-let read_meta_if_changed config name ~(last_mtime : float)
+(** Revalidate the canonical current row on every observation. *)
+let read_meta_if_changed config name ~last_mtime:_
     : ((Keeper_meta_contract.keeper_meta * float) option, current_meta_unavailable) result =
   let requested_name = String.trim name in
   let read_candidate candidate =
@@ -433,12 +440,22 @@ let read_meta_if_changed config name ~(last_mtime : float)
            ~detail:"keeper current metadata is missing")
     else (
       match Fs_compat.file_mtime path with
-      | Some mtime when mtime > last_mtime ->
+      | Some mtime ->
         (match read_meta_file_path_current path with
          | Ok (Some meta) -> Ok (Some (meta, mtime))
-         | Ok None -> Ok None
+         | Ok None ->
+           Error
+             (current_meta_unavailable
+                ~path
+                ~reason:Missing_current
+                ~detail:"keeper current metadata is missing")
          | Error unavailable -> Error unavailable)
-      | _ -> Ok None)
+      | None ->
+        Error
+          (current_meta_unavailable
+             ~path
+             ~reason:Read_failed
+             ~detail:"unable to stat keeper current metadata"))
   in
   read_candidate requested_name
 ;;

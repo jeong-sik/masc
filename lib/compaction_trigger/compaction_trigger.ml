@@ -1,9 +1,19 @@
 type t =
   | Provider_overflow of { limit_tokens : int option }
+  | Request_body_over_capacity of
+      { actual_bytes : int
+      ; limit_bytes : int
+      }
   | Manual
+
+(* Field names are the wire contract for [of_detail_json]; naming them once keeps
+   the encoder and the decoder from drifting apart. *)
+let actual_bytes_field = "actual_bytes"
+let limit_bytes_field = "limit_bytes"
 
 let to_label = function
   | Provider_overflow _ -> "provider_overflow"
+  | Request_body_over_capacity _ -> "request_body_over_capacity"
   | Manual -> "manual"
 ;;
 
@@ -14,6 +24,8 @@ let to_human = function
       (match limit_tokens with
        | Some limit_tokens -> string_of_int limit_tokens
        | None -> "unknown")
+  | Request_body_over_capacity { actual_bytes; limit_bytes } ->
+    Printf.sprintf "request_body_over_capacity(%dB>%dB)" actual_bytes limit_bytes
   | Manual -> "manual"
 ;;
 
@@ -25,6 +37,12 @@ let to_detail_json : t -> Yojson.Safe.t = function
         , match limit_tokens with
           | Some limit_tokens -> `Int limit_tokens
           | None -> `Null )
+      ]
+  | Request_body_over_capacity { actual_bytes; limit_bytes } ->
+    `Assoc
+      [ "kind", `String "request_body_over_capacity"
+      ; actual_bytes_field, `Int actual_bytes
+      ; limit_bytes_field, `Int limit_bytes
       ]
   | Manual -> `Assoc [ "kind", `String "manual" ]
 ;;
@@ -38,6 +56,12 @@ type decode_error =
   | Unknown_kind of string
   | Missing_provider_limit
   | Invalid_provider_limit
+  | Missing_request_body_bytes of string
+  | Invalid_request_body_bytes of string
+  | Request_body_within_capacity of
+      { actual_bytes : int
+      ; limit_bytes : int
+      }
 
 let decode_error_to_string = function
   | Expected_object -> "compaction trigger detail must be an object"
@@ -51,6 +75,15 @@ let decode_error_to_string = function
   | Missing_provider_limit -> "provider overflow trigger is missing limit_tokens"
   | Invalid_provider_limit ->
     "provider overflow limit_tokens must be null or a positive integer"
+  | Missing_request_body_bytes field ->
+    Printf.sprintf "request body over capacity trigger is missing %s" field
+  | Invalid_request_body_bytes field ->
+    Printf.sprintf "request body over capacity %s must be a positive integer" field
+  | Request_body_within_capacity { actual_bytes; limit_bytes } ->
+    Printf.sprintf
+      "request body over capacity requires actual_bytes > limit_bytes, got %d and %d"
+      actual_bytes
+      limit_bytes
 ;;
 
 let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
@@ -77,6 +110,24 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
           Ok (Provider_overflow { limit_tokens = Some limit_tokens })
         | None -> Error Missing_provider_limit
         | Some _ -> Error Invalid_provider_limit)
+     | Some (`String "request_body_over_capacity") ->
+       let* () =
+         reject_unknown_fields [ "kind"; actual_bytes_field; limit_bytes_field ]
+       in
+       let positive_int field =
+         match List.assoc_opt field fields with
+         | Some (`Int value) when value > 0 -> Ok value
+         | None -> Error (Missing_request_body_bytes field)
+         | Some _ -> Error (Invalid_request_body_bytes field)
+       in
+       let* actual_bytes = positive_int actual_bytes_field in
+       let* limit_bytes = positive_int limit_bytes_field in
+       (* The name asserts a comparison, so a record that does not satisfy it is
+          not a value of this type. Decoding it would put a trigger claiming
+          over-capacity in front of a compaction that had no capacity reason. *)
+       if actual_bytes > limit_bytes
+       then Ok (Request_body_over_capacity { actual_bytes; limit_bytes })
+       else Error (Request_body_within_capacity { actual_bytes; limit_bytes })
      | Some (`String "manual") ->
        let* () = reject_unknown_fields [ "kind" ] in
        Ok Manual

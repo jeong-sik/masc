@@ -35,8 +35,37 @@ let test_provider_overflow_trigger_roundtrip () =
        | Ok _ | Error _ -> fail "typed compaction trigger did not round-trip")
     [ trigger
     ; Compaction_trigger.Provider_overflow { limit_tokens = None }
+    ; Compaction_trigger.Request_body_over_capacity
+        { actual_bytes = 1_048_577; limit_bytes = 1_048_576 }
     ; Compaction_trigger.Manual
     ]
+;;
+
+let test_request_body_over_capacity_rejects_non_refusals () =
+  let decode fields =
+    Compaction_trigger.of_detail_json
+      (`Assoc (("kind", `String "request_body_over_capacity") :: fields))
+  in
+  (* The label asserts actual > limit. A record that satisfies the field shape but
+     not the comparison describes a request that fit, so decoding it would put a
+     capacity trigger in front of a compaction that had no capacity reason. *)
+  (match decode [ "actual_bytes", `Int 100; "limit_bytes", `Int 100 ] with
+   | Error
+       (Compaction_trigger.Request_body_within_capacity
+          { actual_bytes = 100; limit_bytes = 100 }) -> ()
+   | Ok _ | Error _ -> fail "an equal-size request body was admitted as over capacity");
+  (match decode [ "actual_bytes", `Int 200 ] with
+   | Error (Compaction_trigger.Missing_request_body_bytes "limit_bytes") -> ()
+   | Ok _ | Error _ -> fail "a trigger missing limit_bytes was admitted");
+  (match decode [ "actual_bytes", `Int 0; "limit_bytes", `Int 10 ] with
+   | Error (Compaction_trigger.Invalid_request_body_bytes "actual_bytes") -> ()
+   | Ok _ | Error _ -> fail "a zero-byte body was admitted as a measurement");
+  match
+    decode
+      [ "actual_bytes", `Int 200; "limit_bytes", `Int 100; "limit_tokens", `Int 5 ]
+  with
+  | Error (Compaction_trigger.Unknown_field "limit_tokens") -> ()
+  | Ok _ | Error _ -> fail "the token field was accepted on the byte axis"
 ;;
 
 let test_retired_trigger_kinds_are_rejected () =
@@ -250,6 +279,8 @@ let () =
         test_provider_overflow_trigger_roundtrip;
       test_case "retired trigger kinds rejected" `Quick
         test_retired_trigger_kinds_are_rejected;
+      test_case "request body over capacity rejects non-refusals" `Quick
+        test_request_body_over_capacity_rejects_non_refusals;
       test_case "malformed trigger details are typed errors" `Quick
         test_malformed_trigger_details_are_typed_errors;
       test_case "happy path" `Quick test_happy_path;

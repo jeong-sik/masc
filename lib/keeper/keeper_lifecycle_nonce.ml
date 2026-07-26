@@ -23,6 +23,7 @@ type error =
   | Invalid_floor of int64
   | Authority_missing
   | Authority_identity_mismatch
+  | Lifecycle_admission_mismatch
   | Shutdown_floor_invalid of string
   | Filesystem_capability_unavailable
   | Directory_prepare_failed of string
@@ -543,7 +544,18 @@ let floor_for_create ~base_path ~keeper_id =
     else Ok (Int64.succ generation)
 ;;
 
-let create ~base_path ~keeper_id ~owner_id () =
+let mutation_admitted permit ~base_path ~keeper_id =
+  if
+    Keeper_lifecycle_admission.Durable_transaction.permit_matches
+      permit
+      ~base_path
+      keeper_id
+  then Ok ()
+  else Error Lifecycle_admission_mismatch
+;;
+
+let create permit ~base_path ~keeper_id ~owner_id () =
+  let* () = mutation_admitted permit ~base_path ~keeper_id in
   let* floor = floor_for_create ~base_path ~keeper_id in
   let* nonce =
     next_for_base_path_with_hooks
@@ -614,7 +626,8 @@ let replace ~base_path ~keeper_id ~source ~owner_id () =
   Ok (witness_of_nonce ~base_path ~keeper_id ~source:(Some source) ~owner_id nonce)
 ;;
 
-let recover_exact ~base_path ~keeper_id ~source ~target () =
+let recover_exact permit ~base_path ~keeper_id ~source ~target () =
+  let* () = mutation_admitted permit ~base_path ~keeper_id in
   if Filename.is_relative base_path
   then Error (Invalid_base_path base_path)
   else
@@ -743,7 +756,8 @@ let settle_published_replace
   | error -> Error error
 ;;
 
-let replace_settled ~base_path ~keeper_id ~source ~owner_id () =
+let replace_settled permit ~base_path ~keeper_id ~source ~owner_id () =
+  let* () = mutation_admitted permit ~base_path ~keeper_id in
   match replace ~base_path ~keeper_id ~source ~owner_id () with
   | Ok witness -> Ok (Settled_allocated witness)
   | Error
@@ -824,6 +838,8 @@ let error_to_string = function
   | Authority_missing -> "lifecycle nonce authority is missing"
   | Authority_identity_mismatch ->
     "lifecycle nonce authority identity does not match the exact request"
+  | Lifecycle_admission_mismatch ->
+    "lifecycle nonce mutation requires the active durable lifecycle admission"
   | Shutdown_floor_invalid detail ->
     "lifecycle nonce shutdown floor is invalid: " ^ detail
   | Filesystem_capability_unavailable ->

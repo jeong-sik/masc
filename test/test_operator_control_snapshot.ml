@@ -2665,90 +2665,115 @@ let test_keeper_lifecycle_transaction_admission_waits_for_cleanup () =
         }
     }
   in
-  (match
-     Keeper_dead_revival_transaction.For_testing.reserve_journal
-       ~config
-       ~owner_id:"durable-start-admission-cleanup-owner"
-       ~original
-       ~candidate
-   with
-   | Ok _ -> ()
-   | Error error ->
-     Alcotest.fail
-       (Keeper_dead_revival_transaction.error_to_string error));
-  let lifecycle_token =
+  let reserved_row =
     match
-      Keeper_lifecycle_reservation.acquire
-        ~base_path:config.base_path
-        ~keeper_name
-        ~expected_generation:original.runtime.nonce
-        ~purpose:Keeper_lifecycle_reservation.Dead_revival
+      Keeper_dead_revival_transaction.For_testing.reserve_journal
+        ~config
+        ~owner_id:"durable-start-admission-cleanup-owner"
+        ~original
+        ~candidate
     with
-    | Ok token -> token
-    | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-      Alcotest.fail
-        (Keeper_lifecycle_reservation.snapshot_to_string owner)
-  in
-  let source =
-    match
-      Keeper_lifecycle_nonce.identity
-        ~owner_id:
-          (Keeper_id.Trace_id.to_string original.runtime.trace_id)
-        ~nonce:(Int64.of_int original.runtime.nonce)
-    with
-    | Ok identity -> identity
+    | Ok row -> row
     | Error error ->
-      Alcotest.fail (Keeper_lifecycle_nonce.error_to_string error)
+      Alcotest.fail
+        (Keeper_dead_revival_transaction.error_to_string error)
   in
-  let replacement =
-    Keeper_lifecycle_nonce.replace_settled
-      ~base_path:config.base_path
-      ~keeper_id:keeper_name
-      ~source
-      ~owner_id:
-        (Keeper_id.Trace_id.to_string candidate.runtime.trace_id)
-      ()
+  let transaction_id =
+    reserved_row
+    |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.member "transaction_id"
+    |> Yojson.Safe.Util.to_string
   in
-  (match replacement with
-   | Error error ->
-     Alcotest.fail (Keeper_lifecycle_nonce.error_to_string error)
-   | Ok (Keeper_lifecycle_nonce.Settled_allocated witness) ->
-     (match
-        Keeper_meta_store.replace_meta
-          ~lifecycle_token
-          witness
-          config
-          candidate
-      with
-      | Ok () -> ()
-      | Error detail -> Alcotest.fail detail)
-   | Ok (Keeper_lifecycle_nonce.Settled_recovered (witness, _)) ->
-     (match
-        Keeper_meta_store.recover_meta_exact
-          ~lifecycle_token
-          witness
-          config
-          candidate
-      with
-      | Ok () -> ()
-      | Error detail -> Alcotest.fail detail));
   (match
-     Keeper_meta_store.read_meta config keeper_name
+     Durable_admission.with_recovery_lifecycle_admission
+       config
+       ~keeper_name
+       ~transaction_id
+       (fun permit ->
+          let lifecycle_token =
+            match
+              Keeper_lifecycle_reservation.acquire
+                ~base_path:config.base_path
+                ~keeper_name
+                ~expected_generation:original.runtime.nonce
+                ~purpose:Keeper_lifecycle_reservation.Dead_revival
+            with
+            | Ok token -> token
+            | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+              Alcotest.fail
+                (Keeper_lifecycle_reservation.snapshot_to_string owner)
+          in
+          let source =
+            match
+              Keeper_lifecycle_nonce.identity
+                ~owner_id:
+                  (Keeper_id.Trace_id.to_string original.runtime.trace_id)
+                ~nonce:(Int64.of_int original.runtime.nonce)
+            with
+            | Ok identity -> identity
+            | Error error ->
+              Alcotest.fail (Keeper_lifecycle_nonce.error_to_string error)
+          in
+          let replacement =
+            Keeper_lifecycle_nonce.replace_settled
+              permit
+              ~base_path:config.base_path
+              ~keeper_id:keeper_name
+              ~source
+              ~owner_id:
+                (Keeper_id.Trace_id.to_string candidate.runtime.trace_id)
+              ()
+          in
+          (match replacement with
+           | Error error ->
+             Alcotest.fail (Keeper_lifecycle_nonce.error_to_string error)
+           | Ok (Keeper_lifecycle_nonce.Settled_allocated witness) ->
+             (match
+                Keeper_meta_store.replace_meta
+                  ~lifecycle_token
+                  permit
+                  witness
+                  config
+                  candidate
+              with
+              | Ok () -> ()
+              | Error detail -> Alcotest.fail detail)
+           | Ok (Keeper_lifecycle_nonce.Settled_recovered (witness, _)) ->
+             (match
+                Keeper_meta_store.recover_meta_exact
+                  ~lifecycle_token
+                  permit
+                  witness
+                  config
+                  candidate
+              with
+              | Ok () -> ()
+              | Error detail -> Alcotest.fail detail));
+          (match
+             Keeper_meta_store.read_meta config keeper_name
+           with
+           | Ok (Some persisted) ->
+             Alcotest.(check int)
+               "lifecycle owner committed replacement generation"
+               candidate.runtime.nonce
+               persisted.runtime.nonce
+           | Ok None ->
+             Alcotest.fail "lifecycle owner replacement disappeared"
+           | Error detail -> Alcotest.fail detail);
+          (match Keeper_lifecycle_reservation.release lifecycle_token with
+           | Keeper_lifecycle_reservation.Released -> ()
+           | Keeper_lifecycle_reservation.Release_missing ->
+             Alcotest.fail "fixture lifecycle reservation disappeared"
+           | Keeper_lifecycle_reservation.Release_not_owner owner ->
+             Alcotest.fail
+               (Keeper_lifecycle_reservation.snapshot_to_string owner)))
    with
-   | Ok (Some persisted) ->
-     Alcotest.(check int)
-       "lifecycle owner committed replacement generation"
-       candidate.runtime.nonce
-       persisted.runtime.nonce
-   | Ok None -> Alcotest.fail "lifecycle owner replacement disappeared"
-   | Error detail -> Alcotest.fail detail);
-  (match Keeper_lifecycle_reservation.release lifecycle_token with
-   | Keeper_lifecycle_reservation.Released -> ()
-   | Keeper_lifecycle_reservation.Release_missing ->
-     Alcotest.fail "fixture lifecycle reservation disappeared"
-   | Keeper_lifecycle_reservation.Release_not_owner owner ->
+   | Durable_admission.Admission_completed ()
+   | Durable_admission.Admission_completed_with_attention ((), _) ->
+     ()
+   | Durable_admission.Admission_blocked reason ->
      Alcotest.fail
-       (Keeper_lifecycle_reservation.snapshot_to_string owner));
+       (Durable_admission.blocked_reason_to_wire reason));
   (match
      Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
        ~config

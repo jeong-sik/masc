@@ -12,6 +12,7 @@ open Keeper_types_profile
     retry — preserves heartbeat-owned cursors when bootstrap races
     a supervisor write (#9749). *)
 val write_initial_meta :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_nonce.create Keeper_lifecycle_nonce.witness ->
   Workspace.config ->
   keeper_meta ->

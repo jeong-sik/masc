@@ -34,8 +34,31 @@ let target_nonce witness =
 
 let target_identity witness = Nonce.witness_target witness
 
+let with_admission ~base_path ~keeper_id fn =
+  let config = Workspace.default_config base_path in
+  match
+    Masc.Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name:keeper_id
+      fn
+  with
+  | Admission_completed result -> result
+  | Admission_completed_with_attention (result, _) -> result
+  | Admission_blocked reason ->
+    fail
+      (Masc.Keeper_lifecycle_admission.Durable_transaction
+       .blocked_reason_to_wire
+         reason)
+;;
+
+let create_result ~base_path ~keeper_id ~owner_id =
+  with_admission ~base_path ~keeper_id (fun permit ->
+    Nonce.create permit ~base_path ~keeper_id ~owner_id ())
+;;
+
 let create ~base_path ~keeper_id ~owner_id =
-  Nonce.create ~base_path ~keeper_id ~owner_id () |> require_ok
+  create_result ~base_path ~keeper_id ~owner_id |> require_ok
 ;;
 
 let settled_target = function
@@ -44,14 +67,38 @@ let settled_target = function
 ;;
 
 let replace_target ~base_path ~keeper_id ~source ~owner_id =
-  Nonce.replace_settled
-    ~base_path
-    ~keeper_id
-    ~source
-    ~owner_id
-    ()
+  with_admission ~base_path ~keeper_id (fun permit ->
+    Nonce.replace_settled
+      permit
+      ~base_path
+      ~keeper_id
+      ~source
+      ~owner_id
+      ())
   |> require_ok
   |> settled_target
+;;
+
+let replace_settled ~base_path ~keeper_id ~source ~owner_id =
+  with_admission ~base_path ~keeper_id (fun permit ->
+    Nonce.replace_settled
+      permit
+      ~base_path
+      ~keeper_id
+      ~source
+      ~owner_id
+      ())
+;;
+
+let recover_exact ~base_path ~keeper_id ~source ~target =
+  with_admission ~base_path ~keeper_id (fun permit ->
+    Nonce.recover_exact
+      permit
+      ~base_path
+      ~keeper_id
+      ~source
+      ~target
+      ())
 ;;
 
 let authority_path ~base_path ~keeper_id =
@@ -93,12 +140,11 @@ let test_replace_requires_exact_source () =
   in
   check int64 "replacement advances" 2L (Nonce.identity_nonce replaced);
   match
-    Nonce.replace_settled
+    replace_settled
       ~base_path
       ~keeper_id:"keeper-a"
       ~source
       ~owner_id:"trace-c"
-      ()
   with
   | Ok (Nonce.Settled_recovered (witness, None)) ->
     check string
@@ -121,22 +167,20 @@ let test_recover_exact_does_not_allocate () =
       ~owner_id:"trace-b"
   in
   let recovered =
-    Nonce.recover_exact
+    recover_exact
       ~base_path
       ~keeper_id:"keeper-a"
       ~source:(Some source)
       ~target
-      ()
     |> require_ok
   in
   check int64 "exact recovery retains nonce" 2L (target_nonce recovered);
   (match
-     Nonce.recover_exact
+     recover_exact
        ~base_path
        ~keeper_id:"keeper-a"
        ~source:(Some target)
        ~target:source
-       ()
    with
    | Error Nonce.Authority_identity_mismatch -> ()
    | Error error ->
@@ -166,12 +210,11 @@ let test_replace_settled_recovers_exact_published_target () =
       ~owner_id:"trace-b"
   in
   match
-    Nonce.replace_settled
+    replace_settled
       ~base_path
       ~keeper_id:"keeper-a"
       ~source
       ~owner_id:"trace-c"
-      ()
   with
   | Ok (Nonce.Settled_recovered (witness, None)) ->
     let target = Nonce.witness_target witness in
@@ -202,12 +245,11 @@ let test_publication_settlement_warning_is_recovered () =
     Nonce.For_testing.with_fault
       Nonce.For_testing.Publication_settlement_warning
       (fun () ->
-        Nonce.replace_settled
+        replace_settled
           ~base_path
           ~keeper_id:"keeper-a"
           ~source
-          ~owner_id:"trace-b"
-          ())
+          ~owner_id:"trace-b")
   with
   | Ok
       (Nonce.Settled_recovered
@@ -227,12 +269,11 @@ let test_verified_publication_failure_is_recovered () =
     Nonce.For_testing.with_fault
       Nonce.For_testing.Verified_publication_failure
       (fun () ->
-        Nonce.replace_settled
+        replace_settled
           ~base_path
           ~keeper_id:"keeper-a"
           ~source
-          ~owner_id:"trace-b"
-          ())
+          ~owner_id:"trace-b")
   with
   | Ok
       (Nonce.Settled_recovered
@@ -252,12 +293,11 @@ let test_indeterminate_publication_is_recovered () =
     Nonce.For_testing.with_fault
       Nonce.For_testing.Publication_indeterminate
       (fun () ->
-        Nonce.replace_settled
+        replace_settled
           ~base_path
           ~keeper_id:"keeper-a"
           ~source
-          ~owner_id:"trace-b"
-          ())
+          ~owner_id:"trace-b")
   with
   | Ok
       (Nonce.Settled_recovered
@@ -277,12 +317,11 @@ let test_post_publication_cancellation_is_recovered () =
     Nonce.For_testing.with_fault
       Nonce.For_testing.Cancellation_after_publication
       (fun () ->
-        Nonce.replace_settled
+        replace_settled
           ~base_path
           ~keeper_id:"keeper-a"
           ~source
-          ~owner_id:"trace-b"
-          ())
+          ~owner_id:"trace-b")
   with
   | Ok
       (Nonce.Settled_recovered
@@ -334,7 +373,7 @@ let test_invalid_current_evidence_is_generic () =
   save_raw
     (authority_path ~base_path ~keeper_id:"keeper-a")
     {|{"schema":"not-current","keeper_id":"keeper-a","allocated_to":"trace-a","nonce":1,"checksum_sha256":"0"}|};
-  match Nonce.create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-b" () with
+  match create_result ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-b" with
   | Error (Nonce.Corrupt_current (Nonce.Invalid_current _)) -> ()
   | Error error -> failf "unexpected invalid-current error: %s" (Nonce.error_to_string error)
   | Ok witness -> failf "invalid evidence allocated nonce %Ld" (target_nonce witness)

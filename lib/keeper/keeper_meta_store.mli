@@ -101,6 +101,7 @@ val write_meta_for_lifecycle :
 
 val create_meta :
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_nonce.create Keeper_lifecycle_nonce.witness ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
@@ -108,6 +109,7 @@ val create_meta :
 
 val replace_meta :
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
@@ -115,19 +117,6 @@ val replace_meta :
 
 val recover_meta_exact :
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
-  Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
-
-val replace_meta_under_admission :
-  Keeper_lifecycle_admission.Durable_transaction.permit ->
-  Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
-
-val recover_meta_exact_under_admission :
   Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness ->
   Workspace.config ->

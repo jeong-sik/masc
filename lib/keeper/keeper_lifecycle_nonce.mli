@@ -18,6 +18,7 @@ type error =
   | Invalid_floor of int64
   | Authority_missing
   | Authority_identity_mismatch
+  | Lifecycle_admission_mismatch
   | Shutdown_floor_invalid of string
   | Filesystem_capability_unavailable
   | Directory_prepare_failed of string
@@ -69,6 +70,7 @@ val identity :
   (identity, error) result
 
 val create :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   base_path:string ->
   keeper_id:string ->
   owner_id:string ->
@@ -76,6 +78,7 @@ val create :
   (create witness, error) result
 
 val recover_exact :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   base_path:string ->
   keeper_id:string ->
   source:identity option ->
@@ -85,14 +88,8 @@ val recover_exact :
 (** Recover only the exact published forward transition from [source] to
     [target]. This never authorizes an identity rewind. *)
 
-val recover_published_replace :
-  base_path:string ->
-  keeper_id:string ->
-  source:identity ->
-  unit ->
-  (recover_exact witness, error) result
-
 val replace_settled :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   base_path:string ->
   keeper_id:string ->
   source:identity ->

@@ -542,49 +542,47 @@ let write_meta_for_lifecycle token config m =
   |> Result.map_error write_meta_error_to_string
 ;;
 
-let create_meta ?lifecycle_token witness config m =
-  write_meta_typed
-    ?lifecycle_token
-    ~identity_authority:(Create_witness witness)
-    config
-    m
-  |> Result.map_error write_meta_error_to_string
+let identity_write_admitted permit config m =
+  Keeper_lifecycle_admission.Durable_transaction.permit_matches
+    permit
+    ~base_path:config.Workspace.base_path
+    m.Keeper_meta_contract.name
 ;;
 
-let replace_meta ?lifecycle_token witness config m =
-  write_meta_typed
-    ?lifecycle_token
-    ~identity_authority:(Replace_witness witness)
-    config
-    m
-  |> Result.map_error write_meta_error_to_string
+let create_meta ?lifecycle_token permit witness config m =
+  if not (identity_write_admitted permit config m)
+  then Error "Keeper identity creation requires the active durable lifecycle admission"
+  else
+    write_meta_typed
+      ?lifecycle_token
+      ~identity_authority:(Create_witness witness)
+      config
+      m
+    |> Result.map_error write_meta_error_to_string
 ;;
 
-let recover_meta_exact ?lifecycle_token witness config m =
-  write_meta_typed
-    ?lifecycle_token
-    ~identity_authority:(Recover_exact_witness witness)
-    config
-    m
-  |> Result.map_error write_meta_error_to_string
+let replace_meta ?lifecycle_token permit witness config m =
+  if not (identity_write_admitted permit config m)
+  then Error "Keeper identity replacement requires the active durable lifecycle admission"
+  else
+    write_meta_typed
+      ?lifecycle_token
+      ~identity_authority:(Replace_witness witness)
+      config
+      m
+    |> Result.map_error write_meta_error_to_string
 ;;
 
-let identity_write_under_admission permit write witness config m =
-  if
-    Keeper_lifecycle_admission.Durable_transaction.permit_matches
-      permit
-      ~base_path:config.Workspace.base_path
-      m.Keeper_meta_contract.name
-  then write witness config m
-  else Error "Keeper identity write lost durable lifecycle admission"
-;;
-
-let replace_meta_under_admission permit witness config m =
-  identity_write_under_admission permit replace_meta witness config m
-;;
-
-let recover_meta_exact_under_admission permit witness config m =
-  identity_write_under_admission permit recover_meta_exact witness config m
+let recover_meta_exact ?lifecycle_token permit witness config m =
+  if not (identity_write_admitted permit config m)
+  then Error "Keeper identity recovery requires the active durable lifecycle admission"
+  else
+    write_meta_typed
+      ?lifecycle_token
+      ~identity_authority:(Recover_exact_witness witness)
+      config
+      m
+    |> Result.map_error write_meta_error_to_string
 ;;
 
 let is_version_conflict_error msg =
@@ -883,9 +881,14 @@ let update_meta_if_identity config ~name ~trace_id ~generation update =
           update)
   with
   | Admission_completed result -> result
-  | Admission_completed_with_attention (Error _ as error, _) -> error
-  | Admission_completed_with_attention (Ok _, failure) ->
-    Error (Identity_lifecycle_admission_release_failed failure)
+  | Admission_completed_with_attention (result, failure) ->
+    Log.Keeper.error
+      "Keeper identity metadata update admission release requires attention \
+       keeper=%s failure=%s"
+      name
+      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+         failure);
+    result
   | Admission_blocked reason ->
     Error (Identity_lifecycle_admission_blocked reason)
 ;;
@@ -972,9 +975,14 @@ let remove_meta_if_identity config ~name ~trace_id ~generation =
           ~generation)
   with
   | Admission_completed result -> result
-  | Admission_completed_with_attention (Error _ as error, _) -> error
-  | Admission_completed_with_attention (Ok (), failure) ->
-    Error (Remove_identity_lifecycle_admission_release_failed failure)
+  | Admission_completed_with_attention (result, failure) ->
+    Log.Keeper.error
+      "Keeper identity metadata removal admission release requires attention \
+       keeper=%s failure=%s"
+      name
+      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+         failure);
+    result
   | Admission_blocked reason ->
     Error (Remove_identity_lifecycle_admission_blocked reason)
 ;;
@@ -1124,9 +1132,14 @@ let remove_meta_if_exact_identity config ~name ~trace_id ~generation ~meta_versi
           ~meta_version)
   with
   | Admission_completed result -> result
-  | Admission_completed_with_attention (Error _ as error, _) -> error
-  | Admission_completed_with_attention (Ok (), failure) ->
-    Error (Exact_identity_lifecycle_admission_release_failed failure)
+  | Admission_completed_with_attention (result, failure) ->
+    Log.Keeper.error
+      "Keeper exact identity metadata removal admission release requires \
+       attention keeper=%s failure=%s"
+      name
+      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+         failure);
+    result
   | Admission_blocked reason ->
     Error (Exact_identity_lifecycle_admission_blocked reason)
 ;;

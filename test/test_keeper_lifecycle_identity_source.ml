@@ -59,9 +59,9 @@ let test_repairs_share_typed_transition () =
   check_contains heartbeat "with_durable_lifecycle_admission";
   check_contains tools "with_durable_lifecycle_admission";
   check_contains transition "permit_matches";
-  check_contains transition "replace_meta_under_admission";
-  check_contains transition "recover_meta_exact_under_admission";
-  check_contains meta_store "identity_write_under_admission";
+  check_contains transition "Keeper_meta_store.replace_meta";
+  check_contains transition "Keeper_meta_store.recover_meta_exact";
+  check_contains meta_store "identity_write_admitted";
   check_not_contains heartbeat "nonce + 1";
   check_not_contains tools "nonce + 1"
 ;;
@@ -85,7 +85,28 @@ let test_create_uses_one_durable_authority_scope () =
 
 let test_nonce_settlement_is_not_claim_based () =
   let interface = read_file "lib/keeper/keeper_lifecycle_nonce.mli" in
+  let meta_interface = read_file "lib/keeper/keeper_meta_store.mli" in
+  let create_interface = read_file "lib/keeper/keeper_turn_up_create.mli" in
   check_contains interface "val replace_settled";
+  check_contains interface
+    "val create :\n  Keeper_lifecycle_admission.Durable_transaction.permit ->";
+  check_contains interface
+    "val recover_exact :\n  Keeper_lifecycle_admission.Durable_transaction.permit ->";
+  check_contains interface
+    "val replace_settled :\n  Keeper_lifecycle_admission.Durable_transaction.permit ->";
+  check_contains meta_interface
+    "val create_meta :\n  ?lifecycle_token:Keeper_lifecycle_reservation.token ->\n  \
+     Keeper_lifecycle_admission.Durable_transaction.permit ->";
+  check_contains meta_interface
+    "val replace_meta :\n  ?lifecycle_token:Keeper_lifecycle_reservation.token ->\n  \
+     Keeper_lifecycle_admission.Durable_transaction.permit ->";
+  check_contains meta_interface
+    "val recover_meta_exact :\n  ?lifecycle_token:Keeper_lifecycle_reservation.token ->\n  \
+     Keeper_lifecycle_admission.Durable_transaction.permit ->";
+  check_contains create_interface
+    "val write_initial_meta :\n  \
+     Keeper_lifecycle_admission.Durable_transaction.permit ->";
+  check_not_contains interface "val recover_published_replace";
   check_not_contains interface "val settle_published_replace";
   check_not_contains interface "val replace :";
   check_not_contains interface "with_published_failure";

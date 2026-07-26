@@ -1426,6 +1426,7 @@ let replacement_target = function
 ;;
 
 let allocate_or_recover_replacement
+      permit
       config
       (original : keeper_meta)
       (candidate : keeper_meta)
@@ -1443,6 +1444,7 @@ let allocate_or_recover_replacement
     in
     (match
        Keeper_lifecycle_nonce.replace_settled
+         permit
          ~base_path:config.Workspace.base_path
          ~keeper_id:original.name
          ~source
@@ -1486,6 +1488,7 @@ let candidate_for_replacement publication (candidate : keeper_meta) =
 ;;
 
 let write_replacement_meta
+      permit
       token
       publication
       config
@@ -1495,12 +1498,14 @@ let write_replacement_meta
   | Replacement_allocated witness ->
     Keeper_meta_store.replace_meta
       ~lifecycle_token:token
+      permit
       witness
       config
       meta
   | Replacement_recovered witness ->
     Keeper_meta_store.recover_meta_exact
       ~lifecycle_token:token
+      permit
       witness
       config
       meta
@@ -1603,7 +1608,7 @@ let rollback_cleanup_stage = function
          "rollback cleanup has no rollback-capable origin")
 ;;
 
-let rollback token config (journal : journal) payload _original_entry =
+let rollback permit token config (journal : journal) payload _original_entry =
   let original = Payload.payload_original payload in
   let candidate = Payload.payload_candidate payload in
   let meta_errors =
@@ -1652,6 +1657,7 @@ let rollback token config (journal : journal) payload _original_entry =
                 Result.bind
                   (nonce_error
                      (Keeper_lifecycle_nonce.recover_exact
+                        permit
                         ~base_path:config.base_path
                         ~keeper_id:restored.name
                         ~source:(Some source)
@@ -1662,6 +1668,7 @@ let rollback token config (journal : journal) payload _original_entry =
                     then
                       Keeper_meta_store.recover_meta_exact
                         ~lifecycle_token:token
+                        permit
                         witness
                         config
                         restored
@@ -1722,8 +1729,8 @@ let rollback token config (journal : journal) payload _original_entry =
                      ])))))
 ;;
 
-let fail_with_rollback token config journal payload original_entry cause error =
-  let errors = rollback token config journal payload original_entry in
+let fail_with_rollback permit token config journal payload original_entry cause error =
+  let errors = rollback permit token config journal payload original_entry in
   observe
     (if errors = [] then "rollback" else "rollback_failed")
     journal.keeper_name
@@ -1755,6 +1762,7 @@ let validate_registry_snapshot config original =
 ;;
 
 let settle_replacement_before_reserved
+      permit
       token
       config
       publication
@@ -1811,6 +1819,7 @@ let settle_replacement_before_reserved
       else
         (match
            write_replacement_meta
+             permit
              token
              publication
              config
@@ -1892,6 +1901,7 @@ let cleanup_unreserved_payload config (journal : journal) ~cause =
 ;;
 
 let abort_replacement_before_reserved
+      permit
       token
       config
       publication
@@ -1903,6 +1913,7 @@ let abort_replacement_before_reserved
   =
   let errors =
     settle_replacement_before_reserved
+      permit
       token
       config
       publication
@@ -2034,6 +2045,7 @@ let settle_runtime_assignment ~keeper_name assignment result =
 ;;
 
 let revive_locked
+      permit
       (ctx : _ context)
       ~original
       ~candidate
@@ -2041,6 +2053,15 @@ let revive_locked
       ~runtime_assignment
       ~launch_committed
   =
+  let allocate_or_recover_replacement =
+    allocate_or_recover_replacement permit
+  in
+  let abort_replacement_before_reserved =
+    abort_replacement_before_reserved permit
+  in
+  let fail_with_rollback = fail_with_rollback permit in
+  let rollback = rollback permit in
+  let write_replacement_meta = write_replacement_meta permit in
   match preflight_journal_authority ctx.config original.name with
   | Error error ->
     observe "conflict" original.name (error_to_string error);
@@ -2513,24 +2534,17 @@ let revive_locked
 ;;
 
 let revive ?runtime_id (ctx : _ context) ~original ~candidate =
-  match Payload.authority_shard_for_keeper ~keeper_name:original.name with
-  | Error failure -> Error (payload_failure Payload_prepare failure)
-  | Ok shard ->
-    (match
-       revival_authority_lock_path
-         ctx.config
-         (Payload.authority_shard_leaf shard)
-     with
-     | Error error -> Error error
-     | Ok lock_path ->
-    (match
-       File_lock_eio.with_durable_lock_observed
-         ~lock_path
-         (fun () ->
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      ctx.config
+      ~keeper_name:original.name
+      (fun permit ->
            let runtime_assignment = ref Runtime_assignment_unchanged in
            let launch_committed = ref false in
            try
              revive_locked
+               permit
                ctx
                ~original
                ~candidate
@@ -2559,30 +2573,38 @@ let revive ?runtime_id (ctx : _ context) ~original ~candidate =
                      original.name
                      detail);
              Printexc.raise_with_backtrace cancelled backtrace)
-     with
-     | File_lock_eio.Lock_not_acquired failure ->
-       Error (Transaction_lock_failed failure)
-     | File_lock_eio.Body_completed { value; release_error = None } -> value
-     | File_lock_eio.Body_completed
-         { value = Ok { meta = committed; entry }
-         ; release_error = Some failure
-         } ->
+  with
+  | Admission_completed value -> value
+  | Admission_completed_with_attention
+      (Ok { meta = committed; entry }, failure) ->
+    let cleanup_error =
+      Journal_write_failed
+        ("keeper revival durable admission release requires attention: "
+         ^ Keeper_lifecycle_admission.Durable_transaction
+           .authority_failure_to_wire
+             failure)
+    in
        Error
          (Post_commit_cleanup_required
             { committed
             ; entry
-            ; cleanup_error = Transaction_lock_failed failure
+            ; cleanup_error
             })
-     | File_lock_eio.Body_completed
-         { value = Error error
-         ; release_error = Some failure
-         } ->
-       Log.Keeper.error
-         "keeper revival transaction lock release failed after body error \
-          keeper=%s error=%s"
-         original.name
-         (File_lock_eio.durable_lock_error_to_string failure);
-       Error error))
+  | Admission_completed_with_attention (Error error, failure) ->
+    Log.Keeper.error
+      "keeper revival durable admission release requires attention after body \
+       error keeper=%s failure=%s"
+      original.name
+      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+         failure);
+    Error error
+  | Admission_blocked reason ->
+    Error
+      (Journal_conflict
+         ("keeper revival blocked by lifecycle authority: "
+          ^ Keeper_lifecycle_admission.Durable_transaction
+            .blocked_reason_to_wire
+              reason))
 ;;
 
 let recovery_payload_error failure =
@@ -2613,7 +2635,8 @@ let finish_rollback_cleanup config journal origin =
         | Error error -> Error (error_to_string error)))
 ;;
 
-let recover_one_locked config leaf =
+let recover_one_locked permit config leaf =
+  let rollback = rollback permit in
   match
     read_journal_leaf
       ~invalid:(fun detail -> Journal_ownership_changed detail)
@@ -2744,32 +2767,29 @@ let recover_one config leaf =
   | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
   | Ok (_, _, Some (Active_journal discovered)) ->
     (match
-       revival_authority_lock_path
+       Keeper_lifecycle_admission.Durable_transaction
+       .with_recovery_lifecycle_admission
          config
-         (Payload.immutable_ref_authority_leaf discovered.payload_ref)
+         ~keeper_name:discovered.keeper_name
+         ~transaction_id:discovered.transaction_id
+         (fun permit -> recover_one_locked permit config leaf)
      with
-     | Error error -> Error (error_to_string error)
-     | Ok lock_path ->
-       (match
-          File_lock_eio.with_durable_lock_observed
-            ~lock_path
-            (fun () -> recover_one_locked config leaf)
-        with
-        | File_lock_eio.Lock_not_acquired failure ->
-          Error
-            ("recovery transaction lock failed: "
-             ^ File_lock_eio.durable_lock_error_to_string failure)
-        | File_lock_eio.Body_completed
-            { value; release_error = None } -> value
-        | File_lock_eio.Body_completed
-            { value; release_error = Some failure } ->
-          let release_detail =
-            "recovery transaction lock release failed: "
-            ^ File_lock_eio.durable_lock_error_to_string failure
-          in
-          (match value with
-           | Ok _ -> Error ("recovery completed; " ^ release_detail)
-           | Error detail -> Error (detail ^ "; " ^ release_detail))))
+     | Admission_completed value -> value
+     | Admission_completed_with_attention (value, failure) ->
+       Log.Keeper.error
+         "keeper recovery durable admission release requires attention \
+          keeper=%s failure=%s"
+         discovered.keeper_name
+         (Keeper_lifecycle_admission.Durable_transaction
+          .authority_failure_to_wire
+            failure);
+       value
+     | Admission_blocked reason ->
+       Error
+         ("recovery transaction admission blocked: "
+          ^ Keeper_lifecycle_admission.Durable_transaction
+            .blocked_reason_to_wire
+              reason))
 ;;
 
 let protect_shard_from_orphan_cleanup_locked config shard =

@@ -30,6 +30,7 @@ let replace_or_recover_exact
   let publication =
     match
       Keeper_lifecycle_nonce.replace_settled
+        permit
         ~base_path:config.base_path
         ~keeper_id:meta.name
         ~source
@@ -95,13 +96,13 @@ let replace_or_recover_exact
   let* () =
     match publication with
     | Allocated witness ->
-      Keeper_meta_store.replace_meta_under_admission
+      Keeper_meta_store.replace_meta
         permit
         witness
         config
         updated
     | Recovered witness ->
-      Keeper_meta_store.recover_meta_exact_under_admission
+      Keeper_meta_store.recover_meta_exact
         permit
         witness
         config

@@ -16,8 +16,8 @@ open Keeper_turn_up_args
 (* #9749: bootstrap can race a heartbeat/supervisor meta write after
    crash recovery. Retry on CAS conflict while keeping heartbeat-owned
    cursors from disk. *)
-let write_initial_meta witness config meta =
-  Keeper_meta_store.create_meta witness config meta
+let write_initial_meta permit witness config meta =
+  Keeper_meta_store.create_meta permit witness config meta
 
 let create_keeper_admitted
       (permit : Keeper_lifecycle_admission.Durable_transaction.permit)
@@ -222,6 +222,7 @@ let create_keeper_admitted
       let nonce_result =
         Result.bind
           (Keeper_lifecycle_nonce.create
+             permit
              ~base_path:ctx.config.base_path
              ~keeper_id:p.name
              ~owner_id:trace_id
@@ -385,7 +386,7 @@ let create_keeper_admitted
          tool_result_error e
        | Ok () ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      match write_initial_meta nonce_witness ctx.config meta with
+      match write_initial_meta permit nonce_witness ctx.config meta with
       | Error e ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();

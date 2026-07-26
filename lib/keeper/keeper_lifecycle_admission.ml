@@ -526,6 +526,65 @@ module Durable_transaction = struct
            (value, Durable_lock_release_failed))
   ;;
 
+  let with_recovery_lifecycle_admission
+        config
+        ~keeper_name
+        ~transaction_id
+        fn
+    =
+    match authority_lock_path config keeper_name with
+    | Error failure ->
+      Admission_blocked
+        (Authority_unreadable { keeper_name; failure })
+    | Ok lock_path ->
+      (match
+         File_lock_eio.with_durable_lock_observed
+           ~lock_path
+           (fun () ->
+              let admit evidence =
+                if String.equal evidence.transaction_id transaction_id
+                then
+                  Ok
+                    (with_active_permit
+                       ~base_path:config.Workspace.base_path
+                       ~keeper_name
+                       ~evidence:(Some evidence)
+                       fn)
+                else
+                  Error
+                    (Revival_transaction_mismatch
+                       { keeper_name; observed = Some evidence })
+              in
+              match read_locked config keeper_name with
+              | Blocked (Rollback_capable_authority evidence) -> admit evidence
+              | Admitted (Some evidence) -> admit evidence
+              | Blocked reason -> Error reason
+              | Admitted None ->
+                Error
+                  (Revival_transaction_mismatch
+                     { keeper_name; observed = None }))
+       with
+       | File_lock_eio.Lock_not_acquired _ ->
+         Admission_blocked
+           (Authority_unreadable
+              { keeper_name; failure = Durable_lock_unavailable })
+       | File_lock_eio.Body_completed
+           { value = Error reason; release_error = None } ->
+         Admission_blocked reason
+       | File_lock_eio.Body_completed
+           { value = Ok value; release_error = None } ->
+         Admission_completed value
+       | File_lock_eio.Body_completed
+           { value = Error _; release_error = Some _ } ->
+         Admission_blocked
+           (Authority_unreadable
+              { keeper_name; failure = Durable_lock_release_failed })
+       | File_lock_eio.Body_completed
+           { value = Ok value; release_error = Some _ } ->
+         Admission_completed_with_attention
+           (value, Durable_lock_release_failed))
+  ;;
+
   let with_revival_launch_admission_under_lock
         config
         ~keeper_name

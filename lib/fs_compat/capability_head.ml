@@ -181,20 +181,35 @@ let exception_detail exn = Printexc.to_string exn
 let diagnostic operation exn =
   { operation; detail = exception_detail exn }
 
+let reraise_fatal exn raw_backtrace =
+  match exn with
+  | Out_of_memory | Stack_overflow | Sys.Break ->
+    Printexc.raise_with_backtrace exn raw_backtrace
+  | _ -> ()
+
 let protect_io operation fn =
   try Ok (fn ()) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Io_error (diagnostic operation exn))
+  | exn ->
+    let raw_backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal exn raw_backtrace;
+    Error (Io_error (diagnostic operation exn))
 
 let protect_result operation fn =
   try fn () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Io_error (diagnostic operation exn))
+  | exn ->
+    let raw_backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal exn raw_backtrace;
+    Error (Io_error (diagnostic operation exn))
 
 let invoke_hook operation hook =
   try hook () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> raise (Hook_failed (diagnostic operation exn))
+  | exn ->
+    let raw_backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal exn raw_backtrace;
+    raise (Hook_failed (diagnostic operation exn))
 
 let diagnostic_of_exception default_operation = function
   | Hook_failed diagnostic -> diagnostic
@@ -337,7 +352,10 @@ let try_lock file =
      with
      | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> Error Busy
      | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> Error (Io_error (diagnostic Acquire_cross_process_lock exn)))
+     | exn ->
+       let raw_backtrace = Printexc.get_raw_backtrace () in
+       reraise_fatal exn raw_backtrace;
+       Error (Io_error (diagnostic Acquire_cross_process_lock exn)))
 
 let fresh_epoch secure_random =
   protect_io Initialize_lock_marker (fun () ->
@@ -502,7 +520,10 @@ let rec create_stage ~sw ~secure_random ~parent attempts =
      | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
        create_stage ~sw ~secure_random ~parent (attempts - 1)
      | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> Error (Io_error (diagnostic Create_stage exn)))
+     | exn ->
+       let raw_backtrace = Printexc.get_raw_backtrace () in
+       reraise_fatal exn raw_backtrace;
+       Error (Io_error (diagnostic Create_stage exn)))
 
 let write_stage ~path file payload =
   let* () = protect_io Write_stage (fun () -> Eio.Flow.copy_string payload file) in
@@ -558,14 +579,21 @@ let run_transaction ~hooks ~parent ~leaf ~publication_state ~set_success_warning
         Eio.Switch.run_protected (fun sw ->
           Eio.Switch.on_release sw (fun () ->
             try hooks.on_resource_settlement () with
-            | exn -> raise (Hook_failed (diagnostic Settle_resources exn)));
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              let raw_backtrace = Printexc.get_raw_backtrace () in
+              reraise_fatal exn raw_backtrace;
+              raise (Hook_failed (diagnostic Settle_resources exn)));
           let exact_parent, parent_stat =
             try
               let exact_parent = Eio.Path.open_dir ~sw parent in
               exact_parent, Eio.Path.stat ~follow:false exact_parent
             with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> raise (Hook_failed (diagnostic Pin_parent exn))
+            | exn ->
+              let raw_backtrace = Printexc.get_raw_backtrace () in
+              reraise_fatal exn raw_backtrace;
+              raise (Hook_failed (diagnostic Pin_parent exn))
           in
           match
             Lease.try_acquire
@@ -593,6 +621,8 @@ let run_transaction ~hooks ~parent ~leaf ~publication_state ~set_success_warning
         when !publication_state = Before_publication && Option.is_none !completed ->
         raise exn
       | exn ->
+        let raw_backtrace = Printexc.get_raw_backtrace () in
+        reraise_fatal exn raw_backtrace;
         let detail = diagnostic_of_exception Settle_resources exn in
         (match !completed with
          | Some (Ok value) ->
@@ -717,7 +747,10 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
                             }
                           :: !warnings))
                 with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->
+                  let raw_backtrace = Printexc.get_raw_backtrace () in
+                  reraise_fatal exn raw_backtrace;
                   warnings :=
                     Cleanup_failed (diagnostic_of_exception Cleanup_stage exn) :: !warnings)
             (fun () ->

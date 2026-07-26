@@ -97,6 +97,18 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 
+  val with_reserved_publication_failure :
+    (unit -> 'a) ->
+    'a
+
+  val with_cleanup_boundary_hooks :
+    ?after_cleanup_pending:
+      ([ `Forward | `Rollback ] -> unit) ->
+    ?after_payload_delete:
+      ([ `Forward | `Rollback ] -> unit) ->
+    (unit -> 'a) ->
+    'a
+
   val with_final_clear_failure :
     detail:string ->
     (unit -> 'a) ->

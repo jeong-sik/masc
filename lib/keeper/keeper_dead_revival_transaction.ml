@@ -4,12 +4,31 @@ open Keeper_types_profile
 module Head = Fs_compat.Capability_head
 module Payload = Keeper_dead_revival_payload
 
-let after_nonce_allocation_hook : (unit -> unit) Atomic.t =
-  Atomic.make (fun () -> ())
+type boundary_hooks =
+  { after_nonce_allocation : unit -> unit
+  ; after_journal_write : unit -> unit
+  }
+
+let boundary_hooks_key : boundary_hooks Eio.Fiber.key =
+  Eio.Fiber.create_key ()
 ;;
 
-let after_journal_write_hook : (unit -> unit) Atomic.t =
-  Atomic.make (fun () -> ())
+let reserved_publication_failure_key : unit Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+type cleanup_direction =
+  [ `Forward
+  | `Rollback
+  ]
+
+type cleanup_boundary_hooks =
+  { after_cleanup_pending : cleanup_direction -> unit
+  ; after_payload_delete : cleanup_direction -> unit
+  }
+
+let cleanup_boundary_hooks_key : cleanup_boundary_hooks Eio.Fiber.key =
+  Eio.Fiber.create_key ()
 ;;
 
 let final_clear_failure_hook : (unit -> string option) Atomic.t =
@@ -39,11 +58,27 @@ let with_head_parent parent fn =
 ;;
 
 let invoke_after_nonce_allocation_hook () =
-  (Atomic.get after_nonce_allocation_hook) ()
+  match Eio.Fiber.get boundary_hooks_key with
+  | None -> ()
+  | Some hooks -> hooks.after_nonce_allocation ()
 ;;
 
 let invoke_after_journal_write_hook () =
-  (Atomic.get after_journal_write_hook) ()
+  match Eio.Fiber.get boundary_hooks_key with
+  | None -> ()
+  | Some hooks -> hooks.after_journal_write ()
+;;
+
+let invoke_after_cleanup_pending_hook direction =
+  match Eio.Fiber.get cleanup_boundary_hooks_key with
+  | None -> ()
+  | Some hooks -> hooks.after_cleanup_pending direction
+;;
+
+let invoke_after_payload_delete_hook direction =
+  match Eio.Fiber.get cleanup_boundary_hooks_key with
+  | None -> ()
+  | Some hooks -> hooks.after_payload_delete direction
 ;;
 
 let invoke_final_clear_failure_hook () =
@@ -60,16 +95,24 @@ module Boundary_hooks_for_testing = struct
         ?(after_journal_write = fun () -> ())
         fn
     =
-    let previous_nonce =
-      Atomic.exchange after_nonce_allocation_hook after_nonce_allocation
-    in
-    let previous_journal =
-      Atomic.exchange after_journal_write_hook after_journal_write
-    in
-    Fun.protect
-      ~finally:(fun () ->
-        Atomic.set after_nonce_allocation_hook previous_nonce;
-        Atomic.set after_journal_write_hook previous_journal)
+    Eio.Fiber.with_binding
+      boundary_hooks_key
+      { after_nonce_allocation; after_journal_write }
+      fn
+  ;;
+
+  let with_reserved_publication_failure fn =
+    Eio.Fiber.with_binding reserved_publication_failure_key () fn
+  ;;
+
+  let with_cleanup_boundary_hooks
+        ?(after_cleanup_pending = fun _ -> ())
+        ?(after_payload_delete = fun _ -> ())
+        fn
+    =
+    Eio.Fiber.with_binding
+      cleanup_boundary_hooks_key
+      { after_cleanup_pending; after_payload_delete }
       fn
   ;;
 
@@ -800,7 +843,20 @@ let reserve_journal config (journal : journal) =
             (Yojson.Safe.to_string (journal_stage_to_json existing.stage))))
   | Ok (parent, snapshot, None)
   | Ok (parent, snapshot, Some (Cleared_tombstone _)) ->
+    let compare_and_swap =
+      match Eio.Fiber.get reserved_publication_failure_key with
+      | None -> Head.compare_and_swap
+      | Some () ->
+        let hooks =
+          Head.For_testing.hooks
+            ~after_verified:(fun () ->
+              failwith "injected Reserved journal post-publication failure")
+            ()
+        in
+        Head.For_testing.compare_and_swap hooks
+    in
     publish_row
+      ~compare_and_swap
       ~conflict:(fun detail -> Journal_conflict detail)
       ~parent
       ~snapshot
@@ -1031,6 +1087,19 @@ let make_prepared_journal ~owner_id ~original ~candidate =
     , prepared )
 ;;
 
+let verify_payload config (journal : journal) =
+  Payload.read
+    config
+    ~expected_ref:journal.payload_ref
+    ~expected_authority_leaf:
+      (Payload.immutable_ref_authority_leaf journal.payload_ref)
+    ~transaction_id:journal.transaction_id
+    ~owner_id:journal.owner_id
+    ~keeper_name:journal.keeper_name
+    ~expected_trace_id:journal.expected_trace_id
+    ~expected_generation:journal.expected_generation
+;;
+
 module For_testing = struct
   include Boundary_hooks_for_testing
 
@@ -1040,16 +1109,34 @@ module For_testing = struct
     | Error failure -> invalid_arg (Payload.error_to_string failure)
   ;;
 
+  let create_and_verify_payload config journal prepared =
+    match Payload.create config prepared with
+    | Error failure ->
+      Error
+        (Payload_operation_failed
+           { operation = Payload_create; failure })
+    | Ok (Payload.Created _ | Payload.Reconciled_created _) ->
+      (match verify_payload config journal with
+       | Ok _ -> Ok ()
+       | Error failure ->
+         Error
+           (Payload_operation_failed
+              { operation = Payload_verify; failure }))
+  ;;
+
   let reserve_journal ~config ~owner_id ~original ~candidate =
     match make_prepared_journal ~owner_id ~original ~candidate with
     | Error failure ->
       Error
         (Payload_operation_failed
            { operation = Payload_prepare; failure })
-    | Ok (journal, _) ->
-      (match save_journal config journal with
-       | Ok () -> Ok (journal_to_bytes journal)
-       | Error error -> Error error)
+    | Ok (journal, prepared) ->
+      (match create_and_verify_payload config journal prepared with
+       | Error _ as error -> error
+       | Ok () ->
+         (match save_journal config journal with
+          | Ok () -> Ok (journal_to_bytes journal)
+          | Error error -> Error error))
   ;;
 
   let current_journal_row ~config ~keeper_name =
@@ -1105,7 +1192,7 @@ module For_testing = struct
       Error
         (Payload_operation_failed
            { operation = Payload_prepare; failure })
-    | Ok (replacement, _) ->
+    | Ok (replacement, prepared) ->
     (match
       read_current_journal
         ~invalid:(fun detail -> Journal_ownership_changed detail)
@@ -1116,12 +1203,15 @@ module For_testing = struct
     | Ok (_, _, None) ->
       Error (Journal_ownership_changed "test replacement source is missing")
     | Ok (parent, snapshot, Some _) ->
-      publish_row
-        ~conflict:(fun detail -> Journal_ownership_changed detail)
-        ~parent
-        ~snapshot
-        ~row:(Active_journal replacement)
-        ())
+      (match create_and_verify_payload config replacement prepared with
+       | Error _ as error -> error
+       | Ok () ->
+         publish_row
+           ~conflict:(fun detail -> Journal_ownership_changed detail)
+           ~parent
+           ~snapshot
+           ~row:(Active_journal replacement)
+           ()))
   ;;
 
   let advance_to_launch_committed ~config ~keeper_name =
@@ -1405,9 +1495,11 @@ let rollback token config journal payload original_entry =
     | Error error ->
       [ Rollback_journal_clear_failed (error_to_string error) ]
     | Ok cleanup ->
+      invoke_after_cleanup_pending_hook `Rollback;
       (match delete_payload config cleanup with
        | Error failure -> [ Rollback_payload_delete_failed failure ]
        | Ok () ->
+         invoke_after_payload_delete_hook `Rollback;
          (match
             clear_journal
               config
@@ -1463,19 +1555,6 @@ let reserve_validated_journal config ~original journal =
     (match validate_registry_snapshot config original with
      | Error conflict -> Error (Registry_conflict conflict)
      | Ok _ -> save_journal config journal)
-;;
-
-let verify_payload config (journal : journal) =
-  Payload.read
-    config
-    ~expected_ref:journal.payload_ref
-    ~expected_authority_leaf:
-      (Payload.immutable_ref_authority_leaf journal.payload_ref)
-    ~transaction_id:journal.transaction_id
-    ~owner_id:journal.owner_id
-    ~keeper_name:journal.keeper_name
-    ~expected_trace_id:journal.expected_trace_id
-    ~expected_generation:journal.expected_generation
 ;;
 
 let payload_failure operation failure =
@@ -1544,7 +1623,8 @@ let forward_cleanup config (journal : journal) =
         ~expected_stage:Launch_committed
         ~cleanup_stage:Forward_cleanup_pending
         journal
-    | Forward_cleanup_pending -> Ok journal
+      |> Result.map (fun cleanup -> cleanup, true)
+    | Forward_cleanup_pending -> Ok (journal, false)
     | _ ->
       Error
         (Journal_ownership_changed
@@ -1552,10 +1632,13 @@ let forward_cleanup config (journal : journal) =
   in
   match cleanup_result with
   | Error _ as error -> error
-  | Ok cleanup ->
+  | Ok (cleanup, cleanup_published) ->
+    if cleanup_published
+    then invoke_after_cleanup_pending_hook `Forward;
     (match delete_payload config cleanup with
      | Error failure -> Error (payload_failure Payload_delete failure)
      | Ok () ->
+       invoke_after_payload_delete_hook `Forward;
        clear_journal
          config
          ~expected_stage:Forward_cleanup_pending
@@ -2033,8 +2116,9 @@ let finish_rollback_cleanup config journal =
   | Error failure ->
     Error
       (rollback_error_to_string
-         (Rollback_payload_delete_failed failure))
+       (Rollback_payload_delete_failed failure))
   | Ok () ->
+    invoke_after_payload_delete_hook `Rollback;
     (match
        clear_journal
          config

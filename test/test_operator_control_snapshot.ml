@@ -1053,6 +1053,143 @@ let with_settled_dead_revival_fixture ~keeper_name fn =
       fn base_dir config original dead_entry ctx)
 ;;
 
+module Revival_payload = Keeper_dead_revival_payload
+
+type active_revival_journal =
+  { raw : string
+  ; transaction_id : string
+  ; payload_ref : Revival_payload.immutable_ref
+  }
+
+let require_revival_payload_ok label = function
+  | Ok value -> value
+  | Error error ->
+    Alcotest.failf
+      "%s: %s"
+      label
+      (Revival_payload.error_to_string error)
+;;
+
+let active_revival_journal_of_raw raw =
+  let open Yojson.Safe.Util in
+  let json =
+    try Yojson.Safe.from_string raw with
+    | Yojson.Json_error detail ->
+      Alcotest.failf "active revival journal is malformed: %s" detail
+  in
+  let transaction_id = json |> member "transaction_id" |> to_string in
+  let payload_ref =
+    json
+    |> member "payload_ref"
+    |> Revival_payload.immutable_ref_of_json
+    |> require_revival_payload_ok "decode active revival payload ref"
+  in
+  { raw; transaction_id; payload_ref }
+;;
+
+let current_active_revival_journal ~config ~keeper_name =
+  match
+    Keeper_dead_revival_transaction.For_testing.current_journal_row
+      ~config
+      ~keeper_name
+  with
+  | Ok (Some raw) -> active_revival_journal_of_raw raw
+  | Ok None -> Alcotest.fail "active revival journal is missing"
+  | Error error ->
+    Alcotest.fail
+      (Keeper_dead_revival_transaction.error_to_string error)
+;;
+
+let revival_payload_path config payload_ref =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Workspace.masc_root_dir config)
+          "keeper-lifecycle-transactions")
+       "payloads")
+    (Filename.concat
+       (Revival_payload.immutable_ref_authority_leaf payload_ref)
+       (Revival_payload.immutable_ref_transaction_leaf payload_ref))
+;;
+
+let current_revival_journal_path config =
+  let root =
+    Filename.concat
+      (Workspace.masc_root_dir config)
+      "keeper-lifecycle-transactions"
+  in
+  let rows =
+    Sys.readdir root
+    |> Array.to_list
+    |> List.filter (fun leaf ->
+      String.starts_with ~prefix:"revival-" leaf
+      && Filename.check_suffix leaf ".json")
+  in
+  match rows with
+  | [ leaf ] -> Filename.concat root leaf
+  | _ ->
+    Alcotest.failf
+      "expected exactly one active revival journal, observed=%d"
+      (List.length rows)
+;;
+
+let write_revival_fixture path contents =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel contents)
+;;
+
+let replace_revival_payload_ref raw payload_ref =
+  match Yojson.Safe.from_string raw with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "payload_ref"
+            then key, Revival_payload.immutable_ref_to_json payload_ref
+            else key, value)
+         fields)
+    |> Yojson.Safe.to_string
+  | _ -> Alcotest.fail "active revival journal is not an object"
+;;
+
+let create_unjournaled_revival_payload
+      ~config
+      ~owner_id
+      ~original
+      ~candidate
+  =
+  let row =
+    Keeper_dead_revival_transaction.For_testing.reserved_journal_row
+      ~owner_id
+      ~original
+      ~candidate
+  in
+  let observed = active_revival_journal_of_raw row in
+  let payload =
+    Revival_payload.make_payload
+      ~transaction_id:observed.transaction_id
+      ~owner_id
+      ~keeper_name:original.name
+      ~expected_trace_id:original.runtime.trace_id
+      ~expected_generation:original.runtime.nonce
+      ~original
+      ~candidate
+    |> require_revival_payload_ok "make unjournaled revival payload"
+  in
+  let prepared =
+    Revival_payload.prepare payload
+    |> require_revival_payload_ok "prepare unjournaled revival payload"
+  in
+  (match Revival_payload.create config prepared with
+   | Ok (Revival_payload.Created _ | Revival_payload.Reconciled_created _) -> ()
+   | Error error ->
+     Alcotest.fail
+       (Revival_payload.error_to_string error));
+  observed
+;;
+
 let test_dead_revival_final_clear_failure_preserves_commit () =
   let keeper_name = "dead-revival-final-clear" in
   with_settled_dead_revival_fixture ~keeper_name
@@ -1164,17 +1301,33 @@ let test_dead_revival_final_clear_failure_preserves_commit () =
      in
      Alcotest.(check (list string))
        "active launch journal retains recovery payload"
-       [ "candidate"
-       ; "expected_generation"
+       [ "expected_generation"
        ; "expected_trace_id"
        ; "keeper_name"
-       ; "original"
        ; "owner_id"
+       ; "payload_ref"
        ; "schema"
        ; "stage"
        ; "transaction_id"
        ]
-       fields
+       fields;
+     let payload_ref_fields =
+       match
+         Yojson.Safe.from_string raw
+         |> Yojson.Safe.Util.member "payload_ref"
+       with
+       | `Assoc fields -> List.map fst fields |> List.sort String.compare
+       | _ -> Alcotest.fail "active launch payload_ref is not an object"
+     in
+     Alcotest.(check (list string))
+       "active launch journal retains only opaque payload metadata"
+       [ "authority_leaf"
+       ; "byte_count"
+       ; "schema"
+       ; "sha256"
+       ; "transaction_leaf"
+       ]
+       payload_ref_fields
    | Ok None -> Alcotest.fail "active launch journal disappeared"
    | Error error ->
      Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
@@ -1534,6 +1687,288 @@ let test_dead_revival_recovery_forwards_concurrent_launch_commit () =
     "forward recovery preserves candidate generation"
     candidate.runtime.nonce
     persisted.runtime.nonce
+;;
+
+let test_dead_revival_ambiguous_reserved_cancellation_retains_payload () =
+  let keeper_name = "dead-revival-ambiguous-reserved-cancel" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun base_dir config original _dead_entry ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  let cancel () =
+    raise
+      (Eio.Cancel.Cancelled
+         (Failure "injected ambiguous Reserved publication cancellation"))
+  in
+  let cancelled =
+    try
+      ignore
+        (Keeper_dead_revival_transaction.For_testing.with_reserved_publication_failure
+           (fun () ->
+              Keeper_dead_revival_transaction.For_testing.with_boundary_hooks
+                ~after_journal_write:cancel
+                (fun () ->
+                   Keeper_dead_revival_transaction.revive
+                     ctx
+                     ~original
+                     ~candidate)));
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool)
+    "ambiguous Reserved cancellation propagates"
+    true
+    cancelled;
+  Alcotest.(check bool)
+    "ambiguous Reserved cancellation releases lifecycle reservation"
+    true
+    (Option.is_none
+       (Keeper_lifecycle_reservation.current
+          ~base_path:base_dir
+          ~keeper_name));
+  let active =
+    current_active_revival_journal ~config ~keeper_name
+  in
+  let payload_path = revival_payload_path config active.payload_ref in
+  Alcotest.(check bool)
+    "ambiguous Reserved cancellation retains payload evidence"
+    true
+    (Sys.file_exists payload_path);
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Reserved -> ()
+   | Ok _ -> Alcotest.fail "ambiguous Reserved journal changed stage"
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  let recovery =
+    Keeper_dead_revival_transaction.recover_pending config
+  in
+  Alcotest.(check int)
+    "ambiguous Reserved recovery is a rollback clear"
+    0
+    recovery.recovered;
+  Alcotest.(check int)
+    "ambiguous Reserved recovery clears one transaction"
+    1
+    recovery.cleared;
+  Alcotest.(check int)
+    "ambiguous Reserved recovery fully settles"
+    0
+    (List.length recovery.unresolved);
+  Alcotest.(check bool)
+    "ambiguous Reserved recovery removes payload"
+    false
+    (Sys.file_exists payload_path)
+;;
+
+type launch_payload_damage =
+  | Launch_payload_missing
+  | Launch_payload_corrupt
+
+let test_dead_revival_launch_payload_damage_forward_cleans damage () =
+  let keeper_name =
+    match damage with
+    | Launch_payload_missing -> "dead-revival-launch-payload-missing"
+    | Launch_payload_corrupt -> "dead-revival-launch-payload-corrupt"
+  in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry _ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    ; runtime =
+        { original.runtime with
+          nonce = original.runtime.nonce + 1
+        ; last_blocker = None
+        }
+    }
+  in
+  (match
+     Keeper_dead_revival_transaction.For_testing.reserve_journal
+       ~config
+       ~owner_id:"launch-payload-damage-owner"
+       ~original
+       ~candidate
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  (match Keeper_meta_store.write_meta config candidate with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match
+     Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
+       ~config
+       ~keeper_name
+   with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  let active =
+    current_active_revival_journal ~config ~keeper_name
+  in
+  let payload_path = revival_payload_path config active.payload_ref in
+  (match damage with
+   | Launch_payload_missing -> Sys.remove payload_path
+   | Launch_payload_corrupt ->
+     write_revival_fixture payload_path "{corrupt");
+  let recovery =
+    Keeper_dead_revival_transaction.recover_pending config
+  in
+  Alcotest.(check int)
+    "damaged launch payload never triggers rollback"
+    0
+    recovery.recovered;
+  Alcotest.(check int)
+    "damaged launch payload forward-clears"
+    1
+    recovery.cleared;
+  Alcotest.(check int)
+    "damaged launch payload leaves no unresolved transaction"
+    0
+    (List.length recovery.unresolved);
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "damaged launch recovery removed candidate"
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check int)
+    "damaged launch recovery preserves candidate generation"
+    candidate.runtime.nonce
+    persisted.runtime.nonce;
+  Alcotest.(check bool)
+    "damaged launch recovery removes payload evidence"
+    false
+    (Sys.file_exists payload_path)
+;;
+
+let test_dead_revival_swapped_payload_ref_preserves_evidence () =
+  let keeper_name = "dead-revival-swapped-payload-ref" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry _ctx ->
+  let first_candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    ; runtime =
+        { original.runtime with
+          nonce = original.runtime.nonce + 1
+        }
+    }
+  in
+  (match
+     Keeper_dead_revival_transaction.For_testing.reserve_journal
+       ~config
+       ~owner_id:"swapped-ref-first-owner"
+       ~original
+       ~candidate:first_candidate
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  let first =
+    current_active_revival_journal ~config ~keeper_name
+  in
+  let second_candidate =
+    { first_candidate with
+      runtime =
+        { first_candidate.runtime with
+          nonce = original.runtime.nonce + 2
+        }
+    }
+  in
+  let second =
+    create_unjournaled_revival_payload
+      ~config
+      ~owner_id:"swapped-ref-second-owner"
+      ~original
+      ~candidate:second_candidate
+  in
+  let first_path = revival_payload_path config first.payload_ref in
+  let second_path = revival_payload_path config second.payload_ref in
+  write_revival_fixture
+    (current_revival_journal_path config)
+    (replace_revival_payload_ref first.raw second.payload_ref);
+  let recovery =
+    Keeper_dead_revival_transaction.recover_pending config
+  in
+  Alcotest.(check bool)
+    "swapped ref is unresolved"
+    true
+    (recovery.unresolved <> []);
+  Alcotest.(check int)
+    "swapped ref never reports rollback"
+    0
+    recovery.recovered;
+  Alcotest.(check bool)
+    "swapped ref preserves original payload evidence"
+    true
+    (Sys.file_exists first_path);
+  Alcotest.(check bool)
+    "swapped ref preserves referenced payload evidence"
+    true
+    (Sys.file_exists second_path);
+  Alcotest.(check bool)
+    "swapped ref preserves invalid journal evidence"
+    true
+    (Sys.file_exists (current_revival_journal_path config))
+;;
+
+let test_dead_revival_exact_orphan_payload_is_deleted () =
+  let keeper_name = "dead-revival-exact-orphan" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry _ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    ; runtime =
+        { original.runtime with
+          nonce = original.runtime.nonce + 1
+        }
+    }
+  in
+  let orphan =
+    create_unjournaled_revival_payload
+      ~config
+      ~owner_id:"exact-orphan-owner"
+      ~original
+      ~candidate
+  in
+  let payload_path = revival_payload_path config orphan.payload_ref in
+  Alcotest.(check bool)
+    "exact orphan fixture exists"
+    true
+    (Sys.file_exists payload_path);
+  let recovery =
+    Keeper_dead_revival_transaction.recover_pending config
+  in
+  Alcotest.(check int)
+    "exact orphan cleanup reports one clear"
+    1
+    recovery.cleared;
+  Alcotest.(check int)
+    "exact orphan cleanup has no unresolved evidence"
+    0
+    (List.length recovery.unresolved);
+  Alcotest.(check bool)
+    "exact orphan cleanup removes only payload"
+    false
+    (Sys.file_exists payload_path)
 ;;
 
 let test_update_keeper_surfaces_committed_cleanup_required () =
@@ -2770,6 +3205,28 @@ let () =
             "recovery forward-completes a concurrent launch commit"
             `Quick
             test_dead_revival_recovery_forwards_concurrent_launch_commit;
+          Alcotest.test_case
+            "ambiguous Reserved cancellation retains payload for recovery"
+            `Quick
+            test_dead_revival_ambiguous_reserved_cancellation_retains_payload;
+          Alcotest.test_case
+            "Launch-committed recovery forward-cleans a missing payload"
+            `Quick
+            (test_dead_revival_launch_payload_damage_forward_cleans
+               Launch_payload_missing);
+          Alcotest.test_case
+            "Launch-committed recovery forward-cleans a corrupt payload"
+            `Quick
+            (test_dead_revival_launch_payload_damage_forward_cleans
+               Launch_payload_corrupt);
+          Alcotest.test_case
+            "swapped payload ref preserves shard evidence"
+            `Quick
+            test_dead_revival_swapped_payload_ref_preserves_evidence;
+          Alcotest.test_case
+            "exact no-journal payload orphan is deleted"
+            `Quick
+            test_dead_revival_exact_orphan_payload_is_deleted;
           Alcotest.test_case
             "keeper update preserves committed cleanup-required outcome"
             `Quick

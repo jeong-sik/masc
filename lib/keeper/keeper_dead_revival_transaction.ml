@@ -598,6 +598,7 @@ let publish_row
       ~parent
       ~snapshot
       ~row
+      ()
   =
   let keeper_name = journal_row_keeper_name row in
   match journal_entropy () with
@@ -625,7 +626,7 @@ let publish_row
               }))
 ;;
 
-let same_transaction left right =
+let same_transaction (left : journal) (right : journal) =
   String.equal left.transaction_id right.transaction_id
   && String.equal left.owner_id right.owner_id
   && String.equal left.keeper_name right.keeper_name
@@ -702,6 +703,7 @@ let reserve_journal config journal =
       ~parent
       ~snapshot
       ~row:(Active_journal journal)
+      ()
 ;;
 
 let transition_journal ?compare_and_swap config ~expected_stage journal =
@@ -729,6 +731,7 @@ let transition_journal ?compare_and_swap config ~expected_stage journal =
       ~parent
       ~snapshot
       ~row:(Active_journal journal)
+      ()
 ;;
 
 let save_journal config journal =
@@ -792,6 +795,7 @@ let clear_journal config ~expected_stage journal =
            { transaction_id = current.transaction_id
            ; keeper_name = current.keeper_name
            })
+      ()
 ;;
 
 type recovery_claim =
@@ -854,6 +858,7 @@ let rec claim_recovery_rollback config journal attempts =
            ~parent
            ~snapshot
            ~row:(Active_journal claimed)
+           ()
        with
        | Ok () -> Ok (Recovery_rollback_claimed (claimed, durable_committed))
        | Error (Journal_ownership_changed _) ->
@@ -958,6 +963,7 @@ module For_testing = struct
         ~parent
         ~snapshot
         ~row:(Active_journal replacement)
+        ()
   ;;
 
   let advance_to_launch_committed ~config ~keeper_name =
@@ -978,6 +984,7 @@ module For_testing = struct
         ~parent
         ~snapshot
         ~row:(Active_journal { current with stage = Launch_committed })
+        ()
   ;;
 end
 ;;

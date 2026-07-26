@@ -59,9 +59,51 @@ let sample_record () : Turn_record.t =
       ; thinking_budget = Some 1500
       ; enable_thinking = Some true
       }
-  ; usage = { input_tokens = Some 18000; output_tokens = Some 412 }
+  ; usage =
+      { input_tokens = Some 18000
+      ; output_tokens = Some 412
+      ; cache_creation_input_tokens = Some 2048
+      ; cache_read_input_tokens = Some 15000
+      }
   ; ts = 1781200000.5
   }
+
+(* The cache counts used to be dropped at the writer, so a row with a large
+   input_tokens could not be read as either a cache-heavy turn or a genuinely large
+   prompt. context_window denominates the ctx-fill percentage against the compaction
+   ceiling, so those two situations look identical on a dashboard while calling for
+   different action. A row that omits them still decodes — legacy rows and turns where
+   the provider reported no usage carry None rather than a fabricated zero. *)
+let test_cache_counts_round_trip_and_stay_optional () =
+  let record = sample_record () in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error e -> failf "decode failed: %s" e
+   | Ok decoded ->
+     check (option int) "cache creation survives" (Some 2048)
+       decoded.usage.cache_creation_input_tokens;
+     check (option int) "cache read survives" (Some 15000)
+       decoded.usage.cache_read_input_tokens);
+  (* A row written before these fields existed. *)
+  let legacy =
+    match Turn_record.to_json record with
+    | `Assoc fields ->
+      `Assoc
+        (List.filter
+           (fun (k, _) ->
+             k <> "cache_creation_input_tokens" && k <> "cache_read_input_tokens")
+           fields)
+    | other -> other
+  in
+  match Turn_record.of_json legacy with
+  | Error e -> failf "legacy row without cache fields failed to decode: %s" e
+  | Ok decoded ->
+    check (option int) "absent cache creation decodes as None" None
+      decoded.usage.cache_creation_input_tokens;
+    check (option int) "absent cache read decodes as None" None
+      decoded.usage.cache_read_input_tokens;
+    check (option int) "the rest of the row is unaffected" (Some 18000)
+      decoded.usage.input_tokens
+;;
 
 let test_codec_roundtrip () =
   let record = sample_record () in
@@ -133,7 +175,12 @@ let test_codec_optional_fields_absent () =
         ; thinking_budget = None
         ; enable_thinking = None
         }
-    ; usage = { input_tokens = None; output_tokens = None }
+    ; usage =
+        { input_tokens = None
+        ; output_tokens = None
+        ; cache_creation_input_tokens = None
+        ; cache_read_input_tokens = None
+        }
     ; turn_ref = None
     }
   in
@@ -320,6 +367,8 @@ let () =
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip
+        ; test_case "cache counts round-trip and stay optional" `Quick
+            test_cache_counts_round_trip_and_stay_optional
         ; test_case "optional fields absent" `Quick test_codec_optional_fields_absent
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
         ; test_case "unknown block decodes as Other" `Quick

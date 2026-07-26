@@ -35,14 +35,16 @@ let requested_names ~(config : Workspace.config) args =
      | None -> names)
     |> dedupe_sorted_strings
   in
-  if Stdlib.List.length explicit_names > 0 then explicit_names
+  if Stdlib.List.length explicit_names > 0 then explicit_names, []
   else
     let registry_names =
       Keeper_registry.all ~base_path:config.base_path ()
       |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
     in
-    registry_names @ configured_keeper_names config @ keeper_names config
-    |> dedupe_sorted_strings
+    let discovery = keeper_names config in
+    ( registry_names @ configured_keeper_names config @ discovery.names
+      |> dedupe_sorted_strings
+    , discovery.unavailable )
 
 let status ~(config : Workspace.config) (meta : keeper_meta) =
   let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
@@ -384,7 +386,7 @@ let summary items =
     ]
 
 let handle ~(config : Workspace.config) args : tool_result =
-  let names = requested_names ~config args in
+  let names, unavailable = requested_names ~config args in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
   if Stdlib.List.length invalid_names > 0 then
     tool_result_error_data
@@ -434,6 +436,9 @@ let handle ~(config : Workspace.config) args : tool_result =
         ("summary", summary audited_items);
         ("returned_count", `Int (List.length returned_items));
         ("items", `List returned_items);
+        ( "unavailable"
+        , current_meta_unavailable_collection_to_yojson
+            (Current_meta_observed unavailable) );
       ]
     in
     tool_result_ok_data (ok_assoc base_fields)

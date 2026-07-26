@@ -521,7 +521,10 @@ let external_attention_rows ~base_path ~keeper_name =
           ~keeper_name
           ~waiting_on:"external_attention_store"
           ~next_action:"repair_external_attention_store"
-          (Keeper_meta_store.current_meta_unavailable_to_yojson err)
+          (`Assoc
+             [ "kind", `String "external_attention_store_unavailable"
+             ; "detail", `String err
+             ])
       ]
     , false )
   | Ok pending ->

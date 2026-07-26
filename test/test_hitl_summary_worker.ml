@@ -934,10 +934,11 @@ let test_manual_resolution_race_is_conclusive () =
          "manual resolution is conclusive for owner cleanup"
          true
          (match !finish_outcome with
-          | Some Worker.Conclusive_terminalization -> true
-          | Some Worker.Terminalization_persistence_uncertain
-          | Some Worker.Owner_unregistered_deferred
-          | None -> false);
+           | Some Worker.Conclusive_terminalization -> true
+           | Some Worker.Terminalization_persistence_uncertain
+           | Some Worker.Terminalization_identity_unbound
+           | Some Worker.Owner_unregistered_deferred
+           | None -> false);
        check bool
          "manually resolved source left pending queue"
          true
@@ -1065,12 +1066,13 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
               (Printexc.raw_backtrace_to_string observed_backtrace);
             check bool
               "pre-bind cancellation reports non-conclusive uncertainty"
-              true
-              (match !finish_outcome with
-               | Some Worker.Terminalization_persistence_uncertain -> true
-               | Some Worker.Conclusive_terminalization
-               | Some Worker.Owner_unregistered_deferred
-               | None -> false);
+               true
+               (match !finish_outcome with
+                | Some Worker.Terminalization_identity_unbound -> true
+                | Some Worker.Conclusive_terminalization
+                | Some Worker.Terminalization_persistence_uncertain
+                | Some Worker.Owner_unregistered_deferred
+                | None -> false);
             check int
               "cancelled before-dispatch callback made no request"
               0
@@ -1257,11 +1259,12 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
             check bool
               "failed bound cleanup reports persistence uncertainty"
               true
-              (match !finish_outcome with
-               | Some Worker.Terminalization_persistence_uncertain -> true
-               | Some Worker.Conclusive_terminalization
-               | Some Worker.Owner_unregistered_deferred
-               | None -> false);
+               (match !finish_outcome with
+                | Some Worker.Terminalization_persistence_uncertain -> true
+                | Some Worker.Conclusive_terminalization
+                | Some Worker.Terminalization_identity_unbound
+                | Some Worker.Owner_unregistered_deferred
+                | None -> false);
             check int
               "cancellation before dispatch performs no provider POST"
               0

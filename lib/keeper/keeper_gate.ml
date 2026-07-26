@@ -514,7 +514,6 @@ let rec spawn_claimed_auto_judge_entry_with
   | None ->
     fail_before_worker
       ~reason:"Auto Judge unavailable: server root switch is not installed"
-      ~retryable:true
 
 and spawn_claimed_auto_judge_entry entry =
   spawn_claimed_auto_judge_entry_with

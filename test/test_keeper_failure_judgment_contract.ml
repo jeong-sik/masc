@@ -119,6 +119,36 @@ let test_single_runtime_identity_yields_one_candidate () =
     (Judge.resolve_candidates () |> require_candidates)
 ;;
 
+(* Nothing loaded the config this repository ships, so a seed that no longer parses
+   or a judgment identity that resolves to one id would reach a new install
+   unnoticed. Reading the shipped file rather than a fixture is the point: the
+   fixture above proves the resolver, this proves what operators actually get. *)
+let shipped_runtime_config () =
+  let candidates = [ "config/runtime.toml"; Filename.concat ".." "config/runtime.toml" ] in
+  match List.find_opt Sys.file_exists candidates with
+  | Some path -> path
+  | None -> fail "shipped config/runtime.toml not found"
+;;
+
+let test_shipped_config_gives_the_judgment_boundary_a_successor () =
+  (match Runtime.init_default ~config_path:(shipped_runtime_config ()) with
+   | Ok () -> ()
+   | Error detail -> failf "shipped config/runtime.toml does not load: %s" detail);
+  let candidates = Judge.resolve_candidates () |> require_candidates in
+  (* One candidate is the shape that made a fenced reply terminal. *)
+  check bool "the shipped judgment identity has a successor" true
+    (List.length candidates > 1);
+  check bool "candidates are distinct" true
+    (List.length (List.sort_uniq compare candidates) = List.length candidates);
+  let provider id = match String.index_opt id '.' with
+    | Some i -> String.sub id 0 i
+    | None -> id
+  in
+  (* A second candidate on the same provider would repeat the formatting habit. *)
+  check bool "candidates span more than one provider" true
+    (List.length (List.sort_uniq compare (List.map provider candidates)) > 1)
+;;
+
 let test_resume_with_guidance () =
   let verdict =
     Contract.of_yojson
@@ -359,6 +389,10 @@ let () =
             "single runtime identity yields one candidate"
             `Quick
             test_single_runtime_identity_yields_one_candidate
+        ; test_case
+            "shipped config gives the judgment boundary a successor"
+            `Quick
+            test_shipped_config_gives_the_judgment_boundary_a_successor
         ] )
     ]
 ;;

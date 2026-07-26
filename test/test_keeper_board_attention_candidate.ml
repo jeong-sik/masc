@@ -108,12 +108,9 @@ let keeper_context ?(active_goal_ids = []) () =
     ]
 ;;
 
-(* yojson 3.0.0 raises Json_error "Infinity value not allowed in standard JSON"
-   from [to_string] for any non-finite float, with or without [~std], so the
-   writer can no longer emit such a row. Its parser still ACCEPTS the bare
-   [Infinity] / [NaN] tokens, so a ledger written by an older binary can still
-   hold one and the reader guard is still load-bearing. Render the row textually
-   to reproduce exactly that on-disk shape. *)
+(* The writer correctly refuses non-finite floats, so render the row textually
+   to model out-of-band corruption of an otherwise current-schema ledger and
+   verify that the reader fails closed through its recorded_at finite guard. *)
 let render_row_with_non_finite ~field ~literal json =
   match json with
   | `Assoc fields ->
@@ -302,9 +299,13 @@ let rewrite_first_comment rewrite = function
   | _ -> Alcotest.fail "expected comments array"
 ;;
 
-let expect_record_error ~base_path label candidate =
+let expect_record_error ?expected_detail ~base_path label candidate =
   match A.record ~base_path candidate with
-  | A.Record_error _ -> ()
+  | A.Record_error detail ->
+    Option.iter
+      (fun expected ->
+         Alcotest.(check string) (label ^ " error") expected detail)
+      expected_detail
   | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded")
 ;;
 
@@ -511,7 +512,13 @@ let test_non_finite_lifecycle_times_are_rejected () =
   Out_channel.with_open_bin ledger_path (fun channel ->
     output_string channel (non_finite_row ^ "\n"));
   match A.load_candidates ~base_path ~keeper_name:valid.keeper_name with
-  | Error _ -> ()
+  | Error detail ->
+    let expected = "board attention candidate.recorded_at must be finite" in
+    if not (String.ends_with ~suffix:expected detail)
+    then
+      Alcotest.failf
+        "non-finite durable candidate returned the wrong reader error: %s"
+        detail
   | Ok _ -> Alcotest.fail "load accepted a non-finite durable candidate"
 ;;
 
@@ -572,10 +579,13 @@ let test_non_finite_complete_request_evidence_is_rejected () =
     }
   in
   let locations =
-    [ "signal.updated_at", at_signal
-    ; "post.created_at", at_post
-    ; "comment.created_at", at_comment
-    ; "nested post evidence", at_nested_evidence
+    [ ( "signal.updated_at"
+      , Some
+          "invalid Board attention candidate: candidate.signal contains a non-finite number"
+      , at_signal )
+    ; "post.created_at", None, at_post
+    ; "comment.created_at", None, at_comment
+    ; "nested post evidence", None, at_nested_evidence
     ]
   in
   let non_finite_values =
@@ -585,10 +595,11 @@ let test_non_finite_complete_request_evidence_is_rejected () =
     ]
   in
   List.iter
-    (fun (location, make_candidate) ->
+    (fun (location, expected_detail, make_candidate) ->
        List.iter
          (fun (number, value) ->
             expect_record_error
+              ?expected_detail
               ~base_path
               (number ^ " at " ^ location)
               (make_candidate value))

@@ -105,35 +105,6 @@ let unresolved_runtime_suffix ~(dropped_bindings : (string * string) list)
     fail-fast: [\[runtime\] default] 가 없거나 그 id 가 목록에 없으면 [Error].
     silent fallback 일절 없음 (runtime→Runtime 비전: TOML 에 default 없으면
     프로그램 실행 불가). *)
-(* RFC keeper→runtime assignment validation: every [[runtime.assignments]]
-   target must resolve to a configured runtime. An unknown id is an operator
-   error rejected at load (mirrors [runtime].default validation), NOT a silent
-   fallback to the default — that would mask a typo'd assignment
-   (Unknown→Permissive anti-pattern). A keeper *absent* from the table is the
-   intended designed fallback to the default and is handled at lookup time, not
-   here. *)
-let validate_keeper_assignments ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
-    (assignments : (string * string) list) : (unit, string) result =
-  let runtime_exists id =
-    List.exists (fun (r : t) -> String.equal r.id id) runtimes
-  in
-  match
-    List.find_opt (fun (_, runtime_id) -> not (runtime_exists runtime_id)) assignments
-  with
-  | None -> Ok ()
-  | Some (keeper_name, runtime_id) ->
-    Error
-      (Printf.sprintf
-         "%s: [runtime.assignments].%s = %S%s"
-         config_path
-         keeper_name
-         runtime_id
-         (unresolved_runtime_suffix ~dropped_bindings
-            ~runtime_count:(List.length runtimes) runtime_id))
-;;
-
-
 (* Route ids resolve with lane precedence ([resolve_assignment] prefers a lane
    over a same-named runtime), so route validation must judge the same target
    the consumer will actually get: lane first, runtime second. *)
@@ -141,181 +112,129 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
   List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
 ;;
 
-(* Every lane candidate must satisfy the route's capability contract: the
-   turn-driver lane walk attempts candidates without re-filtering by
-   capability, so one incapable candidate would silently downgrade the
-   contract mid-failover. [validate_lanes] already guarantees candidate ids
-   resolve; the [None] arm stays total for the error message anyway. *)
-let validate_lane_candidates_capability
-    ~(config_path : string)
-    ~(route_name : string)
-    ~(capability_key : string)
-    ~(runtime_supports : t -> bool)
-    (runtimes : t list)
-    (lane : Runtime_lane.t) : (unit, string) result =
-  let lane_id = Runtime_lane.id lane in
-  let rec check = function
-    | [] -> Ok ()
-    | candidate_id :: rest ->
-      (match
-         List.find_opt (fun (r : t) -> String.equal r.id candidate_id) runtimes
-       with
-       | None ->
-         Error
-           (Printf.sprintf
-              "%s: [runtime].%s = %S lane candidate %S is not a configured \
-               runtime"
-              config_path
-              route_name
-              lane_id
-              candidate_id)
-       | Some runtime ->
-         if runtime_supports runtime
-         then check rest
-         else
-           Error
-             (Printf.sprintf
-                "%s: [runtime].%s = %S lane candidate %S uses model %S, which \
-                 does not declare %s"
-                config_path
-                route_name
-                lane_id
-                candidate_id
-                runtime.model.id
-                capability_key))
-  in
-  check (Runtime_lane.ordered_candidates lane)
-;;
+(* One admission path for every [runtime] field that names a routing target.
+   Three validators — keeper assignments, the per-route ids, and the
+   media_failover list — answered one question, "does this id resolve to
+   something a consumer can route to", and had drifted into three resolution
+   domains and three error shapes for it. The turn driver reaches all three
+   through the same lane-aware dispatch, so a single parse is what the
+   runtime-indifference spec asks for; three parses is how they diverge.
 
-(* One admission path for the routes that name a runtime. Each route resolves an
-   id with lane precedence ([resolve_assignment] prefers a lane over a same-named
-   runtime), and some routes additionally require the resolved target to declare a
-   capability. The requirement is a closed variant rather than an optional
-   argument, so a route that needs no capability states that instead of relying on
-   a caller to omit a parameter that silently changes the outcome.
+   The domain travels with the reference rather than with the call, because it is
+   a property of the field's consumer, not of the validation phase:
 
-   Merging the three per-route validators removed an asymmetry with no stated
-   reason: [runtime].memory_os_consolidation was validated before lanes were
-   materialised, so it alone could not name a lane while cross_verifier and
-   structured_judge could.
+   - [Runtime_only] for keeper assignments and media_failover entries.
+     runtime.mli documents the assignment snapshot as ids that resolve to a
+     configured runtime, and Keeper_vision_tool looks media_failover entries up
+     among runtimes (keeper_vision_tool.ml:82-89). Admitting a lane id at either
+     site would load a config its consumer cannot route.
+   - [Lane_then_runtime] for the route ids, mirroring [resolve_assignment]
+     (:1341-1348): a lane shadows a same-named runtime, so validation must judge
+     the target the consumer will actually get.
 
-   [None] stays the designed "inherit [runtime].default" case for every route, and
-   an unknown id remains an operator typo rejected at load rather than a silent
-   fallback (Unknown -> Permissive anti-pattern). *)
-type route_requirement =
-  | Resolves_only
-  | Declares_capability of
-      { key : string
-      ; supported_by : t -> bool
-      }
+   [None] stays the designed "inherit [runtime].default" case for a route, [[]]
+   the designed "derive capable runtimes from declared capabilities" case for
+   media_failover, and a keeper absent from the assignment table still falls back
+   at lookup time. An unknown id remains an operator typo rejected at load rather
+   than a silent fallback (Unknown -> Permissive anti-pattern).
 
-(* Capability accessors preserve the existing [None -> false] reading: a model
-   with no declared capabilities does not satisfy the requirement. That denial on
-   unknown is carried over unchanged, not introduced here; whether an unknown
-   capability should order a candidate later rather than exclude it up front is
-   the separate question tracked against the format axis. *)
-(* Neither [runtime].cross_verifier nor [runtime].structured_judge requests a wire
-   response format, so neither can require one.
+   Removed with the merge: [Declares_capability] and its lane-candidate helper.
+   #25719 dropped the last capability requirement after finding neither consumer
+   requests a wire response format, leaving a variant with match arms and no
+   construction site — dead weight that reads as an available option. The tool
+   channel it could not express is refused by OAS at dispatch through
+   candidate_rejection_disposition (oas/lib/llm_provider/exact_output.mli:126-132),
+   which is pre-dispatch and therefore failover-eligible: ordering rather than
+   exclusion, which is what the spec asks for. *)
+type reference_domain =
+  | Runtime_only
+  | Lane_then_runtime
 
-   cross_verifier delivers its verdict through the report_review_verdict TOOL CALL
-   (lib/task/anti_rationalization.ml:243-248, with
-   Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config =
-   without_response_format at keeper_structured_output_schema.ml:306).
-   structured_judge applies the same without_response_format transform
-   (lib/keeper/keeper_failure_judge.ml:71-72, passed at :114) and parses by text
-   extraction with structured_json_of_response at :88-90; :79-80 calls that boundary
-   tool-free.
+(* A list entry renders as "field entry \"id\"" and a scalar as "field = \"id\"".
+   Keeping both is not cosmetic: [runtime].media_failover = "x" would tell the
+   operator a list field equals one id. The variance is in rendering the site,
+   never in deciding it. *)
+type reference_shape =
+  | Scalar
+  | List_entry
 
-   cross_verifier does need tool calling, and this catalog cannot say that.
-   Runtime_schema.model_capabilities declares supports_tool_choice,
-   supports_required_tool_choice, supports_named_tool_choice and
-   supports_parallel_tool_calls — the shapes of choosing a tool, not whether the
-   model can call one. Substituting supports_tool_choice would state a requirement
-   the role does not have, which is the same error as the JSON-mode requirement it
-   replaces. A capability that cannot be declared cannot be admitted on, so the
-   requirement is dropped rather than approximated.
+type runtime_reference =
+  { site : string (* the config path as the operator wrote it *)
+  ; shape : reference_shape
+  ; id : string
+  ; domain : reference_domain
+  }
 
-   The axis is not lost. A candidate that cannot serve the tool channel is refused
-   by OAS at dispatch through candidate_rejection_disposition
-   (oas/lib/llm_provider/exact_output.mli:126-132), which is pre-dispatch and
-   therefore failover-eligible — ordering rather than exclusion, which is what the
-   spec asks for. *)
-
-let validate_route_runtime
-    ~(config_path : string)
-    ~(dropped_bindings : (string * string) list)
-    ~(route_name : string)
-    ~(requirement : route_requirement)
-    (runtimes : t list)
-    (lanes : Runtime_lane.t list)
-    (route_id : string option) : (unit, string) result =
-  match route_id with
-  | None -> Ok ()
-  | Some id ->
-    (match find_declared_lane lanes id, requirement with
-     | Some _, Resolves_only ->
-       (* [validate_lanes] already guaranteed every candidate id resolves. *)
-       Ok ()
-     | Some lane, Declares_capability { key; supported_by } ->
-       validate_lane_candidates_capability
-         ~config_path
-         ~route_name
-         ~capability_key:key
-         ~runtime_supports:supported_by
-         runtimes
-         lane
-     | None, _ ->
-       (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
-        | None ->
-          Error
-            (Printf.sprintf
-               "%s: [runtime].%s = %S%s"
-               config_path
-               route_name
-               id
-               (unresolved_runtime_suffix
-                  ~dropped_bindings
-                  ~runtime_count:(List.length runtimes)
-                  id))
-        | Some runtime ->
-          (match requirement with
-           | Resolves_only -> Ok ()
-           | Declares_capability { key; supported_by } ->
-             if supported_by runtime
-             then Ok ()
-             else
-               Error
-                 (Printf.sprintf
-                    "%s: [runtime].%s = %S uses model %S, which does not declare %s"
-                    config_path
-                    route_name
-                    id
-                    runtime.model.id
-                    key))))
-;;
-
-(* [runtime].media_failover (RFC-0265) validates each id in the ordered list: an
-   unknown id is an operator typo rejected at load, not a silent drop
-   (Unknown→Permissive anti-pattern). [[]] is the designed
-   "derive capable runtimes from declared capabilities" case. *)
-let validate_media_failover ~(config_path : string)
+let validate_runtime_references ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)
-    (media_failover : string list) : (unit, string) result =
-  match
-    List.find_opt
-      (fun id ->
-        not (List.exists (fun (r : t) -> String.equal r.id id) runtimes))
-      media_failover
-  with
+    (lanes : Runtime_lane.t list) (references : runtime_reference list)
+  : (unit, string) result
+  =
+  let resolves_as_runtime id =
+    List.exists (fun (r : t) -> String.equal r.id id) runtimes
+  in
+  let resolves (reference : runtime_reference) =
+    match reference.domain with
+    | Runtime_only -> resolves_as_runtime reference.id
+    | Lane_then_runtime ->
+      (* [validate_lanes] already guaranteed every candidate id of a declared
+         lane resolves, so naming the lane is enough. *)
+      Option.is_some (find_declared_lane lanes reference.id)
+      || resolves_as_runtime reference.id
+  in
+  match List.find_opt (fun reference -> not (resolves reference)) references with
   | None -> Ok ()
-  | Some id ->
+  | Some { site; shape; id; domain = _ } ->
+    let named =
+      match shape with
+      | Scalar -> Printf.sprintf "%s = %S" site id
+      | List_entry -> Printf.sprintf "%s entry %S" site id
+    in
     Error
       (Printf.sprintf
-         "%s: [runtime].media_failover entry %S%s"
+         "%s: %s%s"
          config_path
-         id
+         named
          (unresolved_runtime_suffix ~dropped_bindings
             ~runtime_count:(List.length runtimes) id))
+;;
+
+(* Reference constructors keep each site string next to the field it names, so a
+   renamed config key cannot drift away from its diagnostic. *)
+let assignment_references (assignments : (string * string) list) =
+  List.map
+    (fun (keeper_name, runtime_id) ->
+      { site = Printf.sprintf "[runtime.assignments].%s" keeper_name
+      ; shape = Scalar
+      ; id = runtime_id
+      ; domain = Runtime_only
+      })
+    assignments
+;;
+
+let route_references (routes : (string * string option) list) =
+  List.filter_map
+    (fun (route_name, route_id) ->
+      Option.map
+        (fun id ->
+          { site = Printf.sprintf "[runtime].%s" route_name
+          ; shape = Scalar
+          ; id
+          ; domain = Lane_then_runtime
+          })
+        route_id)
+    routes
+;;
+
+let media_failover_references (media_failover : string list) =
+  List.map
+    (fun id ->
+      { site = "[runtime].media_failover"
+      ; shape = List_entry
+      ; id
+      ; domain = Runtime_only
+      })
+    media_failover
 ;;
 
 (* [runtime.lanes.<id>] candidate ids must resolve to configured runtimes.
@@ -952,8 +871,15 @@ let materialize_config
                  ~runtime_count:(List.length runtimes) did))
        | Some rt -> Ok rt)
   in
+  (* Assignments are checked before lanes are materialized, which keeps the order
+     in which a typo'd assignment surfaces ahead of a typo'd lane candidate.
+     [Runtime_only] never consults the lane list, so the empty list here is not a
+     stand-in for lanes that do not exist yet — it states that no lane is
+     admissible at this site, which is the assignment contract runtime.mli
+     documents and Keeper_turn_driver's lane-aware dispatch relies on. *)
   let* () =
-    validate_keeper_assignments ~config_path ~dropped_bindings runtimes assignments
+    validate_runtime_references ~config_path ~dropped_bindings runtimes []
+      (assignment_references assignments)
   in
   (* Lanes are materialized before every route validation so any route id can
      name a lane (#25394); candidate resolution is enforced by [validate_lanes]
@@ -962,39 +888,16 @@ let materialize_config
   let* lanes =
     lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
   in
+  (* One list in the order the errors used to surface: the three routes, then the
+     media_failover entries. *)
   let* () =
-    validate_route_runtime
-      ~config_path
-      ~dropped_bindings
-      ~route_name:"memory_os_consolidation"
-      ~requirement:Resolves_only
-      runtimes
-      lanes
-      cfg.memory_os_consolidation_runtime_id
-  in
-  let* () =
-    validate_route_runtime
-      ~config_path
-      ~dropped_bindings
-      ~route_name:"structured_judge"
-      ~requirement:Resolves_only
-      runtimes
-      lanes
-      cfg.structured_judge_runtime_id
-  in
-  let* () =
-    validate_route_runtime
-      ~config_path
-      ~dropped_bindings
-      ~route_name:"cross_verifier"
-      ~requirement:Resolves_only
-      runtimes
-      lanes
-      cfg.cross_verifier_runtime_id
-  in
-  let* () =
-    validate_media_failover ~config_path ~dropped_bindings runtimes
-      cfg.media_failover
+    validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
+      (route_references
+         [ "memory_os_consolidation", cfg.memory_os_consolidation_runtime_id
+         ; "structured_judge", cfg.structured_judge_runtime_id
+         ; "cross_verifier", cfg.cross_verifier_runtime_id
+         ]
+      @ media_failover_references cfg.media_failover)
   in
   let* () =
     if validate_max_context

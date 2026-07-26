@@ -256,6 +256,18 @@ let journal_leaf keeper_name =
   ^ ".json"
 ;;
 
+let payload_transaction_leaf transaction_id =
+  "transaction-"
+  ^ sha256
+      (String.concat
+         "\000"
+         [ length_delimited
+             "masc.keeper-dead-revival-payload-transaction-leaf.v1"
+         ; length_delimited transaction_id
+         ])
+  ^ ".json"
+;;
+
 let journal_transaction_id
       ~owner_id
       ~keeper_name
@@ -376,6 +388,20 @@ let required_string key fields =
   | None -> Error (Printf.sprintf "journal field %s is missing" key)
 ;;
 
+let required_sha256 key fields =
+  let ( let* ) = Result.bind in
+  let* value = required_string key fields in
+  match Digestif.SHA256.consistent_of_hex_opt value with
+  | Some digest
+    when String.equal value (Digestif.SHA256.to_hex digest) ->
+    Ok value
+  | Some _ | None ->
+    Error
+      (Printf.sprintf
+         "journal field %s must be a lowercase SHA-256"
+         key)
+;;
+
 let required_int key fields =
   match List.assoc_opt key fields with
   | Some (`Int value) -> Ok value
@@ -420,7 +446,7 @@ let journal_of_json = function
       match stage with
       | Cleared ->
         let* () = exact_cleared_journal_fields fields in
-        let* transaction_id = required_string "transaction_id" fields in
+        let* transaction_id = required_sha256 "transaction_id" fields in
         let* keeper_name = required_string "keeper_name" fields in
         Ok (Cleared_tombstone { transaction_id; keeper_name })
       | ( Reserved
@@ -431,7 +457,7 @@ let journal_of_json = function
         | Forward_cleanup_pending
         | Rollback_cleanup_pending ) as stage ->
         let* () = exact_active_journal_fields fields in
-        let* transaction_id = required_string "transaction_id" fields in
+        let* transaction_id = required_sha256 "transaction_id" fields in
         let* owner_id = required_string "owner_id" fields in
         let* keeper_name = required_string "keeper_name" fields in
         let* trace_id_raw = required_string "expected_trace_id" fields in
@@ -448,6 +474,12 @@ let journal_of_json = function
                (Payload.immutable_ref_authority_leaf payload_ref)
                (Payload.authority_shard_leaf shard))
         then Error "journal payload authority differs from its keeper binding"
+        else if
+          not
+            (String.equal
+               (Payload.immutable_ref_transaction_leaf payload_ref)
+               (payload_transaction_leaf transaction_id))
+        then Error "journal payload slot differs from its transaction binding"
         else
           Ok
             (Active_journal
@@ -1302,7 +1334,12 @@ let restore_registry
           [ Rollback_registry_reservation_changed owner ]))
 ;;
 
-let transition_cleanup_pending config ~expected_stage ~cleanup_stage journal =
+let transition_cleanup_pending
+      config
+      ~expected_stage
+      ~cleanup_stage
+      (journal : journal)
+  =
   let cleanup = { journal with stage = cleanup_stage } in
   match transition_journal config ~expected_stage cleanup with
   | Ok () -> Ok cleanup
@@ -1453,16 +1490,57 @@ let payload_failure operation failure =
   Payload_operation_failed { operation; failure }
 ;;
 
-let cleanup_unreserved_payload config journal ~cause =
-  match delete_payload config journal with
-  | Ok () -> cause
-  | Error failure ->
-    Log.Keeper.error
-      "keeper revival unreserved payload cleanup failed keeper=%s cause=%s cleanup=%s"
-      journal.keeper_name
-      (error_to_string cause)
-      (Payload.error_to_string failure);
-    payload_failure Payload_delete failure
+let cleanup_unreserved_payload config (journal : journal) ~cause =
+  let delete_proven_unpublished () =
+    match delete_payload config journal with
+    | Ok () -> cause
+    | Error failure ->
+      Log.Keeper.error
+        "keeper revival unreserved payload cleanup failed keeper=%s cause=%s cleanup=%s"
+        journal.keeper_name
+        (error_to_string cause)
+        (Payload.error_to_string failure);
+      payload_failure Payload_delete failure
+  in
+  Eio.Cancel.protect (fun () ->
+    match
+      read_current_journal
+        ~invalid:(fun detail -> Journal_ownership_changed detail)
+        config
+        journal.keeper_name
+    with
+    | Ok (_, _, None) -> delete_proven_unpublished ()
+    | Ok
+        ( _,
+          _,
+          Some
+            (Cleared_tombstone
+               { transaction_id; keeper_name }) )
+      when String.equal transaction_id journal.transaction_id
+           && String.equal keeper_name journal.keeper_name ->
+      delete_proven_unpublished ()
+    | Ok (_, _, Some (Active_journal current))
+      when same_transaction current journal
+           && current.stage = Reserved ->
+      Log.Keeper.error
+        "keeper revival retains payload for published Reserved recovery keeper=%s transaction=%s"
+        journal.keeper_name
+        journal.transaction_id;
+      cause
+    | Error observation_error ->
+      Log.Keeper.error
+        "keeper revival retains payload after inconclusive HEAD observation keeper=%s transaction=%s observation=%s"
+        journal.keeper_name
+        journal.transaction_id
+        (error_to_string observation_error);
+      observation_error
+    | Ok _ ->
+      Log.Keeper.error
+        "keeper revival retains payload after conflicting HEAD observation keeper=%s transaction=%s"
+        journal.keeper_name
+        journal.transaction_id;
+      Journal_ownership_changed
+        "pre-Reserved payload cleanup was blocked by conflicting journal authority")
 ;;
 
 let forward_cleanup config (journal : journal) =
@@ -1516,13 +1594,13 @@ let revive_locked (ctx : _ context) ~original ~candidate =
          | Some journal ->
            (match !journal_published, !verified_payload_for_cleanup with
             | false, _ ->
-              (match delete_payload ctx.config journal with
-               | Ok () -> ()
-               | Error failure ->
-                 Log.Keeper.error
-                   "keeper lifecycle pre-reservation cancellation payload cleanup failed keeper=%s error=%s"
-                   original.name
-                   (Payload.error_to_string failure))
+              ignore
+                (cleanup_unreserved_payload
+                   ctx.config
+                   journal
+                   ~cause:
+                     (Journal_write_failed
+                        "cancelled before Reserved publication was confirmed"))
             | true, Some payload ->
               let errors = rollback token ctx.config journal payload None in
               if errors <> []
@@ -1619,6 +1697,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                  journal_published := true;
                  Ok (journal, payload)
                | Error error ->
+                 Eio.Cancel.protect (fun () ->
                  (match
                     read_current_journal
                       ~invalid:(fun detail ->
@@ -1630,23 +1709,11 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                       (_, _, Some (Active_journal current))
                     when same_transaction current journal
                          && current.stage = Reserved ->
-                    journal_published := true;
-                    let errors =
-                      rollback
-                        token
-                        ctx.config
-                        journal
-                        payload
-                        None
-                    in
-                    if errors = []
-                    then Error error
-                    else
-                      Error
-                        (Rollback_failed
-                           { cause = error_to_string error
-                           ; errors
-                           })
+                    Log.Keeper.error
+                      "keeper revival retains payload after ambiguous Reserved publication keeper=%s transaction=%s"
+                      journal.keeper_name
+                      journal.transaction_id;
+                    Error error
                   | Ok (_, _, None)
                   | Ok (_, _, Some (Cleared_tombstone _)) ->
                     Error
@@ -1658,7 +1725,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                   | Ok (_, _, Some (Active_journal _)) ->
                     Error
                       (Journal_ownership_changed
-                         "reservation publication settled to an unexpected active transaction")))))
+                         "reservation publication settled to an unexpected active transaction"))))))
     in
     (match journal_result with
      | Error error ->
@@ -2009,19 +2076,18 @@ let recover_one_locked config leaf =
            ^ error_to_string error)
     in
     (match journal.stage with
+     | Launch_committed -> recover_forward journal
      | Forward_cleanup_pending -> recover_forward journal
      | Rollback_cleanup_pending ->
        finish_rollback_cleanup config journal
      | Reserved
      | Durable_committed
-     | Launch_committed
      | Rollback_reserved
      | Rollback_durable_committed ->
        (match verify_payload config journal with
         | Error failure -> Error (recovery_payload_error failure)
         | Ok verified_payload ->
           (match journal.stage with
-           | Launch_committed -> recover_forward journal
            | Reserved
            | Durable_committed
            | Rollback_reserved
@@ -2133,6 +2199,11 @@ let recover_one config leaf =
            | Error detail -> Error (detail ^ "; " ^ release_detail))))
 ;;
 
+type protected_payload_slot =
+  { transaction_id : string
+  ; transaction_leaf : string
+  }
+
 let active_transactions_in_shard_locked config shard =
   let dir = journal_dir config in
   match Safe_ops.list_dir_safe dir with
@@ -2161,7 +2232,23 @@ let active_transactions_in_shard_locked config shard =
                String.equal
                  (Payload.immutable_ref_authority_leaf journal.payload_ref)
                  (Payload.authority_shard_leaf shard)
-             then Ok (journal.transaction_id :: transactions)
+             then
+               let transaction_leaf =
+                 Payload.immutable_ref_transaction_leaf journal.payload_ref
+               in
+               if
+                 String.equal
+                   transaction_leaf
+                   (payload_transaction_leaf journal.transaction_id)
+               then
+                 Ok
+                   ({ transaction_id = journal.transaction_id
+                    ; transaction_leaf
+                    }
+                    :: transactions)
+               else
+                 Error
+                   "active journal payload slot differs from transaction binding"
              else Ok transactions)
       (Ok [])
       files
@@ -2187,26 +2274,20 @@ let clean_orphan_shard config shard =
             let* referenced =
               active_transactions_in_shard_locked config shard
             in
-            List.fold_left
-              (fun result entry ->
-                 let* cleared = result in
-                 if
-                   List.exists
-                     (fun transaction_id ->
-                        Payload.inventory_transaction_matches
-                          entry
-                          ~transaction_id)
-                     referenced
-                 then Ok cleared
-                 else
+            if referenced <> []
+            then Ok 0
+            else
+              List.fold_left
+                (fun result entry ->
+                   let* cleared = result in
                    Payload.delete_inventory_transaction
                      config
                      ~authority_shard:shard
                      entry
                    |> Result.map (fun () -> cleared + 1)
                    |> Result.map_error Payload.error_to_string)
-              (Ok 0)
-              inventory)
+                (Ok 0)
+                inventory)
      with
      | File_lock_eio.Lock_not_acquired failure ->
        Error (File_lock_eio.durable_lock_error_to_string failure)

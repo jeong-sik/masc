@@ -1819,6 +1819,92 @@ let test_runtime_assignment_rejects_commented_disabled_binding () =
       check bool "error mentions disabled runtime id" true
         (String_util.contains_substring msg "local.disabled"))
 
+(* One validator now decides every [runtime] field that names a routing target
+   (keeper assignments, the route ids, media_failover entries), so the properties
+   that were spread across three functions are asserted together.
+
+   Two things can break in a merge like this and neither shows up as a type error.
+   The diagnostics can collapse into one generic message, leaving the operator
+   without the field that is wrong; and the two resolution domains can collapse
+   into one, which would pass any "does the id resolve" test while admitting a
+   lane id at a site whose consumer looks only among runtimes — a config that
+   loads and then cannot route. *)
+let routing_reference_base =
+  "[providers.local]\n\
+   protocol = \"openai-compatible-http\"\n\
+   endpoint = \"http://127.0.0.1:1/v1\"\n\
+   \n\
+   [models.good]\n\
+   api-name = \"chat\"\n\
+   max-context = 1024\n\
+   \n\
+   [local.good]\n\
+   \n\
+   [runtime]\n\
+   default = \"local.good\"\n"
+
+let load_error_of_runtime_toml ~what content =
+  with_temp_runtime_toml content (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> failf "%s should be rejected at load" what
+    | Error msg -> msg)
+
+let test_every_routing_field_names_itself_in_its_diagnostic () =
+  let assignment =
+    load_error_of_runtime_toml
+      ~what:"an assignment to an unknown runtime"
+      (routing_reference_base ^ "\n[runtime.assignments]\nkeeper_a = \"local.typo\"\n")
+  in
+  check bool "assignment diagnostic names the keeper's table entry" true
+    (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"local.typo\"");
+  let route =
+    load_error_of_runtime_toml
+      ~what:"a route naming an unknown runtime"
+      (routing_reference_base ^ "structured_judge = \"local.typo\"\n")
+  in
+  check bool "route diagnostic names the route field" true
+    (String_util.contains_substring route "[runtime].structured_judge = \"local.typo\"");
+  let media =
+    load_error_of_runtime_toml
+      ~what:"a media_failover entry naming an unknown runtime"
+      (routing_reference_base ^ "media_failover = [\"local.typo\"]\n")
+  in
+  (* A list field renders as an entry rather than an equality: [runtime]
+     .media_failover = "local.typo" would tell the operator the list equals one id. *)
+  check bool "media_failover diagnostic names an entry, not an equality" true
+    (String_util.contains_substring media "[runtime].media_failover entry \"local.typo\"")
+
+let test_routing_reference_domains_stay_distinct () =
+  let lane = "\n[runtime.lanes.safe]\nstrategy = \"ordered\"\ncandidates = [\"local.good\"]\n" in
+  (* A route resolves lane-first, mirroring [resolve_assignment], so naming a lane
+     is valid config. *)
+  with_temp_runtime_toml
+    (routing_reference_base ^ "structured_judge = \"safe\"\n" ^ lane)
+    (fun path ->
+      match Runtime.load_list ~config_path:path with
+      | Error msg -> failf "a route may name a lane: %s" msg
+      | Ok (_, _, _, _, structured_judge, _, _, _) ->
+        check (option string) "route keeps the lane id" (Some "safe") structured_judge);
+  (* An assignment resolves among runtimes only. runtime.mli documents the
+     assignment snapshot as ids that resolve to a configured runtime, so admitting
+     a lane here would load a config the assignment consumer cannot look up. *)
+  let assignment =
+    load_error_of_runtime_toml
+      ~what:"an assignment naming a lane"
+      (routing_reference_base ^ lane ^ "\n[runtime.assignments]\nkeeper_a = \"safe\"\n")
+  in
+  check bool "assignment refuses a lane id" true
+    (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"safe\"");
+  (* Keeper_vision_tool resolves media_failover entries among runtimes
+     (keeper_vision_tool.ml:82-89), so the same refusal applies. *)
+  let media =
+    load_error_of_runtime_toml
+      ~what:"a media_failover entry naming a lane"
+      (routing_reference_base ^ "media_failover = [\"safe\"]\n" ^ lane)
+  in
+  check bool "media_failover refuses a lane id" true
+    (String_util.contains_substring media "[runtime].media_failover entry \"safe\"")
+
 let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
   let catalog =
     "[[models]]\n\
@@ -2410,9 +2496,11 @@ let test_structured_judge_runtime_routing () =
            "structured_judge"))
 
 (* #25394 slice 1: [runtime].structured_judge / .cross_verifier accept a
-   [runtime.lanes] id. The capability contract extends to every candidate
-   (the turn-driver lane walk does not re-filter by capability), and
-   validation follows [resolve_assignment]'s lane-over-runtime precedence. *)
+   [runtime.lanes] id, following [resolve_assignment]'s lane-over-runtime
+   precedence. There is no longer a per-candidate capability contract: #25719
+   dropped the wire-format requirement after finding neither consumer requests
+   one, and the lane-candidate capability check that enforced it was removed with
+   the per-route validators it belonged to. *)
 let judge_lane_base =
   "[providers.local]\n\
    display-name = \"Local\"\n\
@@ -3125,6 +3213,12 @@ let () =
           test_case
             "runtime assignment rejects commented disabled binding"
             `Quick test_runtime_assignment_rejects_commented_disabled_binding;
+          test_case
+            "every routing field names itself in its diagnostic"
+            `Quick test_every_routing_field_names_itself_in_its_diagnostic;
+          test_case
+            "routing reference domains stay distinct"
+            `Quick test_routing_reference_domains_stay_distinct;
           test_case
             "strict init rejects assigned runtime absent from OAS catalog"
             `Quick test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog;

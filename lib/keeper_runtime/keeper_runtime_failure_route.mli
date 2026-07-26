@@ -76,8 +76,7 @@ type judgment_class =
 
 (** Typed origin of a judgment request. The route class says what kind of
     decision is needed; this provenance says which execution boundary produced
-    it. [Legacy_unattributed] is a decode-only state for persisted
-    pre-provenance stimuli and is never emitted by current producers. *)
+    it. *)
 type judgment_provenance =
   | Oas_api_error
   | Oas_provider_error
@@ -90,7 +89,6 @@ type judgment_provenance =
   | Oas_internal_error
   | Masc_internal_error
   | Completion_contract
-  | Legacy_unattributed
 
 type error_boundary =
   | Masc_execution

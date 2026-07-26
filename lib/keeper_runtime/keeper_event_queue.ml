@@ -636,40 +636,26 @@ let payload_of_yojson json =
   | "fusion_completed" ->
     let* run_id = string_field ~context "run_id" fields in
     let* terminal =
-      match optional_field "terminal" fields with
-      | Some terminal_json ->
-        let* terminal_fields =
-          assoc_fields ~context:"stimulus.payload.terminal" terminal_json
+      let* terminal_json = required_field ~context "terminal" fields in
+      let* terminal_fields =
+        assoc_fields ~context:"stimulus.payload.terminal" terminal_json
+      in
+      let* terminal_kind =
+        string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
+      in
+      match terminal_kind with
+      | "succeeded" ->
+        let* answer =
+          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
         in
-        let* terminal_kind =
-          string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
+        Ok (Fusion_succeeded answer)
+      | "failed" ->
+        let* detail =
+          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
         in
-        (match terminal_kind with
-         | "succeeded" ->
-           let* answer =
-             string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
-           in
-           Ok (Fusion_succeeded answer)
-         | "failed" ->
-           let* detail =
-             string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
-           in
-           Ok (Fusion_failed detail)
-         | "cancelled" -> Ok Fusion_cancelled
-         | value -> Error (Printf.sprintf "unknown fusion terminal kind: %s" value))
-      | None ->
-        (* Compatibility read for rows persisted before the typed terminal:
-           the old shape carried [ok]+[resolved_answer], and cancellation did
-           not exist, so the two legacy fields determine the terminal exactly.
-           The writer emits only the typed shape. removal target: the next
-           event-queue state generation bump, when pre-terminal rows can no
-           longer exist in a live store. *)
-        let* ok = bool_field ~context "ok" fields in
-        let* resolved_answer = string_field ~context "resolved_answer" fields in
-        Ok
-          (if ok
-           then Fusion_succeeded resolved_answer
-           else Fusion_failed resolved_answer)
+        Ok (Fusion_failed detail)
+      | "cancelled" -> Ok Fusion_cancelled
+      | value -> Error (Printf.sprintf "unknown fusion terminal kind: %s" value)
     in
     let* board_post_id = string_field ~context "board_post_id" fields in
     let* channel = continuation_channel_field fields in
@@ -722,13 +708,8 @@ let payload_of_yojson json =
         Error (Printf.sprintf "unknown failure_judgment class: %s" judgment_label)
     in
     let* provenance =
-      match List.assoc_opt "provenance" fields with
-      | Some json -> Keeper_runtime_failure_route.judgment_provenance_of_yojson json
-      | None ->
-        (* Explicit migration state for pre-provenance durable envelopes. New
-           producers never emit it, but old queues remain replayable without
-           inventing an execution boundary. *)
-        Ok Keeper_runtime_failure_route.Legacy_unattributed
+      let* json = required_field ~context "provenance" fields in
+      Keeper_runtime_failure_route.judgment_provenance_of_yojson json
     in
     let* detail = string_field ~context "detail" fields in
     Ok

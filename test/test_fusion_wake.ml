@@ -330,18 +330,12 @@ let test_fusion_cancellation_is_typed_and_actionable () =
        ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
 ;;
 
-(* Rows persisted before the typed terminal carry { ok; resolved_answer }.
-   The compatibility read must derive the exact terminal from them; on main
-   before this branch these rows decoded, and a terminal-only decoder would
-   reject every pre-deploy row in a live store. *)
-let test_fusion_legacy_rows_decode_to_typed_terminal () =
-  let legacy ~ok =
-    let json =
-      fusion_stimulus ~run_id:"fus-legacy"
-        ~terminal:(Keeper_event_queue.Fusion_succeeded "unused") ()
-      |> Keeper_event_queue.stimulus_to_yojson
-    in
-    match json with
+let test_fusion_missing_terminal_is_rejected () =
+  let missing_terminal =
+    fusion_stimulus ~run_id:"fus-missing-terminal"
+      ~terminal:(Keeper_event_queue.Fusion_succeeded "unused") ()
+    |> Keeper_event_queue.stimulus_to_yojson
+    |> function
     | `Assoc fields ->
       `Assoc
         (List.map
@@ -355,32 +349,14 @@ let test_fusion_legacy_rows_decode_to_typed_terminal () =
                   , `Assoc
                       (List.filter
                          (fun (name, _) -> not (String.equal name "terminal"))
-                         payload_fields
-                       @ [ "ok", `Bool ok
-                         ; "resolved_answer", `String "legacy answer"
-                         ]) )
+                         payload_fields) )
                 | _ -> fail "stimulus payload must be an object"))
            fields)
     | _ -> fail "stimulus json must be an object"
   in
-  (match Keeper_event_queue.stimulus_of_yojson (legacy ~ok:true) with
-   | Ok
-       { payload =
-           Keeper_event_queue.Fusion_completed
-             { terminal = Keeper_event_queue.Fusion_succeeded answer; _ }
-       ; _
-       } -> check string "legacy ok row keeps its answer" "legacy answer" answer
-   | Ok _ -> fail "legacy ok row lost its typed terminal"
-   | Error detail -> fail ("legacy ok row failed to decode: " ^ detail));
-  match Keeper_event_queue.stimulus_of_yojson (legacy ~ok:false) with
-  | Ok
-      { payload =
-          Keeper_event_queue.Fusion_completed
-            { terminal = Keeper_event_queue.Fusion_failed detail; _ }
-      ; _
-      } -> check string "legacy failed row keeps its detail" "legacy answer" detail
-  | Ok _ -> fail "legacy failed row lost its typed terminal"
-  | Error detail -> fail ("legacy failed row failed to decode: " ^ detail)
+  match Keeper_event_queue.stimulus_of_yojson missing_terminal with
+  | Error _ -> ()
+  | Ok _ -> fail "fusion completion without terminal decoded"
 ;;
 
 (* RFC-0290: a completed background job follows the same non-empty delivery
@@ -1082,9 +1058,9 @@ let () =
             `Quick
             test_fusion_cancellation_is_typed_and_actionable
         ; test_case
-            "legacy ok/resolved_answer rows decode to the typed terminal"
+            "fusion completion without terminal is rejected"
             `Quick
-            test_fusion_legacy_rows_decode_to_typed_terminal
+            test_fusion_missing_terminal_is_rejected
         ; test_case
             "missing board_post_id falls back to fusion-run id"
             `Quick

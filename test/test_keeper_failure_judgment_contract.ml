@@ -119,10 +119,13 @@ let test_single_runtime_identity_yields_one_candidate () =
     (Judge.resolve_candidates () |> require_candidates)
 ;;
 
-(* Nothing loaded the config this repository ships, so a seed that no longer parses
-   or a judgment identity that resolves to one id would reach a new install
-   unnoticed. Reading the shipped file rather than a fixture is the point: the
-   fixture above proves the resolver, this proves what operators actually get. *)
+(* test_runtime_config_validity.ml already loads the shipped seed and pins the
+   configured judgment id as a literal, which is a drift guard on the value. This
+   asserts the property that value has to satisfy: the boundary has a successor at
+   all, and the candidates are not one provider's formatting habit repeated. A pinned
+   string cannot say that — it would still pass if the lane were narrowed to a single
+   candidate on one provider. The fixture above proves the resolver; this proves what
+   an operator actually gets. *)
 let shipped_runtime_config () =
   let candidates = [ "config/runtime.toml"; Filename.concat ".." "config/runtime.toml" ] in
   match List.find_opt Sys.file_exists candidates with

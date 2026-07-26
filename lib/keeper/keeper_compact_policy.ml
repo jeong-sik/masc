@@ -411,16 +411,26 @@ let compact_for_request_typed_with
       ; post_success_terminalizer = None
       }
     in
-    let reject_post_dispatch_domain_output () =
-      reject
-        (terminal_rejection
-           requested.post_success_terminalizer
-           Keeper_event_queue_state.Domain_invalid_output)
+    (* Both outcomes are terminal for this attempt, and both used to report
+       [Domain_invalid_output]. That label is defensible — the contract is that only a
+       strictly reducing plan is prepared, so a plan that does not reduce did not
+       satisfy the domain requirement — but it folds two situations an operator repairs
+       differently into one word:
+
+         after = before   the context could not be reduced further
+         after > before   the summarizer produced a LARGER context than it was given
+
+       The second is the summarizer working against itself and is worth seeing on its
+       own; the first is a property of the input. Naming them keeps the terminal's
+       slot_id / call_id / plan fingerprint, which a flat rejection would have dropped
+       (keeper_post_turn.ml maps the two shapes to different payloads). *)
+    let reject_terminal cause =
+      reject (terminal_rejection requested.post_success_terminalizer cause)
     in
     if after_bytes = before_bytes
-    then reject_post_dispatch_domain_output ()
+    then reject_terminal Keeper_event_queue_state.Compaction_produced_no_reduction
     else if after_bytes > before_bytes
-    then reject_post_dispatch_domain_output ()
+    then reject_terminal Keeper_event_queue_state.Compaction_increased_checkpoint
     else (
       let after_messages = message_count compacted_ctx in
       let before_tool_use_count, before_tool_result_count =

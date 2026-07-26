@@ -194,6 +194,11 @@ let test_exact_output_terminal_reasons_round_trip () =
     ; State.Lifecycle_transition_failed_after_dispatch
     ; State.Checkpoint_source_changed
     ; State.Checkpoint_persistence_failed
+      (* Both compaction outcomes reported Domain_invalid_output until they were named:
+         a context that could not shrink and a summarizer that returned a larger one are
+         repaired differently, and the second is the summarizer working against itself. *)
+    ; State.Compaction_produced_no_reduction
+    ; State.Compaction_increased_checkpoint
     ];
   (* Malformed structural evidence and planner invariant violations remain
      retryable/escalated and cannot be encoded as terminal no-compaction. *)

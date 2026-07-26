@@ -366,10 +366,15 @@ let create_keeper_admitted_body
           p.name detail;
         Progress.stop_tracking task_id;
         tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" detail)
-      | Ok _ ->
-      Eio.Cancel.protect (fun () ->
-      let previous_runtime = Runtime.runtime_id_for_keeper p.name in
-      let runtime_assignment_changed = ref false in
+        | Ok _ ->
+        Eio.Cancel.protect (fun () ->
+        let previous_runtime = Runtime.runtime_id_for_keeper p.name in
+        let candidate_runtime =
+          match p.runtime_id_opt with
+          | None -> previous_runtime
+          | Some runtime_id -> Some runtime_id
+        in
+        let runtime_assignment_changed = ref false in
       let same_runtime_target target =
         Option.equal
           String.equal
@@ -439,16 +444,123 @@ let create_keeper_admitted_body
            e;
          Progress.stop_tracking task_id;
          tool_result_error e
-       | Ok () ->
-      Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      let committed_meta = { meta with meta_version = 1 } in
+        | Ok () ->
+        Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
+        let committed_meta = { meta with meta_version = 1 } in
       let same_committed_meta current =
         String.equal
           (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json current))
-          (Yojson.Safe.to_string
-             (Keeper_meta_json.meta_to_json committed_meta))
-      in
-      let write_result =
+            (Yojson.Safe.to_string
+               (Keeper_meta_json.meta_to_json committed_meta))
+        in
+        let observe_candidate_meta () =
+          match Keeper_meta_store.read_meta ctx.config p.name with
+          | Error detail ->
+            Error ("metadata authority reread failed: " ^ detail)
+          | Ok None -> Ok `Missing
+          | Ok (Some current) when same_committed_meta current ->
+            Ok `Candidate
+          | Ok (Some _) ->
+            Error "metadata authority differs from the exact create candidate"
+        in
+        let ensure_candidate_meta () =
+          match observe_candidate_meta () with
+          | Ok `Candidate -> Ok ()
+          | Error _ as error -> error
+          | Ok `Missing ->
+            let write_error =
+              match
+                write_initial_meta permit nonce_witness ctx.config meta
+              with
+              | Ok () -> None
+              | Error detail -> Some detail
+            in
+            (match observe_candidate_meta () with
+             | Ok `Candidate -> Ok ()
+             | Ok `Missing ->
+               Error
+                 (Option.fold
+                    ~none:"candidate metadata remained missing after forward write"
+                    ~some:(fun detail ->
+                      "candidate metadata forward write failed: " ^ detail)
+                    write_error)
+             | Error detail ->
+               Error
+                 (Option.fold
+                    ~none:detail
+                    ~some:(fun write_detail ->
+                      write_detail ^ "; " ^ detail)
+                    write_error))
+        in
+        let remove_candidate_meta () =
+          match observe_candidate_meta () with
+          | Ok `Missing -> Ok ()
+          | Error _ as error -> error
+          | Ok `Candidate ->
+            let remove_error =
+              match
+                Keeper_meta_store.remove_meta_if_identity
+                  ctx.config
+                  ~name:meta.name
+                  ~trace_id:meta.runtime.trace_id
+                  ~generation:meta.runtime.nonce
+              with
+              | Ok () -> None
+              | Error error ->
+                Some
+                  (Keeper_meta_store.identity_remove_error_to_string error)
+            in
+            (match observe_candidate_meta () with
+             | Ok `Missing -> Ok ()
+             | Ok `Candidate ->
+               Error
+                 (Option.fold
+                    ~none:"candidate metadata remained after rollback"
+                    ~some:(fun detail ->
+                      "candidate metadata rollback failed: " ^ detail)
+                    remove_error)
+             | Error detail ->
+               Error
+                 (Option.fold
+                    ~none:detail
+                    ~some:(fun remove_detail ->
+                      remove_detail ^ "; " ^ detail)
+                    remove_error))
+        in
+        let rollback_create_state () =
+          match restore_runtime_assignment () with
+          | Error detail ->
+            Error ("runtime rollback failed: " ^ detail)
+          | Ok () -> remove_candidate_meta ()
+        in
+        let forward_create_state () =
+          match ensure_candidate_meta () with
+          | Error detail -> Error detail
+          | Ok () ->
+            (match converge_runtime_assignment candidate_runtime with
+             | Ok () -> Ok ()
+             | Error detail ->
+               Error ("candidate runtime forward recovery failed: " ^ detail))
+        in
+        let settle_create_state () =
+          match rollback_create_state () with
+          | Ok () -> Ok `Rolled_back
+          | Error first_rollback ->
+            (match forward_create_state () with
+             | Ok () -> Ok `Forward
+             | Error forward ->
+               (match rollback_create_state () with
+                | Ok () -> Ok `Rolled_back
+                | Error second_rollback ->
+                  Error
+                    (Printf.sprintf
+                       "exact create recovery could not converge: rollback=%s; \
+                        forward=%s; final_rollback=%s"
+                       first_rollback
+                       forward
+                       second_rollback)))
+        in
+        let write_result =
         match write_initial_meta permit nonce_witness ctx.config meta with
         | Ok () -> Ok ()
         | Error initial_error ->
@@ -472,31 +584,21 @@ let create_keeper_admitted_body
                 ^ reread_error))
       in
       match write_result with
-      | Error e ->
+        | Error e ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
-        let detail =
-          match restore_runtime_assignment () with
-          | Ok () -> e
-          | Error rollback ->
-            let candidate_retained =
-              match
-                write_initial_meta permit nonce_witness ctx.config meta
-              with
-              | Ok () -> true
-              | Error _ ->
-                (match Keeper_meta_store.read_meta ctx.config p.name with
-                 | Ok (Some current) -> same_committed_meta current
-                 | Ok None | Error _ -> false)
-            in
-            e
-            ^ "; runtime assignment rollback failed: "
-            ^ rollback
-            ^
-            if candidate_retained
-            then "; exact candidate metadata retained"
-            else "; candidate metadata could not be retained"
+          let detail =
+            match settle_create_state () with
+            | Ok `Rolled_back -> e
+            | Ok `Forward ->
+              e ^ "; exact candidate create state retained"
+            | Error recovery ->
+              Log.Keeper.error
+                "create_keeper exact recovery failed name=%s detail=%s"
+                p.name
+                recovery;
+              e ^ "; " ^ recovery
         in
         Progress.stop_tracking task_id;
         tool_result_error detail
@@ -561,71 +663,19 @@ let create_keeper_admitted_body
                    ("candidate registry rollback was reserved: "
                     ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
                    :: !cleanup_errors)
-            | Some _ | None -> ());
-           let retain_candidate_runtime () =
-             match p.runtime_id_opt with
-             | None -> Ok ()
-             | Some runtime_id ->
-               converge_runtime_assignment (Some runtime_id)
-           in
-           (match restore_runtime_assignment () with
-            | Error detail ->
-              cleanup_errors :=
-                ("runtime assignment rollback failed; candidate metadata \
-                  retained: "
-                 ^ detail)
-                :: !cleanup_errors;
-              (match retain_candidate_runtime () with
-               | Ok () -> ()
-               | Error forward_detail ->
-                 cleanup_errors :=
-                   ("candidate runtime could not be retained: "
-                    ^ forward_detail)
-                   :: !cleanup_errors)
-            | Ok () ->
-              (match
-                 Keeper_meta_store.remove_meta_if_identity
-                   ctx.config
-                   ~name:meta.name
-                   ~trace_id:meta.runtime.trace_id
-                   ~generation:meta.runtime.nonce
-               with
-               | Ok () -> ()
-               | Error error ->
-                 let rollback_detail =
-                   Keeper_meta_store.identity_remove_error_to_string error
-                 in
-                 (match Keeper_meta_store.read_meta ctx.config meta.name with
-                  | Ok None -> ()
-                  | Ok (Some current) when same_committed_meta current ->
-                    (match retain_candidate_runtime () with
-                     | Ok () ->
-                       cleanup_errors :=
-                         ("candidate metadata removal failed; exact candidate \
-                           state retained: "
-                          ^ rollback_detail)
-                         :: !cleanup_errors
-                     | Error forward_detail ->
-                       cleanup_errors :=
-                         ("candidate metadata removal failed and candidate \
-                           runtime could not be retained: "
-                          ^ rollback_detail
-                          ^ "; "
-                          ^ forward_detail)
-                         :: !cleanup_errors)
-                  | Ok (Some _) ->
-                    cleanup_errors :=
-                      ("candidate metadata rollback settled to different \
-                        authority: "
-                       ^ rollback_detail)
-                      :: !cleanup_errors
-                  | Error reread_detail ->
-                    cleanup_errors :=
-                      ("candidate metadata rollback could not be reconciled: "
-                       ^ rollback_detail
-                       ^ "; "
-                       ^ reread_detail)
-                      :: !cleanup_errors)));
+             | Some _ | None -> ());
+             (match settle_create_state () with
+              | Ok `Rolled_back -> ()
+              | Ok `Forward ->
+                cleanup_errors :=
+                  "launch failed; exact candidate create state retained"
+                  :: !cleanup_errors
+              | Error detail ->
+                Log.Keeper.error
+                  "create_keeper launch recovery failed name=%s detail=%s"
+                  p.name
+                  detail;
+                cleanup_errors := detail :: !cleanup_errors);
            Progress.stop_tracking task_id;
            let cleanup_detail =
              match List.rev !cleanup_errors with

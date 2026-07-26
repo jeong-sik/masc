@@ -108,6 +108,28 @@ let keeper_context ?(active_goal_ids = []) () =
     ]
 ;;
 
+(* yojson 3.0.0 raises Json_error "Infinity value not allowed in standard JSON"
+   from [to_string] for any non-finite float, with or without [~std], so the
+   writer can no longer emit such a row. Its parser still ACCEPTS the bare
+   [Infinity] / [NaN] tokens, so a ledger written by an older binary can still
+   hold one and the reader guard is still load-bearing. Render the row textually
+   to reproduce exactly that on-disk shape. *)
+let render_row_with_non_finite ~field ~literal json =
+  match json with
+  | `Assoc fields ->
+    let rendered =
+      List.map
+        (fun (key, value) ->
+           Printf.sprintf
+             "%s:%s"
+             (Yojson.Safe.to_string (`String key))
+             (if String.equal key field then literal else Yojson.Safe.to_string value))
+        fields
+    in
+    Printf.sprintf "{%s}" (String.concat "," rendered)
+  | _ -> Alcotest.fail "candidate JSON is not an object"
+;;
+
 let candidate ?(context = keeper_context ()) signal :
   A.candidate
   =
@@ -481,8 +503,10 @@ let test_non_finite_lifecycle_times_are_rejected () =
       "sangsu.jsonl"
   in
   let non_finite_row =
-    A.candidate_to_json { valid with recorded_at = Float.infinity }
-    |> Yojson.Safe.to_string
+    render_row_with_non_finite
+      ~field:"recorded_at"
+      ~literal:"Infinity"
+      (A.candidate_to_json valid)
   in
   Out_channel.with_open_bin ledger_path (fun channel ->
     output_string channel (non_finite_row ^ "\n"));
@@ -495,10 +519,18 @@ let test_non_finite_complete_request_evidence_is_rejected () =
   with_temp_base "board-attention-candidate-request-finite" @@ fun base_path ->
   let base = candidate (signal "post-request-finite") in
   let at_signal value =
-    let signal =
-      { (signal "post-request-finite") with updated_at = Some value }
+    (* [candidate] derives candidate_id by serializing the signal, which yojson 3
+       refuses to do for a non-finite float. Hash a finite placeholder and inject
+       the value afterwards: the stored record, not the id, is under test. *)
+    let placeholder =
+      { (signal "post-request-finite") with updated_at = Some 0.0 }
     in
-    let candidate = candidate signal in
+    let candidate = candidate placeholder in
+    let candidate =
+      { candidate with
+        signal = { candidate.signal with updated_at = Some value }
+      }
+    in
     { candidate with
       judgment_request =
         candidate.judgment_request

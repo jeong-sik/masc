@@ -27,54 +27,125 @@ let init_keeper_tool_registry () =
     (Masc.Unified_tool_registry.register_all ();
      Masc.Unified_tool_registry.enforce_visible_tag_coverage ())
 
-(** Test fixture parser for [keeper_meta] JSON. It supplies only a trace id
-    when a focused fixture omits one, then delegates to the production parser. *)
+let sanitize_fixture_trace_fragment value =
+  let buffer = Buffer.create (String.length value) in
+  String.iter
+    (fun character ->
+       match character with
+       | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' ->
+         Buffer.add_char buffer character
+       | _ -> Buffer.add_char buffer '-')
+    value;
+  match String.trim (Buffer.contents buffer) with
+  | "" -> "fixture"
+  | fragment -> fragment
+;;
+
+let fixture_trace_id name =
+  let candidate = "trace-" ^ sanitize_fixture_trace_fragment name in
+  if String.length candidate <= 64 then candidate else String.sub candidate 0 64
+;;
+
+let current_meta_json_fixture ?(name = "fixture") () : Yojson.Safe.t =
+  `Assoc
+    [ "name", `String name
+    ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+    ; "persona", `Null
+    ; "instructions", `String ""
+    ; "trace_id", `String (fixture_trace_id name)
+    ; "multimodal_policy", `String "inherit"
+    ; "trace_history", `List []
+    ; "generation", `Int 0
+    ; "last_handoff_ts", `Float 0.0
+    ; "created_at", `String "2026-01-01T00:00:00Z"
+    ; "updated_at", `String "2026-01-01T00:00:00Z"
+    ; "total_turns", `Int 0
+    ; "total_input_tokens", `Int 0
+    ; "total_output_tokens", `Int 0
+    ; "total_tokens", `Int 0
+    ; "total_cost_usd", `Float 0.0
+    ; "last_turn_ts", `Float 0.0
+    ; "last_input_tokens", `Int 0
+    ; "last_output_tokens", `Int 0
+    ; "last_total_tokens", `Int 0
+    ; "last_latency_ms", `Int 0
+    ; "compaction_count", `Int 0
+    ; "last_compaction_ts", `Float 0.0
+    ; "last_compaction_before_tokens", `Int 0
+    ; "last_compaction_after_tokens", `Int 0
+    ; "compaction_consecutive_failures", `Int 0
+    ; "proactive_count_total", `Int 0
+    ; "last_proactive_ts", `Float 0.0
+    ; "proactive_visible_count_total", `Int 0
+    ; "last_visible_proactive_ts", `Float 0.0
+    ; "last_proactive_outcome", `String "unknown"
+    ; "last_proactive_reason", `String ""
+    ; "last_proactive_preview", `String ""
+    ; "consecutive_noop_count", `Int 0
+    ; "last_compaction_check_ts", `Float 0.0
+    ; "last_compaction_decision", `String "uninitialized"
+    ; "active_goal_ids", `List []
+    ; "last_autonomous_action_at", `String ""
+    ; "autonomous_action_count", `Int 0
+    ; "autonomous_turn_count", `Int 0
+    ; "autonomous_text_turn_count", `Int 0
+    ; "autonomous_tool_turn_count", `Int 0
+    ; "board_reactive_turn_count", `Int 0
+    ; "mention_reactive_turn_count", `Int 0
+    ; "noop_turn_count", `Int 0
+    ; "message_scope_ack_id", `Null
+    ; "last_blocker", `Null
+    ; "last_runtime_attempt", `Null
+    ; "paused", `Bool false
+    ; "latched_reason", `Null
+    ; "current_task_id", `Null
+    ; "keeper_id", `Null
+    ; "oas_env", `Assoc []
+    ; "meta_version", `Int 0
+    ]
+
+(** Test fixture parser for [keeper_meta]. It first creates an exact current
+    persisted envelope, then applies fixture overrides. TOML-only values are
+    removed before the production parser and re-applied only to the test
+    record. *)
 let meta_of_json_fixture (json : Yojson.Safe.t) =
-  let augment fields =
-    let has key = List.exists (fun (k, _) -> String.equal k key) fields in
-    let add_if_missing key v fs =
-      if has key then fs else fs @ [ (key, v) ]
-    in
-    let sanitize_trace_fragment s =
-      let buf = Buffer.create (String.length s) in
-      String.iter
-        (fun c ->
-          match c with
-          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' ->
-              Buffer.add_char buf c
-          | _ -> Buffer.add_char buf '-')
-        s;
-      match String.trim (Buffer.contents buf) with
-      | "" -> "fixture"
-      | fragment -> fragment
-    in
-    let trace_id =
-      let name =
-        match List.assoc_opt "name" fields with
-        | Some (`String s) -> s
-        | _ -> "fixture"
-      in
-      let candidate = "trace-" ^ sanitize_trace_fragment name in
-      if String.length candidate <= 64 then candidate
-      else String.sub candidate 0 64
-    in
-    fields |> add_if_missing "trace_id" (`String trace_id)
-  in
   let json' =
     match json with
-    | `Assoc fields -> `Assoc (augment fields)
+    | `Assoc overrides ->
+      let name =
+        match List.assoc_opt "name" overrides with
+        | Some (`String value) -> value
+        | _ -> "fixture"
+      in
+      let base_fields =
+        match current_meta_json_fixture ~name () with
+        | `Assoc fields -> fields
+        | _ -> assert false
+      in
+      let persisted_overrides =
+        List.filter
+          (fun (key, _) ->
+             not
+               (List.mem
+                  key
+                  Masc.Keeper_meta_json_scrub.toml_only_field_names))
+          overrides
+      in
+      let fields =
+        List.fold_left
+          (fun fields ((key, _) as field) ->
+             field :: List.remove_assoc key fields)
+          base_fields
+          persisted_overrides
+      in
+      `Assoc fields
     | other -> other
   in
-  (* Production [meta_of_json] no longer reads TOML-only config keys from JSON
-     (TOML is the SSOT; the runtime JSON carries only runtime state). Focused
-     fixtures still set config inline for convenience, so this test helper
-     re-applies those keys onto the parsed record. This keeps config injection a
-     test-only concern and does not resurrect the production JSON read path. *)
   match Masc.Keeper_meta_json_parse.meta_of_json json' with
   | Error _ as e -> e
   | Ok meta ->
     let open Masc.Keeper_meta_contract in
-    let bool_opt key = Safe_ops.json_bool_opt key json' in
+    let bool_opt key = Safe_ops.json_bool_opt key json in
     let apply_bool_opt key current =
       match bool_opt key with Some _ as v -> v | None -> current
     in
@@ -82,11 +153,33 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       match bool_opt key with Some v -> v | None -> current
     in
     let apply_string_list key current =
-      match Safe_ops.json_string_list key json' with [] -> current | xs -> xs
+      match Safe_ops.json_string_list key json with [] -> current | xs -> xs
+    in
+    let sandbox_profile =
+      match Safe_ops.json_string_opt "sandbox_profile" json with
+      | Some raw ->
+        (match Masc.Keeper_types_profile.sandbox_profile_of_string raw with
+         | Some value -> value
+         | None -> meta.sandbox_profile)
+      | None -> meta.sandbox_profile
+    in
+    let network_mode =
+      match Safe_ops.json_string_opt "network_mode" json with
+      | Some raw ->
+        (match Masc.Keeper_types_profile.network_mode_of_string raw with
+         | Some value -> value
+         | None -> meta.network_mode)
+      | None -> meta.network_mode
     in
     Ok
       { meta with
-        allowed_paths = apply_string_list "allowed_paths" meta.allowed_paths
+        sandbox_profile
+      ; sandbox_image =
+          (match Safe_ops.json_string_opt "sandbox_image" json with
+           | Some _ as value -> value
+           | None -> meta.sandbox_image)
+      ; network_mode
+      ; allowed_paths = apply_string_list "allowed_paths" meta.allowed_paths
       ; mention_targets = apply_string_list "mention_targets" meta.mention_targets
       ; proactive =
           (match bool_opt "proactive_enabled" with
@@ -97,7 +190,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       ; telemetry_feedback_enabled =
           apply_bool_opt "telemetry_feedback_enabled" meta.telemetry_feedback_enabled
       ; telemetry_feedback_window_hours =
-          (match Safe_ops.json_int_opt "telemetry_feedback_window_hours" json' with
+          (match Safe_ops.json_int_opt "telemetry_feedback_window_hours" json with
            | Some _ as v -> v
            | None -> meta.telemetry_feedback_window_hours)
       }

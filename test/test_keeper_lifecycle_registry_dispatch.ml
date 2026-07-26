@@ -143,13 +143,12 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =
   ensure_test_runtime ();
   match
-    Keeper_meta_json_parse.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("last_model_used", `String "llama:auto");
         ])
   with
   | Ok meta -> meta

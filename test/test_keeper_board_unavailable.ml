@@ -50,7 +50,7 @@ let with_eio f () =
 
 let test_meta name =
   match
-    Keeper_meta_json_parse.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String name
          ; "agent_name", `String ("keeper-" ^ name ^ "-agent")

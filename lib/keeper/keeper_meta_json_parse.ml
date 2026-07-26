@@ -1,322 +1,407 @@
-(** Keeper meta JSON parser.
-
-    This module owns persisted JSON -> [keeper_meta] decoding.  Serialization
-    stays in [Keeper_meta_json] so canonical-key derivation can use the public
-    facade without creating a cycle. *)
+(** Exact current-schema Keeper meta JSON parser. *)
 
 open Keeper_types_profile
 open Keeper_meta_contract
 open Keeper_meta_json_scrub
 
-type parsed_keeper_identity =
-  { pk_name : string
-  ; pk_agent_name : string
-  ; pk_persona : string option
-  ; pk_trace_id : Keeper_id.Trace_id.t
-  ; pk_trace_history : string list
-  ; pk_instructions : string
-  }
+let ( let* ) = Result.bind
 
-type parsed_keeper_policy =
-  { pp_sandbox_profile : sandbox_profile
-  ; pp_sandbox_image : string option
-  ; pp_network_mode : network_mode
-  ; pp_allowed_paths : string list
-  ; pp_mention_targets : string list
-  ; pp_proactive : proactive_policy
-  ; pp_always_allow : bool option
-  }
-
-type parsed_keeper_state =
-  { ps_created_at_raw : string
-  ; ps_updated_at_raw : string
-  ; ps_active_goal_ids : string list
-  ; ps_paused : bool
-  ; ps_latched_reason : Keeper_latched_reason.t option
-  ; ps_autoboot_enabled : bool
-  ; ps_current_task_id : Keeper_id.Task_id.t option
-  ; ps_max_context_override : int option
-  ; ps_runtime : agent_runtime_state
-  }
-
-let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, string) result
-  =
-  let ident = Keeper_identity.parse_json_identity json in
-  let pk_name = ident.keeper_name in
-  let pk_agent_name = ident.agent_name in
-  let pk_trace_id_raw = Option.value ~default:"" ident.trace_id in
-  match
-    if String.trim pk_trace_id_raw = ""
-    then Error "missing trace_id in persisted keeper identity"
-    else (
-      match Keeper_id.Trace_id.of_string pk_trace_id_raw with
-      | Ok x -> Ok x
-      | Error err -> Error ("invalid trace_id in persisted keeper identity: " ^ err))
-  with
-  | Error e -> Error ("keeper meta parse error: " ^ e)
-  | Ok pk_trace_id ->
-    let pk_persona = Safe_ops.json_string_opt "persona" json in
-    let pk_trace_history =
-      Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
-    in
-    (* Layer 2 PR-B (commit 5): delegate the surviving personality field
-       to [Keeper_personality_io].  parse + coerce yields trim-only
-       canonicalisation; truncation moved to the prompt-render path
-       (Keeper_prompt) so disk and in-memory stay byte-identical.
-       Decision Resolution: write raw, compare normalize, render
-       truncate. *)
-    let personality =
-      Keeper_personality_io.parse json
-      |> Keeper_personality_io.coerce |> Keeper_personality_io.to_raw
-    in
-    let pk_instructions = personality.instructions in
-    Ok
-      { pk_name
-      ; pk_agent_name
-      ; pk_persona
-      ; pk_trace_id
-      ; pk_trace_history
-      ; pk_instructions
-      }
+let invalidf format =
+  Printf.ksprintf
+    (fun detail ->
+       Error
+         (Printf.sprintf
+            "invalid current keeper meta: %s; runtime reset required"
+            detail))
+    format
 ;;
 
-(* Fail-loud sandbox policy field parsing.
-
-   Config fields (sandbox_profile, network_mode) are now TOML-only; runtime
-   JSON omits them by design.  When absent, we return defaults so that
-   [ensure_keeper_meta] can overlay the TOML SSOT values.  Invalid values
-   are still rejected — only the *missing* case changed from Error to
-   default. *)
-let parse_sandbox_policy_fields (json : Yojson.Safe.t)
-  : (sandbox_profile * string option * network_mode, string) result
-  =
-  let sp =
-    match Safe_ops.json_string_opt "sandbox_profile" json with
-    | None -> default_sandbox_profile
-    | Some sp_raw ->
-      (match sandbox_profile_of_string sp_raw with
-       | Some p -> p
-       | None -> default_sandbox_profile)
-  in
-  let si = Safe_ops.json_string_opt "sandbox_image" json in
-  let nm =
-    match Safe_ops.json_string_opt "network_mode" json with
-    | None -> default_network_mode_for_profile sp
-    | Some nm_raw ->
-      (match network_mode_of_string nm_raw with
-       | Some m -> m
-       | None -> default_network_mode_for_profile sp)
-  in
-  Ok (sp, si, nm)
+let required_field fields name =
+  match List.assoc_opt name fields with
+  | Some value -> Ok value
+  | None -> invalidf "missing required field %s" name
 ;;
 
-let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
-  : (parsed_keeper_policy, string) result
-  =
-  match parse_sandbox_policy_fields json with
-  | Error msg -> Error ("meta parse error: " ^ msg)
-  | Ok (pp_sandbox_profile, pp_sandbox_image, pp_network_mode) ->
-    (* TOML-only config fields: the write side ([keeper_meta_json.ml]) omits
-       these by design, so the runtime JSON never carries them. The parser no
-       longer reads them — [ensure_keeper_meta] overlays the TOML SSOT value.
-       Neutral placeholders here keep the record total; a legacy JSON that still
-       carries one of these keys is ignored (TOML remains authoritative). *)
-    let pp_allowed_paths = [] in
-    let pp_mention_targets = [] in
-    let proactive_enabled = default_proactive_enabled in
-    let pp_always_allow = None in
-    (* TOML-only (see note above); overlaid by [ensure_keeper_meta]. *)
-    Ok
-      { pp_sandbox_profile
-      ; pp_sandbox_image
-      ; pp_network_mode
-      ; pp_allowed_paths
-      ; pp_mention_targets
-      ; pp_proactive = { enabled = proactive_enabled }
-      ; pp_always_allow
-      }
+let string_field fields name =
+  let* value = required_field fields name in
+  match value with
+  | `String value -> Ok value
+  | other -> invalidf "field %s must be a string, got %s" name (Json_util.kind_name other)
 ;;
 
-let parse_usage_metrics (json : Yojson.Safe.t) : usage_metrics =
-  { total_turns = Safe_ops.json_int ~default:0 "total_turns" json
-  ; total_input_tokens = Safe_ops.json_int ~default:0 "total_input_tokens" json
-  ; total_output_tokens = Safe_ops.json_int ~default:0 "total_output_tokens" json
-  ; total_tokens = Safe_ops.json_int ~default:0 "total_tokens" json
-  ; total_cost_usd = Safe_ops.json_float ~default:0.0 "total_cost_usd" json
-  ; last_turn_ts = Safe_ops.json_float ~default:0.0 "last_turn_ts" json
-  ; last_input_tokens = Safe_ops.json_int ~default:0 "last_input_tokens" json
-  ; last_output_tokens = Safe_ops.json_int ~default:0 "last_output_tokens" json
-  ; last_total_tokens = Safe_ops.json_int ~default:0 "last_total_tokens" json
-  ; last_latency_ms = Safe_ops.json_int ~default:0 "last_latency_ms" json
-  }
+let int_field fields name =
+  let* value = required_field fields name in
+  match value with
+  | `Int value -> Ok value
+  | other -> invalidf "field %s must be an integer, got %s" name (Json_util.kind_name other)
 ;;
 
-let parse_compaction_runtime (json : Yojson.Safe.t) : compaction_runtime =
-  { count = Safe_ops.json_int ~default:0 "compaction_count" json
-  ; last_ts = Safe_ops.json_float ~default:0.0 "last_compaction_ts" json
-  ; last_before_tokens = Safe_ops.json_int ~default:0 "last_compaction_before_tokens" json
-  ; last_after_tokens = Safe_ops.json_int ~default:0 "last_compaction_after_tokens" json
-  ; last_check_ts = Safe_ops.json_float ~default:0.0 "last_compaction_check_ts" json
-  ; last_decision =
-      Safe_ops.json_string ~default:"uninitialized" "last_compaction_decision" json
-      |> compaction_runtime_decision_of_string
-  ; consecutive_failures =
-      Safe_ops.json_int ~default:0 "compaction_consecutive_failures" json
-  }
-;;
-
-let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
-  let count_total = Safe_ops.json_int ~default:0 "proactive_count_total" json in
-  let last_ts = Safe_ops.json_float ~default:0.0 "last_proactive_ts" json in
-  { count_total
-  ; last_ts
-  ; visible_count_total =
-      Safe_ops.json_int ~default:0 "proactive_visible_count_total" json
-  ; last_visible_ts = Safe_ops.json_float ~default:0.0 "last_visible_proactive_ts" json
-  ; last_outcome =
-      Safe_ops.json_string_opt "last_proactive_outcome" json
-      |> Option.value ~default:"unknown"
-      |> proactive_cycle_outcome_of_string
-  ; last_reason = Safe_ops.json_string ~default:"" "last_proactive_reason" json
-  ; last_preview = Safe_ops.json_string ~default:"" "last_proactive_preview" json
-  ; consecutive_noop_count = Safe_ops.json_int ~default:0 "consecutive_noop_count" json
-  }
-;;
-
-let parse_persisted_max_context_override json =
-  match Json_util.assoc_member_opt "max_context_override" json with
-  | None | Some `Null -> Ok None
-  | Some (`Int value) ->
-    Keeper_config.validate_max_context_override_value value |> Result.map Option.some
-  | Some (`Intlit raw) ->
-    (match int_of_string_opt raw with
-     | Some value ->
-       Keeper_config.validate_max_context_override_value value |> Result.map Option.some
-     | None -> Error (Printf.sprintf "invalid persisted max_context_override: %s" raw))
-  | Some other ->
-    Error
-      (Printf.sprintf
-         "persisted max_context_override must be a positive integer or null (received %s)"
-         (Json_util.kind_name other))
-;;
-
-let parse_keeper_state
-      (json : Yojson.Safe.t)
-      ~(trace_id : Keeper_id.Trace_id.t)
-      ~(trace_history : string list)
-      ~(keeper_name : string)
-      ~max_context_override
-  : parsed_keeper_state
-  =
-  (match Json_util.assoc_member_opt "auto_resume_after_sec" json with
-   | None -> ()
-   | Some _ ->
-     Log.Keeper.warn
-       "%s: retired auto_resume_after_sec persisted field requires canonical \
-        metadata migration; paused state is preserved and only an explicit \
-        operator resume may clear it"
-       keeper_name;
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string MetaReadFailures)
-       ~labels:
-         [ "keeper", keeper_name
-         ; "site", "retired_auto_resume_field_migration_needed"
-         ]
-       ());
-  (* The OCaml field is [nonce]; the persisted JSON key stays ["generation"] for
-     backward compatibility with existing on-disk meta files (every other JSON
-     surface — keeper status, dashboard — already keeps this key while reading
-     [rt.nonce]). Renaming the key here would load every pre-rename meta file
-     as [nonce = 0] and silently reset the fencing counter. *)
-  let nonce = Safe_ops.json_int ~default:0 "generation" json in
-  let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
-  let ps_created_at_raw = Safe_ops.json_string ~default:"" "created_at" json in
-  let ps_updated_at_raw = Safe_ops.json_string ~default:"" "updated_at" json in
-  let ps_active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
-  let last_autonomous_action_at =
-    Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
-  in
-  let autonomous_action_count =
-    Safe_ops.json_int ~default:0 "autonomous_action_count" json
-  in
-  let autonomous_turn_count = Safe_ops.json_int ~default:0 "autonomous_turn_count" json in
-  let autonomous_text_turn_count =
-    Safe_ops.json_int ~default:0 "autonomous_text_turn_count" json
-  in
-  let autonomous_tool_turn_count =
-    Safe_ops.json_int ~default:0 "autonomous_tool_turn_count" json
-  in
-  let board_reactive_turn_count =
-    Safe_ops.json_int ~default:0 "board_reactive_turn_count" json
-  in
-  let mention_reactive_turn_count =
-    Safe_ops.json_int ~default:0 "mention_reactive_turn_count" json
-  in
-  let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
-  let message_scope_ack_id = Safe_ops.json_string_opt "message_scope_ack_id" json in
-  (* Canonical format: last_blocker is a structured object
-     (blocker_info_to_json output) or `Null. *)
-  let last_blocker =
-    let raw_field = Json_util.assoc_member_opt "last_blocker" json in
-    match raw_field with
-    | Some `Null -> None
-    | Some (`Assoc _ as json) -> blocker_info_of_json json
+let float_field fields name =
+  let* value = required_field fields name in
+  let parsed =
+    match value with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
     | _ -> None
-	  in
-	  let last_runtime_attempt =
-	    match json with
-	    | `Assoc fields ->
-	      (match List.assoc_opt "last_runtime_attempt" fields with
-	       | Some raw -> runtime_attempt_record_of_json raw
-	       | None -> None)
-	    | _ -> None
-	  in
-	  let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
-  (* [paused] is the authoritative pause bit. [latched_reason] refines the
-     lifecycle state, notably distinguishing a terminal [Dead_tombstone]. A
-     malformed/unknown value degrades to [None] without clearing [paused];
-     lifecycle admission therefore treats that combination as an unclassified
-     pause. Degradation is logged and counted so the lost classification is
-     visible rather than silently activating the keeper. *)
-  let ps_latched_reason =
-    match Json_util.assoc_member_opt "latched_reason" json with
-    | None | Some `Null -> None
-    | Some reason_json ->
-      (match Keeper_latched_reason.Stable.of_yojson reason_json with
-       | Ok reason -> Some reason
-       | Error err ->
-         Log.Keeper.warn
-           "%s: malformed latched_reason JSON dropped: %s"
-           keeper_name
-           err;
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string MetaReadFailures)
-           ~labels:[ "keeper", keeper_name; "site", "latched_reason_parse" ]
-           ();
-         None)
   in
-  (* TOML-only config; overlaid by [ensure_keeper_meta]. Placeholder default. *)
-  let ps_autoboot_enabled = true in
-  let ps_current_task_id =
-    match Safe_ops.json_string_opt "current_task_id" json with
-    | None -> None
-    | Some s ->
-      (match Keeper_id.Task_id.of_string s with
-       | Ok tid -> Some tid
-       | Error _ -> None)
+  match parsed with
+  | Some value when Float.is_finite value -> Ok value
+  | Some _ -> invalidf "field %s must be finite" name
+  | None -> invalidf "field %s must be a number, got %s" name (Json_util.kind_name value)
+;;
+
+let bool_field fields name =
+  let* value = required_field fields name in
+  match value with
+  | `Bool value -> Ok value
+  | other -> invalidf "field %s must be a boolean, got %s" name (Json_util.kind_name other)
+;;
+
+let nullable_string_field fields name =
+  let* value = required_field fields name in
+  match value with
+  | `Null -> Ok None
+  | `String value -> Ok (Some value)
+  | other ->
+    invalidf "field %s must be a string or null, got %s" name (Json_util.kind_name other)
+;;
+
+let string_list_field fields name =
+  let* value = required_field fields name in
+  match value with
+  | `List values ->
+    let rec collect acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> collect (value :: acc) rest
+      | other :: _ ->
+        invalidf
+          "field %s must contain only strings, got %s"
+          name
+          (Json_util.kind_name other)
+    in
+    collect [] values
+  | other -> invalidf "field %s must be an array, got %s" name (Json_util.kind_name other)
+;;
+
+let find_duplicate fields =
+  let rec loop seen = function
+    | [] -> None
+    | (key, _) :: rest ->
+      if List.mem key seen then Some key else loop (key :: seen) rest
   in
-  { ps_created_at_raw
-  ; ps_updated_at_raw
-  ; ps_active_goal_ids
-  ; ps_paused
-  ; ps_latched_reason
-  ; ps_autoboot_enabled
-  ; ps_current_task_id
-  ; ps_max_context_override = max_context_override
-  ; ps_runtime =
-      { usage = parse_usage_metrics json
-      ; compaction_rt = parse_compaction_runtime json
-      ; proactive_rt = parse_proactive_runtime json
+  loop [] fields
+;;
+
+let require_exact_fields ~context expected fields =
+  match find_duplicate fields with
+  | Some key -> invalidf "%s has duplicate field %s" context key
+  | None ->
+    let present = List.map fst fields in
+    let missing = List.filter (fun key -> not (List.mem key present)) expected in
+    let extra = List.filter (fun key -> not (List.mem key expected)) present in
+    if missing <> []
+    then invalidf "%s is missing fields: %s" context (String.concat ", " missing)
+    else if extra <> []
+    then invalidf "%s has unknown fields: %s" context (String.concat ", " extra)
+    else Ok ()
+;;
+
+let parse_trace_id raw =
+  if String.trim raw = ""
+  then invalidf "trace_id must not be empty"
+  else
+    match Keeper_id.Trace_id.of_string raw with
+    | Ok trace_id -> Ok trace_id
+    | Error detail -> invalidf "trace_id is invalid: %s" detail
+;;
+
+let parse_trace_history fields =
+  let* history = string_list_field fields "trace_history" in
+  match List.find_opt (fun trace_id -> not (validate_name trace_id)) history with
+  | None -> Ok history
+  | Some trace_id -> invalidf "trace_history contains invalid trace id %S" trace_id
+;;
+
+let parse_multimodal_policy fields =
+  let* raw = string_field fields "multimodal_policy" in
+  match multimodal_policy_of_string raw with
+  | Some policy when String.equal raw (multimodal_policy_to_string policy) -> Ok policy
+  | Some _ | None -> invalidf "multimodal_policy has non-canonical value %S" raw
+;;
+
+let parse_proactive_outcome fields =
+  let* raw = string_field fields "last_proactive_outcome" in
+  let outcome = proactive_cycle_outcome_of_string raw in
+  if String.equal raw (proactive_cycle_outcome_to_string outcome)
+  then Ok outcome
+  else invalidf "last_proactive_outcome has non-canonical value %S" raw
+;;
+
+let parse_last_blocker fields =
+  let* value = required_field fields "last_blocker" in
+  match value with
+  | `Null -> Ok None
+  | `Assoc blocker_fields ->
+    let* () =
+      require_exact_fields
+        ~context:"last_blocker"
+        [ "klass"; "detail" ]
+        blocker_fields
+    in
+    let* detail = string_field blocker_fields "detail" in
+    let* klass_json = required_field blocker_fields "klass" in
+    let* klass =
+      match klass_json with
+      | `String label ->
+        (match blocker_class_of_serialized_string label with
+         | Some (Runtime_exhausted _) ->
+           invalidf "last_blocker.klass runtime_exhausted requires a reason object"
+         | Some klass -> Ok klass
+         | None -> invalidf "last_blocker.klass has unknown value %S" label)
+      | `Assoc klass_fields ->
+        let* () =
+          require_exact_fields
+            ~context:"last_blocker.klass"
+            [ "name"; "reason" ]
+            klass_fields
+        in
+        let* name = string_field klass_fields "name" in
+        if not (String.equal name "runtime_exhausted")
+        then invalidf "last_blocker.klass has unknown object name %S" name
+        else
+          let* reason_json = required_field klass_fields "reason" in
+          (match runtime_exhaustion_reason_of_json reason_json with
+           | Some reason
+             when Yojson.Safe.equal
+                    reason_json
+                    (runtime_exhaustion_reason_to_json reason) ->
+             Ok (Runtime_exhausted reason)
+           | Some _ | None ->
+             invalidf "last_blocker.klass.reason is not the current exact shape")
+      | other ->
+        invalidf
+          "last_blocker.klass must be a string or object, got %s"
+          (Json_util.kind_name other)
+    in
+    Ok (Some { klass; detail })
+  | other ->
+    invalidf
+      "field last_blocker must be an object or null, got %s"
+      (Json_util.kind_name other)
+;;
+
+let parse_runtime_attempt_outcome value =
+  match value with
+  | `Assoc fields ->
+    let* kind = string_field fields "kind" in
+    (match kind with
+     | "success" ->
+       let* () =
+         require_exact_fields ~context:"last_runtime_attempt.outcome" [ "kind" ] fields
+       in
+       Ok `Success
+     | "failure" ->
+       let* () =
+         require_exact_fields
+           ~context:"last_runtime_attempt.outcome"
+           [ "kind"; "message" ]
+           fields
+       in
+       let* message = string_field fields "message" in
+       Ok (`Failure message)
+     | other -> invalidf "last_runtime_attempt.outcome has unknown kind %S" other)
+  | other ->
+    invalidf
+      "last_runtime_attempt.outcome must be an object, got %s"
+      (Json_util.kind_name other)
+;;
+
+let parse_last_runtime_attempt fields =
+  let* value = required_field fields "last_runtime_attempt" in
+  match value with
+  | `Null -> Ok None
+  | `Assoc attempt_fields ->
+    let* () =
+      require_exact_fields
+        ~context:"last_runtime_attempt"
+        [ "provider_id"; "http_status"; "outcome"; "timestamp" ]
+        attempt_fields
+    in
+    let* provider_id = string_field attempt_fields "provider_id" in
+    let* http_status_json = required_field attempt_fields "http_status" in
+    let* http_status =
+      match http_status_json with
+      | `Null -> Ok None
+      | `Int status -> Ok (Some status)
+      | other ->
+        invalidf
+          "last_runtime_attempt.http_status must be an integer or null, got %s"
+          (Json_util.kind_name other)
+    in
+    let* outcome_json = required_field attempt_fields "outcome" in
+    let* outcome = parse_runtime_attempt_outcome outcome_json in
+    let* timestamp = float_field attempt_fields "timestamp" in
+    let attempt : runtime_attempt_record =
+      { provider_id; http_status; outcome; timestamp }
+    in
+    Ok (Some attempt)
+  | other ->
+    invalidf
+      "field last_runtime_attempt must be an object or null, got %s"
+      (Json_util.kind_name other)
+;;
+
+let parse_latched_reason fields =
+  let* value = required_field fields "latched_reason" in
+  match value with
+  | `Null -> Ok None
+  | reason_json ->
+    (match Keeper_latched_reason.Stable.of_yojson reason_json with
+     | Ok reason -> Ok (Some reason)
+     | Error detail -> invalidf "latched_reason is invalid: %s" detail)
+;;
+
+let parse_current_task_id fields =
+  let* raw = nullable_string_field fields "current_task_id" in
+  match raw with
+  | None -> Ok None
+  | Some raw ->
+    (match Keeper_id.Task_id.of_string raw with
+     | Ok task_id -> Ok (Some task_id)
+     | Error detail -> invalidf "current_task_id is invalid: %s" detail)
+;;
+
+let parse_keeper_id fields =
+  let* value = required_field fields "keeper_id" in
+  match value with
+  | `Null -> Ok None
+  | `String _ as json ->
+    (match Keeper_id.uid_of_yojson json with
+     | Ok keeper_id -> Ok (Some keeper_id)
+     | Error detail -> invalidf "keeper_id is invalid: %s" detail)
+  | other ->
+    invalidf "keeper_id must be a string or null, got %s" (Json_util.kind_name other)
+;;
+
+let parse_oas_env fields =
+  let* value = required_field fields "oas_env" in
+  match value with
+  | `Assoc env_fields ->
+    (match find_duplicate env_fields with
+     | Some key -> invalidf "oas_env has duplicate key %S" key
+     | None ->
+       let rec collect acc = function
+         | [] -> Ok (List.rev acc)
+         | (key, `String value) :: rest -> collect ((key, value) :: acc) rest
+         | (key, other) :: _ ->
+           invalidf
+             "oas_env.%s must be a string, got %s"
+             key
+             (Json_util.kind_name other)
+       in
+       collect [] env_fields)
+  | other -> invalidf "oas_env must be an object, got %s" (Json_util.kind_name other)
+;;
+
+let decode_current_meta fields =
+  let* name = string_field fields "name" in
+  let* agent_name = string_field fields "agent_name" in
+  let* persona = nullable_string_field fields "persona" in
+  let* instructions = string_field fields "instructions" in
+  let* trace_id_raw = string_field fields "trace_id" in
+  let* trace_id = parse_trace_id trace_id_raw in
+  let* multimodal_policy = parse_multimodal_policy fields in
+  let* trace_history = parse_trace_history fields in
+  let* nonce = int_field fields "generation" in
+  let* last_handoff_ts = float_field fields "last_handoff_ts" in
+  let* created_at = string_field fields "created_at" in
+  let* updated_at = string_field fields "updated_at" in
+  let* total_turns = int_field fields "total_turns" in
+  let* total_input_tokens = int_field fields "total_input_tokens" in
+  let* total_output_tokens = int_field fields "total_output_tokens" in
+  let* total_tokens = int_field fields "total_tokens" in
+  let* total_cost_usd = float_field fields "total_cost_usd" in
+  let* last_turn_ts = float_field fields "last_turn_ts" in
+  let* last_input_tokens = int_field fields "last_input_tokens" in
+  let* last_output_tokens = int_field fields "last_output_tokens" in
+  let* last_total_tokens = int_field fields "last_total_tokens" in
+  let* last_latency_ms = int_field fields "last_latency_ms" in
+  let* compaction_count = int_field fields "compaction_count" in
+  let* last_compaction_ts = float_field fields "last_compaction_ts" in
+  let* last_compaction_before_tokens = int_field fields "last_compaction_before_tokens" in
+  let* last_compaction_after_tokens = int_field fields "last_compaction_after_tokens" in
+  let* compaction_consecutive_failures = int_field fields "compaction_consecutive_failures" in
+  let* proactive_count_total = int_field fields "proactive_count_total" in
+  let* last_proactive_ts = float_field fields "last_proactive_ts" in
+  let* proactive_visible_count_total = int_field fields "proactive_visible_count_total" in
+  let* last_visible_proactive_ts = float_field fields "last_visible_proactive_ts" in
+  let* last_proactive_outcome = parse_proactive_outcome fields in
+  let* last_proactive_reason = string_field fields "last_proactive_reason" in
+  let* last_proactive_preview = string_field fields "last_proactive_preview" in
+  let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
+  let* last_compaction_check_ts = float_field fields "last_compaction_check_ts" in
+  let* last_compaction_decision_raw = string_field fields "last_compaction_decision" in
+  let* active_goal_ids = string_list_field fields "active_goal_ids" in
+  let* last_autonomous_action_at = string_field fields "last_autonomous_action_at" in
+  let* autonomous_action_count = int_field fields "autonomous_action_count" in
+  let* autonomous_turn_count = int_field fields "autonomous_turn_count" in
+  let* autonomous_text_turn_count = int_field fields "autonomous_text_turn_count" in
+  let* autonomous_tool_turn_count = int_field fields "autonomous_tool_turn_count" in
+  let* board_reactive_turn_count = int_field fields "board_reactive_turn_count" in
+  let* mention_reactive_turn_count = int_field fields "mention_reactive_turn_count" in
+  let* noop_turn_count = int_field fields "noop_turn_count" in
+  let* message_scope_ack_id = nullable_string_field fields "message_scope_ack_id" in
+  let* last_blocker = parse_last_blocker fields in
+  let* last_runtime_attempt = parse_last_runtime_attempt fields in
+  let* paused = bool_field fields "paused" in
+  let* latched_reason = parse_latched_reason fields in
+  let* current_task_id = parse_current_task_id fields in
+  let* keeper_id = parse_keeper_id fields in
+  let* oas_env = parse_oas_env fields in
+  let* meta_version = int_field fields "meta_version" in
+  if not (validate_name name)
+  then invalidf "name is invalid: %S" name
+  else if not (validate_name (Keeper_id.Trace_id.to_string trace_id))
+  then invalidf "trace_id is invalid: %S" trace_id_raw
+  else
+    let usage : usage_metrics =
+      { total_turns
+      ; total_input_tokens
+      ; total_output_tokens
+      ; total_tokens
+      ; total_cost_usd
+      ; last_turn_ts
+      ; last_input_tokens
+      ; last_output_tokens
+      ; last_total_tokens
+      ; last_latency_ms
+      }
+    in
+    let compaction_rt : compaction_runtime =
+      { count = compaction_count
+      ; last_ts = last_compaction_ts
+      ; last_before_tokens = last_compaction_before_tokens
+      ; last_after_tokens = last_compaction_after_tokens
+      ; last_check_ts = last_compaction_check_ts
+      ; last_decision = compaction_runtime_decision_of_string last_compaction_decision_raw
+      ; consecutive_failures = compaction_consecutive_failures
+      }
+    in
+    let proactive_rt : proactive_runtime =
+      { count_total = proactive_count_total
+      ; last_ts = last_proactive_ts
+      ; visible_count_total = proactive_visible_count_total
+      ; last_visible_ts = last_visible_proactive_ts
+      ; last_outcome = last_proactive_outcome
+      ; last_reason = last_proactive_reason
+      ; last_preview = last_proactive_preview
+      ; consecutive_noop_count
+      }
+    in
+    let runtime : agent_runtime_state =
+      { usage
+      ; compaction_rt
+      ; proactive_rt
       ; nonce
       ; trace_id
       ; trace_history
@@ -330,198 +415,49 @@ let parse_keeper_state
       ; mention_reactive_turn_count
       ; noop_turn_count
       ; message_scope_ack_id
-	      ; last_blocker
-	      ; last_runtime_attempt
-	      }
-  }
+      ; last_blocker
+      ; last_runtime_attempt
+      }
+    in
+    let sandbox_profile = default_sandbox_profile in
+    let meta : keeper_meta =
+      { id = None
+      ; name
+      ; agent_name
+      ; persona
+      ; instructions
+      ; sandbox_profile
+      ; sandbox_image = None
+      ; network_mode = default_network_mode_for_profile sandbox_profile
+      ; allowed_paths = []
+      ; mention_targets = []
+      ; proactive = { enabled = default_proactive_enabled }
+      ; multimodal_policy
+      ; always_allow = None
+      ; created_at
+      ; updated_at
+      ; active_goal_ids
+      ; paused
+      ; latched_reason
+      ; autoboot_enabled = true
+      ; current_task_id
+      ; max_context_override = None
+      ; telemetry_feedback_enabled = None
+      ; telemetry_feedback_window_hours = None
+      ; runtime
+      ; oas_env
+      ; keeper_id
+      ; meta_version
+      }
+    in
+    Ok meta
 ;;
 
-type removed_keeper_meta_field =
-  | Legacy_goal
-  | Compaction_mode
-  | Initiative_enabled
-  | Persona_profile_path
-  | Tool_access
-  | Tool_denylist
-  | Policy_voice_enabled
-  | Compaction_cooldown
-  | Compaction_profile
-  | Compaction_ratio_gate
-  | Compaction_message_gate
-  | Compaction_token_gate
-  | Last_blocker
-
-let removed_keeper_meta_field_of_key = function
-  | "goal" -> Some Legacy_goal
-  | "compaction_mode" -> Some Compaction_mode
-  | "initiative_enabled" -> Some Initiative_enabled
-  | "persona_profile_path" -> Some Persona_profile_path
-  | "tool_access" -> Some Tool_access
-  | "tool_denylist" -> Some Tool_denylist
-  | "policy_voice_enabled" -> Some Policy_voice_enabled
-  | "compaction_cooldown_sec" -> Some Compaction_cooldown
-  | "compaction_profile" -> Some Compaction_profile
-  | "compaction_ratio_gate" -> Some Compaction_ratio_gate
-  | "compaction_message_gate" -> Some Compaction_message_gate
-  | "compaction_token_gate" -> Some Compaction_token_gate
-  | "last_blocker" -> Some Last_blocker
-  | _ -> None
-;;
-
-let removed_keeper_meta_field_to_wire = function
-  | Legacy_goal -> "goal"
-  | Compaction_mode -> "compaction_mode"
-  | Initiative_enabled -> "initiative_enabled"
-  | Persona_profile_path -> "persona_profile_path"
-  | Tool_access -> "tool_access"
-  | Tool_denylist -> "tool_denylist"
-  | Policy_voice_enabled -> "policy_voice_enabled"
-  | Compaction_cooldown -> "compaction_cooldown_sec"
-  | Compaction_profile -> "compaction_profile"
-  | Compaction_ratio_gate -> "compaction_ratio_gate"
-  | Compaction_message_gate -> "compaction_message_gate"
-  | Compaction_token_gate -> "compaction_token_gate"
-  | Last_blocker -> "last_blocker"
-;;
-
-let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
-  let rec duplicate_key seen = function
-    | [] -> None
-    | (k, _) :: rest ->
-      if List.exists (String.equal k) seen then Some k else duplicate_key (k :: seen) rest
-  in
-  let rec removed_field_error = function
-    | [] -> Ok ()
-    | (key, value) :: rest ->
-      (match removed_keeper_meta_field_of_key key with
-       | Some (Legacy_goal as field)
-       | Some (Compaction_mode as field)
-       | Some (Initiative_enabled as field)
-       | Some (Persona_profile_path as field)
-       | Some (Tool_access as field)
-       | Some (Tool_denylist as field)
-       | Some (Policy_voice_enabled as field)
-       | Some (Compaction_cooldown as field)
-       | Some (Compaction_profile as field)
-       | Some (Compaction_ratio_gate as field)
-       | Some (Compaction_message_gate as field)
-       | Some (Compaction_token_gate as field) ->
-         Error
-           ( "removed keeper meta field is no longer supported: "
-             ^ removed_keeper_meta_field_to_wire field )
-       | Some Last_blocker ->
-         (match value with
-          | `String _ ->
-            Error
-              "removed keeper meta field shape is no longer supported: \
-               last_blocker:string. Use structured last_blocker object."
-          | _ -> removed_field_error rest)
-       | None -> removed_field_error rest)
-  in
-  match json with
-  | `Assoc fields ->
-    (match duplicate_key [] fields with
-     | Some k -> Error ("duplicate keeper meta field is not supported: " ^ k)
-     | None -> removed_field_error fields)
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> Ok ()
-;;
-
-let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
+let meta_of_json json =
   try
-    match reject_removed_keeper_meta_shapes json with
-    | Error e -> Error e
-    | Ok () ->
-      (match parse_keeper_identity json with
-          | Error _ as e -> e
-          | Ok identity ->
-            (match parse_keeper_policy json ~keeper_name:identity.pk_name with
-             | Error _ as e -> e
-             | Ok policy ->
-               (match parse_persisted_max_context_override json with
-                | Error _ as e -> e
-                | Ok max_context_override ->
-               let state =
-                 parse_keeper_state
-                   json
-                   ~trace_id:identity.pk_trace_id
-                   ~trace_history:identity.pk_trace_history
-                   ~keeper_name:identity.pk_name
-                   ~max_context_override
-               in
-               if not (validate_name identity.pk_name)
-               then Error "invalid keeper meta (bad name)"
-               else if
-                 not (validate_name (Keeper_id.Trace_id.to_string identity.pk_trace_id))
-               then Error "invalid keeper meta (bad trace_id)"
-               else
-                 Ok
-                   { id = None
-                   ; name = identity.pk_name
-                   ; agent_name =
-                       (if identity.pk_agent_name = ""
-                        then Keeper_identity.keeper_agent_name identity.pk_name
-                        else identity.pk_agent_name)
-                   ; persona = identity.pk_persona
-                   ; instructions = identity.pk_instructions
-                   ; sandbox_profile = policy.pp_sandbox_profile
-                   ; sandbox_image = policy.pp_sandbox_image
-                   ; network_mode = policy.pp_network_mode
-                   ; allowed_paths = policy.pp_allowed_paths
-                   ; mention_targets = policy.pp_mention_targets
-                   ; proactive = policy.pp_proactive
-                   ; (* RFC vision-delegation §2.4. Parsed inline (mirrors the
-                        telemetry fields below): unknown/missing -> default
-                        Inherit (fail-closed, safe-by-default). This round-trips
-                        through the checkpoint JSON so a Delegate keeper stays
-                        Delegate across reload. *)
-                     multimodal_policy =
-                       (match Safe_ops.json_string_opt "multimodal_policy" json with
-                        | Some raw ->
-                          (match multimodal_policy_of_string raw with
-                           | Some p -> p
-                           | None -> default_multimodal_policy)
-                        | None -> default_multimodal_policy)
-                   ; always_allow = policy.pp_always_allow
-                   ; created_at =
-                       (if state.ps_created_at_raw = ""
-                        then now_iso ()
-                        else state.ps_created_at_raw)
-                   ; updated_at =
-                       (if state.ps_updated_at_raw = ""
-                        then now_iso ()
-                        else state.ps_updated_at_raw)
-                   ; active_goal_ids = state.ps_active_goal_ids
-                   ; paused = state.ps_paused
-                   ; latched_reason = state.ps_latched_reason
-                   ; autoboot_enabled = state.ps_autoboot_enabled
-                   ; current_task_id = state.ps_current_task_id
-                   ; max_context_override = state.ps_max_context_override
-                     (* TOML-only config; overlaid by [ensure_keeper_meta]. *)
-                   ; telemetry_feedback_enabled = None
-                   ; telemetry_feedback_window_hours = None
-                   ; runtime = state.ps_runtime
-                   ; oas_env =
-                       (match Json_util.assoc_member_opt "oas_env" json with
-                        | Some (`Assoc fields) ->
-                          List.filter_map
-                            (function
-                              | k, `String v -> Some (k, v)
-                              | _ -> None)
-                            fields
-                        | _ -> [])
-                   ; keeper_id =
-                       (match Safe_ops.json_string_opt "keeper_id" json with
-                        | Some s ->
-                          (match Keeper_id.uid_of_yojson (`String s) with
-                           | Ok uid -> Some uid
-                           | Error _ -> None)
-                        | None -> None)
-                   ; meta_version =
-                       (match Safe_ops.json_int_opt "meta_version" json with
-                        | Some v -> v
-                        | None -> 0)
-                   })))
+    let* fields = validate_current_object json in
+    decode_current_meta fields
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> invalidf "decoder raised: %s" (Printexc.to_string exn)
 ;;

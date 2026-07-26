@@ -1305,12 +1305,11 @@ let () =
 
   let meta_for_keeper keeper_name trace_id =
     match
-      Masc.Keeper_meta_json_parse.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [ "name", `String keeper_name
           ; "agent_name", `String keeper_name
           ; "trace_id", `String trace_id
-          ; "last_model_used", `String "llama:auto"
           ])
     with
     | Ok meta -> meta

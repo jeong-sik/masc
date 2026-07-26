@@ -29,11 +29,7 @@ module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_supervisor_types = Masc.Keeper_supervisor_types
 
 let base_json name =
-  `Assoc
-    [ "name", `String name
-    ; "agent_name", `String (name ^ "-agent")
-    ; "trace_id", `String ("trace-" ^ name)
-    ]
+  Masc_test_deps.current_meta_json_fixture ~name ()
 
 let make_meta name =
   match Keeper_meta_json_parse.meta_of_json (base_json name) with
@@ -114,34 +110,21 @@ let test_no_latched_reason_serializes_as_null () =
   check (option string) "unset latched_reason round-trips to None" None
     (latched_reason_wire reparsed)
 
-let test_retired_auto_resume_field_is_diagnostic_only () =
-  let before =
-    Masc.Otel_metric_store.metric_total
-      Keeper_metrics.(to_string MetaReadFailures)
-  in
+let test_retired_auto_resume_field_is_rejected () =
   let json =
     match base_json "retired-auto-resume-field" with
     | `Assoc fields ->
       `Assoc
-        (("paused", `Bool true)
-         :: ("auto_resume_after_sec", `Null)
-         :: fields)
+        (("auto_resume_after_sec", `Null) :: fields)
     | _ -> fail "base_json must be an object"
   in
-  let parsed =
-    match Keeper_meta_json_parse.meta_of_json json with
-    | Ok meta -> meta
-    | Error error -> failf "retired field parse failed: %s" error
-  in
-  let after =
-    Masc.Otel_metric_store.metric_total
-      Keeper_metrics.(to_string MetaReadFailures)
-  in
-  check bool "retired field does not activate paused keeper" true parsed.paused;
-  check (option string) "retired field does not invent a latch" None
-    (latched_reason_wire parsed);
-  check (float 0.001) "retired field emits migration-needed diagnostic"
-    (before +. 1.0) after
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error detail ->
+    check bool "error names auto_resume_after_sec" true
+      (Astring.String.is_infix ~affix:"auto_resume_after_sec" detail);
+    check bool "error requires runtime reset" true
+      (Astring.String.is_infix ~affix:"runtime reset required" detail)
+  | Ok _ -> fail "retired auto_resume_after_sec unexpectedly decoded"
 
 (* ── Status bridge surfacing ────────────────────────────────── *)
 
@@ -328,7 +311,7 @@ let () =
         ; test_case "unset reason serializes as null and round-trips to None" `Quick
             test_no_latched_reason_serializes_as_null
         ; test_case "retired auto-resume field is diagnostic only" `Quick
-            test_retired_auto_resume_field_is_diagnostic_only
+            test_retired_auto_resume_field_is_rejected
         ] )
     ; ( "status bridge"
       , [ test_case "attention fields surface the typed pause reason wire" `Quick

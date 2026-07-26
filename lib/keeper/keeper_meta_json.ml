@@ -98,25 +98,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
 
 include Keeper_meta_json_parse
 
-(* Seed round-trip: parse a minimal canonical JSON then serialize to derive
-   the canonical key set. *)
-let canonical_keeper_meta_key_names =
-  let seed_json =
-    `Assoc
-      [ "name", `String "__keeper-meta-key-seed__"
-      ; "agent_name", `String "__keeper-meta-key-seed__"
-      ; "persona", `String "__keeper-meta-key-seed__"
-      ; "trace_id", `String "__keeper-meta-key-seed__"
-      ]
-  in
-  match meta_of_json seed_json with
-  | Ok meta ->
-    (match meta_to_json meta with
-     | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
-     | _ -> invalid_arg "Keeper_meta_json.meta_to_json must return an object")
-  | Error msg ->
-    invalid_arg ("Keeper_meta_json canonical seed is invalid: " ^ msg)
-;;
+let canonical_keeper_meta_key_names = current_field_names
 
 let unknown_keeper_meta_keys (json : Yojson.Safe.t) : string list =
   match json with

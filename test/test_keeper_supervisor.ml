@@ -205,7 +205,7 @@ let test_should_cleanup_dead_true () =
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
       ] in
-      match Keeper_meta_json_parse.meta_of_json json with
+      match Masc_test_deps.meta_of_json_fixture json with
       | Ok meta -> meta
       | Error err -> fail err)
   in
@@ -224,7 +224,7 @@ let test_should_cleanup_dead_false_when_recent () =
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
       ] in
-      match Keeper_meta_json_parse.meta_of_json json with
+      match Masc_test_deps.meta_of_json_fixture json with
       | Ok meta -> meta
       | Error err -> fail err)
   in
@@ -289,7 +289,7 @@ let make_meta name =
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 

@@ -105,12 +105,11 @@ let automated id : Schedule_domain.actor =
 
 let keeper_meta_for_name keeper_name =
   match
-    Keeper_meta_json_parse.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String keeper_name
         ; "agent_name", `String keeper_name
         ; "trace_id", `String ("trace-" ^ keeper_name)
-        ; "last_model_used", `String "llama:auto"
         ])
   with
   | Ok meta -> meta

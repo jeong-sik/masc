@@ -1,14 +1,19 @@
-(** Keeper meta JSON scrub helpers.
+(** Keeper meta current-schema key contract.
 
-    Lives below the codec/parser facade so persisted runtime JSON cleanup code
-    can share the same TOML-owned field names without introducing a module
-    cycle. *)
+    The historical module path is retained, but persisted JSON is never scrubbed,
+    rewritten, imported, or migrated. *)
 
-(** Config field names owned by TOML only — never written to JSON.
-    Defined here to avoid module cycles; re-exported by
-    [Keeper_meta_json] via [include Keeper_meta_json_scrub]. *)
-val config_field_names : string list
+val current_field_names : string list
+(** Exact top-level keys emitted by the current writer. *)
 
-(** Drop the named keys from a top-level JSON object; passes through
-    non-objects unchanged. *)
-val drop_assoc_keys : string list -> Yojson.Safe.t -> Yojson.Safe.t
+val toml_only_field_names : string list
+(** Configuration keys that are valid only in keeper TOML. Their presence in
+    persisted keeper JSON is a retired-schema error. *)
+
+val retired_field_names : string list
+(** Closed set of known retired persisted keys. *)
+
+val validate_current_object :
+  Yojson.Safe.t -> ((string * Yojson.Safe.t) list, string) result
+(** Require exactly the current top-level key set. Duplicate, missing, retired,
+    unknown, and non-object inputs are explicit reset-required errors. *)

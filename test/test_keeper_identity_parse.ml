@@ -40,25 +40,17 @@ let test_explicit_keeper_name_is_not_nickname_canonicalized () =
         "personality-resync-test" meta.name
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
-let test_legacy_runtime_id_alias_tolerated () =
-  (* persona⊥{model,runtime}: a [runtime_id] key in a keeper meta JSON is not a
-     routing input — keeper→runtime assignment lives only in runtime.toml
-     [[runtime.assignments]] ({!Runtime.runtime_id_for_keeper}).  The key parses
-     (tolerated) but an unassigned keeper resolves to [runtime].default. *)
+let test_retired_runtime_id_is_rejected () =
   let json =
-    `Assoc
-      [
-        ("name", `String "alice");
-        ("agent_name", `String "keeper-alice-agent");
-        ("trace_id", `String "alice-001");
-        ("runtime_id", `String "oas-keeper_unified");
-      ]
+    match Masc_test_deps.current_meta_json_fixture ~name:"alice" () with
+    | `Assoc fields -> `Assoc (("runtime_id", `String "retired") :: fields)
+    | _ -> Alcotest.fail "current fixture must be an object"
   in
-  match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta ->
-      check string "name" "alice" meta.name;
-      check string "agent_name" "keeper-alice-agent" meta.agent_name
-  | Error e -> fail ("expected keeper meta runtime_id key to parse, got Error: " ^ e)
+  match Masc.Keeper_meta_json_parse.meta_of_json json with
+  | Error detail ->
+    check bool "error names runtime_id" true
+      (Astring.String.is_infix ~affix:"runtime_id" detail)
+  | Ok _ -> fail "retired runtime_id unexpectedly decoded"
 
 let test_conflicting_runtime_id_and_legacy_runtime_id_rejected () =
   (* Dual-write migration must fail loud when the canonical [runtime_id]
@@ -184,8 +176,8 @@ let () =
       , [ test_case "valid trace_id" `Quick test_valid_trace_id
         ; test_case "explicit keeper name is not nickname-canonicalized" `Quick
             test_explicit_keeper_name_is_not_nickname_canonicalized
-        ; test_case "legacy runtime_id alias tolerated" `Quick
-            test_legacy_runtime_id_alias_tolerated
+        ; test_case "retired runtime_id is rejected" `Quick
+            test_retired_runtime_id_is_rejected
         ; test_case "conflicting runtime_id and legacy runtime_id rejected" `Quick
             test_conflicting_runtime_id_and_legacy_runtime_id_rejected
         ; test_case "missing trace_id field" `Quick test_missing_trace_id

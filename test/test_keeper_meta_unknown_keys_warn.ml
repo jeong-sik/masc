@@ -84,13 +84,19 @@ let test_persisted_multimodal_policy_is_canonical_before_warn () =
     ~finally:(fun () ->
       if Sys.file_exists path then Sys.remove path)
     (fun () ->
-      Fs_compat.save_file
-        path
-        {|{"name":"legacy-mm","agent_name":"legacy-mm","trace_id":"trace-legacy-mm","multimodal_policy":"Delegate"}|};
+      let json =
+        match Masc_test_deps.current_meta_json_fixture ~name:"current-mm" () with
+        | `Assoc fields ->
+          `Assoc
+            (("multimodal_policy", `String "delegate")
+             :: List.remove_assoc "multimodal_policy" fields)
+        | _ -> Alcotest.fail "current fixture must be an object"
+      in
+      Fs_compat.save_file path (Yojson.Safe.to_string json);
       let before = counter_total () in
       (match Keeper_meta_store.read_meta_file_path path with
        | Ok (Some meta) ->
-         Alcotest.(check string) "keeper name" "legacy-mm" meta.name;
+         Alcotest.(check string) "keeper name" "current-mm" meta.name;
          Alcotest.(check string)
            "multimodal policy"
            "delegate"

@@ -32,27 +32,6 @@ let test_canonical_includes_runtime_keys () =
         (List.mem key canonical))
     target_keys
 
-let test_meta_to_json_redacts_last_model_used () =
-  let json =
-    `Assoc
-      [ "name", `String "meta-redaction"
-      ; "agent_name", `String "meta-redaction"
-      ; "trace_id", `String "trace-meta-redaction"
-      ; "last_model_used", `String "openai:gpt-5.4"
-      ]
-  in
-  match Keeper_meta_json.meta_of_json json with
-  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
-  | Ok meta ->
-    let emitted = Keeper_meta_json.meta_to_json meta in
-    let has_last_model_used =
-      match emitted with
-      | `Assoc fields -> List.mem_assoc "last_model_used" fields
-      | _ -> Alcotest.fail "meta_to_json must emit an object"
-    in
-    Alcotest.(check bool) "legacy last_model_used key is redacted on write" false
-      has_last_model_used
-
 (* Regression: the persisted identity-counter JSON key stays ["generation"]
    even though the OCaml field is [nonce] (every other JSON surface — keeper
    status, dashboard — already keeps this key while reading [rt.nonce]).
@@ -63,12 +42,9 @@ let test_meta_to_json_redacts_last_model_used () =
    ["nonce"]). *)
 let test_persisted_identity_counter_key_is_generation () =
   let input =
-    `Assoc
-      [ "name", `String "meta-wire-key"
-      ; "agent_name", `String "meta-wire-key"
-      ; "trace_id", `String "trace-wire-key"
-      ; "generation", `Int 7
-      ]
+    match Masc_test_deps.current_meta_json_fixture ~name:"meta-wire-key" () with
+    | `Assoc fields -> `Assoc (("generation", `Int 7) :: List.remove_assoc "generation" fields)
+    | _ -> Alcotest.fail "current fixture must be an object"
   in
   let meta =
     match Keeper_meta_json.meta_of_json input with
@@ -103,10 +79,6 @@ let () =
             "runtime keys present"
             `Quick
             test_canonical_includes_runtime_keys
-        ; Alcotest.test_case
-            "meta_to_json redacts last_model_used"
-            `Quick
-            test_meta_to_json_redacts_last_model_used
         ; Alcotest.test_case
             "persisted identity counter key is generation"
             `Quick

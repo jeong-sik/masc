@@ -397,7 +397,7 @@ active_goal_ids = ["goal-masc-improver"]
     | `Assoc fields ->
       fields
       |> List.filter_map (fun (key, _) ->
-        if List.mem key Masc.Keeper_meta_json_scrub.config_field_names
+        if List.mem key Masc.Keeper_meta_json_scrub.toml_only_field_names
         then Some key
         else None)
     | _ -> Alcotest.fail "expected keeper meta JSON object"

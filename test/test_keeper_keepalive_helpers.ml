@@ -41,7 +41,7 @@ let make_keepalive_meta ~name ~agent_name =
         ("network_mode", `String "inherit");
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta -> meta
 
@@ -193,7 +193,7 @@ let make_board_resume_meta name =
       ; ("network_mode", `String "inherit")
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta -> meta
 ;;

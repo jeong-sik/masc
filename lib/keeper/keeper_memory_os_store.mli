@@ -136,3 +136,40 @@ val pending_publication_settlement_warnings :
 val settlement_warning_to_string : settlement_warning -> string
 val error_settlement_warnings : error -> settlement_warning list
 val error_to_string : error -> string
+
+module For_testing : sig
+  type error_tag =
+    | Invalid_layout_error
+    | Store_not_active_error
+    | Runtime_store_binding_mismatch_error
+    | Persisted_store_binding_mismatch_error
+    | Invalid_domain_value_error
+    | Conflicting_operation_error
+    | Generation_exhausted_error
+    | Entropy_source_failed_error
+    | Immutable_object_too_large_error
+    | Immutable_create_failed_error
+    | Immutable_read_failed_error
+    | Immutable_digest_mismatch_error
+    | Invalid_store_json_error
+    | Head_operation_failed_error
+    | Head_row_too_large_error
+    | Pending_publication_mismatch_error
+
+  type warning_tag =
+    | Head_settlement_warning_tag
+    | Head_effect_warning_tag
+    | Head_indeterminate_warning_tag
+    | Immutable_settlement_warning_tag
+
+  val error_tag : error -> error_tag
+  val warning_tag : settlement_warning -> warning_tag
+
+  (** Exercise the production publication state machine with deterministic
+      hooks from the underlying capability-relative HEAD primitive. *)
+  val publish_with_head_hooks :
+    Fs_compat.Capability_head.For_testing.hooks ->
+    t ->
+    prepared_commit ->
+    (publish_outcome, error) result
+end

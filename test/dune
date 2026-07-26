@@ -1300,7 +1300,7 @@
 (test
  (name test_keeper_memory_os_store)
  (modules test_keeper_memory_os_store)
- (libraries alcotest masc_test_deps eio_main unix yojson))
+ (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
 
 ; Provider-neutral Memory OS Librarian exact-output composition proof.
 (test

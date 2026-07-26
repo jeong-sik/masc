@@ -2,38 +2,35 @@ open Alcotest
 
 module Store = Masc.Keeper_memory_os_store
 module Types = Masc.Keeper_memory_os_types
+module Head = Fs_compat.Capability_head
 
 let require_ok = function
   | Ok value -> value
   | Error error -> fail (Store.error_to_string error)
 ;;
 
-let contains_substring haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let haystack_length = String.length haystack in
-  let needle_length = String.length needle in
-  let rec loop offset =
-    if offset + needle_length > haystack_length
-    then false
-    else if
-      String.equal
-        (String.sub haystack offset needle_length)
-        needle
-    then true
-    else loop (offset + 1)
-  in
-  needle_length = 0 || loop 0
-;;
-
-let expect_error_contains label needle = function
+let expect_error_tag label expected = function
   | Error error ->
     check
       bool
       label
       true
-      (contains_substring (Store.error_to_string error) needle)
+      (Store.For_testing.error_tag error = expected)
   | Ok _ -> failf "%s: expected an error" label
+;;
+
+let expect_single_warning_tag label expected = function
+  | [ warning ] ->
+    check
+      bool
+      label
+      true
+      (Store.For_testing.warning_tag warning = expected)
+  | warnings ->
+    failf
+      "%s: expected exactly one warning, observed %d"
+      label
+      (List.length warnings)
 ;;
 
 let rec remove_tree path =
@@ -299,9 +296,9 @@ let test_current_replay_and_conflict ~fs () =
        (sha256_string (Store.commit_receipt_id replay))
    | Store.Prepared _ -> fail "exact current operation did not replay"
    | Store.Stale_expected _ -> fail "exact current snapshot became stale");
-  expect_error_contains
+  expect_error_tag
     "same operation with different state conflicts"
-    "current memory os operation"
+    Store.For_testing.Conflicting_operation_error
     (Store.prepare
        store
        ~expected:current
@@ -353,9 +350,9 @@ let test_runtime_binding_rejections ~fs () =
   within_store ~root:root_a ~owner:"keeper-a" @@ fun store_a ->
   let snapshot_a = require_ok (Store.load store_a) in
   within_store ~seed:1 ~root:root_b ~owner:"keeper-a" @@ fun store_b ->
-  expect_error_contains
+  expect_error_tag
     "active cross-store snapshot rejected"
-    "different open store instance"
+    Store.For_testing.Runtime_store_binding_mismatch_error
     (Store.prepare
        store_b
        ~expected:snapshot_a
@@ -365,24 +362,23 @@ let test_runtime_binding_rejections ~fs () =
     within_store ~seed:2 ~root:root_a ~owner:"keeper-a"
       (fun store -> store)
   in
-  expect_error_contains
+  expect_error_tag
     "post-callback store rejected"
-    "callback lifetime has ended"
+    Store.For_testing.Store_not_active_error
     (Store.load escaped_store);
   let escaped_snapshot =
     within_store ~seed:3 ~root:root_a ~owner:"keeper-a"
       (fun store -> require_ok (Store.load store))
   in
   within_store ~seed:4 ~root:root_a ~owner:"keeper-a" @@ fun reopened ->
-  (match
-     Store.prepare
+  expect_error_tag
+    "post-callback snapshot rejected"
+    Store.For_testing.Runtime_store_binding_mismatch_error
+    (Store.prepare
        reopened
        ~expected:escaped_snapshot
        ~operation_id:"escaped-snapshot"
-       ~state:(state "escaped")
-   with
-   | Error _ -> ()
-   | Ok _ -> fail "post-callback snapshot was accepted");
+       ~state:(state "escaped"));
   let escaped_prepared =
     within_store ~seed:5 ~root:root_a ~owner:"keeper-a"
       (fun store ->
@@ -394,9 +390,10 @@ let test_runtime_binding_rejections ~fs () =
            (state "escaped-prepared"))
   in
   within_store ~seed:6 ~root:root_a ~owner:"keeper-a" @@ fun reopened ->
-  (match Store.publish reopened escaped_prepared with
-   | Error _ -> ()
-   | Ok _ -> fail "post-callback prepared commit was accepted")
+  expect_error_tag
+    "post-callback prepared commit rejected"
+    Store.For_testing.Runtime_store_binding_mismatch_error
+    (Store.publish reopened escaped_prepared)
 ;;
 
 let test_same_length_digest_precedes_decode ~fs () =
@@ -416,9 +413,9 @@ let test_same_length_digest_precedes_decode ~fs () =
     (String.length original)
     (String.length corrupted);
   save_raw commit_path corrupted;
-  expect_error_contains
+  expect_error_tag
     "digest mismatch precedes invalid JSON decode"
-    "does not match its sha-256 digest"
+    Store.For_testing.Immutable_digest_mismatch_error
     (load_result ~root ())
 ;;
 
@@ -431,18 +428,18 @@ let test_head_identity_and_ref_tamper_fail_closed ~fs () =
             "owner_id"
             (`String "keeper-b")
             head)
-      , "persisted store binding mismatch" )
+      , Store.For_testing.Persisted_store_binding_mismatch_error )
     ; ( "store"
       , (fun head ->
           replace_json_field
             "store_id"
             (`String zero_digest)
             head)
-      , "persisted store binding mismatch" )
+      , Store.For_testing.Persisted_store_binding_mismatch_error )
     ; ( "generation"
       , (fun head ->
           replace_json_field "generation" (`Intlit "2") head)
-      , "persisted store binding mismatch" )
+      , Store.For_testing.Persisted_store_binding_mismatch_error )
     ; ( "commit-ref"
       , (fun head ->
           let commit =
@@ -452,11 +449,11 @@ let test_head_identity_and_ref_tamper_fail_closed ~fs () =
                  (`String zero_digest)
           in
           replace_json_field "commit" commit head)
-      , "does not match its sha-256 digest" )
+      , Store.For_testing.Immutable_digest_mismatch_error )
     ]
   in
   List.iteri
-    (fun index (label, tamper, expected_error) ->
+    (fun index (label, tamper, expected_tag) ->
       with_root
         ~fs
         ("masc_memory_os_head_tamper_" ^ label ^ "_")
@@ -465,9 +462,9 @@ let test_head_identity_and_ref_tamper_fail_closed ~fs () =
         (seed_commit ~seed:index ~root "alpha"
           : Store.commit_receipt);
       load_head root_path |> tamper |> save_head root_path;
-      expect_error_contains
+      expect_error_tag
         (label ^ " tamper fails closed")
-        expected_error
+        expected_tag
         (load_result ~seed:(100 + index) ~root ()))
     cases
 ;;
@@ -519,9 +516,9 @@ let test_secure_random_collision_never_overwrites ~fs () =
           ignore
             (publish_committed store first : Store.commit_receipt);
           let current = require_ok (Store.load store) in
-          expect_error_contains
+          expect_error_tag
             "exclusive random leaf collision fails"
-            "failed to durably create immutable facts object"
+            Store.For_testing.Immutable_create_failed_error
             (Store.prepare
                store
                ~expected:current
@@ -538,6 +535,316 @@ let test_secure_random_collision_never_overwrites ~fs () =
   within_store ~seed:17 ~root ~owner:"keeper-a" @@ fun reopened ->
   let current = require_ok (Store.load reopened) in
   check_state_claim "reopen after collision" "first" current
+;;
+
+let test_published_late_failure_is_committed ~fs () =
+  with_root ~fs "masc_memory_os_published_failure_" @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let prepared =
+    prepare_new store empty "published-operation" (state "published")
+  in
+  let hook_calls = ref 0 in
+  let hooks =
+    Head.For_testing.hooks
+      ~after_verified:(fun () ->
+        incr hook_calls;
+        raise Exit)
+      ()
+  in
+  (match
+     require_ok
+       (Store.For_testing.publish_with_head_hooks hooks store prepared)
+   with
+   | Store.Committed receipt ->
+     check int "late published hook called once" 1 !hook_calls;
+     expect_single_warning_tag
+       "late published failure is retained as an effect warning"
+       Store.For_testing.Head_effect_warning_tag
+       (Store.commit_receipt_settlement_warnings receipt);
+     check_state_claim
+       "late failure receipt carries published state"
+       "published"
+       (Store.committed_snapshot receipt)
+   | Store.Stale _ -> fail "late published failure became stale"
+   | Store.Indeterminate _ ->
+     fail "verified publication was downgraded to indeterminate");
+  let current = require_ok (Store.load store) in
+  check_state_claim "late failure HEAD is visible" "published" current
+;;
+
+let test_indeterminate_settles_committed ~fs () =
+  with_root ~fs "masc_memory_os_indeterminate_commit_" @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let prepared =
+    prepare_new store empty "pending-operation" (state "pending")
+  in
+  let hook_calls = ref 0 in
+  let hooks =
+    Head.For_testing.hooks
+      ~after_rename:(fun () ->
+        incr hook_calls;
+        raise Exit)
+      ()
+  in
+  let pending =
+    match
+      require_ok
+        (Store.For_testing.publish_with_head_hooks hooks store prepared)
+    with
+    | Store.Indeterminate pending -> pending
+    | Store.Committed _ ->
+      fail "post-rename failure was reported committed before settlement"
+    | Store.Stale _ -> fail "post-rename failure became stale"
+  in
+  check int "indeterminate hook called once" 1 !hook_calls;
+  expect_single_warning_tag
+    "indeterminate publication retains a typed warning"
+    Store.For_testing.Head_indeterminate_warning_tag
+    (Store.pending_publication_settlement_warnings pending);
+  (match require_ok (Store.settle store pending) with
+   | Store.Settled_committed receipt ->
+     check string
+       "settlement preserves pending receipt"
+       (sha256_string (Store.pending_publication_receipt_id pending))
+       (sha256_string (Store.commit_receipt_id receipt));
+     check_state_claim
+       "settlement observes committed state"
+       "pending"
+       (Store.committed_snapshot receipt)
+   | Store.Settled_not_published _ ->
+     fail "visible renamed HEAD was reported not published"
+   | Store.Still_indeterminate _ ->
+     fail "visible renamed HEAD remained indeterminate")
+;;
+
+let test_indeterminate_after_successor_stays_pending ~fs () =
+  with_root ~fs "masc_memory_os_indeterminate_successor_" @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let prepared_a =
+    prepare_new store empty "pending-a" (state "pending-a")
+  in
+  let hook_calls = ref 0 in
+  let hooks =
+    Head.For_testing.hooks
+      ~after_rename:(fun () ->
+        incr hook_calls;
+        raise Exit)
+      ()
+  in
+  let pending_a =
+    match
+      require_ok
+        (Store.For_testing.publish_with_head_hooks hooks store prepared_a)
+    with
+    | Store.Indeterminate pending -> pending
+    | Store.Committed _ | Store.Stale _ ->
+      fail "post-rename fixture did not produce a pending publication"
+  in
+  let current_a = require_ok (Store.load store) in
+  let prepared_b =
+    prepare_new store current_a "successor-b" (state "successor-b")
+  in
+  ignore (publish_committed store prepared_b : Store.commit_receipt);
+  let first_pending =
+    match require_ok (Store.settle store pending_a) with
+    | Store.Still_indeterminate pending -> pending
+    | Store.Settled_committed _ ->
+      fail "later authority falsely proved the earlier pending commit"
+    | Store.Settled_not_published _ ->
+      fail "later authority falsely proved the earlier commit absent"
+  in
+  let second_pending =
+    match require_ok (Store.settle store first_pending) with
+    | Store.Still_indeterminate pending -> pending
+    | Store.Settled_committed _ | Store.Settled_not_published _ ->
+      fail "repeated settlement changed unresolved authority"
+  in
+  check int "indeterminate successor hook called once" 1 !hook_calls;
+  check string
+    "still-indeterminate settlement reuses the pending receipt"
+    (sha256_string (Store.pending_publication_receipt_id pending_a))
+    (sha256_string (Store.pending_publication_receipt_id second_pending));
+  let current_b = require_ok (Store.load store) in
+  check_state_claim "successor remains authoritative" "successor-b" current_b
+;;
+
+let test_settlement_read_error_reuses_pending ~fs () =
+  with_root ~fs "masc_memory_os_settle_read_error_" @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let prepared =
+    prepare_new store empty "read-error-pending" (state "read-error")
+  in
+  let hook_calls = ref 0 in
+  let hooks =
+    Head.For_testing.hooks
+      ~after_rename:(fun () ->
+        incr hook_calls;
+        raise Exit)
+      ()
+  in
+  let pending =
+    match
+      require_ok
+        (Store.For_testing.publish_with_head_hooks hooks store prepared)
+    with
+    | Store.Indeterminate pending -> pending
+    | Store.Committed _ | Store.Stale _ ->
+      fail "post-rename fixture did not produce a pending publication"
+  in
+  let original_head = load_raw (head_path root_path) in
+  save_raw (head_path root_path) "corrupt-without-line-feed";
+  let failed_settlement = Store.settle store pending in
+  save_raw (head_path root_path) original_head;
+  expect_error_tag
+    "settlement read failure is typed"
+    Store.For_testing.Head_operation_failed_error
+    failed_settlement;
+  check int "settlement read-error hook called once" 1 !hook_calls;
+  (match require_ok (Store.settle store pending) with
+   | Store.Settled_committed receipt ->
+     check string
+       "same pending value settles after read repair"
+       (sha256_string (Store.pending_publication_receipt_id pending))
+       (sha256_string (Store.commit_receipt_id receipt))
+   | Store.Settled_not_published _ | Store.Still_indeterminate _ ->
+     fail "repaired pending publication did not settle committed")
+;;
+
+let test_unchanged_failure_and_cancellation_do_not_publish ~fs () =
+  with_root ~fs "masc_memory_os_unchanged_failure_" @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let failed_prepared =
+    prepare_new store empty "unchanged-error" (state "unchanged-error")
+  in
+  let failure_calls = ref 0 in
+  let failure_hooks =
+    Head.For_testing.hooks
+      ~before_rename:(fun () ->
+        incr failure_calls;
+        raise Exit)
+      ()
+  in
+  expect_error_tag
+    "pre-rename non-conflict failure is typed"
+    Store.For_testing.Head_operation_failed_error
+    (Store.For_testing.publish_with_head_hooks
+       failure_hooks
+       store
+       failed_prepared);
+  check int "unchanged failure hook called once" 1 !failure_calls;
+  let after_failure = require_ok (Store.load store) in
+  check int64 "unchanged failure leaves generation zero" 0L
+    (Store.snapshot_generation after_failure);
+  let cancelled_prepared =
+    prepare_new
+      store
+      after_failure
+      "unchanged-cancel"
+      (state "unchanged-cancel")
+  in
+  let cancellation_calls = ref 0 in
+  let cancellation_hooks =
+    Head.For_testing.hooks
+      ~before_rename:(fun () ->
+        incr cancellation_calls;
+        raise
+          (Eio.Cancel.Cancelled
+             (Failure "injected Store pre-publication cancellation")))
+      ()
+  in
+  (match
+     Store.For_testing.publish_with_head_hooks
+       cancellation_hooks
+       store
+       cancelled_prepared
+   with
+   | exception Eio.Cancel.Cancelled _ -> ()
+   | Error error ->
+     failf
+       "pre-publication cancellation was flattened: %s"
+       (Store.error_to_string error)
+   | Ok _ -> fail "pre-publication cancellation returned an outcome");
+  check int "cancellation hook called once" 1 !cancellation_calls;
+  let after_cancellation = require_ok (Store.load store) in
+  check int64 "cancellation leaves generation zero" 0L
+    (Store.snapshot_generation after_cancellation)
+;;
+
+let test_resource_settlement_warning_preserves_commit ~fs () =
+  with_root ~fs "masc_memory_os_resource_warning_" @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let prepared =
+    prepare_new store empty "resource-warning" (state "resource-warning")
+  in
+  let hook_calls = ref 0 in
+  let hooks =
+    Head.For_testing.hooks
+      ~on_resource_settlement:(fun () ->
+        incr hook_calls;
+        raise Exit)
+      ()
+  in
+  (match
+     require_ok
+       (Store.For_testing.publish_with_head_hooks hooks store prepared)
+   with
+   | Store.Committed receipt ->
+     check int "resource-settlement hook called once" 1 !hook_calls;
+     expect_single_warning_tag
+       "resource settlement warning is retained"
+       Store.For_testing.Head_settlement_warning_tag
+       (Store.commit_receipt_settlement_warnings receipt)
+   | Store.Stale _ | Store.Indeterminate _ ->
+     fail "resource settlement warning changed publication effect");
+  let current = require_ok (Store.load store) in
+  check_state_claim
+    "resource warning does not hide committed HEAD"
+    "resource-warning"
+    current
+;;
+
+let test_non_current_operation_is_not_replayed ~fs () =
+  with_root ~fs "masc_memory_os_current_only_replay_" @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let prepared_a =
+    prepare_new store empty "operation-a" (state "state-a")
+  in
+  ignore (publish_committed store prepared_a : Store.commit_receipt);
+  let current_a = require_ok (Store.load store) in
+  let prepared_b =
+    prepare_new store current_a "operation-b" (state "state-b")
+  in
+  ignore (publish_committed store prepared_b : Store.commit_receipt);
+  let current_b = require_ok (Store.load store) in
+  let prepared_a_again =
+    match
+      require_ok
+        (Store.prepare
+           store
+           ~expected:current_b
+           ~operation_id:"operation-a"
+           ~state:(state "state-a"))
+    with
+    | Store.Prepared prepared -> prepared
+    | Store.Current_commit_replay _ ->
+      fail "non-current operation A was replayed after A-B"
+    | Store.Stale_expected _ ->
+      fail "current B snapshot became stale while preparing A again"
+  in
+  let receipt_a_again = publish_committed store prepared_a_again in
+  check int64 "A-B-A creates a new generation" 3L
+    (Store.commit_receipt_generation receipt_a_again);
+  check_state_claim
+    "A-B-A publishes the new current A state"
+    "state-a"
+    (Store.committed_snapshot receipt_a_again)
 ;;
 
 let () =
@@ -562,6 +869,20 @@ let () =
             (test_valid_opaque_orphan_is_ignored ~fs)
         ; test_case "secure random collision no overwrite" `Quick
             (test_secure_random_collision_never_overwrites ~fs)
+        ; test_case "published late failure is committed" `Quick
+            (test_published_late_failure_is_committed ~fs)
+        ; test_case "indeterminate settles committed" `Quick
+            (test_indeterminate_settles_committed ~fs)
+        ; test_case "successor keeps earlier publication pending" `Quick
+            (test_indeterminate_after_successor_stays_pending ~fs)
+        ; test_case "settlement read error reuses pending" `Quick
+            (test_settlement_read_error_reuses_pending ~fs)
+        ; test_case "unchanged failure and cancellation" `Quick
+            (test_unchanged_failure_and_cancellation_do_not_publish ~fs)
+        ; test_case "resource warning preserves commit" `Quick
+            (test_resource_settlement_warning_preserves_commit ~fs)
+        ; test_case "non-current operation is not replayed" `Quick
+            (test_non_current_operation_is_not_replayed ~fs)
         ] )
     ]
 ;;

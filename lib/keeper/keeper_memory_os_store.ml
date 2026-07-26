@@ -1651,7 +1651,11 @@ let add_snapshot_warnings warnings (snapshot : snapshot) =
   }
 ;;
 
-let publish (store : t) (prepared : prepared_commit) =
+let publish_with_compare_and_swap
+      compare_and_swap
+      (store : t)
+      (prepared : prepared_commit)
+  =
   let* () =
     check_binding
       store
@@ -1659,7 +1663,7 @@ let publish (store : t) (prepared : prepared_commit) =
       prepared.settlement_warnings
   in
   match
-    Head.compare_and_swap
+    compare_and_swap
       ~secure_random:store.secure_random
       ~parent:store.root
       ~leaf:head_leaf
@@ -1721,6 +1725,10 @@ let publish (store : t) (prepared : prepared_commit) =
                ~settlement_warnings
                (Head_operation_failed
                   { phase = "publish"; failure = head_error }))))
+;;
+
+let publish store prepared =
+  publish_with_compare_and_swap Head.compare_and_swap store prepared
 ;;
 
 let snapshot_matches_pending
@@ -1813,3 +1821,65 @@ let settle (store : t) (pending : pending_publication) =
         (Still_indeterminate
            { pending with settlement_warnings })
 ;;
+
+module For_testing = struct
+  type error_tag =
+    | Invalid_layout_error
+    | Store_not_active_error
+    | Runtime_store_binding_mismatch_error
+    | Persisted_store_binding_mismatch_error
+    | Invalid_domain_value_error
+    | Conflicting_operation_error
+    | Generation_exhausted_error
+    | Entropy_source_failed_error
+    | Immutable_object_too_large_error
+    | Immutable_create_failed_error
+    | Immutable_read_failed_error
+    | Immutable_digest_mismatch_error
+    | Invalid_store_json_error
+    | Head_operation_failed_error
+    | Head_row_too_large_error
+    | Pending_publication_mismatch_error
+
+  type warning_tag =
+    | Head_settlement_warning_tag
+    | Head_effect_warning_tag
+    | Head_indeterminate_warning_tag
+    | Immutable_settlement_warning_tag
+
+  let error_tag (value : error) =
+    match value.kind with
+    | Invalid_layout _ -> Invalid_layout_error
+    | Store_not_active -> Store_not_active_error
+    | Runtime_store_binding_mismatch ->
+      Runtime_store_binding_mismatch_error
+    | Persisted_store_binding_mismatch _ ->
+      Persisted_store_binding_mismatch_error
+    | Invalid_domain_value _ -> Invalid_domain_value_error
+    | Conflicting_operation _ -> Conflicting_operation_error
+    | Generation_exhausted -> Generation_exhausted_error
+    | Entropy_source_failed _ -> Entropy_source_failed_error
+    | Immutable_object_too_large _ -> Immutable_object_too_large_error
+    | Immutable_create_failed _ -> Immutable_create_failed_error
+    | Immutable_read_failed _ -> Immutable_read_failed_error
+    | Immutable_digest_mismatch _ -> Immutable_digest_mismatch_error
+    | Invalid_store_json _ -> Invalid_store_json_error
+    | Head_operation_failed _ -> Head_operation_failed_error
+    | Head_row_too_large _ -> Head_row_too_large_error
+    | Pending_publication_mismatch -> Pending_publication_mismatch_error
+  ;;
+
+  let warning_tag = function
+    | Head_settlement_warning _ -> Head_settlement_warning_tag
+    | Head_effect_warning _ -> Head_effect_warning_tag
+    | Head_indeterminate_warning _ -> Head_indeterminate_warning_tag
+    | Immutable_settlement_warning _ -> Immutable_settlement_warning_tag
+  ;;
+
+  let publish_with_head_hooks hooks store prepared =
+    publish_with_compare_and_swap
+      (Head.For_testing.compare_and_swap hooks)
+      store
+      prepared
+  ;;
+end

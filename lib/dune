@@ -3,9 +3,10 @@
  (name masc)
  (public_name masc)
  (private_modules
-  keeper_fs_durable_directory
+ keeper_fs_durable_directory
   keeper_exact_flow_scope
-  keeper_dead_revival_payload)
+  keeper_dead_revival_payload
+  keeper_meta_runtime_sync_internal)
  (libraries
   mcp_protocol
   mcp_protocol.eio

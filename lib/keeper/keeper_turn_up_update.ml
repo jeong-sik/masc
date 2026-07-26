@@ -65,6 +65,7 @@ let dead_revival_error_kind error =
   | Journal_published_with_warnings _ -> "journal_published_with_warnings"
   | Journal_read_settlement_failed _ -> "journal_read_settlement_failed"
   | Journal_write_failed _ -> "journal_write_failed"
+  | Runtime_assignment_failed _ -> "runtime_assignment_failed"
   | Payload_operation_failed _ -> "payload_operation_failed"
   | Transaction_lock_failed _ -> "transaction_lock_failed"
   | Post_commit_cleanup_required _ -> "post_commit_cleanup_required"
@@ -279,36 +280,36 @@ let update_keeper ?(preserve_prompt_defaults = false)
          in
          if dead_revival_requested
          then
-           with_runtime_assignment (fun () ->
-             match
-               Keeper_dead_revival_transaction.revive
-                 ctx
-                 ~original:old
-                 ~candidate:updated
-             with
-             | Error
-                 (Keeper_dead_revival_transaction.Post_commit_cleanup_required
-                    { committed; entry; cleanup_error }) ->
-               enqueue_goal_assignment_wakes committed;
-               tool_result_ok_data
-                 (committed_with_cleanup_required_json
-                    ~committed
-                    ~entry
-                    ~cleanup_error)
-             | Error error ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string TurnUpUpdateFailures)
-                 ~labels:
-                   [ "keeper", updated.name
-                   ; "site", "dead_revival_transaction"
-                   ]
-                 ();
-               tool_result_error
-                 (Keeper_dead_revival_transaction.error_to_string error)
-             | Ok success ->
-               enqueue_goal_assignment_wakes success.meta;
-               tool_result_ok_data
-                 (Keeper_meta_json.meta_to_json success.meta))
+           match
+             Keeper_dead_revival_transaction.revive
+               ?runtime_id:p.runtime_id_opt
+               ctx
+               ~original:old
+               ~candidate:updated
+           with
+           | Error
+               (Keeper_dead_revival_transaction.Post_commit_cleanup_required
+                  { committed; entry; cleanup_error }) ->
+             enqueue_goal_assignment_wakes committed;
+             tool_result_ok_data
+               (committed_with_cleanup_required_json
+                  ~committed
+                  ~entry
+                  ~cleanup_error)
+           | Error error ->
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string TurnUpUpdateFailures)
+               ~labels:
+                 [ "keeper", updated.name
+                 ; "site", "dead_revival_transaction"
+                 ]
+               ();
+             tool_result_error
+               (Keeper_dead_revival_transaction.error_to_string error)
+           | Ok success ->
+             enqueue_goal_assignment_wakes success.meta;
+             tool_result_ok_data
+               (Keeper_meta_json.meta_to_json success.meta)
          else
            let run_update permit =
              with_runtime_assignment (fun () ->

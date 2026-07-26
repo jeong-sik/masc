@@ -194,6 +194,7 @@ type rollback_error =
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
   | Rollback_payload_delete_failed of Payload.error
   | Rollback_journal_clear_failed of string
+  | Rollback_runtime_assignment_failed of string
 
 type payload_operation =
   | Payload_prepare
@@ -214,6 +215,7 @@ type error =
       }
   | Journal_read_settlement_failed of Head.settlement_warning list
   | Journal_write_failed of string
+  | Runtime_assignment_failed of string
   | Payload_operation_failed of
       { operation : payload_operation
       ; failure : Payload.error
@@ -1326,6 +1328,8 @@ let rollback_error_to_string = function
   | Rollback_payload_delete_failed failure ->
     "revival payload cleanup failed: " ^ Payload.error_to_string failure
   | Rollback_journal_clear_failed detail -> "journal clear failed: " ^ detail
+  | Rollback_runtime_assignment_failed detail ->
+    "runtime assignment rollback failed: " ^ detail
 ;;
 
 let payload_operation_to_string = function
@@ -1358,6 +1362,8 @@ let rec error_to_string = function
     "keeper revival journal read settled with warnings: "
     ^ settlement_warning_detail (List.length warnings)
   | Journal_write_failed detail -> "keeper revival journal write failed: " ^ detail
+  | Runtime_assignment_failed detail ->
+    "keeper revival runtime assignment failed: " ^ detail
   | Payload_operation_failed { operation; failure } ->
     Printf.sprintf
       "keeper revival payload %s failed: %s"
@@ -1978,12 +1984,72 @@ let preflight_journal_authority config keeper_name =
                (journal_stage_to_json existing.stage))))
 ;;
 
-let revive_locked (ctx : _ context) ~original ~candidate =
+type runtime_assignment =
+  | Runtime_assignment_unchanged
+  | Runtime_assignment_changed of string option
+
+let restore_runtime_assignment ~keeper_name = function
+  | Runtime_assignment_unchanged -> Ok ()
+  | Runtime_assignment_changed (Some runtime_id) ->
+    Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id ()
+  | Runtime_assignment_changed None ->
+    Runtime.clear_runtime_id_for_keeper ~keeper_name ()
+;;
+
+let apply_runtime_assignment ~keeper_name = function
+  | None -> Ok Runtime_assignment_unchanged
+  | Some runtime_id ->
+    let previous = Runtime.runtime_id_for_keeper keeper_name in
+    if Option.equal String.equal previous (Some runtime_id)
+    then Ok Runtime_assignment_unchanged
+    else
+      let assignment = Runtime_assignment_changed previous in
+      (match Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id () with
+       | Ok () -> Ok assignment
+       | Error detail ->
+         (match restore_runtime_assignment ~keeper_name assignment with
+          | Ok () -> Error (Runtime_assignment_failed detail)
+          | Error rollback_detail ->
+            Error
+              (Rollback_failed
+                 { cause =
+                     error_to_string (Runtime_assignment_failed detail)
+                 ; errors =
+                     [ Rollback_runtime_assignment_failed rollback_detail ]
+                 })))
+;;
+
+let settle_runtime_assignment ~keeper_name assignment result =
+  match result with
+  | Ok _ | Error (Post_commit_cleanup_required _) -> result
+  | Error error ->
+    (match restore_runtime_assignment ~keeper_name assignment with
+     | Ok () -> Error error
+     | Error rollback_detail ->
+       Error
+         (Rollback_failed
+            { cause = error_to_string error
+            ; errors = [ Rollback_runtime_assignment_failed rollback_detail ]
+            }))
+;;
+
+let revive_locked
+      (ctx : _ context)
+      ~original
+      ~candidate
+      ~runtime_id
+      ~runtime_assignment
+      ~launch_committed
+  =
   match preflight_journal_authority ctx.config original.name with
   | Error error ->
     observe "conflict" original.name (error_to_string error);
     Error error
   | Ok () ->
+    (match apply_runtime_assignment ~keeper_name:original.name runtime_id with
+     | Error error -> Error error
+     | Ok assignment ->
+       runtime_assignment := assignment;
     (match
        Keeper_lifecycle_reservation.acquire
          ~base_path:ctx.config.base_path
@@ -1999,7 +2065,6 @@ let revive_locked (ctx : _ context) ~original ~candidate =
     let journal_for_cleanup = ref None in
     let verified_payload_for_cleanup = ref None in
     let journal_published = ref false in
-    let launch_committed = ref false in
     let cleanup_pre_journal_cancellation () =
       Eio.Cancel.protect (fun () ->
         (match !journal_for_cleanup with
@@ -2444,10 +2509,10 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                  original.name
                  (String.concat "; " (List.map rollback_error_to_string errors));
              release_observed token original.name);
-         Printexc.raise_with_backtrace cancelled backtrace))
+         Printexc.raise_with_backtrace cancelled backtrace)))
 ;;
 
-let revive (ctx : _ context) ~original ~candidate =
+let revive ?runtime_id (ctx : _ context) ~original ~candidate =
   match Payload.authority_shard_for_keeper ~keeper_name:original.name with
   | Error failure -> Error (payload_failure Payload_prepare failure)
   | Ok shard ->
@@ -2461,7 +2526,39 @@ let revive (ctx : _ context) ~original ~candidate =
     (match
        File_lock_eio.with_durable_lock_observed
          ~lock_path
-         (fun () -> revive_locked ctx ~original ~candidate)
+         (fun () ->
+           let runtime_assignment = ref Runtime_assignment_unchanged in
+           let launch_committed = ref false in
+           try
+             revive_locked
+               ctx
+               ~original
+               ~candidate
+               ~runtime_id
+               ~runtime_assignment
+               ~launch_committed
+             |> settle_runtime_assignment
+                  ~keeper_name:original.name
+                  !runtime_assignment
+           with
+           | Eio.Cancel.Cancelled _ as cancelled ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             if not !launch_committed
+             then
+               Eio.Cancel.protect (fun () ->
+                 match
+                   restore_runtime_assignment
+                     ~keeper_name:original.name
+                     !runtime_assignment
+                 with
+                 | Ok () -> ()
+                 | Error detail ->
+                   Log.Keeper.error
+                     "keeper revival cancellation could not restore runtime \
+                      assignment keeper=%s error=%s"
+                     original.name
+                     detail);
+             Printexc.raise_with_backtrace cancelled backtrace)
      with
      | File_lock_eio.Lock_not_acquired failure ->
        Error (Transaction_lock_failed failure)

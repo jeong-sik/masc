@@ -84,6 +84,16 @@ type settled_replace =
   | Settled_allocated of replace witness
   | Settled_recovered of recover_exact witness * error option
 
+type replacement_fault =
+  | Publication_settlement_warning
+  | Verified_publication_failure
+  | Publication_indeterminate
+  | Cancellation_after_publication
+
+let replacement_fault_key : replacement_fault Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let ( let* ) result fn =
   match result with
   | Ok value -> fn value
@@ -555,10 +565,45 @@ let replace ~base_path ~keeper_id ~source ~owner_id () =
     else Ok (Int64.succ source.nonce)
   in
   let* floor = floor in
+  let compare_and_swap =
+    match Eio.Fiber.get replacement_fault_key with
+    | None -> Head.compare_and_swap
+    | Some fault ->
+      let hooks =
+        match fault with
+        | Publication_settlement_warning ->
+          Head.For_testing.hooks
+            ~on_resource_settlement:(fun () ->
+              failwith
+                "injected lifecycle nonce publication settlement warning")
+            ()
+        | Verified_publication_failure ->
+          Head.For_testing.hooks
+            ~after_verified:(fun () ->
+              failwith
+                "injected lifecycle nonce verified publication failure")
+            ()
+        | Publication_indeterminate ->
+          Head.For_testing.hooks
+            ~after_rename:(fun () ->
+              failwith
+                "injected lifecycle nonce indeterminate publication")
+            ()
+        | Cancellation_after_publication ->
+          Head.For_testing.hooks
+            ~after_rename:(fun () ->
+              raise
+                (Eio.Cancel.Cancelled
+                   (Failure
+                      "injected lifecycle nonce cancellation after publication")))
+            ()
+      in
+      Head.For_testing.compare_and_swap hooks
+  in
   let* nonce =
     next_for_base_path_with_hooks
       ~snapshot_warnings:Head.snapshot_settlement_warnings
-      ~compare_and_swap:Head.compare_and_swap
+      ~compare_and_swap
       ~base_path
       ~keeper_id
       ~owner_id
@@ -826,6 +871,12 @@ let error_to_string = function
 ;;
 
 module For_testing = struct
+  type fault = replacement_fault =
+    | Publication_settlement_warning
+    | Verified_publication_failure
+    | Publication_indeterminate
+    | Cancellation_after_publication
+
   let root_path_for_base_path = root_path_for_base_path
   let authority_leaf = authority_leaf
 
@@ -833,112 +884,7 @@ module For_testing = struct
     Eio.Fiber.with_binding fd_backed_parent_opening_key () fn
   ;;
 
-  let with_read_settlement_warning
-        ~base_path
-        ~keeper_id
-        ~owner_id
-        ?floor
-        ()
-    =
-    let snapshot_warnings snapshot =
-      Head.snapshot_settlement_warnings snapshot
-      @ [ Head.Resource_settlement_failed
-            { operation = Head.Settle_resources
-            ; detail = "injected lifecycle nonce read settlement warning"
-            }
-        ]
-    in
-    next_for_base_path_with_hooks
-      ~snapshot_warnings
-      ~compare_and_swap:Head.compare_and_swap
-      ~base_path
-      ~keeper_id
-      ~owner_id
-      ?floor
-      ()
-  ;;
-
-  let with_publication_settlement_warning
-        ~base_path
-        ~keeper_id
-        ~owner_id
-        ?floor
-        ()
-    =
-    let hooks =
-      Head.For_testing.hooks
-        ~on_resource_settlement:(fun () ->
-          failwith "injected lifecycle nonce publication settlement warning")
-        ()
-    in
-    next_for_base_path_with_hooks
-      ~snapshot_warnings:Head.snapshot_settlement_warnings
-      ~compare_and_swap:(Head.For_testing.compare_and_swap hooks)
-      ~base_path
-      ~keeper_id
-      ~owner_id
-      ?floor
-      ()
-  ;;
-
-  let with_published_failure
-        ~base_path
-        ~keeper_id
-        ~owner_id
-        ?floor
-        ()
-    =
-    let hooks =
-      Head.For_testing.hooks
-        ~after_verified:(fun () ->
-          failwith "injected lifecycle nonce post-publication failure")
-        ()
-    in
-    next_for_base_path_with_hooks
-      ~snapshot_warnings:Head.snapshot_settlement_warnings
-      ~compare_and_swap:(Head.For_testing.compare_and_swap hooks)
-      ~base_path
-      ~keeper_id
-      ~owner_id
-      ?floor
-      ()
-  ;;
-
-  let with_forced_conflicts
-        ~base_path
-        ~keeper_id
-        ~owner_id
-        ?floor
-        ()
-    =
-    let compare_and_swap ~secure_random ~parent ~leaf ~expected ~row =
-      let competing_random =
-        Eio.Flow.string_source (Crypto_rng.generate head_entropy_bytes)
-      in
-      match
-        Head.compare_and_swap
-          ~secure_random:competing_random
-          ~parent
-          ~leaf
-          ~expected
-          ~row
-      with
-      | Error failure -> Error failure
-      | Ok _ ->
-        Head.compare_and_swap
-          ~secure_random
-          ~parent
-          ~leaf
-          ~expected
-          ~row
-    in
-    next_for_base_path_with_hooks
-      ~snapshot_warnings:Head.snapshot_settlement_warnings
-      ~compare_and_swap
-      ~base_path
-      ~keeper_id
-      ~owner_id
-      ?floor
-      ()
+  let with_fault fault fn =
+    Eio.Fiber.with_binding replacement_fault_key fault fn
   ;;
 end

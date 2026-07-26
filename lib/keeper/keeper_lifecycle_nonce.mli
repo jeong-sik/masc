@@ -75,14 +75,6 @@ val create :
   unit ->
   (create witness, error) result
 
-val replace :
-  base_path:string ->
-  keeper_id:string ->
-  source:identity ->
-  owner_id:string ->
-  unit ->
-  (replace witness, error) result
-
 val recover_exact :
   base_path:string ->
   keeper_id:string ->
@@ -123,39 +115,15 @@ val runtime_int_of_nonce : int64 -> (int, error) result
     durable authority remains int64 even while that field remains [int]. *)
 
 module For_testing : sig
+  type fault =
+    | Publication_settlement_warning
+    | Verified_publication_failure
+    | Publication_indeterminate
+    | Cancellation_after_publication
+
   val root_path_for_base_path : base_path:string -> string
   val authority_leaf : keeper_id:string -> string
   val with_fd_backed_parent_opening : (unit -> 'a) -> 'a
 
-  val with_read_settlement_warning :
-    base_path:string ->
-    keeper_id:string ->
-    owner_id:string ->
-    ?floor:int64 ->
-    unit ->
-    (int64, error) result
-
-  val with_publication_settlement_warning :
-    base_path:string ->
-    keeper_id:string ->
-    owner_id:string ->
-    ?floor:int64 ->
-    unit ->
-    (int64, error) result
-
-  val with_published_failure :
-    base_path:string ->
-    keeper_id:string ->
-    owner_id:string ->
-    ?floor:int64 ->
-    unit ->
-    (int64, error) result
-
-  val with_forced_conflicts :
-    base_path:string ->
-    keeper_id:string ->
-    owner_id:string ->
-    ?floor:int64 ->
-    unit ->
-    (int64, error) result
+  val with_fault : fault -> (unit -> 'a) -> 'a
 end

@@ -1012,8 +1012,37 @@ let reload_meta_from_disk ~base_path name =
 
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
-let sync_meta_if_registered ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
+let registry_meta_matches_identity
+      (meta : Keeper_meta_contract.keeper_meta)
+      ~(trace_id : Keeper_id.Trace_id.t)
+      ~nonce
+  =
+  Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id
+  && Int.equal meta.runtime.nonce nonce
+;;
+
+let registry_meta_matches_nonce_identity
+      (meta : Keeper_meta_contract.keeper_meta)
+      identity
+  =
+  String.equal
+    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    (Keeper_lifecycle_nonce.identity_owner_id identity)
+  &&
+  match
+    Keeper_lifecycle_nonce.runtime_int_of_nonce
+      (Keeper_lifecycle_nonce.identity_nonce identity)
+  with
+  | Ok nonce -> Int.equal meta.runtime.nonce nonce
+  | Error _ -> false
+;;
+
+let sync_meta_if_registered
+      (event : Keeper_meta_runtime_sync_internal.event)
+  =
+  let base_path = canonical_base_path_exn event.base_path in
+  let name = event.keeper_name in
+  let meta = event.persisted in
   match validate_registry_meta ~base_path name meta with
   | Error reason ->
       record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
@@ -1024,17 +1053,51 @@ let sync_meta_if_registered ~base_path name meta =
         match StringMap.find_opt key current with
         | None -> ()
         | Some entry ->
-            let updated =
-              StringMap.add key { entry with base_path; name; meta } current
+            let transition_matches =
+              match event.transition with
+              | Keeper_meta_runtime_sync_internal.Ordinary { trace_id; nonce } ->
+                registry_meta_matches_identity entry.meta ~trace_id ~nonce
+                && registry_meta_matches_identity meta ~trace_id ~nonce
+              | Created _ -> false
+              | Replaced witness ->
+                (match Keeper_lifecycle_nonce.witness_source witness with
+                 | None -> false
+                 | Some source ->
+                   registry_meta_matches_nonce_identity entry.meta source
+                   && registry_meta_matches_nonce_identity
+                        meta
+                        (Keeper_lifecycle_nonce.witness_target witness))
+              | Recovered witness ->
+                (match Keeper_lifecycle_nonce.witness_source witness with
+                 | None -> false
+                 | Some source ->
+                   registry_meta_matches_nonce_identity entry.meta source
+                   && registry_meta_matches_nonce_identity
+                        meta
+                        (Keeper_lifecycle_nonce.witness_target witness))
             in
-            if not (Atomic.compare_and_set registry current updated) then loop ()
+            if transition_matches
+            then (
+              let updated =
+                StringMap.add key { entry with base_path; name; meta } current
+              in
+              if not (Atomic.compare_and_set registry current updated) then loop ())
+            else
+              Log.Keeper.warn
+                "runtime metadata sync retained registry lane after identity \
+                 mismatch keeper=%s"
+                name
       in
       loop ()
 ;;
 
 let () =
-  register_runtime_meta_write_sync (fun config meta ->
-    sync_meta_if_registered ~base_path:config.base_path meta.name meta)
+  match
+    Keeper_meta_runtime_sync_internal.install_once
+      sync_meta_if_registered
+  with
+  | Ok () -> ()
+  | Error detail -> failwith detail
 ;;
 
 let mark_dead ~base_path name ~at =

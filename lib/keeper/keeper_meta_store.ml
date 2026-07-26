@@ -9,18 +9,6 @@ open Keeper_types_profile
 open Keeper_meta_contract
 open Keeper_meta_json
 
-let runtime_meta_write_sync_hook_atomic
-    : (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) Atomic.t
-  =
-  Atomic.make (fun _ _ -> ())
-;;
-
-let runtime_meta_write_sync_hook config meta =
-  Atomic.get runtime_meta_write_sync_hook_atomic config meta
-
-let register_runtime_meta_write_sync f =
-  Atomic.set runtime_meta_write_sync_hook_atomic f
-
 let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
 
 let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
@@ -280,22 +268,18 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
 ;;
 
 type runtime_sync =
-  | Sync_runtime
+  | Sync_runtime of Keeper_meta_runtime_sync_internal.event
   | Defer_runtime_sync
 
-let persist_meta_internal ~runtime_sync config path persisted =
+let persist_meta_internal ~runtime_sync path persisted =
   let json = meta_to_json persisted in
   match Keeper_fs.save_json_atomic path json with
   | Ok () ->
     (match runtime_sync with
-     | Sync_runtime -> Atomic.get runtime_meta_write_sync_hook_atomic config persisted
+     | Sync_runtime event -> Keeper_meta_runtime_sync_internal.emit event
      | Defer_runtime_sync -> ());
     Ok ()
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
-;;
-
-let persist_meta config path persisted =
-  persist_meta_internal ~runtime_sync:Sync_runtime config path persisted
 ;;
 
 type write_meta_error =
@@ -411,6 +395,30 @@ let authorize_identity_write config authority existing m =
     else mismatch "exact recovery witness does not bind current source and requested target"
 ;;
 
+let runtime_sync_event config authority existing persisted =
+  let transition =
+    match authority, existing with
+    | Ordinary, Some source ->
+      Keeper_meta_runtime_sync_internal.Ordinary
+        { trace_id = source.runtime.trace_id; nonce = source.runtime.nonce }
+    | Create_witness witness, None ->
+      Keeper_meta_runtime_sync_internal.Created witness
+    | Replace_witness witness, Some _ ->
+      Keeper_meta_runtime_sync_internal.Replaced witness
+    | Recover_exact_witness witness, _ ->
+      Keeper_meta_runtime_sync_internal.Recovered witness
+    | Ordinary, None
+    | Create_witness _, Some _
+    | Replace_witness _, None ->
+      invalid_arg "runtime sync event constructed before identity authorization"
+  in
+  { Keeper_meta_runtime_sync_internal.base_path = config.Workspace.base_path
+  ; keeper_name = persisted.name
+  ; transition
+  ; persisted
+  }
+;;
+
 (* Version CAS only — there is no force/bypass path. Cumulative usage
    counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
    lost the race must resolve the conflict through [write_meta_with_merge],
@@ -441,15 +449,20 @@ let write_meta_typed
        | Error owner -> Error (Lifecycle_reserved owner)
        | Ok () ->
          File_lock_eio.with_mutex path (fun () ->
-           let persist persisted =
+           let persist existing persisted =
              let runtime_sync =
                match lifecycle_token with
-               | None -> Sync_runtime
+               | None ->
+                 Sync_runtime
+                   (runtime_sync_event
+                      config
+                      identity_authority
+                      existing
+                      persisted)
                | Some _ -> Defer_runtime_sync
              in
              persist_meta_internal
                ~runtime_sync
-               config
                path
                persisted
              |> Result.map_error (fun error -> Persist_failed error)
@@ -467,11 +480,11 @@ let write_meta_typed
                     ; expected = m.meta_version
                     ; actual = existing.meta_version
                     })
-             else persist { m with meta_version = m.meta_version + 1 })
+             else persist (Some existing) { m with meta_version = m.meta_version + 1 })
            | Ok None ->
              (match authorize_identity_write config identity_authority None m with
               | Error _ as error -> error
-              | Ok () -> persist { m with meta_version = 1 })
+              | Ok () -> persist None { m with meta_version = 1 })
            | Error msg ->
              Error
                (Read_failed
@@ -763,9 +776,26 @@ let update_meta_if_identity
                      let persisted =
                        { caller with meta_version = latest.meta_version + 1 }
                      in
-                     (match persist_meta config path persisted with
+                     let event =
+                       { Keeper_meta_runtime_sync_internal.base_path =
+                           config.Workspace.base_path
+                       ; keeper_name = persisted.name
+                       ; transition =
+                           Keeper_meta_runtime_sync_internal.Ordinary
+                             { trace_id = latest.runtime.trace_id
+                             ; nonce = latest.runtime.nonce
+                             }
+                       ; persisted
+                       }
+                     in
+                     (match
+                        persist_meta_internal
+                          ~runtime_sync:(Sync_runtime event)
+                          path
+                          persisted
+                      with
                       | Ok () -> Ok persisted
-                     | Error detail -> Error (Identity_write_failed detail))))))
+                      | Error detail -> Error (Identity_write_failed detail))))))
 ;;
 
 type identity_remove_error =

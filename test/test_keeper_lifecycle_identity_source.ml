@@ -78,7 +78,21 @@ let test_create_uses_one_durable_authority_scope () =
 let test_nonce_settlement_is_not_claim_based () =
   let interface = read_file "lib/keeper/keeper_lifecycle_nonce.mli" in
   check_contains interface "val replace_settled";
-  check_not_contains interface "val settle_published_replace"
+  check_not_contains interface "val settle_published_replace";
+  check_not_contains interface "val replace :";
+  check_not_contains interface "with_published_failure";
+  check_not_contains interface "with_forced_conflicts"
+;;
+
+let test_runtime_sync_is_private_and_identity_bound () =
+  let interface = read_file "lib/keeper/keeper_meta_store.mli" in
+  let registry = read_file "lib/keeper/keeper_registry_setup.ml" in
+  check_not_contains interface "register_runtime_meta_write_sync";
+  check_not_contains interface "runtime_meta_write_sync_hook";
+  check_contains registry "registry_meta_matches_identity";
+  check_contains registry "registry_meta_matches_nonce_identity";
+  check_not_contains registry
+    "register_runtime_meta_write_sync (fun config meta"
 ;;
 
 let test_directives_use_current_meta_single_surface () =
@@ -116,6 +130,10 @@ let () =
             "nonce settlement is not claim based"
             `Quick
             test_nonce_settlement_is_not_claim_based
+        ; Alcotest.test_case
+            "runtime sync is private and identity bound"
+            `Quick
+            test_runtime_sync_is_private_and_identity_bound
         ; Alcotest.test_case
             "directives use current meta single surface"
             `Quick

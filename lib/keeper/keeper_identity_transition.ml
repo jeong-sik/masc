@@ -20,21 +20,25 @@ let replace_or_recover_exact
   let new_trace_id_raw = Keeper_identity.generate_trace_id () in
   let publication =
     match
-      Keeper_lifecycle_nonce.replace
+      Keeper_lifecycle_nonce.replace_settled
         ~base_path:config.base_path
         ~keeper_id:meta.name
         ~source
         ~owner_id:new_trace_id_raw
         ()
     with
-    | Ok witness -> Ok (Allocated witness)
-    | Error Keeper_lifecycle_nonce.Authority_identity_mismatch ->
-      Keeper_lifecycle_nonce.recover_published_replace
-        ~base_path:config.base_path
-        ~keeper_id:meta.name
-        ~source
-        ()
-      |> Result.map (fun witness -> Recovered witness)
+    | Ok (Keeper_lifecycle_nonce.Settled_allocated witness) ->
+      Ok (Allocated witness)
+    | Ok (Keeper_lifecycle_nonce.Settled_recovered (witness, attention)) ->
+      Option.iter
+        (fun error ->
+          Log.Keeper.warn
+            "keeper identity replacement settled published authority \
+             keeper=%s attention=%s"
+            meta.name
+            (Keeper_lifecycle_nonce.error_to_string error))
+        attention;
+      Ok (Recovered witness)
     | Error error -> Error error
   in
   let* publication =

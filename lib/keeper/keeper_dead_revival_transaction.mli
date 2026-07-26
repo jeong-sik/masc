@@ -21,6 +21,7 @@ type rollback_error =
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
   | Rollback_payload_delete_failed of Keeper_dead_revival_payload.error
   | Rollback_journal_clear_failed of string
+  | Rollback_runtime_assignment_failed of string
 
 type payload_operation =
   | Payload_prepare
@@ -44,6 +45,7 @@ type error =
   | Journal_read_settlement_failed of
       Fs_compat.Capability_head.settlement_warning list
   | Journal_write_failed of string
+  | Runtime_assignment_failed of string
   | Payload_operation_failed of
       { operation : payload_operation
       ; failure : Keeper_dead_revival_payload.error
@@ -73,6 +75,7 @@ type success =
 val error_to_string : error -> string
 
 val revive :
+  ?runtime_id:string ->
   'a Keeper_types_profile.context ->
   original:Keeper_meta_contract.keeper_meta ->
   candidate:Keeper_meta_contract.keeper_meta ->

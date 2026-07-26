@@ -38,6 +38,22 @@ let create ~base_path ~keeper_id ~owner_id =
   Nonce.create ~base_path ~keeper_id ~owner_id () |> require_ok
 ;;
 
+let settled_target = function
+  | Nonce.Settled_allocated witness -> Nonce.witness_target witness
+  | Nonce.Settled_recovered (witness, _) -> Nonce.witness_target witness
+;;
+
+let replace_target ~base_path ~keeper_id ~source ~owner_id =
+  Nonce.replace_settled
+    ~base_path
+    ~keeper_id
+    ~source
+    ~owner_id
+    ()
+  |> require_ok
+  |> settled_target
+;;
+
 let authority_path ~base_path ~keeper_id =
   Filename.concat
     (Nonce.For_testing.root_path_for_base_path ~base_path)
@@ -69,42 +85,41 @@ let test_replace_requires_exact_source () =
   let created = create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" in
   let source = target_identity created in
   let replaced =
-    Nonce.replace
+    replace_target
       ~base_path
       ~keeper_id:"keeper-a"
       ~source
       ~owner_id:"trace-b"
-      ()
-    |> require_ok
   in
-  check int64 "replacement advances" 2L (target_nonce replaced);
+  check int64 "replacement advances" 2L (Nonce.identity_nonce replaced);
   match
-    Nonce.replace
+    Nonce.replace_settled
       ~base_path
       ~keeper_id:"keeper-a"
       ~source
       ~owner_id:"trace-c"
       ()
   with
-  | Error Nonce.Authority_identity_mismatch -> ()
+  | Ok (Nonce.Settled_recovered (witness, None)) ->
+    check string
+      "stale source recovers exact published owner"
+      "trace-b"
+      (Nonce.witness_target witness |> Nonce.identity_owner_id)
   | Error error -> failf "unexpected stale-source error: %s" (Nonce.error_to_string error)
-  | Ok witness -> failf "stale source allocated nonce %Ld" (target_nonce witness)
+  | Ok _ -> fail "stale source did not recover the exact published replacement"
 ;;
 
 let test_recover_exact_does_not_allocate () =
   with_base "masc_lifecycle_witness_recover_" @@ fun base_path ->
   let created = create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" in
   let source = target_identity created in
-  let replaced =
-    Nonce.replace
+  let target =
+    replace_target
       ~base_path
       ~keeper_id:"keeper-a"
       ~source
       ~owner_id:"trace-b"
-      ()
-    |> require_ok
   in
-  let target = target_identity replaced in
   let recovered =
     Nonce.recover_exact
       ~base_path
@@ -128,15 +143,13 @@ let test_recover_exact_does_not_allocate () =
      failf "unexpected reverse recovery error: %s" (Nonce.error_to_string error)
    | Ok _ -> fail "reverse identity recovery was authorized");
   let next =
-    Nonce.replace
+    replace_target
       ~base_path
       ~keeper_id:"keeper-a"
       ~source:target
       ~owner_id:"trace-c"
-      ()
-    |> require_ok
   in
-  check int64 "recovery consumed no nonce" 3L (target_nonce next)
+  check int64 "recovery consumed no nonce" 3L (Nonce.identity_nonce next)
 ;;
 
 let test_replace_settled_recovers_exact_published_target () =
@@ -146,13 +159,11 @@ let test_replace_settled_recovers_exact_published_target () =
   in
   let source = target_identity created in
   let published =
-    Nonce.replace
+    replace_target
       ~base_path
       ~keeper_id:"keeper-a"
       ~source
       ~owner_id:"trace-b"
-      ()
-    |> require_ok
   in
   match
     Nonce.replace_settled
@@ -170,7 +181,7 @@ let test_replace_settled_recovers_exact_published_target () =
       (Nonce.identity_owner_id target);
     check int64
       "settlement retains exact published nonce"
-      (target_nonce published)
+      (Nonce.identity_nonce published)
       (Nonce.identity_nonce target)
   | Ok (Nonce.Settled_recovered (_, Some _)) ->
     fail "stale-source exact recovery reported unrelated publication attention"
@@ -179,6 +190,106 @@ let test_replace_settled_recovers_exact_published_target () =
   | Error error ->
     failf "exact published replacement was not recovered: %s"
       (Nonce.error_to_string error)
+;;
+
+let test_publication_settlement_warning_is_recovered () =
+  with_base "masc_lifecycle_witness_warning_" @@ fun base_path ->
+  let source =
+    create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a"
+    |> target_identity
+  in
+  match
+    Nonce.For_testing.with_fault
+      Nonce.For_testing.Publication_settlement_warning
+      (fun () ->
+        Nonce.replace_settled
+          ~base_path
+          ~keeper_id:"keeper-a"
+          ~source
+          ~owner_id:"trace-b"
+          ())
+  with
+  | Ok
+      (Nonce.Settled_recovered
+         (witness, Some (Nonce.Published_with_warnings _))) ->
+    check int64 "warning target is settled" 2L (target_nonce witness)
+  | Ok _ -> fail "publication warning did not return exact settled evidence"
+  | Error error -> fail (Nonce.error_to_string error)
+;;
+
+let test_verified_publication_failure_is_recovered () =
+  with_base "masc_lifecycle_witness_verified_failure_" @@ fun base_path ->
+  let source =
+    create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a"
+    |> target_identity
+  in
+  match
+    Nonce.For_testing.with_fault
+      Nonce.For_testing.Verified_publication_failure
+      (fun () ->
+        Nonce.replace_settled
+          ~base_path
+          ~keeper_id:"keeper-a"
+          ~source
+          ~owner_id:"trace-b"
+          ())
+  with
+  | Ok
+      (Nonce.Settled_recovered
+         (witness, Some (Nonce.Published_with_failure _))) ->
+    check int64 "verified failure target is settled" 2L (target_nonce witness)
+  | Ok _ -> fail "verified publication failure was not settled"
+  | Error error -> fail (Nonce.error_to_string error)
+;;
+
+let test_indeterminate_publication_is_recovered () =
+  with_base "masc_lifecycle_witness_indeterminate_" @@ fun base_path ->
+  let source =
+    create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a"
+    |> target_identity
+  in
+  match
+    Nonce.For_testing.with_fault
+      Nonce.For_testing.Publication_indeterminate
+      (fun () ->
+        Nonce.replace_settled
+          ~base_path
+          ~keeper_id:"keeper-a"
+          ~source
+          ~owner_id:"trace-b"
+          ())
+  with
+  | Ok
+      (Nonce.Settled_recovered
+         (witness, Some (Nonce.Publication_indeterminate _))) ->
+    check int64 "indeterminate target is settled" 2L (target_nonce witness)
+  | Ok _ -> fail "indeterminate publication was not settled"
+  | Error error -> fail (Nonce.error_to_string error)
+;;
+
+let test_post_publication_cancellation_is_recovered () =
+  with_base "masc_lifecycle_witness_cancelled_" @@ fun base_path ->
+  let source =
+    create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a"
+    |> target_identity
+  in
+  match
+    Nonce.For_testing.with_fault
+      Nonce.For_testing.Cancellation_after_publication
+      (fun () ->
+        Nonce.replace_settled
+          ~base_path
+          ~keeper_id:"keeper-a"
+          ~source
+          ~owner_id:"trace-b"
+          ())
+  with
+  | Ok
+      (Nonce.Settled_recovered
+         (witness, Some (Nonce.Publication_indeterminate _))) ->
+    check int64 "cancelled publication target is settled" 2L (target_nonce witness)
+  | Ok _ -> fail "post-publication cancellation was not settled"
+  | Error error -> fail (Nonce.error_to_string error)
 ;;
 
 let test_concurrent_create_witnesses_are_exclusive () =
@@ -245,6 +356,22 @@ let () =
             "settled replace recovers exact published target"
             `Quick
             test_replace_settled_recovers_exact_published_target
+        ; test_case
+            "publication settlement warning is recovered"
+            `Quick
+            test_publication_settlement_warning_is_recovered
+        ; test_case
+            "verified publication failure is recovered"
+            `Quick
+            test_verified_publication_failure_is_recovered
+        ; test_case
+            "indeterminate publication is recovered"
+            `Quick
+            test_indeterminate_publication_is_recovered
+        ; test_case
+            "post-publication cancellation is recovered"
+            `Quick
+            test_post_publication_cancellation_is_recovered
         ; test_case "concurrent create is exclusive" `Quick test_concurrent_create_witnesses_are_exclusive
         ; test_case "shutdown floor bounds create" `Quick test_shutdown_floor_bounds_create
         ; test_case "invalid current evidence is generic" `Quick test_invalid_current_evidence_is_generic

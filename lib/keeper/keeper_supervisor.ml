@@ -348,9 +348,8 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                  "%s: supervisor restart blocked by durable lifecycle authority: %s"
                  old_entry.name
                  (Keeper_lifecycle_admission.Durable_transaction
-                  .blocked_reason_to_wire
+                 .blocked_reason_to_wire
                     reason)))
-            )
        | _ ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)

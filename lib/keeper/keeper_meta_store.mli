@@ -5,16 +5,6 @@
     from the compatibility facade. *)
 
 
-(** Hook invoked after each successful [write_meta] /
-    [write_meta_with_merge]. Reset by the runtime to keep
-    [Workspace_state] caches in sync. *)
-val runtime_meta_write_sync_hook :
-  Workspace.config -> Keeper_meta_contract.keeper_meta -> unit
-
-(** Replace [runtime_meta_write_sync_hook] with [f]. *)
-val register_runtime_meta_write_sync :
-  (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
-
 (** Pre-compiled regex matching the CAS [meta version conflict]
     error message. Exposed for symmetry — used internally by
     [is_version_conflict_error]. *)

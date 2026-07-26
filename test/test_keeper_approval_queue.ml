@@ -2003,14 +2003,20 @@ let test_recovered_exact_unbound_is_rejected_without_completion () =
          true
          (AQ.mark_summary_pending ~id);
        let entry = pending_entry_exn id in
-       check_exact_update
-         "persist identity-unbound disposition"
-         true
-         (AQ.mark_summary_attempt_identity_unbound
+       (match
+          AQ.mark_summary_attempt_identity_unbound
             ~base_path
             ~id
             ~input_hash:entry.input_hash
-            ~sequence:entry.sequence);
+            ~sequence:entry.sequence
+        with
+        | Ok changed ->
+          Alcotest.(check bool)
+            "persist identity-unbound disposition"
+            true
+            changed
+        | Error error ->
+          Alcotest.fail (AQ.exact_attempt_error_to_string error));
        let summary = exact_summary "recovered-unbound-call" in
        let snapshot =
          match read_pending_snapshot ~base_path with

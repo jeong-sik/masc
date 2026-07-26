@@ -14,26 +14,11 @@ default = "ollama_cloud.deepseek-v4-flash"
 # Periodic Memory OS fact-survival consolidation is a separate task route from
 # post-turn Librarian extraction. Model/provider selection belongs only here.
 memory_os_consolidation = "ollama_cloud_native.minimax-m3-native-structured"
-# The failure-judgment boundary must not inherit the fleet chat default: keep it
-# explicit so a typo or an unroutable id fails at config load instead of surfacing
-# in the daemon loop.
-#
-# It does NOT request a provider-native wire format. Keeper_failure_judge clears
-# both structured-output fields (keeper_failure_judge.ml apply_output_schema ->
-# Keeper_structured_output_schema.without_response_format) and states the object
-# shape in config/prompts/keeper.failure_judgment.md, then parses strictly. That is
-# why #25719 could drop the last lane-candidate capability requirement: no consumer
-# asks for a response format, so requiring candidates to declare
-# supports-response-format-json checked nothing. Candidates therefore are not
-# limited to schema-capable providers.
-#
-# A lane, not one id, because the parse can only fail on how a runtime chose to
-# format its reply. A single id has no successor, and that is what made one
-# markdown-fenced reply terminal: keeper rondo settled its lane on
-# `Invalid token '```json` and advanced no turn for the next 17.5 hours
-# (event-queue.json last_settlement, 2026-07-25T10:44Z). Candidates span providers
-# so one provider's formatting habit is not the whole boundary.
-structured_judge = "judgment_lane"
+# Provider-native structured-output judges must not inherit the fleet chat
+# default when that default lacks schema support. Keep this lane explicit so
+# structured judgment lanes fail at config load on typo/unsupported
+# routing instead of discovering the mismatch in the daemon loop.
+structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
@@ -997,19 +982,6 @@ strategy = "ordered"
 candidates = [
   "ollama_cloud.deepseek-v4-flash",
   "deepseek.deepseek-v4-pro",
-]
-
-# Referenced by [runtime].structured_judge. The first candidate keeps the runtime
-# that route named before it became a lane, so ordinary behaviour is unchanged; the
-# rest exist for the one failure this boundary can hit, a reply whose shape the
-# strict parser rejects. Three providers, because that failure is a formatting
-# habit and a second candidate on the same provider would repeat it.
-[runtime.lanes.judgment_lane]
-strategy = "ordered"
-candidates = [
-  "ollama_cloud_native.minimax-m3-native-structured",
-  "deepseek.deepseek-v4-pro",
-  "glm-coding.glm-5-turbo",
 ]
 
 # ── Keeper assignments ──────────────────────────────────────────────

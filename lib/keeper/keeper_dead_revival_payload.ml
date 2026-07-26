@@ -15,6 +15,34 @@ type immutable_ref =
   ; byte_count : int64
   }
 
+type prepared =
+  { payload : payload
+  ; reference : immutable_ref
+  ; bytes : string
+  }
+
+type authority_shard =
+  { keeper_name : string
+  ; authority_leaf : string
+  }
+
+type inventory_transaction =
+  { inventory_authority_leaf : string
+  ; inventory_transaction_leaf : string
+  }
+
+type create_outcome =
+  | Created of prepared
+  | Reconciled_identical of prepared
+
+type create_reconciliation_failure =
+  | Reconciliation_read_failed of
+      Fs_compat.Capability_exact_read.failure
+  | Reconciliation_read_settlement_failed of
+      Fs_compat.Capability_exact_read.settlement_warning list
+  | Reconciliation_parent_sync_failed of
+      Fs_compat.capability_directory_sync_error
+
 type error =
   | Invalid_binding of string
   | Malformed_payload of string
@@ -26,13 +54,22 @@ type error =
   | Filesystem_capability_unavailable
   | Directory_prepare_failed of string
   | Parent_open_failed of string
-  | Create_failed of Fs_compat.capability_write_error
+  | Create_conflict of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      }
+  | Create_reconciliation_failed of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      ; reconciliation_failure : create_reconciliation_failure
+      }
   | Read_failed of Fs_compat.Capability_exact_read.failure
   | Read_settlement_failed of
       Fs_compat.Capability_exact_read.settlement_warning list
   | Payload_digest_mismatch
   | Payload_binding_mismatch
   | Delete_failed of Keeper_fs.durable_remove_error
+  | Inventory_failed of string
 
 let payload_schema = "masc.keeper-dead-revival-payload.v1"
 let ref_schema = "masc.keeper-dead-revival-payload-ref.v1"
@@ -42,6 +79,7 @@ let transaction_leaf_domain =
   "masc.keeper-dead-revival-payload-transaction-leaf.v1"
 ;;
 
+let authority_leaf_domain = "keeper-dead-revival-journal-leaf-v1"
 let payload_root_leaf = "payloads"
 let authority_leaf_prefix = "revival-"
 let transaction_leaf_prefix = "transaction-"
@@ -188,6 +226,17 @@ let validate_payload (payload : payload) =
          payload.original.runtime.nonce
          payload.expected_generation)
   then Error (Invalid_binding "original metadata does not match expected_generation")
+  else if
+    not
+      (Keeper_id.Trace_id.equal
+         payload.candidate.runtime.trace_id
+         payload.expected_trace_id)
+  then Error (Invalid_binding "candidate metadata does not preserve expected_trace_id")
+  else if payload.candidate.runtime.nonce <= payload.expected_generation
+  then
+    Error
+      (Invalid_binding
+         "candidate lifecycle nonce must advance expected_generation")
   else
     let expected_transaction_id =
       transaction_digest
@@ -377,6 +426,15 @@ let valid_digest_leaf ~prefix leaf =
   && is_lowercase_sha256 (String.sub leaf prefix_length 64)
 ;;
 
+let canonical_authority_leaf keeper_name =
+  authority_leaf_prefix
+  ^ sha256
+      (authority_leaf_domain
+       ^ "\000"
+       ^ length_delimited keeper_name)
+  ^ json_leaf_suffix
+;;
+
 let valid_authority_leaf =
   valid_digest_leaf ~prefix:authority_leaf_prefix
 ;;
@@ -473,6 +531,37 @@ let immutable_ref_transaction_leaf reference = reference.transaction_leaf
 let immutable_ref_sha256 reference = reference.sha256
 let immutable_ref_byte_count reference = reference.byte_count
 
+let authority_shard_for_keeper ~keeper_name =
+  if String.equal (String.trim keeper_name) ""
+  then Error (Invalid_binding "keeper_name must be non-empty")
+  else
+    Ok
+      { keeper_name
+      ; authority_leaf = canonical_authority_leaf keeper_name
+      }
+;;
+
+let authority_shard_leaf shard = shard.authority_leaf
+
+let prepare payload =
+  let* () = validate_payload payload in
+  let* transaction_leaf =
+    transaction_leaf ~transaction_digest:payload.transaction_id
+  in
+  let bytes = payload_to_bytes payload in
+  let reference =
+    { authority_leaf = canonical_authority_leaf payload.keeper_name
+    ; transaction_leaf
+    ; sha256 = payload_digest bytes
+    ; byte_count = Int64.of_int (String.length bytes)
+    }
+  in
+  Ok { payload; reference; bytes }
+;;
+
+let prepared_payload prepared = prepared.payload
+let prepared_ref prepared = prepared.reference
+
 let payload_directory config =
   Filename.concat
     (Filename.concat
@@ -548,109 +637,271 @@ let with_parent directory fn =
        Error (Parent_open_failed (Printexc.to_string exception_)))
 ;;
 
-let create config ~authority_leaf payload =
-  let* () = validate_payload payload in
-  let* transaction_leaf =
-    transaction_leaf ~transaction_digest:payload.transaction_id
-  in
-  let bytes = payload_to_bytes payload in
-  let reference =
-    { authority_leaf
-    ; transaction_leaf
-    ; sha256 = payload_digest bytes
-    ; byte_count = Int64.of_int (String.length bytes)
-    }
-  in
-  let* directory = prepare_payload_shard config authority_leaf in
-  let* () =
-    with_parent directory (fun parent ->
-      Fs_compat.create_capability_file_exclusive
-        ~parent
-        ~leaf:transaction_leaf
-        ~permissions:0o600
-        bytes
-      |> Result.map_error (fun failure -> Create_failed failure))
-  in
-  Ok reference
+type observation_failure =
+  | Observation_read_failed of
+      Fs_compat.Capability_exact_read.failure
+  | Observation_settlement_failed of
+      Fs_compat.Capability_exact_read.settlement_warning list
+
+let observe_reference ~parent reference =
+  match
+    Fs_compat.Capability_exact_read.read
+      ~parent
+      ~leaf:reference.transaction_leaf
+      ~expected_length:reference.byte_count
+      ~max_length:(Int64.of_int Sys.max_string_length)
+  with
+  | Error failure -> Error (Observation_read_failed failure)
+  | Ok observation ->
+    let warnings =
+      Fs_compat.Capability_exact_read.observation_settlement_warnings
+        observation
+    in
+    if warnings = []
+    then
+      Ok
+        (Fs_compat.Capability_exact_read.observation_bytes observation)
+    else Error (Observation_settlement_failed warnings)
 ;;
 
-let payload_matches left right =
-  String.equal (payload_to_bytes left) (payload_to_bytes right)
+let create config prepared =
+  let reference = prepared.reference in
+  let* directory =
+    prepare_payload_shard config reference.authority_leaf
+  in
+  with_parent directory (fun parent ->
+    match
+      Fs_compat.create_capability_file_exclusive
+        ~parent
+        ~leaf:reference.transaction_leaf
+        ~permissions:0o600
+        prepared.bytes
+    with
+    | Ok () -> Ok (Created prepared)
+    | Error initial_failure ->
+      (match observe_reference ~parent reference with
+       | Ok observed when String.equal observed prepared.bytes ->
+         (match Fs_compat.sync_directory_capability parent with
+          | Ok () -> Ok (Reconciled_identical prepared)
+          | Error failure ->
+            Error
+              (Create_reconciliation_failed
+                 { prepared
+                 ; initial_failure
+                 ; reconciliation_failure =
+                     Reconciliation_parent_sync_failed failure
+                 }))
+       | Ok _ ->
+         Error (Create_conflict { prepared; initial_failure })
+       | Error (Observation_read_failed failure) ->
+         (match failure.error with
+          | Fs_compat.Capability_exact_read.Length_mismatch _ ->
+            Error (Create_conflict { prepared; initial_failure })
+          | _ ->
+            Error
+              (Create_reconciliation_failed
+                 { prepared
+                 ; initial_failure
+                 ; reconciliation_failure =
+                     Reconciliation_read_failed failure
+                 }))
+       | Error (Observation_settlement_failed warnings) ->
+         Error
+           (Create_reconciliation_failed
+              { prepared
+              ; initial_failure
+              ; reconciliation_failure =
+                  Reconciliation_read_settlement_failed warnings
+              })))
+;;
+
+let validate_reference reference =
+  if not (valid_authority_leaf reference.authority_leaf)
+  then Error (Malformed_ref "authority_leaf is not canonical")
+  else if not (valid_transaction_leaf reference.transaction_leaf)
+  then Error (Malformed_ref "transaction_leaf is not canonical")
+  else if not (is_lowercase_sha256 reference.sha256)
+  then Error (Malformed_ref "sha256 is not a lowercase SHA-256")
+  else if Int64.compare reference.byte_count 0L <= 0
+  then Error (Malformed_ref "byte_count must be positive")
+  else Ok ()
+;;
+
+let validate_reference_binding
+      reference
+      ~keeper_name
+      ~expected_authority_leaf
+      ~transaction_id
+  =
+  let* () = validate_reference reference in
+  let* shard = authority_shard_for_keeper ~keeper_name in
+  if not (String.equal expected_authority_leaf shard.authority_leaf)
+  then
+    Error
+      (Invalid_binding
+         "expected_authority_leaf does not match canonical keeper authority")
+  else if not (String.equal reference.authority_leaf shard.authority_leaf)
+  then Error Payload_binding_mismatch
+  else
+    let* expected_transaction_leaf =
+      transaction_leaf ~transaction_digest:transaction_id
+    in
+    if
+      String.equal
+        reference.transaction_leaf
+        expected_transaction_leaf
+    then Ok shard
+    else Error Payload_binding_mismatch
 ;;
 
 let read
       config
       ~expected_ref
-      ~authority_leaf
+      ~expected_authority_leaf
       ~transaction_id
       ~owner_id
       ~keeper_name
       ~expected_trace_id
       ~expected_generation
-      ~original
-      ~candidate
   =
-  let* expected_payload =
-    make_payload
-      ~transaction_id
-      ~owner_id
+  let* shard =
+    validate_reference_binding
+      expected_ref
       ~keeper_name
-      ~expected_trace_id
-      ~expected_generation
-      ~original
-      ~candidate
+      ~expected_authority_leaf
+      ~transaction_id
   in
-  let* expected_transaction_leaf =
-    transaction_leaf ~transaction_digest:transaction_id
+  let directory =
+    payload_shard_directory config shard.authority_leaf
   in
-  if
-    not (valid_authority_leaf authority_leaf)
-    || not (String.equal expected_ref.authority_leaf authority_leaf)
-    || not
-         (String.equal
-            expected_ref.transaction_leaf
-            expected_transaction_leaf)
-  then Error Payload_binding_mismatch
+  let* bytes =
+    with_parent directory (fun parent ->
+      match observe_reference ~parent expected_ref with
+      | Ok bytes -> Ok bytes
+      | Error (Observation_read_failed failure) ->
+        Error (Read_failed failure)
+      | Error (Observation_settlement_failed warnings) ->
+        Error (Read_settlement_failed warnings))
+  in
+  if not (String.equal expected_ref.sha256 (payload_digest bytes))
+  then Error Payload_digest_mismatch
   else
-    let directory = payload_shard_directory config authority_leaf in
-    let* observation =
-      with_parent directory (fun parent ->
-        Fs_compat.Capability_exact_read.read
-          ~parent
-          ~leaf:expected_ref.transaction_leaf
-          ~expected_length:expected_ref.byte_count
-          ~max_length:(Int64.of_int Sys.max_string_length)
-        |> Result.map_error (fun failure -> Read_failed failure))
-    in
-    let warnings =
-      Fs_compat.Capability_exact_read.observation_settlement_warnings
-        observation
-    in
-    if warnings <> []
-    then Error (Read_settlement_failed warnings)
-    else
-      let bytes =
-        Fs_compat.Capability_exact_read.observation_bytes observation
-      in
-      if not (String.equal expected_ref.sha256 (payload_digest bytes))
-      then Error Payload_digest_mismatch
-      else
-        let* observed_payload = payload_of_bytes bytes in
-        if payload_matches observed_payload expected_payload
-        then Ok observed_payload
-        else Error Payload_binding_mismatch
+    let* observed_payload = payload_of_bytes bytes in
+    if
+      String.equal observed_payload.transaction_id transaction_id
+      && String.equal observed_payload.owner_id owner_id
+      && String.equal observed_payload.keeper_name keeper_name
+      && Keeper_id.Trace_id.equal
+           observed_payload.expected_trace_id
+           expected_trace_id
+      && Int.equal
+           observed_payload.expected_generation
+           expected_generation
+    then Ok observed_payload
+    else Error Payload_binding_mismatch
 ;;
 
-let delete config reference =
+let delete
+      config
+      ~keeper_name
+      ~expected_authority_leaf
+      ~transaction_id
+      reference
+  =
+  let* shard =
+    validate_reference_binding
+      reference
+      ~keeper_name
+      ~expected_authority_leaf
+      ~transaction_id
+  in
+  let directory =
+    payload_shard_directory config shard.authority_leaf
+  in
+  let path = Filename.concat directory reference.transaction_leaf in
+  Keeper_fs.remove_file_durable
+    ~ownership_root:(Workspace.masc_root_dir config)
+    path
+  |> Result.map_error (fun failure -> Delete_failed failure)
+;;
+
+let inventory_transactions config shard =
+  let canonical =
+    canonical_authority_leaf shard.keeper_name
+  in
   if
-    not (valid_authority_leaf reference.authority_leaf)
-    || not (valid_transaction_leaf reference.transaction_leaf)
-  then Error (Invalid_binding "payload ref contains a non-canonical storage leaf")
+    not (String.equal canonical shard.authority_leaf)
+    || not (valid_authority_leaf shard.authority_leaf)
+  then Error (Invalid_binding "authority shard is not canonical")
   else
     let directory =
-      payload_shard_directory config reference.authority_leaf
+      payload_shard_directory config shard.authority_leaf
     in
-    let path = Filename.concat directory reference.transaction_leaf in
+    match Safe_ops.list_dir_safe directory with
+    | Error _ when not (Fs_compat.file_exists directory) -> Ok []
+    | Error detail -> Error (Inventory_failed detail)
+    | Ok names ->
+      let rec collect accumulated = function
+        | [] ->
+          Ok
+            (List.sort
+               (fun left right ->
+                  String.compare
+                    left.inventory_transaction_leaf
+                    right.inventory_transaction_leaf)
+               accumulated)
+        | name :: rest ->
+          if valid_transaction_leaf name
+          then
+            collect
+              ({ inventory_authority_leaf = shard.authority_leaf
+               ; inventory_transaction_leaf = name
+               }
+               :: accumulated)
+              rest
+          else
+            Error
+              (Inventory_failed
+                 ("unexpected non-transaction entry in authority shard: "
+                  ^ name))
+      in
+      collect [] names
+;;
+
+let inventory_transaction_matches inventory ~transaction_id =
+  match transaction_leaf ~transaction_digest:transaction_id with
+  | Error _ -> false
+  | Ok expected ->
+    String.equal inventory.inventory_transaction_leaf expected
+;;
+
+let delete_inventory_transaction
+      config
+      ~authority_shard
+      inventory
+  =
+  let canonical =
+    canonical_authority_leaf authority_shard.keeper_name
+  in
+  if
+    not (String.equal canonical authority_shard.authority_leaf)
+    || not
+         (String.equal
+            inventory.inventory_authority_leaf
+            authority_shard.authority_leaf)
+    || not
+         (valid_transaction_leaf
+            inventory.inventory_transaction_leaf)
+  then Error (Invalid_binding "inventory transaction is not bound to authority shard")
+  else
+    let directory =
+      payload_shard_directory config authority_shard.authority_leaf
+    in
+    let path =
+      Filename.concat
+        directory
+        inventory.inventory_transaction_leaf
+    in
     Keeper_fs.remove_file_durable
       ~ownership_root:(Workspace.masc_root_dir config)
       path
@@ -712,6 +963,19 @@ let exact_read_error_to_string = function
       diagnostic.detail
 ;;
 
+let create_reconciliation_failure_to_string = function
+  | Reconciliation_read_failed failure ->
+    "exact reread failed: "
+    ^ exact_read_error_to_string failure.error
+  | Reconciliation_read_settlement_failed warnings ->
+    Printf.sprintf
+      "exact reread settlement failed warning_count=%d"
+      (List.length warnings)
+  | Reconciliation_parent_sync_failed failure ->
+    "parent durability sync failed: "
+    ^ Fs_compat.capability_directory_sync_error_to_string failure
+;;
+
 let error_to_string = function
   | Invalid_binding detail -> "invalid revival payload binding: " ^ detail
   | Malformed_payload detail -> "malformed revival payload: " ^ detail
@@ -728,9 +992,16 @@ let error_to_string = function
     "revival payload directory preparation failed: " ^ detail
   | Parent_open_failed detail ->
     "revival payload parent open failed: " ^ detail
-  | Create_failed failure ->
-    "revival payload create failed: "
-    ^ Fs_compat.capability_write_error_to_string failure
+  | Create_conflict { initial_failure; _ } ->
+    "revival payload create found conflicting immutable bytes after: "
+    ^ Fs_compat.capability_write_error_to_string initial_failure
+  | Create_reconciliation_failed
+      { initial_failure; reconciliation_failure; _ } ->
+    "revival payload create reconciliation failed after "
+    ^ Fs_compat.capability_write_error_to_string initial_failure
+    ^ ": "
+    ^ create_reconciliation_failure_to_string
+        reconciliation_failure
   | Read_failed failure ->
     "revival payload read failed: "
     ^ exact_read_error_to_string failure.error
@@ -743,4 +1014,6 @@ let error_to_string = function
   | Delete_failed failure ->
     "revival payload delete failed: "
     ^ Keeper_fs.durable_remove_error_to_string failure
+  | Inventory_failed detail ->
+    "revival payload inventory failed: " ^ detail
 ;;

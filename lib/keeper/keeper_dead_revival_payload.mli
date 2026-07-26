@@ -2,6 +2,21 @@
 
 type payload
 type immutable_ref
+type prepared
+type authority_shard
+type inventory_transaction
+
+type create_outcome =
+  | Created of prepared
+  | Reconciled_identical of prepared
+
+type create_reconciliation_failure =
+  | Reconciliation_read_failed of
+      Fs_compat.Capability_exact_read.failure
+  | Reconciliation_read_settlement_failed of
+      Fs_compat.Capability_exact_read.settlement_warning list
+  | Reconciliation_parent_sync_failed of
+      Fs_compat.capability_directory_sync_error
 
 type error =
   | Invalid_binding of string
@@ -14,13 +29,22 @@ type error =
   | Filesystem_capability_unavailable
   | Directory_prepare_failed of string
   | Parent_open_failed of string
-  | Create_failed of Fs_compat.capability_write_error
+  | Create_conflict of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      }
+  | Create_reconciliation_failed of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      ; reconciliation_failure : create_reconciliation_failure
+      }
   | Read_failed of Fs_compat.Capability_exact_read.failure
   | Read_settlement_failed of
       Fs_compat.Capability_exact_read.settlement_warning list
   | Payload_digest_mismatch
   | Payload_binding_mismatch
   | Delete_failed of Keeper_fs.durable_remove_error
+  | Inventory_failed of string
 
 val error_to_string : error -> string
 
@@ -55,25 +79,27 @@ val immutable_ref_transaction_leaf : immutable_ref -> string
 val immutable_ref_sha256 : immutable_ref -> string
 val immutable_ref_byte_count : immutable_ref -> int64
 
+val prepare : payload -> (prepared, error) result
+val prepared_payload : prepared -> payload
+val prepared_ref : prepared -> immutable_ref
+
 val create :
   Workspace.config ->
-  authority_leaf:string ->
-  payload ->
-  (immutable_ref, error) result
+  prepared ->
+  (create_outcome, error) result
 (** Durably creates one exclusive mode-[0600] payload. Existing leaves are
-    never replaced. *)
+    never replaced. An exact pre-existing payload is reconciled as idempotent
+    success; conflicting bytes are rejected. *)
 
 val read :
   Workspace.config ->
   expected_ref:immutable_ref ->
-  authority_leaf:string ->
+  expected_authority_leaf:string ->
   transaction_id:string ->
   owner_id:string ->
   keeper_name:string ->
   expected_trace_id:Keeper_id.Trace_id.t ->
   expected_generation:int ->
-  original:Keeper_meta_contract.keeper_meta ->
-  candidate:Keeper_meta_contract.keeper_meta ->
   (payload, error) result
 (** Reads exactly the referenced byte count, verifies its revival-domain
     digest, decodes only the current canonical schema, and checks every caller
@@ -81,6 +107,33 @@ val read :
 
 val delete :
   Workspace.config ->
+  keeper_name:string ->
+  expected_authority_leaf:string ->
+  transaction_id:string ->
   immutable_ref ->
   (unit, error) result
 (** Idempotently removes the immutable payload and durably anchors absence. *)
+
+val authority_shard_for_keeper :
+  keeper_name:string ->
+  (authority_shard, error) result
+
+val authority_shard_leaf : authority_shard -> string
+
+val inventory_transactions :
+  Workspace.config ->
+  authority_shard ->
+  (inventory_transaction list, error) result
+(** Lists only the validated single-component transaction leaves in one
+    caller-locked authority shard. No raw filesystem path is exposed. *)
+
+val inventory_transaction_matches :
+  inventory_transaction ->
+  transaction_id:string ->
+  bool
+
+val delete_inventory_transaction :
+  Workspace.config ->
+  authority_shard:authority_shard ->
+  inventory_transaction ->
+  (unit, error) result

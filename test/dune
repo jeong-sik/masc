@@ -1311,6 +1311,12 @@
  (modules test_keeper_lifecycle_nonce)
  (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
 
+; Immutable binding-complete dead-Keeper revival payload proof.
+(test
+ (name test_keeper_dead_revival_payload)
+ (modules test_keeper_dead_revival_payload)
+ (libraries alcotest digestif fs_compat masc_test_deps eio_main unix yojson))
+
 ; Provider-neutral Memory OS Librarian exact-output composition proof.
 (test
  (name test_librarian_exact_output_conformance)

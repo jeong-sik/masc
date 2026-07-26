@@ -111,7 +111,7 @@ let check_row label expected snapshot =
   check (option string) label expected (Head.snapshot_row snapshot)
 ;;
 
-let check_publication_evidence label row evidence =
+let check_publication_evidence label row (evidence : Head.publication_evidence) =
   ignore evidence.Head.expected_cursor;
   ignore evidence.Head.published_cursor;
   check int64
@@ -228,6 +228,7 @@ let test_strict_row_shape_rejection ~fs ~secure_random () =
     ; "LF-terminated row", "row\n"
     ; "CRLF row", "row\r\n"
     ; "embedded LF row", "left\nright"
+    ; "oversized row", String.make (Head.max_row_bytes + 1) 'x'
     ];
   let absent = read ~secure_random ~parent ~leaf "valid row pre-read" in
   ignore
@@ -330,6 +331,73 @@ let test_different_roots_do_not_false_share ~fs ~secure_random () =
   |> check_row "root B progressed independently" (Some "root-b")
 ;;
 
+let test_parent_cancellation_after_dispatch_returns_publication
+      ~fs
+      ~secure_random
+      ()
+  =
+  with_tmp_dir "masc_capability_head_parent_cancel_" @@ fun directory ->
+  let leaf = "HEAD" in
+  with_parent ~fs directory @@ fun parent ->
+  let absent = read ~secure_random ~parent ~leaf "parent cancellation fixture read" in
+  let receipts = ref [] in
+  let cancel_was_issued = Atomic.make false in
+  Eio.Switch.run (fun sw ->
+    let sub_context, resolve_sub_context = Eio.Promise.create () in
+    let lock_acquired, resolve_lock_acquired = Eio.Promise.create () in
+    let release_lock, resolve_release_lock = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      let context = Eio.Promise.await sub_context in
+      Eio.Promise.await lock_acquired;
+      Eio.Cancel.cancel
+        context
+        (Failure "caller cancellation after HEAD dispatch");
+      Atomic.set cancel_was_issued true;
+      Eio.Promise.resolve resolve_release_lock ());
+    (try
+       Eio.Cancel.sub (fun context ->
+         Eio.Promise.resolve resolve_sub_context context;
+         let hooks =
+           Head.For_testing.hooks
+             ~after_lock_acquired:(fun () ->
+               Eio.Promise.resolve resolve_lock_acquired ();
+               Eio.Promise.await release_lock)
+             ()
+         in
+         let receipt =
+           publish_for_testing
+             hooks
+             ~secure_random
+             ~parent
+             ~leaf
+             ~expected:absent
+             ~row:"published-after-parent-cancel"
+         in
+         receipts := receipt :: !receipts)
+     with
+     | Eio.Cancel.Cancelled _ -> ()));
+  check bool
+    "outer sibling issued real parent cancellation"
+    true
+    (Atomic.get cancel_was_issued);
+  (match !receipts with
+   | [ Ok publication ] ->
+     Head.publication_evidence publication
+     |> check_publication_evidence
+          "parent cancellation publication"
+          "published-after-parent-cancel"
+   | [ Error _ ] ->
+     fail "protected CAS returned a failure after parent cancellation"
+   | [] ->
+     fail "parent cancellation escaped before CAS returned a receipt"
+   | _ :: _ :: _ ->
+     fail "parent cancellation produced more than one CAS receipt");
+  read ~secure_random ~parent ~leaf "parent cancellation final read"
+  |> check_row
+       "successful receipt matches published HEAD"
+       (Some "published-after-parent-cancel")
+;;
+
 let test_before_rename_failure_and_cancellation_are_unchanged
       ~fs
       ~secure_random
@@ -352,7 +420,7 @@ let test_before_rename_failure_and_cancellation_are_unchanged
   read ~secure_random ~parent ~leaf:exception_leaf (exception_label ^ " final read")
   |> check_row (exception_label ^ " keeps HEAD absent") None;
   let cancellation_leaf = "HEAD-cancellation" in
-  let cancellation_label = "before-rename cancellation" in
+  let cancellation_label = "before-rename injected Cancelled exception" in
   let absent =
     read ~secure_random ~parent ~leaf:cancellation_leaf (cancellation_label ^ " read")
   in
@@ -478,6 +546,10 @@ let () =
             (test_same_directory_contention_is_busy ~fs ~secure_random)
         ; test_case "different roots do not false-share" `Quick
             (test_different_roots_do_not_false_share ~fs ~secure_random)
+        ; test_case "parent cancellation after dispatch publishes once" `Quick
+            (test_parent_cancellation_after_dispatch_returns_publication
+               ~fs
+               ~secure_random)
         ] )
     ; ( "publication-boundary"
       , [ test_case "before rename stays unchanged" `Quick

@@ -8,7 +8,7 @@
 
 ## 1. 사실 (2026-07-27 fleet 실측)
 
-`~/me/.masc/keepers/*/runtime-manifests/` 의 `context_compacted` 레코드 **2,506건 전부**가 자율 트리거를 달고 있고, 성공은 **0건**이다.
+`<base-path>/.masc/keepers/*/runtime-manifests/` 의 `context_compacted` 레코드 **2,506건 전부**가 자율 트리거를 달고 있고, 성공은 **0건**이다.
 
 | `decision.trigger` | 건수 |
 |---|---|

@@ -33,10 +33,6 @@ type inventory_transaction =
 
 type create_outcome =
   | Created of prepared
-  | Reconciled_identical of
-      { prepared : prepared
-      ; initial_failure : Fs_compat.capability_write_error
-      }
   | Reconciled_created of
       { prepared : prepared
       ; initial_failure : Fs_compat.capability_write_error
@@ -699,28 +695,17 @@ let create config prepared =
       (match initial_failure.target_effect with
        | Fs_compat.Target_created_incomplete
        | Target_state_unknown
-       | Target_replaced ->
+       | Target_replaced
+       | Target_unchanged ->
          Error (Create_unsettled { prepared; initial_failure })
-       | (Target_unchanged | Target_created) as target_effect ->
+       | Target_created ->
          (match observe_reference ~parent reference with
           | Ok observed when String.equal observed prepared.bytes ->
             (match Fs_compat.sync_directory_capability parent with
              | Ok () ->
-               (match target_effect with
-                | Target_unchanged ->
-                  Ok
-                    (Reconciled_identical
-                       { prepared; initial_failure })
-                | Target_created ->
-                  Ok
-                    (Reconciled_created
-                       { prepared; initial_failure })
-                | Target_created_incomplete
-                | Target_state_unknown
-                | Target_replaced ->
-                  Error
-                    (Create_unsettled
-                       { prepared; initial_failure }))
+               Ok
+                 (Reconciled_created
+                    { prepared; initial_failure })
              | Error failure ->
                Error
                  (Create_reconciliation_failed

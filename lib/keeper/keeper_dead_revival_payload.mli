@@ -8,10 +8,6 @@ type inventory_transaction
 
 type create_outcome =
   | Created of prepared
-  | Reconciled_identical of
-      { prepared : prepared
-      ; initial_failure : Fs_compat.capability_write_error
-      }
   | Reconciled_created of
       { prepared : prepared
       ; initial_failure : Fs_compat.capability_write_error

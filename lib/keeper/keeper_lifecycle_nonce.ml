@@ -1,5 +1,3 @@
-module Head = Fs_compat.Capability_head
-
 include Keeper_lifecycle_nonce_types
 open Keeper_lifecycle_nonce_storage
 

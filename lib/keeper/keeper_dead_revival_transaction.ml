@@ -4,6 +4,10 @@ open Keeper_types_profile
 module Head = Fs_compat.Capability_head
 module Payload = Keeper_dead_revival_payload
 
+exception Injected_durable_publication_settlement_warning
+exception Injected_launch_publication_settlement_warning
+exception Injected_reserved_post_publication_failure
+
 type boundary_hooks =
   { after_nonce_allocation : unit -> unit
   ; after_journal_write : unit -> unit
@@ -1141,10 +1145,6 @@ let verify_payload config (journal : journal) =
 ;;
 
 module For_testing = struct
-  exception Injected_durable_publication_settlement_warning
-  exception Injected_launch_publication_settlement_warning
-  exception Injected_reserved_post_publication_failure
-
   include Boundary_hooks_for_testing
 
   let reserved_journal_row ~owner_id ~original ~candidate =

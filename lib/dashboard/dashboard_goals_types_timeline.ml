@@ -16,7 +16,8 @@ open Dashboard_goals_types_accessor
 let json_to_string_opt = function | `String s -> Some s | _ -> None
 let json_to_int_opt = function | `Int n -> Some n | `Intlit s -> (try Some (int_of_string s) with _ -> None) | _ -> None
 
-let goal_phase_color = function
+let goal_phase_color phase =
+  match Goal_phase.view phase with
   | Goal_phase.Executing -> "#4ade80"
   | Goal_phase.Blocked -> "#ef4444"
   | Goal_phase.Paused -> "#94a3b8"

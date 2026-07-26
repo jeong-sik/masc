@@ -258,13 +258,14 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   let count_phase phase =
     goals
-    |> List.filter (fun (goal : Goal_store.goal) -> goal.phase = phase)
+    |> List.filter (fun (goal : Goal_store.goal) ->
+         Goal_phase.view goal.phase = phase)
     |> List.length
   in
   let active_goal_count =
     goals
     |> List.filter (fun (goal : Goal_store.goal) ->
-           goal.phase = Goal_phase.Executing)
+           Goal_phase.is_executing goal.phase)
     |> List.length
   in
   let pending_approval_total =

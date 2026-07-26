@@ -1,40 +1,47 @@
-(** Goal_phase — state machine SSOT for goal lifecycle.
+(** Read-only Goal lifecycle view.
 
-    Encodes the seven phases a goal can be in, the operator/system
-    actions that drive transitions, and the deterministic decision
-    function {!decide_transition}. Used by the goal subsystem to keep
-    transition logic out of caller code. *)
+    The stored phase is abstract. [Completed] below is an observation constructor,
+    not a value of [t], so callers cannot manufacture a terminal Goal phase. *)
 
-(** Goal lifecycle phases. *)
-type t =
+type t = Goal_store.Phase.t
+
+type view = Goal_store.Phase.view =
   | Executing
   | Blocked
   | Paused
   | Completed
   | Dropped
 
+type nonterminal = Goal_store.Phase.nonterminal =
+  | N_executing
+  | N_blocked
+  | N_paused
+  | N_dropped
+
+val view : t -> view
 val to_string : t -> string
-(** Lowercase canonical name ([Executing -> "executing"], …). *)
-
-val of_string : string -> t option
-(** Inverse of {!to_string}. Returns [None] for unknown input. *)
-
-val parse : string -> t option
-(** Like {!of_string} but trims whitespace and lowercases first. *)
-
+val view_to_string : view -> string
+val of_string : string -> view option
+val parse : string -> view option
 val to_yojson : t -> Yojson.Safe.t
+val view_to_yojson : view -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (view, string) result
+val all : view list
+val nonterminal_to_view : nonterminal -> view
 
-val of_yojson : Yojson.Safe.t -> (t, string) result
+val executing : t
+val blocked : t
+val paused : t
+val dropped : t
 
-val all : t list
-(** Every phase in declaration order. SSOT for callers that need the full
-    string set (MCP schema enum, validator) via [List.map to_string all]. *)
-
+val is_executing : t -> bool
+val is_blocked : t -> bool
+val is_paused : t -> bool
+val is_completed : t -> bool
+val is_dropped : t -> bool
 val admits_self_directed_progress : t -> bool
-(** Whether a keeper waking on this goal can make progress on it. *)
 
-(** Operator / system actions that may drive a transition. *)
-type action =
+type action = Goal_store.Phase.action =
   | Request_complete
   | Pause
   | Resume
@@ -46,22 +53,11 @@ type action =
 val action_to_string : action -> string
 val action_of_string : string -> action option
 val parse_action : string -> action option
-
 val all_actions : action list
-(** Every action in declaration order. SSOT for the schema/validator action
-    enum via [List.map action_to_string all_actions]. *)
 
-(** Outcome of {!decide_transition}. [Move_to] is a direct phase change and
-    [Complete] is the terminal success transition. *)
-type transition_outcome =
-  | Move_to of t
+type transition_outcome = Goal_store.Phase.transition_outcome =
+  | Move_to of nonterminal
   | Complete
 
 val decide_transition :
-  phase:t ->
-  action:action ->
-  (transition_outcome, string) result
-(** Pure transition decider. [Request_complete] yields [Complete] from
-    [Executing]; the workspace adapter must obtain and atomically persist the
-    required semantic completion verdict before committing [Completed].
-    Returns [Error msg] for invalid pairs. *)
+  phase:t -> action:action -> (transition_outcome, string) result

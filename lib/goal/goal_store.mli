@@ -5,13 +5,8 @@
     integer [version] counter and an ISO-8601 [updated_at]
     stamp.  Each goal carries:
 
-    - a {!Goal_phase.t} (canonical lifecycle: [Executing] / [Blocked] /
-      [Completed] / [Paused] / [Dropped]) — the only persisted
-      lifecycle representation.  The legacy [status] duplicate was
-      removed in RFC-0352 slice 1 after a live-store measurement
-      found zero phase-less rows; the decoder still accepts and
-      ignores an incoming ["status"] field during the transition
-      window.
+    - an abstract {!Phase.t}; [Completed] is observable through {!Phase.view}
+      but its stored constructor is owned only by this module.
 
     Every type is exposed concretely because external
     callers ([test/test_dashboard_goals],
@@ -35,20 +30,86 @@
     [sort_goals], [active_goals], [ensure_dirs],
     [default_state], [clamp_priority]. *)
 
-(** {1 Parsers (string → variant option)} *)
+(** {1 Lifecycle} *)
 
-val parse_goal_phase : string option -> Goal_phase.t option
-(** Delegates to {!Goal_phase.parse}.  [None] passes
+module Phase : sig
+  type t
+
+  type view =
+    | Executing
+    | Blocked
+    | Paused
+    | Completed
+    | Dropped
+
+  type nonterminal =
+    | N_executing
+    | N_blocked
+    | N_paused
+    | N_dropped
+
+  val view : t -> view
+  val to_string : t -> string
+  val view_to_string : view -> string
+  val view_of_string : string -> view option
+  val parse_view : string -> view option
+  val view_to_yojson : view -> Yojson.Safe.t
+  val view_of_yojson : Yojson.Safe.t -> (view, string) result
+  val all_views : view list
+  val nonterminal_to_view : nonterminal -> view
+  val executing : t
+  val blocked : t
+  val paused : t
+  val dropped : t
+  val is_executing : t -> bool
+  val is_blocked : t -> bool
+  val is_paused : t -> bool
+  val is_completed : t -> bool
+  val is_dropped : t -> bool
+  val admits_self_directed_progress : t -> bool
+
+  type action =
+    | Request_complete
+    | Pause
+    | Resume
+    | Block
+    | Unblock
+    | Drop
+    | Reopen
+
+  val action_to_string : action -> string
+  val action_of_string : string -> action option
+  val parse_action : string -> action option
+  val all_actions : action list
+
+  type transition_outcome =
+    | Move_to of nonterminal
+    | Complete
+
+  val decide_transition :
+    phase:t -> action:action -> (transition_outcome, string) result
+end
+
+(** {1 Parsers (string -> observation option)} *)
+
+val parse_goal_phase : string option -> Phase.view option
+(** Delegates to {!Phase.parse_view}.  [None] passes
     through. *)
 
 (** {1 Goal record} *)
 
 type completion_receipt = private
-  { evaluator_runtime : string
+  { workspace_identity : string
+  ; expected_state_version : int
+  ; operation_id : string
+  ; completion_digest : string
+  ; review_evidence_sha256 : string
+  ; evaluator_runtime : string
   ; reviewed_at : string
   ; reviewed_goal_updated_at : string
   ; review_prompt_sha256 : string
   ; completion_claim : string
+  ; requesting_agent : string
   ; linked_task_ids : string list
   }
 (** Durable proof that the configured semantic reviewer approved the exact Goal
@@ -70,7 +131,7 @@ type goal = {
   target_value : string option;
   due_date : string option;
   priority : int;
-  phase : Goal_phase.t;
+  phase : Phase.t;
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
@@ -123,22 +184,9 @@ val goals_path : Workspace_utils.config -> string
 (** {1 State I/O} *)
 
 val read_state : Workspace_utils.config -> state
-(** Reads {!goals_path}; returns an empty default state on
-    missing file or parse failure.  Goals loaded from disk
-    are passed through the internal normaliser ([priority]
-    clamp + phase/status reconciliation). *)
-
-val write_state : Workspace_utils.config -> state -> unit
-(** Direct overwrite of {!goals_path} with the supplied state.
-    Used by tests that need deterministic initial state without
-    the read-modify-write cycle of {!update_state}.
-
-    Does *not* acquire the file lock; callers that need atomicity
-    should use {!update_state} instead. *)
-
-val write_state_result :
-  Workspace_utils.config -> state -> (unit, string) result
-(** Result-returning variant of {!write_state}. *)
+(** Reads the current schema. A missing file starts a fresh state; malformed or
+    obsolete state raises {!Current_state_invalid} and requires an explicit
+    pre-1.0 runtime reset rather than compatibility interpretation. *)
 
 (** {1 Single-goal operations} *)
 
@@ -148,15 +196,6 @@ val get_goal_with_version :
   Workspace_utils.config -> goal_id:string -> (goal * int) option
 (** Returns the Goal and the exact enclosing store version from one read. *)
 
-val update_goal :
-  Workspace_utils.config ->
-  goal_id:string ->
-  (goal -> goal) ->
-  (goal, string) result
-(** Locks the state file, applies [f] to the matched goal
-    (with [updated_at] pre-stamped), normalises the result,
-    and writes back.  Errors when the [goal_id] is unknown. *)
-
 type conditional_update_error =
   | Goal_not_found
   | Goal_snapshot_changed
@@ -165,14 +204,24 @@ type conditional_update_error =
 
 val conditional_update_error_to_string : conditional_update_error -> string
 
-val update_goal_if_unchanged :
+val set_nonterminal_phase_if_unchanged :
   Workspace_utils.config ->
   expected:goal ->
-  (goal -> goal) ->
+  phase:Phase.nonterminal ->
+  review_note:string option ->
   (goal, conditional_update_error) result
-(** Atomically updates one Goal only when its current persisted record exactly
-    equals [expected]. The equality is structural over the typed record, not a
-    serialized string or selected-field heuristic. *)
+(** Atomically writes a nonterminal lifecycle phase only when the current
+    persisted record exactly equals [expected]. *)
+
+val record_completion_review_failure_if_unchanged :
+  Workspace_utils.config ->
+  expected:goal ->
+  failure:completion_review_failure ->
+  review_note:string ->
+  reviewed_at:string ->
+  (goal, conditional_update_error) result
+(** Persists a failed completion review without exposing a generic goal-record
+    mutation callback. *)
 
 val complete_goal :
   Workspace_utils.config ->
@@ -180,6 +229,8 @@ val complete_goal :
   expected_state_version:int ->
   operation_id:string ->
   approval:Goal_completion_reviewer.approval ->
+  read_current_linked_tasks:
+    (unit -> (Yojson.Safe.t * string list, string) result) ->
   (goal, conditional_update_error) result
 (** Consumes an exact semantic-review approval and persists [Completed] in one
     lock/CAS transaction. This is the only completion mutation authority. *)
@@ -209,7 +260,7 @@ val delete_goal :
 
 val list_goals :
   Workspace_utils.config ->
-  ?phase:Goal_phase.t ->
+  ?phase:Goal_phase.view ->
   unit ->
   goal list
 (** Reads the state, applies optional filters, then sorts
@@ -237,3 +288,16 @@ val upsert_goal :
 
     Errors when [title] is omitted or empty for a new Goal, or when a caller
     tries to mutate a completed Goal before reopening it. *)
+exception Current_state_invalid of string
+(** Raised when a present primary/recovery file is not the exact current
+    schema. Invalid state is never projected as an empty Goal set. *)
+
+val canonical_workspace_identity :
+  Workspace_utils.config -> (string, string) result
+(** Stable hash of the canonical cluster-aware workspace root. *)
+
+module For_testing : sig
+  val write_state : Workspace_utils.config -> state -> unit
+  val write_state_result :
+    Workspace_utils.config -> state -> (unit, string) result
+end

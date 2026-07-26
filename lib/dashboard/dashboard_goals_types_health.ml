@@ -29,7 +29,8 @@ let keeper_name_of_assignee metas assignee =
       if keeper_name_matches_meta metas assignee then Some assignee
       else None
 
-let goal_fsm_state_kind = function
+let goal_fsm_state_kind phase =
+  match Goal_phase.view phase with
   | Goal_phase.Executing -> "executing"
   | Goal_phase.Blocked -> "blocked"
   | Goal_phase.Paused -> "paused"

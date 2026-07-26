@@ -23,7 +23,7 @@ let make_goal ?metric ?target_value id title =
     target_value;
     due_date = None;
     priority = 3;
-    phase = Goal_phase.Executing;
+    phase = Goal_phase.executing;
     parent_goal_id = None;
     last_review_note = None;
     last_review_at = None;

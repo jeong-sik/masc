@@ -17,9 +17,17 @@
   masc_config
   masc_log
   masc_workspace
+  masc_runtime
+  masc.prompt_registry
+  masc.config
+  masc_eio_context
   shared_audit
   time_compat
   fs_compat
+  agent_sdk
+  agent_sdk.base
+  agent_sdk.llm_provider
+  digestif
   yojson
   eio
   unix)

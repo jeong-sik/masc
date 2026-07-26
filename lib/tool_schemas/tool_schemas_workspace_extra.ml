@@ -2,7 +2,7 @@
 
 open Masc_domain
 
-let goal_phase_enum = List.map Goal_phase.to_string Goal_phase.all
+let goal_phase_enum = List.map Goal_phase.view_to_string Goal_phase.all
 
 let goal_transition_action_enum =
   List.map Goal_phase.action_to_string Goal_phase.all_actions

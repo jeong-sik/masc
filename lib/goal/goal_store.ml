@@ -1,11 +1,164 @@
-(* Goal store — shared planning goals with a dedicated lifecycle phase.
-   [phase] is the only persisted lifecycle representation (RFC-0352 slice 1).
-   The legacy [status] duplicate was removed after a live-store measurement
-   found zero rows without a [phase] field; during the transition window the
-   decoder still accepts and ignores an incoming "status" field, and the
-   full-file save converges the store to phase-only on first write. *)
+(* Goal store -- current-schema shared planning state. Invalid persisted input
+   never becomes an empty Goal set and no retired shape is recognized. *)
 
 let ( let* ) = Result.bind
+
+module Phase = struct
+  type view =
+    | Executing
+    | Blocked
+    | Paused
+    | Completed
+    | Dropped
+
+  type nonterminal =
+    | N_executing
+    | N_blocked
+    | N_paused
+    | N_dropped
+
+  type t = view
+
+  let view phase = phase
+
+  let view_to_string = function
+    | Executing -> "executing"
+    | Blocked -> "blocked"
+    | Paused -> "paused"
+    | Completed -> "completed"
+    | Dropped -> "dropped"
+  ;;
+
+  let to_string = view_to_string
+
+  let view_of_string = function
+    | "executing" -> Some Executing
+    | "blocked" -> Some Blocked
+    | "paused" -> Some Paused
+    | "completed" -> Some Completed
+    | "dropped" -> Some Dropped
+    | _ -> None
+  ;;
+
+  let parse_view value =
+    String.trim value |> String.lowercase_ascii |> view_of_string
+  ;;
+
+  let view_to_yojson view = `String (view_to_string view)
+
+  let view_of_yojson = function
+    | `String raw ->
+      (match parse_view raw with
+       | Some view -> Ok view
+       | None -> Error ("goal_phase_of_yojson: " ^ raw))
+    | json ->
+      Error ("goal_phase_of_yojson: " ^ Yojson.Safe.to_string json)
+  ;;
+
+  let all_views = [ Executing; Blocked; Paused; Completed; Dropped ]
+  let executing = Executing
+  let blocked = Blocked
+  let paused = Paused
+  let dropped = Dropped
+  let completed = Completed
+
+  let of_nonterminal = function
+    | N_executing -> Executing
+    | N_blocked -> Blocked
+    | N_paused -> Paused
+    | N_dropped -> Dropped
+  ;;
+
+  let nonterminal_to_view = function
+    | N_executing -> Executing
+    | N_blocked -> Blocked
+    | N_paused -> Paused
+    | N_dropped -> Dropped
+  ;;
+
+  let of_view = function
+    | Executing -> Executing
+    | Blocked -> Blocked
+    | Paused -> Paused
+    | Completed -> Completed
+    | Dropped -> Dropped
+  ;;
+
+  let is_executing phase = view phase = Executing
+  let is_blocked phase = view phase = Blocked
+  let is_paused phase = view phase = Paused
+  let is_completed phase = view phase = Completed
+  let is_dropped phase = view phase = Dropped
+
+  let admits_self_directed_progress phase =
+    match view phase with
+    | Executing -> true
+    | Blocked | Paused | Completed | Dropped -> false
+  ;;
+
+  type action =
+    | Request_complete
+    | Pause
+    | Resume
+    | Block
+    | Unblock
+    | Drop
+    | Reopen
+
+  let action_to_string = function
+    | Request_complete -> "request_complete"
+    | Pause -> "pause"
+    | Resume -> "resume"
+    | Block -> "block"
+    | Unblock -> "unblock"
+    | Drop -> "drop"
+    | Reopen -> "reopen"
+  ;;
+
+  let all_actions =
+    [ Request_complete; Pause; Resume; Block; Unblock; Drop; Reopen ]
+  ;;
+
+  let action_of_string = function
+    | "request_complete" -> Some Request_complete
+    | "pause" -> Some Pause
+    | "resume" -> Some Resume
+    | "block" -> Some Block
+    | "unblock" -> Some Unblock
+    | "drop" -> Some Drop
+    | "reopen" -> Some Reopen
+    | _ -> None
+  ;;
+
+  let parse_action value =
+    String.trim value |> String.lowercase_ascii |> action_of_string
+  ;;
+
+  type transition_outcome =
+    | Move_to of nonterminal
+    | Complete
+
+  let decide_transition ~phase ~(action : action) =
+    match view phase, action with
+    | Executing, Request_complete -> Ok Complete
+    | Executing, Pause -> Ok (Move_to N_paused)
+    | Executing, Block -> Ok (Move_to N_blocked)
+    | Executing, Drop -> Ok (Move_to N_dropped)
+    | Paused, Resume -> Ok (Move_to N_executing)
+    | Paused, Drop -> Ok (Move_to N_dropped)
+    | Blocked, Unblock -> Ok (Move_to N_executing)
+    | Blocked, Drop -> Ok (Move_to N_dropped)
+    | Completed, Reopen -> Ok (Move_to N_executing)
+    | Completed, Drop -> Ok (Move_to N_dropped)
+    | Dropped, Reopen -> Ok (Move_to N_executing)
+    | current, _ ->
+      Error
+        (Printf.sprintf
+           "invalid goal transition: %s -> %s"
+           (view_to_string current)
+           (action_to_string action))
+  ;;
+end
 
 (* RFC-0294: the workspace-goal [horizon] (short/mid/long) and its dead
    refresh/snapshot scheduler ([refresh_mode], [snapshot_mode], and their
@@ -17,11 +170,17 @@ let clamp_priority p =
   max 1 (min 5 p)
 
 type completion_receipt =
-  { evaluator_runtime : string
+  { workspace_identity : string
+  ; expected_state_version : int
+  ; operation_id : string
+  ; completion_digest : string
+  ; review_evidence_sha256 : string
+  ; evaluator_runtime : string
   ; reviewed_at : string
   ; reviewed_goal_updated_at : string
   ; review_prompt_sha256 : string
   ; completion_claim : string
+  ; requesting_agent : string
   ; linked_task_ids : string list
   }
 
@@ -36,7 +195,7 @@ type goal = {
   target_value : string option;
   due_date : string option;
   priority : int;
-  phase : Goal_phase.t;
+  phase : Phase.t;
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
@@ -47,20 +206,20 @@ type goal = {
 }
 
 let validate_completion_invariant goal =
-  match goal.phase, goal.completion_receipt, goal.completion_review_failure with
-  | Goal_phase.Completed, None, _ ->
+  match Phase.view goal.phase, goal.completion_receipt, goal.completion_review_failure with
+  | Phase.Completed, None, _ ->
     Error
       "completed Goal requires a configured semantic-review completion receipt"
-  | (Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Dropped),
+  | (Phase.Executing | Phase.Blocked | Phase.Paused | Phase.Dropped),
     Some _,
     _ ->
     Error "non-completed Goal cannot retain a completion receipt"
-  | Goal_phase.Completed, Some _, Some _ ->
+  | Phase.Completed, Some _, Some _ ->
     Error "completed Goal cannot retain a failed completion-review outcome"
   | _, _, Some _ when Option.is_none goal.last_review_note ->
     Error "failed completion-review outcome requires a durable review note"
-  | Goal_phase.Completed, Some _, None
-  | (Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Dropped),
+  | Phase.Completed, Some _, None
+  | (Phase.Executing | Phase.Blocked | Phase.Paused | Phase.Dropped),
     None,
     _ ->
     Ok ()
@@ -71,8 +230,8 @@ let generic_completion_error =
    semantic-review completion authority"
 ;;
 
-let validate_generic_goal_mutation ~before:_ after =
-  if after.phase = Goal_phase.Completed
+let validate_generic_goal_mutation ~before after =
+  if Phase.is_completed before.phase || Phase.is_completed after.phase
   then Error generic_completion_error
   else validate_completion_invariant after
 ;;
@@ -82,6 +241,16 @@ type state = {
   updated_at : string;
   goals : goal list;
 }
+
+exception Current_state_invalid of string
+
+let current_state_invalid_message =
+  "Goal store current state is invalid; reset the pre-1.0 runtime state"
+;;
+
+let raise_current_state_invalid () =
+  raise (Current_state_invalid current_state_invalid_message)
+;;
 
 let rec state_to_yojson (state : state) =
   `Assoc
@@ -100,7 +269,7 @@ and goal_to_yojson (goal : goal) =
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("priority", `Int goal.priority);
-      ("phase", Goal_phase.to_yojson goal.phase);
+      ("phase", Phase.view_to_yojson (Phase.view goal.phase));
       ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
@@ -119,11 +288,17 @@ and goal_to_yojson (goal : goal) =
 
 and completion_receipt_to_yojson receipt =
   `Assoc
-    [ "evaluator_runtime", `String receipt.evaluator_runtime
+    [ "workspace_identity", `String receipt.workspace_identity
+    ; "expected_state_version", `Int receipt.expected_state_version
+    ; "operation_id", `String receipt.operation_id
+    ; "completion_digest", `String receipt.completion_digest
+    ; "review_evidence_sha256", `String receipt.review_evidence_sha256
+    ; "evaluator_runtime", `String receipt.evaluator_runtime
     ; "reviewed_at", `String receipt.reviewed_at
     ; "reviewed_goal_updated_at", `String receipt.reviewed_goal_updated_at
     ; "review_prompt_sha256", `String receipt.review_prompt_sha256
     ; "completion_claim", `String receipt.completion_claim
+    ; "requesting_agent", `String receipt.requesting_agent
     ; ( "linked_task_ids"
       , `List (List.map (fun task_id -> `String task_id) receipt.linked_task_ids) )
     ]
@@ -131,11 +306,17 @@ and completion_receipt_to_yojson receipt =
 and completion_receipt_of_yojson = function
   | `Assoc fields as json ->
     let accepted_fields =
-      [ "evaluator_runtime"
+      [ "workspace_identity"
+      ; "expected_state_version"
+      ; "operation_id"
+      ; "completion_digest"
+      ; "review_evidence_sha256"
+      ; "evaluator_runtime"
       ; "reviewed_at"
       ; "reviewed_goal_updated_at"
       ; "review_prompt_sha256"
       ; "completion_claim"
+      ; "requesting_agent"
       ; "linked_task_ids"
       ]
     in
@@ -152,18 +333,30 @@ and completion_receipt_of_yojson = function
             field)
      | None ->
        (match
-          ( Json_util.assoc_member_opt "evaluator_runtime" json
+          ( Json_util.assoc_member_opt "workspace_identity" json
+          , Json_util.assoc_member_opt "expected_state_version" json
+          , Json_util.assoc_member_opt "operation_id" json
+          , Json_util.assoc_member_opt "completion_digest" json
+          , Json_util.assoc_member_opt "review_evidence_sha256" json
+          , Json_util.assoc_member_opt "evaluator_runtime" json
           , Json_util.assoc_member_opt "reviewed_at" json
           , Json_util.assoc_member_opt "reviewed_goal_updated_at" json
           , Json_util.assoc_member_opt "review_prompt_sha256" json
           , Json_util.assoc_member_opt "completion_claim" json
+          , Json_util.assoc_member_opt "requesting_agent" json
           , Json_util.assoc_member_opt "linked_task_ids" json )
         with
-        | ( Some (`String evaluator_runtime)
+        | ( Some (`String workspace_identity)
+          , Some (`Int expected_state_version)
+          , Some (`String operation_id)
+          , Some (`String completion_digest)
+          , Some (`String review_evidence_sha256)
+          , Some (`String evaluator_runtime)
           , Some (`String reviewed_at)
           , Some (`String reviewed_goal_updated_at)
           , Some (`String review_prompt_sha256)
           , Some (`String completion_claim)
+          , Some (`String requesting_agent)
           , Some (`List linked_task_ids_json) ) ->
           let rec parse_task_ids acc = function
             | [] -> Ok (List.rev acc)
@@ -175,11 +368,17 @@ and completion_receipt_of_yojson = function
           in
           Result.map
             (fun linked_task_ids ->
-               { evaluator_runtime
+               { workspace_identity
+               ; expected_state_version
+               ; operation_id
+               ; completion_digest
+               ; review_evidence_sha256
+               ; evaluator_runtime
                ; reviewed_at
                ; reviewed_goal_updated_at
                ; review_prompt_sha256
                ; completion_claim
+               ; requesting_agent
                ; linked_task_ids
                })
             (parse_task_ids [] linked_task_ids_json)
@@ -187,10 +386,22 @@ and completion_receipt_of_yojson = function
   | _ -> Error "completion_receipt_of_yojson: expected object"
 
 and state_of_yojson = function
-  | `Assoc _ as json ->
+  | `Assoc fields as json ->
+      let accepted_fields = [ "version"; "updated_at"; "goals" ] in
+      let unknown_field =
+        List.find_map
+          (fun (field, _) ->
+             if List.mem field accepted_fields then None else Some field)
+          fields
+      in
       begin
-        match Json_util.assoc_member_opt "version" json, Json_util.assoc_member_opt "updated_at" json, Json_util.assoc_member_opt "goals" json with
-        | Some (`Int version), Some (`String updated_at), Some (`List goals_json) ->
+        match
+          ( unknown_field
+          , Json_util.assoc_member_opt "version" json
+          , Json_util.assoc_member_opt "updated_at" json
+          , Json_util.assoc_member_opt "goals" json )
+        with
+        | None, Some (`Int version), Some (`String updated_at), Some (`List goals_json) ->
             let rec collect acc = function
               | [] -> Ok (List.rev acc)
               | row :: rest -> (
@@ -201,7 +412,12 @@ and state_of_yojson = function
             Result.map
               (fun goals -> { version; updated_at; goals })
               (collect [] goals_json)
-        | _ -> Error "state_of_yojson: invalid state"
+        | Some field, _, _, _ ->
+          Error
+            (Printf.sprintf
+               "state_of_yojson: unknown current-state field %S"
+               field)
+        | _ -> Error "state_of_yojson: invalid current state"
       end
   | json ->
       Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
@@ -215,9 +431,6 @@ and goal_of_yojson = function
         ; "target_value"
         ; "due_date"
         ; "priority"
-        ; "status" (* accepted and ignored during the phase-only transition:
-                        rows written before RFC-0352 slice 1 still carry the
-                        derived duplicate until the first full-file save *)
         ; "phase"
         ; "parent_goal_id"
         ; "last_review_note"
@@ -244,19 +457,13 @@ and goal_of_yojson = function
                field)
       | None, Some (`String id), Some (`String title) ->
           let phase =
-            (* Phase is required. The status->phase read inference for
-               pre-phase rows was removed in RFC-0352 slice 1 after a live
-               measurement found zero phase-less rows; a row without [phase]
-               is now a decode error rather than a silent Active default
-               (the silent default already caused main red #23901 once). *)
             match Json_util.assoc_member_opt "phase" json with
             | None | Some `Null ->
                 Error
                   (Printf.sprintf
-                     "goal_of_yojson: goal %S has no phase field (legacy \
-                      status-only rows no longer decode; RFC-0352 slice 1)"
+                     "goal_of_yojson: goal %S has no current phase field"
                      id)
-            | Some phase_json -> Goal_phase.of_yojson phase_json
+            | Some phase_json -> Phase.view_of_yojson phase_json
           in
           let created_at =
             match Json_util.assoc_member_opt "created_at" json with
@@ -343,7 +550,7 @@ let normalize_lower s =
   String.trim s |> String.lowercase_ascii
 
 let parse_goal_phase = function
-  | Some s -> Goal_phase.parse s
+  | Some s -> Phase.parse_view s
   | None -> None
 
 let goals_path config =
@@ -354,6 +561,19 @@ let goals_recovery_path config =
 
 let ensure_dirs config =
   Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
+
+let canonical_workspace_identity config =
+  try
+    ensure_dirs config;
+    let canonical_path = Fs_compat.realpath (Workspace_utils.masc_dir config) in
+    Ok
+      Digestif.SHA256.(
+        digest_string ("masc-workspace\000" ^ canonical_path) |> to_hex)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ ->
+    Error "Goal workspace identity is unavailable; reset is required"
+;;
 
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
@@ -381,17 +601,17 @@ let read_state config =
                         Log.Misc.error
                           "goal_store: both primary and recovery goals.json corrupt (primary: %s, recovery: %s)"
                           primary_msg recovery_msg;
-                        default_state ())
+                        raise_current_state_invalid ())
                | Error recovery_read_msg ->
                    Log.Misc.warn
                      "goal_store: goals.json corrupt (%s), recovery read failed: %s"
                      primary_msg recovery_read_msg;
-                   default_state ()
+                    raise_current_state_invalid ()
              else
                (Log.Misc.warn
                   "goal_store: goals.json corrupt (%s), no .last-good available"
                   primary_msg;
-                default_state ()))
+                raise_current_state_invalid ()))
     | Error primary_msg ->
         let recovery = goals_recovery_path config in
         if Workspace_utils.path_exists config recovery then
@@ -407,17 +627,17 @@ let read_state config =
                    Log.Misc.error
                      "goal_store: primary unreadable (%s), recovery corrupt (%s)"
                      primary_msg recovery_msg;
-                   default_state ())
+                   raise_current_state_invalid ())
           | Error recovery_msg ->
               Log.Misc.error
                 "goal_store: primary unreadable (%s), recovery unreadable (%s)"
                 primary_msg recovery_msg;
-              default_state ()
+              raise_current_state_invalid ()
         else
           (Log.Misc.warn
              "goal_store: goals.json unreadable (%s), no .last-good available"
              primary_msg;
-           default_state ())
+           raise_current_state_invalid ())
   else
     default_state ()
 
@@ -436,7 +656,7 @@ let write_state_unchecked config state =
 
 let write_state_result config state =
   if List.exists
-       (fun goal -> goal.phase = Goal_phase.Completed)
+       (fun goal -> goal.phase = Phase.Completed)
        state.goals
   then Error generic_completion_error
   else
@@ -474,9 +694,9 @@ let validate_state_mutation before after =
     | goal :: rest ->
       let* () = validate_completion_invariant goal in
       (match goal.phase, find_goal before.goals goal.id with
-       | Goal_phase.Completed, Some previous when previous = goal ->
+       | Phase.Completed, Some previous when previous = goal ->
          validate rest
-       | Goal_phase.Completed, _ -> Error generic_completion_error
+       | Phase.Completed, _ -> Error generic_completion_error
        | _ -> validate rest)
   in
   validate after.goals
@@ -527,6 +747,7 @@ let update_goal config ~goal_id f =
 type conditional_update_error =
   | Goal_not_found
   | Goal_snapshot_changed
+  | Goal_approval_invalid
   | Goal_persistence_failed of string
 
 let conditional_update_error_to_string = function
@@ -562,12 +783,53 @@ let update_goal_if_unchanged config ~(expected : goal) f =
           | Ok () -> Ok updated_goal
           | Error msg -> Error (Goal_persistence_failed msg))))
 
+let set_nonterminal_phase_if_unchanged
+      config
+      ~expected
+      ~phase
+      ~review_note
+  =
+  update_goal_if_unchanged config ~expected (fun goal ->
+    let last_review_note, last_review_at =
+      match review_note, Phase.nonterminal_to_view phase with
+      | Some note, _ -> Some note, Some goal.updated_at
+      | None, Phase.Executing -> None, None
+      | None, (Phase.Blocked | Phase.Paused | Phase.Dropped) ->
+        goal.last_review_note, goal.last_review_at
+      | None, Phase.Completed -> assert false
+    in
+    { goal with
+      phase = Phase.of_nonterminal phase
+    ; last_review_note
+    ; last_review_at
+    ; completion_review_failure = None
+    ; completion_receipt = None
+    })
+;;
+
+let record_completion_review_failure_if_unchanged
+      config
+      ~expected
+      ~failure
+      ~review_note
+      ~reviewed_at
+  =
+  update_goal_if_unchanged config ~expected (fun goal ->
+    { goal with
+      last_review_note = Some review_note
+    ; last_review_at = Some reviewed_at
+    ; completion_review_failure = Some failure
+    ; completion_receipt = None
+    })
+;;
+
 let complete_goal
       config
       ~(expected : goal)
       ~expected_state_version
       ~operation_id
       ~approval
+      ~read_current_linked_tasks
   =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
     let state = read_state config in
@@ -577,52 +839,87 @@ let complete_goal
       when state.version <> expected_state_version || current <> expected ->
       Error Goal_snapshot_changed
     | Some current ->
-      if
-        not
-          (Goal_completion_reviewer.approval_authorizes
-             approval
-             ~goal_json:(goal_to_yojson current)
-             ~reviewed_goal_updated_at:current.updated_at
-             ~goal_id:current.id
-             ~expected_version:state.version
-             ~operation_id)
+      if not (Phase.is_executing current.phase)
+      then Error Goal_approval_invalid
+      else if
+        List.exists
+          (fun goal ->
+             match goal.completion_receipt with
+             | Some receipt -> String.equal receipt.operation_id operation_id
+             | None -> false)
+          state.goals
       then Error Goal_approval_invalid
       else
-        let metadata =
-          Goal_completion_reviewer.approval_metadata approval
-        in
-        let receipt =
-          { evaluator_runtime = metadata.evaluator_runtime
-          ; reviewed_at = metadata.reviewed_at
-          ; reviewed_goal_updated_at = current.updated_at
-          ; review_prompt_sha256 = metadata.review_prompt_sha256
-          ; completion_claim = metadata.completion_claim
-          ; linked_task_ids = metadata.linked_task_ids
-          }
-        in
-        let now = Masc_domain.now_iso () in
-        let updated_goal =
-          { current with
-            phase = Goal_phase.Completed
-          ; last_review_note = Some "Configured LLM approved Goal completion"
-          ; last_review_at = Some metadata.reviewed_at
-          ; completion_review_failure = None
-          ; completion_receipt = Some receipt
-          ; updated_at = now
-          }
-        in
-        (match validate_completion_invariant updated_goal with
+        (match read_current_linked_tasks () with
          | Error msg -> Error (Goal_persistence_failed msg)
-         | Ok () ->
-           let next_state =
-             { version = state.version + 1
-             ; updated_at = now
-             ; goals = replace_goal state.goals updated_goal
-             }
+         | Ok (linked_tasks_json, linked_task_ids) ->
+           let child_goals_json =
+             state.goals
+             |> List.filter (fun goal ->
+               match goal.parent_goal_id with
+               | Some parent_goal -> String.equal parent_goal current.id
+               | None -> false)
+             |> List.map goal_to_yojson
+             |> fun goals -> `List goals
            in
-           (match write_state_unchecked config next_state with
-            | Ok () -> Ok updated_goal
-            | Error msg -> Error (Goal_persistence_failed msg))))
+           let workspace_identity = canonical_workspace_identity config in
+           if
+             not
+               (Goal_completion_reviewer.approval_authorizes
+                  approval
+                  ~workspace_identity
+                  ~goal_json:(goal_to_yojson current)
+                  ~reviewed_goal_updated_at:current.updated_at
+                  ~goal_id:current.id
+                  ~expected_version:state.version
+                  ~operation_id
+                  ~linked_tasks_json
+                  ~linked_task_ids
+                  ~child_goals_json)
+           then Error Goal_approval_invalid
+           else
+             let metadata =
+               Goal_completion_reviewer.approval_metadata approval
+             in
+             let receipt =
+               { workspace_identity = metadata.workspace_identity
+               ; expected_state_version = metadata.expected_version
+               ; operation_id = metadata.operation_id
+               ; completion_digest = metadata.completion_digest
+               ; review_evidence_sha256 = metadata.review_evidence_sha256
+               ; evaluator_runtime = metadata.evaluator_runtime
+               ; reviewed_at = metadata.reviewed_at
+               ; reviewed_goal_updated_at = metadata.reviewed_goal_updated_at
+               ; review_prompt_sha256 = metadata.review_prompt_sha256
+               ; completion_claim = metadata.completion_claim
+               ; requesting_agent = metadata.requesting_agent
+               ; linked_task_ids = metadata.linked_task_ids
+               }
+             in
+             let now = Masc_domain.now_iso () in
+             let updated_goal =
+               { current with
+                 phase = Phase.completed
+               ; last_review_note =
+                   Some "Configured runtime approved Goal completion"
+               ; last_review_at = Some metadata.reviewed_at
+               ; completion_review_failure = None
+               ; completion_receipt = Some receipt
+               ; updated_at = now
+               }
+             in
+             (match validate_completion_invariant updated_goal with
+              | Error msg -> Error (Goal_persistence_failed msg)
+              | Ok () ->
+                let next_state =
+                  { version = state.version + 1
+                  ; updated_at = now
+                  ; goals = replace_goal state.goals updated_goal
+                  }
+                in
+                (match write_state_unchecked config next_state with
+                 | Ok () -> Ok updated_goal
+                 | Error msg -> Error (Goal_persistence_failed msg)))))
 
 type delete_goal_outcome =
   | Deleted
@@ -697,7 +994,7 @@ let list_goals config ?phase () =
   |> List.filter (fun goal ->
          match phase with
          | None -> true
-         | Some phase -> goal.phase = phase)
+         | Some phase -> Phase.view goal.phase = phase)
   |> sort_goals
 
 let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
@@ -796,7 +1093,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                   in
                   if candidate_goal = existing
                   then state
-                  else if existing.phase = Goal_phase.Completed
+                  else if existing.phase = Phase.Completed
                   then (
                     mutation_rejection :=
                       Some
@@ -819,7 +1116,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         target_value;
                         due_date;
                         priority = clamp_priority (Option.value priority ~default:3);
-                        phase = Goal_phase.Executing;
+                        phase = Phase.Executing;
                         parent_goal_id;
                         last_review_note = None;
                         last_review_at = None;
@@ -851,14 +1148,14 @@ let compute_rollup goals =
     List_util.count_if predicate goals
   in
   {
-    active_count = count (fun goal -> goal.phase = Goal_phase.Executing);
+    active_count = count (fun goal -> goal.phase = Phase.Executing);
     paused_count =
       count (fun goal ->
           match goal.phase with
-          | Goal_phase.Paused | Goal_phase.Blocked -> true
+          | Phase.Paused | Phase.Blocked -> true
           | _ -> false);
-    done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
-    dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
+    done_count = count (fun goal -> goal.phase = Phase.Completed);
+    dropped_count = count (fun goal -> goal.phase = Phase.Dropped);
   }
 
 (* RFC-0294: the horizon-driven refresh/snapshot scheduler ([snapshot],
@@ -867,4 +1164,9 @@ let compute_rollup goals =
    cohort selector keyed on the now-deleted [horizon]. *)
 
 let active_goals config =
-  list_goals config ~phase:Goal_phase.Executing ()
+  list_goals config ~phase:Phase.Executing ()
+
+module For_testing = struct
+  let write_state = write_state
+  let write_state_result = write_state_result
+end

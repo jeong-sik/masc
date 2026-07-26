@@ -271,7 +271,7 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
       ~task_done_count ~task_count ~target_parse_status ~unit
       ~observed_value:None ~target_numeric ~attainment_pct:None ~note goal
   in
-  match goal.phase with
+  match Goal_phase.view goal.phase with
   | Goal_phase.Completed ->
       build_attainment_json ~state:"attained" ~basis:"goal_phase"
         ~task_done_count ~task_count
@@ -374,13 +374,13 @@ let goal_completion_to_json (goal : Goal_store.goal) (node : tree_node) ~attainm
     | None, None -> (None, "none")
   in
   let ready_to_request_completion =
-    match goal.phase with
+    match Goal_phase.view goal.phase with
     | Goal_phase.Executing -> true
     | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Completed | Goal_phase.Dropped ->
         false
   in
   let state =
-    match goal.phase with
+    match Goal_phase.view goal.phase with
     | Goal_phase.Completed -> "completed"
     | Goal_phase.Dropped -> "dropped"
     | Goal_phase.Blocked -> "blocked"
@@ -388,7 +388,7 @@ let goal_completion_to_json (goal : Goal_store.goal) (node : tree_node) ~attainm
     | Goal_phase.Executing -> "ready_for_completion"
   in
   let is_terminal =
-    match goal.phase with
+    match Goal_phase.view goal.phase with
     | Goal_phase.Completed | Goal_phase.Dropped -> true
     | Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused ->
         false
@@ -407,7 +407,7 @@ let goal_completion_to_json (goal : Goal_store.goal) (node : tree_node) ~attainm
       ("task_total", `Int task_count);
       ("task_done", `Int task_done_count);
       ("task_open", `Int task_open_count);
-      ("is_complete", `Bool (goal.phase = Goal_phase.Completed));
+      ("is_complete", `Bool (Goal_phase.is_completed goal.phase));
       ("is_terminal", `Bool is_terminal);
       ("ready_to_request_completion", `Bool ready_to_request_completion);
     ]

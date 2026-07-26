@@ -193,7 +193,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
 ;;
 
 let goal_summary_for_turn (goal : Goal_store.goal) =
-  match goal.phase, goal.completion_review_failure with
+  match Goal_phase.view goal.phase, goal.completion_review_failure with
   | Goal_phase.Executing, Some _ ->
     Printf.sprintf
       "%s [completion review pending rework; inspect masc_goal_list]"

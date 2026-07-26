@@ -75,7 +75,7 @@ let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
    lifecycle SSOT) instead of hand-rolling them here, so the validator, the MCP
    schema enum, and the type can never drift apart. *)
-let goal_phase_strings = List.map Goal_phase.to_string Goal_phase.all
+let goal_phase_strings = List.map Goal_phase.view_to_string Goal_phase.all
 
 let goal_transition_action_strings =
   List.map Goal_phase.action_to_string Goal_phase.all_actions
@@ -214,23 +214,11 @@ let parse_optional_transition_action args field =
 ;;
 
 let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () =
-  let last_review_note, last_review_at =
-    match note, phase with
-    | Some note, _ -> Some note, Some (Masc_domain.now_iso ())
-    | None, Goal_phase.Executing -> None, None
-    | None,
-      (Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Completed | Goal_phase.Dropped)
-      ->
-      goal.last_review_note, goal.last_review_at
-  in
-  Goal_store.update_goal_if_unchanged ctx.config ~expected:goal (fun current ->
-    { current with
-      phase
-    ; last_review_note
-    ; last_review_at
-    ; completion_review_failure = None
-    ; completion_receipt = None
-    })
+  Goal_store.set_nonterminal_phase_if_unchanged
+    ctx.config
+    ~expected:goal
+    ~phase
+    ~review_note:note
 ;;
 
 let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
@@ -247,7 +235,7 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ])
 ;;
 
-let goal_completion_evidence (ctx : context) (goal : Goal_store.goal) =
+let linked_task_evidence (ctx : context) (goal : Goal_store.goal) =
   match Workspace.read_backlog_r ctx.config with
   | Error msg -> Error ("Goal completion task evidence unavailable: " ^ msg)
   | Ok backlog ->
@@ -262,12 +250,19 @@ let goal_completion_evidence (ctx : context) (goal : Goal_store.goal) =
        let linked_tasks =
          Workspace_goal_index.tasks_for_goal index ~goal_id:goal.id
        in
-       let child_goals =
-         Goal_store.list_goals ctx.config ()
-         |> List.filter (fun (candidate : Goal_store.goal) ->
-              candidate.parent_goal_id = Some goal.id)
-       in
-       Ok (linked_tasks, child_goals))
+       Ok linked_tasks)
+;;
+
+let goal_completion_evidence (ctx : context) (goal : Goal_store.goal) =
+  match linked_task_evidence ctx goal with
+  | Error _ as error -> error
+  | Ok linked_tasks ->
+    let child_goals =
+      Goal_store.list_goals ctx.config ()
+      |> List.filter (fun (candidate : Goal_store.goal) ->
+           candidate.parent_goal_id = Some goal.id)
+    in
+    Ok (linked_tasks, child_goals)
 ;;
 
 let persist_nonterminal_goal_review
@@ -276,13 +271,12 @@ let persist_nonterminal_goal_review
       ~failure
       ~reason
   =
-  Goal_store.update_goal_if_unchanged ctx.config ~expected:goal (fun current ->
-    { current with
-      last_review_note = Some reason
-    ; last_review_at = Some (Masc_domain.now_iso ())
-    ; completion_review_failure = Some failure
-    ; completion_receipt = None
-    })
+  Goal_store.record_completion_review_failure_if_unchanged
+    ctx.config
+    ~expected:goal
+    ~failure
+    ~review_note:reason
+    ~reviewed_at:(Masc_domain.now_iso ())
 ;;
 
 let conditional_goal_error_result
@@ -294,6 +288,7 @@ let conditional_goal_error_result
     match error with
     | Goal_store.Goal_not_found -> Not_found
     | Goal_store.Goal_snapshot_changed -> Conflict
+    | Goal_store.Goal_approval_invalid -> Conflict
     | Goal_store.Goal_persistence_failed _ -> Internal_error
   in
   let class_ =
@@ -367,13 +362,14 @@ let handle_goal_completion_request
         |> to_hex)
     in
     let request : Goal_completion_reviewer.review_request =
-      { goal_id = goal.id
+      { workspace_identity = Goal_store.canonical_workspace_identity ctx.config
+      ; goal_id = goal.id
       ; goal_version
       ; operation_id
       ; goal_json = Goal_store.goal_to_yojson goal
       ; goal_updated_at = goal.updated_at
       ; completion_claim
-      ; agent_name = ctx.agent_name
+      ; requesting_agent = ctx.agent_name
       ; linked_tasks_json =
           `List (List.map Masc_domain.task_to_yojson linked_tasks)
       ; linked_task_ids =
@@ -390,13 +386,35 @@ let handle_goal_completion_request
        Goal_completion_reviewer.Structured_tool,
        Some _,
        Some approval ->
-       (match
-          Goal_store.complete_goal
-            ctx.config
-            ~expected:goal
-            ~expected_state_version:goal_version
-            ~operation_id
-            ~approval
+       let backlog_lock_path =
+         Filename.concat (Workspace_utils.tasks_dir ctx.config) ".backlog"
+       in
+       let completion_result =
+         Workspace_utils.with_file_lock ctx.config backlog_lock_path (fun () ->
+           Workspace_utils.with_file_lock
+             ctx.config
+             (Workspace_goal_index.goal_task_links_lock_path ctx.config)
+             (fun () ->
+                Goal_store.complete_goal
+                  ctx.config
+                  ~expected:goal
+                  ~expected_state_version:goal_version
+                  ~operation_id
+                  ~approval
+                  ~read_current_linked_tasks:(fun () ->
+                    match linked_task_evidence ctx goal with
+                    | Error _ as error -> error
+                    | Ok current_linked_tasks ->
+                      Ok
+                        ( `List
+                            (List.map
+                               Masc_domain.task_to_yojson
+                               current_linked_tasks)
+                        , List.map
+                            (fun (task : Masc_domain.task) -> task.id)
+                            current_linked_tasks ))))
+       in
+       (match completion_result
         with
         | Error error ->
           conditional_goal_error_result ~tool_name ~start_time error

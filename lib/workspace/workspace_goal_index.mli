@@ -54,6 +54,11 @@ val build_task_goal_index
 (** Path to the persistent goal-task link registry. *)
 val goal_task_links_path : Workspace_utils_backend_setup.config -> string
 
+(** Lock authority shared by every goal-task link reader/writer that participates
+    in a cross-store Goal completion transaction. *)
+val goal_task_links_lock_path :
+  Workspace_utils_backend_setup.config -> string
+
 (** Read the persistent goal-task link registry. Missing registry files are
     treated as an empty link set. *)
 val read_goal_task_links :

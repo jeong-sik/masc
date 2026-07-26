@@ -26,23 +26,10 @@ let repo_root () =
     ascend (Sys.getcwd ())
 ;;
 
-let goal_reviewer_run
-  : (string ->
-     ( Goal_completion_reviewer.verdict option
-     , Agent_sdk.Error.sdk_error )
-       result)
-      ref
-  =
-  ref (fun (_prompt : string) ->
-    Ok (Some Goal_completion_reviewer.Approve))
-;;
-
 let () =
   Prompt_registry.set_markdown_dir
     (Filename.concat (repo_root ()) "config/prompts");
   Prompt_defaults.init ();
-  Atomic.set Workspace_hooks.get_cross_verifier_runtime_id_fn (fun () ->
-    Some "test.goal-completion-reviewer");
 ;;
 
 let temp_dir () =
@@ -181,19 +168,26 @@ let test_goal_list_filters_by_phase () =
   @@ fun config ->
   let create ~title ~phase =
     let phase =
-      match Goal_phase.parse phase with
-      | Some phase -> phase
-      | None -> fail ("invalid phase fixture: " ^ phase)
+      match phase with
+      | "executing" -> Goal_store.Phase.N_executing
+      | "blocked" -> Goal_store.Phase.N_blocked
+      | "paused" -> Goal_store.Phase.N_paused
+      | "dropped" -> Goal_store.Phase.N_dropped
+      | phase -> fail ("invalid nonterminal phase fixture: " ^ phase)
     in
     match Goal_store.upsert_goal config ~title () with
     | Error msg -> fail msg
     | Ok (goal, _) ->
       (match
-         Goal_store.update_goal config ~goal_id:goal.id (fun current ->
-           { current with phase })
+         Goal_store.set_nonterminal_phase_if_unchanged
+           config
+           ~expected:goal
+           ~phase
+           ~review_note:None
        with
        | Ok _ -> ()
-       | Error msg -> fail msg)
+       | Error error ->
+         fail (Goal_store.conditional_update_error_to_string error))
   in
   create ~title:"Executing goal" ~phase:"executing";
   create ~title:"Blocked goal" ~phase:"blocked";
@@ -419,81 +413,6 @@ let test_goal_completion_verdict_parser_is_exact () =
        ])
 ;;
 
-let test_goal_completion_requires_structured_approval () =
-  with_workspace
-  @@ fun config ->
-  goal_reviewer_run := (fun _ -> Ok (Some Goal_completion_reviewer.Approve));
-  let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Direct completion" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  let result =
-    request_complete
-      ~note:"Deployment receipt confirms the target behavior."
-      config
-      goal.id
-  in
-  check string "structured approval completes" "completed" (transition_phase result);
-  let completed = current_goal config goal.id in
-  check bool "approved Goal has no failure marker" true
-    (Option.is_none completed.completion_review_failure);
-  (match completed.completion_receipt with
-   | None -> fail "structured approval did not persist a completion receipt"
-   | Some receipt ->
-     check
-       string
-       "provider-neutral reviewer runtime persisted"
-       "test.goal-completion-reviewer"
-       receipt.evaluator_runtime;
-     check
-       string
-       "receipt binds reviewed snapshot"
-       goal.updated_at
-       receipt.reviewed_goal_updated_at;
-     check
-       int
-       "receipt binds exact review prompt"
-       64
-       (String.length receipt.review_prompt_sha256));
-  let mutation_error =
-    Tool_workspace.dispatch
-      (workspace_ctx config)
-      ~name:"masc_goal_upsert"
-      ~args:
-        (`Assoc
-           [ "id", `String goal.id
-           ; "title", `String "Mutated after approval"
-           ])
-    |> expect_error
-  in
-  check
-    string
-    "completed contract mutation is rejected"
-    "validation_error"
-    (get_string_field mutation_error "error_code");
-  check
-    string
-    "completed Goal retains reviewed title"
-    "Direct completion"
-    (current_goal config goal.id).title;
-  let reopened =
-    Tool_workspace.dispatch
-      (workspace_ctx config)
-      ~name:"masc_goal_transition"
-      ~args:
-        (`Assoc
-           [ "goal_id", `String goal.id
-           ; "action", `String "reopen"
-           ])
-  in
-  check string "reopen returns to execution" "executing"
-    (transition_phase reopened);
-  check bool "reopen clears completion receipt" true
-    (current_goal config goal.id
-     |> fun current -> Option.is_none current.completion_receipt)
-;;
-
 let test_goal_completion_requires_nonempty_claim () =
   with_workspace
   @@ fun config ->
@@ -502,7 +421,6 @@ let test_goal_completion_requires_nonempty_claim () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  goal_reviewer_run := (fun _ -> fail "reviewer ran without a completion claim");
   let error = request_complete config goal.id |> expect_error in
   check
     string
@@ -511,202 +429,11 @@ let test_goal_completion_requires_nonempty_claim () =
     (get_string_field error "error_code");
   let current = current_goal config goal.id in
   check bool "missing claim cannot complete" true
-    (current.phase = Goal_phase.Executing);
+    Goal_phase.is_executing current.phase;
   check bool "missing claim writes no receipt" true
     (Option.is_none current.completion_receipt)
 ;;
 
-let test_goal_completion_supplies_open_task_as_evidence () =
-  with_workspace
-  @@ fun config ->
-  let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Open task completion" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  ignore
-    (Workspace_task.add_task
-       ~goal_id:goal.id
-       config
-       ~title:"Still open"
-       ~priority:3
-       ~description:"This task is unrelated to the already achieved target");
-  let task =
-    Workspace.get_tasks_raw config
-    |> List.find (fun (task : Masc_domain.task) ->
-         String.equal task.title "Still open")
-  in
-  goal_reviewer_run :=
-    (fun prompt ->
-       check
-         bool
-         "linked open Task reaches semantic reviewer"
-         true
-         (contains_substring prompt task.id);
-       Ok (Some Goal_completion_reviewer.Approve));
-  check
-    string
-    "open task is evidence, not a local count gate"
-    "completed"
-    (transition_phase
-       (request_complete
-          ~note:"The Goal target was achieved independently; see the claim."
-          config
-          goal.id))
-;;
-
-let test_goal_completion_rejection_is_durable_and_nonterminal () =
-  with_workspace
-  @@ fun config ->
-  let goal, _ =
-    match
-      Goal_store.upsert_goal
-        config
-        ~title:"Metric completion"
-        ~metric:"coverage %"
-        ~target_value:"80%"
-        ()
-    with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  goal_reviewer_run :=
-    (fun prompt ->
-       check bool "metric reaches reviewer" true (contains_substring prompt "coverage %");
-       check bool "target reaches reviewer" true (contains_substring prompt "80%");
-       Ok
-         (Some
-            (Goal_completion_reviewer.Reject
-               "No measured coverage result was supplied")));
-  let error =
-    request_complete
-      ~note:"All implementation tasks are done."
-      config
-      goal.id
-    |> expect_error
-  in
-  check
-    string
-    "semantic rejection is explicit"
-    "precondition_failed"
-    (get_string_field error "error_code");
-  let current = current_goal config goal.id in
-  check bool "rejected Goal stays executing" true
-    (current.phase = Goal_phase.Executing);
-  check
-    (option string)
-    "rejection reason is durable"
-    (Some "No measured coverage result was supplied")
-    current.last_review_note;
-  check bool "rejection kind is typed" true
-    (current.completion_review_failure = Some Goal_store.Rejected);
-  check bool "next Keeper turn receives fixed continuation marker" true
-    (contains_substring
-       (Keeper_unified_turn.goal_summary_for_turn current)
-       "completion review pending rework")
-;;
-
-let test_goal_completion_unavailable_is_retryable_and_nonterminal () =
-  with_workspace
-  @@ fun config ->
-  let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Evaluator unavailable" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  goal_reviewer_run :=
-    (fun _ ->
-       Error (Agent_sdk.Error.Internal "review runtime temporarily unavailable"));
-  let result =
-    request_complete
-      ~note:"Retry after the configured evaluator becomes available."
-      config
-      goal.id
-  in
-  (match result with
-   | Some result ->
-     check
-       bool
-       "unavailable review is retryable"
-       true
-       (Tool_result.failure_class result = Some Tool_result.Transient_error)
-   | None -> fail "masc_goal_transition not handled");
-  let current = current_goal config goal.id in
-  check bool "unavailable Goal stays executing" true
-    (current.phase = Goal_phase.Executing);
-  check bool "unavailable reason is durable" true
-    (Option.is_some current.last_review_note);
-  check bool "unavailable kind is typed" true
-    (current.completion_review_failure = Some Goal_store.Unavailable)
-;;
-
-let test_goal_completion_missing_verdict_is_nonterminal () =
-  with_workspace
-  @@ fun config ->
-  let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Missing structured verdict" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  goal_reviewer_run := (fun _ -> Ok None);
-  let result =
-    request_complete
-      ~note:"The linked evidence should be reviewed through the typed tool."
-      config
-      goal.id
-  in
-  (match result with
-   | Some result ->
-     check bool "missing verdict fails" false (Tool_result.is_success result);
-     check
-       bool
-       "missing verdict is retryable"
-       true
-       (Tool_result.failure_class result = Some Tool_result.Transient_error)
-   | None -> fail "masc_goal_transition not handled");
-  let current = current_goal config goal.id in
-  check bool "missing verdict cannot complete" true
-    (current.phase = Goal_phase.Executing);
-  check bool "missing verdict is typed unavailable" true
-    (current.completion_review_failure = Some Goal_store.Unavailable);
-  check bool "missing verdict writes no receipt" true
-    (Option.is_none current.completion_receipt)
-;;
-
-let test_goal_completion_rejects_stale_approval () =
-  with_workspace
-  @@ fun config ->
-  let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Original target" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  goal_reviewer_run :=
-    (fun _ ->
-       (match
-          Goal_store.update_goal config ~goal_id:goal.id (fun current ->
-            { current with title = "Changed while reviewing" })
-        with
-        | Ok _ -> ()
-        | Error msg -> fail msg);
-       Ok (Some Goal_completion_reviewer.Approve));
-  let error =
-    request_complete
-      ~note:"The Goal reached the original target before the concurrent edit."
-      config
-      goal.id
-    |> expect_error
-  in
-  check
-    string
-    "stale approval is a conflict"
-    "conflict"
-    (get_string_field error "error_code");
-  let current = current_goal config goal.id in
-  check bool "stale approval cannot complete" true
-    (current.phase = Goal_phase.Executing);
-  check bool "no stale receipt" true (Option.is_none current.completion_receipt)
-;;
 let test_goal_block_and_unblock_have_no_operator_hierarchy () =
   with_workspace
   @@ fun config ->

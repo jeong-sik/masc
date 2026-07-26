@@ -1,20 +1,45 @@
 (** Capability-relative, one-row durable HEAD authority.
 
-    This surface deliberately does not expose append, scan, fallback, repair, or
-    migration operations.  A HEAD is either absent, or exactly one non-empty
-    LF-terminated row. *)
+    HEAD is the only content authority. The stable lock contains only an
+    immutable random fencing epoch and is never rewritten, renamed, or deleted.
+    This surface deliberately exposes no append, scan, fallback, repair, delete,
+    or migration operation. *)
+
+val max_row_bytes : int
 
 type cursor
+type operation =
+  | Pin_parent
+  | Open_lock
+  | Acquire_cross_process_lock
+  | Read_lock_marker
+  | Initialize_lock_marker
+  | Read_head
+  | Create_stage
+  | Write_stage
+  | Sync_stage
+  | Close_stage
+  | Revalidate
+  | Rename_head
+  | Sync_parent
+  | Verify_publication
+  | Cleanup_stage
+  | Settle_resources
+
+type diagnostic =
+  { operation : operation
+  ; detail : string
+  }
+
+type settlement_warning =
+  | Cleanup_failed of diagnostic
+  | Resource_settlement_failed of diagnostic
+
 type snapshot
 
 val snapshot_row : snapshot -> string option
 val snapshot_cursor : snapshot -> cursor
-val snapshot_settlement_warnings : snapshot -> string list
-
-type io_error =
-  { operation : string
-  ; detail : string
-  }
+val snapshot_settlement_warnings : snapshot -> settlement_warning list
 
 type error =
   | Invalid_leaf of string
@@ -24,37 +49,72 @@ type error =
   | Corrupt_lock of string
   | Corrupt_head of string
   | Unsupported of string
-  | Io_error of io_error
+  | Io_error of diagnostic
+
+type publication_evidence =
+  { expected_cursor : cursor
+  ; intended_sha256 : string
+  ; intended_length : int64
+  ; published_cursor : cursor
+  }
 
 type publication_indeterminate =
-  { intended_sha256 : string
+  { expected_cursor : cursor
+  ; intended_sha256 : string
   ; intended_length : int64
   ; observed : cursor option
   }
 
 type target_effect =
   | Unchanged
+  | Published of publication_evidence
   | Publication_indeterminate of publication_indeterminate
 
 type failure = private
   { error : error
   ; target_effect : target_effect
-  ; settlement_warnings : string list
+  ; settlement_warnings : settlement_warning list
   }
 
 type publication
 
-val publication_cursor : publication -> cursor
-val publication_settlement_warnings : publication -> string list
+val publication_evidence : publication -> publication_evidence
+val publication_settlement_warnings : publication -> settlement_warning list
 
 val read :
+  secure_random:Eio.Flow.source_ty Eio.Resource.t ->
   parent:Eio.Fs.dir_ty Eio.Path.t ->
   leaf:string ->
   (snapshot, failure) result
 
 val compare_and_swap :
+  secure_random:Eio.Flow.source_ty Eio.Resource.t ->
   parent:Eio.Fs.dir_ty Eio.Path.t ->
   leaf:string ->
   expected:cursor ->
   row:string ->
   (publication, failure) result
+
+module For_testing : sig
+  type hooks
+
+  val hooks :
+    ?after_lock_acquired:(unit -> unit) ->
+    ?before_rename:(unit -> unit) ->
+    ?after_rename:(unit -> unit) ->
+    ?after_parent_sync:(unit -> unit) ->
+    ?after_verified:(unit -> unit) ->
+    ?before_stage_cleanup:(unit -> unit) ->
+    ?on_resource_settlement:(unit -> unit) ->
+    unit ->
+    hooks
+
+  val compare_and_swap :
+    hooks ->
+    secure_random:Eio.Flow.source_ty Eio.Resource.t ->
+    parent:Eio.Fs.dir_ty Eio.Path.t ->
+    leaf:string ->
+    expected:cursor ->
+    row:string ->
+    (publication, failure) result
+end

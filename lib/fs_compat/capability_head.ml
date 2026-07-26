@@ -1,7 +1,3 @@
-type lock_state =
-  | Virgin
-  | Active
-
 type target_fingerprint =
   { dev : int64
   ; ino : int64
@@ -16,24 +12,45 @@ type cursor =
   ; lock_dev : int64
   ; lock_ino : int64
   ; lock_epoch : string
-  ; lock_state : lock_state
   ; target : target_fingerprint option
   }
+
+type operation =
+  | Pin_parent
+  | Open_lock
+  | Acquire_cross_process_lock
+  | Read_lock_marker
+  | Initialize_lock_marker
+  | Read_head
+  | Create_stage
+  | Write_stage
+  | Sync_stage
+  | Close_stage
+  | Revalidate
+  | Rename_head
+  | Sync_parent
+  | Verify_publication
+  | Cleanup_stage
+  | Settle_resources
+
+type diagnostic =
+  { operation : operation
+  ; detail : string
+  }
+
+type settlement_warning =
+  | Cleanup_failed of diagnostic
+  | Resource_settlement_failed of diagnostic
 
 type snapshot =
   { row : string option
   ; cursor : cursor
-  ; settlement_warnings : string list
+  ; settlement_warnings : settlement_warning list
   }
 
 let snapshot_row snapshot = snapshot.row
 let snapshot_cursor snapshot = snapshot.cursor
 let snapshot_settlement_warnings snapshot = snapshot.settlement_warnings
-
-type io_error =
-  { operation : string
-  ; detail : string
-  }
 
 type error =
   | Invalid_leaf of string
@@ -43,31 +60,50 @@ type error =
   | Corrupt_lock of string
   | Corrupt_head of string
   | Unsupported of string
-  | Io_error of io_error
+  | Io_error of diagnostic
+
+type publication_evidence =
+  { expected_cursor : cursor
+  ; intended_sha256 : string
+  ; intended_length : int64
+  ; published_cursor : cursor
+  }
 
 type publication_indeterminate =
-  { intended_sha256 : string
+  { expected_cursor : cursor
+  ; intended_sha256 : string
   ; intended_length : int64
   ; observed : cursor option
   }
 
 type target_effect =
   | Unchanged
+  | Published of publication_evidence
   | Publication_indeterminate of publication_indeterminate
 
 type failure =
   { error : error
   ; target_effect : target_effect
-  ; settlement_warnings : string list
+  ; settlement_warnings : settlement_warning list
   }
 
 type publication =
-  { cursor : cursor
-  ; settlement_warnings : string list
+  { evidence : publication_evidence
+  ; settlement_warnings : settlement_warning list
   }
 
-let publication_cursor publication = publication.cursor
+let publication_evidence publication = publication.evidence
 let publication_settlement_warnings publication = publication.settlement_warnings
+
+let max_row_bytes = 64 * 1024
+let max_lock_marker_bytes = 128
+let lock_magic = "MASC-CAPABILITY-HEAD-LOCK-v2"
+let stage_counter = Atomic.make 0
+
+let ( let* ) result fn =
+  match result with
+  | Ok value -> fn value
+  | Error error -> Error error
 
 module Lease = struct
   module Key = struct
@@ -109,25 +145,59 @@ type lock_handle =
   ; path : Eio.Fs.dir_ty Eio.Path.t
   ; stat : Eio.File.Stat.t
   ; epoch : string
-  ; state : lock_state
+  }
+
+type hooks =
+  { after_lock_acquired : unit -> unit
+  ; before_rename : unit -> unit
+  ; after_rename : unit -> unit
+  ; after_parent_sync : unit -> unit
+  ; after_verified : unit -> unit
+  ; before_stage_cleanup : unit -> unit
+  ; on_resource_settlement : unit -> unit
+  }
+
+let no_hooks =
+  { after_lock_acquired = (fun () -> ())
+  ; before_rename = (fun () -> ())
+  ; after_rename = (fun () -> ())
+  ; after_parent_sync = (fun () -> ())
+  ; after_verified = (fun () -> ())
+  ; before_stage_cleanup = (fun () -> ())
+  ; on_resource_settlement = (fun () -> ())
   }
 
 type transaction_effect =
   | Before_publication
   | Renamed of publication_indeterminate
-  | Durable of cursor
+  | Durable of publication_evidence
 
-let lock_magic = "MASC-CAPABILITY-HEAD-LOCK-v1"
-let max_lock_marker_bytes = 256
-let stage_counter = Atomic.make 0
+exception Hook_failed of diagnostic
 
 let sha256 value = Digestif.SHA256.(to_hex (digest_string value))
+let exception_detail exn = Printexc.to_string exn
 
-let exception_detail exn =
-  Printexc.to_string exn
+let diagnostic operation exn =
+  { operation; detail = exception_detail exn }
 
-let io_error operation exn =
-  Io_error { operation; detail = exception_detail exn }
+let protect_io operation fn =
+  try Ok (fn ()) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Io_error (diagnostic operation exn))
+
+let protect_result operation fn =
+  try fn () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Io_error (diagnostic operation exn))
+
+let invoke_hook operation hook =
+  try hook () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> raise (Hook_failed (diagnostic operation exn))
+
+let diagnostic_of_exception default_operation = function
+  | Hook_failed diagnostic -> diagnostic
+  | exn -> diagnostic default_operation exn
 
 let failure ?(target_effect = Unchanged) error =
   { error; target_effect; settlement_warnings = [] }
@@ -135,7 +205,7 @@ let failure ?(target_effect = Unchanged) error =
 let target_effect_of_transaction = function
   | Before_publication -> Unchanged
   | Renamed evidence -> Publication_indeterminate evidence
-  | Durable _ -> Unchanged
+  | Durable evidence -> Published evidence
 
 let failure_for_effect effect error =
   failure ~target_effect:(target_effect_of_transaction effect) error
@@ -151,16 +221,17 @@ let validate_leaf leaf =
 let validate_row row =
   if String.equal row ""
   then Error (Invalid_row "HEAD row must be non-empty")
+  else if String.length row > max_row_bytes
+  then Error (Invalid_row "HEAD row exceeds max_row_bytes")
   else if String.exists (fun char -> Char.equal char '\n' || Char.equal char '\r') row
   then Error (Invalid_row "HEAD row must not contain CR or LF")
   else Ok ()
 
-let lock_state_name = function
-  | Virgin -> "virgin"
-  | Active -> "active"
-
 let lock_leaf leaf =
   ".masc-capability-head-" ^ sha256 leaf ^ ".lock"
+
+let marker epoch =
+  Printf.sprintf "%s %s\n" lock_magic epoch
 
 let is_lower_hex value =
   String.length value = 64
@@ -169,9 +240,6 @@ let is_lower_hex value =
          | '0' .. '9' | 'a' .. 'f' -> true
          | _ -> false)
        value
-
-let marker ~state ~epoch =
-  Printf.sprintf "%s %s %s\n" lock_magic (lock_state_name state) epoch
 
 let parse_marker value =
   let length = String.length value in
@@ -185,11 +253,8 @@ let parse_marker value =
     then Error (Corrupt_lock "stable lock marker contains multiple rows or CR")
     else
       match String.split_on_char ' ' body with
-      | [ magic; state; epoch ] when String.equal magic lock_magic && is_lower_hex epoch ->
-        (match state with
-         | "virgin" -> Ok (Virgin, epoch)
-         | "active" -> Ok (Active, epoch)
-         | _ -> Error (Corrupt_lock "stable lock marker has an unknown state"))
+      | [ magic; epoch ] when String.equal magic lock_magic && is_lower_hex epoch ->
+        Ok epoch
       | _ -> Error (Corrupt_lock "stable lock marker has an invalid shape")
 
 let same_identity (left : Eio.File.Stat.t) (right : Eio.File.Stat.t) =
@@ -206,8 +271,8 @@ let validate_private_regular ~what ~corrupt (stat : Eio.File.Stat.t) =
   then Error (corrupt (what ^ " is not a regular file"))
   else if not (Int64.equal stat.nlink 1L)
   then Error (corrupt (what ^ " must have exactly one hard link"))
-  else if stat.perm land 0o777 <> 0o600
-  then Error (corrupt (what ^ " must have mode 0600"))
+  else if stat.perm land 0o7777 <> 0o600
+  then Error (corrupt (what ^ " must have mode 0600 and no special bits"))
   else Ok ()
 
 let verify_path_binding ~path ~opened_stat ~what ~corrupt =
@@ -221,44 +286,38 @@ let verify_path_binding ~path ~opened_stat ~what ~corrupt =
   | `Symbolic_link -> Error (corrupt (what ^ " path is a symbolic link"))
   | _ -> Error (corrupt (what ^ " path is not a regular file"))
 
-let read_open_file ~max_bytes ~what ~corrupt file =
-  let before = Eio.File.stat file in
-  let size64 = Optint.Int63.to_int64 before.size in
-  if Int64.compare size64 0L < 0
-  then Error (corrupt (what ^ " has a negative size"))
-  else if Int64.compare size64 (Int64.of_int max_bytes) > 0
-  then Error (corrupt (what ^ " exceeds its byte bound"))
-  else
-    let size = Int64.to_int size64 in
-    ignore (Eio.File.seek file (Optint.Int63.of_int 0) `Set);
-    let value = Eio.Flow.read_all ~max_size:(max_bytes + 1) file in
-    let after = Eio.File.stat file in
-    if not (same_open_file before after)
-    then Error (corrupt (what ^ " changed while it was being read"))
-    else if String.length value <> size
-    then Error (corrupt (what ^ " size changed while it was being read"))
-    else Ok (value, after)
-
-let write_exact file value =
-  Eio.File.truncate file (Optint.Int63.of_int 0);
-  ignore (Eio.File.seek file (Optint.Int63.of_int 0) `Set);
-  Eio.Flow.copy_string value file;
-  Eio.File.truncate file (Optint.Int63.of_int (String.length value));
-  Eio.File.sync file
+let read_open_file ~max_bytes ~operation ~what ~corrupt file =
+  protect_result operation (fun () ->
+    let before = Eio.File.stat file in
+    let size64 = Optint.Int63.to_int64 before.size in
+    if Int64.compare size64 0L < 0
+    then Error (corrupt (what ^ " has a negative size"))
+    else if Int64.compare size64 (Int64.of_int max_bytes) > 0
+    then Error (corrupt (what ^ " exceeds its byte bound"))
+    else
+      let size = Int64.to_int size64 in
+      let buffer = Cstruct.create size in
+      if size > 0
+      then
+        Eio.File.pread_exact
+          file
+          ~file_offset:(Optint.Int63.of_int 0)
+          [ buffer ];
+      let after = Eio.File.stat file in
+      if not (same_open_file before after)
+      then Error (corrupt (what ^ " changed while it was being read"))
+      else Ok (Cstruct.to_string buffer, after))
 
 let sync_parent parent =
   let resource, _relative = parent in
   match Eio_unix.Resource.fd_opt resource with
   | None -> Error (Unsupported "parent directory capability has no Unix file descriptor")
   | Some fd ->
-    (try
-       Eio_unix.Fd.use_exn "capability_head.sync_parent" fd (fun raw_fd ->
-         Eio_unix.run_in_systhread
-           ~label:"capability_head.sync_parent"
-           (fun () -> Unix.fsync raw_fd));
-       Ok ()
-     with
-     | exn -> Error (io_error "sync_parent" exn))
+    protect_io Sync_parent (fun () ->
+      Eio_unix.Fd.use_exn "capability_head.sync_parent" fd (fun raw_fd ->
+        Eio_unix.run_in_systhread
+          ~label:"capability_head.sync_parent"
+          (fun () -> Unix.fsync raw_fd)))
 
 let try_lock file =
   match Eio_unix.Resource.fd_opt file with
@@ -274,76 +333,67 @@ let try_lock file =
        Ok ()
      with
      | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> Error Busy
-     | exn -> Error (io_error "try_lock" exn))
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Io_error (diagnostic Acquire_cross_process_lock exn)))
 
-let epoch_for_lock ~parent_stat ~leaf (lock_stat : Eio.File.Stat.t) =
-  sha256
-    (Printf.sprintf
-       "%Ld\000%Ld\000%s\000%Ld\000%Ld\000%.17g\000%.17g"
-       parent_stat.Eio.File.Stat.dev
-       parent_stat.ino
-       leaf
-       lock_stat.dev
-       lock_stat.ino
-       lock_stat.ctime
-       lock_stat.mtime)
+let fresh_epoch secure_random =
+  protect_io Initialize_lock_marker (fun () ->
+    let bytes = Cstruct.create 32 in
+    Eio.Flow.read_exact secure_random bytes;
+    sha256 (Cstruct.to_string bytes))
 
-let open_lock ~sw ~parent ~parent_stat ~leaf =
-  let target_path = Eio.Path.(parent / leaf) in
-  let path = Eio.Path.(parent / lock_leaf leaf) in
-  match Eio.Path.kind ~follow:false path with
-  | (`Not_found | `Regular_file) ->
-    let file = Eio.Path.open_out ~sw ~create:(`If_missing 0o600) path in
-    (match try_lock file with
-     | Error error -> Error error
-     | Ok () ->
-       let opened_stat = Eio.File.stat file in
-       (match
-          validate_private_regular
-            ~what:"stable lock"
-            ~corrupt:(fun detail -> Corrupt_lock detail)
-            opened_stat
-        with
-        | Error error -> Error error
-        | Ok () ->
-          (match
-             verify_path_binding
-               ~path
-               ~opened_stat
-               ~what:"stable lock"
-               ~corrupt:(fun detail -> Corrupt_lock detail)
-           with
-           | Error error -> Error error
-           | Ok () ->
-             (match
-                read_open_file
-                  ~max_bytes:max_lock_marker_bytes
-                  ~what:"stable lock marker"
-                  ~corrupt:(fun detail -> Corrupt_lock detail)
-                  file
-              with
-              | Error error -> Error error
-              | Ok ("", _) ->
-                (match Eio.Path.kind ~follow:false target_path with
-                 | `Not_found ->
-                   Eio.File.sync file;
-                   (match sync_parent parent with
-                    | Error error -> Error error
-                    | Ok () ->
-                      let epoch = epoch_for_lock ~parent_stat ~leaf opened_stat in
-                      write_exact file (marker ~state:Virgin ~epoch);
-                      Ok { file; path; stat = opened_stat; epoch; state = Virgin })
-                 | _ ->
-                   Error
-                     (Corrupt_lock
-                        "empty stable lock exists beside a non-empty HEAD namespace"))
-              | Ok (value, _) ->
-                (match parse_marker value with
-                 | Error error -> Error error
-                 | Ok (state, epoch) ->
-                   Ok { file; path; stat = opened_stat; epoch; state })))))
-  | `Symbolic_link -> Error (Corrupt_lock "stable lock path is a symbolic link")
-  | _ -> Error (Corrupt_lock "stable lock path is not a regular file")
+let write_initial_marker file epoch =
+  protect_io Initialize_lock_marker (fun () ->
+    ignore (Eio.File.seek file (Optint.Int63.of_int 0) `Set);
+    Eio.Flow.copy_string (marker epoch) file;
+    Eio.File.sync file)
+
+let open_lock ~sw ~secure_random ~parent ~leaf =
+  protect_result Open_lock (fun () ->
+    let target_path = Eio.Path.(parent / leaf) in
+    let path = Eio.Path.(parent / lock_leaf leaf) in
+    match Eio.Path.kind ~follow:false path with
+    | (`Not_found | `Regular_file) ->
+      let file = Eio.Path.open_out ~sw ~create:(`If_missing 0o600) path in
+      let* () = try_lock file in
+      let opened_stat = Eio.File.stat file in
+      let* () =
+        validate_private_regular
+          ~what:"stable lock"
+          ~corrupt:(fun detail -> Corrupt_lock detail)
+          opened_stat
+      in
+      let* () =
+        verify_path_binding
+          ~path
+          ~opened_stat
+          ~what:"stable lock"
+          ~corrupt:(fun detail -> Corrupt_lock detail)
+      in
+      let* contents, _ =
+        read_open_file
+          ~max_bytes:max_lock_marker_bytes
+          ~operation:Read_lock_marker
+          ~what:"stable lock marker"
+          ~corrupt:(fun detail -> Corrupt_lock detail)
+          file
+      in
+      if not (String.equal contents "")
+      then
+        let* epoch = parse_marker contents in
+        Ok { file; path; stat = opened_stat; epoch }
+      else
+        (match Eio.Path.kind ~follow:false target_path with
+         | `Not_found ->
+           let* () = protect_io Initialize_lock_marker (fun () -> Eio.File.sync file) in
+           let* () = sync_parent parent in
+           let* epoch = fresh_epoch secure_random in
+           let* () = write_initial_marker file epoch in
+           Ok { file; path; stat = opened_stat; epoch }
+         | _ ->
+           Error (Corrupt_lock "empty stable lock exists beside a present HEAD"))
+    | `Symbolic_link -> Error (Corrupt_lock "stable lock path is a symbolic link")
+    | _ -> Error (Corrupt_lock "stable lock path is not a regular file"))
 
 let parse_head_payload payload =
   let length = String.length payload in
@@ -353,80 +403,59 @@ let parse_head_payload payload =
   then Error (Corrupt_head "HEAD is not LF-terminated")
   else
     let row = String.sub payload 0 (length - 1) in
-    if String.exists (fun char -> Char.equal char '\n' || Char.equal char '\r') row
+    if String.length row > max_row_bytes
+    then Error (Corrupt_head "HEAD row exceeds max_row_bytes")
+    else if String.exists (fun char -> Char.equal char '\n' || Char.equal char '\r') row
     then Error (Corrupt_head "HEAD contains multiple rows or CR")
     else Ok row
 
 let read_target ~sw ~parent ~leaf =
-  let path = Eio.Path.(parent / leaf) in
-  match Eio.Path.kind ~follow:false path with
-  | `Not_found -> Ok None
-  | `Regular_file ->
-    let file = Eio.Path.open_in ~sw path in
-    let opened_stat = Eio.File.stat file in
-    (match
-       validate_private_regular
-         ~what:"HEAD"
-         ~corrupt:(fun detail -> Corrupt_head detail)
-         opened_stat
-     with
-     | Error error -> Error error
-     | Ok () ->
-       (match
-          verify_path_binding
-            ~path
-            ~opened_stat
-            ~what:"HEAD"
-            ~corrupt:(fun detail -> Corrupt_head detail)
-        with
-        | Error error -> Error error
-        | Ok () ->
-          let max_bytes = Sys.max_string_length - 1 in
-          (match
-             read_open_file
-               ~max_bytes
-               ~what:"HEAD"
-               ~corrupt:(fun detail -> Corrupt_head detail)
-               file
-           with
-           | Error error -> Error error
-           | Ok (payload, final_stat) ->
-             (match
-                verify_path_binding
-                  ~path
-                  ~opened_stat:final_stat
-                  ~what:"HEAD"
-                  ~corrupt:(fun detail -> Corrupt_head detail)
-              with
-              | Error error -> Error error
-              | Ok () ->
-                (match parse_head_payload payload with
-                 | Error error -> Error error
-                 | Ok row ->
-                   let fingerprint =
-                     { dev = final_stat.dev
-                     ; ino = final_stat.ino
-                     ; length = Int64.of_int (String.length payload)
-                     ; sha256 = sha256 payload
-                     }
-                   in
-                   Ok (Some (row, fingerprint)))))))
-  | `Symbolic_link -> Error (Corrupt_head "HEAD path is a symbolic link")
-  | _ -> Error (Corrupt_head "HEAD path is not a regular file")
-
-let verify_lock_binding lock =
-  verify_path_binding
-    ~path:lock.path
-    ~opened_stat:lock.stat
-    ~what:"stable lock"
-    ~corrupt:(fun detail -> Corrupt_lock detail)
-
-let activate_lock lock =
-  match verify_lock_binding lock with
-  | Error error -> Error error
-  | Ok () ->
-    write_exact lock.file (marker ~state:Active ~epoch:lock.epoch);
-    Ok { lock with state = Active }
+  protect_result Read_head (fun () ->
+    let path = Eio.Path.(parent / leaf) in
+    match Eio.Path.kind ~follow:false path with
+    | `Not_found -> Ok None
+    | `Regular_file ->
+      let file = Eio.Path.open_in ~sw path in
+      let opened_stat = Eio.File.stat file in
+      let* () =
+        validate_private_regular
+          ~what:"HEAD"
+          ~corrupt:(fun detail -> Corrupt_head detail)
+          opened_stat
+      in
+      let* () =
+        verify_path_binding
+          ~path
+          ~opened_stat
+          ~what:"HEAD"
+          ~corrupt:(fun detail -> Corrupt_head detail)
+      in
+      let* payload, final_stat =
+        read_open_file
+          ~max_bytes:(max_row_bytes + 1)
+          ~operation:Read_head
+          ~what:"HEAD"
+          ~corrupt:(fun detail -> Corrupt_head detail)
+          file
+      in
+      let* () =
+        verify_path_binding
+          ~path
+          ~opened_stat:final_stat
+          ~what:"HEAD"
+          ~corrupt:(fun detail -> Corrupt_head detail)
+      in
+      let* row = parse_head_payload payload in
+      let fingerprint =
+        { dev = final_stat.dev
+        ; ino = final_stat.ino
+        ; length = Int64.of_int (String.length payload)
+        ; sha256 = sha256 payload
+        }
+      in
+      Ok (Some (row, fingerprint))
+    | `Symbolic_link -> Error (Corrupt_head "HEAD path is a symbolic link")
+    | _ -> Error (Corrupt_head "HEAD path is not a regular file"))
 
 let make_cursor ~parent_stat ~leaf ~lock ~target =
   { parent_dev = parent_stat.Eio.File.Stat.dev
@@ -435,35 +464,18 @@ let make_cursor ~parent_stat ~leaf ~lock ~target =
   ; lock_dev = lock.stat.dev
   ; lock_ino = lock.stat.ino
   ; lock_epoch = lock.epoch
-  ; lock_state = lock.state
   ; target
   }
 
 let read_current ~sw ~parent ~parent_stat ~leaf ~lock =
-  match read_target ~sw ~parent ~leaf with
-  | Error error -> Error error
-  | Ok None ->
-    (match lock.state with
-     | Active -> Error (Corrupt_head "an active stable lock has no HEAD")
-     | Virgin ->
-       let cursor = make_cursor ~parent_stat ~leaf ~lock ~target:None in
-       Ok ({ row = None; cursor; settlement_warnings = [] }, lock))
-  | Ok (Some (row, target)) ->
-    (match lock.state with
-     | Active ->
-       let cursor = make_cursor ~parent_stat ~leaf ~lock ~target:(Some target) in
-       Ok ({ row = Some row; cursor; settlement_warnings = [] }, lock)
-     | Virgin ->
-       (match sync_parent parent with
-        | Error error -> Error error
-        | Ok () ->
-          (match activate_lock lock with
-           | Error error -> Error error
-           | Ok active_lock ->
-             let cursor =
-               make_cursor ~parent_stat ~leaf ~lock:active_lock ~target:(Some target)
-             in
-             Ok ({ row = Some row; cursor; settlement_warnings = [] }, active_lock))))
+  let* target = read_target ~sw ~parent ~leaf in
+  match target with
+  | None ->
+    let cursor = make_cursor ~parent_stat ~leaf ~lock ~target:None in
+    Ok { row = None; cursor; settlement_warnings = [] }
+  | Some (row, fingerprint) ->
+    let cursor = make_cursor ~parent_stat ~leaf ~lock ~target:(Some fingerprint) in
+    Ok { row = Some row; cursor; settlement_warnings = [] }
 
 let cursor_equal left right =
   left = right
@@ -475,7 +487,7 @@ let stage_leaf ~leaf ~payload =
 
 let rec create_stage ~sw ~parent ~leaf ~payload attempts =
   if attempts = 0
-  then Error (Io_error { operation = "create_stage"; detail = "stage namespace exhausted" })
+  then Error (Io_error { operation = Create_stage; detail = "stage namespace exhausted" })
   else
     let stage_leaf = stage_leaf ~leaf ~payload in
     let path = Eio.Path.(parent / stage_leaf) in
@@ -485,34 +497,42 @@ let rec create_stage ~sw ~parent ~leaf ~payload attempts =
     with
     | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
       create_stage ~sw ~parent ~leaf ~payload (attempts - 1)
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Io_error (diagnostic Create_stage exn))
 
 let write_stage ~path file payload =
-  Eio.Flow.copy_string payload file;
-  Eio.File.sync file;
-  let opened_stat = Eio.File.stat file in
-  match
-    validate_private_regular
-      ~what:"stage"
-      ~corrupt:(fun detail -> Io_error { operation = "write_stage"; detail })
-      opened_stat
-  with
-  | Error error -> Error error
-  | Ok () ->
+  let* () = protect_io Write_stage (fun () -> Eio.Flow.copy_string payload file) in
+  let* () = protect_io Sync_stage (fun () -> Eio.File.sync file) in
+  protect_result Sync_stage (fun () ->
+    let opened_stat = Eio.File.stat file in
+    let* () =
+      validate_private_regular
+        ~what:"stage"
+        ~corrupt:(fun detail -> Io_error { operation = Sync_stage; detail })
+        opened_stat
+    in
     if
       not
         (Int64.equal
            (Optint.Int63.to_int64 opened_stat.size)
            (Int64.of_int (String.length payload)))
-    then Error (Io_error { operation = "write_stage"; detail = "stage size mismatch" })
+    then Error (Io_error { operation = Sync_stage; detail = "stage size mismatch" })
     else
-      verify_path_binding
-        ~path
-        ~opened_stat
-        ~what:"stage"
-        ~corrupt:(fun detail -> Io_error { operation = "write_stage"; detail })
+      let* () =
+        verify_path_binding
+          ~path
+          ~opened_stat
+          ~what:"stage"
+          ~corrupt:(fun detail -> Io_error { operation = Sync_stage; detail })
+      in
+      Ok opened_stat)
 
-let add_warning warnings operation exn =
-  warnings := (operation ^ ": " ^ exception_detail exn) :: !warnings
+let verify_lock_binding lock =
+  verify_path_binding
+    ~path:lock.path
+    ~opened_stat:lock.stat
+    ~what:"stable lock"
+    ~corrupt:(fun detail -> Corrupt_lock detail)
 
 let normalize_result ~warnings ~set_success_warnings = function
   | Ok value -> Ok (set_success_warnings value warnings)
@@ -522,7 +542,7 @@ let normalize_result ~warnings ~set_success_warnings = function
         settlement_warnings = failure.settlement_warnings @ warnings
       }
 
-let run_transaction ~parent ~leaf ~effect ~set_success_warnings transaction =
+let run_transaction ~hooks ~parent ~leaf ~effect ~set_success_warnings transaction =
   Eio.Fiber.check ();
   let token = ref None in
   let completed = ref None in
@@ -532,6 +552,9 @@ let run_transaction ~parent ~leaf ~effect ~set_success_warnings transaction =
     (fun () ->
       try
         Eio.Switch.run_protected (fun sw ->
+          Eio.Switch.on_release sw (fun () ->
+            try hooks.on_resource_settlement () with
+            | exn -> raise (Hook_failed (diagnostic Settle_resources exn)));
           let exact_parent = Eio.Path.open_dir ~sw parent in
           let parent_stat = Eio.Path.stat ~follow:false exact_parent in
           match
@@ -560,46 +583,46 @@ let run_transaction ~parent ~leaf ~effect ~set_success_warnings transaction =
         when !effect = Before_publication && Option.is_none !completed ->
         raise exn
       | exn ->
-        let close_warning = "resource settlement: " ^ exception_detail exn in
+        let detail = diagnostic_of_exception Settle_resources exn in
         (match !completed with
-         | Some (Ok value) -> Ok (set_success_warnings value [ close_warning ])
+         | Some (Ok value) ->
+           Ok (set_success_warnings value [ Resource_settlement_failed detail ])
          | Some (Error failure) ->
            Error
              { failure with
-               settlement_warnings = failure.settlement_warnings @ [ close_warning ]
+               settlement_warnings =
+                 failure.settlement_warnings @ [ Resource_settlement_failed detail ]
              }
          | None ->
-           let error = io_error "capability_head_transaction" exn in
            Error
-             { (failure_for_effect !effect error) with
-               settlement_warnings = List.rev !warnings @ [ close_warning ]
+             { (failure_for_effect !effect (Io_error detail)) with
+               settlement_warnings = List.rev !warnings
              }))
 
-let read ~parent ~leaf =
+let read ~secure_random ~parent ~leaf =
   match validate_leaf leaf with
   | Error error -> Error (failure error)
   | Ok () ->
     let effect = ref Before_publication in
     run_transaction
+      ~hooks:no_hooks
       ~parent
       ~leaf
       ~effect
       ~set_success_warnings:(fun snapshot warnings ->
         { snapshot with settlement_warnings = snapshot.settlement_warnings @ warnings })
       (fun ~sw ~parent ~parent_stat ~warnings:_ ->
-        match open_lock ~sw ~parent ~parent_stat ~leaf with
-        | Error error -> Error (failure_for_effect !effect error)
-        | Ok lock ->
-          (match read_current ~sw ~parent ~parent_stat ~leaf ~lock with
-           | Error error -> Error (failure_for_effect !effect error)
-           | Ok (snapshot, _lock) -> Ok snapshot))
+        let* lock = open_lock ~sw ~secure_random ~parent ~leaf in
+        let* snapshot = read_current ~sw ~parent ~parent_stat ~leaf ~lock in
+        Ok snapshot)
 
-let compare_and_swap ~parent ~leaf ~expected ~row =
+let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row =
   match validate_leaf leaf, validate_row row with
   | Error error, _ | _, Error error -> Error (failure error)
   | Ok (), Ok () ->
     let effect = ref Before_publication in
     run_transaction
+      ~hooks
       ~parent
       ~leaf
       ~effect
@@ -608,86 +631,146 @@ let compare_and_swap ~parent ~leaf ~expected ~row =
           settlement_warnings = publication.settlement_warnings @ warnings
         })
       (fun ~sw ~parent ~parent_stat ~warnings ->
-        match open_lock ~sw ~parent ~parent_stat ~leaf with
-        | Error error -> Error (failure_for_effect !effect error)
-        | Ok lock ->
-          (match read_current ~sw ~parent ~parent_stat ~leaf ~lock with
-           | Error error -> Error (failure_for_effect !effect error)
-           | Ok (current, lock) ->
-             if not (cursor_equal expected current.cursor)
-             then Error (failure (Conflict current))
-             else
-               let payload = row ^ "\n" in
-               let intended =
-                 { intended_sha256 = sha256 payload
-                 ; intended_length = Int64.of_int (String.length payload)
-                 ; observed = None
-                 }
-               in
-               (match create_stage ~sw ~parent ~leaf ~payload 32 with
-                | Error error -> Error (failure_for_effect !effect error)
-                | Ok (stage_path, stage_file) ->
-                  let cleanup_stage = ref true in
-                  Fun.protect
-                    ~finally:(fun () ->
-                      if !cleanup_stage
-                      then
-                        try Eio.Path.unlink stage_path with
-                        | exn -> add_warning warnings "stage cleanup" exn)
-                    (fun () ->
-                      match write_stage ~path:stage_path stage_file payload with
-                      | Error error -> Error (failure_for_effect !effect error)
-                      | Ok () ->
-                        (match read_current ~sw ~parent ~parent_stat ~leaf ~lock with
-                         | Error error -> Error (failure_for_effect !effect error)
-                         | Ok (revalidated, lock) ->
-                           if not (cursor_equal expected revalidated.cursor)
-                           then Error (failure (Conflict revalidated))
-                           else
-                             (match verify_lock_binding lock with
-                              | Error error -> Error (failure_for_effect !effect error)
-                              | Ok () ->
-                                let target_path = Eio.Path.(parent / leaf) in
-                                Eio.Path.rename stage_path target_path;
-                                cleanup_stage := false;
-                                effect := Renamed intended;
-                                (match sync_parent parent with
-                                 | Error error ->
-                                   Error (failure_for_effect !effect error)
-                                 | Ok () ->
-                                   (match
-                                      read_current
-                                        ~sw
-                                        ~parent
-                                        ~parent_stat
-                                        ~leaf
-                                        ~lock
-                                    with
-                                    | Error error ->
-                                      Error (failure_for_effect !effect error)
-                                    | Ok (published, _active_lock) ->
-                                      effect :=
-                                        Renamed
-                                          { intended with
-                                            observed = Some published.cursor
-                                          };
-                                      (match published.row, published.cursor.target with
-                                       | Some observed_row, Some observed_target
-                                         when String.equal observed_row row
-                                              && String.equal
-                                                   observed_target.sha256
-                                                   intended.intended_sha256
-                                              && Int64.equal
-                                                   observed_target.length
-                                                   intended.intended_length ->
-                                         effect := Durable published.cursor;
-                                         Ok
-                                           { cursor = published.cursor
-                                           ; settlement_warnings = []
-                                           }
-                                       | _ ->
-                                         Error
-                                           (failure_for_effect
-                                              !effect
-                                              (Corrupt_head
-                                                 "published HEAD does not match the staged row")))))))))))
+        let fail error = Error (failure_for_effect !effect error) in
+        let* lock =
+          match open_lock ~sw ~secure_random ~parent ~leaf with
+          | Ok lock -> Ok lock
+          | Error error -> fail error
+        in
+        invoke_hook Acquire_cross_process_lock hooks.after_lock_acquired;
+        let* current =
+          match read_current ~sw ~parent ~parent_stat ~leaf ~lock with
+          | Ok current -> Ok current
+          | Error error -> fail error
+        in
+        if not (cursor_equal expected current.cursor)
+        then Error (failure (Conflict current))
+        else
+          let payload = row ^ "\n" in
+          let indeterminate =
+            { expected_cursor = expected
+            ; intended_sha256 = sha256 payload
+            ; intended_length = Int64.of_int (String.length payload)
+            ; observed = None
+            }
+          in
+          let* stage_path, stage_file =
+            match create_stage ~sw ~parent ~leaf ~payload 32 with
+            | Ok stage -> Ok stage
+            | Error error -> fail error
+          in
+          let cleanup_stage = ref true in
+          Fun.protect
+            ~finally:(fun () ->
+              if !cleanup_stage
+              then
+                try
+                  invoke_hook Cleanup_stage hooks.before_stage_cleanup;
+                  Eio.Path.unlink stage_path
+                with
+                | exn ->
+                  warnings :=
+                    Cleanup_failed (diagnostic_of_exception Cleanup_stage exn) :: !warnings)
+            (fun () ->
+              let* stage_stat =
+                match write_stage ~path:stage_path stage_file payload with
+                | Ok stat -> Ok stat
+                | Error error -> fail error
+              in
+              let* () =
+                match protect_io Close_stage (fun () -> Eio.Flow.close stage_file) with
+                | Ok () -> Ok ()
+                | Error error -> fail error
+              in
+              let* () =
+                match
+                  verify_path_binding
+                    ~path:stage_path
+                    ~opened_stat:stage_stat
+                    ~what:"stage"
+                    ~corrupt:(fun detail -> Io_error { operation = Revalidate; detail })
+                with
+                | Ok () -> Ok ()
+                | Error error -> fail error
+              in
+              let* revalidated =
+                match read_current ~sw ~parent ~parent_stat ~leaf ~lock with
+                | Ok current -> Ok current
+                | Error error -> fail error
+              in
+              if not (cursor_equal expected revalidated.cursor)
+              then Error (failure (Conflict revalidated))
+              else (
+                invoke_hook Revalidate hooks.before_rename;
+                let* () =
+                  match verify_lock_binding lock with
+                  | Ok () -> Ok ()
+                  | Error error -> fail error
+                in
+                let target_path = Eio.Path.(parent / leaf) in
+                let* () =
+                  match protect_io Rename_head (fun () -> Eio.Path.rename stage_path target_path) with
+                  | Ok () -> Ok ()
+                  | Error error -> fail error
+                in
+                cleanup_stage := false;
+                effect := Renamed indeterminate;
+                invoke_hook Rename_head hooks.after_rename;
+                let* () =
+                  match sync_parent parent with
+                  | Ok () -> Ok ()
+                  | Error error -> fail error
+                in
+                invoke_hook Sync_parent hooks.after_parent_sync;
+                let* published =
+                  match read_current ~sw ~parent ~parent_stat ~leaf ~lock with
+                  | Ok published -> Ok published
+                  | Error error -> fail error
+                in
+                effect :=
+                  Renamed { indeterminate with observed = Some published.cursor };
+                match published.row, published.cursor.target with
+                | Some observed_row, Some observed_target
+                  when String.equal observed_row row
+                       && String.equal observed_target.sha256 indeterminate.intended_sha256
+                       && Int64.equal observed_target.length indeterminate.intended_length ->
+                  let evidence =
+                    { expected_cursor = expected
+                    ; intended_sha256 = indeterminate.intended_sha256
+                    ; intended_length = indeterminate.intended_length
+                    ; published_cursor = published.cursor
+                    }
+                  in
+                  effect := Durable evidence;
+                  invoke_hook Verify_publication hooks.after_verified;
+                  Ok { evidence; settlement_warnings = [] }
+                | _ -> fail (Corrupt_head "published HEAD does not match the staged row")))
+
+let compare_and_swap ~secure_random ~parent ~leaf ~expected ~row =
+  compare_and_swap_internal ~hooks:no_hooks ~secure_random ~parent ~leaf ~expected ~row
+
+module For_testing = struct
+  type nonrec hooks = hooks
+
+  let hooks
+      ?(after_lock_acquired = fun () -> ())
+      ?(before_rename = fun () -> ())
+      ?(after_rename = fun () -> ())
+      ?(after_parent_sync = fun () -> ())
+      ?(after_verified = fun () -> ())
+      ?(before_stage_cleanup = fun () -> ())
+      ?(on_resource_settlement = fun () -> ())
+      ()
+    =
+    { after_lock_acquired
+    ; before_rename
+    ; after_rename
+    ; after_parent_sync
+    ; after_verified
+    ; before_stage_cleanup
+    ; on_resource_settlement
+    }
+
+  let compare_and_swap hooks ~secure_random ~parent ~leaf ~expected ~row =
+    compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
+end

@@ -739,6 +739,10 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
   | Agent_sdk.Error.Api (InputCapacity _) -> false
+  | Agent_sdk.Error.Agent
+      (UnrecognizedStopReason
+         { reason = "model_context_window_exceeded" }) ->
+      true
   | _ -> false
 
 (* Invariant for this predicate: the exemption gate is

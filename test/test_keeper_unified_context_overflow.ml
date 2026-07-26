@@ -59,9 +59,9 @@ let test_is_context_overflow_only_for_overflow_errors () =
     Agent_sdk.Error.Agent
       (UnrecognizedStopReason { reason = "model_context_window_exceeded" })
   in
-  check bool "raw unrecognized stop reason does not match" false
+  check bool "exact typed unrecognized stop reason matches" true
     (EC.is_context_overflow unrecognized_stop_reason);
-  check bool "raw unrecognized stop reason is not auto-recoverable" false
+  check bool "exact typed unrecognized stop reason is auto-recoverable" true
     (EC.is_auto_recoverable_turn_error unrecognized_stop_reason)
 ;;
 

@@ -70,7 +70,8 @@ val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
     severity only; it grants no retry, admission, pause, or blocker authority. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] when a structured error indicates context overflow. *)
+(** [true] for typed API context overflow or the exact structured
+    [model_context_window_exceeded] agent stop reason. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the error is an OAS [InputRequired] — the agent paused

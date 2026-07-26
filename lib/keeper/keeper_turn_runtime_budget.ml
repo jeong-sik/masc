@@ -401,12 +401,63 @@ let turn_event_bus_evidence_detail
     summary.event_count
     (String.concat "," summary.payload_kinds)
 
-let context_overflow_event_of_error
-    (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event option =
+type capacity_refusal =
+  | Provider_context_window of { limit_tokens : int option }
+  | Serialized_request_body of
+      { actual_bytes : int
+      ; limit_bytes : int
+      }
+
+(* Variants are enumerated rather than closed with [_ -> None] so a new SDK error
+   forces a decision here. The catch-all this replaces is why the byte axis was
+   invisible: [Request_body_too_large] carries two measured integers and fell
+   through as "not a capacity refusal", so a request that provably exceeded the
+   target's declared byte limit produced no compaction request at all. *)
+let capacity_refusal_of_error (err : Agent_sdk.Error.sdk_error) : capacity_refusal option =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
-    Some (Keeper_state_machine.Context_overflow_detected { limit_tokens = limit })
-  | _ -> None
+    Some (Provider_context_window { limit_tokens = limit })
+  | Agent_sdk.Error.Api
+      (InvalidRequest { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
+    ->
+    Some (Serialized_request_body { actual_bytes; limit_bytes })
+  | Agent_sdk.Error.Api
+      (InvalidRequest { reason = Json_parse_error | Unknown_invalid_request; _ }) ->
+    (* A malformed request is a defect in what was built, not a size the target
+       refused. Compacting would send the same defect at a smaller size. *)
+    None
+  | Agent_sdk.Error.Api (InputCapacity _) ->
+    (* A third axis, not yet carried: [Serving_constraint.admission_error] measures
+       input *tokens* against probed serving evidence (input_tokens,
+       accepted_through, rejected_from), so it needs its own trigger variant
+       rather than being folded into either axis above. Reaching masc at all means
+       OAS already advanced through every candidate
+       (oas exact_output.ml:924-925), which is where a reduction request belongs. *)
+    None
+  | Agent_sdk.Error.Api
+      ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
+      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
+      | Timeout _ )
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ -> None
+
+(* Projection for the two token-axis call sites. Both publish
+   reason="provider_context_overflow" and the [Sdk_context_window_exceeded]
+   blocker class (keeper_unified_turn_execution.ml:485-509), labels that would be
+   wrong for a declared-byte refusal, so this projection admits only the context
+   window. Byte refusals reach compaction through {!capacity_refusal_of_error}. *)
+let context_overflow_event_of_error
+    (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event option =
+  match capacity_refusal_of_error err with
+  | Some (Provider_context_window { limit_tokens }) ->
+    Some (Keeper_state_machine.Context_overflow_detected { limit_tokens })
+  | Some (Serialized_request_body _) | None -> None
 
 (* Prefix that tags a [last_compaction_decision] value as a provider-overflow
    recovery failure. Kept as a named binding so the observability regression test

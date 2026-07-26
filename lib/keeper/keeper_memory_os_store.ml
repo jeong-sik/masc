@@ -3061,6 +3061,38 @@ let publication_obligation_of_bytes raw =
     Error (make_error (Invalid_publication_obligation detail))
 ;;
 
+let publication_obligation_operation_id
+      (value : publication_obligation)
+  =
+  value.operation_id
+;;
+
+let publication_obligation_desired_receipt_id
+      (value : publication_obligation)
+  =
+  match value.desired with
+  | Head_authority desired -> desired.receipt_id
+  | Empty_authority ->
+    (* Construction and decoding both reject an empty desired authority. *)
+    assert false
+;;
+
+let publication_obligation_desired_state_sha256
+      (value : publication_obligation)
+  =
+  value.state_sha256
+;;
+
+let publication_obligation_desired_generation
+      (value : publication_obligation)
+  =
+  match value.desired with
+  | Head_authority desired -> desired.generation
+  | Empty_authority ->
+    (* Construction and decoding both reject an empty desired authority. *)
+    assert false
+;;
+
 let publication_obligation_of_prepared
       (store : t)
       (prepared : prepared_commit)

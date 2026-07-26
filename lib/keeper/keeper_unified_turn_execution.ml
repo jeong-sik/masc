@@ -37,8 +37,8 @@ let autonomous_yield_request ~base_path ~keeper_name =
             ^ Keeper_chat_queue.mutation_error_to_string error)
        | Ok true -> Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
        | Ok false ->
-         let pending =
-           Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         let* pending =
+           Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
          in
          if Keeper_event_queue.is_empty pending
          then Ok None

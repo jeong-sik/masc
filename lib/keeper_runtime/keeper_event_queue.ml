@@ -449,6 +449,19 @@ let required_field ~context name fields =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s missing required field %s" context name)
 
+let exact_fields ~context ~expected fields =
+  let actual = List.map fst fields |> List.sort String.compare in
+  let expected = List.sort String.compare expected in
+  if actual = expected
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "%s fields must be exactly [%s], got [%s]"
+         context
+         (String.concat "," expected)
+         (String.concat "," actual))
+
 let optional_field name fields =
   match List.assoc_opt name fields with
   | Some `Null | None -> None
@@ -634,6 +647,12 @@ let payload_of_yojson json =
       Ok (Board_attention { candidate_id; signal })
   | "bootstrap" -> Ok Bootstrap
   | "fusion_completed" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "run_id"; "terminal"; "board_post_id"; "channel" ]
+        fields
+    in
     let* run_id = string_field ~context "run_id" fields in
     let* terminal =
       let* terminal_json = required_field ~context "terminal" fields in
@@ -645,16 +664,35 @@ let payload_of_yojson json =
       in
       match terminal_kind with
       | "succeeded" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind"; "message" ]
+            terminal_fields
+        in
         let* answer =
           string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
         in
         Ok (Fusion_succeeded answer)
       | "failed" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind"; "message" ]
+            terminal_fields
+        in
         let* detail =
           string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
         in
         Ok (Fusion_failed detail)
-      | "cancelled" -> Ok Fusion_cancelled
+      | "cancelled" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind" ]
+            terminal_fields
+        in
+        Ok Fusion_cancelled
       | value -> Error (Printf.sprintf "unknown fusion terminal kind: %s" value)
     in
     let* board_post_id = string_field ~context "board_post_id" fields in

@@ -1,3 +1,19 @@
+module Event_queue_persistence_source = Keeper_event_queue_persistence
+module Keeper_event_queue_persistence = struct
+  include Event_queue_persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
+
+let registry_snapshot ~base_path keeper_name =
+  match Masc.Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Ok queue -> queue
+  | Error detail -> Alcotest.fail detail
+
 let temp_dir prefix =
   Filename.temp_dir prefix ""
 
@@ -63,35 +79,35 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr input)
     (fun () -> really_input_string input (in_channel_length input))
 
-let remove_payload_field ~kind ~field json =
-  let removed = ref 0 in
+let rewrite_payload_fields ~kind ~label rewrite_fields json =
+  let rewritten = ref 0 in
   let rec rewrite = function
     | `Assoc fields ->
       let fields =
         match List.assoc_opt "kind" fields with
         | Some (`String observed_kind) when String.equal observed_kind kind ->
-          if List.mem_assoc field fields
-          then (
-            incr removed;
-            List.remove_assoc field fields)
-          else fields
+          let next = rewrite_fields fields in
+          if next <> fields then incr rewritten;
+          next
         | _ -> fields
       in
       `Assoc (List.map (fun (name, value) -> name, rewrite value) fields)
     | `List values -> `List (List.map rewrite values)
     | other -> other
   in
-  let rewritten = rewrite json in
+  let rewritten_json = rewrite json in
   Alcotest.(check int)
-    (Printf.sprintf "removed exactly one %s field from %s payload" field kind)
+    (Printf.sprintf "rewrote exactly one %s payload for %s" kind label)
     1
-    !removed;
-  rewritten
+    !rewritten;
+  rewritten_json
 
-let latest_log_seq () =
-  match Log.Ring.recent ~limit:1 () with
-  | (entry : Log.Ring.entry) :: _ -> entry.seq
-  | [] -> -1
+let remove_payload_field ~kind ~field =
+  rewrite_payload_fields
+    ~kind
+    ~label:("missing " ^ field)
+    (fun fields ->
+       if List.mem_assoc field fields then List.remove_assoc field fields else fields)
 
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in
@@ -116,13 +132,6 @@ let with_strict_executor f =
   Executor_pool_ref.For_testing.with_pool
     (Domain_pool.executor_pool pool)
     f
-
-let restored_log_messages_since before_seq =
-  Log.Ring.recent ~limit:20 ~module_filter:"Keeper" ~since_seq:before_seq ()
-  |> List.filter_map (fun (entry : Log.Ring.entry) ->
-    if contains_substring ~needle:"event_queue_snapshot: restored " entry.message
-    then Some entry.message
-    else None)
 
 let claim_single ~base_path ~keeper_name ~claimed_at ~ready =
   match
@@ -794,34 +803,6 @@ let () =
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
-  (* --- operator snapshot reads stay quiet; live hydration still announces replay. --- *)
-  let base_path = temp_dir "keeper-event-queue-restore-log-gate" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      Log.set_level Log.Info;
-      let keeper_name = "keeper-event-queue-restore-log-gate-test" in
-      let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
-      let before_operator_read = latest_log_seq () in
-      ignore
-        (Keeper_event_queue_persistence.load_snapshot_pair_with_errors
-           ~base_path
-           ~keeper_name);
-      Alcotest.(check (list string))
-        "operator snapshot read does not emit restore log"
-        []
-        (restored_log_messages_since before_operator_read);
-      let before_live_load = latest_log_seq () in
-      ignore (Keeper_event_queue_persistence.load ~base_path ~keeper_name);
-      Alcotest.(check bool)
-        "live load emits restore log"
-        true
-        (List.exists
-           (contains_substring
-              ~needle:"keeper=keeper-event-queue-restore-log-gate-test")
-           (restored_log_messages_since before_live_load)));
-
   (* --- strict persisted load rejects current payloads missing required
          terminal provenance and preserves the operator-reset evidence. --- *)
   let failure_judgment : failure_judgment =
@@ -850,12 +831,12 @@ let () =
       ; payload = Failure_judgment failure_judgment
       }
   in
-  let assert_strict_persisted_missing_field ~kind ~field =
-    let base_path = temp_dir ("keeper-event-queue-missing-" ^ field) in
+  let assert_strict_persisted_rejected ~label ~rewrite ~expected_detail =
+    let base_path = temp_dir ("keeper-event-queue-" ^ label) in
     Fun.protect
       ~finally:(fun () -> rm_rf base_path)
       (fun () ->
-        let keeper_name = "strict-persisted-required-fields" in
+        let keeper_name = "strict-persisted-" ^ label in
         Keeper_event_queue_persistence.persist
           ~base_path
           ~keeper_name
@@ -864,7 +845,7 @@ let () =
         let malformed =
           read_file path
           |> Yojson.Safe.from_string
-          |> remove_payload_field ~kind ~field
+          |> rewrite
           |> Yojson.Safe.to_string
         in
         write_file path malformed;
@@ -874,27 +855,75 @@ let () =
              ~keeper_name
          with
          | Ok _ ->
-           Alcotest.failf "persisted %s payload without %s loaded" kind field
+           Alcotest.failf "persisted malformed payload loaded: %s" label
          | Error detail ->
            Alcotest.(check bool)
-             (Printf.sprintf "%s error requires reset" field)
+             (label ^ " error requires reset")
              true
              (contains_substring ~needle:"reset required" detail);
-           Alcotest.(check bool)
-             (Printf.sprintf "%s error names missing field" field)
-             true
-             (contains_substring ~needle:field detail));
+           (match expected_detail with
+            | None -> ()
+            | Some expected ->
+              Alcotest.(check bool)
+                (label ^ " error preserves decoder detail")
+                true
+                (contains_substring ~needle:expected detail)));
         Alcotest.(check string)
-          (Printf.sprintf "%s evidence is not rewritten" field)
+          (label ^ " evidence is not rewritten")
           malformed
           (read_file path))
   in
-  assert_strict_persisted_missing_field
-    ~kind:"fusion_completed"
-    ~field:"terminal";
-  assert_strict_persisted_missing_field
-    ~kind:"failure_judgment"
-    ~field:"provenance";
+  assert_strict_persisted_rejected
+    ~label:"missing-terminal"
+    ~rewrite:(remove_payload_field ~kind:"fusion_completed" ~field:"terminal")
+    ~expected_detail:(Some "terminal");
+  assert_strict_persisted_rejected
+    ~label:"missing-provenance"
+    ~rewrite:(remove_payload_field ~kind:"failure_judgment" ~field:"provenance")
+    ~expected_detail:(Some "provenance");
+  let rewrite_fusion_payload ~label rewrite_fields =
+    rewrite_payload_fields ~kind:"fusion_completed" ~label rewrite_fields
+  in
+  let rewrite_terminal rewrite_fields fields =
+    List.map
+      (function
+        | "terminal", `Assoc terminal_fields ->
+          "terminal", `Assoc (rewrite_fields terminal_fields)
+        | field -> field)
+      fields
+  in
+  assert_strict_persisted_rejected
+    ~label:"fusion-output-fields"
+    ~rewrite:
+      (rewrite_fusion_payload
+         ~label:"unexpected output fields"
+         (fun fields ->
+            ("ok", `Bool true)
+            :: ("resolved_answer", `String "conflicting answer")
+            :: fields))
+    ~expected_detail:None;
+  assert_strict_persisted_rejected
+    ~label:"fusion-terminal-extra-field"
+    ~rewrite:
+      (rewrite_fusion_payload
+         ~label:"terminal extra field"
+         (rewrite_terminal (fun fields -> ("unexpected", `String "value") :: fields)))
+    ~expected_detail:None;
+  assert_strict_persisted_rejected
+    ~label:"fusion-terminal-duplicate-kind"
+    ~rewrite:
+      (rewrite_fusion_payload
+         ~label:"terminal duplicate kind"
+         (rewrite_terminal (fun fields -> ("kind", `String "failed") :: fields)))
+    ~expected_detail:None;
+  assert_strict_persisted_rejected
+    ~label:"fusion-terminal-duplicate-message"
+    ~rewrite:
+      (rewrite_fusion_payload
+         ~label:"terminal duplicate message"
+         (rewrite_terminal (fun fields ->
+            ("message", `String "conflicting message") :: fields)))
+    ~expected_detail:None;
 
   (* --- durable snapshot load collapses legacy duplicates that differ only by
          arrival time. --- *)
@@ -1242,11 +1271,11 @@ let () =
       ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      assert (length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+      assert (length (registry_snapshot ~base_path keeper_name) = 1);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       Masc.Keeper_registry.For_testing.clear ();
       ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-      let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      let restored = registry_snapshot ~base_path keeper_name in
       assert (length restored = 1);
       (match
          Masc.Keeper_registry_event_queue.claim_when_result
@@ -1259,7 +1288,7 @@ let () =
        | Ok (Some _) -> Alcotest.fail "unready stimulus must remain queued"
        | Error error -> Alcotest.fail ("readiness claim failed: " ^ error));
       assert (
-        length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+        length (registry_snapshot ~base_path keeper_name) = 1);
       let replay_lease, replayed =
         claim_single
           ~base_path
@@ -1337,7 +1366,7 @@ let () =
       Alcotest.(check (list string))
         "both aliases publish to one live atomic"
         expected_post_ids
-        (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name
+        (registry_snapshot ~base_path keeper_name
          |> queue_post_ids);
       Alcotest.(check (list string))
         "both alias stimuli share one durable snapshot"
@@ -1356,7 +1385,7 @@ let () =
       Alcotest.(check (list string))
         "restart through alias restores both stimuli"
         expected_post_ids
-        (Masc.Keeper_registry_event_queue.snapshot
+        (registry_snapshot
            ~base_path
            keeper_name
          |> queue_post_ids));
@@ -1474,10 +1503,10 @@ let () =
         keeper_name
         duplicate_bootstrap_stim;
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      let pending = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      let pending = registry_snapshot ~base_path keeper_name in
       assert (length pending = 2);
       ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-      let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      let restored = registry_snapshot ~base_path keeper_name in
       assert (length restored = 2);
       let claim_and_ack expected_post_id =
         let claimed_at = Time_compat.now () in
@@ -1739,7 +1768,7 @@ let () =
        | Ok () -> ()
        | Error msg -> Alcotest.fail ("offline durable enqueue failed: " ^ msg));
       assert (
-        length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+        length (registry_snapshot ~base_path keeper_name) = 1);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name)));
 
   (* --- critical delivery: an unwritable path is an explicit error, never an

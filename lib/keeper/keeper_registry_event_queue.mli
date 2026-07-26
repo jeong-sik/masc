@@ -359,8 +359,10 @@ val enqueue_hitl_resolution_durable_result :
     function returns [Ok ()]. *)
 
 (** Read-only snapshot of the keeper's queue. If the keeper is not registered,
-    read the durable snapshot so diagnostics still expose pending replay. *)
-val snapshot : base_path:string -> string -> Keeper_event_queue.t
+    read the durable snapshot so diagnostics still expose pending replay.
+    Durable read failures remain explicit. *)
+val snapshot_result :
+  base_path:string -> string -> (Keeper_event_queue.t, string) result
 
 val drop_by_post_id :
   base_path:string

@@ -14,6 +14,17 @@
 open Alcotest
 open Masc
 
+module Event_queue_persistence_source = Keeper_event_queue_persistence
+module Keeper_event_queue_persistence = struct
+  include Event_queue_persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> fail detail
+  ;;
+end
+
 (* substring check without pulling in the [str] library *)
 let contains ~needle haystack =
   let nl = String.length needle and hl = String.length haystack in

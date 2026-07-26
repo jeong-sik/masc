@@ -1,6 +1,15 @@
 module A = Masc.Keeper_board_attention_candidate
 module Event_queue = Keeper_event_queue
-module Event_queue_persistence = Keeper_event_queue_persistence
+module Event_queue_persistence_source = Keeper_event_queue_persistence
+module Event_queue_persistence = struct
+  include Event_queue_persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
 module J = Masc.Keeper_board_attention_judgment
 module Wake = Masc.Keeper_board_attention_worker_wake
 

@@ -15,6 +15,7 @@ val snapshot_topology_readiness : unit -> (unit, string) result
     This is not credential, wire, or output admission. *)
 
 exception Exact_terminalization_persistence_failed of string
+exception Exact_terminalization_identity_unbound of string
 
 type execution_boundary =
   | Executed
@@ -23,6 +24,7 @@ type execution_boundary =
 type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
+  | Terminalization_identity_unbound
   | Owner_unregistered_deferred
 
 val spawn

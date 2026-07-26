@@ -534,12 +534,20 @@ let test_all_candidates_rejected_before_network () =
          "incapable candidate is not pre-admitted"
          []
          (List.map admission_id before.admissions);
-       Worker.For_testing.execute_prepared_flow
-         ~net
-         ~clock
-         ~on_summary:(fun _ -> fail "incapable candidate delivered a summary")
-         prepared
-       |> require_executed;
+       (match
+          Worker.For_testing.execute_prepared_flow
+            ~net
+            ~clock
+            ~on_summary:(fun _ -> fail "incapable candidate delivered a summary")
+            prepared
+        with
+        | exception Worker.Exact_terminalization_identity_unbound detail ->
+          check bool "identityless terminalization is explicit" true
+            (String.trim detail <> "")
+        | Worker.Executed ->
+          fail "identityless candidate exhaustion reported terminal success"
+        | Worker.Deferred_unregistered ->
+          fail "registered owner was reported as unregistered");
        check
          (list string)
          "execution records the rejected candidate"
@@ -549,11 +557,11 @@ let test_all_candidates_rejected_before_network () =
        match Q.get_pending_entry ~id:entry.id with
        | Some
            { exact_attempt = Q.Exact_unbound
-           ; summary_status = Q.Summary_failed { retryable = false; _ }
+           ; summary_status = Q.Summary_pending
            ; _
            } ->
          ()
-       | _ -> fail "pre-network rejection was not durably terminal")
+       | _ -> fail "pre-network rejection mutated identityless terminal state")
 ;;
 
 let test_visible_bind_blocks_dispatch () =
@@ -1270,7 +1278,7 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
                 "failed cancellation cleanup did not preserve the durable binding"))
 ;;
 
-let test_pre_worker_start_failure_is_retryable () =
+let test_pre_worker_start_failure_preserves_unbound_pending () =
   run_eio @@ fun ~sw:_ ~net:_ ~clock:_ ->
   with_temp_dir "hitl-pre-worker-start-failure" @@ fun base_path ->
   Fun.protect
@@ -1297,15 +1305,11 @@ let test_pre_worker_start_failure_is_retryable () =
        (match Q.get_pending_entry ~id:entry.id with
        | Some
            { exact_attempt = Q.Exact_unbound
-           ; summary_status = Q.Summary_failed { reason; retryable = true }
+           ; summary_status = Q.Summary_pending
            ; _
            } ->
-         check
-           string
-           "retryable failure reason is durable"
-           "no usable exact-output lane slots"
-           reason
-       | _ -> fail "pre-worker failure was not durably retryable");
+         ()
+       | _ -> fail "pre-worker failure mutated identityless terminal state");
        check
          bool
          "pre-worker failure releases the owner claim"
@@ -1737,9 +1741,9 @@ let () =
             `Quick
             test_bound_cancellation_cleanup_uncertainty_preserves_origin
         ; test_case
-            "pre-worker start failure is retryable"
+            "pre-worker start failure preserves unbound pending"
             `Quick
-            test_pre_worker_start_failure_is_retryable
+            test_pre_worker_start_failure_preserves_unbound_pending
         ; test_case
             "visible uncertainty withholds production drain"
             `Quick

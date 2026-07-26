@@ -414,15 +414,6 @@ val mark_summary_pending : id:string -> (bool, summary_transition_error) result
       so a Gate can prevent duplicate judge workers. A bound or quarantined
       exact attempt is rejected explicitly. *)
 
-val attach_summary :
-  id:string -> hitl_context_summary -> (bool, summary_transition_error) result
-
-val mark_summary_failed :
-  id:string ->
-  reason:string ->
-  retryable:bool ->
-  (bool, summary_transition_error) result
-
 (** Durably transition any [Summary_failed] state back to the in-flight marker.
     Only explicit operator action calls this CAS, so the diagnostic [retryable]
     classification never controls work. A restart-classified

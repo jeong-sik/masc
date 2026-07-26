@@ -436,32 +436,10 @@ let rec spawn_claimed_auto_judge_entry_with
         ~approval_id
         reason
   in
-  let on_failure ~reason ~retryable =
-    match
-      Keeper_approval_queue.mark_summary_failed
-        ~id:approval_id
-        ~reason
-        ~retryable
-    with
-    | Ok true -> ()
-    | Ok false ->
-      log_summary_transition_miss
-        ~keeper_name:entry.keeper_name
-        ~approval_id
-        ~operation:"fail"
-    | Error error ->
-      log_summary_state_error
-        ~keeper_name:entry.keeper_name
-        ~approval_id
-        ~operation:"fail"
-        error
-  in
-  let fail_before_worker ~reason ~retryable =
+  let fail_before_worker ~reason =
     Fun.protect
       ~finally:(fun () -> release_auto_judge entry)
-      (fun () ->
-         on_failure ~reason ~retryable;
-         Error reason)
+      (fun () -> Error reason)
   in
   match Eio_context.get_root_switch_opt () with
   | Some sw ->
@@ -480,6 +458,11 @@ let rec spawn_claimed_auto_judge_entry_with
                     ~base_path:entry.audit_base_path
                     ~keeper_name:entry.keeper_name
                     ())
+             | Hitl_summary_worker.Terminalization_identity_unbound ->
+               Log.Keeper.warn
+                 ~keeper_name:entry.keeper_name
+                 "Auto Judge terminalization blocked before exact attempt identity was bound; durable pending approval retained approval=%s"
+                 entry.id
              | Hitl_summary_worker.Terminalization_persistence_uncertain ->
                Log.Keeper.error
                  ~keeper_name:entry.keeper_name
@@ -518,7 +501,7 @@ let rec spawn_claimed_auto_judge_entry_with
            ()
        with
        | Ok () -> Ok Started
-       | Error reason -> fail_before_worker ~reason ~retryable:true
+       | Error reason -> fail_before_worker ~reason
      with
      | Eio.Cancel.Cancelled _ as exn ->
        release_auto_judge entry;
@@ -527,7 +510,7 @@ let rec spawn_claimed_auto_judge_entry_with
        let reason =
          "Auto Judge worker start failed: " ^ Printexc.to_string exn
        in
-       fail_before_worker ~reason ~retryable:true)
+       fail_before_worker ~reason)
   | None ->
     fail_before_worker
       ~reason:"Auto Judge unavailable: server root switch is not installed"
@@ -804,7 +787,8 @@ let finalize_recovered_judgment
   =
   match entry.exact_attempt with
   | Keeper_approval_queue.Exact_unbound ->
-    resolve_judgment entry ~approval_id:entry.id summary
+    Error
+      "recovered Auto Judge summary has no exact attempt identity; finalization withheld"
   | Keeper_approval_queue.Exact_bound
       ({ status = Keeper_approval_queue.Exact_completed; _ } as binding) ->
     (match
@@ -840,7 +824,7 @@ let finalize_recovered_judgment
           ^ Keeper_approval_queue.exact_attempt_error_to_string error))
   | Keeper_approval_queue.Exact_bound _ ->
     Error
-      "recovered Auto Judge entry is not an unbound or completed exact judgment"
+      "recovered Auto Judge entry is not a completed exact judgment"
 ;;
 
 let resume_persisted_auto_judges_with

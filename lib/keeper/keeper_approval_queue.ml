@@ -1746,32 +1746,6 @@ let persist_pending_entry_unlocked ~map ~(entry : pending_approval) updated_entr
     Ok true
 ;;
 
-(** Complete an unbound legacy judge exactly once. Exact attempts must use
-    [complete_summary_exact_attempt], which commits content and identity
-    together. *)
-let complete_summary ~id summary_status =
-  with_pending_store_lock (fun () ->
-    let map = Atomic.get pending in
-    match SMap.find_opt id map with
-    | None -> Ok false
-    | Some entry ->
-      (match summary_transition_rejection entry with
-       | Some rejection -> Error (Summary_transition_rejected rejection)
-       | None ->
-         (match entry.summary_status with
-          | Summary_pending ->
-            persist_pending_entry_unlocked
-              ~map
-              ~entry
-              { entry with summary_status }
-            |> Result.map_error (fun error ->
-              Summary_transition_storage_error error)
-          | Summary_not_requested
-          | Summary_available _
-          | Summary_failed _ ->
-            Ok false)))
-;;
-
 let publish_summary_update ~id =
   let now = Time_compat.now () in
   match get_pending_entry ~id with
@@ -2263,16 +2237,6 @@ let mark_summary_pending ~id =
               Ok false)))
   in
   publish_summary_transition ~id result
-;;
-
-let attach_summary ~id summary =
-  let updated = complete_summary ~id (Summary_available summary) in
-  publish_summary_transition ~id updated
-;;
-
-let mark_summary_failed ~id ~reason ~retryable =
-  let updated = complete_summary ~id (Summary_failed { reason; retryable }) in
-  publish_summary_transition ~id updated
 ;;
 
 let restart_failed_summary ~id =

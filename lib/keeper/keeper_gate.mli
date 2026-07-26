@@ -88,8 +88,8 @@ val decide :
     [(base_path, keeper_name)] owner evaluates only its oldest entry.
     Failed, quarantined, released, uncertain, or otherwise ineligible oldest
     state is a FIFO barrier: recovery never activates a later same-owner entry.
-    Completion drains only that owner's FIFO. Decisive
-    persisted unbound output retains its legacy direct-finalization behavior.
+    Completion drains only that owner's FIFO. Decisive output without an exact
+    attempt identity is retained pending and recorded as a recovery failure.
     Completed exact output is first idempotently strict-rewritten with the same
     identity and summary; only [Keeper_approval_queue.Fsync_completed] permits
     Gate finalization. Visible unconfirmed or failed rewrites leave the approval

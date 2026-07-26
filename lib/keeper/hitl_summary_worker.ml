@@ -485,6 +485,19 @@ let exact_attempt_source_resolved (entry : pending_approval) = function
 
 exception Exact_terminalization_persistence_failed of string
 exception Cancelled_uncertain of exn * Printexc.raw_backtrace * string
+
+exception Exact_terminalization_identity_unbound of string
+
+type exact_settlement_error =
+  | Exact_settlement_identity_unbound of string
+  | Exact_settlement_persistence_failed of string
+
+let exact_settlement_error_to_string = function
+  | Exact_settlement_identity_unbound detail
+  | Exact_settlement_persistence_failed detail ->
+    detail
+;;
+
 let signal_terminalization_persistence_failure
       (entry : pending_approval)
       operation
@@ -499,19 +512,6 @@ let signal_terminalization_persistence_failure
           operation
           entry.id
           detail))
-;;
-
-let mark_unbound_failure (entry : pending_approval) reason =
-  match
-    Keeper_approval_queue.mark_summary_failed
-      ~id:entry.id
-      ~reason
-      ~retryable:false
-  with
-  | Ok true -> Ok ()
-  | Ok false -> Error "unbound failure transition did not change state"
-  | Error error ->
-    Error (Keeper_approval_queue.summary_transition_error_to_string error)
 ;;
 
 let quarantine_identity_result
@@ -608,7 +608,12 @@ let settle_current ?quarantine_writer (entry : pending_approval) ~reason ~cause 
     record_outcome "exact_source_resolved";
     Ok ()
   | Some { exact_attempt = Exact_unbound; _ } ->
-    mark_unbound_failure entry reason
+    Error
+      (Exact_settlement_identity_unbound
+         (Printf.sprintf
+            "HITL exact-output terminalization requires a bound attempt identity approval_id=%s: %s"
+            entry.id
+            reason))
   | Some
       { exact_attempt =
           Exact_bound { status = (Exact_completed | Exact_quarantined _); _ }
@@ -622,16 +627,26 @@ let settle_current ?quarantine_writer (entry : pending_approval) ~reason ~cause 
       entry
       (exact_identity_of_binding binding)
       cause
+    |> Result.map_error (fun detail ->
+      Exact_settlement_persistence_failed detail)
+;;
+
+let signal_settlement_error (entry : pending_approval) = function
+  | Exact_settlement_identity_unbound detail ->
+    record_outcome "exact_identity_unbound";
+    log_exact_error entry "terminalization blocked" detail;
+    raise (Exact_terminalization_identity_unbound detail)
+  | Exact_settlement_persistence_failed detail ->
+    signal_terminalization_persistence_failure
+      entry
+      "terminalization persistence"
+      detail
 ;;
 
 let settle_current_or_signal (entry : pending_approval) ~reason ~cause =
   match settle_current entry ~reason ~cause with
   | Ok () -> ()
-  | Error detail ->
-    signal_terminalization_persistence_failure
-      entry
-      "terminalization persistence"
-      detail
+  | Error error -> signal_settlement_error entry error
 ;;
 
 let same_catalog_generation left right =
@@ -950,7 +965,8 @@ let execute_prepared_flow_with_queue_writers_current
       match settlement with
       | Ok () ->
         Printexc.raise_with_backtrace cancellation cancellation_backtrace
-      | Error detail ->
+      | Error settlement_error ->
+        let detail = exact_settlement_error_to_string settlement_error in
         record_outcome "exact_cancellation_settlement_failed";
         log_exact_error
           prepared.entry
@@ -978,11 +994,8 @@ let execute_prepared_flow_with_queue_writers_current
      | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
        Deferred_unregistered
      | Keeper_exact_flow_scope.Current (Ok ()) -> Executed
-     | Keeper_exact_flow_scope.Current (Error persistence_detail) ->
-       signal_terminalization_persistence_failure
-         prepared.entry
-         "crash terminalization persistence"
-         persistence_detail)
+     | Keeper_exact_flow_scope.Current (Error error) ->
+       signal_settlement_error prepared.entry error)
 ;;
 
 let execute_prepared_flow_with_queue_writers
@@ -1024,6 +1037,7 @@ let execute_prepared_flow ~net ?clock ~on_summary prepared =
 type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
+  | Terminalization_identity_unbound
   | Owner_unregistered_deferred
 
 let spawn_with
@@ -1072,6 +1086,8 @@ let spawn_with
         `Cancelled (cancellation, Printexc.get_raw_backtrace ())
       | Exact_terminalization_persistence_failed _ as uncertainty ->
         `Uncertain uncertainty
+      | Exact_terminalization_identity_unbound _ as blocked ->
+        `Identity_unbound blocked
       | exn -> `Uncertain exn
     in
     match execution_outcome with
@@ -1083,6 +1099,9 @@ let spawn_with
         (cancellation, cancellation_backtrace, _detail) ->
       on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    | `Identity_unbound blocked ->
+      on_finish Terminalization_identity_unbound;
+      raise blocked
     | `Owner_unregistered -> on_finish Owner_unregistered_deferred
     | `Uncertain uncertainty ->
       on_finish Terminalization_persistence_uncertain;

@@ -1257,16 +1257,6 @@ let test_exact_attempt_binding_release_and_conflicts () =
          "new identity replaces released attempt"
          true
          (run_exact_transition AQ.bind_summary_exact_attempt replacement);
-       let summary = exact_summary "bound-summary-rejection" in
-       expect_summary_rejection
-         "bound attach"
-         (AQ.attach_summary ~id summary);
-       expect_summary_rejection
-         "bound fail"
-         (AQ.mark_summary_failed
-            ~id
-            ~reason:"must remain exact"
-            ~retryable:true);
        expect_summary_rejection
          "bound restart"
          (AQ.restart_failed_summary ~id);
@@ -1981,98 +1971,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_summary_updates_never_resolve_pending_request () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-summary-advisory" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       ignore (install_exn ~base_path);
-       let id = submit ~base_path ~keeper_name ~input:(`Assoc [ "request", `String "x" ]) in
-       check_update "mark pending" true (AQ.mark_summary_pending ~id);
-       check_update
-         "duplicate judge worker rejected"
-         false
-         (AQ.mark_summary_pending ~id);
-       let summary : AQ.hitl_context_summary =
-         { summary_version = 2
-         ; generated_at = Unix.gettimeofday ()
-         ; model_run_id = "judge-run"
-         ; context_summary = "The model recommends approval."
-         ; key_questions = []
-         ; judgment = AQ.Approve
-         ; rationale = "Visible context supports the exact request."
-         }
-       in
-       check_update "attach advisory judgment" true (AQ.attach_summary ~id summary);
-       check_update "terminal summary cannot be replaced" false
-         (AQ.attach_summary ~id { summary with judgment = AQ.Deny });
-       check_update "terminal summary cannot become failure" false
-         (AQ.mark_summary_failed ~id ~reason:"late failure" ~retryable:true);
-       Alcotest.(check bool) "model judgment remains pending" true
-         (Option.is_some (AQ.get_pending_entry ~id));
-       Alcotest.(check bool) "resolved entry cannot be updated" true
-         (match aq_resolve ~base_path ~id ~decision:(AQ.Decision.Reject "operator denied") with
-          | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
-          | Ok () ->
-            (match AQ.attach_summary ~id summary with
-             | Ok updated -> not updated
-             | Error error ->
-               Alcotest.fail (AQ.summary_transition_error_to_string error))))
-;;
-
-let test_all_summary_failures_accept_explicit_restart () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-summary-retry" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       ignore (install_exn ~base_path);
-       let retryable_id =
-         submit ~base_path ~keeper_name ~input:(`Assoc [ "request", `String "retry" ])
-       in
-       let terminal_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "request", `String "terminal" ])
-       in
-       List.iter
-         (fun id -> check_update "mark pending" true (AQ.mark_summary_pending ~id))
-         [ retryable_id; terminal_id ];
-       check_update
-         "retryable failure"
-         true
-         (AQ.mark_summary_failed
-            ~id:retryable_id
-            ~reason:"interrupted"
-            ~retryable:true);
-       check_update
-         "nonretryable failure"
-         true
-         (AQ.mark_summary_failed
-            ~id:terminal_id
-            ~reason:"terminal"
-            ~retryable:false);
-       check_update
-         "retryable diagnostic CAS restarts"
-         true
-         (AQ.restart_failed_summary ~id:retryable_id);
-       check_update
-         "nonretryable diagnostic does not block operator restart"
-         true
-         (AQ.restart_failed_summary ~id:terminal_id);
-       (match AQ.get_pending_entry ~id:retryable_id with
-       | Some { summary_status = AQ.Summary_pending; _ } -> ()
-       | Some _ | None -> Alcotest.fail "retryable summary did not return to pending");
-       (match AQ.get_pending_entry ~id:terminal_id with
-        | Some { summary_status = AQ.Summary_pending; _ } -> ()
-        | Some _ | None -> Alcotest.fail "operator restart was gated by diagnostic state");
-       reject_and_cleanup ~base_path retryable_id;
-       reject_and_cleanup ~base_path terminal_id)
-;;
-
-let test_operator_recovery_skips_terminal_exact_failures () =
+let test_operator_recovery_skips_terminal_exact_failure () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-operator-recovery" in
   Fun.protect
@@ -2081,37 +1980,13 @@ let test_operator_recovery_skips_terminal_exact_failures () =
       cleanup_dir base_path)
     (fun () ->
        ignore (install_exn ~base_path);
-       let request_context =
-         `Assoc
-           [ "history_messages", `List [ `String "exact prior evidence" ]
-           ; "system_prompt", `String "exact judgment policy"
-           ]
-       in
-       let retryable_id =
-         submit_with_context
-           ~request_context
-           ~base_path
-           ~keeper_name
-           ~input:(`String "retryable")
-           ()
-       in
-       let terminal_id =
-         submit ~base_path ~keeper_name ~input:(`String "terminal")
-       in
        let quarantined_id =
          submit ~base_path ~keeper_name ~input:(`String "quarantined")
        in
-       List.iter
-         (fun id -> check_update "mark pending" true (AQ.mark_summary_pending ~id))
-         [ retryable_id; terminal_id; quarantined_id ];
        check_update
-         "retryable failure"
+         "mark exact failure pending"
          true
-         (AQ.mark_summary_failed ~id:retryable_id ~reason:"transport" ~retryable:true);
-       check_update
-         "terminal failure"
-         true
-         (AQ.mark_summary_failed ~id:terminal_id ~reason:"prompt" ~retryable:false);
+         (AQ.mark_summary_pending ~id:quarantined_id);
        let quarantined_identity =
          exact_identity
            ~slot_id:"slot-quarantined"
@@ -2137,23 +2012,9 @@ let test_operator_recovery_skips_terminal_exact_failures () =
            Alcotest.fail (AQ.summary_transition_error_to_string error)
        in
        Alcotest.(check (list string))
-         "explicit operator action reopens only restartable failures"
-         (List.sort String.compare [ retryable_id; terminal_id ])
+         "explicit operator action cannot reopen exact quarantine"
+         []
          reopened;
-       List.iter
-         (fun id ->
-            match AQ.get_pending_entry ~id with
-            | Some { summary_status = AQ.Summary_not_requested; _ } -> ()
-            | Some _ | None -> Alcotest.fail "failed summary was not reopened")
-         reopened;
-       (match AQ.get_pending_entry ~id:retryable_id with
-        | Some entry ->
-          Alcotest.check
-            (Alcotest.option yojson)
-            "operator recovery preserves exact request context"
-            (Some request_context)
-            entry.request_context
-        | None -> Alcotest.fail "reopened summary disappeared");
        (match AQ.get_pending_entry ~id:quarantined_id with
         | Some
             { summary_status = AQ.Summary_failed { retryable = false; _ }
@@ -2168,8 +2029,6 @@ let test_operator_recovery_skips_terminal_exact_failures () =
           ()
         | Some _ | None ->
           Alcotest.fail "bulk recovery changed a terminal exact quarantine");
-       reject_and_cleanup ~base_path retryable_id;
-       reject_and_cleanup ~base_path terminal_id;
        reject_and_cleanup ~base_path quarantined_id)
 ;;
 
@@ -2239,56 +2098,6 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
        | Some _ | None -> Alcotest.fail "pending summary was not terminalized")
 ;;
 
-let test_dashboard_retry_rejects_cross_workspace_approval () =
-  let base_a = temp_dir () in
-  let base_b = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_a;
-      cleanup_dir base_b)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path:base_a);
-       let approval_id =
-         submit
-           ~base_path:base_a
-           ~keeper_name:"queue-retry-base-a"
-           ~input:(`Assoc [ "request", `String "base-a" ])
-       in
-       check_update "mark pending" true (AQ.mark_summary_pending ~id:approval_id);
-       check_update
-         "mark failed"
-         true
-         (AQ.mark_summary_failed
-            ~id:approval_id
-            ~reason:"base-a-original"
-            ~retryable:true);
-       let args = `Assoc [ "id", `String approval_id ] in
-       (match
-          Server_dashboard_http.dashboard_gate_retry_http_json
-            ~base_path:base_b
-            ~requested_by:"operator-b"
-            ~args
-        with
-        | Error message ->
-          Alcotest.(check string)
-            "cross-workspace id is not addressable"
-            ("pending approval not found: " ^ approval_id)
-            message
-        | Ok _ -> Alcotest.fail "workspace B retried workspace A approval");
-       (match AQ.get_pending_entry ~id:approval_id with
-        | Some
-            { summary_status =
-                AQ.Summary_failed { reason = "base-a-original"; retryable = true }
-            ; _
-            } ->
-          ()
-        | Some _ | None ->
-          Alcotest.fail "cross-workspace retry changed workspace A state");
-       reject_and_cleanup ~base_path:base_a approval_id)
-;;
-
 let test_dashboard_resolve_rejects_cross_workspace_approval () =
   let base_a = temp_dir () in
   let base_b = temp_dir () in
@@ -2345,129 +2154,6 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
                  (AQ.For_testing.always_allowed_store_path ~base_path)))
          [ base_a; base_b ];
        reject_and_cleanup ~base_path:base_a approval_id)
-;;
-
-let test_lane_activity_does_not_retry_failed_auto_judge () =
-  let base_path = temp_dir () in
-  let keeper_a = "queue-retry-lane-a" in
-  let keeper_b = "queue-retry-lane-b" in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       ignore (install_exn ~base_path);
-       let id_a =
-         submit
-           ~base_path
-           ~keeper_name:keeper_a
-           ~input:(`Assoc [ "request", `String "lane-a" ])
-       in
-       let id_b =
-         submit
-           ~base_path
-           ~keeper_name:keeper_b
-           ~input:(`Assoc [ "request", `String "lane-b" ])
-       in
-       List.iter
-         (fun id -> check_update "mark pending" true (AQ.mark_summary_pending ~id))
-         [ id_a; id_b ];
-       check_update
-         "lane a failed"
-         true
-         (AQ.mark_summary_failed ~id:id_a ~reason:"lane-a-original" ~retryable:true);
-       check_update
-         "lane b failed"
-         true
-         (AQ.mark_summary_failed ~id:id_b ~reason:"lane-b-original" ~retryable:true);
-       let request : Gate.request =
-         { keeper_name = keeper_a
-         ; operation = "external-effect"
-         ; input = `Assoc [ "request", `String "new-lane-a-activity" ]
-         ; base_path
-         ; causal_context = None
-         ; task_id = None
-         ; goal_ids = []
-         ; continuation_channel = None
-         }
-       in
-       (match Gate.decide ~keeper_always_allow:true request with
-        | Gate.Allow { source = Gate.Keeper_always_allow } -> ()
-        | Gate.Allow _ | Gate.Deferred _ | Gate.Unavailable _ ->
-          Alcotest.fail "lane activity did not retain Keeper Always Allow");
-       (match AQ.get_pending_entry ~id:id_a with
-        | Some
-            { summary_status = AQ.Summary_failed { reason; retryable = true }
-            ; _
-            } ->
-          Alcotest.(check string)
-            "same lane failure remains untouched"
-            "lane-a-original"
-            reason
-        | Some _ | None -> Alcotest.fail "same-lane failure state is not observable");
-       (match AQ.get_pending_entry ~id:id_b with
-        | Some
-            { summary_status =
-                AQ.Summary_failed { reason = "lane-b-original"; retryable = true }
-            ; _
-            } ->
-          ()
-        | Some _ | None ->
-          Alcotest.fail "lane activity changed another Keeper's judge failure");
-       reject_and_cleanup ~base_path id_a;
-       reject_and_cleanup ~base_path id_b;
-       List.iter
-         (fun (keeper_name, approval_id) ->
-            match durable_resolution_opt ~base_path ~keeper_name ~approval_id with
-            | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
-            | None -> Alcotest.fail "lane-local retry cleanup was not durable")
-         [ keeper_a, id_a; keeper_b, id_b ])
-;;
-
-let test_decisive_summary_finalizes_after_restart () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-summary-finalize-restart" in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       let id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "request", `String "finalize-after-restart" ])
-       in
-       check_update "mark pending" true (AQ.mark_summary_pending ~id);
-       let summary : AQ.hitl_context_summary =
-         { summary_version = 2
-         ; generated_at = Unix.gettimeofday ()
-         ; model_run_id = "judge-before-restart"
-         ; context_summary = "The exact request is justified."
-         ; key_questions = []
-         ; judgment = AQ.Approve
-         ; rationale = "Visible context supports this exact request."
-         }
-       in
-       check_update "persist decisive summary" true (AQ.attach_summary ~id summary);
-       AQ.For_testing.reset_runtime_state ();
-       let _ = install_exn ~base_path in
-       let report = Gate.resume_persisted_auto_judges ~base_path in
-       Alcotest.(check int) "one recovery candidate" 1 report.requested;
-       Alcotest.(check (list string)) "judgment finalized" [ id ] report.finalized_ids;
-       Alcotest.(check int) "no worker restart" 0 (List.length report.started_ids);
-       Alcotest.(check int) "no skipped recovery" 0 (List.length report.skipped_ids);
-       Alcotest.(check int) "no recovery failure" 0 (List.length report.failures);
-       Alcotest.(check bool) "pending removed" true
-         (Option.is_none (AQ.get_pending_entry ~id));
-       let resolution =
-         match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
-         | Some resolution -> resolution
-         | None -> Alcotest.fail "decisive summary did not reach origin Keeper"
-       in
-       drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
 let test_malformed_snapshot_fails_install_and_is_observed () =
@@ -2977,10 +2663,6 @@ let () =
             `Quick
             test_cycle_grant_uses_exact_effect_and_is_consumed_once
         ; Alcotest.test_case
-            "summary is advisory"
-            `Quick
-            test_summary_updates_never_resolve_pending_request
-        ; Alcotest.test_case
             "exact binding codec validates identity and current causes"
             `Quick
             test_exact_binding_codec_validates_entry_identity
@@ -3004,34 +2686,18 @@ let () =
               "exact staged durability converges and rewrites"
               `Quick
               test_exact_attempt_staged_durability_and_idempotent_rewrite
-          ; Alcotest.test_case
-            "all summary failures accept explicit operator restart"
-            `Quick
-            test_all_summary_failures_accept_explicit_restart
-        ; Alcotest.test_case
-            "dashboard retry rejects cross-workspace approval"
-            `Quick
-            test_dashboard_retry_rejects_cross_workspace_approval
         ; Alcotest.test_case
             "dashboard resolve rejects cross-workspace approval"
             `Quick
             test_dashboard_resolve_rejects_cross_workspace_approval
         ; Alcotest.test_case
-            "lane activity never retries a failed Auto Judge"
-            `Quick
-            test_lane_activity_does_not_retry_failed_auto_judge
-        ; Alcotest.test_case
             "operator recovery skips terminal exact failures"
             `Quick
-            test_operator_recovery_skips_terminal_exact_failures
+            test_operator_recovery_skips_terminal_exact_failure
         ; Alcotest.test_case
             "summary owner retirement is atomic and owner scoped"
             `Quick
             test_summary_owner_retirement_is_atomic_and_owner_scoped
-          ; Alcotest.test_case
-              "decisive summary finalizes after restart"
-              `Quick
-              test_decisive_summary_finalizes_after_restart
           ; Alcotest.test_case
               "exact restart finalization requires fsync"
               `Quick

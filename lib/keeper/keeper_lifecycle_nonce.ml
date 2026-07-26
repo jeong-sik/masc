@@ -3,12 +3,14 @@ module Head = Fs_compat.Capability_head
 let schema = "masc.keeper-lifecycle-nonce.v1"
 let root_leaf = "keeper-lifecycle-nonces-v1"
 let head_entropy_bytes = 32 * 33
-let fd_backed_parent_opening_for_testing = Atomic.make false
+let fd_backed_parent_opening_key : unit Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
 
 let with_head_parent parent fn =
-  if Atomic.get fd_backed_parent_opening_for_testing
-  then Eio.Path.with_open_dir parent fn
-  else fn parent
+  match Eio.Fiber.get fd_backed_parent_opening_key with
+  | Some () -> Eio.Path.with_open_dir parent fn
+  | None -> fn parent
 ;;
 
 type corruption =
@@ -526,8 +528,8 @@ module For_testing = struct
   let root_path_for_base_path = root_path_for_base_path
   let authority_leaf = authority_leaf
 
-  let enable_fd_backed_parent_opening () =
-    Atomic.set fd_backed_parent_opening_for_testing true
+  let with_fd_backed_parent_opening fn =
+    Eio.Fiber.with_binding fd_backed_parent_opening_key () fn
   ;;
 
   let with_read_settlement_warning

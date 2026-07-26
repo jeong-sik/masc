@@ -491,6 +491,7 @@ let test_context_snapshot_storage_failure_is_unavailable () =
 let test_keeper_up_clears_dead_tombstone_resume_state () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let keeper_name = "dead-tombstone-operator-resume" in
@@ -856,6 +857,7 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
 let test_dead_revival_launch_failure_rolls_back_both_authorities () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let keeper_name = "dead-revival-rollback" in
@@ -972,6 +974,7 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
 let with_settled_dead_revival_fixture ~keeper_name fn =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -1240,6 +1243,7 @@ type dead_revival_cancellation_boundary =
 let test_dead_revival_cancellation_releases_reservation boundary () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let keeper_name =
@@ -1395,6 +1399,7 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
 let test_dead_revival_existing_reserved_journal_blocks () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let keeper_name = "dead-revival-existing-journal" in

@@ -326,7 +326,7 @@ let test_contention_retry_budget_is_finite () =
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Nonce.For_testing.enable_fd_backed_parent_opening ();
+  Nonce.For_testing.with_fd_backed_parent_opening @@ fun () ->
   run
     "keeper lifecycle nonce"
     [ ( "allocator"

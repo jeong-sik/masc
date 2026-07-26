@@ -15,12 +15,14 @@ let final_clear_failure_hook : (unit -> string option) Atomic.t =
   Atomic.make (fun () -> None)
 ;;
 
-let fd_backed_parent_opening_for_testing = Atomic.make false
+let fd_backed_parent_opening_key : unit Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
 
 let with_head_parent parent fn =
-  if Atomic.get fd_backed_parent_opening_for_testing
-  then Eio.Path.with_open_dir parent fn
-  else fn parent
+  match Eio.Fiber.get fd_backed_parent_opening_key with
+  | Some () -> Eio.Path.with_open_dir parent fn
+  | None -> fn parent
 ;;
 
 let invoke_after_nonce_allocation_hook () =
@@ -63,8 +65,8 @@ module Boundary_hooks_for_testing = struct
       fn
   ;;
 
-  let enable_fd_backed_parent_opening () =
-    Atomic.set fd_backed_parent_opening_for_testing true
+  let with_fd_backed_parent_opening fn =
+    Eio.Fiber.with_binding fd_backed_parent_opening_key () fn
   ;;
 end
 

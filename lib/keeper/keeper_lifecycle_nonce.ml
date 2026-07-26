@@ -60,6 +60,8 @@ type row =
   { keeper_id : string
   ; allocated_to : string
   ; nonce : int64
+  ; source_owner_id : string option
+  ; source_nonce : int64 option
   }
 
 type identity =
@@ -110,6 +112,13 @@ let payload_json (row : row) =
     ; "keeper_id", `String row.keeper_id
     ; "allocated_to", `String row.allocated_to
     ; "nonce", `Intlit (Int64.to_string row.nonce)
+    ; ( "source_owner_id"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value) row.source_owner_id )
+    ; ( "source_nonce"
+      , Option.fold
+          ~none:`Null
+          ~some:(fun value -> `Intlit (Int64.to_string value))
+          row.source_nonce )
     ]
 ;;
 
@@ -127,6 +136,13 @@ let row_bytes row =
     ; "keeper_id", `String row.keeper_id
     ; "allocated_to", `String row.allocated_to
     ; "nonce", `Intlit (Int64.to_string row.nonce)
+    ; ( "source_owner_id"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value) row.source_owner_id )
+    ; ( "source_nonce"
+      , Option.fold
+          ~none:`Null
+          ~some:(fun value -> `Intlit (Int64.to_string value))
+          row.source_nonce )
     ; "checksum_sha256", `String (checksum row)
     ]
   |> Yojson.Safe.to_string
@@ -190,7 +206,14 @@ let decode_row ~keeper_id raw =
   let* json = parsed in
   let* fields =
     exact_fields
-      [ "schema"; "keeper_id"; "allocated_to"; "nonce"; "checksum_sha256" ]
+      [ "schema"
+      ; "keeper_id"
+      ; "allocated_to"
+      ; "nonce"
+      ; "source_owner_id"
+      ; "source_nonce"
+      ; "checksum_sha256"
+      ]
       json
   in
   let* observed_schema = required_string "schema" fields in
@@ -201,9 +224,26 @@ let decode_row ~keeper_id raw =
     let* allocated_to = required_string "allocated_to" fields in
     let* nonce_json = required_field "nonce" fields in
     let* nonce = positive_int64 nonce_json in
+    let* source_owner_id_json = required_field "source_owner_id" fields in
+    let* source_nonce_json = required_field "source_nonce" fields in
+    let* source_owner_id, source_nonce =
+      match source_owner_id_json, source_nonce_json with
+      | `Null, `Null -> Ok (None, None)
+      | `String owner_id, nonce_json ->
+        let* nonce = positive_int64 nonce_json in
+        if String.equal (String.trim owner_id) ""
+        then Error (Invalid_current "source owner id is empty")
+        else Ok (Some owner_id, Some nonce)
+      | _ -> Error (Invalid_current "source identity is not an exact pair")
+    in
     let* observed_checksum = required_string "checksum_sha256" fields in
     let observed : row =
-      { keeper_id = observed_keeper; allocated_to; nonce }
+      { keeper_id = observed_keeper
+      ; allocated_to
+      ; nonce
+      ; source_owner_id
+      ; source_nonce
+      }
     in
     if not (String.equal observed_checksum (checksum observed))
     then Error (Invalid_current "authority checksum does not match")
@@ -365,7 +405,12 @@ let rec allocate
     let current_nonce = Option.fold ~none:0L ~some:(fun row -> row.nonce) current in
     let* desired = next_value ~floor current_nonce in
     let desired_row : row =
-      { keeper_id; allocated_to = owner_id; nonce = desired }
+      { keeper_id
+      ; allocated_to = owner_id
+      ; nonce = desired
+      ; source_owner_id = Option.map (fun source -> source.owner_id) expected_source
+      ; source_nonce = Option.map (fun source -> source.nonce) expected_source
+      }
     in
     let* write_entropy = entropy_source () in
     (match
@@ -552,11 +597,70 @@ let recover_exact ~base_path ~keeper_id ~source ~target () =
              decode_row ~keeper_id raw
              |> Result.map_error (fun corruption -> Corrupt_current corruption)
            in
-           if
-             String.equal row.allocated_to target.owner_id
-             && Int64.equal row.nonce target.nonce
+           let row_target = { owner_id = row.allocated_to; nonce = row.nonce } in
+           let row_source =
+             match row.source_owner_id, row.source_nonce with
+             | Some owner_id, Some nonce -> Some { owner_id; nonce }
+             | None, None -> None
+             | Some _, None | None, Some _ -> None
+           in
+           let equal_identity left right =
+             String.equal left.owner_id right.owner_id
+             && Int64.equal left.nonce right.nonce
+           in
+           let forward =
+             Option.equal equal_identity source row_source
+             && equal_identity target row_target
+           in
+           let reverse =
+             match source, row_source with
+             | Some current, Some original ->
+               equal_identity current row_target && equal_identity target original
+             | None, None | None, Some _ | Some _, None -> false
+           in
+           if forward || reverse
            then Ok { base_path; keeper_id; source; target }
            else Error Authority_identity_mismatch)
+;;
+
+let recover_published_replace ~base_path ~keeper_id ~source () =
+  if Filename.is_relative base_path
+  then Error (Invalid_base_path base_path)
+  else
+    let* root = prepare_root ~base_path in
+    let* secure_random = entropy_source () in
+    match
+      with_head_parent root (fun parent ->
+        Head.read ~secure_random ~parent ~leaf:(authority_leaf ~keeper_id))
+    with
+    | Error failure -> Error (Head_read_failed failure)
+    | Ok snapshot ->
+      let warnings = Head.snapshot_settlement_warnings snapshot in
+      if warnings <> []
+      then
+        Error
+          (Head_read_settlement_failed
+             { cursor = Head.snapshot_cursor snapshot
+             ; row = Head.snapshot_row snapshot
+             ; observed_nonce = observed_nonce ~keeper_id (Head.snapshot_row snapshot)
+             ; warnings
+             })
+      else
+        (match Head.snapshot_row snapshot with
+         | None -> Error Authority_missing
+         | Some raw ->
+           let* row =
+             decode_row ~keeper_id raw
+             |> Result.map_error (fun corruption -> Corrupt_current corruption)
+           in
+           (match row.source_owner_id, row.source_nonce with
+            | Some owner_id, Some nonce
+              when String.equal owner_id source.owner_id
+                   && Int64.equal nonce source.nonce ->
+              let target = { owner_id = row.allocated_to; nonce = row.nonce } in
+              Ok { base_path; keeper_id; source = Some source; target }
+            | Some _, Some _ | None, None | Some _, None | None, Some _ ->
+              Error Authority_identity_mismatch))
 ;;
 
 let runtime_int_of_nonce nonce =

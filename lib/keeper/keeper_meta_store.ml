@@ -307,6 +307,9 @@ type write_meta_error =
   | Lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Read_failed of string
   | Persist_failed of string
+  | Identity_creation_requires_witness of string
+  | Identity_change_requires_witness of string
+  | Identity_witness_mismatch of string
   | Invariant_violation of
       { keeper_name : string
       ; detail : string
@@ -325,14 +328,99 @@ let write_meta_error_to_string = function
     Printf.sprintf
       "keeper lifecycle transaction reserved metadata mutation: %s"
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  | Identity_creation_requires_witness keeper_name ->
+    Printf.sprintf
+      "keeper metadata identity creation requires a lifecycle nonce witness: %s"
+      keeper_name
+  | Identity_change_requires_witness keeper_name ->
+    Printf.sprintf
+      "keeper metadata identity change requires a lifecycle nonce witness: %s"
+      keeper_name
+  | Identity_witness_mismatch detail ->
+    "keeper metadata lifecycle nonce witness mismatch: " ^ detail
   | Read_failed detail | Persist_failed detail -> detail
+;;
+
+type identity_write_authority =
+  | Ordinary
+  | Create_witness of Keeper_lifecycle_nonce.create Keeper_lifecycle_nonce.witness
+  | Replace_witness of Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness
+  | Recover_exact_witness of
+      Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness
+
+let meta_identity_matches identity (meta : Keeper_meta_contract.keeper_meta) =
+  String.equal
+    (Keeper_lifecycle_nonce.identity_owner_id identity)
+    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+  &&
+  match
+    Keeper_lifecycle_nonce.runtime_int_of_nonce
+      (Keeper_lifecycle_nonce.identity_nonce identity)
+  with
+  | Ok nonce -> Int.equal nonce meta.runtime.nonce
+  | Error _ -> false
+;;
+
+let witness_binding_matches config m witness =
+  String.equal
+    config.Workspace.base_path
+    (Keeper_lifecycle_nonce.witness_base_path witness)
+  && String.equal m.Keeper_meta_contract.name
+       (Keeper_lifecycle_nonce.witness_keeper_id witness)
+  && meta_identity_matches (Keeper_lifecycle_nonce.witness_target witness) m
+;;
+
+let authorize_identity_write config authority existing m =
+  let mismatch detail = Error (Identity_witness_mismatch detail) in
+  match authority, existing with
+  | Ordinary, None -> Error (Identity_creation_requires_witness m.Keeper_meta_contract.name)
+  | Ordinary, Some persisted ->
+    if
+      String.equal persisted.name m.name
+      && Keeper_id.Trace_id.equal persisted.runtime.trace_id m.runtime.trace_id
+      && Int.equal persisted.runtime.nonce m.runtime.nonce
+    then Ok ()
+    else Error (Identity_change_requires_witness m.name)
+  | Create_witness witness, None ->
+    if witness_binding_matches config m witness
+       && Option.is_none (Keeper_lifecycle_nonce.witness_source witness)
+    then Ok ()
+    else mismatch "create witness does not bind the requested target"
+  | Create_witness _, Some _ ->
+    mismatch "create witness requires absent metadata"
+  | Replace_witness witness, Some persisted ->
+    if
+      witness_binding_matches config m witness
+      &&
+      match Keeper_lifecycle_nonce.witness_source witness with
+      | Some source -> meta_identity_matches source persisted
+      | None -> false
+    then Ok ()
+    else mismatch "replace witness does not bind persisted source and requested target"
+  | Replace_witness _, None ->
+    mismatch "replace witness requires existing metadata"
+  | Recover_exact_witness witness, existing ->
+    let source_matches =
+      match Keeper_lifecycle_nonce.witness_source witness, existing with
+      | None, None -> true
+      | Some source, Some persisted -> meta_identity_matches source persisted
+      | None, Some _ | Some _, None -> false
+    in
+    if witness_binding_matches config m witness && source_matches
+    then Ok ()
+    else mismatch "exact recovery witness does not bind current source and requested target"
 ;;
 
 (* Version CAS only — there is no force/bypass path. Cumulative usage
    counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
    lost the race must resolve the conflict through [write_meta_with_merge],
    never overwrite the disk snapshot. *)
-let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_meta) =
+let write_meta_typed
+      ?lifecycle_token
+      ?(identity_authority = Ordinary)
+      config
+      (m : Keeper_meta_contract.keeper_meta)
+  =
   let path = keeper_meta_path config m.name in
   (* Write-boundary invariant (fail-closed): never persist [paused=false] with
      a terminal or reset-required latch. *)
@@ -368,6 +456,9 @@ let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_me
            in
            match read_meta_file_path path with
            | Ok (Some existing) ->
+             (match authorize_identity_write config identity_authority (Some existing) m with
+              | Error _ as error -> error
+              | Ok () ->
              if existing.meta_version <> m.meta_version
              then
                Error
@@ -376,8 +467,11 @@ let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_me
                     ; expected = m.meta_version
                     ; actual = existing.meta_version
                     })
-             else persist { m with meta_version = m.meta_version + 1 }
-           | Ok None -> persist { m with meta_version = 1 }
+             else persist { m with meta_version = m.meta_version + 1 })
+           | Ok None ->
+             (match authorize_identity_write config identity_authority None m with
+              | Error _ as error -> error
+              | Ok () -> persist { m with meta_version = 1 })
            | Error msg ->
              Error
                (Read_failed
@@ -393,6 +487,33 @@ let write_meta config m =
 
 let write_meta_for_lifecycle token config m =
   write_meta_typed ~lifecycle_token:token config m
+  |> Result.map_error write_meta_error_to_string
+;;
+
+let create_meta ?lifecycle_token witness config m =
+  write_meta_typed
+    ?lifecycle_token
+    ~identity_authority:(Create_witness witness)
+    config
+    m
+  |> Result.map_error write_meta_error_to_string
+;;
+
+let replace_meta ?lifecycle_token witness config m =
+  write_meta_typed
+    ?lifecycle_token
+    ~identity_authority:(Replace_witness witness)
+    config
+    m
+  |> Result.map_error write_meta_error_to_string
+;;
+
+let recover_meta_exact ?lifecycle_token witness config m =
+  write_meta_typed
+    ?lifecycle_token
+    ~identity_authority:(Recover_exact_witness witness)
+    config
+    m
   |> Result.map_error write_meta_error_to_string
 ;;
 
@@ -420,7 +541,14 @@ let write_meta_with_merge_internal
     match write_meta_typed ?lifecycle_token config caller with
     | Ok () -> Ok ()
     | Error error when n >= max_retries -> Error (write_meta_error_to_string error)
-    | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _ | Invariant_violation _) as error) ->
+    | Error
+        (( Lifecycle_reserved _
+         | Read_failed _
+         | Persist_failed _
+         | Invariant_violation _
+         | Identity_creation_requires_witness _
+         | Identity_change_requires_witness _
+         | Identity_witness_mismatch _ ) as error) ->
       Error (write_meta_error_to_string error)
     | Error (Version_conflict _) ->
       (match read_meta_file_path path with

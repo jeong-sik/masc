@@ -87,28 +87,19 @@ val recover_exact :
   unit ->
   (recover_exact witness, error) result
 
+val recover_published_replace :
+  base_path:string ->
+  keeper_id:string ->
+  source:identity ->
+  unit ->
+  (recover_exact witness, error) result
+
 val witness_base_path : _ witness -> string
 val witness_keeper_id : _ witness -> string
 val witness_source : _ witness -> identity option
 val witness_target : _ witness -> identity
 val identity_owner_id : identity -> string
 val identity_nonce : identity -> int64
-
-val next_for_base_path :
-  base_path:string ->
-  keeper_id:string ->
-  owner_id:string ->
-  ?floor:int64 ->
-  unit ->
-  (int64, error) result
-[@@deprecated
-  "temporary compile bridge; use create, replace, or recover_exact"]
-(** Reserve the next nonce from the explicit workspace. [floor], when
-    supplied, is an inclusive positive lower bound. The workspace's current
-    [.masc] ownership root must already exist.
-
-    @deprecated Temporary compile bridge for the two unmigrated production
-    callers. New code must use [create], [replace], or [recover_exact]. *)
 
 val runtime_int_of_nonce : int64 -> (int, error) result
 (** Checked projection for the existing Keeper runtime metadata field. The

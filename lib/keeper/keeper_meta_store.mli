@@ -90,11 +90,6 @@ val read_meta_if_changed :
   last_mtime:float ->
   (Keeper_meta_contract.keeper_meta * float) option
 
-(** Atomic write of [persisted] to [path]; runs the
-    [runtime_meta_write_sync_hook] on success. *)
-val persist_meta :
-  Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
-
 (** Persist [m] with a CAS bump on [meta_version]: the write is rejected
     if the on-disk version has moved since [m] was read. There is no force
     / bypass path — cumulative usage counters are a monotone invariant
@@ -110,6 +105,27 @@ val write_meta :
     CAS critical section. *)
 val write_meta_for_lifecycle :
   Keeper_lifecycle_reservation.token ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
+val create_meta :
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_nonce.create Keeper_lifecycle_nonce.witness ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
+val replace_meta :
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
+val recover_meta_exact :
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result

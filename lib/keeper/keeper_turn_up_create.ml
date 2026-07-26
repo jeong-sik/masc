@@ -16,10 +16,8 @@ open Keeper_turn_up_args
 (* #9749: bootstrap can race a heartbeat/supervisor meta write after
    crash recovery. Retry on CAS conflict while keeping heartbeat-owned
    cursors from disk. *)
-let write_initial_meta config meta =
-  write_meta_with_merge
-    ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-    config meta
+let write_initial_meta witness config meta =
+  Keeper_meta_store.create_meta witness config meta
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
@@ -206,12 +204,16 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          diverge. *)
       let nonce_result =
         Result.bind
-          (Keeper_lifecycle_nonce.next_for_base_path
+          (Keeper_lifecycle_nonce.create
              ~base_path:ctx.config.base_path
              ~keeper_id:p.name
              ~owner_id:trace_id
              ())
-          Keeper_lifecycle_nonce.runtime_int_of_nonce
+          (fun witness ->
+             Keeper_lifecycle_nonce.runtime_int_of_nonce
+               (Keeper_lifecycle_nonce.identity_nonce
+                  (Keeper_lifecycle_nonce.witness_target witness))
+             |> Result.map (fun nonce -> witness, nonce))
       in
       match nonce_result with
       | Error error ->
@@ -226,7 +228,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           detail;
         Progress.stop_tracking task_id;
         tool_result_error detail
-      | Ok nonce ->
+      | Ok (nonce_witness, nonce) ->
       let meta = {
         id = None;
         name = p.name;
@@ -366,7 +368,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          tool_result_error e
        | Ok () ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      match write_initial_meta ctx.config meta with
+      match write_initial_meta nonce_witness ctx.config meta with
       | Error e ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();

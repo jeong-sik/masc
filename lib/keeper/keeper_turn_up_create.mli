@@ -12,7 +12,10 @@ open Keeper_types_profile
     retry — preserves heartbeat-owned cursors when bootstrap races
     a supervisor write (#9749). *)
 val write_initial_meta :
-  Workspace.config -> keeper_meta -> (unit, string) result
+  Keeper_lifecycle_nonce.create Keeper_lifecycle_nonce.witness ->
+  Workspace.config ->
+  keeper_meta ->
+  (unit, string) result
 
 (** Create a new keeper from parsed args: build initial meta,
     write checkpoint, start keepalive, return the [keeper_up]

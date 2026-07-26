@@ -154,39 +154,15 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
   if String.equal expected_agent_name meta.agent_name then
     Ok (meta, None)
   else
+    let* updated_meta =
+      Keeper_identity_transition.replace_or_recover_exact
+        ~config
+        meta
+        ~expected_agent_name
+    in
     let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let new_trace_id_raw = Keeper_identity.generate_trace_id () in
-    let* new_trace_id =
-      Keeper_id.Trace_id.of_string new_trace_id_raw
-      |> Result.map_error (fun err ->
-          Printf.sprintf
-            "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
-            meta.name new_trace_id_raw err)
-    in
-    let base_dir = Keeper_types_profile.session_base_dir config in
-    let _session =
-      Keeper_context_runtime.create_session ~session_id:new_trace_id_raw ~base_dir
-    in
-    let updated_meta =
-      { meta with
-        agent_name = expected_agent_name;
-        updated_at = Keeper_meta_contract.now_iso ();
-        runtime =
-          { meta.runtime with
-            trace_id = new_trace_id;
-            trace_history =
-              Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
-            nonce = meta.runtime.nonce + 1;
-          };
-      }
-    in
-    let* () =
-      Keeper_meta_store.write_meta_with_merge
-        ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
-      |> Result.map_error (fun err ->
-          Printf.sprintf
-            "failed to persist reseeded keeper identity for %s: %s"
-            meta.name err)
+    let new_trace_id_raw =
+      Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id
     in
     Ok
       ( updated_meta,

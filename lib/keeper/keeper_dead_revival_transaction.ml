@@ -1527,7 +1527,36 @@ let rollback token config journal payload original_entry =
       [ Rollback_meta_payload_changed ]
     | Ok (Some current) ->
       let restored = { original with meta_version = current.meta_version } in
-      (match Keeper_meta_store.write_meta_for_lifecycle token config restored with
+      let nonce_error result =
+        Result.map_error Keeper_lifecycle_nonce.error_to_string result
+      in
+      let restored_result =
+        Result.bind
+          (nonce_error
+             (Keeper_lifecycle_nonce.identity
+                ~owner_id:(Keeper_id.Trace_id.to_string current.runtime.trace_id)
+                ~nonce:(Int64.of_int current.runtime.nonce)))
+          (fun source ->
+            Result.bind
+              (nonce_error
+                 (Keeper_lifecycle_nonce.identity
+                    ~owner_id:
+                      (Keeper_id.Trace_id.to_string restored.runtime.trace_id)
+                    ~nonce:(Int64.of_int restored.runtime.nonce)))
+              (fun target ->
+                Result.bind
+                  (nonce_error
+                     (Keeper_lifecycle_nonce.recover_exact
+                        ~base_path:config.base_path
+                        ~keeper_id:restored.name
+                        ~source:(Some source)
+                        ~target
+                        ()))
+                  (fun witness ->
+                    Keeper_meta_store.recover_meta_exact
+                      ~lifecycle_token:token witness config restored)))
+      in
+      (match restored_result with
        | Ok () -> []
        | Error detail -> [ Rollback_meta_write_failed detail ])
   in
@@ -1797,13 +1826,23 @@ let revive_locked (ctx : _ context) ~original ~candidate =
       protect_pre_journal (fun () ->
         let result =
           Result.bind
-            (Keeper_lifecycle_nonce.next_for_base_path
-               ~base_path:ctx.config.base_path
-               ~floor:(Int64.succ (Int64.of_int original.runtime.nonce))
-               ~keeper_id:original.name
+            (Keeper_lifecycle_nonce.identity
                ~owner_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
-               ())
-            Keeper_lifecycle_nonce.runtime_int_of_nonce
+               ~nonce:(Int64.of_int original.runtime.nonce))
+            (fun source ->
+              Result.bind
+                (Keeper_lifecycle_nonce.replace
+                   ~base_path:ctx.config.base_path
+                   ~keeper_id:original.name
+                   ~source
+                   ~owner_id:
+                     (Keeper_id.Trace_id.to_string candidate.runtime.trace_id)
+                   ())
+                (fun witness ->
+                  Result.map
+                    (fun nonce -> (witness, nonce))
+                    (Keeper_lifecycle_nonce.runtime_int_of_nonce
+                       (Keeper_lifecycle_nonce.witness_target witness))))
         in
         invoke_after_nonce_allocation_hook ();
         result)
@@ -1816,7 +1855,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
         (Keeper_lifecycle_nonce.error_to_string error);
       release_observed token original.name;
       Error (Nonce_allocation_failed error)
-    | Ok nonce ->
+    | Ok (nonce_witness, nonce) ->
     let candidate =
       { candidate with
         runtime = { candidate.runtime with nonce }
@@ -1880,11 +1919,15 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                       (_, _, Some (Active_journal current))
                     when same_transaction current journal
                          && current.stage = Reserved ->
-                    Log.Keeper.error
-                      "keeper revival retains payload after ambiguous Reserved publication keeper=%s transaction=%s"
-                      journal.keeper_name
-                      journal.transaction_id;
-                    Error error
+                    (match
+                       clear_journal ctx.config ~expected_stage:Reserved current
+                     with
+                     | Error attention -> Error attention
+                     | Ok () ->
+                       (match delete_payload ctx.config current with
+                        | Ok () -> Error error
+                        | Error failure ->
+                          Error (payload_failure Payload_delete failure)))
                   | Ok (_, _, None)
                   | Ok (_, _, Some (Cleared_tombstone _)) ->
                     Error
@@ -1981,7 +2024,11 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                    (Registry_conflict conflict)
                | Ok () ->
                  (match
-                    Keeper_meta_store.write_meta_for_lifecycle token ctx.config candidate
+                    Keeper_meta_store.replace_meta
+                      ~lifecycle_token:token
+                      nonce_witness
+                      ctx.config
+                      candidate
                   with
                   | Error detail ->
                     fail_with_rollback

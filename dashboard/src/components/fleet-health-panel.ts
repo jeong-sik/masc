@@ -13,6 +13,8 @@ import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-ref
 import { formatMsCompact, formatNumber } from '../lib/format-number'
 import { refreshShell, shellRuntimeResolution } from '../store'
 import type {
+  DashboardBlockedKeeperFact,
+  DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
   DashboardPausedKeeperDetail,
 } from '../types'
@@ -34,6 +36,10 @@ import {
 } from './fleet-data-core'
 import { coverageGapDisplay, freshnessText, sourceHealthClass } from './common/source-health'
 import { CoverageGapBlock } from './common/coverage-gap-block'
+import {
+  keeperFleetOperatorFactPresentation,
+  keeperFleetOperatorFacts,
+} from './keeper-fleet-operator-fact'
 
 type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'gate' | 'attribution' | 'keeper-health'
 
@@ -242,11 +248,12 @@ function FleetCommandStrip() {
   const target = fleet?.target_reaction_capacity_count
   const shortfall = fleet?.reaction_capacity_shortfall_count
   const pausedCount = pausedHealth?.count ?? fleet?.paused_keeper_count ?? fleetSafety?.paused_keepers
-  const tone = fleet?.status === 'blocked'
-    ? 'bad'
-    : fleet?.operator_action_required || fleet?.reaction_capacity_below_target || (pausedCount && pausedCount > 0)
-      ? 'warn'
-      : runtime?.status === 'ready' ? 'ok' : 'warn'
+  const operatorFact = fleet?.status === 'ok' ? null : keeperFleetOperatorFacts(fleet)[0]
+  const operatorPresentation = operatorFact
+    ? keeperFleetOperatorFactPresentation(operatorFact, fleet?.status)
+    : null
+  const tone = operatorPresentation?.tone
+    ?? (fleet?.status === 'ok' && runtime?.status === 'ready' ? 'ok' : 'warn')
   const runtimeLabel = runtime?.status === 'ready' ? '런타임 가동' : `런타임 ${runtime?.status ?? 'unknown'}`
   const tick = fleetSafety ? 'runtime sample' : 'no runtime sample'
 
@@ -352,6 +359,76 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
   `
 }
 
+function RuntimeBlockedKeeperFactRow({
+  fact,
+  fleetStatus,
+  index,
+}: {
+  fact: DashboardBlockedKeeperFact
+  fleetStatus: DashboardFleetPressureHealth['status'] | null | undefined
+  index: number
+}) {
+  const presentation = keeperFleetOperatorFactPresentation(fact, fleetStatus)
+  const Icon = presentation.Icon
+  const toneClass = presentation.tone === 'bad'
+    ? 'text-[var(--color-status-err)]'
+    : 'text-[var(--warn-bright)]'
+  return html`
+    <tr
+      class="v2-monitoring-row border-b border-[var(--color-border-default)]/30 last:border-b-0"
+      data-testid=${`keeper-fleet-operator-fact-${index}`}
+      data-tone=${presentation.tone}
+    >
+      <td class="px-3 py-2 font-mono text-[var(--color-fg-primary)]">${presentation.keeper}</td>
+      <td class=${`px-3 py-2 ${toneClass}`}>
+        <span class="inline-flex items-center gap-1.5">
+          <${Icon} size=${14} aria-hidden="true" />
+          <span>${presentation.label}</span>
+        </span>
+        <div class="font-mono text-3xs text-[var(--color-fg-muted)]">${presentation.reason}</div>
+      </td>
+      <td class="px-3 py-2 text-[var(--color-fg-secondary)]">${presentation.action}</td>
+    </tr>
+  `
+}
+
+function RuntimeBlockedKeeperFactTable({
+  fleet,
+}: {
+  fleet: DashboardFleetPressureHealth | null | undefined
+}) {
+  const facts = keeperFleetOperatorFacts(fleet)
+  if (facts.length === 0) {
+    return html`
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
+        No current Keeper blockers.
+      </div>
+    `
+  }
+  return html`
+    <div class="v2-monitoring-card overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+      <table class="v2-monitoring-table w-full text-2xs" aria-label="Keeper fleet operator facts">
+        <thead>
+          <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
+            <th scope="col" class="px-3 py-2 text-left font-medium">Keeper</th>
+            <th scope="col" class="px-3 py-2 text-left font-medium">Current fact</th>
+            <th scope="col" class="px-3 py-2 text-left font-medium">Operator action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${facts.map((fact, index) => html`
+            <${RuntimeBlockedKeeperFactRow}
+              fact=${fact}
+              fleetStatus=${fleet?.status}
+              index=${index}
+            />
+          `)}
+        </tbody>
+      </table>
+    </div>
+  `
+}
+
 function RuntimeBlockerBoard() {
   useEffect(() => {
     void refreshShell({ force: true })
@@ -366,9 +443,13 @@ function RuntimeBlockerBoard() {
   const shortfall = fleet?.reaction_capacity_shortfall_count
   const pausedCount = pausedHealth?.count ?? fleet?.paused_keeper_count ?? fleetSafety?.paused_keepers
   const pausedNames = pausedHealth?.names ?? []
-  const capacityStatus = fleet?.status === 'blocked'
+  const operatorFact = fleet?.status === 'ok' ? null : keeperFleetOperatorFacts(fleet)[0]
+  const operatorTone = operatorFact
+    ? keeperFleetOperatorFactPresentation(operatorFact, fleet?.status).tone
+    : null
+  const capacityStatus = operatorTone === 'bad'
     ? 'crit'
-    : fleet?.operator_action_required || fleet?.reaction_capacity_below_target
+    : operatorTone === 'warn'
       ? 'warn'
       : fleet ? 'ok' : undefined
 
@@ -389,7 +470,11 @@ function RuntimeBlockerBoard() {
         />
       </div>
       <div>
-        <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Paused keeper blockers</div>
+        <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keeper operator facts</div>
+        <${RuntimeBlockedKeeperFactTable} fleet=${fleet} />
+      </div>
+      <div>
+        <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Paused keeper diagnostics</div>
         <${RuntimePausedKeeperTable} fleetSafety=${fleetSafety} />
       </div>
     </section>

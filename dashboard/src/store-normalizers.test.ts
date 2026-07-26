@@ -461,6 +461,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         read_errors: [],
       },
       keeper_fleet_safety: {
+        schema: 'masc.keeper_fleet_operator.v1',
         status: 'blocked',
         blocker: 'no_executable_keeper_fibers',
         bootable_keeper_count: 1,
@@ -476,7 +477,25 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         paused_autoboot_enabled_keeper_count: 13,
         target_reaction_capacity_count: 14,
         operator_action_required: true,
-        blocked_keeper_count: 24,
+        blocked_keeper_count: 2,
+        blocked_keepers: [
+          {
+            keeper_name: 'analyst',
+            reason: 'durable_paused_autoboot_enabled',
+            action: 'resume_or_leave_paused',
+            operator_action_type: null,
+            operator_tool_name: null,
+            operator_action_confirm_required: null,
+          },
+          {
+            keeper_name: 'rondo',
+            reason: 'phase_restarting',
+            action: 'wait_for_keeper_restart',
+            operator_action_type: null,
+            operator_tool_name: null,
+            operator_action_confirm_required: null,
+          },
+        ],
       },
       keeper_reaction_ledger: {
         status: 'ok',
@@ -509,6 +528,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         }],
       },
       keeper_fleet_safety: {
+        schema: 'masc.keeper_fleet_operator.v1',
         status: 'blocked',
         blocker: 'no_executable_keeper_fibers',
         bootable_keeper_count: 1,
@@ -524,7 +544,19 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         paused_autoboot_enabled_keeper_count: 13,
         target_reaction_capacity_count: 14,
         operator_action_required: true,
-        blocked_keeper_count: 24,
+        blocked_keeper_count: 2,
+        blocked_keepers: [
+          {
+            keeper_name: 'analyst',
+            reason: 'durable_paused_autoboot_enabled',
+            action: 'resume_or_leave_paused',
+          },
+          {
+            keeper_name: 'rondo',
+            reason: 'phase_restarting',
+            action: 'wait_for_keeper_restart',
+          },
+        ],
       },
       keeper_reaction_ledger: {
         status: 'ok',
@@ -534,6 +566,35 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         pending_stimulus_count: 0,
         read_error_count: 0,
       },
+    })
+  })
+
+  it('collapses a malformed Keeper operator item into one bad current fact', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_fleet_safety: {
+        schema: 'masc.keeper_fleet_operator.v1',
+        status: 'degraded',
+        blocker: 'reaction_capacity_below_target',
+        blocked_keeper_count: 1,
+        blocked_keepers: [{
+          keeper_name: 'sangsu',
+          reason: 'phase_failing',
+          action: 'unsupported_action',
+        }],
+        operator_action_required: true,
+      },
+    }))
+
+    expect(result?.fleet_safety?.keeper_fleet_safety).toMatchObject({
+      status: 'blocked',
+      blocker: 'current_fact_invalid',
+      blocked_keeper_count: 1,
+      operator_action_required: true,
+      blocked_keepers: [{
+        keeper_name: null,
+        reason: 'current_fact_invalid',
+        action: 'inspect_current_keeper_fact',
+      }],
     })
   })
 

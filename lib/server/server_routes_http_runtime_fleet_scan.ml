@@ -683,7 +683,7 @@ type blocked_keeper_reason =
   | Not_registered
   | Not_running
   | No_keeper_binding
-  | Unknown
+  | Current_fact_invalid
 
 let blocked_keeper_reason_label = function
   | Durable_paused_autoboot_enabled -> "durable_paused_autoboot_enabled"
@@ -695,7 +695,7 @@ let blocked_keeper_reason_label = function
   | Not_registered -> "not_registered"
   | Not_running -> "not_running"
   | No_keeper_binding -> "no_keeper_binding"
-  | Unknown -> "unknown"
+  | Current_fact_invalid -> "current_fact_invalid"
 
 type blocked_keeper_operator_action =
   | Resume_or_leave_paused
@@ -718,6 +718,7 @@ type blocked_keeper_operator_action =
   | Inspect_crashed_keeper
   | Wait_for_keeper_restart
   | Create_keeper_or_reassign_task
+  | Inspect_current_keeper_fact
 
 let blocked_keeper_operator_action_to_string = function
   | Resume_or_leave_paused -> "resume_or_leave_paused"
@@ -742,6 +743,7 @@ let blocked_keeper_operator_action_to_string = function
   | Inspect_crashed_keeper -> "inspect_crashed_keeper"
   | Wait_for_keeper_restart -> "wait_for_keeper_restart"
   | Create_keeper_or_reassign_task -> "create_keeper_or_reassign_task"
+  | Inspect_current_keeper_fact -> "inspect_current_keeper_fact"
 
 let blocked_keeper_action = function
   | Durable_paused_autoboot_enabled -> Resume_or_leave_paused
@@ -771,7 +773,7 @@ let blocked_keeper_action = function
   | Not_registered -> Start_or_recover_keeper
   | Not_running -> Start_or_recover_keeper
   | No_keeper_binding -> Create_keeper_or_reassign_task
-  | Unknown -> Inspect_keeper_autoboot_logs
+  | Current_fact_invalid -> Inspect_current_keeper_fact
 
 let blocked_keeper_action_label reason =
   reason |> blocked_keeper_action |> blocked_keeper_operator_action_to_string
@@ -803,7 +805,7 @@ let blocked_keeper_operator_action = function
   | Not_registered
   | Not_running
   | No_keeper_binding
-  | Unknown ->
+  | Current_fact_invalid ->
       None
 
 let blocked_keeper_operator_action_fields reason =
@@ -985,7 +987,7 @@ let blocked_keeper_detail_json
              | None ->
                if keeper_bootstrap_enabled then Not_registered
                else Bootstrap_disabled)
-          else Unknown
+          else Current_fact_invalid
   in
   let terminal_phase_field =
     match phase with
@@ -1056,8 +1058,7 @@ let blocked_keeper_detail_json
   in
   `Assoc
     ([
-       ("keeper", `String name);
-       ("name", `String name);
+       ("keeper_name", `String name);
        ("reason", `String (blocked_keeper_reason_label reason));
        ("action", `String (blocked_keeper_action_label reason));
        ("phase", Json_util.string_opt_to_json phase_name);
@@ -1131,9 +1132,7 @@ let active_task_owner_without_executable_fiber_json row =
   in
   `Assoc
     [
-      ("keeper", Json_util.string_opt_to_json row.keeper_name);
-      (* Legacy alias retained for existing fleet-safety consumers. *)
-      ("name", Json_util.string_opt_to_json row.keeper_name);
+      ("keeper_name", Json_util.string_opt_to_json row.keeper_name);
       ("agent_name", `String row.agent_name);
       ("task_id", `String row.task_id);
       ("task_status", `String row.task_status);
@@ -1299,15 +1298,15 @@ let active_task_owner_blocked_detail_json row =
     | None -> No_keeper_binding
   in
   `Assoc
-    [
-      ("keeper", Json_util.string_opt_to_json row.keeper_name);
-      ("name", Json_util.string_opt_to_json row.keeper_name);
-      ("agent_name", `String row.agent_name);
-      ("task_id", `String row.task_id);
-      ("task_status", `String row.task_status);
-      ("reason", `String (blocked_keeper_reason_label reason));
-      ("action", `String (blocked_keeper_action_label reason));
-    ]
+    ([
+       ("keeper_name", Json_util.string_opt_to_json row.keeper_name);
+       ("agent_name", `String row.agent_name);
+       ("task_id", `String row.task_id);
+       ("task_status", `String row.task_status);
+       ("reason", `String (blocked_keeper_reason_label reason));
+       ("action", `String (blocked_keeper_action_label reason));
+     ]
+     @ blocked_keeper_operator_action_fields reason)
 
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
@@ -1459,7 +1458,6 @@ let keeper_fleet_safety_health_json
      a capacity shortfall; see the PR summary.
      Consumers should read this as "number of named blockers" rather than
      missing capacity slots. *)
-  let blocked_keeper_count = List.length blocked_keeper_names in
   let active_capacity_names = executable_names in
   let bootable_set = string_set_of_list bootable_names in
   let capacity_set = string_set_of_list active_capacity_names in
@@ -1471,7 +1469,7 @@ let keeper_fleet_safety_health_json
   let read_error_set =
     autoboot_scan.read_errors |> List.map fst |> string_set_of_list
   in
-  let blocked_keeper_reasons =
+  let blocked_keepers =
     if active_task_owner_is_selected_blocker then
       active_task_owner_scan.active_task_owner_without_executable_fibers
       |> List.map active_task_owner_blocked_detail_json
@@ -1490,6 +1488,7 @@ let keeper_fleet_safety_health_json
                ~read_error_set
                name)
   in
+  let blocked_keeper_count = List.length blocked_keepers in
   let blocker =
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
@@ -1500,7 +1499,8 @@ let keeper_fleet_safety_health_json
     else None
   in
   `Assoc
-    [ "status", `String status
+    [ "schema", `String "masc.keeper_fleet_operator.v1"
+    ; "status", `String status
     ; ("blocker", Json_util.string_opt_to_json blocker)
     ; "keeper_bootstrap_enabled", `Bool keeper_bootstrap_enabled
     ; ( "keeper_bootstrap_blocker"
@@ -1570,10 +1570,8 @@ let keeper_fleet_safety_health_json
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
     ; "blocked_keeper_count", `Int blocked_keeper_count
     ; ( "blocked_keeper_count_semantics"
-      , `String "number of named keepers currently listed in blocked_keeper_names" )
-    ; ( "blocked_keeper_names"
-      , `List (List.map (fun name -> `String name) blocked_keeper_names) )
-    ; "blocked_keeper_reasons", `List blocked_keeper_reasons
+      , `String "number of canonical blocked_keepers items" )
+    ; "blocked_keepers", `List blocked_keepers
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers

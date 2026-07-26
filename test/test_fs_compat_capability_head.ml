@@ -475,6 +475,42 @@ let test_after_rename_failure_is_indeterminate ~fs ~secure_random () =
     (String.length evidence.Head.intended_sha256)
 ;;
 
+let test_after_parent_sync_failure_is_indeterminate_but_visible
+      ~fs
+      ~secure_random
+      ()
+  =
+  with_tmp_dir "masc_capability_head_after_parent_sync_" @@ fun directory ->
+  let leaf = "HEAD" in
+  with_parent ~fs directory @@ fun parent ->
+  let absent = read ~secure_random ~parent ~leaf "parent-sync fixture read" in
+  let hooks =
+    Head.For_testing.hooks ~after_parent_sync:(fun () -> raise Exit) ()
+  in
+  let evidence =
+    publish_for_testing
+      hooks
+      ~secure_random
+      ~parent
+      ~leaf
+      ~expected:absent
+      ~row:"parent-synced-row"
+    |> require_indeterminate_failure "after-parent-sync exception"
+  in
+  check int64
+    "parent-sync indeterminate evidence retains intended length"
+    (Int64.of_int (String.length "parent-synced-row" + 1))
+    evidence.Head.intended_length;
+  check int
+    "parent-sync indeterminate evidence retains intended SHA-256"
+    64
+    (String.length evidence.Head.intended_sha256);
+  read ~secure_random ~parent ~leaf "after-parent-sync exact read"
+  |> check_row
+       "exact read observes the parent-synced row"
+       (Some "parent-synced-row")
+;;
+
 let test_after_verified_failure_reports_published ~fs ~secure_random () =
   with_tmp_dir "masc_capability_head_after_verified_" @@ fun directory ->
   let leaf = "HEAD" in
@@ -558,6 +594,10 @@ let () =
                ~secure_random)
         ; test_case "after rename is indeterminate" `Quick
             (test_after_rename_failure_is_indeterminate ~fs ~secure_random)
+        ; test_case "after parent sync is indeterminate but visible" `Quick
+            (test_after_parent_sync_failure_is_indeterminate_but_visible
+               ~fs
+               ~secure_random)
         ; test_case "after verified is published" `Quick
             (test_after_verified_failure_reports_published ~fs ~secure_random)
         ; test_case "settlement warning preserves success" `Quick

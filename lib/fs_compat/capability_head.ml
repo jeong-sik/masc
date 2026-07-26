@@ -666,23 +666,58 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
             | Error error -> fail error
           in
           let cleanup_stage = ref true in
+          let stage_identity = ref None in
           Fun.protect
             ~finally:(fun () ->
               if !cleanup_stage
               then
                 try
                   invoke_hook Cleanup_stage hooks.before_stage_cleanup;
-                  Eio.Path.unlink stage_path
+                  (match !stage_identity with
+                   | None ->
+                     warnings :=
+                       Cleanup_failed
+                         { operation = Cleanup_stage
+                         ; detail = "stage identity unavailable; unknown path preserved"
+                         }
+                       :: !warnings
+                   | Some opened_stat ->
+                     (match
+                        verify_path_binding
+                          ~path:stage_path
+                          ~opened_stat
+                          ~what:"stage"
+                          ~corrupt:(fun _detail ->
+                            Io_error
+                              { operation = Cleanup_stage
+                              ; detail = "stage binding changed"
+                              })
+                      with
+                      | Ok () -> Eio.Path.unlink stage_path
+                      | Error _ ->
+                        warnings :=
+                          Cleanup_failed
+                            { operation = Cleanup_stage
+                            ; detail = "stage path no longer names created inode; preserved"
+                            }
+                          :: !warnings))
                 with
                 | exn ->
                   warnings :=
                     Cleanup_failed (diagnostic_of_exception Cleanup_stage exn) :: !warnings)
             (fun () ->
+              let* initial_stage_stat =
+                match protect_io Create_stage (fun () -> Eio.File.stat stage_file) with
+                | Ok stat -> Ok stat
+                | Error error -> fail error
+              in
+              stage_identity := Some initial_stage_stat;
               let* stage_stat =
                 match write_stage ~path:stage_path stage_file payload with
                 | Ok stat -> Ok stat
                 | Error error -> fail error
               in
+              stage_identity := Some stage_stat;
               let* () =
                 match protect_io Close_stage (fun () -> Eio.Flow.close stage_file) with
                 | Ok () -> Ok ()

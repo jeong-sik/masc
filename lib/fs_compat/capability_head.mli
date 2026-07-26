@@ -3,7 +3,12 @@
     HEAD is the only content authority. The stable lock contains only an
     immutable random fencing epoch and is never rewritten, renamed, or deleted.
     This surface deliberately exposes no append, scan, fallback, repair, delete,
-    or migration operation. *)
+    or migration operation.
+
+    The parent namespace must be private to cooperating callers. Direct unlink
+    or replacement outside this surface is out of contract: remembering such a
+    deletion would require a second persistent freshness authority, which this
+    single-authority API intentionally rejects. *)
 
 val max_row_bytes : int
 

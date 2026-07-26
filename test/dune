@@ -652,12 +652,17 @@
   test_board_rest_routes
   test_board_context_inference_resolution)
  (libraries
-  masc_test_deps masc.keeper_chat_delivery_identity masc_schedule multimodal
-  bigstringaf masc.keeper_checkpoint_ref))
+  masc_test_deps
+  masc.keeper_chat_delivery_identity
+  masc_schedule
+  multimodal
+  bigstringaf
+  masc.keeper_checkpoint_ref))
 
 ; Request-authority admission uses Eio fiber-local bindings and therefore owns
 ; an explicit executable stanza instead of borrowing the pure synchronous test
 ; group above.
+
 (test
  (name test_keeper_event_queue_state_v2)
  (modules test_keeper_event_queue_state_v2)
@@ -667,7 +672,6 @@
  (name test_keeper_checkpoint_purge)
  (modules test_keeper_checkpoint_purge)
  (libraries alcotest masc_test_deps))
-
 
 (test
  (name test_keeper_paused_work_cancellation_transaction)
@@ -734,7 +738,11 @@
  (name test_keeper_memory_os_generation_base_path)
  (modules test_keeper_memory_os_generation_base_path)
  (libraries masc_test_deps)
- (action (setenv MASC_CONFIG_DIR "" (run %{test}))))
+ (action
+  (setenv
+   MASC_CONFIG_DIR
+   ""
+   (run %{test}))))
 
 (test
  (name test_oas_canonical_delegation)
@@ -1278,6 +1286,7 @@
  (libraries alcotest masc_cancel_safe eio eio_main))
 
 ; Real local exact-output fixture shared only by compaction tests.
+
 (library
  (name compaction_exact_output_fixture)
  (wrapped false)
@@ -1285,6 +1294,7 @@
  (libraries masc_test_deps unix))
 
 ; Composition proof for the provider-neutral compaction exact-output lane.
+
 (test
  (name test_compaction_exact_output_conformance)
  (modules test_compaction_exact_output_conformance)
@@ -1297,32 +1307,53 @@
   unix))
 
 ; Fresh-state canonical Memory OS authority and strict HEAD publication proof.
+
 (test
  (name test_keeper_memory_os_store)
  (modules test_keeper_memory_os_store)
  (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
 
 ; Provider-neutral Memory OS Librarian exact-output composition proof.
+
 (test
  (name test_librarian_exact_output_conformance)
  (modules test_librarian_exact_output_conformance)
- (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+ (libraries
+  alcotest
+  compaction_exact_output_fixture
+  masc_test_deps
+  eio_main
+  unix))
 
 ; Production Board-attention adapter proof over the provider-neutral OAS lane.
+
 (test
  (name test_keeper_board_attention_exact_flow)
  (modules test_keeper_board_attention_exact_flow)
- (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+ (libraries
+  alcotest
+  compaction_exact_output_fixture
+  masc_test_deps
+  eio_main
+  unix))
 
 ; Durable pre-dispatch fence and restart/cancellation fail-closed proof.
+
 (test
  (name test_keeper_exact_execution_lease_guard)
  (modules
   test_keeper_exact_execution_lease_guard
   test_keeper_exact_execution_lease_guard_fixture)
- (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref eio_main unix))
+ (libraries
+  alcotest
+  masc
+  masc_test_deps
+  masc.keeper_checkpoint_ref
+  eio_main
+  unix))
 
 ; Source-bound exact disposition schema, WAL replay, and restart reconciliation.
+
 (test
  (name test_keeper_exact_disposition_recovery)
  (modules test_keeper_exact_disposition_recovery)
@@ -1330,6 +1361,7 @@
 
 ; Process-isolated proof that exact-output bootstrap honors full catalog
 ; replacement precedence over deployment overlays and OAS embedded targets.
+
 (test
  (name test_exact_output_catalog_precedence)
  (modules
@@ -1341,10 +1373,16 @@
 ; Production entrypoint coverage for an intentionally absent Eio clock. This
 ; must remain a separate process because Eio_context clock installation is
 ; process-global and cannot be masked by the existing scoped test helper.
+
 (test
  (name test_compaction_exact_output_entrypoint_clockless)
  (modules test_compaction_exact_output_entrypoint_clockless)
- (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+ (libraries
+  alcotest
+  compaction_exact_output_fixture
+  masc_test_deps
+  eio_main
+  unix))
 
 ; Warn-log dedup table stays bounded under distinct token-hash-prefix churn.
 
@@ -1358,7 +1396,15 @@
 (test
  (name test_server_auth_dashboard_actor_resolution)
  (modules test_server_auth_dashboard_actor_resolution)
- (libraries alcotest masc masc.auth masc.masc_types masc_server eio_main httpun unix))
+ (libraries
+  alcotest
+  masc
+  masc.auth
+  masc.masc_types
+  masc_server
+  eio_main
+  httpun
+  unix))
 
 ; RFC-0301 item 6: the turn-local generated-media accumulator turns stream media
 ; into reload chat blocks (image / voice / attach) via the content-addressed store.
@@ -1718,7 +1764,9 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
+
 (include stanzas/test_keeper_compaction_persist_gate.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
@@ -1884,24 +1932,17 @@
 
 (include stanzas/test_goal_phase_all.inc)
 
-
-
-
 (include stanzas/test_heartbeat_integration.inc)
 
 (include stanzas/test_http_pages_asset_read.inc)
 
-
 (include stanzas/test_bind_required_guard_counter.inc)
-
 
 (include stanzas/test_k2_pipeline_e2e.inc)
 
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
 
-
 (include stanzas/test_keepers_runtime_dir_ssot.inc)
-
 
 (include stanzas/test_keeper_latched_reason_wiring.inc)
 
@@ -1915,8 +1956,6 @@
 
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 
-
-
 (include stanzas/test_keeper_context_isolation.inc)
 
 (include stanzas/test_keeper_turn_up_args.inc)
@@ -1928,7 +1967,6 @@
 (include stanzas/test_keeper_tool_name.inc)
 
 (include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
-
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
@@ -1978,8 +2016,6 @@
 
 (include stanzas/test_keeper_mutex_coverage.inc)
 
-
-
 (include stanzas/test_keeper_personality_round_trip.inc)
 
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
@@ -1997,6 +2033,7 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
+
 (include stanzas/test_keeper_supervisor_persona_drift_order.inc)
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
@@ -2013,19 +2050,16 @@
 
 (include stanzas/test_keeper_tool_matrix.inc)
 
-
 (include stanzas/test_keeper_unified_tool_event_order_source.inc)
 
-
 (include stanzas/test_keeper_task_outcomes.inc)
-
-
 
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 
 (include stanzas/test_keeper_transition_audit_types.inc)
 
 (include stanzas/test_keeper_path_rejection.inc)
+
 (include stanzas/test_keeper_path_containment_objective.inc)
 
 (include stanzas/test_keeper_approval_queue_rules_types.inc)
@@ -2050,7 +2084,6 @@
 
 (include stanzas/test_runtime_oas_eio_context_classify.inc)
 
-
 (include stanzas/test_runtime_model_temperature_toml.inc)
 
 (include stanzas/test_keeper_response_feedback.inc)
@@ -2061,9 +2094,7 @@
 
 (include stanzas/test_mcp_tool_matrix.inc)
 
-
 (include stanzas/test_normalized_actor.inc)
-
 
 (include stanzas/test_keeper_runtime_observation_boundaries.inc)
 
@@ -2101,9 +2132,7 @@
 
 (include stanzas/test_pr_open_script.inc)
 
-
 (include stanzas/test_release_train_guard_script.inc)
-
 
 (include stanzas/test_server_state_product.inc)
 
@@ -2533,7 +2562,6 @@
    (run %{test})))
  (libraries masc_test_deps))
 
-
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
 (include stanzas/test_keeper_meta_json_config_toml_only.inc)
@@ -2600,14 +2628,24 @@
 (test
  (name test_fs_compat_capability_exact_read)
  (modules test_fs_compat_capability_exact_read)
- (libraries alcotest fs_compat fs_compat_test_support eio eio_main eio.unix unix)
+ (libraries
+  alcotest
+  fs_compat
+  fs_compat_test_support
+  eio
+  eio_main
+  eio.unix
+  unix)
  (deps
   ../lib/fs_compat/fs_compat.mli
   ../lib/fs_compat/capability_exact_read_stubs.c))
 
 (include stanzas/test_keeper_turn_attempt_observer.inc)
+
 (include stanzas/test_keeper_gate_effect_coverage.inc)
+
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)
+
 (include stanzas/test_fs_compat_capability_write.inc)
 
 (test
@@ -2616,4 +2654,5 @@
  (libraries alcotest cstruct fs_compat eio eio_main unix))
 
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
+
 (include stanzas/test_eio_resource_scope.inc)

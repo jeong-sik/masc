@@ -57,7 +57,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                (String.concat ", " missing))
   in
   let sandbox_profile =
-    resolve_sandbox_profile ~fallback:p.profile_defaults.sandbox_profile
+    resolve_sandbox_profile
+      ?requested:p.sandbox_profile_opt
+      ~fallback:p.profile_defaults.sandbox_profile
+      ()
   in
   let network_mode =
     resolve_network_mode

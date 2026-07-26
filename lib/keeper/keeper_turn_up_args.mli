@@ -63,8 +63,13 @@ val resolve_mention_targets :
   string list
 
 val resolve_sandbox_profile :
+  ?requested:string ->
   fallback:sandbox_profile option ->
+  unit ->
   sandbox_profile
+(** An explicit [requested] profile wins over the TOML [fallback], which wins over the
+    built-in default. [requested] is the caller's raw string; an unparseable one is
+    treated as absent, since the tool gate rejects those before this is reached. *)
 
 val resolve_network_mode :
   sandbox_profile:sandbox_profile ->

@@ -1311,6 +1311,12 @@
  (modules test_keeper_lifecycle_nonce)
  (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
 
+; Exact current-schema Keeper-keyed shutdown generation floor.
+(test
+ (name test_keeper_shutdown_generation_floor)
+ (modules test_keeper_shutdown_generation_floor)
+ (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
+
 ; Immutable binding-complete dead-Keeper revival payload proof.
 (test
  (name test_keeper_dead_revival_payload)

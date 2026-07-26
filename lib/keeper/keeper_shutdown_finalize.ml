@@ -533,6 +533,24 @@ let remove_meta_file ~config operation =
   | Dead_tombstone_cleanup -> Ok ()
 ;;
 
+let publish_generation_floor_before_meta_removal ~config operation =
+  match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
+  | Retain_operator_pause
+  | Retain_dead_tombstone -> Ok ()
+  | Remove_meta ->
+    (match
+       Keeper_shutdown_generation_floor.record_exact
+         ~base_path:config.Workspace.base_path
+         ~keeper_id:operation.keeper_name
+         ~generation:(Int64.of_int operation.generation)
+         ()
+     with
+     | Ok _ -> Ok ()
+     | Error error ->
+       Error
+         (Keeper_shutdown_generation_floor.error_to_string error))
+;;
+
 let remove_session_dir ~config operation =
   if operation.cleanup_intent.remove_session
   then (
@@ -723,9 +741,12 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
                  error)))
   in
   let finish registry_unregistered =
-    match remove_meta_file ~config operation with
+    match publish_generation_floor_before_meta_removal ~config operation with
     | Error detail -> block ~config operation Meta_remove detail
     | Ok () ->
+      (match remove_meta_file ~config operation with
+       | Error detail -> block ~config operation Meta_remove detail
+       | Ok () ->
       (match remove_session_dir ~config operation with
        | Error detail -> block ~config operation Session_remove detail
        | Ok () ->
@@ -768,7 +789,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
          match replace ~config finalized with
          | Error _ as error -> error
          | Ok persisted_finalized ->
-           deliver_finalized_completion ~config persisted_finalized)
+           deliver_finalized_completion ~config persisted_finalized))
   in
   match begin_exact_retirement ~base_path:config.base_path operation entry with
   | Error detail -> block ~config operation Registry_unregister detail

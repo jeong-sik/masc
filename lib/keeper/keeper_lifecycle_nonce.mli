@@ -9,21 +9,16 @@
     monotonic, and exclusive for its keeper. *)
 
 type corruption =
-  | Malformed_current of string
-  | Unsupported_schema of string
-  | Noncanonical_current
-  | Keeper_binding_mismatch of
-      { expected : string
-      ; observed : string
-      }
-  | Invalid_current_nonce of string
-  | Checksum_mismatch
+  | Invalid_current of string
 
 type error =
   | Invalid_base_path of string
   | Invalid_keeper_id
   | Invalid_owner_id
   | Invalid_floor of int64
+  | Authority_missing
+  | Authority_identity_mismatch
+  | Shutdown_floor_invalid of string
   | Filesystem_capability_unavailable
   | Directory_prepare_failed of string
   | Entropy_source_failed of string
@@ -58,6 +53,47 @@ type error =
 
 val error_to_string : error -> string
 
+type identity
+type create
+type replace
+type recover_exact
+type 'kind witness
+
+val identity :
+  owner_id:string ->
+  nonce:int64 ->
+  (identity, error) result
+
+val create :
+  base_path:string ->
+  keeper_id:string ->
+  owner_id:string ->
+  unit ->
+  (create witness, error) result
+
+val replace :
+  base_path:string ->
+  keeper_id:string ->
+  source:identity ->
+  owner_id:string ->
+  unit ->
+  (replace witness, error) result
+
+val recover_exact :
+  base_path:string ->
+  keeper_id:string ->
+  source:identity option ->
+  target:identity ->
+  unit ->
+  (recover_exact witness, error) result
+
+val witness_base_path : _ witness -> string
+val witness_keeper_id : _ witness -> string
+val witness_source : _ witness -> identity option
+val witness_target : _ witness -> identity
+val identity_owner_id : identity -> string
+val identity_nonce : identity -> int64
+
 val next_for_base_path :
   base_path:string ->
   keeper_id:string ->
@@ -65,9 +101,14 @@ val next_for_base_path :
   ?floor:int64 ->
   unit ->
   (int64, error) result
+[@@deprecated
+  "temporary compile bridge; use create, replace, or recover_exact"]
 (** Reserve the next nonce from the explicit workspace. [floor], when
     supplied, is an inclusive positive lower bound. The workspace's current
-    [.masc] ownership root must already exist. *)
+    [.masc] ownership root must already exist.
+
+    @deprecated Temporary compile bridge for the two unmigrated production
+    callers. New code must use [create], [replace], or [recover_exact]. *)
 
 val runtime_int_of_nonce : int64 -> (int, error) result
 (** Checked projection for the existing Keeper runtime metadata field. The

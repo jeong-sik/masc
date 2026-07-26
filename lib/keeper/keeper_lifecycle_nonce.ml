@@ -14,21 +14,16 @@ let with_head_parent parent fn =
 ;;
 
 type corruption =
-  | Malformed_current of string
-  | Unsupported_schema of string
-  | Noncanonical_current
-  | Keeper_binding_mismatch of
-      { expected : string
-      ; observed : string
-      }
-  | Invalid_current_nonce of string
-  | Checksum_mismatch
+  | Invalid_current of string
 
 type error =
   | Invalid_base_path of string
   | Invalid_keeper_id
   | Invalid_owner_id
   | Invalid_floor of int64
+  | Authority_missing
+  | Authority_identity_mismatch
+  | Shutdown_floor_invalid of string
   | Filesystem_capability_unavailable
   | Directory_prepare_failed of string
   | Entropy_source_failed of string
@@ -65,6 +60,22 @@ type row =
   { keeper_id : string
   ; allocated_to : string
   ; nonce : int64
+  }
+
+type identity =
+  { owner_id : string
+  ; nonce : int64
+  }
+
+type create
+type replace
+type recover_exact
+
+type 'kind witness =
+  { base_path : string
+  ; keeper_id : string
+  ; source : identity option
+  ; target : identity
   }
 
 let ( let* ) result fn =
@@ -132,25 +143,25 @@ let exact_fields expected = function
     then Ok fields
     else
       Error
-        (Malformed_current
+        (Invalid_current
            (Printf.sprintf
               "expected fields [%s], observed [%s]"
               (String.concat "," expected)
               (String.concat "," actual)))
-  | _ -> Error (Malformed_current "current authority must be a JSON object")
+  | _ -> Error (Invalid_current "current authority must be a JSON object")
 ;;
 
 let required_field name fields =
   match List.assoc_opt name fields with
   | Some value -> Ok value
-  | None -> Error (Malformed_current ("missing field " ^ name))
+  | None -> Error (Invalid_current ("missing field " ^ name))
 ;;
 
 let required_string name fields =
   let* value = required_field name fields in
   match value with
   | `String value -> Ok value
-  | _ -> Error (Malformed_current (name ^ " must be a string"))
+  | _ -> Error (Invalid_current (name ^ " must be a string"))
 ;;
 
 let positive_int64 = function
@@ -163,17 +174,18 @@ let positive_int64 = function
        Ok value
      | Some _ | None ->
        Error
-         (Invalid_current_nonce
+         (Invalid_current
             "nonce must be a canonical positive int64"))
   | _ ->
     Error
-      (Invalid_current_nonce "nonce must be a canonical positive int64")
+      (Invalid_current "nonce must be a canonical positive int64")
 ;;
 
 let decode_row ~keeper_id raw =
   let parsed =
     try Ok (Yojson.Safe.from_string raw) with
-    | Yojson.Json_error detail -> Error (Malformed_current detail)
+    | Yojson.Json_error _ ->
+      Error (Invalid_current "authority is not current canonical JSON")
   in
   let* json = parsed in
   let* fields =
@@ -183,7 +195,7 @@ let decode_row ~keeper_id raw =
   in
   let* observed_schema = required_string "schema" fields in
   if not (String.equal observed_schema schema)
-  then Error (Unsupported_schema observed_schema)
+  then Error (Invalid_current "authority does not match the exact current schema")
   else
     let* observed_keeper = required_string "keeper_id" fields in
     let* allocated_to = required_string "allocated_to" fields in
@@ -194,14 +206,12 @@ let decode_row ~keeper_id raw =
       { keeper_id = observed_keeper; allocated_to; nonce }
     in
     if not (String.equal observed_checksum (checksum observed))
-    then Error Checksum_mismatch
+    then Error (Invalid_current "authority checksum does not match")
     else if not (String.equal raw (row_bytes observed))
-    then Error Noncanonical_current
+    then Error (Invalid_current "authority is not canonical")
     else if not (String.equal keeper_id observed_keeper)
     then
-      Error
-        (Keeper_binding_mismatch
-           { expected = keeper_id; observed = observed_keeper })
+      Error (Invalid_current "authority keeper binding does not match")
     else Ok observed
 ;;
 
@@ -278,7 +288,7 @@ let next_value ~floor current =
 let head_contention_retry_limit = 2
 
 let observed_nonce ~keeper_id = function
-  | None -> Some 0L
+  | None -> None
   | Some raw ->
     (match decode_row ~keeper_id raw with
      | Ok row -> Some row.nonce
@@ -293,6 +303,7 @@ let rec allocate
           ~root
           ~keeper_id
           ~owner_id
+          ~expected_source
           ~floor
   =
   let retry failure =
@@ -306,9 +317,10 @@ let rec allocate
         ~remaining_retries:(remaining_retries - 1)
         ~attempts:(attempts + 1)
         ~root
-        ~keeper_id
-        ~owner_id
-        ~floor)
+          ~keeper_id
+          ~owner_id
+          ~expected_source
+          ~floor)
   in
   let leaf = authority_leaf ~keeper_id in
   let* read_entropy = entropy_source () in
@@ -333,14 +345,25 @@ let rec allocate
     else
     let current =
       match Head.snapshot_row snapshot with
-      | None -> Ok 0L
+      | None -> Ok None
       | Some raw ->
         decode_row ~keeper_id raw
-        |> Result.map (fun row -> row.nonce)
+        |> Result.map Option.some
         |> Result.map_error (fun corruption -> Corrupt_current corruption)
     in
     let* current = current in
-    let* desired = next_value ~floor current in
+    let* () =
+      match expected_source, current with
+      | None, _ -> Ok ()
+      | Some _, None -> Error Authority_missing
+      | Some source, Some row
+        when String.equal source.owner_id row.allocated_to
+             && Int64.equal source.nonce row.nonce ->
+        Ok ()
+      | Some _, Some _ -> Error Authority_identity_mismatch
+    in
+    let current_nonce = Option.fold ~none:0L ~some:(fun row -> row.nonce) current in
+    let* desired = next_value ~floor current_nonce in
     let desired_row : row =
       { keeper_id; allocated_to = owner_id; nonce = desired }
     in
@@ -382,6 +405,7 @@ let next_for_base_path_with_hooks
       ~base_path
       ~keeper_id
       ~owner_id
+      ?expected_source
       ?(floor = 1L)
       ()
   =
@@ -405,13 +429,134 @@ let next_for_base_path_with_hooks
       ~root
       ~keeper_id
       ~owner_id
+      ~expected_source
       ~floor
 ;;
 
-let next_for_base_path =
+let next_for_base_path ~base_path ~keeper_id ~owner_id ?floor () =
   next_for_base_path_with_hooks
     ~snapshot_warnings:Head.snapshot_settlement_warnings
     ~compare_and_swap:Head.compare_and_swap
+    ~base_path
+    ~keeper_id
+    ~owner_id
+    ?floor
+    ()
+;;
+
+let identity ~owner_id ~nonce =
+  if String.equal (String.trim owner_id) ""
+  then Error Invalid_owner_id
+  else if Int64.compare nonce 0L <= 0
+  then Error (Invalid_floor nonce)
+  else Ok { owner_id; nonce }
+;;
+
+let witness_base_path witness = witness.base_path
+let witness_keeper_id witness = witness.keeper_id
+let witness_source witness = witness.source
+let witness_target witness = witness.target
+let identity_owner_id identity = identity.owner_id
+let identity_nonce identity = identity.nonce
+
+let witness_of_nonce ~base_path ~keeper_id ~source ~owner_id nonce =
+  { base_path; keeper_id; source; target = { owner_id; nonce } }
+;;
+
+let floor_for_create ~base_path ~keeper_id =
+  match
+    Keeper_shutdown_generation_floor.point_read
+      ~base_path
+      ~keeper_id
+      ()
+  with
+  | Error error ->
+    Error
+      (Shutdown_floor_invalid
+         (Keeper_shutdown_generation_floor.error_to_string error))
+  | Ok None -> Ok 1L
+  | Ok (Some floor) ->
+    let generation = Keeper_shutdown_generation_floor.generation floor in
+    if Int64.equal generation Int64.max_int
+    then Error Nonce_exhausted
+    else Ok (Int64.succ generation)
+;;
+
+let create ~base_path ~keeper_id ~owner_id () =
+  let* floor = floor_for_create ~base_path ~keeper_id in
+  let* nonce =
+    next_for_base_path_with_hooks
+      ~snapshot_warnings:Head.snapshot_settlement_warnings
+      ~compare_and_swap:Head.compare_and_swap
+      ~base_path
+      ~keeper_id
+      ~owner_id
+      ~floor
+      ()
+  in
+  Ok (witness_of_nonce ~base_path ~keeper_id ~source:None ~owner_id nonce)
+;;
+
+let replace ~base_path ~keeper_id ~source ~owner_id () =
+  let floor =
+    if Int64.equal source.nonce Int64.max_int
+    then Error Nonce_exhausted
+    else Ok (Int64.succ source.nonce)
+  in
+  let* floor = floor in
+  let* nonce =
+    next_for_base_path_with_hooks
+      ~snapshot_warnings:Head.snapshot_settlement_warnings
+      ~compare_and_swap:Head.compare_and_swap
+      ~base_path
+      ~keeper_id
+      ~owner_id
+      ~expected_source:source
+      ~floor
+      ()
+  in
+  Ok (witness_of_nonce ~base_path ~keeper_id ~source:(Some source) ~owner_id nonce)
+;;
+
+let recover_exact ~base_path ~keeper_id ~source ~target () =
+  if Filename.is_relative base_path
+  then Error (Invalid_base_path base_path)
+  else
+    let* root = prepare_root ~base_path in
+    let* secure_random = entropy_source () in
+    match
+      with_head_parent root (fun parent ->
+        Head.read
+          ~secure_random
+          ~parent
+          ~leaf:(authority_leaf ~keeper_id))
+    with
+    | Error failure -> Error (Head_read_failed failure)
+    | Ok snapshot ->
+      let warnings = Head.snapshot_settlement_warnings snapshot in
+      if warnings <> []
+      then
+        Error
+          (Head_read_settlement_failed
+             { cursor = Head.snapshot_cursor snapshot
+             ; row = Head.snapshot_row snapshot
+             ; observed_nonce =
+                 observed_nonce ~keeper_id (Head.snapshot_row snapshot)
+             ; warnings
+             })
+      else
+        (match Head.snapshot_row snapshot with
+         | None -> Error Authority_missing
+         | Some raw ->
+           let* row =
+             decode_row ~keeper_id raw
+             |> Result.map_error (fun corruption -> Corrupt_current corruption)
+           in
+           if
+             String.equal row.allocated_to target.owner_id
+             && Int64.equal row.nonce target.nonce
+           then Ok { base_path; keeper_id; source; target }
+           else Error Authority_identity_mismatch)
 ;;
 
 let runtime_int_of_nonce nonce =
@@ -458,17 +603,8 @@ let head_failure_to_string (failure : Head.failure) =
 ;;
 
 let corruption_to_string = function
-  | Malformed_current detail -> "malformed current authority: " ^ detail
-  | Unsupported_schema observed ->
-    "unsupported lifecycle nonce schema: " ^ observed
-  | Noncanonical_current -> "current authority is not canonical"
-  | Keeper_binding_mismatch { expected; observed } ->
-    Printf.sprintf
-      "keeper binding mismatch expected=%S observed=%S"
-      expected
-      observed
-  | Invalid_current_nonce detail -> "invalid current nonce: " ^ detail
-  | Checksum_mismatch -> "current authority checksum mismatch"
+  | Invalid_current _ ->
+    "lifecycle nonce current evidence is invalid; operator reset is required"
 ;;
 
 let error_to_string = function
@@ -480,6 +616,11 @@ let error_to_string = function
     Printf.sprintf
       "lifecycle nonce floor must be positive: %Ld"
       floor
+  | Authority_missing -> "lifecycle nonce authority is missing"
+  | Authority_identity_mismatch ->
+    "lifecycle nonce authority identity does not match the exact request"
+  | Shutdown_floor_invalid detail ->
+    "lifecycle nonce shutdown floor is invalid: " ^ detail
   | Filesystem_capability_unavailable ->
     "lifecycle nonce filesystem capability is unavailable"
   | Directory_prepare_failed detail ->

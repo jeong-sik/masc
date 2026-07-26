@@ -494,8 +494,45 @@ let write_meta_typed
                      msg))))
 ;;
 
+let durable_admission_error prefix reason =
+  prefix
+  ^ ": "
+  ^ Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+      reason
+;;
+
+let durable_admission_attention prefix failure =
+  prefix
+  ^ ": "
+  ^ Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+      failure
+;;
+
+let with_ordinary_write_admission config ~keeper_name fn =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name
+      fn
+  with
+  | Admission_completed result -> result
+  | Admission_completed_with_attention (Error _ as error, _) -> error
+  | Admission_completed_with_attention (Ok _, failure) ->
+    Error
+      (durable_admission_attention
+         "Keeper metadata admission release failed"
+         failure)
+  | Admission_blocked reason ->
+    Error
+      (durable_admission_error
+         "Keeper metadata mutation blocked by lifecycle authority"
+         reason)
+;;
+
 let write_meta config m =
-  write_meta_typed config m |> Result.map_error write_meta_error_to_string
+  with_ordinary_write_admission config ~keeper_name:m.name (fun _permit ->
+    write_meta_typed config m |> Result.map_error write_meta_error_to_string)
 ;;
 
 let write_meta_for_lifecycle token config m =
@@ -588,7 +625,8 @@ let write_meta_with_merge_internal
 ;;
 
 let write_meta_with_merge ?max_retries ~merge config m =
-  write_meta_with_merge_internal ?max_retries ~merge config m
+  with_ordinary_write_admission config ~keeper_name:m.name (fun _permit ->
+    write_meta_with_merge_internal ?max_retries ~merge config m)
 ;;
 
 let write_meta_with_merge_for_lifecycle token ?max_retries ~merge config m =
@@ -716,6 +754,10 @@ type identity_update_error =
   | Identity_missing
   | Identity_changed
   | Identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Identity_read_failed of string
   | Identity_write_failed of string
 
@@ -726,11 +768,19 @@ let identity_update_error_to_string = function
     Printf.sprintf
       "Keeper metadata lifecycle reservation conflict: %s"
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  | Identity_lifecycle_admission_blocked reason ->
+    durable_admission_error
+      "Keeper metadata identity update blocked by lifecycle authority"
+      reason
+  | Identity_lifecycle_admission_release_failed failure ->
+    durable_admission_attention
+      "Keeper metadata identity update admission release failed"
+      failure
   | Identity_read_failed detail -> detail
   | Identity_write_failed detail -> detail
 ;;
 
-let update_meta_if_identity
+let update_meta_if_identity_under_admission
       config
       ~name
       ~trace_id
@@ -798,10 +848,36 @@ let update_meta_if_identity
                       | Error detail -> Error (Identity_write_failed detail))))))
 ;;
 
+let update_meta_if_identity config ~name ~trace_id ~generation update =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name:name
+      (fun _permit ->
+        update_meta_if_identity_under_admission
+          config
+          ~name
+          ~trace_id
+          ~generation
+          update)
+  with
+  | Admission_completed result -> result
+  | Admission_completed_with_attention (Error _ as error, _) -> error
+  | Admission_completed_with_attention (Ok _, failure) ->
+    Error (Identity_lifecycle_admission_release_failed failure)
+  | Admission_blocked reason ->
+    Error (Identity_lifecycle_admission_blocked reason)
+;;
+
 type identity_remove_error =
   | Remove_identity_missing
   | Remove_identity_changed
   | Remove_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Remove_identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Remove_identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Remove_identity_read_failed of string
   | Remove_identity_unlink_failed of string
 
@@ -812,10 +888,24 @@ let identity_remove_error_to_string = function
     Printf.sprintf
       "Keeper metadata lifecycle reservation conflict: %s"
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  | Remove_identity_lifecycle_admission_blocked reason ->
+    durable_admission_error
+      "Keeper metadata removal blocked by lifecycle authority"
+      reason
+  | Remove_identity_lifecycle_admission_release_failed failure ->
+    durable_admission_attention
+      "Keeper metadata removal admission release failed"
+      failure
   | Remove_identity_read_failed detail | Remove_identity_unlink_failed detail -> detail
 ;;
 
-let remove_meta_if_identity config ~name ~trace_id ~generation =
+let remove_meta_if_identity_internal
+      ?lifecycle_token
+      config
+      ~name
+      ~trace_id
+      ~generation
+  =
   let path = keeper_meta_path config name in
   Keeper_lifecycle_reservation.with_key_lock
     ~base_path:config.Workspace.base_path
@@ -823,6 +913,7 @@ let remove_meta_if_identity config ~name ~trace_id ~generation =
     (fun () ->
        match
          Keeper_lifecycle_reservation.authorize
+           ?token:lifecycle_token
            ~base_path:config.Workspace.base_path
            ~keeper_name:name
            ()
@@ -847,6 +938,42 @@ let remove_meta_if_identity config ~name ~trace_id ~generation =
                | exn -> Error (Remove_identity_unlink_failed (Printexc.to_string exn))))
 ;;
 
+let remove_meta_if_identity config ~name ~trace_id ~generation =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name:name
+      (fun _permit ->
+        remove_meta_if_identity_internal
+          config
+          ~name
+          ~trace_id
+          ~generation)
+  with
+  | Admission_completed result -> result
+  | Admission_completed_with_attention (Error _ as error, _) -> error
+  | Admission_completed_with_attention (Ok (), failure) ->
+    Error (Remove_identity_lifecycle_admission_release_failed failure)
+  | Admission_blocked reason ->
+    Error (Remove_identity_lifecycle_admission_blocked reason)
+;;
+
+let remove_meta_if_identity_for_lifecycle
+      token
+      config
+      ~name
+      ~trace_id
+      ~generation
+  =
+  remove_meta_if_identity_internal
+    ~lifecycle_token:token
+    config
+    ~name
+    ~trace_id
+    ~generation
+;;
+
 type exact_identity_error =
   | Exact_identity_missing
   | Exact_identity_changed
@@ -854,6 +981,11 @@ type exact_identity_error =
       { expected : int
       ; actual : int
       }
+  | Exact_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Exact_identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Exact_identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Exact_identity_read_failed of string
   | Exact_identity_unlink_failed of string
 
@@ -865,6 +997,18 @@ let exact_identity_error_to_string = function
       "Keeper metadata version changed: expected %d, actual %d"
       expected
       actual
+  | Exact_identity_lifecycle_reserved owner ->
+    Printf.sprintf
+      "Keeper metadata lifecycle reservation conflict: %s"
+      (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  | Exact_identity_lifecycle_admission_blocked reason ->
+    durable_admission_error
+      "Exact Keeper metadata removal blocked by lifecycle authority"
+      reason
+  | Exact_identity_lifecycle_admission_release_failed failure ->
+    durable_admission_attention
+      "Exact Keeper metadata removal admission release failed"
+      failure
   | Exact_identity_read_failed detail
   | Exact_identity_unlink_failed detail -> detail
 ;;
@@ -898,7 +1042,8 @@ let read_meta_if_exact_identity
       validate_exact_identity ~trace_id ~generation ~meta_version latest)
 ;;
 
-let remove_meta_if_exact_identity
+let remove_meta_if_exact_identity_internal
+    ?lifecycle_token
     config
     ~name
     ~trace_id
@@ -906,19 +1051,79 @@ let remove_meta_if_exact_identity
     ~meta_version
   =
   let path = keeper_meta_path config name in
-  File_lock_eio.with_mutex path (fun () ->
-    match read_meta_file_path path with
-    | Error detail -> Error (Exact_identity_read_failed detail)
-    | Ok None -> Error Exact_identity_missing
-    | Ok (Some latest) ->
-      (match validate_exact_identity ~trace_id ~generation ~meta_version latest with
-       | Error _ as error -> error
-       | Ok _ ->
-         try
-           Unix.unlink path;
-           Ok ()
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Error (Exact_identity_unlink_failed (Printexc.to_string exn))))
+  Keeper_lifecycle_reservation.with_key_lock
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:name
+    (fun () ->
+      match
+        Keeper_lifecycle_reservation.authorize
+          ?token:lifecycle_token
+          ~base_path:config.Workspace.base_path
+          ~keeper_name:name
+          ()
+      with
+      | Error owner -> Error (Exact_identity_lifecycle_reserved owner)
+      | Ok () ->
+        File_lock_eio.with_mutex path (fun () ->
+          match read_meta_file_path path with
+          | Error detail -> Error (Exact_identity_read_failed detail)
+          | Ok None -> Error Exact_identity_missing
+          | Ok (Some latest) ->
+            (match
+               validate_exact_identity
+                 ~trace_id
+                 ~generation
+                 ~meta_version
+                 latest
+             with
+             | Error _ as error -> error
+             | Ok _ ->
+               try
+                 Unix.unlink path;
+                 Ok ()
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn ->
+                 Error
+                   (Exact_identity_unlink_failed
+                      (Printexc.to_string exn)))))
+;;
+
+let remove_meta_if_exact_identity config ~name ~trace_id ~generation ~meta_version =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name:name
+      (fun _permit ->
+        remove_meta_if_exact_identity_internal
+          config
+          ~name
+          ~trace_id
+          ~generation
+          ~meta_version)
+  with
+  | Admission_completed result -> result
+  | Admission_completed_with_attention (Error _ as error, _) -> error
+  | Admission_completed_with_attention (Ok (), failure) ->
+    Error (Exact_identity_lifecycle_admission_release_failed failure)
+  | Admission_blocked reason ->
+    Error (Exact_identity_lifecycle_admission_blocked reason)
+;;
+
+let remove_meta_if_exact_identity_for_lifecycle
+      token
+      config
+      ~name
+      ~trace_id
+      ~generation
+      ~meta_version
+  =
+  remove_meta_if_exact_identity_internal
+    ~lifecycle_token:token
+    config
+    ~name
+    ~trace_id
+    ~generation
+    ~meta_version
 ;;

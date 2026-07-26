@@ -63,16 +63,20 @@ let with_keeper_entry_by_identity ~identity ~on_missing f =
 ;;
 
 let persist_directive_meta_update
+      ~(config : Workspace.config)
       (entry : Keeper_registry.registry_entry)
       ~(update : keeper_meta -> keeper_meta)
   : (keeper_meta, string) result
   =
-  let config = Workspace.default_config entry.base_path in
+  if not (String.equal config.Workspace.base_path entry.base_path)
+  then Error "directive metadata config does not match the registry scope"
+  else
   let persist permit =
     if
       not
         (Keeper_lifecycle_admission.Durable_transaction.permit_matches
            permit
+           ~base_path:config.Workspace.base_path
            entry.name)
     then Error "directive metadata admission scope is invalid"
     else
@@ -273,7 +277,7 @@ let log_directive_agent_not_in_registry ~agent_name ~action =
   )
 ;;
 
-let set_keeper_paused_state ~agent_name paused =
+let set_keeper_paused_state ~config ~agent_name paused =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
@@ -299,6 +303,7 @@ let set_keeper_paused_state ~agent_name paused =
          let previous_failure_reason = entry.last_failure_reason in
          match
            persist_directive_meta_update
+             ~config
              entry
              ~update:(fun latest -> directive_paused_meta latest paused)
          with
@@ -346,7 +351,7 @@ let wakeup_keeper_by_agent_name ~agent_name =
     (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
-let assign_keeper_task_from_directive ~agent_name ~task_id =
+let assign_keeper_task_from_directive ~config ~agent_name ~task_id =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
@@ -359,6 +364,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
        let task_id_string = Keeper_id.Task_id.to_string task_id in
        match
          persist_directive_meta_update
+           ~config
            entry
            ~update:(fun latest ->
              { latest with current_task_id = Some task_id; updated_at = now_iso () })
@@ -385,7 +391,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
 
 (** Apply one typed control-plane directive.  Parsing belongs to the transport
     boundary; this domain path cannot receive an unknown command. *)
-let process_directive ~agent_name directive =
+let process_directive ~config ~agent_name directive =
   match directive with
   | Keeper_directive.Pause ->
     Log.Keeper.emit
@@ -393,7 +399,7 @@ let process_directive ~agent_name directive =
       ~category:Log.Directive
       ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "pause" ])
       (Printf.sprintf "directive: pausing keeper %s" agent_name);
-    set_keeper_paused_state ~agent_name true
+    set_keeper_paused_state ~config ~agent_name true
   | Keeper_directive.Wakeup ->
     (* Wakeup is only a scheduling signal. It must never clear an operator
        pause: paused-work disposition belongs to the receipt-first
@@ -420,7 +426,7 @@ let process_directive ~agent_name directive =
          "directive: server assigned task %s to %s"
          task_id_string
          agent_name);
-    assign_keeper_task_from_directive ~agent_name ~task_id
+    assign_keeper_task_from_directive ~config ~agent_name ~task_id
 ;;
 
 (* ── gRPC heartbeat stream ── *)
@@ -1210,6 +1216,7 @@ let start_keepalive_under_admission
   if
     Keeper_lifecycle_admission.Durable_transaction.permit_matches
       permit
+      ~base_path:ctx.config.Workspace.base_path
       meta.name
   then
     start_keepalive_admitted

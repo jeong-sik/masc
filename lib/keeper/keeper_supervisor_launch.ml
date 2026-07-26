@@ -670,6 +670,7 @@ let launch_supervised_fiber_under_admission
     not
       (Keeper_lifecycle_admission.Durable_transaction.permit_matches
          permit
+         ~base_path:ctx.config.Workspace.base_path
          meta.name)
   then Error Supervised_launch_permit_mismatch
   else

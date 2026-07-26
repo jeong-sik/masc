@@ -404,6 +404,7 @@ type done_resolution = [ `Stopped | `Crashed of string ]
 type lifecycle_transaction_purpose =
   | Dead_revival
   | Paused_work_disposition
+  | Shutdown_finalization
 
 type lifecycle_reservation_snapshot =
   { owner_id : string

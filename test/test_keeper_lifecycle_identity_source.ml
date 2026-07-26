@@ -99,7 +99,25 @@ let test_directives_use_current_meta_single_surface () =
   let source = read_file "lib/keeper/keeper_keepalive.ml" in
   check_contains source "Keeper_meta_store.update_meta_if_identity";
   check_contains source "with_durable_lifecycle_admission";
+  check_contains source "~(config : Workspace.config)";
+  check_not_contains source "Workspace.default_config entry.base_path";
   check_not_contains source "Keeper_fs.save_json_atomic persisted_path"
+;;
+
+let test_ordinary_writes_and_shutdown_share_lifecycle_authority () =
+  let meta_store = read_file "lib/keeper/keeper_meta_store.ml" in
+  let shutdown = read_file "lib/keeper/keeper_shutdown_finalize.ml" in
+  check_contains meta_store "with_ordinary_write_admission";
+  check_contains meta_store "remove_meta_if_identity_for_lifecycle";
+  check_contains meta_store "remove_meta_if_exact_identity_for_lifecycle";
+  check_contains shutdown "with_durable_lifecycle_admission";
+  check_contains shutdown "Shutdown_finalization";
+  check_contains shutdown "unregister_exact_for_lifecycle";
+  check_not_contains shutdown "Keeper_registry.unregister_exact entry";
+  check_not_contains shutdown
+    "Keeper_meta_store.remove_meta_if_identity\n";
+  check_not_contains shutdown
+    "Keeper_meta_store.remove_meta_if_exact_identity\n"
 ;;
 
 let () =
@@ -138,6 +156,10 @@ let () =
             "directives use current meta single surface"
             `Quick
             test_directives_use_current_meta_single_surface
+        ; Alcotest.test_case
+            "ordinary writes and shutdown share lifecycle authority"
+            `Quick
+            test_ordinary_writes_and_shutdown_share_lifecycle_authority
         ] )
     ]
 ;;

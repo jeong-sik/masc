@@ -2551,6 +2551,28 @@ let test_keeper_lifecycle_transaction_admission_current_schema () =
       Alcotest.fail
         (Keeper_dead_revival_transaction.error_to_string error)
   in
+  let ordinary_candidate =
+    { original with
+      instructions = original.instructions ^ "\nblocked ordinary mutation"
+    }
+  in
+  (match Keeper_meta_store.write_meta config ordinary_candidate with
+   | Error _ -> ()
+   | Ok () ->
+     Alcotest.fail
+       "ordinary metadata write crossed unresolved rollback authority");
+  (match Keeper_meta_store.read_meta config keeper_name with
+   | Ok (Some persisted) ->
+     Alcotest.(check int)
+       "blocked ordinary write leaves generation unchanged"
+       original.runtime.nonce
+       persisted.runtime.nonce;
+     Alcotest.(check string)
+       "blocked ordinary write leaves payload unchanged"
+       original.instructions
+       persisted.instructions
+   | Ok None -> Alcotest.fail "blocked ordinary write removed metadata"
+   | Error detail -> Alcotest.fail detail);
   let blocked_stages =
     [ "Reserved", `Assoc [ "reserved", `Bool true ]
     ; "Durable_committed", `Assoc [ "durable_committed", `Bool true ]
@@ -2654,9 +2676,79 @@ let test_keeper_lifecycle_transaction_admission_waits_for_cleanup () =
    | Error error ->
      Alcotest.fail
        (Keeper_dead_revival_transaction.error_to_string error));
-  (match Keeper_meta_store.write_meta config candidate with
-   | Ok () -> ()
+  let lifecycle_token =
+    match
+      Keeper_lifecycle_reservation.acquire
+        ~base_path:config.base_path
+        ~keeper_name
+        ~expected_generation:original.runtime.nonce
+        ~purpose:Keeper_lifecycle_reservation.Dead_revival
+    with
+    | Ok token -> token
+    | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+      Alcotest.fail
+        (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  in
+  let source =
+    match
+      Keeper_lifecycle_nonce.identity
+        ~owner_id:
+          (Keeper_id.Trace_id.to_string original.runtime.trace_id)
+        ~nonce:(Int64.of_int original.runtime.nonce)
+    with
+    | Ok identity -> identity
+    | Error error ->
+      Alcotest.fail (Keeper_lifecycle_nonce.error_to_string error)
+  in
+  let replacement =
+    Keeper_lifecycle_nonce.replace_settled
+      ~base_path:config.base_path
+      ~keeper_id:keeper_name
+      ~source
+      ~owner_id:
+        (Keeper_id.Trace_id.to_string candidate.runtime.trace_id)
+      ()
+  in
+  (match replacement with
+   | Error error ->
+     Alcotest.fail (Keeper_lifecycle_nonce.error_to_string error)
+   | Ok (Keeper_lifecycle_nonce.Settled_allocated witness) ->
+     (match
+        Keeper_meta_store.replace_meta
+          ~lifecycle_token
+          witness
+          config
+          candidate
+      with
+      | Ok () -> ()
+      | Error detail -> Alcotest.fail detail)
+   | Ok (Keeper_lifecycle_nonce.Settled_recovered (witness, _)) ->
+     (match
+        Keeper_meta_store.recover_meta_exact
+          ~lifecycle_token
+          witness
+          config
+          candidate
+      with
+      | Ok () -> ()
+      | Error detail -> Alcotest.fail detail));
+  (match
+     Keeper_meta_store.read_meta config keeper_name
+   with
+   | Ok (Some persisted) ->
+     Alcotest.(check int)
+       "lifecycle owner committed replacement generation"
+       candidate.runtime.nonce
+       persisted.runtime.nonce
+   | Ok None -> Alcotest.fail "lifecycle owner replacement disappeared"
    | Error detail -> Alcotest.fail detail);
+  (match Keeper_lifecycle_reservation.release lifecycle_token with
+   | Keeper_lifecycle_reservation.Released -> ()
+   | Keeper_lifecycle_reservation.Release_missing ->
+     Alcotest.fail "fixture lifecycle reservation disappeared"
+   | Keeper_lifecycle_reservation.Release_not_owner owner ->
+     Alcotest.fail
+       (Keeper_lifecycle_reservation.snapshot_to_string owner));
   (match
      Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
        ~config

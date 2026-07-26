@@ -29,6 +29,7 @@ let create_keeper_admitted
     not
       (Keeper_lifecycle_admission.Durable_transaction.permit_matches
          permit
+         ~base_path:ctx.config.Workspace.base_path
          p.name)
   then tool_result_error "keeper creation lost durable lifecycle admission"
   else

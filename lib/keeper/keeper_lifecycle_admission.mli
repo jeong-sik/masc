@@ -104,7 +104,7 @@ module Durable_transaction : sig
     | Admission_completed_with_attention of 'a * authority_failure
     | Admission_blocked of blocked_reason
 
-  val permit_matches : permit -> string -> bool
+  val permit_matches : permit -> base_path:string -> string -> bool
 
   val with_durable_lifecycle_admission :
     Workspace.config ->

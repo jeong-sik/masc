@@ -10,6 +10,7 @@
 type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
   | Dead_revival
   | Paused_work_disposition
+  | Shutdown_finalization
 
 type token
 

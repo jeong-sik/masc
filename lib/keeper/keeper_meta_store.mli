@@ -124,6 +124,10 @@ type identity_update_error =
   | Identity_missing
   | Identity_changed
   | Identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Identity_read_failed of string
   | Identity_write_failed of string
 
@@ -144,6 +148,10 @@ type identity_remove_error =
   | Remove_identity_missing
   | Remove_identity_changed
   | Remove_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Remove_identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Remove_identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Remove_identity_read_failed of string
   | Remove_identity_unlink_failed of string
 
@@ -158,6 +166,14 @@ val remove_meta_if_identity :
   generation:int ->
   (unit, identity_remove_error) result
 
+val remove_meta_if_identity_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  Workspace.config ->
+  name:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  generation:int ->
+  (unit, identity_remove_error) result
+
 type exact_identity_error =
   | Exact_identity_missing
   | Exact_identity_changed
@@ -165,6 +181,11 @@ type exact_identity_error =
       { expected : int
       ; actual : int
       }
+  | Exact_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Exact_identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Exact_identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Exact_identity_read_failed of string
   | Exact_identity_unlink_failed of string
 
@@ -186,6 +207,15 @@ val read_meta_if_exact_identity :
     preserve the newer metadata and surface the lifecycle operation as
     blocked. *)
 val remove_meta_if_exact_identity :
+  Workspace.config ->
+  name:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  generation:int ->
+  meta_version:int ->
+  (unit, exact_identity_error) result
+
+val remove_meta_if_exact_identity_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
   Workspace.config ->
   name:string ->
   trace_id:Keeper_id.Trace_id.t ->

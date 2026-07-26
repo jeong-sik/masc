@@ -109,7 +109,8 @@ module Durable_transaction = struct
         }
 
   type permit =
-    { keeper_name : string
+    { base_path : string
+    ; keeper_name : string
     ; evidence : evidence option
     ; scope_id : int
     }
@@ -133,13 +134,13 @@ module Durable_transaction = struct
     | Admission_completed_with_attention of 'a * authority_failure
     | Admission_blocked of blocked_reason
 
-  let active_permit_scope_key : int Eio.Fiber.key = Eio.Fiber.create_key ()
+  let active_permit_scope_key : permit Eio.Fiber.key = Eio.Fiber.create_key ()
   let next_permit_scope = Atomic.make 0
 
-  let with_active_permit ~keeper_name ~evidence fn =
+  let with_active_permit ~base_path ~keeper_name ~evidence fn =
     let scope_id = Atomic.fetch_and_add next_permit_scope 1 in
-    let permit = { keeper_name; evidence; scope_id } in
-    Eio.Fiber.with_binding active_permit_scope_key scope_id (fun () -> fn permit)
+    let permit = { base_path; keeper_name; evidence; scope_id } in
+    Eio.Fiber.with_binding active_permit_scope_key permit (fun () -> fn permit)
   ;;
 
   let journal_schema = "masc.keeper-dead-revival-journal.v3"
@@ -469,15 +470,22 @@ module Durable_transaction = struct
                   Admitted (Some evidence)))))
   ;;
 
-  let permit_matches (permit : permit) keeper_name =
+  let permit_matches (permit : permit) ~base_path keeper_name =
+    String.equal permit.base_path base_path
+    &&
     String.equal permit.keeper_name keeper_name
     &&
     match Eio.Fiber.get active_permit_scope_key with
-    | Some active_scope -> Int.equal active_scope permit.scope_id
+    | Some active_permit -> Int.equal active_permit.scope_id permit.scope_id
     | None -> false
   ;;
 
   let with_durable_lifecycle_admission config ~keeper_name fn =
+    match Eio.Fiber.get active_permit_scope_key with
+    | Some permit
+      when permit_matches permit ~base_path:config.Workspace.base_path keeper_name ->
+      Admission_completed (fn permit)
+    | Some _ | None ->
     match authority_lock_path config keeper_name with
     | Error failure ->
       Admission_blocked
@@ -490,7 +498,12 @@ module Durable_transaction = struct
               match read_locked config keeper_name with
               | Blocked reason -> Error reason
               | Admitted evidence ->
-                Ok (with_active_permit ~keeper_name ~evidence fn))
+                Ok
+                  (with_active_permit
+                     ~base_path:config.Workspace.base_path
+                     ~keeper_name
+                     ~evidence
+                     fn))
        with
        | File_lock_eio.Lock_not_acquired _ ->
          Admission_blocked
@@ -550,6 +563,7 @@ module Durable_transaction = struct
                        && current.stage = Durable_committed ->
                   Ok
                     (with_active_permit
+                       ~base_path:config.Workspace.base_path
                        ~keeper_name
                        ~evidence:(Some current)
                        fn)

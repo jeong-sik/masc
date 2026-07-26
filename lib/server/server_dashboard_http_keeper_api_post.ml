@@ -1286,6 +1286,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
             | None, None -> Keeper_identity.keeper_agent_name name
           in
           Keeper_keepalive.process_directive
+            ~config
             ~agent_name:resolved_agent_name
             directive;
           (match plain_directive with
@@ -1437,6 +1438,7 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
                    | None, None -> Keeper_identity.keeper_agent_name name
                  in
                  Keeper_keepalive.process_directive
+                   ~config
                    ~agent_name:resolved_agent_name
                    directive;
                  `Assoc [ "name", `String name; "ok", `Bool true ])

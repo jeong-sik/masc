@@ -80,7 +80,6 @@ type t =
   | TraceEmitFailures
   | TransitionAuditFailures
   | ExecutionReceiptFailures
-  | OperatorBroadcastSuppressed
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures

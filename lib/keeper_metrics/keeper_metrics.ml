@@ -89,7 +89,6 @@ type t =
   | TraceEmitFailures
   | TransitionAuditFailures
   | ExecutionReceiptFailures
-  | OperatorBroadcastSuppressed
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures
@@ -308,7 +307,6 @@ let to_string = function
   | TraceEmitFailures -> "masc_keeper_trace_emit_failures_total"
   | TransitionAuditFailures -> "masc_keeper_transition_audit_failures_total"
   | ExecutionReceiptFailures -> "masc_keeper_execution_receipt_failures_total"
-  | OperatorBroadcastSuppressed -> "masc_keeper_operator_broadcast_suppressed_total"
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
   | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"

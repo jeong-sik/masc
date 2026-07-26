@@ -7,7 +7,6 @@
 type t =
   | Healthy
   | Stale_turn_timeout_idle
-  | Stale_turn_timeout_in_turn
   | Stale_turn_timeout_no_progress
   | Stale_turn_timeout_noop
   | Stale_termination_storm
@@ -23,7 +22,6 @@ type t =
 let to_wire = function
   | Healthy -> "healthy"
   | Stale_turn_timeout_idle
-  | Stale_turn_timeout_in_turn
   | Stale_turn_timeout_no_progress
   | Stale_turn_timeout_noop ->
     (* Existing wire emission collapses the three sub-classes into one
@@ -41,27 +39,15 @@ let to_wire = function
   | Sdk_error wire -> wire
 ;;
 
-let of_wire = function
+let of_wire_exact = function
   | "healthy" -> Some Healthy
-  | "stale_turn_timeout" ->
-    (* Lossy: the wire string lost the sub-class. Canonicalise to
-         [Stale_turn_timeout_in_turn], the terminal-code canonical for a
-         stale turn whose kill-class sub-class was not preserved on the
-         wire. PR-4 removes [of_wire] callers. *)
-    Some Stale_turn_timeout_in_turn
   | "stale_termination_storm" -> Some Stale_termination_storm
   | "heartbeat_failures" -> Some Heartbeat_failures
   | "turn_failures" -> Some Turn_failures
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "turn_overflow_failure" -> Some Turn_overflow_failure
   | "operator_interrupt" -> Some Operator_interrupt
-  | "exception" -> Some (Exception_unhandled "")
-  | _other ->
-    (* Could be a [Provider_runtime_error] / [Tool_required_unsatisfied]
-         original [code] string, or an unrecognised legacy code from a
-         pre-RFC emit site. Returning [None] forces the caller to make
-         the policy choice rather than silently mis-classifying. *)
-    None
+  | _ -> None
 ;;
 
 let of_failure_reason : Keeper_registry.failure_reason -> t = function

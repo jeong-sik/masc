@@ -235,8 +235,8 @@ val operator_disposition : t -> operator_disposition_kind * operator_disposition
 val needs_operator_broadcast : operator_disposition_kind -> bool
 
 (** Structured payload emitted for [keeper.operator_broadcast_required].
-    Exposed so tests can pin the diagnostic fields operators need when a
-    keeper turn pauses or stalls silently. *)
+    Exposed so tests can pin the diagnostic fields of a durable receipt whose
+    disposition requires operator attention. *)
 val operator_broadcast_payload
   :  t
   -> disposition:operator_disposition_kind

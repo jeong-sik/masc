@@ -63,7 +63,6 @@ let to_wire = function
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
   | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
   | Provider_error code -> Code.to_wire code
-  | Unknown { raw_error = "" } -> "unknown_error"
   | Unknown { raw_error } -> raw_error
 ;;
 
@@ -79,7 +78,6 @@ let of_termination_code (c : Code.t) : t =
   match c with
   | Code.Healthy -> Success
   | Code.Stale_turn_timeout_idle
-  | Code.Stale_turn_timeout_in_turn
   | Code.Stale_turn_timeout_no_progress
   | Code.Stale_turn_timeout_noop -> Turn_wall_clock_timeout
   | Code.Heartbeat_failures
@@ -95,16 +93,16 @@ let of_termination_code (c : Code.t) : t =
 
 let of_wire wire =
   match wire with
-     | "success" -> Success
-     | "input_required" -> Input_required
-     | "external_cancel" -> External_cancel
-     | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
-     | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
-     | "unknown_error" -> Unknown { raw_error = "" }
-     | other ->
-       (match Code.of_wire other with
-        | Some c -> of_termination_code c
-        | None -> Unknown { raw_error = other })
+  | "success" -> Success
+  | "input_required" -> Input_required
+  | "external_cancel" -> External_cancel
+  | "turn_wall_clock_timeout"
+  | "stale_turn_timeout" -> Turn_wall_clock_timeout
+  | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
+  | other ->
+    (match Code.of_wire_exact other with
+     | Some c -> of_termination_code c
+     | None -> Unknown { raw_error = other })
 ;;
 
 let is_success = function

@@ -499,15 +499,20 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let server_state = current_server_state_opt () in
-  let keeper_current_meta_unavailable_json =
+  let current_meta_discovery =
     match server_state with
     | Some state ->
-      state
-      |> Mcp_server.workspace_config
-      |> Keeper_meta_store.current_meta_unavailable_facts
-      |> Keeper_meta_store.current_meta_unavailable_collection_to_yojson
-    | None ->
-      Keeper_meta_store.current_meta_unavailable_collection_to_yojson []
+      Some
+        (Keeper_meta_store.discover_current_meta
+           (Mcp_server.workspace_config state))
+    | None -> None
+  in
+  let keeper_current_meta_unavailable_json =
+    Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+      (match current_meta_discovery with
+       | Some discovery ->
+         Keeper_meta_store.Current_meta_observed discovery.unavailable
+       | None -> Keeper_meta_store.Current_meta_observation_unavailable)
   in
   (* Single-pass fleet meta scan: reads each keeper meta file once,
      shared by paused-keepers and fleet-safety sections. *)
@@ -868,7 +873,8 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("component_timed_out", `Bool component_timed_out);
         ] );
     ( "keeper_current_meta_unavailable",
-      Keeper_meta_store.current_meta_unavailable_collection_to_yojson [] );
+      Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+        Keeper_meta_store.Current_meta_observation_unavailable );
     ( "publication_recovery_activation",
       full_health_component_placeholder
         ?error

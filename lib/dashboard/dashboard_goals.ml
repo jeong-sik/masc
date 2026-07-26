@@ -50,7 +50,7 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
     | Some parent_id -> not (List.mem parent_id goal_ids)
   in
   let keeper_metas =
-    Keeper_meta_store.keeper_names config
+    (Keeper_meta_store.keeper_names config).names
     |> List.filter_map (fun keeper_name ->
            match Keeper_meta_store.read_meta config keeper_name with
            | Ok (Some meta) -> Some meta
@@ -188,7 +188,7 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
   | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
   | Some node ->
       let keeper_details =
-        Keeper_meta_store.keeper_names config
+        (Keeper_meta_store.keeper_names config).names
         |> List.filter_map (fun keeper_name ->
                match Keeper_meta_store.read_meta config keeper_name with
                | Ok (Some meta) when List.mem meta.name node.linked_keeper_names ->

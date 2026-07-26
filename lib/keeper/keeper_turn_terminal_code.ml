@@ -10,6 +10,7 @@ type t =
   | Turn_failures
   | Provider_runtime_error of string
   | Fiber_unresolved
+  | Current_meta_unavailable
   | Turn_overflow_failure
   | Operator_interrupt
   | Exception_unhandled of string
@@ -22,6 +23,7 @@ let to_wire = function
   | Turn_failures -> "turn_failures"
   | Provider_runtime_error code -> code
   | Fiber_unresolved -> "fiber_unresolved"
+  | Current_meta_unavailable -> "current_meta_unavailable"
   | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
   | Exception_unhandled _ -> "exception"
@@ -34,6 +36,7 @@ let of_wire_exact = function
   | "heartbeat_failures" -> Some Heartbeat_failures
   | "turn_failures" -> Some Turn_failures
   | "fiber_unresolved" -> Some Fiber_unresolved
+  | "current_meta_unavailable" -> Some Current_meta_unavailable
   | "turn_overflow_failure" -> Some Turn_overflow_failure
   | "operator_interrupt" -> Some Operator_interrupt
   | _ -> None

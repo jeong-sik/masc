@@ -118,6 +118,7 @@ let with_keeper_slot ~sem ~name f =
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 let keepers_json
       ?keeper_names
+      ?keeper_metas
       ?(include_recent_activity = false)
       ?(lightweight = false)
       config
@@ -125,7 +126,15 @@ let keepers_json
   let names =
     match keeper_names with
     | Some n -> n
-    | None -> Keeper_meta_store.keeper_names config
+    | None -> (Keeper_meta_store.keeper_names config).names
+  in
+  let keeper_metas_by_name =
+    Option.map
+      (fun metas ->
+         let by_name = Hashtbl.create (List.length metas) in
+         List.iter (fun (name, meta) -> Hashtbl.replace by_name name meta) metas;
+         by_name)
+      keeper_metas
   in
   (* Parallel keeper I/O with concurrency cap: at most
      _keeper_snapshot_max_concurrency fibers run simultaneously.
@@ -187,9 +196,16 @@ let keepers_json
           results.(idx)
           <- (try
                 let t0 = Time_compat.now () in
-                match Keeper_meta_store.read_meta config name with
-                | Error _ | Ok None -> None
-                | Ok (Some meta) ->
+                match
+                  match keeper_metas_by_name with
+                  | Some by_name -> Hashtbl.find_opt by_name name
+                  | None ->
+                    (match Keeper_meta_store.read_meta config name with
+                     | Error _ | Ok None -> None
+                     | Ok (Some meta) -> Some meta)
+                with
+                | None -> None
+                | Some meta ->
                   dt_meta := Time_compat.now () -. t0;
                   if lightweight && meta.paused
                   then (
@@ -632,18 +648,20 @@ let snapshot_json
           ])
         else [])
     in
+    let current_meta_discovery =
+      if initialized && include_keepers
+      then Some (Keeper_meta_store.discover_current_meta config)
+      else None
+    in
     let keeper_names =
-      if initialized && include_keepers then Keeper_meta_store.keeper_names config else []
+      match current_meta_discovery with
+      | Some discovery -> discovery.keeper_names
+      | None -> []
     in
-    let persistent_keeper_names =
-      if initialized && include_keepers
-      then (Keeper_meta_store.discover_persistent_agents config).names
-      else []
-    in
-    let keeper_current_meta_unavailable =
-      if initialized && include_keepers
-      then Keeper_meta_store.current_meta_unavailable_facts config
-      else []
+    let keeper_metas =
+      match current_meta_discovery with
+      | Some discovery -> discovery.metas
+      | None -> []
     in
   let board_attention_quarantines =
   timed "board_attention_quarantines" (fun () ->
@@ -662,7 +680,10 @@ in
          ; "authoritative_judgment_available", `Bool false
          ; ( "keeper_current_meta_unavailable"
            , Keeper_meta_store.current_meta_unavailable_collection_to_yojson
-               keeper_current_meta_unavailable )
+               (match current_meta_discovery with
+                | Some discovery ->
+                  Keeper_meta_store.Current_meta_observed discovery.unavailable
+                | None -> Keeper_meta_store.Current_meta_observation_unavailable) )
          ; "inference_inflight", Inference_inflight_observation.snapshot_json ()
          ; "workspace", workspace_json config
          ; "board_attention_quarantines", board_attention_quarantines
@@ -684,6 +705,7 @@ in
                       then
                         keepers_json
                           ~keeper_names
+                          ~keeper_metas
                           ~lightweight:lightweight_summary
                           ~include_recent_activity:(not lightweight_summary)
                           config
@@ -702,10 +724,10 @@ in
                               | _ -> [])
                            | _ -> []
                          in
-                         persistent_agents_json
-                           ~keeper_names:persistent_keeper_names
-                           ~keeper_rows
-                           config)
+                         match current_meta_discovery with
+                         | Some discovery ->
+                           persistent_agents_json ~discovery ~keeper_rows
+                         | None -> empty_section)
                        else empty_section))
               ];
             [ "sessions", !sessions_ref

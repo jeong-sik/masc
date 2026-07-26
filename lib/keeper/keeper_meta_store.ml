@@ -12,6 +12,8 @@ open Keeper_meta_json
 type current_meta_unavailable_reason =
   | Invalid_current
   | Read_failed
+  | Missing_current
+  | Discovery_failed
 
 type current_meta_unavailable =
   { keeper_name : string
@@ -25,11 +27,23 @@ type keeper_name_discovery =
   ; unavailable : current_meta_unavailable list
   }
 
-exception Current_meta_unavailable of current_meta_unavailable
+type current_meta_discovery =
+  { keeper_names : string list
+  ; persisted_keeper_names : string list
+  ; persistent_keeper_names : string list
+  ; metas : (string * Keeper_meta_contract.keeper_meta) list
+  ; unavailable : current_meta_unavailable list
+  }
+
+type current_meta_unavailable_observation =
+  | Current_meta_observed of current_meta_unavailable list
+  | Current_meta_observation_unavailable
 
 let current_meta_unavailable_reason_to_string = function
   | Invalid_current -> "invalid_current"
   | Read_failed -> "read_failed"
+  | Missing_current -> "missing_current"
+  | Discovery_failed -> "discovery_failed"
 ;;
 
 let current_meta_unavailable_message unavailable =
@@ -39,13 +53,6 @@ let current_meta_unavailable_message unavailable =
     unavailable.path_identity
     (current_meta_unavailable_reason_to_string unavailable.reason)
     unavailable.detail
-;;
-
-let () =
-  Printexc.register_printer (function
-    | Current_meta_unavailable unavailable ->
-      Some (current_meta_unavailable_message unavailable)
-    | _ -> None)
 ;;
 
 let current_meta_unavailable_to_yojson unavailable =
@@ -59,7 +66,12 @@ let current_meta_unavailable_to_yojson unavailable =
     ]
 ;;
 
-let current_meta_unavailable_collection_to_yojson unavailable =
+let current_meta_unavailable_collection_to_yojson observation =
+  let observation_available, unavailable =
+    match observation with
+    | Current_meta_observed unavailable -> true, unavailable
+    | Current_meta_observation_unavailable -> false, []
+  in
   let unavailable =
     List.sort
       (fun left right -> String.compare left.keeper_name right.keeper_name)
@@ -73,7 +85,7 @@ let current_meta_unavailable_collection_to_yojson unavailable =
     ; ( "status"
       , `String
           (if unavailable = []
-           then "ok"
+           then if observation_available then "ok" else "unavailable"
            else if reset_required
            then "blocked"
            else "unavailable") )
@@ -96,6 +108,8 @@ let current_meta_unavailable ~path ~reason ~detail:_ =
     | Invalid_current ->
       "keeper current metadata does not match the current schema; runtime reset required"
     | Read_failed -> "keeper current metadata could not be read"
+    | Missing_current -> "keeper current metadata is missing"
+    | Discovery_failed -> "keeper current metadata directory could not be listed"
   in
   { keeper_name; path_identity; reason; detail }
 ;;
@@ -180,7 +194,12 @@ let persisted_keeper_names_result config =
       Keeper_metrics.(to_string MetaReadFailures)
       ~labels:[("keeper", "aggregate"); ("site", "persisted_listdir")]
       ();
-    Error (Printf.sprintf "failed to list keeper directory %s: %s" dir e)
+    Log.Keeper.warn "failed to list keeper directory %s: %s" dir e;
+    Error
+      (current_meta_unavailable
+         ~path:dir
+         ~reason:Discovery_failed
+         ~detail:e)
   | Ok files ->
     Ok
       (files
@@ -191,10 +210,8 @@ let persisted_keeper_names_result config =
 
 let persisted_keeper_names config =
   match persisted_keeper_names_result config with
-  | Ok names -> names
-  | Error msg ->
-    Log.Keeper.warn "persisted_keeper_names: %s" msg;
-    []
+  | Ok names -> { names; unavailable = [] }
+  | Error unavailable -> { names = []; unavailable = [ unavailable ] }
 ;;
 
 let configured_keeper_names config =
@@ -216,22 +233,8 @@ let keeper_names config =
      JSON at boot by load_or_materialize_boot_meta, so they appear here too.
      Every canonical root [.json] is metadata authority. *)
   match keeper_names_result config with
-  | Ok names -> names
-  | Error msg ->
-    Log.Keeper.warn "keeper_names: %s" msg;
-    []
-;;
-
-let current_meta_unavailable_facts config =
-  let names =
-    dedupe_keep_order (configured_keeper_names config @ keeper_names config)
-  in
-  List.filter_map
-    (fun name ->
-       match read_meta_file_path_current (keeper_meta_path config name) with
-       | Ok _ -> None
-       | Error unavailable -> Some unavailable)
-    names
+  | Ok names -> { names; unavailable = [] }
+  | Error unavailable -> { names = []; unavailable = [ unavailable ] }
 ;;
 
 let declarative_autoboot_enabled_by_default config name =
@@ -258,6 +261,59 @@ let effective_autoboot_enabled config name meta =
     (match defaults.autoboot_enabled with
      | Some value -> value
      | None -> meta.autoboot_enabled)
+;;
+
+let discover_current_meta config =
+  let configured_names = configured_keeper_names config in
+  let persisted = persisted_keeper_names config in
+  let keeper_names =
+    dedupe_keep_order (configured_names @ persisted.names)
+  in
+  let is_configured name =
+    List.exists (String.equal name) configured_names
+  in
+  let metas, persistent_keeper_names, unavailable =
+    List.fold_left
+      (fun (metas, persistent_keeper_names, unavailable) name ->
+         let path = keeper_meta_path config name in
+         match read_meta_file_path_current path with
+         | Ok (Some meta) ->
+           let persistent_keeper_names =
+             if
+               is_configured name
+               && not meta.paused
+               && effective_autoboot_enabled config name meta
+             then meta.name :: persistent_keeper_names
+             else persistent_keeper_names
+           in
+           ( (meta.name, meta) :: metas
+           , persistent_keeper_names
+           , unavailable )
+         | Ok None ->
+           ( metas
+           , persistent_keeper_names
+           , current_meta_unavailable
+               ~path
+               ~reason:Missing_current
+               ~detail:"missing"
+             :: unavailable )
+         | Error current_meta_unavailable ->
+           ( metas
+           , persistent_keeper_names
+           , current_meta_unavailable :: unavailable ))
+      ([], [], List.rev persisted.unavailable)
+      keeper_names
+  in
+  { keeper_names
+  ; persisted_keeper_names = persisted.names
+  ; persistent_keeper_names = List.rev persistent_keeper_names
+  ; metas = List.rev metas
+  ; unavailable = List.rev unavailable
+  }
+;;
+
+let current_meta_unavailable_facts config =
+  (discover_current_meta config).unavailable
 ;;
 
 let discover_configured_keepers config ~include_missing =
@@ -293,7 +349,10 @@ let discover_keepalive_keepers config =
 ;;
 
 let discover_persistent_agents config =
-  discover_configured_keepers config ~include_missing:(fun _ _ -> false)
+  let discovery = discover_current_meta config in
+  { names = discovery.persistent_keeper_names
+  ; unavailable = discovery.unavailable
+  }
 ;;
 
 let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta) option, string) result =

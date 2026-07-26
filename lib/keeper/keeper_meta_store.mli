@@ -3,6 +3,8 @@
 type current_meta_unavailable_reason =
   | Invalid_current
   | Read_failed
+  | Missing_current
+  | Discovery_failed
 
 type current_meta_unavailable =
   { keeper_name : string
@@ -16,7 +18,17 @@ type keeper_name_discovery =
   ; unavailable : current_meta_unavailable list
   }
 
-exception Current_meta_unavailable of current_meta_unavailable
+type current_meta_discovery =
+  { keeper_names : string list
+  ; persisted_keeper_names : string list
+  ; persistent_keeper_names : string list
+  ; metas : (string * Keeper_meta_contract.keeper_meta) list
+  ; unavailable : current_meta_unavailable list
+  }
+
+type current_meta_unavailable_observation =
+  | Current_meta_observed of current_meta_unavailable list
+  | Current_meta_observation_unavailable
 
 val current_meta_unavailable_reason_to_string :
   current_meta_unavailable_reason -> string
@@ -25,7 +37,7 @@ val current_meta_unavailable_message : current_meta_unavailable -> string
 val current_meta_unavailable_to_yojson : current_meta_unavailable -> Yojson.Safe.t
 
 val current_meta_unavailable_collection_to_yojson :
-  current_meta_unavailable list -> Yojson.Safe.t
+  current_meta_unavailable_observation -> Yojson.Safe.t
 
 (** Hook invoked after each successful [write_meta] /
     [write_meta_with_merge]. Reset by the runtime to keep
@@ -57,15 +69,21 @@ val is_keeper_meta_file : string -> bool
 
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
-val persisted_keeper_names_result : Workspace.config -> (string list, string) result
-val persisted_keeper_names : Workspace.config -> string list
+val persisted_keeper_names_result :
+  Workspace.config -> (string list, current_meta_unavailable) result
+val persisted_keeper_names : Workspace.config -> keeper_name_discovery
 
 (** List keeper names declared in TOML config (overlay sources). *)
 val configured_keeper_names : Workspace.config -> string list
 
 (** Primary keeper discovery: persisted JSON names. *)
-val keeper_names_result : Workspace.config -> (string list, string) result
-val keeper_names : Workspace.config -> string list
+val keeper_names_result :
+  Workspace.config -> (string list, current_meta_unavailable) result
+val keeper_names : Workspace.config -> keeper_name_discovery
+
+(** One current-schema observation used by operator, health, and dashboard
+    projections. Each candidate metadata row is decoded at most once. *)
+val discover_current_meta : Workspace.config -> current_meta_discovery
 
 val current_meta_unavailable_facts :
   Workspace.config -> current_meta_unavailable list

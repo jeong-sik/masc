@@ -92,7 +92,7 @@ let assignment_json (default : Runtime.t option) (keeper_name : string) : Yojson
    riders bug #14 is about). *)
 let all_keeper_names ~(config : Workspace.config) : string list =
   let assigned = List.map fst (Runtime.keeper_assignments ()) in
-  let registered = Keeper_meta_store.keeper_names config in
+  let registered = (Keeper_meta_store.keeper_names config).names in
   assigned @ registered |> List.sort_uniq String.compare
 ;;
 

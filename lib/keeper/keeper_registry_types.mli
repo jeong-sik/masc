@@ -57,6 +57,12 @@ type fiber_drop_cause =
   | Cancelled_by_parent
   | Unexpected
 
+type current_meta_failure_cause =
+  | Current_meta_invalid
+  | Current_meta_read_failed
+  | Current_meta_missing
+  | Current_meta_discovery_failed
+
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
@@ -81,6 +87,10 @@ type failure_reason =
           idle watchdog should preserve this root cause instead of recasting
           the keeper as generically stale. *)
   | Fiber_unresolved of fiber_drop_cause
+  | Current_meta_unavailable of
+      { path_identity : string
+      ; cause : current_meta_failure_cause
+      }
   | Exception of string
   | Turn_overflow_failure
       (** Context-overflow compact-retry exhaustion observed for the current

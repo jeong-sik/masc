@@ -239,6 +239,22 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
            "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is \
             required."
          Fiber_unresolved)
+  | Keeper_registry.Current_meta_unavailable { path_identity; cause } ->
+    let cause =
+      match cause with
+      | Keeper_registry.Current_meta_invalid -> "invalid current schema"
+      | Keeper_registry.Current_meta_read_failed -> "read failed"
+      | Keeper_registry.Current_meta_missing -> "current metadata missing"
+      | Keeper_registry.Current_meta_discovery_failed -> "discovery failed"
+    in
+    Some
+      { blocker_class = "current_meta_unavailable"
+      ; summary =
+          Printf.sprintf
+            "Keeper current metadata is unavailable (%s, path=%s); lifecycle stopped with the typed cause preserved."
+            cause
+            path_identity
+      }
   | Keeper_registry.Turn_overflow_failure ->
     Some
       { blocker_class = "turn_overflow_failure"

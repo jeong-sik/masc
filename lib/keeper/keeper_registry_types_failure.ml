@@ -41,6 +41,12 @@ type fiber_drop_cause =
             missed-resolution bug. Emitted at ERROR severity. Drives the
             existing [cohort=fiber_unresolved] supervisor pause path. *)
 
+type current_meta_failure_cause =
+  | Current_meta_invalid
+  | Current_meta_read_failed
+  | Current_meta_missing
+  | Current_meta_discovery_failed
+
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
@@ -65,6 +71,10 @@ type failure_reason =
               provider/runtime errors. *)
       }
   | Fiber_unresolved of fiber_drop_cause
+  | Current_meta_unavailable of
+      { path_identity : string
+      ; cause : current_meta_failure_cause
+      }
   (** Fiber exited without resolving [done_r].
           Issue #18901: cause payload distinguishes graceful shutdown
           artifacts (SIGTERM/SIGINT during turn — INFO severity, no
@@ -105,6 +115,15 @@ let failure_reason_to_string = function
      fleet audits can split the noise:signal ratio (Issue #18901) and
      supervisor restart/back-off can treat parent-cancel differently
      from genuine missed-resolution. *)
+  | Current_meta_unavailable { path_identity; cause } ->
+    let cause =
+      match cause with
+      | Current_meta_invalid -> "invalid_current"
+      | Current_meta_read_failed -> "read_failed"
+      | Current_meta_missing -> "missing_current"
+      | Current_meta_discovery_failed -> "discovery_failed"
+    in
+    Printf.sprintf "current_meta_unavailable(%s:%s)" cause path_identity
   | Exception s -> Printf.sprintf "exception(%s)" s
   | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
@@ -130,6 +149,7 @@ let failure_reason_cohort_key = function
   | Some (Fiber_unresolved Unexpected) -> "fiber_unresolved"
   (* Graceful shutdown and parent cancellation stay distinct from an unexpected
      unresolved fiber for dashboard and metric observation. *)
+  | Some (Current_meta_unavailable _) -> "current_meta_unavailable"
   | Some (Exception _) -> "exception"
   | Some Turn_overflow_failure -> "turn_overflow_failure"
   | Some Operator_interrupt -> "operator_interrupt"
@@ -143,6 +163,7 @@ let stale_kill_failure_reason ~prior ~kill_class =
       | Turn_consecutive_failures _
       | Turn_overflow_failure
       | Heartbeat_consecutive_failures _
+      | Current_meta_unavailable _
       | Exception _
       | Operator_interrupt ) -> prior
   | Some

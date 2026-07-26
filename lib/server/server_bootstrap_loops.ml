@@ -1388,7 +1388,7 @@ let start_keeper_loops_owned
         claimed_persistence.claimed_report.shutdown.blocked_keeper_names
         |> Keeper_name_set.of_list
       in
-      let all_names = Keeper_meta_store.keeper_names config in
+      let all_names = (Keeper_meta_store.keeper_names config).names in
       let all_count = List.length all_names in
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"

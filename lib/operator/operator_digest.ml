@@ -272,7 +272,7 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
     Some (attention_item, recommended_action)
 
 let keeper_attention_projection_items config =
-  let keeper_names = Keeper_meta_store.keeper_names config in
+  let keeper_names = (Keeper_meta_store.keeper_names config).names in
   let status_attention =
     keeper_names
     |> List.filter_map (fun name ->

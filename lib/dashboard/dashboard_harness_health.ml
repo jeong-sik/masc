@@ -597,7 +597,7 @@ let read_keeper_metric_records ?since ?until (config : Workspace.config) keeper_
 
 let read_handoff_events ?since ?until (config : Workspace.config) =
   let events =
-    Keeper_meta_store.keeper_names config
+    (Keeper_meta_store.keeper_names config).names
     |> List.concat_map (fun keeper_name ->
       read_keeper_metric_records ?since ?until config keeper_name
       |> List.filter_map handoff_event_of_metrics_json)
@@ -609,7 +609,7 @@ let read_handoff_events ?since ?until (config : Workspace.config) =
 ;;
 
 let has_any_handoff_events (config : Workspace.config) =
-  Keeper_meta_store.keeper_names config
+  (Keeper_meta_store.keeper_names config).names
   |> List.exists (fun keeper_name ->
     read_keeper_metric_records config keeper_name
     |> List.exists (fun json -> Option.is_some (handoff_event_of_metrics_json json)))

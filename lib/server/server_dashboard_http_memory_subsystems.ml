@@ -71,7 +71,7 @@ let load_memory_subsystems_entries ~(config : Workspace_utils.config) =
      | _ ->
        let rows, errors =
          try
-           Keeper_meta_store.keeper_names config
+           (Keeper_meta_store.keeper_names config).names
            |> List.fold_left
                 (fun (rows_acc, errs_acc) keeper ->
                   match

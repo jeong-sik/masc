@@ -17,7 +17,11 @@ let keeper_reaction_ledger_health_json () =
   | Some state ->
     let config = (Mcp_server.workspace_config state) in
     let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings |> take 64 with
+      try
+        (Keeper_meta_store.keeper_names config).names
+        |> sorted_unique_strings
+        |> take 64
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn
@@ -50,7 +54,7 @@ let keeper_turn_admission_health_json () =
   | Some state ->
     let config = Mcp_server.workspace_config state in
     let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings with
+      try (Keeper_meta_store.keeper_names config).names |> sorted_unique_strings with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn
@@ -78,7 +82,7 @@ let keeper_board_event_collection_health_json () =
   | Some state ->
     let config = Mcp_server.workspace_config state in
     let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings with
+      try (Keeper_meta_store.keeper_names config).names |> sorted_unique_strings with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn
@@ -262,10 +266,13 @@ let keeper_fleet_runtime_resolution_base_fields
         | Some state ->
           state
           |> Mcp_server.workspace_config
-          |> Keeper_meta_store.current_meta_unavailable_facts
-          |> Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+          |> Keeper_meta_store.discover_current_meta
+          |> fun discovery ->
+          Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+            (Keeper_meta_store.Current_meta_observed discovery.unavailable)
         | None ->
-          Keeper_meta_store.current_meta_unavailable_collection_to_yojson [] )
+          Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+            Keeper_meta_store.Current_meta_observation_unavailable )
     ; "keeper_turn_admission", keeper_turn_admission_health_json ()
     ; "keeper_board_event_collection", keeper_board_event_collection_health_json ()
     ]

@@ -1836,7 +1836,24 @@ let run_heartbeat_loop
             "%s: heartbeat stopped on %s"
             m.name
             (Keeper_meta_store.current_meta_unavailable_message unavailable);
-          raise (Keeper_meta_store.Current_meta_unavailable unavailable)
+          let cause =
+            match unavailable.reason with
+            | Keeper_meta_store.Invalid_current ->
+              Keeper_registry.Current_meta_invalid
+            | Keeper_meta_store.Read_failed ->
+              Keeper_registry.Current_meta_read_failed
+            | Keeper_meta_store.Missing_current ->
+              Keeper_registry.Current_meta_missing
+            | Keeper_meta_store.Discovery_failed ->
+              Keeper_registry.Current_meta_discovery_failed
+          in
+          Keeper_registry.set_failure_reason
+            ~base_path:ctx.config.base_path
+            m.name
+            (Some
+               (Keeper_registry.Current_meta_unavailable
+                  { path_identity = unavailable.path_identity; cause }));
+          raise Keeper_registry.Keeper_fiber_crash
       in
       Option.iter (fun new_mtime -> last_meta_mtime := new_mtime) new_meta_mtime;
       let meta_current =

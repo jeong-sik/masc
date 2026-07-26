@@ -92,7 +92,7 @@ let running_keeper_names ?base_path () =
 let durable_paused_keeper_scan ?(include_details = true) config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
-  Keeper_meta_store.keeper_names config
+  (Keeper_meta_store.keeper_names config).names
   |> List.fold_left
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with
@@ -213,7 +213,8 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
   let now = Unix.gettimeofday () in
   let configured_names = Keeper_meta_store.configured_keeper_names config in
   let all_names =
-    sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
+    sorted_unique_strings
+      (configured_names @ (Keeper_meta_store.keeper_names config).names)
   in
   let is_configured name = List.exists (String.equal name) configured_names in
   let should_count_autoboot_target name = is_configured name in
@@ -588,7 +589,8 @@ let keeper_identity_drift_scan config =
     Keeper_meta_store.configured_keeper_names config |> sorted_unique_strings
   in
   let persisted_meta_names =
-    Keeper_meta_store.persisted_keeper_names config |> sorted_unique_strings
+    (Keeper_meta_store.persisted_keeper_names config).names
+    |> sorted_unique_strings
   in
   let materializable_configured_names =
     configured_names

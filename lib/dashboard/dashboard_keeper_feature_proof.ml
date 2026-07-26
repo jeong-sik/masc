@@ -48,7 +48,7 @@ let uniq_sorted names =
   |> List.sort_uniq String.compare
 
 let load_keeper_snapshots config =
-  Keeper_meta_store.keeper_names config
+  (Keeper_meta_store.keeper_names config).names
   |> uniq_sorted
   |> List.map (fun keeper_name ->
     match Keeper_meta_store.read_meta config keeper_name with

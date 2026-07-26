@@ -39,7 +39,10 @@ let test_invalid_current_is_typed_and_byte_preserving () =
        (match unavailable.reason with
         | Keeper_meta_store.Invalid_current -> ()
         | Keeper_meta_store.Read_failed ->
-          Alcotest.fail "schema mismatch was classified as a read failure");
+          Alcotest.fail "schema mismatch was classified as a read failure"
+        | Keeper_meta_store.Missing_current
+        | Keeper_meta_store.Discovery_failed ->
+          Alcotest.fail "schema mismatch was classified as a discovery failure");
        check string
          "path projection is basename-only"
          (Filename.basename path)
@@ -56,7 +59,7 @@ let test_invalid_current_is_typed_and_byte_preserving () =
             unavailable.detail);
        let projection =
          Keeper_meta_store.current_meta_unavailable_collection_to_yojson
-           [ unavailable ]
+           (Keeper_meta_store.Current_meta_observed [ unavailable ])
        in
        check string
          "collection status"
@@ -92,6 +95,13 @@ let test_all_outside_fields_share_one_reason () =
          | Error { reason = Keeper_meta_store.Invalid_current; _ } -> ()
          | Error { reason = Keeper_meta_store.Read_failed; _ } ->
            Alcotest.failf "%s was classified as read_failed" key
+         | Error
+             { reason =
+                 ( Keeper_meta_store.Missing_current
+                 | Keeper_meta_store.Discovery_failed )
+             ; _
+             } ->
+           Alcotest.failf "%s was classified as a discovery failure" key
          | Ok _ -> Alcotest.failf "%s unexpectedly decoded" key))
 ;;
 

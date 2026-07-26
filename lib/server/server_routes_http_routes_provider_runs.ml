@@ -218,7 +218,7 @@ let add_routes ~sw router =
                (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
                   ~keepers:[] ~window_minutes:window)
              ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
+               let keeper_names = (Keeper_meta_store.keeper_names config).names in
                let keepers =
                  List.filter_map (fun name ->
                    match Keeper_meta_store.read_meta config name with
@@ -258,7 +258,7 @@ let add_routes ~sw router =
                (Dashboard_http_keeper.keeper_decisions_json ~config
                   ~keepers:[] ~limit ())
              ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
+               let keeper_names = (Keeper_meta_store.keeper_names config).names in
                let keepers =
                  List.filter_map (fun name ->
                    match Keeper_meta_store.read_meta config name with
@@ -283,7 +283,7 @@ let add_routes ~sw router =
                (Dashboard_http_keeper.keeper_decisions_log_json ~config
                   ~keepers:[] ~limit ())
              ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
+               let keeper_names = (Keeper_meta_store.keeper_names config).names in
                let keepers =
                  List.filter_map (fun name ->
                    match Keeper_meta_store.read_meta config name with
@@ -308,7 +308,7 @@ let add_routes ~sw router =
                (Dashboard_http_keeper.keeper_memory_log_json ~config
                   ~keepers:[] ~limit ())
              ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
+               let keeper_names = (Keeper_meta_store.keeper_names config).names in
                let keepers =
                  List.filter_map (fun name ->
                    match Keeper_meta_store.read_meta config name with

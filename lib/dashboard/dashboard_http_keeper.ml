@@ -35,7 +35,7 @@ let count_execution_receipt_entries = Dashboard_http_keeper_execution_receipt.co
 let execution_receipt_coverage_gaps = Dashboard_http_keeper_execution_receipt.execution_receipt_coverage_gaps
 
 let keeper_names (config : Workspace.config) =
-  Keeper_meta_store.keeper_names config
+  (Keeper_meta_store.keeper_names config).names
 
 let keeper_count (config : Workspace.config) : int =
   List.length (keeper_names config)

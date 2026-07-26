@@ -17,6 +17,8 @@ type t =
   (** [Keeper_registry.Provider_runtime_error]: payload is the
           original [code] field. *)
   | Fiber_unresolved (** [Keeper_registry.Fiber_unresolved]. *)
+  | Current_meta_unavailable
+  (** Current-schema Keeper metadata could not be observed. *)
   | Turn_overflow_failure
   (** [Keeper_registry.Turn_overflow_failure]: context overflow with
           compact retry exhausted; the failure is observed without changing

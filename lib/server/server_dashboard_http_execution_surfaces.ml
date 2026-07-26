@@ -654,7 +654,7 @@ let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
 ;;
 
 let running_keeper_names (config : Workspace.config) =
-  Keeper_meta_store.keeper_names config
+  (Keeper_meta_store.keeper_names config).names
   |> List.filter_map (fun name ->
     match Keeper_meta_store.read_meta config name with
     | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->

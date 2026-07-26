@@ -54,7 +54,11 @@ type auto_judge_resume_failure_code =
   | Resume_identity_unbound
   | Resume_completion_persistence_uncertain
   | Resume_completion_failed
+  | Resume_judgment_resolution_failed
   | Resume_exact_state_not_completed
+
+val auto_judge_resume_failure_code_to_string :
+  auto_judge_resume_failure_code -> string
 
 type auto_judge_resume_failure =
   { approval_id : string

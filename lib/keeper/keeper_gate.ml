@@ -46,7 +46,17 @@ type auto_judge_resume_failure_code =
   | Resume_identity_unbound
   | Resume_completion_persistence_uncertain
   | Resume_completion_failed
+  | Resume_judgment_resolution_failed
   | Resume_exact_state_not_completed
+
+let auto_judge_resume_failure_code_to_string = function
+  | Resume_worker_start_failed -> "worker_start_failed"
+  | Resume_identity_unbound -> "identity_unbound"
+  | Resume_completion_persistence_uncertain -> "completion_persistence_uncertain"
+  | Resume_completion_failed -> "completion_failed"
+  | Resume_judgment_resolution_failed -> "judgment_resolution_failed"
+  | Resume_exact_state_not_completed -> "exact_state_not_completed"
+;;
 
 type auto_judge_resume_failure =
   { approval_id : string
@@ -848,7 +858,10 @@ let finalize_recovered_judgment
              Keeper_approval_queue.Fsync_completed
          ; _
           } ->
-       resolve_judgment entry ~approval_id:entry.id summary
+       (match resolve_judgment entry ~approval_id:entry.id summary with
+        | Ok outcome -> Ok outcome
+        | Error operator_detail ->
+          Error (Resume_judgment_resolution_failed, operator_detail))
       | Ok
           { write_outcome =
               Keeper_approval_queue.Visible_sync_unconfirmed _detail

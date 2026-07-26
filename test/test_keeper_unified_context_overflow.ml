@@ -54,7 +54,15 @@ let test_is_context_overflow_only_for_overflow_errors () =
   check bool "rendered internal text does not match" false
     (EC.is_context_overflow rendered_only);
   check bool "rendered internal text is not auto-recoverable" false
-    (EC.is_auto_recoverable_turn_error rendered_only)
+    (EC.is_auto_recoverable_turn_error rendered_only);
+  let unrecognized_stop_reason =
+    Agent_sdk.Error.Agent
+      (UnrecognizedStopReason { reason = "model_context_window_exceeded" })
+  in
+  check bool "raw unrecognized stop reason does not match" false
+    (EC.is_context_overflow unrecognized_stop_reason);
+  check bool "raw unrecognized stop reason is not auto-recoverable" false
+    (EC.is_auto_recoverable_turn_error unrecognized_stop_reason)
 ;;
 
 let test_input_capacity_is_not_context_overflow () =

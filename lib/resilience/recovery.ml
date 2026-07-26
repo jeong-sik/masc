@@ -262,7 +262,6 @@ let transient_phrases =
 
 let resource_phrases =
   [ ("token", `Tokens);
-    ("context overflow", `Tokens);
     ("context window", `Tokens);
     ("context length", `Tokens);
     ("memory", `Memory);

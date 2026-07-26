@@ -122,9 +122,13 @@ let test_classify_hard_quota_resource_exhausted () =
   | _ -> assert false
 
 let test_classify_permanent_fallback () =
-  match R.classify_string "Some generic error" with
-  | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
-  | _ -> assert false
+  let require_permanent_handoff = function
+    | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
+    | _ -> assert false
+  in
+  require_permanent_handoff (R.classify_string "Some generic error");
+  require_permanent_handoff
+    (R.classify_string "Context overflow: arbitrary rendered diagnostic")
 
 (* ─── default_strategy mapping ────────────────────────────────── *)
 

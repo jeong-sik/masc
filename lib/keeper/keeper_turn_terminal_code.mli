@@ -23,7 +23,7 @@ type t =
   | Stale_turn_timeout_in_turn
   (** Terminal code for a stale turn whose kill-class sub-class was not
           preserved on the wire (formerly the retired [In_turn_hung]); produced
-          by the lossy [of_wire] / [of_failure_reason_option] canonicalisation. *)
+          by the lossy [of_wire] canonicalisation. *)
   | Stale_turn_timeout_no_progress
   (** [Keeper_registry.Stale_turn_timeout (Mid_turn_no_progress _)]: a live
           turn stayed inside its outer timeout but stopped producing
@@ -90,16 +90,6 @@ val of_wire : string -> t option
     constructor there is a compile error here, which is the property
     this RFC is meant to provide. *)
 val of_failure_reason : Keeper_registry.failure_reason -> t
-
-(** Option-wrapped bridge. [None] is the legacy convention for a
-    keeper that became stale without a recorded [failure_reason]; the
-    pre-RFC string emitter mapped this to ["stale_turn_timeout"]. We
-    canonicalise to [Stale_turn_timeout_in_turn] so [to_wire] reproduces
-    the same bytes. PR-3 narrows callers to a non-option representation
-    where applicable.
-
-    @since 0.193.0 *)
-val of_failure_reason_option : Keeper_registry.failure_reason option -> t
 
 (** Wrap an [Agent_sdk.Error.t] wire string into the typed bridge.
     The argument is the legacy parametrised wire string produced by

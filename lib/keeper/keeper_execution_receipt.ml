@@ -684,20 +684,15 @@ let stale_kill_class_label = function
   | Keeper_registry.Noop_failure_loop _ -> "noop_failure_loop"
 ;;
 
-let stale_terminal_reason_code_typed = Keeper_turn_terminal_code.of_failure_reason_option
+let stale_terminal_reason_code_typed = Keeper_turn_terminal_code.of_failure_reason
 
-let stale_broadcast_failure_cohort = function
-  | Some _ as reason -> Keeper_registry.failure_reason_cohort_key reason
-  | None -> "stale_turn_timeout"
-;;
+let stale_broadcast_failure_cohort reason =
+  Keeper_registry.failure_reason_cohort_key (Some reason)
 
-let stale_broadcast_failure_reason_text = function
-  | Some reason -> Some (Keeper_registry.failure_reason_to_string reason)
-  | None -> None
-;;
+let stale_broadcast_failure_reason_text = Keeper_registry.failure_reason_to_string
 
 let stale_broadcast_kill_class = function
-  | Some (Keeper_registry.Stale_turn_timeout cls) -> Some (stale_kill_class_label cls)
+  | Keeper_registry.Stale_turn_timeout cls -> Some (stale_kill_class_label cls)
   | _ -> None
 ;;
 
@@ -794,7 +789,7 @@ let stale_broadcast_payload
       , `String
           (Keeper_turn_terminal_code.to_wire
              (stale_terminal_reason_code_typed failure_reason)) )
-    ; "failure_reason", string_opt_json failure_reason_text
+    ; "failure_reason", `String failure_reason_text
     ; "failure_reason_cohort", `String failure_reason_cohort
     ; "stale_kill_class", string_opt_json (stale_broadcast_kill_class failure_reason)
     ; "stale_turn_bucket", `String (stale_turn_bucket stale_seconds)

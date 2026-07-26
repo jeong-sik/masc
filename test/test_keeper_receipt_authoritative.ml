@@ -105,19 +105,17 @@ let check_bool label expected actual =
          actual)
 
 let stale_idle_failure stall_seconds =
-  Some
-    (Masc.Keeper_registry.Stale_turn_timeout
-       (Masc.Keeper_registry.Idle_turn { stall_seconds }))
+  Masc.Keeper_registry.Stale_turn_timeout
+    (Masc.Keeper_registry.Idle_turn { stall_seconds })
 
 let stale_mid_turn_failure since_progress_seconds =
-  Some
-    (Masc.Keeper_registry.Stale_turn_timeout
-       (Masc.Keeper_registry.Mid_turn_no_progress
-          { active_seconds = since_progress_seconds +. 30.0
-          ; since_progress_seconds
-          ; progress_timeout_threshold = 300.0
-          ; last_progress_kind = Some "runtime_state"
-          }))
+  Masc.Keeper_registry.Stale_turn_timeout
+    (Masc.Keeper_registry.Mid_turn_no_progress
+       { active_seconds = since_progress_seconds +. 30.0
+       ; since_progress_seconds
+       ; progress_timeout_threshold = 300.0
+       ; last_progress_kind = Some "runtime_state"
+       })
 
 let emit_stale_for_testing
       ?(keeper_name = "keeper-a")

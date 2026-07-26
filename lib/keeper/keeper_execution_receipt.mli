@@ -252,7 +252,7 @@ val stale_broadcast_payload
   -> runtime_id:string
   -> trace_id:string
   -> generation:int
-  -> failure_reason:Keeper_registry.failure_reason option
+  -> failure_reason:Keeper_registry.failure_reason
   -> stale_seconds:float
   -> last_turn_ts:float
   -> Yojson.Safe.t
@@ -270,7 +270,7 @@ module For_testing : sig
     -> runtime_id:string
     -> trace_id:string
     -> generation:int
-    -> failure_reason:Keeper_registry.failure_reason option
+    -> failure_reason:Keeper_registry.failure_reason
     -> stale_seconds:float
     -> stale_broadcast_dedupe_key
 
@@ -282,7 +282,7 @@ module For_testing : sig
     -> runtime_id:string
     -> trace_id:string
     -> generation:int
-    -> failure_reason:Keeper_registry.failure_reason option
+    -> failure_reason:Keeper_registry.failure_reason
     -> stale_seconds:float
     -> emit:(unit -> unit)
     -> bool
@@ -302,7 +302,7 @@ val emit_stale_keeper_broadcast
   -> runtime_id:string
   -> trace_id:string
   -> generation:int
-  -> failure_reason:Keeper_registry.failure_reason option
+  -> failure_reason:Keeper_registry.failure_reason
   -> stale_seconds:float
   -> last_turn_ts:float
   -> unit

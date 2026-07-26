@@ -81,13 +81,4 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Exception msg -> Exception_unhandled msg
 ;;
 
-let of_failure_reason_option = function
-  | Some fr -> of_failure_reason fr
-  | None ->
-    (* A stale keeper without a recorded failure reason still emits the
-       stale-turn cohort. Canonicalise to [Stale_turn_timeout_in_turn],
-       matching the lossy [of_wire] convention for ["stale_turn_timeout"]. *)
-    Stale_turn_timeout_in_turn
-;;
-
 let of_sdk_error_wire wire = Sdk_error wire

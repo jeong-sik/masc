@@ -125,7 +125,7 @@ let make_error ?(settlement_warnings = []) kind =
   { kind; settlement_warnings }
 ;;
 
-let prepend_warnings warnings error =
+let prepend_warnings warnings (error : error) =
   { error with
     settlement_warnings = warnings @ error.settlement_warnings
   }
@@ -248,19 +248,45 @@ type settle_outcome =
   | Settled_not_published of snapshot
   | Still_indeterminate of pending_publication
 
-let snapshot_state value = value.state
-let snapshot_generation value = value.generation
-let snapshot_settlement_warnings value = value.settlement_warnings
-let committed_snapshot value = value.snapshot
-let commit_receipt_id value = value.receipt_id
-let commit_receipt_operation_id value = value.operation_id
-let commit_receipt_state_sha256 value = value.state_sha256
-let commit_receipt_generation value = value.generation
-let commit_receipt_settlement_warnings value = value.settlement_warnings
-let pending_publication_operation_id value = value.prepared.operation_id
-let pending_publication_generation value = value.prepared.generation
-let pending_publication_receipt_id value = value.prepared.receipt_id
-let pending_publication_settlement_warnings value = value.settlement_warnings
+let snapshot_state (value : snapshot) = value.state
+let snapshot_generation (value : snapshot) = value.generation
+
+let snapshot_settlement_warnings (value : snapshot) =
+  value.settlement_warnings
+;;
+
+let committed_snapshot (value : commit_receipt) = value.snapshot
+let commit_receipt_id (value : commit_receipt) = value.receipt_id
+
+let commit_receipt_operation_id (value : commit_receipt) =
+  value.operation_id
+;;
+
+let commit_receipt_state_sha256 (value : commit_receipt) =
+  value.state_sha256
+;;
+
+let commit_receipt_generation (value : commit_receipt) = value.generation
+
+let commit_receipt_settlement_warnings (value : commit_receipt) =
+  value.settlement_warnings
+;;
+
+let pending_publication_operation_id (value : pending_publication) =
+  value.prepared.operation_id
+;;
+
+let pending_publication_generation (value : pending_publication) =
+  value.prepared.generation
+;;
+
+let pending_publication_receipt_id (value : pending_publication) =
+  value.prepared.receipt_id
+;;
+
+let pending_publication_settlement_warnings (value : pending_publication) =
+  value.settlement_warnings
+;;
 
 let head_operation_to_string = function
   | Head.Pin_parent -> "pin_parent"
@@ -397,7 +423,7 @@ let settlement_warning_to_string = function
       (exact_read_diagnostic_to_string diagnostic)
 ;;
 
-let error_settlement_warnings value = value.settlement_warnings
+let error_settlement_warnings (value : error) = value.settlement_warnings
 
 let error_to_string value =
   match value.kind with
@@ -699,7 +725,7 @@ let finite value =
   | FP_infinite | FP_nan -> false
 ;;
 
-let validate_fact fact =
+let validate_fact (fact : Types.fact) =
   let optional_finite = function
     | None -> true
     | Some value -> finite value
@@ -742,7 +768,7 @@ let validate_episode episode =
       map_result validate_fact episode.claims |> Result.map ignore
 ;;
 
-let validate_state value =
+let validate_state (value : state) =
   let* _ = map_result validate_fact value.facts in
   let* _ = map_result validate_episode value.episodes in
   Ok ()
@@ -1025,7 +1051,10 @@ let random_token store purpose =
     Eio.Flow.read_exact store.secure_random entropy;
     Ok (hash_domain purpose (Cstruct.to_string entropy))
   with
-  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break)
+    as exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exception_ backtrace
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     Error
@@ -1102,7 +1131,7 @@ let empty_snapshot binding head_snapshot =
   }
 ;;
 
-let load_from_head store head_snapshot =
+let load_from_head (store : t) (head_snapshot : Head.snapshot) =
   let head_warnings =
     warnings_of_head (Head.snapshot_settlement_warnings head_snapshot)
   in
@@ -1259,13 +1288,13 @@ let load_from_head store head_snapshot =
           }
 ;;
 
-let check_active store =
+let check_active (store : t) =
   if Atomic.get store.binding.active
   then Ok ()
   else Error (make_error Store_not_active)
 ;;
 
-let check_binding store binding warnings =
+let check_binding (store : t) (binding : binding) warnings =
   let* () = check_active store |> with_prior_warnings warnings in
   if store.binding == binding
   then Ok ()
@@ -1306,7 +1335,55 @@ let load store =
             { phase = "read"; failure = failure.error }))
 ;;
 
-let receipt_of_snapshot snapshot =
+type terminal_revalidation =
+  | Terminal_current of snapshot
+  | Terminal_stale of snapshot
+
+let revalidate_terminal_current (store : t) (current : snapshot) =
+  match
+    Head.read
+      ~secure_random:store.secure_random
+      ~parent:store.root
+      ~leaf:head_leaf
+  with
+  | Error failure ->
+    let failure : Head.failure = failure in
+    Error
+      (make_error
+         ~settlement_warnings:
+           (current.settlement_warnings
+            @ warnings_of_head failure.settlement_warnings)
+         (Head_operation_failed
+            { phase = "terminal revalidation"; failure = failure.error }))
+  | Ok head_snapshot ->
+    let observed_cursor = Head.snapshot_cursor head_snapshot in
+    let observed_row = Head.snapshot_row head_snapshot in
+    if same_cursor observed_cursor current.cursor
+       && observed_row = current.head_row
+    then
+      Ok
+        (Terminal_current
+           { current with
+             settlement_warnings =
+               current.settlement_warnings
+               @ warnings_of_head
+                   (Head.snapshot_settlement_warnings head_snapshot)
+           })
+    else
+      (match load_from_head store head_snapshot with
+       | Error error ->
+         Error (prepend_warnings current.settlement_warnings error)
+       | Ok authoritative ->
+         Ok
+           (Terminal_stale
+              { authoritative with
+                settlement_warnings =
+                  current.settlement_warnings
+                  @ authoritative.settlement_warnings
+              }))
+;;
+
+let receipt_of_snapshot (snapshot : snapshot) =
   match snapshot.commit with
   | None -> None
   | Some commit ->
@@ -1339,7 +1416,12 @@ let create_episode_objects
   loop [] episodes
 ;;
 
-let prepare store ~expected ~operation_id ~state =
+let prepare
+      (store : t)
+      ~(expected : snapshot)
+      ~operation_id
+      ~(state : state)
+  =
   let* () =
     check_binding
       store
@@ -1368,30 +1450,33 @@ let prepare store ~expected ~operation_id ~state =
     then Ok (Stale_expected current)
     else
       match current.commit with
-      | Some commit
-        when String.equal commit.operation_id operation_id
-             && Sha256.equal
-                  commit.state_sha256
-                  requested_state_sha256 ->
-        (match receipt_of_snapshot current with
-         | Some receipt -> Ok (Current_commit_replay receipt)
-         | None ->
-           Error
-             (make_error
-                ~settlement_warnings:current.settlement_warnings
-                (Invalid_store_json
-                   { artifact = "HEAD"
-                   ; detail = "current commit receipt is absent"
-                   })))
       | Some commit when String.equal commit.operation_id operation_id ->
-        Error
-          (make_error
-             ~settlement_warnings:current.settlement_warnings
-             (Conflicting_operation
-                { operation_id
-                ; committed_state_sha256 = commit.state_sha256
-                ; requested_state_sha256
-                }))
+        let* terminal = revalidate_terminal_current store current in
+        (match terminal with
+         | Terminal_stale authoritative ->
+           Ok (Stale_expected authoritative)
+         | Terminal_current current ->
+           if Sha256.equal commit.state_sha256 requested_state_sha256
+           then
+             (match receipt_of_snapshot current with
+              | Some receipt -> Ok (Current_commit_replay receipt)
+              | None ->
+                Error
+                  (make_error
+                     ~settlement_warnings:current.settlement_warnings
+                     (Invalid_store_json
+                        { artifact = "HEAD"
+                        ; detail = "current commit receipt is absent"
+                        })))
+           else
+             Error
+               (make_error
+                  ~settlement_warnings:current.settlement_warnings
+                  (Conflicting_operation
+                     { operation_id
+                     ; committed_state_sha256 = commit.state_sha256
+                     ; requested_state_sha256
+                     })))
       | Some _ | None ->
         if Int64.equal current.generation Int64.max_int
         then
@@ -1503,7 +1588,11 @@ let prepare store ~expected ~operation_id ~state =
                  })
 ;;
 
-let snapshot_of_prepared prepared cursor warnings =
+let snapshot_of_prepared
+      (prepared : prepared_commit)
+      cursor
+      warnings
+  =
   { binding = prepared.binding
   ; cursor
   ; head_row = Some prepared.head_row
@@ -1530,13 +1619,13 @@ let receipt_of_prepared prepared cursor warnings =
   }
 ;;
 
-let add_snapshot_warnings warnings snapshot =
+let add_snapshot_warnings warnings (snapshot : snapshot) =
   { snapshot with
     settlement_warnings = warnings @ snapshot.settlement_warnings
   }
 ;;
 
-let publish store prepared =
+let publish (store : t) (prepared : prepared_commit) =
   let* () =
     check_binding
       store
@@ -1608,7 +1697,10 @@ let publish store prepared =
                   { phase = "publish"; failure = head_error }))))
 ;;
 
-let snapshot_matches_pending snapshot pending =
+let snapshot_matches_pending
+      (snapshot : snapshot)
+      (pending : pending_publication)
+  =
   match snapshot.commit, snapshot.store_id with
   | Some commit, Some store_id ->
     String.equal store_id pending.prepared.store_id
@@ -1621,7 +1713,7 @@ let snapshot_matches_pending snapshot pending =
   | None, _ | _, None -> false
 ;;
 
-let settle store pending =
+let settle (store : t) (pending : pending_publication) =
   let* () =
     check_binding
       store

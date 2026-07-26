@@ -11,7 +11,11 @@ let manifest_schema = "masc-memory-os-manifest-v2"
 let commit_schema = "masc-memory-os-commit-v2"
 let state_schema = "masc-memory-os-state-v2"
 let head_leaf = "HEAD"
-let max_immutable_bytes = Int64.of_int (64 * 1024 * 1024)
+(* Private guard for one contiguous OCaml string allocation. This is not a
+   product capacity, admission/routing limit, provider/model capability,
+   pricing input, or public configuration. *)
+let immutable_serialization_safety_ceiling_bytes =
+  Int64.of_int (64 * 1024 * 1024)
 
 module Sha256 = struct
   type t = string
@@ -28,6 +32,7 @@ module Sha256 = struct
 end
 
 let canonical_json json = Yojson.Safe.to_string json
+let list_map fn values = List.rev (List.rev_map fn values)
 
 let sha256 bytes =
   Digestif.SHA256.(digest_string bytes |> to_hex)
@@ -42,6 +47,20 @@ type artifact_kind =
   | Episode_object
   | Manifest_object
   | Commit_object
+
+type persisted_artifact =
+  [ `Facts
+  | `Episode
+  | `Manifest
+  | `Commit
+  | `Head_row
+  ]
+
+type implementation_safety_violation =
+  { artifact : persisted_artifact
+  ; observed_at_least_bytes : int64
+  ; ceiling_bytes : int64
+  }
 
 let artifact_kind_token = function
   | Facts_object -> "facts"
@@ -93,11 +112,9 @@ type error_kind =
       ; exception_ : exn
       ; backtrace : Printexc.raw_backtrace
       }
-  | Immutable_object_too_large of
-      { kind : artifact_kind
-      ; byte_count : int64
-      ; maximum : int64
-      }
+  | Implementation_safety_ceiling_exceeded
+      of implementation_safety_violation
+  | Byte_accounting_overflow of persisted_artifact
   | Immutable_create_failed of
       { kind : artifact_kind
       ; leaf : string
@@ -247,6 +264,405 @@ type settle_outcome =
   | Settled_committed of commit_receipt
   | Settled_not_published of snapshot
   | Still_indeterminate of pending_publication
+
+module Canonical_bytes = struct
+  type sink =
+    { write : string -> off:int -> len:int -> unit }
+
+  type measurement_error =
+    | Ceiling_exceeded of int64
+    | Counter_overflow
+
+  exception Measurement_ceiling_exceeded of int64
+  exception Measurement_counter_overflow
+  exception Render_mismatch of string
+
+  let write sink value =
+    sink.write value ~off:0 ~len:(String.length value)
+  ;;
+
+  let write_slice sink value ~off ~len =
+    if len > 0 then sink.write value ~off ~len
+  ;;
+
+  let hex_digit value =
+    Char.chr (if value < 10 then value + 48 else value + 87)
+  ;;
+
+  let json_string sink value =
+    write sink "\"";
+    let start = ref 0 in
+    let flush stop =
+      write_slice sink value ~off:!start ~len:(stop - !start)
+    in
+    for index = 0 to String.length value - 1 do
+      let escaped =
+        match value.[index] with
+        | '"' -> Some "\\\""
+        | '\\' -> Some "\\\\"
+        | '\b' -> Some "\\b"
+        | '\012' -> Some "\\f"
+        | '\n' -> Some "\\n"
+        | '\r' -> Some "\\r"
+        | '\t' -> Some "\\t"
+        | ('\x00' .. '\x1f' | '\x7f') as character ->
+          let code = Char.code character in
+          let escaped = Bytes.of_string "\\u0000" in
+          Bytes.set escaped 4 (hex_digit (code lsr 4));
+          Bytes.set escaped 5 (hex_digit (code land 0xf));
+          Some (Bytes.unsafe_to_string escaped)
+        | _ -> None
+      in
+      match escaped with
+      | None -> ()
+      | Some escaped ->
+        flush index;
+        write sink escaped;
+        start := index + 1
+    done;
+    flush (String.length value);
+    write sink "\""
+  ;;
+
+  let int_value sink value = write sink (string_of_int value)
+  let int64_value sink value = write sink (Int64.to_string value)
+
+  let float_value sink value =
+    write sink (Yojson.Safe.to_string (`Float value))
+  ;;
+
+  let field sink ~first name =
+    if not first then write sink ",";
+    json_string sink name;
+    write sink ":"
+  ;;
+
+  let list emit sink values =
+    write sink "[";
+    let rec loop first = function
+      | [] -> ()
+      | value :: rest ->
+        if not first then write sink ",";
+        emit sink value;
+        loop false rest
+    in
+    loop true values;
+    write sink "]"
+  ;;
+
+  let measure_bounded ~ceiling emit =
+    let count = ref 0L in
+    let sink =
+      { write =
+          (fun _value ~off:_ ~len ->
+             let delta = Int64.of_int len in
+             if
+               Int64.compare
+                 !count
+                 (Int64.sub Int64.max_int delta)
+               > 0
+             then raise Measurement_counter_overflow;
+             let next = Int64.add !count delta in
+             if Int64.compare next ceiling > 0
+             then raise (Measurement_ceiling_exceeded next);
+             count := next)
+      }
+    in
+    try
+      emit sink;
+      Ok !count
+    with
+    | Measurement_ceiling_exceeded observed ->
+      Error (Ceiling_exceeded observed)
+    | Measurement_counter_overflow -> Error Counter_overflow
+  ;;
+
+  let digest ?domain emit =
+    let context = ref Digestif.SHA256.empty in
+    let feed value ~off ~len =
+      context :=
+        Digestif.SHA256.feed_string !context ~off ~len value
+    in
+    (match domain with
+     | None -> ()
+     | Some domain ->
+       let prefix = "masc.memory_os.store/v2\000" in
+       feed prefix ~off:0 ~len:(String.length prefix);
+       feed domain ~off:0 ~len:(String.length domain);
+       feed "\000" ~off:0 ~len:1);
+    emit { write = feed };
+    Digestif.SHA256.(get !context |> to_hex)
+  ;;
+
+  let render_exact ~byte_count emit =
+    if
+      Int64.compare byte_count 0L < 0
+      || Int64.compare
+           byte_count
+           (Int64.of_int Sys.max_string_length)
+         > 0
+    then Error "measured byte count is not representable as one OCaml string"
+    else
+      let expected = Int64.to_int byte_count in
+      let output = Bytes.create expected in
+      let position = ref 0 in
+      let sink =
+        { write =
+            (fun value ~off ~len ->
+               if len < 0 || !position > expected - len
+               then
+                 raise
+                   (Render_mismatch
+                      "canonical emitter produced more bytes than measured");
+               Bytes.blit_string value off output !position len;
+               position := !position + len)
+        }
+      in
+      try
+        emit sink;
+        if !position <> expected
+        then
+          Error
+            (Printf.sprintf
+               "canonical emitter produced %d bytes after measuring %d"
+               !position
+               expected)
+        else Ok (Bytes.unsafe_to_string output)
+      with
+      | Render_mismatch detail -> Error detail
+  ;;
+end
+
+let emit_provenance sink (value : Types.provenance_event) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "trace_id";
+  Canonical_bytes.json_string sink value.trace_id;
+  Canonical_bytes.field sink ~first:false "turn";
+  Canonical_bytes.int_value sink value.turn;
+  (match value.tool_call_id with
+   | None -> ()
+   | Some tool_call_id ->
+     Canonical_bytes.field sink ~first:false "tool_call_id";
+     Canonical_bytes.json_string sink tool_call_id);
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_string_list sink values =
+  Canonical_bytes.list Canonical_bytes.json_string sink values
+;;
+
+let emit_fact sink (value : Types.fact) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "claim";
+  Canonical_bytes.json_string sink value.claim;
+  Canonical_bytes.field sink ~first:false "category";
+  Canonical_bytes.json_string
+    sink
+    (Types.category_to_string value.category);
+  Canonical_bytes.field sink ~first:false "source";
+  emit_provenance sink value.source;
+  Canonical_bytes.field sink ~first:false "first_seen";
+  Canonical_bytes.float_value sink value.first_seen;
+  Canonical_bytes.field sink ~first:false "schema_version";
+  Canonical_bytes.json_string sink value.schema_version;
+  (match value.valid_until with
+   | None -> ()
+   | Some valid_until ->
+     Canonical_bytes.field sink ~first:false "valid_until";
+     Canonical_bytes.float_value sink valid_until);
+  (match value.last_verified_at with
+   | None -> ()
+   | Some last_verified_at ->
+     Canonical_bytes.field sink ~first:false "last_verified_at";
+     Canonical_bytes.float_value sink last_verified_at);
+  (match value.observed_by with
+   | [] -> ()
+   | observed_by ->
+     Canonical_bytes.field sink ~first:false "observed_by";
+     emit_string_list sink observed_by);
+  (match value.claim_id with
+   | None -> ()
+   | Some claim_id ->
+     Canonical_bytes.field sink ~first:false "claim_id";
+     Canonical_bytes.json_string sink claim_id);
+  (match value.claim_kind with
+   | None -> ()
+   | Some claim_kind ->
+     Canonical_bytes.field sink ~first:false "claim_kind";
+     Canonical_bytes.json_string
+       sink
+       (Types.claim_kind_to_string claim_kind));
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_episode sink (value : Types.episode) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "trace_id";
+  Canonical_bytes.json_string sink value.trace_id;
+  Canonical_bytes.field sink ~first:false "generation";
+  Canonical_bytes.int_value sink value.generation;
+  Canonical_bytes.field sink ~first:false "episode_summary";
+  Canonical_bytes.json_string sink value.episode_summary;
+  Canonical_bytes.field sink ~first:false "claims";
+  Canonical_bytes.list emit_fact sink value.claims;
+  Canonical_bytes.field sink ~first:false "open_items";
+  emit_string_list sink value.open_items;
+  Canonical_bytes.field sink ~first:false "constraints";
+  emit_string_list sink value.constraints;
+  Canonical_bytes.field sink ~first:false "preserved_tool_refs";
+  emit_string_list sink value.preserved_tool_refs;
+  Canonical_bytes.field sink ~first:false "created_at";
+  Canonical_bytes.float_value sink value.created_at;
+  Canonical_bytes.field sink ~first:false "schema_version";
+  Canonical_bytes.json_string sink value.schema_version;
+  (match value.source_turn_range with
+   | None -> ()
+   | Some (lo, hi) ->
+     Canonical_bytes.field sink ~first:false "source_turn_range";
+     Canonical_bytes.write sink "{";
+     Canonical_bytes.field sink ~first:true "lo";
+     Canonical_bytes.int_value sink lo;
+     Canonical_bytes.field sink ~first:false "hi";
+     Canonical_bytes.int_value sink hi;
+     Canonical_bytes.write sink "}");
+  (match value.valid_until with
+   | None -> ()
+   | Some valid_until ->
+     Canonical_bytes.field sink ~first:false "valid_until";
+     Canonical_bytes.float_value sink valid_until);
+  (match value.terminal_marker with
+   | None -> ()
+   | Some terminal_marker ->
+     Canonical_bytes.field sink ~first:false "terminal_marker";
+     Canonical_bytes.json_string sink terminal_marker);
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_immutable_ref sink (value : immutable_ref) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "kind";
+  Canonical_bytes.json_string sink (artifact_kind_token value.kind);
+  Canonical_bytes.field sink ~first:false "leaf";
+  Canonical_bytes.json_string sink value.leaf;
+  Canonical_bytes.field sink ~first:false "sha256";
+  Canonical_bytes.json_string sink (Sha256.to_string value.sha256);
+  Canonical_bytes.field sink ~first:false "byte_count";
+  Canonical_bytes.int64_value sink value.byte_count;
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_head_record sink (value : head_record) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "schema";
+  Canonical_bytes.json_string sink head_schema;
+  Canonical_bytes.field sink ~first:false "store_id";
+  Canonical_bytes.json_string sink value.store_id;
+  Canonical_bytes.field sink ~first:false "owner_id";
+  Canonical_bytes.json_string sink value.owner_id;
+  Canonical_bytes.field sink ~first:false "generation";
+  Canonical_bytes.int64_value sink value.generation;
+  Canonical_bytes.field sink ~first:false "commit";
+  emit_immutable_ref sink value.commit_ref;
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_facts_object sink (value : facts_object) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "schema";
+  Canonical_bytes.json_string sink facts_schema;
+  Canonical_bytes.field sink ~first:false "store_id";
+  Canonical_bytes.json_string sink value.store_id;
+  Canonical_bytes.field sink ~first:false "owner_id";
+  Canonical_bytes.json_string sink value.owner_id;
+  Canonical_bytes.field sink ~first:false "generation";
+  Canonical_bytes.int64_value sink value.generation;
+  Canonical_bytes.field sink ~first:false "facts";
+  Canonical_bytes.list emit_fact sink value.facts;
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_episode_object sink (value : episode_object) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "schema";
+  Canonical_bytes.json_string sink episode_schema;
+  Canonical_bytes.field sink ~first:false "store_id";
+  Canonical_bytes.json_string sink value.store_id;
+  Canonical_bytes.field sink ~first:false "owner_id";
+  Canonical_bytes.json_string sink value.owner_id;
+  Canonical_bytes.field sink ~first:false "generation";
+  Canonical_bytes.int64_value sink value.generation;
+  Canonical_bytes.field sink ~first:false "episode";
+  emit_episode sink value.episode;
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_manifest sink (value : manifest) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "schema";
+  Canonical_bytes.json_string sink manifest_schema;
+  Canonical_bytes.field sink ~first:false "store_id";
+  Canonical_bytes.json_string sink value.store_id;
+  Canonical_bytes.field sink ~first:false "owner_id";
+  Canonical_bytes.json_string sink value.owner_id;
+  Canonical_bytes.field sink ~first:false "generation";
+  Canonical_bytes.int64_value sink value.generation;
+  Canonical_bytes.field sink ~first:false "facts";
+  emit_immutable_ref sink value.facts_ref;
+  Canonical_bytes.field sink ~first:false "episodes";
+  Canonical_bytes.list emit_immutable_ref sink value.episode_refs;
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_commit_envelope sink (value : commit_record) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "schema";
+  Canonical_bytes.json_string sink commit_schema;
+  Canonical_bytes.field sink ~first:false "store_id";
+  Canonical_bytes.json_string sink value.store_id;
+  Canonical_bytes.field sink ~first:false "owner_id";
+  Canonical_bytes.json_string sink value.owner_id;
+  Canonical_bytes.field sink ~first:false "generation";
+  Canonical_bytes.int64_value sink value.generation;
+  Canonical_bytes.field sink ~first:false "operation_id";
+  Canonical_bytes.json_string sink value.operation_id;
+  Canonical_bytes.field sink ~first:false "manifest";
+  emit_immutable_ref sink value.manifest_ref;
+  Canonical_bytes.field sink ~first:false "state_sha256";
+  Canonical_bytes.json_string sink (Sha256.to_string value.state_sha256);
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_commit_record sink (value : commit_record) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "schema";
+  Canonical_bytes.json_string sink commit_schema;
+  Canonical_bytes.field sink ~first:false "store_id";
+  Canonical_bytes.json_string sink value.store_id;
+  Canonical_bytes.field sink ~first:false "owner_id";
+  Canonical_bytes.json_string sink value.owner_id;
+  Canonical_bytes.field sink ~first:false "generation";
+  Canonical_bytes.int64_value sink value.generation;
+  Canonical_bytes.field sink ~first:false "operation_id";
+  Canonical_bytes.json_string sink value.operation_id;
+  Canonical_bytes.field sink ~first:false "manifest";
+  emit_immutable_ref sink value.manifest_ref;
+  Canonical_bytes.field sink ~first:false "state_sha256";
+  Canonical_bytes.json_string sink (Sha256.to_string value.state_sha256);
+  Canonical_bytes.field sink ~first:false "receipt_id";
+  Canonical_bytes.json_string sink (Sha256.to_string value.receipt_id);
+  Canonical_bytes.write sink "}"
+;;
+
+let emit_state sink (value : state) =
+  Canonical_bytes.write sink "{";
+  Canonical_bytes.field sink ~first:true "schema";
+  Canonical_bytes.json_string sink state_schema;
+  Canonical_bytes.field sink ~first:false "facts";
+  Canonical_bytes.list emit_fact sink value.facts;
+  Canonical_bytes.field sink ~first:false "episodes";
+  Canonical_bytes.list emit_episode sink value.episodes;
+  Canonical_bytes.write sink "}"
+;;
 
 let snapshot_state (value : snapshot) = value.state
 let snapshot_generation (value : snapshot) = value.generation
@@ -425,6 +841,18 @@ let settlement_warning_to_string = function
 
 let error_settlement_warnings (value : error) = value.settlement_warnings
 
+let error_implementation_safety_violation (value : error) =
+  match value.kind with
+  | Implementation_safety_ceiling_exceeded violation -> Some violation
+  | Head_row_too_large observed ->
+    Some
+      { artifact = `Head_row
+      ; observed_at_least_bytes = Int64.of_int observed
+      ; ceiling_bytes = Int64.of_int Head.max_row_bytes
+      }
+  | _ -> None
+;;
+
 let error_to_string (value : error) =
   match value.kind with
   | Invalid_layout detail ->
@@ -454,12 +882,32 @@ let error_to_string (value : error) =
       "Memory OS secure entropy failed for %s: %s"
       purpose
       (Printexc.to_string exception_)
-  | Immutable_object_too_large { kind; byte_count; maximum } ->
+  | Implementation_safety_ceiling_exceeded
+      { artifact; observed_at_least_bytes; ceiling_bytes } ->
+    let artifact =
+      match artifact with
+      | `Facts -> "facts"
+      | `Episode -> "episode"
+      | `Manifest -> "manifest"
+      | `Commit -> "commit"
+      | `Head_row -> "HEAD row"
+    in
     Printf.sprintf
-      "immutable %s object is too large: %Ld bytes, maximum %Ld"
-      (artifact_kind_token kind)
-      byte_count
-      maximum
+      "%s exceeded the private contiguous-allocation safety ceiling: \
+       observed at least %Ld bytes, ceiling %Ld"
+      artifact
+      observed_at_least_bytes
+      ceiling_bytes
+  | Byte_accounting_overflow artifact ->
+    let artifact =
+      match artifact with
+      | `Facts -> "facts"
+      | `Episode -> "episode"
+      | `Manifest -> "manifest"
+      | `Commit -> "commit"
+      | `Head_row -> "HEAD row"
+    in
+    "Memory OS byte accounting overflowed while measuring " ^ artifact
   | Immutable_create_failed { kind; leaf; failure } ->
     Printf.sprintf
       "failed to durably create immutable %s object %S: %s"
@@ -509,7 +957,7 @@ let non_negative_int64_of_json = function
 
 let exact_assoc expected = function
   | `Assoc fields ->
-    let actual = List.map fst fields |> List.sort String.compare in
+    let actual = list_map fst fields |> List.sort String.compare in
     let expected = List.sort String.compare expected in
     if List.equal String.equal actual expected
     then Ok fields
@@ -547,12 +995,24 @@ let list_field name fields =
   | _ -> Error (name ^ " must be an array")
 ;;
 
-let rec map_result fn = function
-  | [] -> Ok []
-  | value :: rest ->
-    let* mapped = fn value in
-    let* mapped_rest = map_result fn rest in
-    Ok (mapped :: mapped_rest)
+let map_result fn values =
+  let rec loop mapped = function
+    | [] -> Ok (List.rev mapped)
+    | value :: rest ->
+      let* value = fn value in
+      loop (value :: mapped) rest
+  in
+  loop [] values
+;;
+
+let iter_result fn values =
+  let rec loop = function
+    | [] -> Ok ()
+    | value :: rest ->
+      let* () = fn value in
+      loop rest
+  in
+  loop values
 ;;
 
 let valid_store_id value = Option.is_some (Sha256.of_string value)
@@ -605,7 +1065,11 @@ let immutable_ref_of_json json =
   then Error ("invalid immutable leaf " ^ leaf)
   else if Int64.compare byte_count 0L <= 0
   then Error "immutable byte_count must be positive"
-  else if Int64.compare byte_count max_immutable_bytes > 0
+  else if
+    Int64.compare
+      byte_count
+      immutable_serialization_safety_ceiling_bytes
+    > 0
   then Error "immutable byte_count exceeds the store maximum"
   else Ok ({ kind; leaf; sha256 = digest; byte_count } : immutable_ref)
 ;;
@@ -663,7 +1127,7 @@ let facts_object_to_json (value : facts_object) =
     ; "store_id", `String value.store_id
     ; "owner_id", `String value.owner_id
     ; "generation", int64_to_json value.generation
-    ; "facts", `List (List.map Types.fact_to_json value.facts)
+    ; "facts", `List (list_map Types.fact_to_json value.facts)
     ]
 ;;
 
@@ -684,19 +1148,7 @@ let manifest_to_json (value : manifest) =
     ; "owner_id", `String value.owner_id
     ; "generation", int64_to_json value.generation
     ; "facts", immutable_ref_to_json value.facts_ref
-    ; "episodes", `List (List.map immutable_ref_to_json value.episode_refs)
-    ]
-;;
-
-let commit_envelope_to_json (value : commit_record) =
-  `Assoc
-    [ "schema", `String commit_schema
-    ; "store_id", `String value.store_id
-    ; "owner_id", `String value.owner_id
-    ; "generation", int64_to_json value.generation
-    ; "operation_id", `String value.operation_id
-    ; "manifest", immutable_ref_to_json value.manifest_ref
-    ; "state_sha256", `String (Sha256.to_string value.state_sha256)
+    ; "episodes", `List (list_map immutable_ref_to_json value.episode_refs)
     ]
 ;;
 
@@ -714,9 +1166,9 @@ let commit_record_to_json (value : commit_record) =
 ;;
 
 let receipt_digest (value : commit_record) =
-  commit_envelope_to_json value
-  |> canonical_json
-  |> hash_domain "commit-receipt"
+  Canonical_bytes.digest
+    ~domain:"commit-receipt"
+    (fun sink -> emit_commit_envelope sink value)
 ;;
 
 let finite value =
@@ -765,13 +1217,12 @@ let validate_episode (episode : Types.episode) =
     | Some (lo, hi) when lo < 0 || hi < lo ->
       Error "episode source_turn_range is invalid"
     | Some _ | None ->
-      map_result validate_fact episode.claims |> Result.map ignore
+      iter_result validate_fact episode.claims
 ;;
 
 let validate_state (value : state) =
-  let* _ = map_result validate_fact value.facts in
-  let* _ = map_result validate_episode value.episodes in
-  Ok ()
+  let* () = iter_result validate_fact value.facts in
+  iter_result validate_episode value.episodes
 ;;
 
 let fact_of_json json =
@@ -925,16 +1376,10 @@ let commit_record_of_json json =
     else Ok value
 ;;
 
-let state_to_json (value : state) =
-  `Assoc
-    [ "schema", `String state_schema
-    ; "facts", `List (List.map Types.fact_to_json value.facts)
-    ; "episodes", `List (List.map Types.episode_to_json value.episodes)
-    ]
-;;
-
 let state_digest (value : state) =
-  state_to_json value |> canonical_json |> hash_domain "state"
+  Canonical_bytes.digest
+    ~domain:"state"
+    (fun sink -> emit_state sink value)
 ;;
 
 let invalid_json artifact detail =
@@ -1014,7 +1459,7 @@ let read_object_raw (store : t) (reference : immutable_ref) =
       ~parent:store.root
       ~leaf:reference.leaf
       ~expected_length:reference.byte_count
-      ~max_length:max_immutable_bytes
+      ~max_length:immutable_serialization_safety_ceiling_bytes
   with
   | Error failure ->
     let failure : Exact_read.failure = failure in
@@ -1080,37 +1525,204 @@ let fresh_leaf (store : t) (kind : artifact_kind) =
      ^ ".json")
 ;;
 
-let create_raw_object (store : t) (kind : artifact_kind) raw =
-  let byte_count = Int64.of_int (String.length raw) in
-  if
-    Int64.compare byte_count 0L <= 0
-    || Int64.compare byte_count max_immutable_bytes > 0
-  then
-    Error
-      (make_error
-         (Immutable_object_too_large
-            { kind; byte_count; maximum = max_immutable_bytes }))
-  else
-    let* leaf = fresh_leaf store kind in
-    let reference : immutable_ref =
-      { kind; leaf; sha256 = sha256 raw; byte_count }
-    in
-    match
-      Fs_compat.create_capability_file_exclusive
-        ~parent:store.root
-        ~leaf
-        ~permissions:0o600
-        raw
-    with
-    | Ok () -> Ok reference
-    | Error failure ->
-      Error
-        (make_error
-           (Immutable_create_failed { kind; leaf; failure }))
+let persisted_artifact_of_kind = function
+  | Facts_object -> `Facts
+  | Episode_object -> `Episode
+  | Manifest_object -> `Manifest
+  | Commit_object -> `Commit
 ;;
 
-let create_object (store : t) (kind : artifact_kind) encode value =
-  create_raw_object store kind (canonical_json (encode value))
+let measure_artifact ~maximum artifact emit =
+  match Canonical_bytes.measure_bounded ~ceiling:maximum emit with
+  | Ok byte_count -> Ok byte_count
+  | Error (Canonical_bytes.Ceiling_exceeded observed_at_least_bytes) ->
+    Error
+      (make_error
+         (Implementation_safety_ceiling_exceeded
+            { artifact
+            ; observed_at_least_bytes
+            ; ceiling_bytes = maximum
+            }))
+  | Error Canonical_bytes.Counter_overflow ->
+    Error (make_error (Byte_accounting_overflow artifact))
+;;
+
+let render_canonical artifact ~byte_count emit =
+  match Canonical_bytes.render_exact ~byte_count emit with
+  | Ok raw -> Ok raw
+  | Error detail ->
+    let artifact =
+      match artifact with
+      | `Facts -> "facts encoder"
+      | `Episode -> "episode encoder"
+      | `Manifest -> "manifest encoder"
+      | `Commit -> "commit encoder"
+      | `Head_row -> "HEAD encoder"
+    in
+    Error (make_error (Invalid_store_json { artifact; detail }))
+;;
+
+let create_planned_object
+      (store : t)
+      (kind : artifact_kind)
+      ~byte_count
+      emit
+  =
+  let artifact = persisted_artifact_of_kind kind in
+  let* raw = render_canonical artifact ~byte_count emit in
+  let digest = Canonical_bytes.digest emit in
+  let* leaf = fresh_leaf store kind in
+  let reference : immutable_ref =
+    { kind; leaf; sha256 = digest; byte_count }
+  in
+  match
+    Fs_compat.create_capability_file_exclusive
+      ~parent:store.root
+      ~leaf
+      ~permissions:0o600
+      raw
+  with
+  | Ok () -> Ok reference
+  | Error failure ->
+    Error
+      (make_error
+         (Immutable_create_failed { kind; leaf; failure }))
+;;
+
+let placeholder_digest = String.make 64 '0'
+
+let placeholder_leaf kind =
+  "memory-os-"
+  ^ artifact_kind_token kind
+  ^ "-"
+  ^ placeholder_digest
+  ^ ".json"
+;;
+
+let placeholder_ref kind byte_count : immutable_ref =
+  { kind
+  ; leaf = placeholder_leaf kind
+  ; sha256 = placeholder_digest
+  ; byte_count
+  }
+;;
+
+type graph_preflight =
+  { generation : int64
+  ; state_sha256 : Sha256.t
+  ; facts_bytes : int64
+  ; episode_bytes : int64 list
+  ; manifest_bytes : int64
+  ; commit_bytes : int64
+  ; head_row_bytes : int64
+  }
+
+let preflight_graph
+      ~maximum
+      (store : t)
+      ~(expected : snapshot)
+      ~operation_id
+      ~(state : state)
+  =
+  if Int64.equal expected.generation Int64.max_int
+  then Error (make_error Generation_exhausted)
+  else
+    let generation = Int64.succ expected.generation in
+    let planned_store_id =
+      Option.value expected.store_id ~default:placeholder_digest
+    in
+    let state_sha256 = state_digest state in
+    let facts_value : facts_object =
+      { store_id = planned_store_id
+      ; owner_id = store.owner_id
+      ; generation
+      ; facts = state.facts
+      }
+    in
+    let* facts_bytes =
+      measure_artifact
+        ~maximum
+        `Facts
+        (fun sink -> emit_facts_object sink facts_value)
+    in
+    let rec measure_episodes measured = function
+      | [] -> Ok (List.rev measured)
+      | episode :: rest ->
+        let value : episode_object =
+          { store_id = planned_store_id
+          ; owner_id = store.owner_id
+          ; generation
+          ; episode
+          }
+        in
+        let* byte_count =
+          measure_artifact
+            ~maximum
+            `Episode
+            (fun sink -> emit_episode_object sink value)
+        in
+        measure_episodes (byte_count :: measured) rest
+    in
+    let* episode_bytes = measure_episodes [] state.episodes in
+    let manifest : manifest =
+      { store_id = planned_store_id
+      ; owner_id = store.owner_id
+      ; generation
+      ; facts_ref = placeholder_ref Facts_object facts_bytes
+      ; episode_refs =
+          list_map (placeholder_ref Episode_object) episode_bytes
+      }
+    in
+    let* manifest_bytes =
+      measure_artifact
+        ~maximum
+        `Manifest
+        (fun sink -> emit_manifest sink manifest)
+    in
+    let commit : commit_record =
+      { store_id = planned_store_id
+      ; owner_id = store.owner_id
+      ; generation
+      ; operation_id
+      ; manifest_ref = placeholder_ref Manifest_object manifest_bytes
+      ; state_sha256
+      ; receipt_id = placeholder_digest
+      }
+    in
+    let* commit_bytes =
+      measure_artifact
+        ~maximum
+        `Commit
+        (fun sink -> emit_commit_record sink commit)
+    in
+    let head : head_record =
+      { store_id = planned_store_id
+      ; owner_id = store.owner_id
+      ; generation
+      ; commit_ref = placeholder_ref Commit_object commit_bytes
+      }
+    in
+    let* head_row_bytes =
+      match
+        Canonical_bytes.measure_bounded
+          ~ceiling:(Int64.of_int Head.max_row_bytes)
+          (fun sink -> emit_head_record sink head)
+      with
+      | Ok byte_count -> Ok byte_count
+      | Error (Canonical_bytes.Ceiling_exceeded observed) ->
+        Error (make_error (Head_row_too_large (Int64.to_int observed)))
+      | Error Canonical_bytes.Counter_overflow ->
+        Error (make_error (Byte_accounting_overflow `Head_row))
+    in
+    Ok
+      { generation
+      ; state_sha256
+      ; facts_bytes
+      ; episode_bytes
+      ; manifest_bytes
+      ; commit_bytes
+      ; head_row_bytes
+      }
 ;;
 
 let same_cursor = Head.cursor_equal
@@ -1417,23 +2029,40 @@ let create_episode_objects
       ~store_id
       ~owner_id
       ~generation
+      ~(byte_counts : int64 list)
       (episodes : Types.episode list)
   =
-  let rec loop objects = function
-    | [] -> Ok (List.rev objects)
-    | episode :: rest ->
+  let rec loop objects episodes byte_counts =
+    match episodes, byte_counts with
+    | [], [] -> Ok (List.rev objects)
+    | episode :: rest, byte_count :: remaining_counts ->
       let value : episode_object =
         { store_id; owner_id; generation; episode }
       in
       let* reference =
-        create_object store Episode_object episode_object_to_json value
+        create_planned_object
+          store
+          Episode_object
+          ~byte_count
+          (fun sink -> emit_episode_object sink value)
       in
-      loop ((reference, episode) :: objects) rest
+      loop
+        ((reference, episode) :: objects)
+        rest
+        remaining_counts
+    | [], _ :: _ | _ :: _, [] ->
+      Error
+        (make_error
+           (Invalid_store_json
+              { artifact = "episode preflight"
+              ; detail = "episode byte-count plan does not match state"
+              }))
   in
-  loop [] episodes
+  loop [] episodes byte_counts
 ;;
 
-let prepare
+let prepare_with_implementation_ceiling
+      maximum
       (store : t)
       ~(expected : snapshot)
       ~operation_id
@@ -1451,6 +2080,13 @@ let prepare
       (make_error
          ~settlement_warnings:expected.settlement_warnings
          (Invalid_domain_value "operation_id must be non-empty"))
+  else if Int64.compare maximum 0L <= 0
+  then
+    Error
+      (make_error
+         ~settlement_warnings:expected.settlement_warnings
+         (Invalid_layout
+            "implementation safety ceiling must be positive"))
   else
     let* () =
       match validate_state state with
@@ -1461,7 +2097,16 @@ let prepare
              ~settlement_warnings:expected.settlement_warnings
              (Invalid_domain_value detail))
     in
-    let requested_state_sha256 = state_digest state in
+    let* preflight =
+      preflight_graph
+        ~maximum
+        store
+        ~expected
+        ~operation_id
+        ~state
+      |> with_prior_warnings expected.settlement_warnings
+    in
+    let requested_state_sha256 = preflight.state_sha256 in
     let* (current : snapshot) = load store in
     if not (same_head_authority expected current)
     then Ok (Stale_expected current)
@@ -1495,19 +2140,12 @@ let prepare
                      ; requested_state_sha256
                      })))
       | Some _ | None ->
-        if Int64.equal current.generation Int64.max_int
-        then
-          Error
-            (make_error
-               ~settlement_warnings:current.settlement_warnings
-               Generation_exhausted)
-        else
           let* store_id =
             match current.store_id with
             | Some store_id -> Ok store_id
             | None -> random_token store "store-id"
           in
-          let generation = Int64.succ current.generation in
+          let generation = preflight.generation in
           let facts_value : facts_object =
             { store_id
             ; owner_id = store.owner_id
@@ -1516,11 +2154,11 @@ let prepare
             }
           in
           let* facts_ref =
-            create_object
+            create_planned_object
               store
               Facts_object
-              facts_object_to_json
-              facts_value
+              ~byte_count:preflight.facts_bytes
+              (fun sink -> emit_facts_object sink facts_value)
             |> with_prior_warnings current.settlement_warnings
           in
           let* episode_objects =
@@ -1529,6 +2167,7 @@ let prepare
               ~store_id
               ~owner_id:store.owner_id
               ~generation
+              ~byte_counts:preflight.episode_bytes
               state.episodes
             |> with_prior_warnings current.settlement_warnings
           in
@@ -1537,15 +2176,15 @@ let prepare
             ; owner_id = store.owner_id
             ; generation
             ; facts_ref
-            ; episode_refs = List.map fst episode_objects
+            ; episode_refs = list_map fst episode_objects
             }
           in
           let* manifest_ref =
-            create_object
+            create_planned_object
               store
               Manifest_object
-              manifest_to_json
-              manifest
+              ~byte_count:preflight.manifest_bytes
+              (fun sink -> emit_manifest sink manifest)
             |> with_prior_warnings current.settlement_warnings
           in
           let provisional_commit : commit_record =
@@ -1563,11 +2202,11 @@ let prepare
             { provisional_commit with receipt_id }
           in
           let* commit_ref =
-            create_object
+            create_planned_object
               store
               Commit_object
-              commit_record_to_json
-              commit
+              ~byte_count:preflight.commit_bytes
+              (fun sink -> emit_commit_record sink commit)
             |> with_prior_warnings current.settlement_warnings
           in
           let head : head_record =
@@ -1577,17 +2216,16 @@ let prepare
             ; commit_ref
             }
           in
-          let head_row = canonical_json (head_record_to_json head) in
-          if String.length head_row > Head.max_row_bytes
-          then
-            Error
-              (make_error
-                 ~settlement_warnings:current.settlement_warnings
-                 (Head_row_too_large (String.length head_row)))
-          else
-            Ok
-              (Prepared
-                 ({ binding = store.binding
+          let* head_row =
+            render_canonical
+              `Head_row
+              ~byte_count:preflight.head_row_bytes
+              (fun sink -> emit_head_record sink head)
+            |> with_prior_warnings current.settlement_warnings
+          in
+          Ok
+            (Prepared
+               ({ binding = store.binding
                   ; expected_cursor = current.cursor
                   ; previous = current
                   ; store_id
@@ -1604,8 +2242,17 @@ let prepare
                   ; head_row
                   ; settlement_warnings =
                       current.settlement_warnings
-                  }
-                  : prepared_commit))
+                }
+                : prepared_commit))
+;;
+
+let prepare store ~expected ~operation_id ~state =
+  prepare_with_implementation_ceiling
+    immutable_serialization_safety_ceiling_bytes
+    store
+    ~expected
+    ~operation_id
+    ~state
 ;;
 
 let snapshot_of_prepared
@@ -1832,7 +2479,8 @@ module For_testing = struct
     | Conflicting_operation_error
     | Generation_exhausted_error
     | Entropy_source_failed_error
-    | Immutable_object_too_large_error
+    | Implementation_safety_ceiling_exceeded_error
+    | Byte_accounting_overflow_error
     | Immutable_create_failed_error
     | Immutable_read_failed_error
     | Immutable_digest_mismatch_error
@@ -1860,7 +2508,9 @@ module For_testing = struct
     | Conflicting_operation _ -> Conflicting_operation_error
     | Generation_exhausted -> Generation_exhausted_error
     | Entropy_source_failed _ -> Entropy_source_failed_error
-    | Immutable_object_too_large _ -> Immutable_object_too_large_error
+    | Implementation_safety_ceiling_exceeded _ ->
+      Implementation_safety_ceiling_exceeded_error
+    | Byte_accounting_overflow _ -> Byte_accounting_overflow_error
     | Immutable_create_failed _ -> Immutable_create_failed_error
     | Immutable_read_failed _ -> Immutable_read_failed_error
     | Immutable_digest_mismatch _ -> Immutable_digest_mismatch_error
@@ -1885,4 +2535,41 @@ module For_testing = struct
       store
       prepared
   ;;
+
+  let prepare_with_implementation_ceiling
+        ~maximum
+        store
+        ~expected
+        ~operation_id
+        ~state
+    =
+    prepare_with_implementation_ceiling
+      maximum
+      store
+      ~expected
+      ~operation_id
+      ~state
+  ;;
+
+  let canonical_state_bytes state =
+    let emit sink = emit_state sink state in
+    match
+      Canonical_bytes.measure_bounded
+        ~ceiling:(Int64.of_int Sys.max_string_length)
+        emit
+    with
+    | Error (Canonical_bytes.Ceiling_exceeded observed_at_least_bytes) ->
+      Error
+        (make_error
+           (Implementation_safety_ceiling_exceeded
+              { artifact = `Facts
+              ; observed_at_least_bytes
+              ; ceiling_bytes = Int64.of_int Sys.max_string_length
+              }))
+    | Error Canonical_bytes.Counter_overflow ->
+      Error (make_error (Byte_accounting_overflow `Facts))
+    | Ok byte_count -> render_canonical `Facts ~byte_count emit
+  ;;
+
+  let state_sha256 = state_digest
 end

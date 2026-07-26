@@ -35,6 +35,23 @@ type pending_publication
 type settlement_warning
 type error
 
+type persisted_artifact =
+  [ `Facts
+  | `Episode
+  | `Manifest
+  | `Commit
+  | `Head_row
+  ]
+
+(** Diagnostic projection for the store's private contiguous-allocation safety
+    ceiling. This is not a product capacity, admission policy, runtime limit,
+    provider/model capability, or pricing input. *)
+type implementation_safety_violation =
+  { artifact : persisted_artifact
+  ; observed_at_least_bytes : int64
+  ; ceiling_bytes : int64
+  }
+
 (** [prepare] performs a final live HEAD revalidation against [expected].
     [Stale_expected current] reports the authoritative snapshot observed when
     that exact cursor check fails.
@@ -135,6 +152,9 @@ val pending_publication_settlement_warnings :
 
 val settlement_warning_to_string : settlement_warning -> string
 val error_settlement_warnings : error -> settlement_warning list
+val error_implementation_safety_violation :
+  error ->
+  implementation_safety_violation option
 val error_to_string : error -> string
 
 module For_testing : sig
@@ -147,7 +167,8 @@ module For_testing : sig
     | Conflicting_operation_error
     | Generation_exhausted_error
     | Entropy_source_failed_error
-    | Immutable_object_too_large_error
+    | Implementation_safety_ceiling_exceeded_error
+    | Byte_accounting_overflow_error
     | Immutable_create_failed_error
     | Immutable_read_failed_error
     | Immutable_digest_mismatch_error
@@ -173,4 +194,15 @@ module For_testing : sig
     t ->
     prepared_commit ->
     (publish_outcome, error) result
+
+  val prepare_with_implementation_ceiling :
+    maximum:int64 ->
+    t ->
+    expected:snapshot ->
+    operation_id:string ->
+    state:state ->
+    (prepare_outcome, error) result
+
+  val canonical_state_bytes : state -> (string, error) result
+  val state_sha256 : state -> Sha256.t
 end

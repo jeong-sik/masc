@@ -162,6 +162,23 @@ let save_raw path raw =
   Unix.chmod path 0o600
 ;;
 
+let root_snapshot root =
+  Sys.readdir root
+  |> Array.to_list
+  |> List.sort String.compare
+  |> List.map (fun leaf ->
+    let path = Filename.concat root leaf in
+    leaf, load_raw path)
+;;
+
+let immutable_object_sizes root =
+  Sys.readdir root
+  |> Array.to_list
+  |> List.filter (String.starts_with ~prefix:"memory-os-")
+  |> List.map (fun leaf ->
+    (Unix.stat (Filename.concat root leaf)).Unix.st_size)
+;;
+
 let json_field name = function
   | `Assoc fields ->
     (match List.assoc_opt name fields with
@@ -356,26 +373,41 @@ let test_concurrent_publish_has_single_cas_winner ~fs ~clock () =
                            "timed out waiting for the contended CAS")
                      ()
                  in
-                 let winner_result, contended_result =
-                   match
-                     Eio.Time.with_timeout clock 3.0 (fun () ->
-                       Eio.Fiber.both
-                         (fun () ->
-                            Store.For_testing.publish_with_head_hooks
-                              hooks
-                              store_a
-                              prepared_a)
-                         (fun () ->
-                            Eio.Promise.await lock_held;
-                            Fun.protect
-                              ~finally:(fun () ->
-                                Eio.Promise.resolve resolve_release_a ())
-                              (fun () ->
-                                 Store.publish store_b prepared_b)))
-                   with
-                   | Ok results -> results
-                   | Error `Timeout ->
-                     fail "concurrent CAS did not settle within 3s"
+                 let winner_result = ref None in
+                 let contended_result = ref None in
+                 (match
+                    Eio.Time.with_timeout clock 3.0 (fun () ->
+                      Eio.Fiber.both
+                        (fun () ->
+                           winner_result :=
+                             Some
+                               (Store.For_testing.publish_with_head_hooks
+                                  hooks
+                                  store_a
+                                  prepared_a))
+                        (fun () ->
+                           Eio.Promise.await lock_held;
+                           let result =
+                             Fun.protect
+                               ~finally:(fun () ->
+                                 Eio.Promise.resolve resolve_release_a ())
+                               (fun () ->
+                                  Store.publish store_b prepared_b)
+                           in
+                           contended_result := Some result))
+                  with
+                  | Ok () -> ()
+                  | Error `Timeout ->
+                    fail "concurrent CAS did not settle within 3s");
+                 let require_fiber_result label = function
+                   | Some result -> result
+                   | None -> failf "%s fiber did not publish a result" label
+                 in
+                 let winner_result =
+                   require_fiber_result "lock holder" !winner_result
+                 in
+                 let contended_result =
+                   require_fiber_result "contender" !contended_result
                  in
                  let committed_count =
                    List.fold_left
@@ -967,6 +999,257 @@ let test_non_current_operation_is_not_replayed ~fs () =
     (Store.committed_snapshot receipt_a_again)
 ;;
 
+let expect_safety_violation label expected_artifact = function
+  | Error error ->
+    (match Store.error_implementation_safety_violation error with
+     | Some (violation : Store.implementation_safety_violation) ->
+       check bool label true (violation.artifact = expected_artifact)
+     | None ->
+       failf
+         "%s: expected implementation safety violation, got %s"
+         label
+         (Store.error_to_string error))
+  | Ok _ -> failf "%s: expected an implementation safety violation" label
+;;
+
+let expect_any_safety_violation label = function
+  | Error error ->
+    (match Store.error_implementation_safety_violation error with
+     | Some _ -> ()
+     | None ->
+       failf
+         "%s: expected implementation safety violation, got %s"
+         label
+         (Store.error_to_string error))
+  | Ok _ -> failf "%s: expected an implementation safety violation" label
+;;
+
+let prepare_rejected_without_effect
+      ~root_path
+      ~store
+      ~expected
+      ~maximum
+      ~operation_id
+      ~state
+      ~artifact
+  =
+  let before = root_snapshot root_path in
+  let result =
+    Store.For_testing.prepare_with_implementation_ceiling
+      ~maximum
+      store
+      ~expected
+      ~operation_id
+      ~state
+  in
+  expect_safety_violation
+    "oversize artifact is typed"
+    artifact
+    result;
+  check
+    bool
+    "oversize rejection has no persistent effect"
+    true
+    (before = root_snapshot root_path)
+;;
+
+let test_facts_oversize_is_effect_free ~fs () =
+  with_root ~fs "masc_memory_os_facts_oversize_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let expected = require_ok (Store.load store) in
+  let oversized = String.make 2048 'f' in
+  prepare_rejected_without_effect
+    ~root_path
+    ~store
+    ~expected
+    ~maximum:1024L
+    ~operation_id:"facts-oversize"
+    ~state:{ Store.facts = [ fact oversized ]; episodes = [] }
+    ~artifact:`Facts
+;;
+
+let test_last_episode_oversize_is_effect_free ~fs () =
+  with_root ~fs "masc_memory_os_last_episode_oversize_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let expected = require_ok (Store.load store) in
+  let oversized = String.make 2048 'e' in
+  prepare_rejected_without_effect
+    ~root_path
+    ~store
+    ~expected
+    ~maximum:1024L
+    ~operation_id:"last-episode-oversize"
+    ~state:
+      { Store.facts = [ fact "small" ]
+      ; episodes = [ episode "small"; episode oversized ]
+      }
+    ~artifact:`Episode
+;;
+
+let test_manifest_oversize_is_effect_free ~fs () =
+  with_root ~fs "masc_memory_os_manifest_oversize_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let expected = require_ok (Store.load store) in
+  let episodes =
+    List.init 12 (fun index -> episode (string_of_int index))
+  in
+  prepare_rejected_without_effect
+    ~root_path
+    ~store
+    ~expected
+    ~maximum:1024L
+    ~operation_id:"manifest-oversize"
+    ~state:{ Store.facts = [ fact "small" ]; episodes }
+    ~artifact:`Manifest
+;;
+
+let test_commit_oversize_is_effect_free ~fs () =
+  with_root ~fs "masc_memory_os_commit_oversize_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let expected = require_ok (Store.load store) in
+  prepare_rejected_without_effect
+    ~root_path
+    ~store
+    ~expected
+    ~maximum:1024L
+    ~operation_id:(String.make 2048 'c')
+    ~state:{ Store.facts = [ fact "small" ]; episodes = [] }
+    ~artifact:`Commit
+;;
+
+let test_head_oversize_is_effect_free ~fs () =
+  with_root ~fs "masc_memory_os_head_oversize_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:(String.make 70_000 'o') @@ fun store ->
+  let expected = require_ok (Store.load store) in
+  prepare_rejected_without_effect
+    ~root_path
+    ~store
+    ~expected
+    ~maximum:(Int64.of_int (64 * 1024 * 1024))
+    ~operation_id:"head-oversize"
+    ~state:{ Store.facts = []; episodes = [] }
+    ~artifact:`Head_row
+;;
+
+let test_exact_implementation_boundary ~fs () =
+  let maximum =
+    with_root ~fs "masc_memory_os_boundary_measure_"
+    @@ fun root_path root ->
+    within_store ~root ~owner:"keeper-a" @@ fun store ->
+    let expected = require_ok (Store.load store) in
+    ignore
+      (prepare_new store expected "boundary-operation" (state "boundary")
+        : Store.prepared_commit);
+    match immutable_object_sizes root_path with
+    | [] -> fail "boundary fixture created no immutable objects"
+    | first :: rest -> List.fold_left max first rest
+  in
+  with_root ~fs "masc_memory_os_boundary_exact_"
+  @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let expected = require_ok (Store.load store) in
+  (match
+     require_ok
+       (Store.For_testing.prepare_with_implementation_ceiling
+          ~maximum:(Int64.of_int maximum)
+          store
+          ~expected
+          ~operation_id:"boundary-operation"
+          ~state:(state "boundary"))
+   with
+   | Store.Prepared _ -> ()
+   | Store.Current_commit_replay _ | Store.Stale_expected _ ->
+     fail "exact implementation boundary did not prepare");
+  with_root ~fs "masc_memory_os_boundary_exceeded_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let expected = require_ok (Store.load store) in
+  let before = root_snapshot root_path in
+  expect_any_safety_violation
+    "one byte below required maximum rejects"
+    (Store.For_testing.prepare_with_implementation_ceiling
+       ~maximum:(Int64.of_int (maximum - 1))
+       store
+       ~expected
+       ~operation_id:"boundary-operation"
+       ~state:(state "boundary"));
+  check bool "boundary rejection has no effect" true
+    (before = root_snapshot root_path)
+;;
+
+let test_canonical_state_and_digest_parity () =
+  let special_fact =
+    { (fact "quote:\" slash:\\ control:\x7f utf8:hangul") with
+      observed_by = [ "keeper-a"; "quote:\""; "control:\x01" ]
+    ; valid_until = Some 20.5
+    ; last_verified_at = Some 15.25
+    }
+  in
+  let special_episode =
+    { (episode "special") with
+      claims = [ special_fact ]
+    ; open_items = [ "line\nbreak" ]
+    ; constraints = [ "tab\tvalue" ]
+    ; preserved_tool_refs = [ "tool\\ref" ]
+    ; terminal_marker = Some "terminal\rmarker"
+    }
+  in
+  let value : Store.state =
+    { facts = [ special_fact ]; episodes = [ special_episode ] }
+  in
+  let legacy =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "schema", `String "masc-memory-os-state-v2"
+         ; "facts", `List [ Types.fact_to_json special_fact ]
+         ; "episodes", `List [ Types.episode_to_json special_episode ]
+         ])
+  in
+  check string "streaming canonical bytes match Yojson" legacy
+    (require_ok (Store.For_testing.canonical_state_bytes value));
+  let expected_digest =
+    Digestif.SHA256.(
+      digest_string
+        ("masc.memory_os.store/v2\000state\000" ^ legacy)
+      |> to_hex)
+  in
+  check string "streaming state digest matches legacy digest"
+    expected_digest
+    (Store.For_testing.state_sha256 value |> sha256_string)
+;;
+
+let test_long_fact_list_is_stack_safe ~fs () =
+  let rec build remaining values =
+    if remaining = 0
+    then values
+    else build (remaining - 1) (fact "stack-safe" :: values)
+  in
+  let value : Store.state =
+    { facts = build 20_000 []; episodes = [] }
+  in
+  check bool "long canonical state rendered" true
+    (String.length
+       (require_ok (Store.For_testing.canonical_state_bytes value))
+     > 0);
+  with_root ~fs "masc_memory_os_stack_safe_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let expected = require_ok (Store.load store) in
+  prepare_rejected_without_effect
+    ~root_path
+    ~store
+    ~expected
+    ~maximum:1L
+    ~operation_id:"stack-safe"
+    ~state:value
+    ~artifact:`Facts
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
@@ -1004,6 +1287,22 @@ let () =
             (test_resource_settlement_warning_preserves_commit ~fs)
         ; test_case "non-current operation is not replayed" `Quick
             (test_non_current_operation_is_not_replayed ~fs)
+        ; test_case "facts oversize is effect-free" `Quick
+            (test_facts_oversize_is_effect_free ~fs)
+        ; test_case "last episode oversize is effect-free" `Quick
+            (test_last_episode_oversize_is_effect_free ~fs)
+        ; test_case "manifest oversize is effect-free" `Quick
+            (test_manifest_oversize_is_effect_free ~fs)
+        ; test_case "commit oversize is effect-free" `Quick
+            (test_commit_oversize_is_effect_free ~fs)
+        ; test_case "HEAD oversize is effect-free" `Quick
+            (test_head_oversize_is_effect_free ~fs)
+        ; test_case "exact implementation boundary" `Quick
+            (test_exact_implementation_boundary ~fs)
+        ; test_case "canonical state and digest parity" `Quick
+            test_canonical_state_and_digest_parity
+        ; test_case "long fact list is stack-safe" `Quick
+            (test_long_fact_list_is_stack_safe ~fs)
         ] )
     ]
 ;;

@@ -10,6 +10,8 @@ let episode_schema = "masc-memory-os-episode-v2"
 let manifest_schema = "masc-memory-os-manifest-v2"
 let commit_schema = "masc-memory-os-commit-v2"
 let state_schema = "masc-memory-os-state-v2"
+let publication_obligation_schema =
+  "masc-memory-os-publication-obligation-v1"
 let head_leaf = "HEAD"
 (* Private guard for one contiguous OCaml string allocation. This is not a
    product capacity, admission/routing limit, provider/model capability,
@@ -132,6 +134,12 @@ type error_kind =
       }
   | Head_row_too_large of int
   | Pending_publication_mismatch
+  | Invalid_publication_obligation of string
+  | Publication_obligation_owner_mismatch of
+      { obligation_owner_id : string
+      ; store_owner_id : string
+      }
+  | Publication_obligation_mismatch of string
 
 type error =
   { kind : error_kind
@@ -250,6 +258,24 @@ type pending_publication =
   ; settlement_warnings : settlement_warning list
   }
 
+type authority_token =
+  | Empty_authority
+  | Head_authority of
+      { payload_sha256 : Sha256.t
+      ; payload_bytes : int64
+      ; store_id : string
+      ; generation : int64
+      ; receipt_id : Sha256.t
+      }
+
+type publication_obligation =
+  { owner_id : string
+  ; expected : authority_token
+  ; desired : authority_token
+  ; operation_id : string
+  ; state_sha256 : Sha256.t
+  }
+
 type prepare_outcome =
   | Prepared of prepared_commit
   | Current_commit_replay of commit_receipt
@@ -264,6 +290,11 @@ type settle_outcome =
   | Settled_committed of commit_receipt
   | Settled_not_published of snapshot
   | Still_indeterminate of pending_publication
+
+type recovery_outcome =
+  | Recovered_committed of commit_receipt
+  | Recovered_not_published of snapshot
+  | Recovered_superseded of snapshot
 
 module Canonical_bytes = struct
   type sink =
@@ -968,6 +999,17 @@ let error_to_string (value : error) =
       Head.max_row_bytes
   | Pending_publication_mismatch ->
     "settled Memory OS HEAD does not match the pending publication receipt"
+  | Invalid_publication_obligation detail ->
+    "invalid Memory OS publication obligation: " ^ detail
+  | Publication_obligation_owner_mismatch
+      { obligation_owner_id; store_owner_id } ->
+    Printf.sprintf
+      "Memory OS publication obligation owner %S does not match opened owner %S"
+      obligation_owner_id
+      store_owner_id
+  | Publication_obligation_mismatch detail ->
+    "Memory OS publication obligation does not match current authority: "
+    ^ detail
 ;;
 
 let int64_to_json value = `Intlit (Int64.to_string value)
@@ -2121,6 +2163,333 @@ let receipt_of_snapshot (snapshot : snapshot) =
        : commit_receipt)
 ;;
 
+let head_payload_fingerprint row =
+  let payload = row ^ "\n" in
+  sha256 payload, Int64.of_int (String.length payload)
+;;
+
+let authority_of_snapshot (snapshot : snapshot) =
+  match
+    snapshot.head_row,
+    snapshot.store_id,
+    snapshot.commit_ref,
+    snapshot.commit
+  with
+  | None, None, None, None when Int64.equal snapshot.generation 0L ->
+    Ok Empty_authority
+  | Some row, Some store_id, Some _commit_ref, Some commit ->
+    if
+      not (String.equal store_id commit.store_id)
+      || not (Int64.equal snapshot.generation commit.generation)
+    then
+      Error
+        (make_error
+           ~settlement_warnings:snapshot.settlement_warnings
+           (Invalid_store_json
+              { artifact = "HEAD authority"
+              ; detail = "snapshot and current commit identity diverge"
+              }))
+    else
+      let payload_sha256, payload_bytes =
+        head_payload_fingerprint row
+      in
+      Ok
+        (Head_authority
+           { payload_sha256
+           ; payload_bytes
+           ; store_id
+           ; generation = snapshot.generation
+           ; receipt_id = commit.receipt_id
+           })
+  | _ ->
+    Error
+      (make_error
+         ~settlement_warnings:snapshot.settlement_warnings
+         (Invalid_store_json
+            { artifact = "HEAD authority"
+            ; detail = "snapshot has an incomplete current authority"
+            }))
+;;
+
+let authority_of_prepared (prepared : prepared_commit) =
+  let payload_sha256, payload_bytes =
+    head_payload_fingerprint prepared.head_row
+  in
+  Head_authority
+    { payload_sha256
+    ; payload_bytes
+    ; store_id = prepared.store_id
+    ; generation = prepared.generation
+    ; receipt_id = prepared.receipt_id
+    }
+;;
+
+let same_authority left right =
+  match left, right with
+  | Empty_authority, Empty_authority -> true
+  | Head_authority left, Head_authority right ->
+    Sha256.equal left.payload_sha256 right.payload_sha256
+    && Int64.equal left.payload_bytes right.payload_bytes
+    && String.equal left.store_id right.store_id
+    && Int64.equal left.generation right.generation
+    && Sha256.equal left.receipt_id right.receipt_id
+  | Empty_authority, Head_authority _
+  | Head_authority _, Empty_authority ->
+    false
+;;
+
+let authority_token_to_json = function
+  | Empty_authority -> `Assoc [ "kind", `String "empty" ]
+  | Head_authority authority ->
+    `Assoc
+      [ "kind", `String "head"
+      ; "payload_sha256",
+        `String (Sha256.to_string authority.payload_sha256)
+      ; "payload_bytes", int64_to_json authority.payload_bytes
+      ; "store_id", `String authority.store_id
+      ; "generation", int64_to_json authority.generation
+      ; "receipt_id", `String (Sha256.to_string authority.receipt_id)
+      ]
+;;
+
+let canonical_sha256_of_json label = function
+  | `String raw ->
+    (match Sha256.of_string raw with
+     | Some digest -> Ok digest
+     | None ->
+       Error
+         (label ^ " must be canonical lowercase SHA-256 hex"))
+  | _ -> Error (label ^ " must be a string")
+;;
+
+let sha256_field name fields =
+  let* value = required_field name fields in
+  canonical_sha256_of_json name value
+;;
+
+let authority_token_of_json json =
+  let* fields =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "authority must be an object"
+  in
+  let* kind = string_field "kind" fields in
+  match kind with
+  | "empty" ->
+    let* _ = exact_assoc [ "kind" ] json in
+    Ok Empty_authority
+  | "head" ->
+    let* fields =
+      exact_assoc
+        [ "kind"
+        ; "payload_sha256"
+        ; "payload_bytes"
+        ; "store_id"
+        ; "generation"
+        ; "receipt_id"
+        ]
+        json
+    in
+    let* payload_sha256 = sha256_field "payload_sha256" fields in
+    let* payload_bytes = int64_field "payload_bytes" fields in
+    let* store_id = string_field "store_id" fields in
+    let* generation = int64_field "generation" fields in
+    let* receipt_id = sha256_field "receipt_id" fields in
+    if Int64.compare payload_bytes 0L <= 0
+    then Error "authority payload_bytes must be positive"
+    else if not (valid_store_id store_id)
+    then Error "authority store_id must be canonical lowercase SHA-256 hex"
+    else if Int64.compare generation 0L <= 0
+    then Error "authority generation must be positive"
+    else
+      Ok
+        (Head_authority
+           { payload_sha256
+           ; payload_bytes
+           ; store_id
+           ; generation
+           ; receipt_id
+           })
+  | _ -> Error ("unknown authority kind " ^ kind)
+;;
+
+let publication_obligation_payload_to_json
+      (value : publication_obligation)
+  =
+  `Assoc
+    [ "schema", `String publication_obligation_schema
+    ; "owner_id", `String value.owner_id
+    ; "expected", authority_token_to_json value.expected
+    ; "desired", authority_token_to_json value.desired
+    ; "operation_id", `String value.operation_id
+    ; "state_sha256", `String (Sha256.to_string value.state_sha256)
+    ]
+;;
+
+let publication_obligation_checksum value =
+  publication_obligation_payload_to_json value
+  |> canonical_json
+  |> hash_domain "publication-obligation"
+;;
+
+let publication_obligation_to_bytes value =
+  match publication_obligation_payload_to_json value with
+  | `Assoc fields ->
+    canonical_json
+      (`Assoc
+         (fields
+          @ [ ( "checksum_sha256"
+              , `String
+                  (Sha256.to_string
+                     (publication_obligation_checksum value)) )
+            ]))
+  | _ -> assert false
+;;
+
+let validate_publication_obligation
+      (value : publication_obligation)
+  =
+  if String.trim value.owner_id = ""
+  then Error "owner_id must be non-empty"
+  else if String.trim value.operation_id = ""
+  then Error "operation_id must be non-empty"
+  else
+    match value.desired, value.expected with
+    | Empty_authority, _ ->
+      Error "desired authority must name a HEAD commit"
+    | Head_authority desired, Empty_authority ->
+      if Int64.equal desired.generation 1L
+      then Ok ()
+      else Error "genesis desired generation must be one"
+    | Head_authority desired, Head_authority expected ->
+      if not (String.equal desired.store_id expected.store_id)
+      then Error "expected and desired store identifiers differ"
+      else if Int64.equal expected.generation Int64.max_int
+      then Error "expected authority generation is exhausted"
+      else if
+        not
+          (Int64.equal
+             desired.generation
+             (Int64.succ expected.generation))
+      then Error "desired generation does not immediately follow expected"
+      else Ok ()
+;;
+
+let decode_publication_obligation raw =
+  try
+    let json = Yojson.Safe.from_string raw in
+    let* fields =
+      exact_assoc
+        [ "schema"
+        ; "owner_id"
+        ; "expected"
+        ; "desired"
+        ; "operation_id"
+        ; "state_sha256"
+        ; "checksum_sha256"
+        ]
+        json
+    in
+    let* () = validate_schema publication_obligation_schema fields in
+    let* owner_id = string_field "owner_id" fields in
+    let* expected_json = required_field "expected" fields in
+    let* expected = authority_token_of_json expected_json in
+    let* desired_json = required_field "desired" fields in
+    let* desired = authority_token_of_json desired_json in
+    let* operation_id = string_field "operation_id" fields in
+    let* state_sha256 = sha256_field "state_sha256" fields in
+    let* checksum = sha256_field "checksum_sha256" fields in
+    let value : publication_obligation =
+      { owner_id; expected; desired; operation_id; state_sha256 }
+    in
+    let* () = validate_publication_obligation value in
+    let expected_checksum = publication_obligation_checksum value in
+    if not (Sha256.equal checksum expected_checksum)
+    then Error "checksum_sha256 does not bind the canonical obligation"
+    else
+      let canonical = publication_obligation_to_bytes value in
+      if String.equal canonical raw
+      then Ok value
+      else Error "obligation bytes are not exact canonical JSON"
+  with
+  | Yojson.Json_error detail -> Error detail
+;;
+
+let publication_obligation_of_bytes raw =
+  match decode_publication_obligation raw with
+  | Ok value -> Ok value
+  | Error detail ->
+    Error (make_error (Invalid_publication_obligation detail))
+;;
+
+let publication_obligation_of_prepared
+      (store : t)
+      (prepared : prepared_commit)
+  =
+  let* () =
+    check_binding
+      store
+      prepared.binding
+      prepared.settlement_warnings
+  in
+  let* expected = authority_of_snapshot prepared.previous in
+  let value : publication_obligation =
+    { owner_id = store.owner_id
+    ; expected
+    ; desired = authority_of_prepared prepared
+    ; operation_id = prepared.operation_id
+    ; state_sha256 = prepared.state_sha256
+    }
+  in
+  match validate_publication_obligation value with
+  | Ok () -> Ok value
+  | Error detail ->
+    Error
+      (make_error
+         ~settlement_warnings:prepared.settlement_warnings
+         (Invalid_publication_obligation detail))
+;;
+
+let recover_publication
+      (store : t)
+      (obligation : publication_obligation)
+  =
+  let* () = check_active store in
+  if not (String.equal obligation.owner_id store.owner_id)
+  then
+    Error
+      (make_error
+         (Publication_obligation_owner_mismatch
+            { obligation_owner_id = obligation.owner_id
+            ; store_owner_id = store.owner_id
+            }))
+  else
+    let* current = load store in
+    let* current_authority = authority_of_snapshot current in
+    if same_authority current_authority obligation.desired
+    then
+      (match receipt_of_snapshot current, obligation.desired with
+       | Some receipt, Head_authority desired
+         when
+           Int64.equal receipt.generation desired.generation
+           && Sha256.equal receipt.receipt_id desired.receipt_id
+           && String.equal receipt.operation_id obligation.operation_id
+           && Sha256.equal receipt.state_sha256 obligation.state_sha256 ->
+         Ok (Recovered_committed receipt)
+       | Some _, Head_authority _
+       | None, Head_authority _
+       | Some _, Empty_authority
+       | None, Empty_authority ->
+         Error
+           (make_error
+              ~settlement_warnings:current.settlement_warnings
+              (Publication_obligation_mismatch
+                 "desired HEAD receipt metadata diverges")))
+    else if same_authority current_authority obligation.expected
+    then Ok (Recovered_not_published current)
+    else Ok (Recovered_superseded current)
+;;
+
 let create_episode_objects
       (store : t)
       ~maximum
@@ -2583,6 +2952,9 @@ module For_testing = struct
     | Head_operation_failed_error
     | Head_row_too_large_error
     | Pending_publication_mismatch_error
+    | Invalid_publication_obligation_error
+    | Publication_obligation_owner_mismatch_error
+    | Publication_obligation_mismatch_error
 
   type warning_tag =
     | Head_settlement_warning_tag
@@ -2614,6 +2986,12 @@ module For_testing = struct
     | Head_operation_failed _ -> Head_operation_failed_error
     | Head_row_too_large _ -> Head_row_too_large_error
     | Pending_publication_mismatch -> Pending_publication_mismatch_error
+    | Invalid_publication_obligation _ ->
+      Invalid_publication_obligation_error
+    | Publication_obligation_owner_mismatch _ ->
+      Publication_obligation_owner_mismatch_error
+    | Publication_obligation_mismatch _ ->
+      Publication_obligation_mismatch_error
   ;;
 
   let warning_tag = function

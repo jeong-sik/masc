@@ -133,6 +133,12 @@ let publish_committed store prepared =
   | Store.Indeterminate _ -> fail "normal publication was indeterminate"
 ;;
 
+let obligation_bytes store prepared =
+  Store.publication_obligation_of_prepared store prepared
+  |> require_ok
+  |> Store.publication_obligation_to_bytes
+;;
+
 let check_state_claim label expected snapshot =
   let value = Store.snapshot_state snapshot in
   check int (label ^ " fact count") 1 (List.length value.facts);
@@ -1308,6 +1314,214 @@ let test_long_episode_claims_publish_reopen ~fs () =
       (List.length episodes)
 ;;
 
+let test_genesis_obligation_recovers_not_published_after_reopen ~fs () =
+  with_root ~fs "masc_memory_os_recover_genesis_" @@ fun _root_path root ->
+  let bytes =
+    within_store ~root ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "recover-genesis" (state "genesis")
+    in
+    obligation_bytes store prepared
+  in
+  within_store ~seed:31 ~root ~owner:"keeper-a" @@ fun reopened ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  match require_ok (Store.recover_publication reopened obligation) with
+  | Store.Recovered_not_published current ->
+    check int64
+      "reopened genesis expected authority remains current"
+      0L
+      (Store.snapshot_generation current)
+  | Store.Recovered_committed _ ->
+    fail "unpublished genesis obligation recovered as committed"
+  | Store.Recovered_superseded _ ->
+    fail "unpublished genesis obligation recovered as superseded"
+;;
+
+let test_desired_obligation_recovers_same_receipt_after_reopen ~fs () =
+  with_root ~fs "masc_memory_os_recover_desired_"
+  @@ fun _root_path root ->
+  let bytes, expected_receipt_id =
+    within_store ~root ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "recover-desired" (state "desired")
+    in
+    let bytes = obligation_bytes store prepared in
+    let receipt = publish_committed store prepared in
+    bytes, sha256_string (Store.commit_receipt_id receipt)
+  in
+  within_store ~seed:32 ~root ~owner:"keeper-a" @@ fun reopened ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  match require_ok (Store.recover_publication reopened obligation) with
+  | Store.Recovered_committed receipt ->
+    check string
+      "reopened recovery returns the exact committed receipt"
+      expected_receipt_id
+      (sha256_string (Store.commit_receipt_id receipt));
+    check_state_claim
+      "reopened desired authority"
+      "desired"
+      (Store.committed_snapshot receipt)
+  | Store.Recovered_not_published _ ->
+    fail "published desired obligation recovered as not published"
+  | Store.Recovered_superseded _ ->
+    fail "published desired obligation recovered as superseded"
+;;
+
+let test_nonempty_expected_obligation_recovers_not_published ~fs () =
+  with_root ~fs "masc_memory_os_recover_nonempty_"
+  @@ fun _root_path root ->
+  ignore (seed_commit ~root "base" : Store.commit_receipt);
+  let bytes =
+    within_store ~seed:33 ~root ~owner:"keeper-a" @@ fun store ->
+    let base = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store base "recover-next" (state "next")
+    in
+    obligation_bytes store prepared
+  in
+  within_store ~seed:34 ~root ~owner:"keeper-a" @@ fun reopened ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  match require_ok (Store.recover_publication reopened obligation) with
+  | Store.Recovered_not_published current ->
+    check_state_claim "nonempty prior remains current" "base" current
+  | Store.Recovered_committed _ ->
+    fail "unpublished nonempty obligation recovered as committed"
+  | Store.Recovered_superseded _ ->
+    fail "unchanged nonempty authority recovered as superseded"
+;;
+
+let test_third_authority_recovers_superseded ~fs () =
+  with_root ~fs "masc_memory_os_recover_third_" @@ fun _root_path root ->
+  ignore (seed_commit ~root "base" : Store.commit_receipt);
+  let bytes =
+    within_store ~seed:35 ~root ~owner:"keeper-a" @@ fun store ->
+    let base = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store base "recover-pending" (state "pending")
+    in
+    obligation_bytes store prepared
+  in
+  within_store ~seed:36 ~root ~owner:"keeper-a" @@ fun store ->
+  let base = require_ok (Store.load store) in
+  let successor =
+    prepare_new store base "recover-successor" (state "successor")
+  in
+  ignore (publish_committed store successor : Store.commit_receipt);
+  within_store ~seed:37 ~root ~owner:"keeper-a" @@ fun reopened ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  match require_ok (Store.recover_publication reopened obligation) with
+  | Store.Recovered_superseded current ->
+    check_state_claim "valid third authority is retained" "successor" current
+  | Store.Recovered_committed _ ->
+    fail "third authority falsely proved desired committed"
+  | Store.Recovered_not_published _ ->
+    fail "third authority falsely proved desired not published"
+;;
+
+let test_obligation_codec_is_exact_and_tamper_evident ~fs () =
+  with_root ~fs "masc_memory_os_obligation_codec_"
+  @@ fun _root_path root ->
+  let bytes =
+    within_store ~root ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "codec-operation" (state "codec")
+    in
+    obligation_bytes store prepared
+  in
+  let decoded =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  check string
+    "obligation codec is exact canonical JSON"
+    bytes
+    (Store.publication_obligation_to_bytes decoded);
+  let tampered_owner =
+    Yojson.Safe.from_string bytes
+    |> replace_json_field "owner_id" (`String "keeper-b")
+    |> Yojson.Safe.to_string
+  in
+  expect_error_tag
+    "owner tamper without a matching domain checksum is rejected"
+    Store.For_testing.Invalid_publication_obligation_error
+    (Store.publication_obligation_of_bytes tampered_owner);
+  let extra_field =
+    match Yojson.Safe.from_string bytes with
+    | `Assoc fields ->
+      Yojson.Safe.to_string
+        (`Assoc (("legacy_fallback", `Bool true) :: fields))
+    | _ -> fail "canonical obligation was not an object"
+  in
+  expect_error_tag
+    "unknown obligation fields are rejected"
+    Store.For_testing.Invalid_publication_obligation_error
+    (Store.publication_obligation_of_bytes extra_field);
+  expect_error_tag
+    "noncanonical whitespace is rejected"
+    Store.For_testing.Invalid_publication_obligation_error
+    (Store.publication_obligation_of_bytes (" " ^ bytes))
+;;
+
+let test_foreign_owner_obligation_fails_closed ~fs () =
+  with_root ~fs "masc_memory_os_obligation_owner_"
+  @@ fun _root_path root ->
+  let bytes =
+    within_store ~root ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "foreign-owner" (state "foreign")
+    in
+    obligation_bytes store prepared
+  in
+  within_store ~seed:38 ~root ~owner:"keeper-b" @@ fun foreign_store ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  expect_error_tag
+    "foreign owner obligation is rejected before authority classification"
+    Store.For_testing.Publication_obligation_owner_mismatch_error
+    (Store.recover_publication foreign_store obligation)
+;;
+
+let test_recovery_validates_desired_reachable_graph ~fs () =
+  with_root ~fs "masc_memory_os_recover_tamper_"
+  @@ fun root_path root ->
+  let bytes =
+    within_store ~root ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "recover-tamper" (state "tamper")
+    in
+    let bytes = obligation_bytes store prepared in
+    ignore (publish_committed store prepared : Store.commit_receipt);
+    bytes
+  in
+  let commit_leaf = load_head root_path |> commit_leaf_of_head in
+  let commit_path = Filename.concat root_path commit_leaf in
+  let raw = load_raw commit_path in
+  let tampered = Bytes.of_string raw in
+  Bytes.set tampered 0 '[';
+  save_raw commit_path (Bytes.unsafe_to_string tampered);
+  within_store ~seed:39 ~root ~owner:"keeper-a" @@ fun reopened ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  expect_error_tag
+    "desired HEAD is not committed when its reachable graph is corrupt"
+    Store.For_testing.Immutable_digest_mismatch_error
+    (Store.recover_publication reopened obligation)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
@@ -1363,6 +1577,20 @@ let () =
             (test_long_fact_list_is_stack_safe ~fs)
         ; test_case "long episode claims publish and reopen" `Quick
             (test_long_episode_claims_publish_reopen ~fs)
+        ; test_case "genesis obligation recovers not published" `Quick
+            (test_genesis_obligation_recovers_not_published_after_reopen ~fs)
+        ; test_case "desired obligation recovers same receipt" `Quick
+            (test_desired_obligation_recovers_same_receipt_after_reopen ~fs)
+        ; test_case "nonempty expected obligation recovers not published" `Quick
+            (test_nonempty_expected_obligation_recovers_not_published ~fs)
+        ; test_case "third authority recovers superseded" `Quick
+            (test_third_authority_recovers_superseded ~fs)
+        ; test_case "obligation codec is exact and tamper evident" `Quick
+            (test_obligation_codec_is_exact_and_tamper_evident ~fs)
+        ; test_case "foreign owner obligation fails closed" `Quick
+            (test_foreign_owner_obligation_fails_closed ~fs)
+        ; test_case "recovery validates desired reachable graph" `Quick
+            (test_recovery_validates_desired_reachable_graph ~fs)
         ] )
     ]
 ;;

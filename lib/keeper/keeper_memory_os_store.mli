@@ -32,6 +32,7 @@ type snapshot
 type prepared_commit
 type commit_receipt
 type pending_publication
+type publication_obligation
 type settlement_warning
 type error
 
@@ -92,6 +93,17 @@ type settle_outcome =
   | Settled_not_published of snapshot
   | Still_indeterminate of pending_publication
 
+(** Restart recovery is current-only. [Recovered_committed] proves that the
+    exact desired HEAD row and receipt are authoritative now.
+    [Recovered_not_published] proves that the exact expected prior authority is
+    still current. [Recovered_superseded] reports a valid third authority; it
+    does not prove whether the desired publication was authoritative earlier
+    and must therefore fail closed without automatic republication. *)
+type recovery_outcome =
+  | Recovered_committed of commit_receipt
+  | Recovered_not_published of snapshot
+  | Recovered_superseded of snapshot
+
 (** Open a store below an already-authorized private root capability. The
     callback delimits the lifetime of the open store resources. Values are not
     generatively typed: the implementation embeds an opaque runtime binding and
@@ -116,6 +128,28 @@ val prepare :
   state:state ->
   (prepare_outcome, error) result
 
+(** Capture the exact expected and desired current-authority evidence from a
+    prepared commit. Production access must durably persist the canonical bytes
+    before dispatching [publish].
+
+    An obligation contains no facts or episodes, is not a Memory OS read
+    authority, and provides no publish, delete, fallback, or migration
+    operation. Unlike runtime-bound prepared and pending values, its canonical
+    bytes are intended to survive callback and process restart. *)
+val publication_obligation_of_prepared :
+  t ->
+  prepared_commit ->
+  (publication_obligation, error) result
+
+(** Encode or decode only the exact current obligation schema. The checksum is
+    domain-separated and binds owner, expected and desired HEAD publication
+    evidence, desired operation, and desired state digest. *)
+val publication_obligation_to_bytes : publication_obligation -> string
+
+val publication_obligation_of_bytes :
+  string ->
+  (publication_obligation, error) result
+
 val publish :
   t ->
   prepared_commit ->
@@ -125,6 +159,17 @@ val settle :
   t ->
   pending_publication ->
   (settle_outcome, error) result
+
+(** Classify a durable obligation against the validated current HEAD and its
+    reachable immutable graph. This never publishes, retries, deletes, or
+    changes HEAD or immutable Memory OS authority. The underlying HEAD read may
+    initialize or settle private stable-lock mechanism metadata. Callers must
+    retain and use the obligation to block successor mutations until the wider
+    transaction explicitly resolves it. *)
+val recover_publication :
+  t ->
+  publication_obligation ->
+  (recovery_outcome, error) result
 
 val committed_snapshot : commit_receipt -> snapshot
 
@@ -177,6 +222,9 @@ module For_testing : sig
     | Head_operation_failed_error
     | Head_row_too_large_error
     | Pending_publication_mismatch_error
+    | Invalid_publication_obligation_error
+    | Publication_obligation_owner_mismatch_error
+    | Publication_obligation_mismatch_error
 
   type warning_tag =
     | Head_settlement_warning_tag

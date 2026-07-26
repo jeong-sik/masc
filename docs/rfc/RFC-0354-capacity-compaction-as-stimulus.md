@@ -8,21 +8,23 @@
 
 ## 1. 사실 (2026-07-27 fleet 실측)
 
-`~/me/.masc/keepers/*/runtime-manifests/*.jsonl` 의 `context_compacted` 레코드 **70건 전부**가 자율 트리거를 달고 있고, 성공은 **0건**이다.
+`~/me/.masc/keepers/*/runtime-manifests/` 의 `context_compacted` 레코드 **2,506건 전부**가 자율 트리거를 달고 있고, 성공은 **0건**이다.
 
 | `decision.trigger` | 건수 |
 |---|---|
-| `provider_overflow` | 70 |
+| `provider_overflow` | 2,506 |
 | (그 외) | 0 |
 
 | `decision.error` | 건수 |
 |---|---|
+| `compaction rejected: exact_execution_guard_failed` | **2,438** |
 | `compaction retry suspended after 3 consecutive failures; reactive prepare refused before the summarizer call` | 66 |
-| `compaction rejected: exact_execution_guard_failed` | 2 |
 | `compaction rejected: exact_target_selection_failed` | 1 |
 | `checkpoint generation is missing` | 1 |
 
-66건은 래치(#25461)다. 래치를 채운 것은 앞의 4건이고, 그 중 2건이 guard 부재다.
+> **초안 정정 (2026-07-27)**: 이 표의 최초 버전은 guard 부재를 **2건**으로 적었다. 매니페스트는 크기 초과 시 `<name>.jsonl.1` 로 회전하는데(`lib/keeper/keeper_types_support.ml:240-258`), 측정 도구가 `*.jsonl` 만 glob 해서 회전된 세대를 통째로 놓치고 있었다. 회전분을 읽으면 65 → 2,506 건이고 guard 부재는 2 → **2,438** 건이다. 결론은 바뀌지 않지만 **규모가 두 자릿수 다르다** — guard 부재는 래치를 채운 소수의 사건이 아니라 압도적 다수의 실패다.
+
+guard 부재가 전체의 97% 다. 래치(#25461) 66건은 그 뒤에 오는 결과다.
 
 대표 레코드 (sangsu, 2026-07-25T09:31:46Z):
 
@@ -44,8 +46,8 @@
 |---|---|---|
 | 자율 트리거가 발화하지 않는다 | **반증** | 70/70 이 `provider_overflow` |
 | 선제(`Context_measured`) 경로가 없어서다 | **부분적, 무관** | 사실이나(#25773) 반응형 경로는 발화하고 있고 그것도 거부된다 |
-| exact-output 레인에 서빙 가능한 슬롯이 없다 | **반증(오늘 기준)** | `compaction_exact` 1/2 슬롯 도달 가능 (`provider_probe` 실측) |
-| 래치가 원인이다 | **반증** | 래치는 결과다. 앞선 4건이 래치를 채웠다 |
+| exact-output 레인에 서빙 가능한 슬롯이 없다 | **반증(오늘 기준)** | `compaction_exact` 1/2 슬롯 도달 가능 (`provider_probe` 실측). `exact_target_selection_failed` 는 2,506건 중 **1건** |
+| 래치가 원인이다 | **반증** | 래치는 결과다. 66건이며 guard 부재 2,438건 뒤에 온다 |
 
 ---
 
@@ -133,7 +135,7 @@ A-1 만으로 G-6 이 판정 가능해진다. A-3 은 그 다음이며, 그 전�
 
 APC 하네스 G-6 (`~/me/.worktrees/masc-liveness-program/scripts/apc/selftest.py`) 이 판정을 이미 자동화한다:
 
-- `autonomous_trigger_attempts` — 자율 트리거를 단 레코드 수 (현재 70)
+- `autonomous_trigger_attempts` — 자율 트리거를 단 레코드 수 (현재 2,506)
 - 성공 수 — 현재 0, 안 A 채택 시 1 이상이어야 한다
 - `exact_output_lane_service` — 레인별 실효 슬롯 (현재 각 1/2)
 
@@ -143,7 +145,9 @@ APC 하네스 G-6 (`~/me/.worktrees/masc-liveness-program/scripts/apc/selftest.p
 python3 - <<'PY'
 import json, pathlib, collections
 c = collections.Counter()
-for f in (pathlib.Path.home()/"me/.masc/keepers").glob("*/runtime-manifests/*.jsonl"):
+# 회전된 세대(.jsonl.1, .2 …)를 반드시 포함할 것 — 빼면 97% 를 놓친다.
+import glob as _g
+for f in map(pathlib.Path, _g.glob(str(pathlib.Path.home()/"me/.masc/keepers/*/runtime-manifests/*.jsonl*"))):
     for line in f.read_text(errors="replace").splitlines():
         if '"context_compacted"' not in line: continue
         d = (json.loads(line).get("decision") or {})

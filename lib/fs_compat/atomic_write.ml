@@ -1115,6 +1115,36 @@ let write_cleanup_failures failures =
   List.map (fun failure -> Write_cleanup_failure failure) failures
 ;;
 
+let reraise_capability_write_cancellation
+      ~backtrace
+      ~operation
+      ~target_effect
+      ~interrupted_primary_failure
+      ~cleanup_failures
+      reason
+  =
+  let reason, interrupted_recovery, carried_cleanup_failures =
+    match reason with
+    | Capability_recovery_operation_cancelled (reason, interruption) ->
+      reason, Some interruption, []
+    | Parent_sync_cleanup_failed_on_cancellation (reason, failures) ->
+      reason, None, write_cleanup_failures failures
+    | reason -> reason, None, []
+  in
+  Printexc.raise_with_backtrace
+    (Eio.Cancel.Cancelled
+       (Capability_write_cancelled
+          ( reason
+          , { operation
+            ; target_effect
+            ; interrupted_primary_failure
+            ; interrupted_recovery
+            ; cleanup_failures =
+                cleanup_failures @ carried_cleanup_failures
+            } )))
+    backtrace
+;;
+
 let capture_recovery_cleanup ~recovery_phase operation =
   try
     match operation () with
@@ -1448,7 +1478,18 @@ let replace_capability_file_with
         !cleanup_failures)
     in
     let error primary_failure additional =
-      let cleanup_failures = additional @ cleanup () in
+      let cleanup_failures =
+        try additional @ cleanup () with
+        | Eio.Cancel.Cancelled reason ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          reraise_capability_write_cancellation
+            ~backtrace
+            ~operation
+            ~target_effect:!target_effect
+            ~interrupted_primary_failure:(Some primary_failure)
+            ~cleanup_failures:additional
+            reason
+      in
       Error
         { operation
         ; target_effect = !target_effect
@@ -1863,11 +1904,25 @@ let create_capability_file_exclusive_with
            @ cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty))
     in
     let error failure additional =
+      let primary_failure = Write_primary_failure failure in
+      let additional = write_cleanup_failures additional in
+      let cleanup_failures =
+        try additional @ cleanup () with
+        | Eio.Cancel.Cancelled reason ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          reraise_capability_write_cancellation
+            ~backtrace
+            ~operation
+            ~target_effect:!target_effect
+            ~interrupted_primary_failure:(Some primary_failure)
+            ~cleanup_failures:additional
+            reason
+      in
       Error
         { operation
         ; target_effect = !target_effect
-        ; primary_failure = Write_primary_failure failure
-        ; cleanup_failures = write_cleanup_failures additional @ cleanup ()
+        ; primary_failure
+        ; cleanup_failures
         }
     in
     let result =

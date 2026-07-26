@@ -76,6 +76,7 @@ val runtime_int_of_nonce : int64 -> (int, error) result
 module For_testing : sig
   val root_path_for_base_path : base_path:string -> string
   val authority_leaf : keeper_id:string -> string
+  val enable_fd_backed_parent_opening : unit -> unit
 
   val with_read_settlement_warning :
     base_path:string ->

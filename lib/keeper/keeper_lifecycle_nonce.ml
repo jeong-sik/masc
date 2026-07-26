@@ -3,6 +3,13 @@ module Head = Fs_compat.Capability_head
 let schema = "masc.keeper-lifecycle-nonce.v1"
 let root_leaf = "keeper-lifecycle-nonces-v1"
 let head_entropy_bytes = 32 * 33
+let fd_backed_parent_opening_for_testing = Atomic.make false
+
+let with_head_parent parent fn =
+  if Atomic.get fd_backed_parent_opening_for_testing
+  then Eio.Path.with_open_dir parent fn
+  else fn parent
+;;
 
 type corruption =
   | Malformed_current of string
@@ -303,7 +310,10 @@ let rec allocate
   in
   let leaf = authority_leaf ~keeper_id in
   let* read_entropy = entropy_source () in
-  match Head.read ~secure_random:read_entropy ~parent:root ~leaf with
+  match
+    with_head_parent root (fun parent ->
+      Head.read ~secure_random:read_entropy ~parent ~leaf)
+  with
   | Error failure when failure.error = Head.Busy ->
     retry failure
   | Error failure -> Error (Head_read_failed failure)
@@ -334,12 +344,13 @@ let rec allocate
     in
     let* write_entropy = entropy_source () in
     (match
-       compare_and_swap
-         ~secure_random:write_entropy
-         ~parent:root
-         ~leaf
-         ~expected:(Head.snapshot_cursor snapshot)
-         ~row:(row_bytes desired_row)
+       with_head_parent root (fun parent ->
+         compare_and_swap
+           ~secure_random:write_entropy
+           ~parent
+           ~leaf
+           ~expected:(Head.snapshot_cursor snapshot)
+           ~row:(row_bytes desired_row))
      with
      | Ok publication ->
        let warnings = Head.publication_settlement_warnings publication in
@@ -514,6 +525,10 @@ let error_to_string = function
 module For_testing = struct
   let root_path_for_base_path = root_path_for_base_path
   let authority_leaf = authority_leaf
+
+  let enable_fd_backed_parent_opening () =
+    Atomic.set fd_backed_parent_opening_for_testing true
+  ;;
 
   let with_read_settlement_warning
         ~base_path

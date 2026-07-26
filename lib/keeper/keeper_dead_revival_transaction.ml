@@ -15,6 +15,14 @@ let final_clear_failure_hook : (unit -> string option) Atomic.t =
   Atomic.make (fun () -> None)
 ;;
 
+let fd_backed_parent_opening_for_testing = Atomic.make false
+
+let with_head_parent parent fn =
+  if Atomic.get fd_backed_parent_opening_for_testing
+  then Eio.Path.with_open_dir parent fn
+  else fn parent
+;;
+
 let invoke_after_nonce_allocation_hook () =
   (Atomic.get after_nonce_allocation_hook) ()
 ;;
@@ -53,6 +61,10 @@ module Boundary_hooks_for_testing = struct
     Fun.protect
       ~finally:(fun () -> Atomic.set final_clear_failure_hook previous)
       fn
+  ;;
+
+  let enable_fd_backed_parent_opening () =
+    Atomic.set fd_backed_parent_opening_for_testing true
   ;;
 end
 
@@ -379,10 +391,11 @@ let read_current_journal ~invalid config keeper_name =
      | Error error -> Error error
      | Ok secure_random ->
        (match
-          Head.read
-            ~secure_random
-            ~parent
-            ~leaf:(keeper_name ^ ".json")
+          with_head_parent parent (fun parent ->
+            Head.read
+              ~secure_random
+              ~parent
+              ~leaf:(keeper_name ^ ".json"))
         with
         | Error failure ->
           Error (Journal_write_failed (head_failure_to_string failure))
@@ -419,12 +432,13 @@ let publish_row ~conflict ~parent ~snapshot ~journal =
   | Error error -> Error error
   | Ok secure_random ->
     (match
-       Head.compare_and_swap
-         ~secure_random
-         ~parent
-         ~leaf:(journal.keeper_name ^ ".json")
-         ~expected:(Head.snapshot_cursor snapshot)
-         ~row:(journal_to_bytes journal)
+       with_head_parent parent (fun parent ->
+         Head.compare_and_swap
+           ~secure_random
+           ~parent
+           ~leaf:(journal.keeper_name ^ ".json")
+           ~expected:(Head.snapshot_cursor snapshot)
+           ~row:(journal_to_bytes journal))
      with
      | Error failure -> Error (publication_error ~conflict failure)
      | Ok publication ->

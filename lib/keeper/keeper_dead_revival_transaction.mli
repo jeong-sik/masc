@@ -90,6 +90,8 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 
+  val enable_fd_backed_parent_opening : unit -> unit
+
   val reserved_journal_row :
     owner_id:string ->
     original:Keeper_meta_contract.keeper_meta ->

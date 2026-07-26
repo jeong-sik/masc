@@ -21,7 +21,9 @@ let ensure_fs env =
   (* An Eio filesystem capability is owned by the current scheduler. This test
      executable creates a fresh [Eio_main.run] per case, so retaining the first
      capability would leak a dead scheduler resource into later cases. *)
-  Fs_compat.set_fs (Eio.Stdenv.fs env)
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Keeper_lifecycle_nonce.For_testing.enable_fd_backed_parent_opening ();
+  Keeper_dead_revival_transaction.For_testing.enable_fd_backed_parent_opening ()
 
 let publication_recovery_registry env sw config =
   let registry_root =

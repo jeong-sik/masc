@@ -229,7 +229,7 @@ let consensus_failure ~detail ~dissenters =
 let degradation_required ~detail ~recommended_level =
   DegradationRequired { detail; recommended_level }
 
-(* ── Heuristic classification ─────────────────────────────────── *)
+(* ── Untyped fail-closed classification ───────────────────────── *)
 
 let classify_string (s : string) : error_mode =
   permanent ~detail:s ~fallback:(HumanHandoff s)

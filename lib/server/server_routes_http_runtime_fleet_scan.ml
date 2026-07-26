@@ -287,8 +287,7 @@ let keeper_fleet_meta_scan
              else acc
            | None ->
              let path_identity =
-               Keeper_meta_store.keeper_meta_path config name
-               |> Filename.basename
+               name ^ ".json"
              in
              let err =
                match

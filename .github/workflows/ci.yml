@@ -858,6 +858,23 @@ jobs:
           chmod +x scripts/harness/lib/server_bootstrap.sh
           scripts/ci-run-tests.sh "scripts/harness/contract/run_all.sh"
 
+      # This smoke is the only gate that boots the installed binary against the
+      # release-evidence config fixture. Running it solely on push-to-main made
+      # it structurally invisible to review: #25671 added a mandatory
+      # exact-output lane, every PR check was green, and main then failed on
+      # every push for ~29 hours (#25663). Running it on pull_request too moves
+      # that failure into the PR that causes it. It is a ~10s local boot against
+      # a dead-port fixture with keeper bootstrap disabled, so it issues no
+      # provider call and needs no credential.
+      - name: Boot release evidence smoke (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          chmod +x scripts/release-evidence.sh
+          mkdir -p .release-evidence
+          scripts/release-evidence.sh \
+            _build/default/bin/main_eio.exe \
+            .release-evidence/pr-release-evidence.md
+
       - name: Generate main release evidence bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |

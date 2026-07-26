@@ -208,7 +208,7 @@ let load_exact_output_lane_declarations ?config_root () =
 ;;
 
 let mandatory_exact_output_lane_ids =
-  [ "hitl_auto_judge"; Keeper_board_attention_exact_flow.lane_id ]
+  [ Hitl_summary_worker.lane_id; Keeper_board_attention_exact_flow.lane_id ]
 ;;
 
 let require_explicit_mandatory_exact_output_lanes ~config_path lanes =

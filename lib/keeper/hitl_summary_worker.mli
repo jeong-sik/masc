@@ -4,6 +4,11 @@
     admission, attempt allocation, execution, failover, receipts, and
     provenance. *)
 
+val lane_id : string
+(** The registry lane id this worker resolves. Exposed so startup validation and
+    config fixtures name the lane through this module instead of repeating the
+    literal, matching {!Keeper_board_attention_exact_flow.lane_id}. *)
+
 val snapshot_topology_readiness : unit -> (unit, string) result
 (** Verify only prompt availability and that the registry-owned
     [hitl_auto_judge] topology can be frozen as an OAS exact-output snapshot.

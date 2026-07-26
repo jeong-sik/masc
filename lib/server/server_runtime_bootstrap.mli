@@ -77,6 +77,15 @@ val create_server_state :
     [Masc_http_client.Pool] can lazy-init with the full
     {!Eio_unix.Stdenv.base}.  RFC-0107 Phase D.2c. *)
 
+val mandatory_exact_output_lane_ids : string list
+(** Every exact-output lane a server must find declared, with a non-empty slot
+    list, in the resolved [runtime.toml] before readiness. Startup raises
+    [Env_config_core.Config_error] when one is missing rather than synthesizing
+    a default, so this list is also the contract every boot-path config fixture
+    has to satisfy. Exposed so a fixture that a PR never boots can still be
+    checked against it — a lane added here without a matching fixture update is
+    the failure mode this value exists to make detectable. *)
+
 module For_testing : sig
   val configure_exact_output_registry : ?config_root:string -> unit -> unit
   val install_domain_pool_references : Domain_pool.t -> unit

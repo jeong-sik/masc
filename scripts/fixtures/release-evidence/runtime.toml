@@ -1,0 +1,52 @@
+# Release-evidence install smoke runtime config.
+#
+# Copied verbatim into the isolated base path by scripts/release-evidence.sh.
+# It lives here as a file, not as a heredoc inside that script, so
+# test_runtime_config_validity can check it against
+# Server_runtime_bootstrap.mandatory_exact_output_lane_ids. A heredoc is
+# invisible to the compiler and to every test, which is how the
+# hitl_auto_judge lane requirement added in #25671 reached main unnoticed and
+# failed every push for ~29 hours (#25663).
+#
+# Nothing here contacts a provider: every endpoint is an isolated dead port and
+# release-evidence.sh sets MASC_KEEPER_BOOTSTRAP_ENABLED=false. This fixture
+# only proves the installed binary boots and serves /health.
+
+[runtime]
+# The default model id must be known to the OAS capability catalog, or the
+# startup capability gate (validate_runtime_model_capabilities, RFC-0206)
+# refuses to boot (a fixture model named "smoke" is absent from the catalog and
+# was rejected, breaking this evidence step on every OCaml push to main).
+# deepseek-v4-flash is the catalog-known fleet default; the provider endpoint
+# below is an isolated dead port. The [models.deepseek-v4-flash] block mirrors
+# config/runtime.toml's shape so the runtime resolves; its model id is what the
+# gate matches against the catalog.
+default = "ollama_cloud.deepseek-v4-flash"
+
+# Startup requires every id in Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+# to be declared here with a non-empty slot list; it synthesizes nothing. The
+# slots name OAS target refs, which resolve through the sibling
+# oas-models-overlay.toml — that overlay declares release_evidence.smoke with an
+# empty api_key_env so admission needs no credential. Without it the second
+# startup gate (require_usable_mandatory_exact_output_lanes) would reject this
+# config for having no credential-usable slot.
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["release_evidence.smoke"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["release_evidence.smoke"]
+
+[providers.ollama_cloud]
+display-name = "Release Evidence Smoke"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[ollama_cloud.deepseek-v4-flash]
+is-default = true
+max-concurrent = 1

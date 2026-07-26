@@ -716,7 +716,13 @@
 (test
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
- (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
+ ; source_tree, not named files: the mandatory-lane check discovers every
+ ; scripts/fixtures/<name>/runtime.toml, so a fixture added later is covered
+ ; without editing this stanza.
+ (deps
+  ../config/oas-models-overlay.toml
+  ../config/runtime.toml
+  (source_tree ../scripts/fixtures))
  (libraries masc_test_deps compaction_exact_output_fixture))
 
 (test

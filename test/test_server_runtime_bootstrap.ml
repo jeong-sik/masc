@@ -104,6 +104,28 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let test_grpc_tool_arguments_fail_closed_before_dispatch () =
+  let dispatch_calls = ref 0 in
+  let dispatch _arguments =
+    incr dispatch_calls;
+    Ok "{}"
+  in
+  [ "malformed", "{"; "non-object", "[]" ]
+  |> List.iter (fun (label, arguments_json) ->
+    match
+      Server_runtime_bootstrap.For_testing.dispatch_grpc_tool_call
+        ~dispatch
+        arguments_json
+    with
+    | Error message ->
+      Alcotest.(check string)
+        (label ^ " typed error")
+        "Invalid params: expected object"
+        message
+    | Ok _ -> Alcotest.failf "%s arguments reached the dispatcher" label);
+  Alcotest.(check int) "dispatcher calls" 0 !dispatch_calls
+;;
+
 let canonical_path path =
   try Unix.realpath path with Unix.Unix_error _ -> path
 
@@ -4798,6 +4820,10 @@ let () =
             "transition projection cursor commits before isolated owner recovery"
             `Quick
             test_transition_projection_cursor_commits_before_isolated_owner_recovery;
+          Alcotest.test_case
+            "gRPC tool arguments fail closed before dispatch"
+            `Quick
+            test_grpc_tool_arguments_fail_closed_before_dispatch;
           Alcotest.test_case
             "model catalog installs explicit env override"
             `Quick test_model_catalog_configuration_installs_explicit_env_override;

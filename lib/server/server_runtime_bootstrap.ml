@@ -351,9 +351,17 @@ let install_domain_pool_references domain_pool =
   Executor_pool_ref.set (Domain_pool.executor_pool domain_pool)
 ;;
 
+let dispatch_grpc_tool_call ~dispatch arguments_json =
+  match Yojson.Safe.from_string arguments_json with
+  | (`Assoc _ as arguments) -> dispatch arguments
+  | _ -> Error "Invalid params: expected object"
+  | exception Yojson.Json_error _ -> Error "Invalid params: expected object"
+;;
+
 module For_testing = struct
   let configure_exact_output_registry = configure_exact_output_registry
   let install_domain_pool_references = install_domain_pool_references
+  let dispatch_grpc_tool_call = dispatch_grpc_tool_call
 end
 
 (* GC tuning for long-running server with bursty allocation.
@@ -1370,26 +1378,23 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
          unrelated Keeper lanes. *)
       (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
       let tool_dispatcher tool_name args_json =
-        let arguments =
-          try Yojson.Safe.from_string args_json
-          with Yojson.Json_error _ -> `Assoc []
-        in
-        let workspace_scope = Mcp_server.workspace_scope state in
-        let result =
-          Mcp_server_eio_execute.execute_tool_eio
-            ~sw
-            ~clock
-            ~workspace_scope
-            state
-            ~name:tool_name ~arguments
-        in
-        let success = not (Tool_result.is_failed result)
-        and result_str = Tool_result.message result
-        in
-        if not success then
-          Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
-            tool_name (String.length result_str);
-        if success then Ok result_str else Error result_str
+        dispatch_grpc_tool_call args_json ~dispatch:(fun arguments ->
+          let workspace_scope = Mcp_server.workspace_scope state in
+          let result =
+            Mcp_server_eio_execute.execute_tool_eio
+              ~sw
+              ~clock
+              ~workspace_scope
+              state
+              ~name:tool_name ~arguments
+          in
+          let success = not (Tool_result.is_failed result)
+          and result_str = Tool_result.message result
+          in
+          if not success then
+            Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
+              tool_name (String.length result_str);
+          if success then Ok result_str else Error result_str)
       in
       Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
         ~tool_dispatcher;

@@ -15,6 +15,10 @@ let final_clear_failure_hook : (unit -> string option) Atomic.t =
   Atomic.make (fun () -> None)
 ;;
 
+let before_recovery_claim_hook : (unit -> unit) Atomic.t =
+  Atomic.make (fun () -> ())
+;;
+
 let fd_backed_parent_opening_key : unit Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
@@ -35,6 +39,10 @@ let invoke_after_journal_write_hook () =
 
 let invoke_final_clear_failure_hook () =
   (Atomic.get final_clear_failure_hook) ()
+;;
+
+let invoke_before_recovery_claim_hook () =
+  (Atomic.get before_recovery_claim_hook) ()
 ;;
 
 module Boundary_hooks_for_testing = struct
@@ -62,6 +70,15 @@ module Boundary_hooks_for_testing = struct
     in
     Fun.protect
       ~finally:(fun () -> Atomic.set final_clear_failure_hook previous)
+      fn
+  ;;
+
+  let with_recovery_claim_hook ~before_recovery_claim fn =
+    let previous =
+      Atomic.exchange before_recovery_claim_hook before_recovery_claim
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set before_recovery_claim_hook previous)
       fn
   ;;
 
@@ -130,6 +147,8 @@ type journal_stage =
   | Reserved
   | Durable_committed
   | Launch_committed
+  | Rollback_reserved
+  | Rollback_durable_committed
   | Cleared
 
 type journal =
@@ -142,6 +161,15 @@ type journal =
   ; candidate : keeper_meta
   ; stage : journal_stage
   }
+
+type cleared_journal =
+  { transaction_id : string
+  ; keeper_name : string
+  }
+
+type journal_row =
+  | Active_journal of journal
+  | Cleared_tombstone of cleared_journal
 
 type recovery_summary =
   { recovered : int
@@ -162,6 +190,14 @@ let sha256 value =
 
 let length_delimited value =
   Printf.sprintf "%d:%s" (String.length value) value
+;;
+
+let journal_leaf keeper_name =
+  "revival-"
+  ^ sha256
+      ("keeper-dead-revival-journal-leaf-v1\000"
+       ^ length_delimited keeper_name)
+  ^ ".json"
 ;;
 
 let journal_transaction_id
@@ -187,12 +223,18 @@ let journal_stage_to_json = function
   | Reserved -> `Assoc [ "reserved", `Bool true ]
   | Durable_committed -> `Assoc [ "durable_committed", `Bool true ]
   | Launch_committed -> `Assoc [ "launch_committed", `Bool true ]
+  | Rollback_reserved -> `Assoc [ "rollback_reserved", `Bool true ]
+  | Rollback_durable_committed ->
+    `Assoc [ "rollback_durable_committed", `Bool true ]
   | Cleared -> `Assoc [ "cleared", `Bool true ]
 ;;
 
 let journal_to_json journal =
   let stage =
-    journal_stage_to_json journal.stage
+    match journal.stage with
+    | Cleared ->
+      invalid_arg "active keeper revival journal cannot have Cleared stage"
+    | stage -> journal_stage_to_json stage
   in
   `Assoc
     [ "schema", `String journal_schema
@@ -207,12 +249,48 @@ let journal_to_json journal =
     ]
 ;;
 
+let cleared_journal_to_json tombstone =
+  `Assoc
+    [ "schema", `String journal_schema
+    ; "transaction_id", `String tombstone.transaction_id
+    ; "keeper_name", `String tombstone.keeper_name
+    ; "stage", journal_stage_to_json Cleared
+    ]
+;;
+
+let journal_row_to_json = function
+  | Active_journal journal -> journal_to_json journal
+  | Cleared_tombstone tombstone -> cleared_journal_to_json tombstone
+;;
+
 let journal_to_bytes journal =
   Yojson.Safe.to_string (journal_to_json journal)
 ;;
 
-let exact_journal_fields fields =
-  let expected =
+let journal_row_to_bytes row =
+  Yojson.Safe.to_string (journal_row_to_json row)
+;;
+
+let exact_fields ~kind expected fields =
+  let expected = List.sort String.compare expected in
+  let observed =
+    List.map fst fields
+    |> List.sort String.compare
+  in
+  if List.equal String.equal expected observed
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "%s fields differ expected=[%s] observed=[%s]"
+         kind
+         (String.concat "," expected)
+         (String.concat "," observed))
+;;
+
+let exact_active_journal_fields fields =
+  exact_fields
+    ~kind:"active journal"
     [ "schema"
     ; "transaction_id"
     ; "owner_id"
@@ -223,20 +301,14 @@ let exact_journal_fields fields =
     ; "candidate"
     ; "stage"
     ]
-    |> List.sort String.compare
-  in
-  let observed =
-    List.map fst fields
-    |> List.sort String.compare
-  in
-  if List.equal String.equal expected observed
-  then Ok ()
-  else
-    Error
-      (Printf.sprintf
-         "journal fields differ expected=[%s] observed=[%s]"
-         (String.concat "," expected)
-         (String.concat "," observed))
+    fields
+;;
+
+let exact_cleared_journal_fields fields =
+  exact_fields
+    ~kind:"cleared journal"
+    [ "schema"; "transaction_id"; "keeper_name"; "stage" ]
+    fields
 ;;
 
 let required_string key fields =
@@ -258,6 +330,10 @@ let required_stage fields =
   | Some (`Assoc [ ("reserved", `Bool true) ]) -> Ok Reserved
   | Some (`Assoc [ ("durable_committed", `Bool true) ]) -> Ok Durable_committed
   | Some (`Assoc [ ("launch_committed", `Bool true) ]) -> Ok Launch_committed
+  | Some (`Assoc [ ("rollback_reserved", `Bool true) ]) ->
+    Ok Rollback_reserved
+  | Some (`Assoc [ ("rollback_durable_committed", `Bool true) ]) ->
+    Ok Rollback_durable_committed
   | Some (`Assoc [ ("cleared", `Bool true) ]) -> Ok Cleared
   | Some _ -> Error "journal stage must contain exactly one known constructor"
   | None -> Error "journal field stage is missing"
@@ -272,50 +348,63 @@ let required_meta key fields =
 let journal_of_json = function
   | `Assoc fields ->
     let ( let* ) = Result.bind in
-    let* () = exact_journal_fields fields in
     let* schema = required_string "schema" fields in
-    let* transaction_id = required_string "transaction_id" fields in
-    let* owner_id = required_string "owner_id" fields in
-    let* keeper_name = required_string "keeper_name" fields in
-    let* trace_id_raw = required_string "expected_trace_id" fields in
-    let* expected_trace_id = Keeper_id.Trace_id.of_string trace_id_raw in
-    let* expected_generation = required_int "expected_generation" fields in
-    let* original = required_meta "original" fields in
-    let* candidate = required_meta "candidate" fields in
     let* stage = required_stage fields in
     if not (String.equal schema journal_schema)
     then Error ("unsupported keeper lifecycle journal schema: " ^ schema)
-    else if
-      not (String.equal original.name keeper_name)
-      || not (String.equal candidate.name keeper_name)
-      || not
-           (Keeper_id.Trace_id.equal
-              original.runtime.trace_id
-              expected_trace_id)
-      || not (Int.equal original.runtime.nonce expected_generation)
-    then Error "journal metadata does not match its keeper lifecycle binding"
     else
-      let expected_transaction_id =
-        journal_transaction_id
-          ~owner_id
-          ~keeper_name
-          ~expected_trace_id
-          ~expected_generation
-          ~candidate_nonce:candidate.runtime.nonce
-      in
-      if not (String.equal transaction_id expected_transaction_id)
-      then Error "journal transaction_id does not bind owner and lifecycle nonce"
-      else
-        Ok
-          { transaction_id
-          ; owner_id
-          ; keeper_name
-          ; expected_trace_id
-          ; expected_generation
-          ; original
-          ; candidate
-          ; stage
-          }
+      match stage with
+      | Cleared ->
+        let* () = exact_cleared_journal_fields fields in
+        let* transaction_id = required_string "transaction_id" fields in
+        let* keeper_name = required_string "keeper_name" fields in
+        Ok (Cleared_tombstone { transaction_id; keeper_name })
+      | ( Reserved
+        | Durable_committed
+        | Launch_committed
+        | Rollback_reserved
+        | Rollback_durable_committed ) as stage ->
+        let* () = exact_active_journal_fields fields in
+        let* transaction_id = required_string "transaction_id" fields in
+        let* owner_id = required_string "owner_id" fields in
+        let* keeper_name = required_string "keeper_name" fields in
+        let* trace_id_raw = required_string "expected_trace_id" fields in
+        let* expected_trace_id = Keeper_id.Trace_id.of_string trace_id_raw in
+        let* expected_generation = required_int "expected_generation" fields in
+        let* original = required_meta "original" fields in
+        let* candidate = required_meta "candidate" fields in
+        if
+          not (String.equal original.name keeper_name)
+          || not (String.equal candidate.name keeper_name)
+          || not
+               (Keeper_id.Trace_id.equal
+                  original.runtime.trace_id
+                  expected_trace_id)
+          || not (Int.equal original.runtime.nonce expected_generation)
+        then Error "journal metadata does not match its keeper lifecycle binding"
+        else
+          let expected_transaction_id =
+            journal_transaction_id
+              ~owner_id
+              ~keeper_name
+              ~expected_trace_id
+              ~expected_generation
+              ~candidate_nonce:candidate.runtime.nonce
+          in
+          if not (String.equal transaction_id expected_transaction_id)
+          then Error "journal transaction_id does not bind owner and lifecycle nonce"
+          else
+            Ok
+              (Active_journal
+                 { transaction_id
+                 ; owner_id
+                 ; keeper_name
+                 ; expected_trace_id
+                 ; expected_generation
+                 ; original
+                 ; candidate
+                 ; stage
+                 })
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "keeper lifecycle journal must be a JSON object"
 ;;
@@ -324,9 +413,9 @@ let journal_of_bytes raw =
   try
     Result.bind
       (journal_of_json (Yojson.Safe.from_string raw))
-      (fun journal ->
-         if String.equal raw (journal_to_bytes journal)
-         then Ok journal
+      (fun row ->
+         if String.equal raw (journal_row_to_bytes row)
+         then Ok row
          else Error "journal row is not exact canonical JSON")
   with
   | Yojson.Json_error detail -> Error detail
@@ -385,7 +474,17 @@ let settlement_warning_detail count =
   Printf.sprintf "journal authority settled with %d warning(s)" count
 ;;
 
-let read_current_journal ~invalid config keeper_name =
+let journal_row_keeper_name = function
+  | Active_journal journal -> journal.keeper_name
+  | Cleared_tombstone tombstone -> tombstone.keeper_name
+;;
+
+let journal_row_transaction_id = function
+  | Active_journal journal -> journal.transaction_id
+  | Cleared_tombstone tombstone -> tombstone.transaction_id
+;;
+
+let read_journal_leaf ~invalid config ~leaf ~expected_keeper_name =
   match journal_parent config with
   | Error error -> Error error
   | Ok parent ->
@@ -397,7 +496,7 @@ let read_current_journal ~invalid config keeper_name =
             Head.read
               ~secure_random
               ~parent
-              ~leaf:(keeper_name ^ ".json"))
+              ~leaf)
         with
         | Error failure ->
           Error (Journal_write_failed (head_failure_to_string failure))
@@ -412,9 +511,29 @@ let read_current_journal ~invalid config keeper_name =
              | Some raw ->
                (match journal_of_bytes raw with
                 | Error detail -> Error (invalid detail)
-                | Ok journal when not (String.equal journal.keeper_name keeper_name) ->
-                  Error (invalid "journal keeper binding differs from its leaf")
-                | Ok journal -> Ok (parent, snapshot, Some journal)))))
+                | Ok row
+                  when not
+                         (String.equal
+                            (journal_leaf (journal_row_keeper_name row))
+                            leaf) ->
+                  Error (invalid "journal keeper binding differs from its hashed leaf")
+                | Ok row ->
+                  (match expected_keeper_name with
+                   | Some keeper_name
+                     when not
+                            (String.equal
+                               (journal_row_keeper_name row)
+                               keeper_name) ->
+                     Error (invalid "journal keeper binding differs from request")
+                   | Some _ | None -> Ok (parent, snapshot, Some row))))))
+;;
+
+let read_current_journal ~invalid config keeper_name =
+  read_journal_leaf
+    ~invalid
+    config
+    ~leaf:(journal_leaf keeper_name)
+    ~expected_keeper_name:(Some keeper_name)
 ;;
 
 let publication_error ~conflict (failure : Head.failure) =
@@ -429,7 +548,8 @@ let publication_error ~conflict (failure : Head.failure) =
     Journal_publication_indeterminate failure
 ;;
 
-let publish_row ~conflict ~parent ~snapshot ~journal =
+let publish_row ~conflict ~parent ~snapshot ~row =
+  let keeper_name = journal_row_keeper_name row in
   match journal_entropy () with
   | Error error -> Error error
   | Ok secure_random ->
@@ -438,9 +558,9 @@ let publish_row ~conflict ~parent ~snapshot ~journal =
          Head.compare_and_swap
            ~secure_random
            ~parent
-           ~leaf:(journal.keeper_name ^ ".json")
+           ~leaf:(journal_leaf keeper_name)
            ~expected:(Head.snapshot_cursor snapshot)
-           ~row:(journal_to_bytes journal))
+           ~row:(journal_row_to_bytes row))
      with
      | Error failure -> Error (publication_error ~conflict failure)
      | Ok publication ->
@@ -474,8 +594,7 @@ let reserve_journal config journal =
       journal.keeper_name
   with
   | Error error -> Error error
-  | Ok (_, _, Some existing)
-    when existing.stage <> Cleared ->
+  | Ok (_, _, Some (Active_journal existing)) ->
     Error
       (Journal_conflict
          (Printf.sprintf
@@ -483,20 +602,12 @@ let reserve_journal config journal =
             existing.transaction_id
             (Yojson.Safe.to_string (journal_stage_to_json existing.stage))))
   | Ok (parent, snapshot, None)
-  | Ok (parent, snapshot, Some { stage = Cleared; _ }) ->
+  | Ok (parent, snapshot, Some (Cleared_tombstone _)) ->
     publish_row
       ~conflict:(fun detail -> Journal_conflict detail)
       ~parent
       ~snapshot
-      ~journal
-  | Ok (_, _, Some existing) ->
-    Error
-      (Journal_conflict
-         (Printf.sprintf
-            "existing journal transaction=%s remains stage=%s"
-            existing.transaction_id
-            (Yojson.Safe.to_string
-               (journal_stage_to_json existing.stage))))
+      ~row:(Active_journal journal)
 ;;
 
 let transition_journal config ~expected_stage journal =
@@ -509,18 +620,20 @@ let transition_journal config ~expected_stage journal =
   | Error error -> Error error
   | Ok (_, _, None) ->
     Error (Journal_ownership_changed "journal authority is missing")
-  | Ok (_, _, Some current)
+  | Ok (_, _, Some (Cleared_tombstone _)) ->
+    Error (Journal_ownership_changed "journal authority is already cleared")
+  | Ok (_, _, Some (Active_journal current))
     when current.stage <> expected_stage
          || not (same_transaction current journal) ->
     Error
       (Journal_ownership_changed
          "journal authority is not the expected transaction stage")
-  | Ok (parent, snapshot, Some _) ->
+  | Ok (parent, snapshot, Some (Active_journal _)) ->
     publish_row
       ~conflict:(fun detail -> Journal_ownership_changed detail)
       ~parent
       ~snapshot
-      ~journal
+      ~row:(Active_journal journal)
 ;;
 
 let save_journal config journal =
@@ -530,11 +643,15 @@ let save_journal config journal =
     transition_journal config ~expected_stage:Reserved journal
   | Launch_committed ->
     transition_journal config ~expected_stage:Durable_committed journal
+  | Rollback_reserved | Rollback_durable_committed ->
+    Error
+      (Journal_write_failed
+         "rollback claim stages are owned by startup recovery")
   | Cleared ->
     Error (Journal_write_failed "Cleared is not a publishable revival stage")
 ;;
 
-let clear_journal config journal =
+let clear_journal config ~expected_stage journal =
   match
     read_current_journal
       ~invalid:(fun detail -> Journal_ownership_changed detail)
@@ -544,18 +661,101 @@ let clear_journal config journal =
   | Error error -> Error error
   | Ok (_, _, None) ->
     Error (Journal_ownership_changed "journal authority disappeared before clear")
-  | Ok (_, _, Some current)
+  | Ok (_, _, Some (Cleared_tombstone tombstone))
+    when String.equal tombstone.transaction_id journal.transaction_id
+         && String.equal tombstone.keeper_name journal.keeper_name ->
+    Ok ()
+  | Ok (_, _, Some (Cleared_tombstone _)) ->
+    Error
+      (Journal_ownership_changed
+         "cleared journal authority belongs to a different transaction")
+  | Ok (_, _, Some (Active_journal current))
     when not (same_transaction current journal) ->
     Error
       (Journal_ownership_changed
          "journal authority belongs to a different transaction")
-  | Ok (_, _, Some { stage = Cleared; _ }) -> Ok ()
-  | Ok (parent, snapshot, Some current) ->
+  | Ok (_, _, Some (Active_journal current))
+    when current.stage <> expected_stage ->
+    Error
+      (Journal_ownership_changed
+         "journal authority advanced beyond the expected clear stage")
+  | Ok (parent, snapshot, Some (Active_journal current)) ->
     publish_row
       ~conflict:(fun detail -> Journal_ownership_changed detail)
       ~parent
       ~snapshot
-      ~journal:{ current with stage = Cleared }
+      ~row:
+        (Cleared_tombstone
+           { transaction_id = current.transaction_id
+           ; keeper_name = current.keeper_name
+           })
+;;
+
+type recovery_claim =
+  | Recovery_rollback_claimed of journal * bool
+  | Recovery_forward_complete of journal
+  | Recovery_already_cleared
+
+let rec claim_recovery_rollback config journal attempts =
+  if attempts <= 0
+  then
+    Error
+      (Journal_ownership_changed
+         "journal authority did not settle while recovery claimed rollback")
+  else
+    match
+      read_current_journal
+        ~invalid:(fun detail -> Journal_ownership_changed detail)
+        config
+        journal.keeper_name
+    with
+    | Error error -> Error error
+    | Ok (_, _, None) ->
+      Error (Journal_ownership_changed "journal authority disappeared before claim")
+    | Ok (_, _, Some (Cleared_tombstone tombstone))
+      when String.equal tombstone.transaction_id journal.transaction_id ->
+      Ok Recovery_already_cleared
+    | Ok (_, _, Some (Cleared_tombstone _)) ->
+      Error
+        (Journal_ownership_changed
+           "journal authority belongs to a different cleared transaction")
+    | Ok (_, _, Some (Active_journal current))
+      when not (same_transaction current journal) ->
+      Error
+        (Journal_ownership_changed
+           "journal authority belongs to a different transaction")
+    | Ok (_, _, Some (Active_journal current))
+      when current.stage = Launch_committed ->
+      Ok (Recovery_forward_complete current)
+    | Ok (_, _, Some (Active_journal current))
+      when current.stage = Rollback_reserved ->
+      Ok (Recovery_rollback_claimed (current, false))
+    | Ok (_, _, Some (Active_journal current))
+      when current.stage = Rollback_durable_committed ->
+      Ok (Recovery_rollback_claimed (current, true))
+    | Ok (parent, snapshot, Some (Active_journal current)) ->
+      let claimed_stage, durable_committed =
+        match current.stage with
+        | Reserved -> Rollback_reserved, false
+        | Durable_committed -> Rollback_durable_committed, true
+        | Launch_committed
+        | Rollback_reserved
+        | Rollback_durable_committed
+        | Cleared ->
+          assert false
+      in
+      let claimed = { current with stage = claimed_stage } in
+      (match
+         publish_row
+           ~conflict:(fun detail -> Journal_ownership_changed detail)
+           ~parent
+           ~snapshot
+           ~row:(Active_journal claimed)
+       with
+       | Ok () -> Ok (Recovery_rollback_claimed (claimed, durable_committed))
+       | Error (Journal_ownership_changed _) ->
+         claim_recovery_rollback config journal (attempts - 1)
+       | Error error -> Error error)
 ;;
 
 let make_reserved_journal ~owner_id ~original ~candidate =
@@ -602,7 +802,7 @@ module For_testing = struct
     with
     | Error error -> Error error
     | Ok (_, _, None) -> Ok None
-    | Ok (_, _, Some journal) -> Ok (Some (journal_to_bytes journal))
+    | Ok (_, _, Some row) -> Ok (Some (journal_row_to_bytes row))
   ;;
 
   let current_journal_stage ~config ~keeper_name =
@@ -614,12 +814,21 @@ module For_testing = struct
     with
     | Error error -> Error error
     | Ok (_, _, None) -> Ok `Missing
-    | Ok (_, _, Some { stage = Reserved; _ }) -> Ok `Reserved
-    | Ok (_, _, Some { stage = Durable_committed; _ }) ->
+    | Ok (_, _, Some (Active_journal { stage = Reserved; _ })) -> Ok `Reserved
+    | Ok (_, _, Some (Active_journal { stage = Durable_committed; _ })) ->
       Ok `Durable_committed
-    | Ok (_, _, Some { stage = Launch_committed; _ }) ->
+    | Ok (_, _, Some (Active_journal { stage = Launch_committed; _ })) ->
       Ok `Launch_committed
-    | Ok (_, _, Some { stage = Cleared; _ }) -> Ok `Cleared
+    | Ok (_, _, Some (Active_journal { stage = Rollback_reserved; _ })) ->
+      Ok `Rollback_reserved
+    | Ok
+        (_, _, Some (Active_journal { stage = Rollback_durable_committed; _ })) ->
+      Ok `Rollback_durable_committed
+    | Ok (_, _, Some (Active_journal { stage = Cleared; _ })) ->
+      Error
+        (Journal_ownership_changed
+           "active journal unexpectedly carries Cleared stage")
+    | Ok (_, _, Some (Cleared_tombstone _)) -> Ok `Cleared
   ;;
 
   let replace_with_reserved_journal
@@ -645,7 +854,27 @@ module For_testing = struct
         ~conflict:(fun detail -> Journal_ownership_changed detail)
         ~parent
         ~snapshot
-        ~journal:replacement
+        ~row:(Active_journal replacement)
+  ;;
+
+  let advance_to_launch_committed ~config ~keeper_name =
+    match
+      read_current_journal
+        ~invalid:(fun detail -> Journal_ownership_changed detail)
+        config
+        keeper_name
+    with
+    | Error error -> Error error
+    | Ok (_, _, None) ->
+      Error (Journal_ownership_changed "test launch source is missing")
+    | Ok (_, _, Some (Cleared_tombstone _)) ->
+      Error (Journal_ownership_changed "test launch source is already cleared")
+    | Ok (parent, snapshot, Some (Active_journal current)) ->
+      publish_row
+        ~conflict:(fun detail -> Journal_ownership_changed detail)
+        ~parent
+        ~snapshot
+        ~row:(Active_journal { current with stage = Launch_committed })
   ;;
 end
 ;;
@@ -837,7 +1066,7 @@ let rollback token config journal original_entry =
   if errors <> []
   then errors
   else
-    match clear_journal config journal with
+    match clear_journal config ~expected_stage:journal.stage journal with
     | Ok () -> []
     | Error error ->
       [ Rollback_journal_clear_failed (error_to_string error) ]
@@ -895,7 +1124,12 @@ let revive (ctx : _ context) ~original ~candidate =
         (match !journal_for_cleanup with
          | None -> ()
          | Some journal ->
-           (match clear_journal ctx.config journal with
+           (match
+              clear_journal
+                ctx.config
+                ~expected_stage:journal.stage
+                journal
+            with
             | Ok () -> ()
             | Error error ->
               Log.Keeper.error
@@ -1101,7 +1335,10 @@ let revive (ctx : _ context) ~original ~candidate =
                                       | Some detail ->
                                         Error (Journal_write_failed detail)
                                       | None ->
-                                        clear_journal ctx.config launch_journal
+                                        clear_journal
+                                          ctx.config
+                                          ~expected_stage:Launch_committed
+                                          launch_journal
                                     in
                                     release_observed token committed.name;
                                     result)
@@ -1143,17 +1380,19 @@ let revive (ctx : _ context) ~original ~candidate =
          Printexc.raise_with_backtrace cancelled backtrace)
 ;;
 
-let recover_one config keeper_name =
+let recover_one config leaf =
   match
-    read_current_journal
+    read_journal_leaf
       ~invalid:(fun detail -> Journal_ownership_changed detail)
       config
-      keeper_name
+      ~leaf
+      ~expected_keeper_name:None
   with
   | Error error -> Error (error_to_string error)
   | Ok (_, _, None) -> Error "journal authority disappeared during recovery"
-  | Ok (_, _, Some journal) ->
-      let rollback_recovery ~durable_committed =
+  | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
+  | Ok (_, _, Some (Active_journal journal)) ->
+      let rollback_recovery () =
         match
           Keeper_lifecycle_reservation.acquire
             ~base_path:config.Workspace.base_path
@@ -1169,22 +1408,53 @@ let recover_one config keeper_name =
           Error
             ("recovery reservation conflict: "
              ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
-        | Ok token ->
-          let errors = rollback token config journal None in
-          observe
-            (match errors with
-             | [] -> "recovery"
-             | _ -> "recovery_failed")
-            journal.keeper_name
-            (String.concat "; " (List.map rollback_error_to_string errors));
+         | Ok token ->
+          invoke_before_recovery_claim_hook ();
+          let result =
+            match claim_recovery_rollback config journal 8 with
+            | Error error -> Error (error_to_string error)
+            | Ok Recovery_already_cleared -> Ok false
+            | Ok (Recovery_forward_complete current) ->
+              (match
+                 clear_journal
+                   config
+                   ~expected_stage:Launch_committed
+                   current
+               with
+               | Ok () ->
+                 observe
+                   "recovery_forward_commit"
+                   current.keeper_name
+                   "journal cleared after rollback-stage race";
+                 Ok false
+               | Error error -> Error (error_to_string error))
+            | Ok (Recovery_rollback_claimed (claimed, durable_committed)) ->
+              let errors = rollback token config claimed None in
+              observe
+                (match errors with
+                 | [] -> "recovery"
+                 | _ -> "recovery_failed")
+                claimed.keeper_name
+                (String.concat "; " (List.map rollback_error_to_string errors));
+              (match errors with
+               | [] -> Ok durable_committed
+               | _ ->
+                 Error
+                   (String.concat
+                      "; "
+                      (List.map rollback_error_to_string errors)))
+          in
           release_observed token journal.keeper_name;
-          (match errors with
-           | [] -> Ok durable_committed
-           | _ -> Error (String.concat "; " (List.map rollback_error_to_string errors)))
+          result
       in
       match journal.stage with
       | Launch_committed ->
-        (match clear_journal config journal with
+        (match
+           clear_journal
+             config
+             ~expected_stage:Launch_committed
+             journal
+         with
          | Ok () ->
            observe "recovery_forward_commit" journal.keeper_name "journal cleared";
            Ok false
@@ -1192,9 +1462,13 @@ let recover_one config keeper_name =
            Error
              ("forward-commit journal cleanup failed: "
               ^ error_to_string error))
-      | Reserved -> rollback_recovery ~durable_committed:false
-      | Durable_committed -> rollback_recovery ~durable_committed:true
-      | Cleared -> Ok false
+      | Reserved
+      | Durable_committed
+      | Rollback_reserved
+      | Rollback_durable_committed ->
+        rollback_recovery ()
+      | Cleared ->
+        Error "active journal unexpectedly carries Cleared stage"
 ;;
 
 let recover_pending config =
@@ -1208,8 +1482,7 @@ let recover_pending config =
     |> List.fold_left
          (fun summary file ->
             let path = Filename.concat dir file in
-            let keeper_name = Filename.chop_suffix file ".json" in
-            match recover_one config keeper_name with
+            match recover_one config file with
             | Ok true -> { summary with recovered = summary.recovered + 1 }
             | Ok false -> { summary with cleared = summary.cleared + 1 }
             | Error detail ->

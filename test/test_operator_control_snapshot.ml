@@ -491,8 +491,8 @@ let test_context_snapshot_storage_failure_is_unavailable () =
 let test_keeper_up_clears_dead_tombstone_resume_state () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
-  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   let base_dir = temp_dir () in
   let keeper_name = "dead-tombstone-operator-resume" in
   Eio.Switch.on_release sw (fun () ->
@@ -627,12 +627,15 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
           (Keeper_lane.id dead_entry.lane)));
   Alcotest.(check bool) "revival mints a new generation" true
     (running_entry.meta.runtime.nonce > persisted_seed.runtime.nonce);
-  let journal_path =
-    List.fold_left Filename.concat base_dir
-      [ ".masc"; "keeper-lifecycle-transactions"; keeper_name ^ ".json" ]
-  in
-  Alcotest.(check bool) "committed revival clears durable journal" false
-    (Fs_compat.file_exists journal_path);
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Cleared -> ()
+   | Ok _ -> Alcotest.fail "committed revival did not leave a cleared tombstone"
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
   ignore
     (Keeper_keepalive.stop_keepalive_and_await
        ~base_path:base_dir keeper_name);
@@ -857,8 +860,8 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
 let test_dead_revival_launch_failure_rolls_back_both_authorities () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
-  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   let base_dir = temp_dir () in
   let keeper_name = "dead-revival-rollback" in
   Fun.protect
@@ -964,18 +967,22 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
            (Keeper_lane.id dead_entry.lane));
       Alcotest.(check bool) "rollback registry phase is Dead" true
         (restored_entry.phase = Keeper_state_machine.Dead);
-      let journal_path =
-        List.fold_left Filename.concat base_dir
-          [ ".masc"; "keeper-lifecycle-transactions"; keeper_name ^ ".json" ]
-      in
-      Alcotest.(check bool) "successful rollback clears journal" false
-        (Fs_compat.file_exists journal_path))
+      (match
+         Keeper_dead_revival_transaction.For_testing.current_journal_stage
+           ~config
+           ~keeper_name
+       with
+       | Ok `Cleared -> ()
+       | Ok _ -> Alcotest.fail "successful rollback did not leave a cleared tombstone"
+       | Error error ->
+         Alcotest.fail
+           (Keeper_dead_revival_transaction.error_to_string error)))
 
 let with_settled_dead_revival_fixture ~keeper_name fn =
   Eio_main.run @@ fun env ->
   ensure_fs env;
-  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1144,6 +1151,24 @@ let test_dead_revival_final_clear_failure_preserves_commit () =
    | Ok _ -> Alcotest.fail "journal did not retain exact Launch_committed stage"
    | Error error ->
      Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_row
+       ~config
+       ~keeper_name
+   with
+   | Ok (Some raw) ->
+     let fields =
+       match Yojson.Safe.from_string raw with
+       | `Assoc fields -> List.map fst fields |> List.sort String.compare
+       | _ -> Alcotest.fail "cleared journal tombstone is not an object"
+     in
+     Alcotest.(check (list string))
+       "cleared tombstone retains no metadata payload"
+       [ "keeper_name"; "schema"; "stage"; "transaction_id" ]
+       fields
+   | Ok None -> Alcotest.fail "cleared journal tombstone disappeared"
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
   Alcotest.(check bool)
     "post-commit failure released lifecycle reservation"
     true
@@ -1177,6 +1202,72 @@ let test_dead_revival_final_clear_failure_preserves_commit () =
     "forward recovery preserves committed nonce"
     committed.runtime.nonce
     persisted_after_recovery.runtime.nonce
+;;
+
+let test_dead_revival_recovery_forwards_concurrent_launch_commit () =
+  let keeper_name = "dead-revival-recovery-stage-race" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry _ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    ; runtime =
+        { original.runtime with
+          nonce = original.runtime.nonce + 1
+        ; last_blocker = None
+        }
+    }
+  in
+  (match
+     Keeper_dead_revival_transaction.For_testing.reserve_journal
+       ~config
+       ~owner_id:"recovery-stage-race-owner"
+       ~original
+       ~candidate
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
+  (match Keeper_meta_store.write_meta config candidate with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let recovery =
+    Keeper_dead_revival_transaction.For_testing.with_recovery_claim_hook
+      ~before_recovery_claim:(fun () ->
+        match
+          Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
+            ~config
+            ~keeper_name
+        with
+        | Ok () -> ()
+        | Error error ->
+          Alcotest.fail
+            (Keeper_dead_revival_transaction.error_to_string error))
+      (fun () -> Keeper_dead_revival_transaction.recover_pending config)
+  in
+  Alcotest.(check int)
+    "stage race does not report rollback recovery"
+    0
+    recovery.recovered;
+  Alcotest.(check int)
+    "stage race forward-clears launch authority"
+    1
+    recovery.cleared;
+  Alcotest.(check int)
+    "stage race is fully resolved"
+    0
+    (List.length recovery.unresolved);
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "forward recovery removed candidate metadata"
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check int)
+    "forward recovery preserves candidate generation"
+    candidate.runtime.nonce
+    persisted.runtime.nonce
 ;;
 
 let test_update_keeper_surfaces_committed_cleanup_required () =
@@ -1243,8 +1334,8 @@ type dead_revival_cancellation_boundary =
 let test_dead_revival_cancellation_releases_reservation boundary () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
-  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   let base_dir = temp_dir () in
   let keeper_name =
     match boundary with
@@ -1399,10 +1490,10 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
 let test_dead_revival_existing_reserved_journal_blocks () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
-  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   let base_dir = temp_dir () in
-  let keeper_name = "dead-revival-existing-journal" in
+  let keeper_name = ".masc-capability-head-worker" in
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
@@ -2389,6 +2480,10 @@ let () =
             "final clear failure preserves committed revival"
             `Quick
             test_dead_revival_final_clear_failure_preserves_commit;
+          Alcotest.test_case
+            "recovery forward-completes a concurrent launch commit"
+            `Quick
+            test_dead_revival_recovery_forwards_concurrent_launch_commit;
           Alcotest.test_case
             "keeper update preserves committed cleanup-required outcome"
             `Quick

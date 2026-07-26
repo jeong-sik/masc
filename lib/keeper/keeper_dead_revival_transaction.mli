@@ -90,6 +90,11 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 
+  val with_recovery_claim_hook :
+    before_recovery_claim:(unit -> unit) ->
+    (unit -> 'a) ->
+    'a
+
   val with_fd_backed_parent_opening : (unit -> 'a) -> 'a
 
   val reserved_journal_row :
@@ -117,6 +122,8 @@ module For_testing : sig
       | `Reserved
       | `Durable_committed
       | `Launch_committed
+      | `Rollback_reserved
+      | `Rollback_durable_committed
       | `Cleared
       ]
     , error )
@@ -127,5 +134,10 @@ module For_testing : sig
     owner_id:string ->
     original:Keeper_meta_contract.keeper_meta ->
     candidate:Keeper_meta_contract.keeper_meta ->
+    (unit, error) result
+
+  val advance_to_launch_committed :
+    config:Workspace.config ->
+    keeper_name:string ->
     (unit, error) result
 end

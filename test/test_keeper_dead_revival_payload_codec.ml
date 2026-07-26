@@ -202,6 +202,39 @@ let test_candidate_lifecycle_binding_rejections () =
   reject_nonce
     (fixture.expected_generation - 1)
     "candidate nonce must not move backward";
+  let zero_generation = 0 in
+  let original =
+    { fixture.original with
+      runtime = { fixture.original.runtime with nonce = zero_generation }
+    }
+  in
+  let candidate =
+    { fixture.candidate with
+      runtime = { fixture.candidate.runtime with nonce = zero_generation + 1 }
+    }
+  in
+  let transaction_id =
+    independent_transaction_id
+      ~owner_id:fixture.owner_id
+      ~keeper_name:fixture.keeper_name
+      ~expected_trace_id:fixture.expected_trace_id
+      ~expected_generation:zero_generation
+      ~candidate_nonce:candidate.runtime.nonce
+  in
+  Payload.make_payload
+    ~transaction_id
+    ~owner_id:fixture.owner_id
+    ~keeper_name:fixture.keeper_name
+    ~expected_trace_id:fixture.expected_trace_id
+    ~expected_generation:zero_generation
+    ~original
+    ~candidate
+  |> expect_error
+       "expected generation must be strictly positive"
+       (function
+         | Payload.Invalid_binding
+             "expected_generation must be strictly positive" -> true
+         | _ -> false);
   let uppercase_transaction_id =
     "A" ^ String.sub fixture.transaction_id 1 63
   in

@@ -137,8 +137,8 @@ let validate_payload (payload : payload) =
   then Error (Invalid_binding "owner_id must be non-empty")
   else if String.equal (String.trim payload.keeper_name) ""
   then Error (Invalid_binding "keeper_name must be non-empty")
-  else if payload.expected_generation < 0
-  then Error (Invalid_binding "expected_generation must be non-negative")
+  else if payload.expected_generation <= 0
+  then Error (Invalid_binding "expected_generation must be strictly positive")
   else if
     not (String.equal payload.original.name payload.keeper_name)
     || not (String.equal payload.candidate.name payload.keeper_name)

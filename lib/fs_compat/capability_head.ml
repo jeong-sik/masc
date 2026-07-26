@@ -555,8 +555,14 @@ let run_transaction ~hooks ~parent ~leaf ~publication_state ~set_success_warning
           Eio.Switch.on_release sw (fun () ->
             try hooks.on_resource_settlement () with
             | exn -> raise (Hook_failed (diagnostic Settle_resources exn)));
-          let exact_parent = Eio.Path.open_dir ~sw parent in
-          let parent_stat = Eio.Path.stat ~follow:false exact_parent in
+          let exact_parent, parent_stat =
+            try
+              let exact_parent = Eio.Path.open_dir ~sw parent in
+              exact_parent, Eio.Path.stat ~follow:false exact_parent
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> raise (Hook_failed (diagnostic Pin_parent exn))
+          in
           match
             Lease.try_acquire
               ~parent_dev:parent_stat.dev
@@ -684,11 +690,12 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
               in
               let* () =
                 match
-                  verify_path_binding
-                    ~path:stage_path
-                    ~opened_stat:stage_stat
-                    ~what:"stage"
-                    ~corrupt:(fun detail -> Io_error { operation = Revalidate; detail })
+                  protect_result Revalidate (fun () ->
+                    verify_path_binding
+                      ~path:stage_path
+                      ~opened_stat:stage_stat
+                      ~what:"stage"
+                      ~corrupt:(fun detail -> Io_error { operation = Revalidate; detail }))
                 with
                 | Ok () -> Ok ()
                 | Error error -> fail error
@@ -703,7 +710,7 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
               else (
                 invoke_hook Revalidate hooks.before_rename;
                 let* () =
-                  match verify_lock_binding lock with
+                  match protect_result Revalidate (fun () -> verify_lock_binding lock) with
                   | Ok () -> Ok ()
                   | Error error -> fail error
                 in

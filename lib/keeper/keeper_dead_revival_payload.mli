@@ -161,3 +161,18 @@ val delete_inventory_transaction :
   (unit, error) result
 (** Deletes one opaque inventory entry. The caller must continuously hold the
     matching revival authority lock. *)
+
+module For_testing : sig
+  type hooks
+
+  val hooks :
+    ?create_target_effect:Fs_compat.capability_write_target_effect ->
+    ?before_create_stage:(Fs_compat.capability_write_stage -> unit) ->
+    ?before_reconciliation_read:(unit -> unit) ->
+    ?before_parent_sync_stage:(Fs_compat.capability_write_stage -> unit) ->
+    unit ->
+    hooks
+
+  val with_hooks : hooks -> (unit -> 'a) -> 'a
+  (** Installs hooks only in the current Eio fiber scope. *)
+end

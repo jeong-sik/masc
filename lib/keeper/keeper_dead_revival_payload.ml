@@ -92,6 +92,20 @@ let authority_leaf_prefix = "revival-"
 let transaction_leaf_prefix = "transaction-"
 let json_leaf_suffix = ".json"
 
+type testing_hooks =
+  { create_target_effect :
+      Fs_compat.capability_write_target_effect option
+  ; before_create_stage :
+      Fs_compat.capability_write_stage -> unit
+  ; before_reconciliation_read : unit -> unit
+  ; before_parent_sync_stage :
+      Fs_compat.capability_write_stage -> unit
+  }
+
+let testing_hooks_key : testing_hooks Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let ( let* ) result fn =
   match result with
   | Ok value -> fn value
@@ -650,19 +664,80 @@ let with_parent directory fn =
        Error (Parent_open_failed (Printexc.to_string exception_)))
 ;;
 
+let injected_create_failure target_effect =
+  let exception_ =
+    Failure "injected revival payload exclusive-create failure"
+  in
+  let backtrace = Printexc.get_callstack 1 in
+  { Fs_compat.operation = Fs_compat.Create_exclusive_operation
+  ; target_effect
+  ; primary_failure =
+      Fs_compat.Write_primary_failure
+        { stage = Fs_compat.Create_target_entry
+        ; cause =
+            Fs_compat.Operation_failed
+              { exception_; backtrace }
+        }
+  ; cleanup_failures = []
+  }
+;;
+
+let create_exclusive ~parent ~leaf ~permissions bytes =
+  match Eio.Fiber.get testing_hooks_key with
+  | None ->
+    Fs_compat.create_capability_file_exclusive
+      ~parent
+      ~leaf
+      ~permissions
+      bytes
+  | Some hooks ->
+    (match hooks.create_target_effect with
+     | Some target_effect ->
+       Error (injected_create_failure target_effect)
+     | None ->
+       Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
+         ~before_stage:hooks.before_create_stage
+         ~parent
+         ~leaf
+         ~permissions
+         bytes)
+;;
+
 type observation_failure =
   | Observation_read_failed of
       Fs_compat.Capability_exact_read.failure
   | Observation_settlement_failed of
       Fs_compat.Capability_exact_read.settlement_warning list
 
-let observe_reference ~parent reference =
-  match
-    Fs_compat.Capability_exact_read.read
+let observe_reference
+      ?(for_reconciliation = false)
       ~parent
-      ~leaf:reference.transaction_leaf
-      ~expected_length:reference.byte_count
-      ~max_length:(Int64.of_int Sys.max_string_length)
+      reference
+  =
+  let read () =
+    match Eio.Fiber.get testing_hooks_key, for_reconciliation with
+    | Some hooks, true ->
+      let exact_read_hooks =
+        Fs_compat.Capability_exact_read.For_testing.hooks
+          ~before_open:hooks.before_reconciliation_read
+          ()
+      in
+      Fs_compat.Capability_exact_read.For_testing.read
+        ~hooks:exact_read_hooks
+        ~parent
+        ~leaf:reference.transaction_leaf
+        ~expected_length:reference.byte_count
+        ~max_length:(Int64.of_int Sys.max_string_length)
+    | (None | Some _), false
+    | None, true ->
+      Fs_compat.Capability_exact_read.read
+        ~parent
+        ~leaf:reference.transaction_leaf
+        ~expected_length:reference.byte_count
+        ~max_length:(Int64.of_int Sys.max_string_length)
+  in
+  match
+    read ()
   with
   | Error failure -> Error (Observation_read_failed failure)
   | Ok observation ->
@@ -677,6 +752,15 @@ let observe_reference ~parent reference =
     else Error (Observation_settlement_failed warnings)
 ;;
 
+let sync_parent_for_reconciliation parent =
+  match Eio.Fiber.get testing_hooks_key with
+  | None -> Fs_compat.sync_directory_capability parent
+  | Some hooks ->
+    Fs_compat.Capability_write_for_testing.sync_directory_capability
+      ~before_stage:hooks.before_parent_sync_stage
+      parent
+;;
+
 let create config prepared =
   let reference = prepared.reference in
   let* directory =
@@ -684,7 +768,7 @@ let create config prepared =
   in
   with_parent directory (fun parent ->
     match
-      Fs_compat.create_capability_file_exclusive
+      create_exclusive
         ~parent
         ~leaf:reference.transaction_leaf
         ~permissions:0o600
@@ -699,9 +783,14 @@ let create config prepared =
        | Target_unchanged ->
          Error (Create_unsettled { prepared; initial_failure })
        | Target_created ->
-         (match observe_reference ~parent reference with
+         (match
+            observe_reference
+              ~for_reconciliation:true
+              ~parent
+              reference
+          with
           | Ok observed when String.equal observed prepared.bytes ->
-            (match Fs_compat.sync_directory_capability parent with
+            (match sync_parent_for_reconciliation parent with
              | Ok () ->
                Ok
                  (Reconciled_created
@@ -1111,3 +1200,25 @@ let error_to_string = function
   | Inventory_failed detail ->
     "revival payload inventory failed: " ^ detail
 ;;
+
+module For_testing = struct
+  type nonrec hooks = testing_hooks
+
+  let hooks
+      ?create_target_effect
+      ?(before_create_stage = fun _ -> ())
+      ?(before_reconciliation_read = fun () -> ())
+      ?(before_parent_sync_stage = fun _ -> ())
+      ()
+    =
+    { create_target_effect
+    ; before_create_stage
+    ; before_reconciliation_read
+    ; before_parent_sync_stage
+    }
+  ;;
+
+  let with_hooks hooks fn =
+    Eio.Fiber.with_binding testing_hooks_key hooks fn
+  ;;
+end

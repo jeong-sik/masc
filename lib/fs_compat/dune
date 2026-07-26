@@ -9,6 +9,7 @@
   fd_cache
   owned_directory_chain
   capability_leaf
+  capability_head
   capability_mutation_lease
   eio_resource_scope
   capability_recovery_obligation

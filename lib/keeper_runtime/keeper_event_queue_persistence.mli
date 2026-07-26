@@ -42,6 +42,8 @@ type exact_execution_terminal_cause = Keeper_event_queue_state.exact_execution_t
   | Exact_execution_failed
   | Exact_execution_cancelled
   | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch
   | Commit_admission_unavailable

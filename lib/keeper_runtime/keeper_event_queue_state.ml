@@ -16,6 +16,8 @@ type exact_execution_terminal_cause =
   | Exact_execution_failed
   | Exact_execution_cancelled
   | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch
   | Commit_admission_unavailable
@@ -481,6 +483,8 @@ let exact_execution_terminal_cause_label = function
   | Exact_execution_failed -> "exact_execution_failed"
   | Exact_execution_cancelled -> "exact_execution_cancelled"
   | Domain_invalid_output -> "domain_invalid_output"
+  | Compaction_produced_no_reduction -> "compaction_produced_no_reduction"
+  | Compaction_increased_checkpoint -> "compaction_increased_checkpoint"
   | Invalid_structural_evidence -> "invalid_structural_evidence"
   | Invalid_structural_source_after_dispatch ->
     "invalid_structural_source_after_dispatch"
@@ -496,6 +500,8 @@ let exact_execution_terminal_cause_of_label = function
   | "exact_execution_failed" -> Ok Exact_execution_failed
   | "exact_execution_cancelled" -> Ok Exact_execution_cancelled
   | "domain_invalid_output" -> Ok Domain_invalid_output
+  | "compaction_produced_no_reduction" -> Ok Compaction_produced_no_reduction
+  | "compaction_increased_checkpoint" -> Ok Compaction_increased_checkpoint
   | "invalid_structural_evidence" -> Ok Invalid_structural_evidence
   | "invalid_structural_source_after_dispatch" ->
     Ok Invalid_structural_source_after_dispatch

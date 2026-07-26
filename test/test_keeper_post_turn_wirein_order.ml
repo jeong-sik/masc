@@ -1552,7 +1552,7 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
       let config = Masc.Workspace.default_config base_path in
       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
       init_runtime_fixture ();
-      let run_case ~name response =
+      let run_case ~name ~expected_cause response =
         let server =
           Exact_fixture.start_server
             ~sw
@@ -1586,29 +1586,34 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
          | Compact_policy.Rejected
              ( Manual
              , Exact_execution_terminal
-                 { cause = Keeper_event_queue_state.Domain_invalid_output
-                 ; slot_id
-                 ; call_id
-                 } ) ->
+                 { cause; slot_id; call_id } )
+           when cause = expected_cause ->
            check bool (name ^ " terminal retains slot") true
              (String.trim slot_id <> "");
            check bool (name ^ " terminal retains call") true
              (String.trim call_id <> "")
-         | _ -> fail (name ^ " was not a domain-invalid exact terminal"));
+         | _ -> fail (name ^ " did not report its own non-reduction cause"));
         match !quarantine_calls with
-        | [ Keeper_event_queue_state.Domain_invalid_output, observation ] ->
+        | [ (cause, observation) ] when cause = expected_cause ->
           check bool (name ^ " quarantine retains slot") true
             (String.trim observation.slot_id <> "");
           check bool (name ^ " quarantine retains call") true
             (String.trim observation.call_id <> "")
         | _ -> fail (name ^ " was not quarantined exactly once")
       in
+      (* The two cases reported the same cause. Only one of them should: a plan the
+         domain validator rejects IS invalid output, while a summarizer that returns a
+         LARGER context produced valid output that worked against the purpose. Both stay
+         terminal and quarantined and keep slot and call provenance; they no longer read
+         as the same failure. *)
       run_case
         ~name:"unchanged-plan"
+        ~expected_cause:Keeper_event_queue_state.Domain_invalid_output
         (exact_response
            [ compaction_decision 1 Schema.compaction_plan_action_keep ]);
       run_case
         ~name:"larger-checkpoint"
+        ~expected_cause:Keeper_event_queue_state.Compaction_increased_checkpoint
         (summarize_response (String.make 20_000 'x')))
 ;;
 

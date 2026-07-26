@@ -66,10 +66,19 @@ val resolve_sandbox_profile :
   ?requested:string ->
   fallback:sandbox_profile option ->
   unit ->
-  sandbox_profile
-(** An explicit [requested] profile wins over the TOML [fallback], which wins over the
-    built-in default. [requested] is the caller's raw string; an unparseable one is
-    treated as absent, since the tool gate rejects those before this is reached. *)
+  sandbox_profile option
+(** An explicit [requested] profile wins over the TOML [fallback]. [None] when neither
+    states one.
+
+    No built-in default. The sandbox is an isolation boundary, so a caller that states
+    nothing gets [None] rather than a quietly chosen profile — the determinism gate
+    names that shape "permissive default on unknown input", and it is the same rule this
+    tool applies by requiring the value at all. The tool gate rejects the
+    nothing-stated case before creation, so this returning [None] is a contract the
+    caller can rely on rather than a case it has to guess at.
+
+    [requested] is the caller's raw string; an unparseable one is treated as absent,
+    since the gate rejects those first. *)
 
 val resolve_network_mode :
   sandbox_profile:sandbox_profile ->

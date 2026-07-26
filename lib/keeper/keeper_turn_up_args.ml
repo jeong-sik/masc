@@ -216,8 +216,8 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
    mapped to the default. *)
 let resolve_sandbox_profile ?requested ~fallback () =
   match Option.bind requested sandbox_profile_of_string with
-  | Some sp -> sp
-  | None -> Option.value fallback ~default:default_sandbox_profile
+  | Some _ as stated -> stated
+  | None -> fallback
 
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback

@@ -78,7 +78,7 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
     "an explicit request creates without a TOML default"
     true
     (A.resolve_sandbox_profile ~requested:"docker" ~fallback:None ()
-     = Keeper_types_profile_toml_io.Docker);
+     = Some Keeper_types_profile_toml_io.Docker);
   check
     bool
     "an explicit request overrides the TOML default"
@@ -87,7 +87,7 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
        ~requested:"local"
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
-     = Keeper_types_profile_toml_io.Local);
+     = Some Keeper_types_profile_toml_io.Local);
   check
     bool
     "no request keeps the TOML default"
@@ -95,7 +95,7 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
     (A.resolve_sandbox_profile
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
-     = Keeper_types_profile_toml_io.Docker);
+     = Some Keeper_types_profile_toml_io.Docker);
   (* Unparseable is treated as absent rather than mapped to a profile: the tool gate
      rejects it before this point, and inventing an isolation boundary here would hide
      that rejection if the gate were ever bypassed. *)
@@ -107,7 +107,13 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
        ~requested:"chroot"
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
-     = Keeper_types_profile_toml_io.Docker)
+     = Some Keeper_types_profile_toml_io.Docker);
+  (* Nothing stated resolves to nothing rather than to a quietly chosen boundary. *)
+  check
+    bool
+    "neither stated resolves to None, not to a default"
+    true
+    (A.resolve_sandbox_profile ~fallback:None () = None)
 ;;
 
 let () =

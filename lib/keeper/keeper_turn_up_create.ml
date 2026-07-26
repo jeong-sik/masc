@@ -56,11 +56,24 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             (Printf.sprintf "unknown active_goal_ids: %s"
                (String.concat ", " missing))
   in
+  (* [None] cannot reach here: the tool gate rejects a turn-up that states no sandbox
+     profile in either the argument or the keeper TOML
+     (keeper_turn_up_args.ml, sandbox_profile_error). Raising rather than choosing one
+     keeps that contract checkable — a quiet default here would decide an isolation
+     boundary on behalf of a caller who stated nothing, which is the requirement this
+     tool exists to enforce. *)
   let sandbox_profile =
-    resolve_sandbox_profile
-      ?requested:p.sandbox_profile_opt
-      ~fallback:p.profile_defaults.sandbox_profile
-      ()
+    match
+      resolve_sandbox_profile
+        ?requested:p.sandbox_profile_opt
+        ~fallback:p.profile_defaults.sandbox_profile
+        ()
+    with
+    | Some sp -> sp
+    | None ->
+      invalid_arg
+        "Keeper_turn_up_create: no sandbox_profile in argument or keeper TOML; the \
+         turn-up gate must reject this before creation"
   in
   let network_mode =
     resolve_network_mode

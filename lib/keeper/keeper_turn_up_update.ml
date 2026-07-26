@@ -311,8 +311,26 @@ let update_keeper ?(preserve_prompt_defaults = false)
              tool_result_ok_data
                (Keeper_meta_json.meta_to_json success.meta)
          else
+           let stop_outcome =
+             stop_keepalive_and_await
+               ~base_path:ctx.config.base_path
+               updated.name
+           in
            let run_update permit =
-             with_runtime_assignment (fun () ->
+             match
+               Keeper_registry.get
+                 ~base_path:ctx.config.base_path
+                 updated.name
+             with
+             | Some replacement ->
+               tool_result_error
+                 (Printf.sprintf
+                    "keeper update rejected because a replacement lane raced \
+                     the stopped lane: %s"
+                    (start_keepalive_outcome_to_string
+                       (Keepalive_already_registered replacement)))
+             | None ->
+               with_runtime_assignment (fun () ->
             (* CAS-merge instead of a force write: a dashboard/turn-up edit
                builds [updated] from a meta snapshot ([old]), so a concurrent
                keeper turn that bumped cumulative usage counters between the
@@ -359,11 +377,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   durable, so the keepalive restart below delivers it on the
                   new fiber's first cycle. Removals never wake. *)
                enqueue_goal_assignment_wakes updated;
-               let stop_outcome =
-                 stop_keepalive_and_await
-                   ~base_path:ctx.config.base_path
-                   updated.name
-               in
                let launch_outcome =
                  start_keepalive_under_admission permit ctx updated
                in

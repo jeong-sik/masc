@@ -134,6 +134,10 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 
+  val with_launch_publication_unchanged :
+    (unit -> 'a) ->
+    'a
+
   val with_fd_backed_parent_opening : (unit -> 'a) -> 'a
 
   val reserved_journal_row :

@@ -1609,6 +1609,62 @@ let test_dead_revival_launch_publication_warning_preserves_commit () =
     (List.length recovery.unresolved)
 ;;
 
+let test_dead_revival_unchanged_launch_aborts_before_rollback () =
+  let keeper_name = "dead-revival-launch-publication-unchanged" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  (match
+     Keeper_dead_revival_transaction.For_testing
+     .with_launch_publication_unchanged
+       (fun () ->
+          Keeper_dead_revival_transaction.revive
+            ctx
+            ~original
+            ~candidate)
+   with
+   | Error (Keeper_dead_revival_transaction.Rollback_failed _) ->
+     Alcotest.fail "gated launch changed rollback authority"
+   | Error _ -> ()
+   | Ok _ ->
+     Alcotest.fail "unchanged launch publication committed the revival");
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "launch rollback removed durable metadata"
+    | Error error -> Alcotest.fail error
+  in
+  let persisted_content =
+    { persisted with
+      meta_version = original.meta_version
+    ; runtime =
+        { persisted.runtime with
+          trace_id = original.runtime.trace_id
+        ; trace_history = original.runtime.trace_history
+        ; nonce = original.runtime.nonce
+        }
+    }
+  in
+  Alcotest.(check string)
+    "gated lane performs no durable metadata mutation before publication"
+    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json original))
+    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json persisted_content));
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Cleared -> ()
+   | Ok _ -> Alcotest.fail "unchanged launch left rollback journal unresolved"
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error))
+;;
+
 let test_dead_revival_durable_publication_warning_clears_actual_stage () =
   let keeper_name = "dead-revival-durable-publication-warning" in
   with_settled_dead_revival_fixture ~keeper_name
@@ -3864,6 +3920,10 @@ let () =
             "launch publication warning preserves committed revival"
             `Quick
             test_dead_revival_launch_publication_warning_preserves_commit;
+          Alcotest.test_case
+            "unchanged launch aborts gated lane before rollback"
+            `Quick
+            test_dead_revival_unchanged_launch_aborts_before_rollback;
           Alcotest.test_case
             "durable publication warning clears actual authority stage"
             `Quick

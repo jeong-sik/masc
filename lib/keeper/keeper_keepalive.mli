@@ -93,6 +93,16 @@ type start_keepalive_outcome =
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
 
+type launch_gate
+
+(** A dead-revival lane can be forked under durable admission while remaining
+    side-effect-free until its launch journal is confirmed. Settlement is
+    exact-once; commit is idempotent but rejects a previously aborted gate. *)
+val create_launch_gate : unit -> launch_gate
+val commit_launch_gate : launch_gate -> unit
+val abort_launch_gate : launch_gate -> unit
+val launch_gate_is_committed : launch_gate -> bool
+
 val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
 
 (** Launch while the caller continuously holds the matching durable lifecycle
@@ -100,6 +110,7 @@ val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
 val start_keepalive_under_admission :
   ?proactive_warmup_sec:int ->
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ?launch_gate:launch_gate ->
   Keeper_lifecycle_admission.Durable_transaction.permit ->
   'a context ->
   keeper_meta ->
@@ -111,6 +122,7 @@ val start_keepalive_under_admission :
 val start_keepalive :
   ?proactive_warmup_sec:int ->
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ?launch_gate:launch_gate ->
   'a context ->
   keeper_meta ->
   start_keepalive_outcome

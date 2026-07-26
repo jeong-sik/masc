@@ -739,6 +739,41 @@ type start_keepalive_outcome =
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
 
+type launch_gate_outcome =
+  | Launch_gate_committed
+  | Launch_gate_aborted
+
+type launch_gate =
+  { outcome : launch_gate_outcome Eio.Promise.t
+  ; resolve_outcome : launch_gate_outcome Eio.Promise.u
+  }
+
+let create_launch_gate () =
+  let outcome, resolve_outcome = Eio.Promise.create () in
+  { outcome; resolve_outcome }
+;;
+
+let commit_launch_gate gate =
+  if not (Eio.Promise.try_resolve gate.resolve_outcome Launch_gate_committed)
+  then
+    match Eio.Promise.peek gate.outcome with
+    | Some Launch_gate_committed -> ()
+    | Some Launch_gate_aborted ->
+      invalid_arg "cannot commit an aborted Keeper launch gate"
+    | None -> failwith "Keeper launch gate settlement disappeared"
+;;
+
+let abort_launch_gate gate =
+  ignore
+    (Eio.Promise.try_resolve gate.resolve_outcome Launch_gate_aborted : bool)
+;;
+
+let launch_gate_is_committed gate =
+  match Eio.Promise.peek gate.outcome with
+  | Some Launch_gate_committed -> true
+  | Some Launch_gate_aborted | None -> false
+;;
+
 let start_keepalive_outcome_to_string = function
   | Keepalive_started entry ->
     Printf.sprintf "started lane=%s" (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
@@ -821,6 +856,7 @@ let record_lifecycle_start_denial
 let start_keepalive_admitted
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
+      ?launch_gate
       ~permit
       (ctx : _ context)
   (m : keeper_meta)
@@ -1240,21 +1276,34 @@ let start_keepalive_admitted
                  terminal_detail
                  tracking_detail)
         in
-        publish_keeper_started ~live_meta;
+        (match launch_gate with
+         | None -> publish_keeper_started ~live_meta
+         | Some _ -> ());
         (match
            Keeper_lane.fork
              ~sw:ctx.sw
              reg.lane
              ~run:(fun lane_sw ->
-        let ctx = { ctx with sw = lane_sw } in
-        (* The sidecar is part of this Keeper lane. It cannot outlive the
-           lane's structured-concurrency scope. *)
-        let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
-        (match grpc_close with
-         | Some _ ->
-           Atomic.set reg.grpc_close grpc_close
-         | None -> ());
-        run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
+        let launch_outcome =
+          match launch_gate with
+          | None -> Launch_gate_committed
+          | Some gate -> Eio.Promise.await gate.outcome
+        in
+        match launch_outcome with
+        | Launch_gate_aborted -> ()
+        | Launch_gate_committed ->
+          let ctx = { ctx with sw = lane_sw } in
+          Option.iter
+            (fun _ -> publish_keeper_started ~live_meta)
+            launch_gate;
+          (* The sidecar is part of this Keeper lane. It cannot outlive the
+             lane's structured-concurrency scope. *)
+          let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
+          (match grpc_close with
+           | Some _ ->
+             Atomic.set reg.grpc_close grpc_close
+           | None -> ());
+          run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
              ~cleanup:cleanup_tracking
          with
          | Ok () -> Keepalive_started reg
@@ -1281,6 +1330,7 @@ type joined_stop_result =
 let start_keepalive_under_admission
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
+      ?launch_gate
       permit
       (ctx : _ context)
       (meta : keeper_meta)
@@ -1294,6 +1344,7 @@ let start_keepalive_under_admission
          start_keepalive_admitted
            ~proactive_warmup_sec
            ?lifecycle_token
+           ?launch_gate
            ~permit
            ctx
            meta)
@@ -1314,6 +1365,7 @@ let start_keepalive_under_admission
 let start_keepalive
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
+      ?launch_gate
       (ctx : _ context)
       (meta : keeper_meta)
   =
@@ -1338,6 +1390,7 @@ let start_keepalive
             start_keepalive_under_admission
               ~proactive_warmup_sec
               ~lifecycle_token:token
+              ?launch_gate
               permit
               ctx
               meta)
@@ -1353,6 +1406,7 @@ let start_keepalive
          (fun permit ->
             start_keepalive_under_admission
               ~proactive_warmup_sec
+              ?launch_gate
               permit
               ctx
               meta)

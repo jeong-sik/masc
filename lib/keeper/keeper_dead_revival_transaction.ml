@@ -6,6 +6,7 @@ module Payload = Keeper_dead_revival_payload
 
 exception Injected_durable_publication_settlement_warning
 exception Injected_launch_publication_settlement_warning
+exception Injected_launch_publication_unchanged
 exception Injected_reserved_post_publication_failure
 
 type boundary_hooks =
@@ -160,6 +161,23 @@ module Boundary_hooks_for_testing = struct
       Head.For_testing.hooks
         ~on_resource_settlement:(fun () ->
           raise Injected_launch_publication_settlement_warning)
+        ()
+    in
+    let previous =
+      Atomic.exchange
+        launch_compare_and_swap_hook
+        (Head.For_testing.compare_and_swap hooks)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set launch_compare_and_swap_hook previous)
+      fn
+  ;;
+
+  let with_launch_publication_unchanged fn =
+    let hooks =
+      Head.For_testing.hooks
+        ~before_rename:(fun () ->
+          raise Injected_launch_publication_unchanged)
         ()
     in
     let previous =
@@ -1993,7 +2011,7 @@ let revive_locked
       ~candidate
       ~runtime_id
       ~runtime_assignment
-      ~launch_committed
+      ~launch_gate
   =
   let allocate_or_recover_replacement =
     allocate_or_recover_replacement permit
@@ -2217,6 +2235,21 @@ let revive_locked
           snapshot across the exception boundary; transaction ownership and
           all shared state remain in Atomic/CAS structures. *)
        let original_entry_for_rollback = ref None in
+       let rollback_journal = ref journal in
+       let pending_launch_entry = ref None in
+       let abort_pending_launch () =
+         match !pending_launch_entry with
+         | None -> Keeper_keepalive.abort_launch_gate launch_gate
+         | Some entry ->
+           Atomic.set entry.fiber_stop true;
+           Keeper_keepalive.abort_launch_gate launch_gate;
+           Keeper_keepalive.request_entry_stop entry;
+           ignore (Keeper_lane.await_exit entry.lane : Keeper_lane.exit);
+           ignore
+             (Eio.Promise.await entry.done_p
+               : Keeper_registry.done_resolution);
+           pending_launch_entry := None
+       in
        let run () =
          match Keeper_meta_store.read_meta ctx.config original.name with
          | Error detail ->
@@ -2360,6 +2393,8 @@ let revive_locked
                                committed_journal
                            with
                            | Durable_publication_rollback_from observed_stage ->
+                             rollback_journal :=
+                               { journal with stage = observed_stage };
                              fail_with_rollback
                                token
                                ctx.config
@@ -2378,18 +2413,22 @@ let revive_locked
                              release_observed token committed.name;
                              Error attention)
                         | Ok () ->
+                          rollback_journal := committed_journal;
                           (match
                              Keeper_keepalive.start_keepalive
                                ~lifecycle_token:token
+                               ~launch_gate
                                ctx
                                committed
                            with
                            | Keeper_keepalive.Keepalive_started entry ->
+                             pending_launch_entry := Some entry;
                              let launch_journal =
                                { committed_journal with stage = Launch_committed }
                              in
                              let committed_with_attention cleanup_error =
-                               launch_committed := true;
+                               Keeper_keepalive.commit_launch_gate launch_gate;
+                               pending_launch_entry := None;
                                release_observed token committed.name;
                                Error
                                  (Post_commit_cleanup_required
@@ -2406,6 +2445,7 @@ let revive_locked
                                      committed_journal
                                  with
                                  | Launch_publication_not_committed ->
+                                   abort_pending_launch ();
                                    fail_with_rollback
                                      token
                                      ctx.config
@@ -2417,6 +2457,7 @@ let revive_locked
                                  | Launch_publication_committed ->
                                    committed_with_attention publication_error
                                  | Launch_publication_attention attention ->
+                                   abort_pending_launch ();
                                    Log.Keeper.error
                                      "keeper revival launch publication requires \
                                       attention keeper=%s publication=%s \
@@ -2424,9 +2465,11 @@ let revive_locked
                                      committed.name
                                      (error_to_string publication_error)
                                      (error_to_string attention);
-                                   committed_with_attention attention)
+                                   release_observed token committed.name;
+                                   Error attention)
                               | Ok () ->
-                                launch_committed := true;
+                                Keeper_keepalive.commit_launch_gate launch_gate;
+                                pending_launch_entry := None;
                                 let cleanup_result =
                                   Eio.Cancel.protect (fun () ->
                                     let result =
@@ -2451,6 +2494,7 @@ let revive_locked
                                    observe "commit" committed.name "lane started";
                                    Ok { meta = committed; entry }))
                            | rejected ->
+                             Keeper_keepalive.abort_launch_gate launch_gate;
                              fail_with_rollback
                                token
                                ctx.config
@@ -2463,14 +2507,15 @@ let revive_locked
        try run () with
        | Eio.Cancel.Cancelled _ as cancelled ->
          let backtrace = Printexc.get_raw_backtrace () in
-         if not !launch_committed
+         if not (Keeper_keepalive.launch_gate_is_committed launch_gate)
          then
            Eio.Cancel.protect (fun () ->
+             abort_pending_launch ();
              let errors =
                rollback
                  token
                  ctx.config
-                 journal
+                 !rollback_journal
                  verified_payload
                  !original_entry_for_rollback
              in
@@ -2492,7 +2537,7 @@ let revive ?runtime_id (ctx : _ context) ~original ~candidate =
       ~keeper_name:original.name
       (fun permit ->
            let runtime_assignment = ref Runtime_assignment_unchanged in
-           let launch_committed = ref false in
+           let launch_gate = Keeper_keepalive.create_launch_gate () in
            try
              revive_locked
                permit
@@ -2501,14 +2546,14 @@ let revive ?runtime_id (ctx : _ context) ~original ~candidate =
                ~candidate
                ~runtime_id
                ~runtime_assignment
-               ~launch_committed
+               ~launch_gate
              |> settle_runtime_assignment
                   ~keeper_name:original.name
                   !runtime_assignment
            with
            | Eio.Cancel.Cancelled _ as cancelled ->
              let backtrace = Printexc.get_raw_backtrace () in
-             if not !launch_committed
+             if not (Keeper_keepalive.launch_gate_is_committed launch_gate)
              then
                Eio.Cancel.protect (fun () ->
                  match

@@ -36,6 +36,9 @@ describe('keeper fleet operator fact presentation', () => {
 
   it('fails a missing current fleet fact closed', () => {
     const [invalid] = keeperFleetOperatorFacts(null)
+    if (invalid == null) {
+      throw new Error('missing current fleet fact did not fail closed')
+    }
     const presentation = keeperFleetOperatorFactPresentation(invalid, null)
 
     expect(invalid).toEqual(CURRENT_KEEPER_FLEET_FACT_INVALID)

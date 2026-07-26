@@ -56,6 +56,7 @@ import {
   widgetSoloUrlForRoute,
 } from './widget-solo'
 import {
+  CURRENT_KEEPER_FLEET_FACT_INVALID,
   keeperFleetOperatorFactPresentation,
   keeperFleetOperatorFacts,
 } from './keeper-fleet-operator-fact'
@@ -264,7 +265,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   if (!fleetSafety) return null
   const fleet = fleetSafety.keeper_fleet_safety
   if (fleet?.status === 'ok') return null
-  const fact = keeperFleetOperatorFacts(fleet)[0]
+  const fact = keeperFleetOperatorFacts(fleet)[0] ?? CURRENT_KEEPER_FLEET_FACT_INVALID
   const presentation = keeperFleetOperatorFactPresentation(fact, fleet?.status)
   return {
     key: 'fleet-liveness-risk',

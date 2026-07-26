@@ -2,6 +2,21 @@
 
 module R = Resilience.Recovery
 
+let contains haystack needle =
+  let haystack_length = String.length haystack in
+  let needle_length = String.length needle in
+  let rec loop offset =
+    if needle_length = 0
+    then true
+    else if offset + needle_length > haystack_length
+    then false
+    else if String.sub haystack offset needle_length = needle
+    then true
+    else loop (offset + 1)
+  in
+  loop 0
+;;
+
 (* ─── Convenience constructors ────────────────────────────────── *)
 
 let test_transient_default_args () =

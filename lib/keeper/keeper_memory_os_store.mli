@@ -134,8 +134,11 @@ val prepare :
 
     An obligation contains no facts or episodes, is not a Memory OS read
     authority, and provides no publish, delete, fallback, or migration
-    operation. Unlike runtime-bound prepared and pending values, its canonical
-    bytes are intended to survive callback and process restart. *)
+    operation. Its desired immutable commit reference is a restart-stable scope
+    proof: recovery must find and validate that exact prepared commit below the
+    opened private root before classifying an expected or superseding HEAD.
+    Unlike runtime-bound prepared and pending values, its canonical bytes are
+    intended to survive callback and process restart. *)
 val publication_obligation_of_prepared :
   t ->
   prepared_commit ->
@@ -143,7 +146,8 @@ val publication_obligation_of_prepared :
 
 (** Encode or decode only the exact current obligation schema. The checksum is
     domain-separated and binds owner, expected and desired HEAD publication
-    evidence, desired operation, and desired state digest. *)
+    evidence (including the exact immutable commit references), desired
+    operation, and desired state digest. *)
 val publication_obligation_to_bytes : publication_obligation -> string
 
 val publication_obligation_of_bytes :
@@ -162,10 +166,13 @@ val settle :
 
 (** Classify a durable obligation against the validated current HEAD and its
     reachable immutable graph. This never publishes, retries, deletes, or
-    changes HEAD or immutable Memory OS authority. The underlying HEAD read may
-    initialize or settle private stable-lock mechanism metadata. Callers must
-    retain and use the obligation to block successor mutations until the wider
-    transaction explicitly resolves it. *)
+    changes HEAD or immutable Memory OS authority. Recovery rejects a private
+    root that does not contain the exact desired commit scope proof and rejects
+    impossible store, generation, or receipt relationships instead of treating
+    them as supersession. The underlying HEAD read may initialize or settle
+    private stable-lock mechanism metadata. Callers must retain and use the
+    obligation to block successor mutations until the wider transaction
+    explicitly resolves it. *)
 val recover_publication :
   t ->
   publication_obligation ->

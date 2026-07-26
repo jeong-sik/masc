@@ -1216,7 +1216,7 @@ let test_canonical_state_and_digest_parity () =
       observed_by = [ "keeper-a"; "quote:\""; "control:\x01" ]
     ; first_seen = Float.max_float
     ; valid_until = Some (-. Float.max_float)
-    ; last_verified_at = Some Float.min_positive_normal
+    ; last_verified_at = Some 2.2250738585072014e-308
     }
   in
   let special_episode =
@@ -1428,6 +1428,119 @@ let test_third_authority_recovers_superseded ~fs () =
     fail "third authority falsely proved desired not published"
 ;;
 
+let test_foreign_empty_root_obligation_fails_closed ~fs () =
+  with_root ~fs "masc_memory_os_recover_source_empty_" @@ fun _ source ->
+  let bytes =
+    within_store ~root:source ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "foreign-empty" (state "foreign-empty")
+    in
+    obligation_bytes store prepared
+  in
+  with_root ~fs "masc_memory_os_recover_foreign_empty_"
+  @@ fun _ foreign ->
+  within_store ~seed:40 ~root:foreign ~owner:"keeper-a" @@ fun store ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  expect_error_tag
+    "same-owner foreign empty root lacks the desired commit scope proof"
+    Store.For_testing.Immutable_read_failed_error
+    (Store.recover_publication store obligation)
+;;
+
+let test_foreign_populated_root_obligation_fails_closed ~fs () =
+  with_root ~fs "masc_memory_os_recover_source_populated_"
+  @@ fun _ source ->
+  let bytes =
+    within_store ~root:source ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "foreign-populated" (state "source")
+    in
+    obligation_bytes store prepared
+  in
+  with_root ~fs "masc_memory_os_recover_foreign_populated_"
+  @@ fun _ foreign ->
+  ignore (seed_commit ~root:foreign "foreign-current" : Store.commit_receipt);
+  within_store ~seed:41 ~root:foreign ~owner:"keeper-a" @@ fun store ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  expect_error_tag
+    "same-owner foreign populated root lacks the desired commit scope proof"
+    Store.For_testing.Immutable_read_failed_error
+    (Store.recover_publication store obligation)
+;;
+
+let test_lower_authority_relation_fails_closed ~fs () =
+  with_root ~fs "masc_memory_os_recover_lower_authority_"
+  @@ fun root_path root ->
+  ignore (seed_commit ~root "base" : Store.commit_receipt);
+  let bytes =
+    within_store ~seed:42 ~root ~owner:"keeper-a" @@ fun store ->
+    let base = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store base "lower-authority" (state "desired")
+    in
+    obligation_bytes store prepared
+  in
+  Sys.remove (head_path root_path);
+  within_store ~seed:43 ~root ~owner:"keeper-a" @@ fun store ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  expect_error_tag
+    "non-empty obligation cannot recover against a regressed empty authority"
+    Store.For_testing.Publication_obligation_mismatch_error
+    (Store.recover_publication store obligation)
+;;
+
+let test_same_receipt_different_authority_fails_closed ~fs () =
+  with_root ~fs "masc_memory_os_recover_receipt_collision_"
+  @@ fun root_path root ->
+  let bytes =
+    within_store ~root ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "receipt-collision" (state "desired")
+    in
+    let bytes = obligation_bytes store prepared in
+    ignore (publish_committed store prepared : Store.commit_receipt);
+    bytes
+  in
+  let head = load_head root_path in
+  let commit_leaf = commit_leaf_of_head head in
+  let duplicate_leaf =
+    let bytes = Bytes.of_string commit_leaf in
+    let index = String.length "memory-os-commit-" in
+    Bytes.set
+      bytes
+      index
+      (if Char.equal (Bytes.get bytes index) '0' then '1' else '0');
+    Bytes.unsafe_to_string bytes
+  in
+  save_raw
+    (Filename.concat root_path duplicate_leaf)
+    (load_raw (Filename.concat root_path commit_leaf));
+  let duplicate_commit =
+    json_field "commit" head
+    |> replace_json_field "leaf" (`String duplicate_leaf)
+  in
+  save_head
+    root_path
+    (replace_json_field "commit" duplicate_commit head);
+  within_store ~seed:44 ~root ~owner:"keeper-a" @@ fun store ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  expect_error_tag
+    "same receipt under a different exact HEAD authority is corruption"
+    Store.For_testing.Publication_obligation_mismatch_error
+    (Store.recover_publication store obligation)
+;;
+
 let test_obligation_codec_is_exact_and_tamper_evident ~fs () =
   with_root ~fs "masc_memory_os_obligation_codec_"
   @@ fun _root_path root ->
@@ -1585,6 +1698,14 @@ let () =
             (test_nonempty_expected_obligation_recovers_not_published ~fs)
         ; test_case "third authority recovers superseded" `Quick
             (test_third_authority_recovers_superseded ~fs)
+        ; test_case "foreign empty root obligation fails closed" `Quick
+            (test_foreign_empty_root_obligation_fails_closed ~fs)
+        ; test_case "foreign populated root obligation fails closed" `Quick
+            (test_foreign_populated_root_obligation_fails_closed ~fs)
+        ; test_case "lower authority relation fails closed" `Quick
+            (test_lower_authority_relation_fails_closed ~fs)
+        ; test_case "same receipt different authority fails closed" `Quick
+            (test_same_receipt_different_authority_fails_closed ~fs)
         ; test_case "obligation codec is exact and tamper evident" `Quick
             (test_obligation_codec_is_exact_and_tamper_evident ~fs)
         ; test_case "foreign owner obligation fails closed" `Quick

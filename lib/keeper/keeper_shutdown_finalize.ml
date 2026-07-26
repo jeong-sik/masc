@@ -494,11 +494,12 @@ let remove_tree path =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let remove_meta_file ~lifecycle_token ~config operation =
+let remove_meta_file ~permit ~lifecycle_token ~config operation =
   match operation.cleanup_intent.reason with
   | Dashboard_keeper_purge context ->
     (match
        Keeper_meta_store.remove_meta_if_exact_identity_for_lifecycle
+         permit
          lifecycle_token
          config
          ~name:operation.keeper_name
@@ -517,6 +518,7 @@ let remove_meta_file ~lifecycle_token ~config operation =
   | Operator_stop_remove_meta ->
     (match
        Keeper_meta_store.remove_meta_if_identity_for_lifecycle
+         permit
          lifecycle_token
          config
          ~name:operation.keeper_name
@@ -623,7 +625,7 @@ let begin_exact_retirement ~base_path operation entry =
          Error "Keeper exact owner was replaced before finalization")
 ;;
 
-let unregister_retired_exact ~lifecycle_token ~base_path operation entry =
+let unregister_retired_exact ~permit ~lifecycle_token ~base_path operation entry =
   match operation.lane_ownership, entry with
   | Dormant_meta, None -> Ok false
   | Dormant_meta, Some _ ->
@@ -644,19 +646,24 @@ let unregister_retired_exact ~lifecycle_token ~base_path operation entry =
     else
       (match
          Keeper_registry.unregister_exact_for_lifecycle
+           permit
            lifecycle_token
            entry
        with
-       | Keeper_registry.Exact_unregistered
-       | Keeper_registry.Exact_entry_missing ->
+       | Keeper_registry.Lifecycle_mutation_admission_denied ->
+         Error "Keeper registry finalization lost durable lifecycle admission"
+       | Keeper_registry.Lifecycle_mutation_completed
+           (Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing) ->
          Keeper_exact_flow_scope.release_owner
            ~base_path
            ~keeper_name:operation.keeper_name
            ~expected_lane_id;
          Ok true
-     | Keeper_registry.Exact_entry_replaced ->
+     | Keeper_registry.Lifecycle_mutation_completed
+         Keeper_registry.Exact_entry_replaced ->
        Error "Keeper registry lane was replaced during finalization"
-     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
        Error
          (Printf.sprintf
             "Keeper lifecycle transaction owns registry finalization: %s"
@@ -746,11 +753,11 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
               (Keeper_approval_queue.summary_owner_retirement_error_to_string
                  error)))
   in
-  let finish_admitted ~lifecycle_token registry_unregistered =
+  let finish_admitted ~permit ~lifecycle_token registry_unregistered =
     match publish_generation_floor_before_meta_removal ~config operation with
     | Error detail -> block ~config operation Meta_remove detail
     | Ok () ->
-      (match remove_meta_file ~lifecycle_token ~config operation with
+      (match remove_meta_file ~permit ~lifecycle_token ~config operation with
        | Error detail -> block ~config operation Meta_remove detail
        | Ok () ->
       (match remove_session_dir ~config operation with
@@ -803,7 +810,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
         ~base_path:config.Workspace.base_path
         operation.keeper_name
         (fun () ->
-           finish_admitted ~lifecycle_token registry_unregistered)
+           finish_admitted ~permit ~lifecycle_token registry_unregistered)
     with
     | Keeper_lifecycle_admission.Durable_transaction
       .Permit_lease_completed result ->
@@ -848,6 +855,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
                (fun () ->
                  match
                    unregister_retired_exact
+                     ~permit
                      ~lifecycle_token
                      ~base_path:config.base_path
                      operation

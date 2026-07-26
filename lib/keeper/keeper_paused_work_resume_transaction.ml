@@ -10,6 +10,8 @@ type projection_stage =
 
 type failure =
   | Invalid_request of string
+  | Durable_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -67,6 +69,9 @@ let projection_stage_to_string = function
 
 let failure_to_string = function
   | Invalid_request detail -> "invalid Resume_owner request: " ^ detail
+  | Durable_lifecycle_admission_blocked reason ->
+    "Resume_owner durable lifecycle admission blocked: "
+    ^ Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire reason
   | Reservation_conflict owner ->
     "Resume_owner lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -197,37 +202,56 @@ let registered_owner_opt config receipt =
   | Some entry -> Ok (Some entry)
 ;;
 
-let update_registry_meta token entry committed =
+let update_registry_meta permit token entry committed =
   match
-    Keeper_registry.update_entry_exact_for_lifecycle token entry (fun current ->
+    Keeper_registry.update_entry_exact_for_lifecycle permit token entry (fun current ->
       { current with meta = committed })
   with
-  | Keeper_registry.Exact_updated -> Ok ()
-  | Keeper_registry.Exact_update_missing -> Error "registered lane disappeared"
-  | Keeper_registry.Exact_update_replaced -> Error "registered lane was replaced"
-  | Keeper_registry.Exact_update_invalid error ->
+  | Keeper_registry.Lifecycle_mutation_admission_denied ->
+    Error "registered lane update lost durable lifecycle admission"
+  | Keeper_registry.Lifecycle_mutation_completed Keeper_registry.Exact_updated ->
+    Ok ()
+  | Keeper_registry.Lifecycle_mutation_completed
+      Keeper_registry.Exact_update_missing ->
+    Error "registered lane disappeared"
+  | Keeper_registry.Lifecycle_mutation_completed
+      Keeper_registry.Exact_update_replaced ->
+    Error "registered lane was replaced"
+  | Keeper_registry.Lifecycle_mutation_completed
+      (Keeper_registry.Exact_update_invalid error) ->
     Error (Keeper_registry.registry_entry_validation_error_to_string error)
 ;;
 
-let project_registry token entry committed =
+let project_registry permit token entry committed =
   let* () =
-    update_registry_meta token entry committed
+    update_registry_meta permit token entry committed
     |> Result.map_error (fun detail -> Projection_failed { stage = Registry_meta; detail })
   in
   let* phase =
     match entry.phase with
     | Keeper_state_machine.Paused ->
       Keeper_registry.dispatch_event_exact_for_lifecycle
+        permit
         token
         entry
         Keeper_state_machine.Operator_resume
-      |> Result.map (fun (transition : Keeper_state_machine.transition_result) ->
-           transition.new_phase)
-      |> Result.map_error (fun error ->
-        Projection_failed
-          { stage = Registry_transition
-          ; detail = Keeper_state_machine.transition_error_to_string error
-          })
+      |> (function
+        | Keeper_registry.Lifecycle_mutation_admission_denied ->
+          Error
+            (Projection_failed
+               { stage = Registry_transition
+               ; detail = "registry transition lost durable lifecycle admission"
+               })
+        | Keeper_registry.Lifecycle_mutation_completed result ->
+          result
+          |> Result.map
+               (fun (transition : Keeper_state_machine.transition_result) ->
+                  transition.new_phase)
+          |> Result.map_error (fun error ->
+            Projection_failed
+              { stage = Registry_transition
+              ; detail = Keeper_state_machine.transition_error_to_string error
+              }))
     | phase -> Ok phase
   in
   if not (Keeper_state_machine.is_terminal phase)
@@ -235,7 +259,7 @@ let project_registry token entry committed =
   Ok phase
 ;;
 
-let project_receipt token config (receipt : Keeper_paused_work_disposition_receipt.t) =
+let project_receipt permit token config (receipt : Keeper_paused_work_disposition_receipt.t) =
   let* current = read_meta config receipt.keeper_name in
   let* current =
     match current with
@@ -256,6 +280,7 @@ let project_receipt token config (receipt : Keeper_paused_work_disposition_recei
       in
       let* () =
         Keeper_meta_store.write_meta_with_merge_for_lifecycle
+          permit
           token
           ~merge:Keeper_meta_merge.monotonic_usage_counters
           config
@@ -280,7 +305,7 @@ let project_receipt token config (receipt : Keeper_paused_work_disposition_recei
   in
   match entry with
   | None -> Error Registry_owner_missing
-  | Some entry -> project_registry token entry committed
+  | Some entry -> project_registry permit token entry committed
 ;;
 
 let create_receipt config ~keeper_name request =
@@ -307,7 +332,7 @@ let create_receipt config ~keeper_name request =
   | Some entry -> Error (Registry_owner_not_paused entry.phase)
 ;;
 
-let run_owned receipt_lock token config ~keeper_name request =
+let run_owned permit receipt_lock token config ~keeper_name request =
   let* existing =
     Keeper_paused_work_disposition_receipt.load
       config
@@ -336,19 +361,15 @@ let run_owned receipt_lock token config ~keeper_name request =
        | Ok (Existing existing) -> Error (Receipt_conflict existing))
   in
   let projection =
-    match project_receipt token config receipt with
+    match project_receipt permit token config receipt with
     | Ok phase -> Applied phase
     | Error failure -> Committed_followup_failed failure
   in
   Ok (receipt, commit_status, projection)
 ;;
 
-let resume config ~keeper_name request =
-  match validate_request request with
-  | Error detail ->
-    Error { cause = Invalid_request detail; reservation_release = None }
-  | Ok () ->
-    (match
+let resume_admitted permit config ~keeper_name request =
+  match
        Keeper_lifecycle_reservation.acquire
          ~base_path:config.Workspace.base_path
          ~keeper_name
@@ -365,7 +386,7 @@ let resume config ~keeper_name request =
                 config
                 ~keeper_name
                 (fun receipt_lock ->
-                   run_owned receipt_lock token config ~keeper_name request)
+                   run_owned permit receipt_lock token config ~keeper_name request)
             with
             | Error detail -> Error (Receipt_lock_failed detail)
             | Ok outcome -> outcome
@@ -380,4 +401,34 @@ let resume config ~keeper_name request =
           (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
           ignore (Keeper_lifecycle_reservation.release token : _);
           raise exn))
+;;
+
+let resume config ~keeper_name request =
+  match validate_request request with
+  | Error detail ->
+    Error { cause = Invalid_request detail; reservation_release = None }
+  | Ok () ->
+    (match
+       Keeper_lifecycle_admission.Durable_transaction
+       .with_durable_lifecycle_admission
+         config
+         ~keeper_name
+         (fun permit -> resume_admitted permit config ~keeper_name request)
+     with
+     | Keeper_lifecycle_admission.Durable_transaction.Admission_completed result ->
+       result
+     | Keeper_lifecycle_admission.Durable_transaction
+       .Admission_completed_with_attention (result, failure) ->
+       Log.Keeper.error
+         "Resume_owner durable lifecycle admission release requires attention \
+          keeper=%s failure=%s"
+         keeper_name
+         (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+            failure);
+       result
+     | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+       Error
+         { cause = Durable_lifecycle_admission_blocked reason
+         ; reservation_release = None
+         })
 ;;

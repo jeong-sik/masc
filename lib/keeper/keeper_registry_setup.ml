@@ -14,6 +14,24 @@ let running_count_atomic = Atomic.make 0
 module Orphan_drops = Keeper_registry_orphan_drops
 module Error_tracking = Keeper_registry_error_tracking
 
+type 'a lifecycle_mutation_result =
+  | Lifecycle_mutation_completed of 'a
+  | Lifecycle_mutation_admission_denied
+
+let with_lifecycle_mutation_admission permit ~base_path ~keeper_name fn =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ~base_path
+      keeper_name
+      fn
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed result ->
+    Lifecycle_mutation_completed result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Lifecycle_mutation_admission_denied
+;;
+
 let registry_entry_validation_error_label = function
   | Healthy -> "healthy"
   | Lifecycle_transaction_reserved _ -> "lifecycle_transaction_reserved"
@@ -334,8 +352,12 @@ let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
 
 let update_entry_exact expected f = update_entry_exact_internal expected f
 
-let update_entry_exact_for_lifecycle token expected f =
-  update_entry_exact_internal ~lifecycle_token:token expected f
+let update_entry_exact_for_lifecycle permit token expected f =
+  with_lifecycle_mutation_admission
+    permit
+    ~base_path:expected.base_path
+    ~keeper_name:expected.name
+    (fun () -> update_entry_exact_internal ~lifecycle_token:token expected f)
 ;;
 
 type install_entry_result =
@@ -637,21 +659,22 @@ let register_offline_if_admitted ~base_path name meta =
     ~conditions
 ;;
 
-let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
-  let conditions =
-    { Keeper_state_machine.default_conditions with
-      launch_pending = true
-    }
-  in
-  let phase = Keeper_state_machine.derive_phase conditions in
-  register_with_state_result
-    ~lifecycle_token:token
-    ~respect_shutdown_fence:true
-    ~base_path
-    name
-    meta
-    ~phase
-    ~conditions
+let register_offline_if_admitted_for_lifecycle permit token ~base_path name meta =
+  with_lifecycle_mutation_admission permit ~base_path ~keeper_name:name (fun () ->
+    let conditions =
+      { Keeper_state_machine.default_conditions with
+        launch_pending = true
+      }
+    in
+    let phase = Keeper_state_machine.derive_phase conditions in
+    register_with_state_result
+      ~lifecycle_token:token
+      ~respect_shutdown_fence:true
+      ~base_path
+      name
+      meta
+      ~phase
+      ~conditions)
 ;;
 
 type register_restarting_error =
@@ -885,8 +908,12 @@ let unregister_exact_internal ?lifecycle_token entry =
 
 let unregister_exact entry = unregister_exact_internal entry
 
-let unregister_exact_for_lifecycle token entry =
-  unregister_exact_internal ~lifecycle_token:token entry
+let unregister_exact_for_lifecycle permit token entry =
+  with_lifecycle_mutation_admission
+    permit
+    ~base_path:entry.base_path
+    ~keeper_name:entry.name
+    (fun () -> unregister_exact_internal ~lifecycle_token:token entry)
 ;;
 
 type restore_entry_result =
@@ -895,11 +922,16 @@ type restore_entry_result =
   | Entry_restore_invalid of registry_entry_validation_error
   | Entry_restore_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
 
-let restore_entry_if_absent_for_lifecycle token (entry : registry_entry) =
-  Keeper_lifecycle_reservation.with_key_lock
+let restore_entry_if_absent_for_lifecycle permit token (entry : registry_entry) =
+  with_lifecycle_mutation_admission
+    permit
     ~base_path:entry.base_path
     ~keeper_name:entry.name
     (fun () ->
+      Keeper_lifecycle_reservation.with_key_lock
+        ~base_path:entry.base_path
+        ~keeper_name:entry.name
+        (fun () ->
   match
     Keeper_lifecycle_reservation.authorize
       ~token
@@ -923,7 +955,7 @@ let restore_entry_if_absent_for_lifecycle token (entry : registry_entry) =
            then Entry_restored
            else loop ()
        in
-       loop ()))
+       loop ())))
 ;;
 
 let health_of_entry ~base_path name entry =

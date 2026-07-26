@@ -596,11 +596,20 @@ let publish_keeper_started ~(live_meta : keeper_meta) : unit =
 (** Launch gate: dispatch [Fiber_started] before forking the keepalive
     fiber. Returns [Error _] when the registry FSM rejects the launch —
     the caller must not fork and must not announce [Started]/[Running]. *)
-let dispatch_fiber_started ?lifecycle_token ?entry ~base_path keeper_name =
+let dispatch_fiber_started ~permit ?lifecycle_token ?entry ~base_path keeper_name =
   let transition =
     match lifecycle_token, entry with
     | Some token, Some entry ->
-      Keeper_registry.prepare_fiber_launch_for_lifecycle token entry
+      (match
+         Keeper_registry.prepare_fiber_launch_for_lifecycle permit token entry
+       with
+       | Keeper_registry.Lifecycle_mutation_completed result -> result
+       | Keeper_registry.Lifecycle_mutation_admission_denied ->
+         Error
+           (Keeper_state_machine.Precondition_violation
+              { event = "fiber_started"
+              ; reason = "durable lifecycle admission was lost before launch"
+              }))
     | None, None -> Keeper_registry.prepare_fiber_launch ~base_path keeper_name
     | Some _, None | None, Some _ ->
       invalid_arg "dispatch_fiber_started lifecycle token and entry must be paired"
@@ -812,6 +821,7 @@ let record_lifecycle_start_denial
 let start_keepalive_admitted
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
+      ~permit
       (ctx : _ context)
   (m : keeper_meta)
   : start_keepalive_outcome
@@ -875,22 +885,41 @@ let start_keepalive_admitted
             "start_keepalive: reclaiming stale registered entry %s phase=%s"
             m.name
             (Keeper_state_machine.phase_to_string entry.phase));
-       (match
-          match lifecycle_token with
-          | None -> Keeper_registry.unregister_exact entry
-          | Some token -> Keeper_registry.unregister_exact_for_lifecycle token entry
-        with
-        | Keeper_registry.Exact_unregistered
-        | Keeper_registry.Exact_entry_missing -> ()
-        | Keeper_registry.Exact_entry_replaced ->
-          Log.Keeper.info
-            "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
-            m.name
-        | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
-          Log.Keeper.warn
-            "start_keepalive: stale entry reclaim rejected by lifecycle reservation for %s: %s"
-            m.name
-            (Keeper_lifecycle_reservation.snapshot_to_string owner))
+       (match lifecycle_token with
+        | Some token ->
+          (match
+             Keeper_registry.unregister_exact_for_lifecycle permit token entry
+           with
+           | Keeper_registry.Lifecycle_mutation_admission_denied ->
+             Log.Keeper.warn
+               "start_keepalive: stale entry reclaim lost durable lifecycle admission for %s"
+               m.name
+           | Keeper_registry.Lifecycle_mutation_completed result ->
+             (match result with
+              | Keeper_registry.Exact_unregistered
+              | Keeper_registry.Exact_entry_missing -> ()
+              | Keeper_registry.Exact_entry_replaced ->
+                Log.Keeper.info
+                  "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
+                  m.name
+              | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+                Log.Keeper.warn
+                  "start_keepalive: stale entry reclaim rejected by lifecycle reservation for %s: %s"
+                  m.name
+                  (Keeper_lifecycle_reservation.snapshot_to_string owner)))
+        | None ->
+          (match Keeper_registry.unregister_exact entry with
+           | Keeper_registry.Exact_unregistered
+           | Keeper_registry.Exact_entry_missing -> ()
+           | Keeper_registry.Exact_entry_replaced ->
+             Log.Keeper.info
+               "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
+               m.name
+           | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+             Log.Keeper.warn
+               "start_keepalive: stale entry reclaim rejected by lifecycle reservation for %s: %s"
+               m.name
+               (Keeper_lifecycle_reservation.snapshot_to_string owner)))
      | _ -> ());
     match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
     | Some registered ->
@@ -903,41 +932,65 @@ let start_keepalive_admitted
     | None ->
       (* Register in Keeper_registry first — single source of truth. *)
       (match
-         match lifecycle_token with
+         (match lifecycle_token with
          | None ->
-           Keeper_registry.register_offline_if_admitted
-             ~base_path:ctx.config.base_path
-             m.name
-             m
+           `Completed
+             (Keeper_registry.register_offline_if_admitted
+                ~base_path:ctx.config.base_path
+                m.name
+                m)
          | Some token ->
-           Keeper_registry.register_offline_if_admitted_for_lifecycle
-             token
-             ~base_path:ctx.config.base_path
-             m.name
-             m
+           (match
+              Keeper_registry.register_offline_if_admitted_for_lifecycle
+                permit
+                token
+                ~base_path:ctx.config.base_path
+                m.name
+                m
+            with
+            | Keeper_registry.Lifecycle_mutation_completed result ->
+              `Completed result
+            | Keeper_registry.Lifecycle_mutation_admission_denied ->
+              `Admission_denied))
        with
-       | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+       | `Admission_denied ->
+         Log.Keeper.warn
+           "start_keepalive: lifecycle registration lost durable admission for %s"
+           m.name;
+         Keepalive_transaction_admission_denied
+           (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
+              { keeper_name = m.name
+              ; failure =
+                  Keeper_lifecycle_admission.Durable_transaction
+                  .Invalid_current_schema
+              })
+       | `Completed
+           (Error (Keeper_registry.Registration_shutdown_reserved operation_id)) ->
          Log.Keeper.warn
            "start_keepalive: skipped %s because shutdown operation %s owns admission"
            m.name
            (Keeper_shutdown_types.Operation_id.to_string operation_id);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_shutdown_reserved operation_id)
-       | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+       | `Completed
+           (Error (Keeper_registry.Registration_lifecycle_reserved owner)) ->
          Log.Keeper.warn
            "start_keepalive: lifecycle reservation rejected %s: %s"
            m.name
            (Keeper_lifecycle_reservation.snapshot_to_string owner);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_lifecycle_reserved owner)
-       | Error (Keeper_registry.Registration_invalid validation_error) ->
+       | `Completed (Error (Keeper_registry.Registration_invalid validation_error)) ->
          Log.Keeper.error
            "start_keepalive: registry validation rejected %s: %s"
            m.name
            (Keeper_registry.registry_entry_validation_error_to_string validation_error);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_invalid validation_error)
-       | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+       | `Completed
+           (Error
+              (Keeper_registry.Registration_event_queue_unavailable
+                 { keeper_name; detail })) ->
          Log.Keeper.error
            "start_keepalive: registry event queue unavailable keeper=%s: %s"
            keeper_name
@@ -945,7 +998,7 @@ let start_keepalive_admitted
          Keepalive_registration_rejected
            (Keeper_registry.Registration_event_queue_unavailable
               { keeper_name; detail })
-       | Ok reg ->
+       | `Completed (Ok reg) ->
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
       (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,
@@ -957,9 +1010,10 @@ let start_keepalive_admitted
       match
         match lifecycle_token with
         | None ->
-          dispatch_fiber_started ~base_path:ctx.config.base_path m.name
+          dispatch_fiber_started ~permit ~base_path:ctx.config.base_path m.name
         | Some token ->
           dispatch_fiber_started
+            ~permit
             ~lifecycle_token:token
             ~entry:reg
             ~base_path:ctx.config.base_path
@@ -1009,14 +1063,27 @@ let start_keepalive_admitted
         let wakeup = reg.fiber_wakeup in
         let live_meta = bootstrap_live_keeper_meta ?lifecycle_token ~ctx m in
         let live_meta_installed =
-          (match lifecycle_token with
-           | None ->
-             Keeper_registry.update_entry_exact reg (fun current ->
-               { current with meta = live_meta })
-           | Some token ->
-             Keeper_registry.update_entry_exact_for_lifecycle token reg (fun current ->
-               { current with meta = live_meta }))
-          |> Keeper_registry.exact_update_succeeded reg ~site:"start_keepalive.live_meta"
+          match lifecycle_token with
+          | None ->
+            Keeper_registry.update_entry_exact reg (fun current ->
+              { current with meta = live_meta })
+            |> Keeper_registry.exact_update_succeeded
+                 reg
+                 ~site:"start_keepalive.live_meta"
+          | Some token ->
+            (match
+               Keeper_registry.update_entry_exact_for_lifecycle
+                 permit
+                 token
+                 reg
+                 (fun current -> { current with meta = live_meta })
+             with
+             | Keeper_registry.Lifecycle_mutation_admission_denied -> false
+             | Keeper_registry.Lifecycle_mutation_completed result ->
+               Keeper_registry.exact_update_succeeded
+                 reg
+                 ~site:"start_keepalive.live_meta"
+                 result)
         in
         if not live_meta_installed
         then (
@@ -1227,6 +1294,7 @@ let start_keepalive_under_admission
          start_keepalive_admitted
            ~proactive_warmup_sec
            ?lifecycle_token
+           ~permit
            ctx
            meta)
   with

@@ -820,14 +820,29 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
            | Ok _ -> Alcotest.fail "unowned registration crossed reservation");
           let entry =
             match
-              Keeper_registry.register_offline_if_admitted_for_lifecycle
-                token
-                ~base_path:base_dir
-                persisted.name
-                persisted
+              Keeper_lifecycle_admission.Durable_transaction
+              .with_durable_lifecycle_admission
+                config
+                ~keeper_name:persisted.name
+                (fun permit ->
+                   Keeper_registry.register_offline_if_admitted_for_lifecycle
+                     permit
+                     token
+                     ~base_path:base_dir
+                     persisted.name
+                     persisted)
             with
-            | Ok entry -> entry
-            | Error _ -> Alcotest.fail "owner registration was rejected"
+            | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
+                (Keeper_registry.Lifecycle_mutation_completed (Ok entry))
+            | Keeper_lifecycle_admission.Durable_transaction
+              .Admission_completed_with_attention
+                ((Keeper_registry.Lifecycle_mutation_completed (Ok entry)), _) ->
+              entry
+            | Keeper_lifecycle_admission.Durable_transaction.Admission_completed _
+            | Keeper_lifecycle_admission.Durable_transaction
+              .Admission_completed_with_attention _
+            | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked _ ->
+              Alcotest.fail "owner registration was rejected"
           in
           (match Keeper_registry.update_entry_exact entry Fun.id with
            | Keeper_registry.Exact_update_invalid
@@ -843,18 +858,53 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
                | Keeper_registry.Name_mismatch _ ) ->
              Alcotest.fail "unowned exact registry update crossed reservation");
           (match
-             Keeper_registry.update_entry_exact_for_lifecycle token entry Fun.id
+             Keeper_lifecycle_admission.Durable_transaction
+             .with_durable_lifecycle_admission
+               config
+               ~keeper_name:persisted.name
+               (fun permit ->
+                  Keeper_registry.update_entry_exact_for_lifecycle
+                    permit
+                    token
+                    entry
+                    Fun.id)
            with
-           | Keeper_registry.Exact_updated -> ()
-           | Keeper_registry.Exact_update_missing
-           | Keeper_registry.Exact_update_replaced
-           | Keeper_registry.Exact_update_invalid _ ->
+           | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
+               (Keeper_registry.Lifecycle_mutation_completed
+                  Keeper_registry.Exact_updated)
+           | Keeper_lifecycle_admission.Durable_transaction
+             .Admission_completed_with_attention
+               ((Keeper_registry.Lifecycle_mutation_completed
+                   Keeper_registry.Exact_updated), _) ->
+             ()
+           | Keeper_lifecycle_admission.Durable_transaction.Admission_completed _
+           | Keeper_lifecycle_admission.Durable_transaction
+             .Admission_completed_with_attention _
+           | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked _ ->
              Alcotest.fail "owner exact registry update was rejected");
-          (match Keeper_registry.unregister_exact_for_lifecycle token entry with
-           | Keeper_registry.Exact_unregistered -> ()
-           | Keeper_registry.Exact_entry_missing
-           | Keeper_registry.Exact_entry_replaced
-           | Keeper_registry.Exact_unregister_lifecycle_reserved _ ->
+          (match
+             Keeper_lifecycle_admission.Durable_transaction
+             .with_durable_lifecycle_admission
+               config
+               ~keeper_name:persisted.name
+               (fun permit ->
+                  Keeper_registry.unregister_exact_for_lifecycle
+                    permit
+                    token
+                    entry)
+           with
+           | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
+               (Keeper_registry.Lifecycle_mutation_completed
+                  Keeper_registry.Exact_unregistered)
+           | Keeper_lifecycle_admission.Durable_transaction
+             .Admission_completed_with_attention
+               ((Keeper_registry.Lifecycle_mutation_completed
+                   Keeper_registry.Exact_unregistered), _) ->
+             ()
+           | Keeper_lifecycle_admission.Durable_transaction.Admission_completed _
+           | Keeper_lifecycle_admission.Durable_transaction
+             .Admission_completed_with_attention _
+           | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked _ ->
              Alcotest.fail "owner exact unregister was rejected")))
 
 let test_dead_revival_launch_failure_rolls_back_both_authorities () =
@@ -2480,15 +2530,10 @@ let replace_revival_journal_stage raw stage =
   | _ -> Alcotest.fail "revival journal fixture is not an object"
 ;;
 
-let replace_durable_admission_row ~config ~keeper_name row =
-  match
-    Durable_admission.For_testing.replace_current_row
-      ~config
-      ~keeper_name
-      ~row
-  with
-  | Ok () -> ()
-  | Error detail -> Alcotest.fail detail
+let replace_durable_admission_row ~config ~keeper_name:_ row =
+  Out_channel.with_open_bin
+    (current_revival_journal_path config)
+    (fun channel -> output_string channel row)
 ;;
 
 let expect_durable_start_admitted ~config ~keeper_name label =

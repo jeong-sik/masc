@@ -196,6 +196,7 @@ type rollback_error =
   | Rollback_meta_write_failed of string
   | Rollback_registry_occupied of Keeper_registry.registry_entry
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
+  | Rollback_registry_admission_denied
   | Rollback_payload_delete_failed of Payload.error
   | Rollback_journal_clear_failed of string
   | Rollback_runtime_assignment_failed of string
@@ -1329,6 +1330,8 @@ let rollback_error_to_string = function
   | Rollback_registry_reservation_changed owner ->
     "registry rollback lost reservation ownership: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
+  | Rollback_registry_admission_denied ->
+    "registry rollback lost durable lifecycle admission"
   | Rollback_payload_delete_failed failure ->
     "revival payload cleanup failed: " ^ Payload.error_to_string failure
   | Rollback_journal_clear_failed detail -> "journal clear failed: " ^ detail
@@ -1516,6 +1519,7 @@ let write_replacement_meta
 ;;
 
 let clear_rollback_registry
+      permit
       token
       config
       (journal : journal)
@@ -1534,23 +1538,34 @@ let clear_rollback_registry
        unregister, so the replacement cannot inherit a live predecessor. *)
     let _lane_exit = Keeper_lane.await_exit entry.lane in
     let _done_resolution = Eio.Promise.await entry.done_p in
-    (match Keeper_registry.unregister_exact_for_lifecycle token entry with
-     | Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing -> []
-     | Keeper_registry.Exact_entry_replaced -> [ Rollback_registry_occupied entry ]
-     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+    (match Keeper_registry.unregister_exact_for_lifecycle permit token entry with
+     | Keeper_registry.Lifecycle_mutation_admission_denied ->
+       [ Rollback_registry_admission_denied ]
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing) ->
+       []
+     | Keeper_registry.Lifecycle_mutation_completed
+         Keeper_registry.Exact_entry_replaced ->
+       [ Rollback_registry_occupied entry ]
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
        [ Rollback_registry_reservation_changed owner ])
   | Some entry
     when same_identity entry.meta original
          && entry.phase = Keeper_state_machine.Dead
          && Option.is_some (Eio.Promise.peek entry.done_p)
          && Keeper_registry.lane_has_exited entry ->
-    (match Keeper_registry.unregister_exact_for_lifecycle token entry with
-     | Keeper_registry.Exact_unregistered
-     | Keeper_registry.Exact_entry_missing ->
+    (match Keeper_registry.unregister_exact_for_lifecycle permit token entry with
+     | Keeper_registry.Lifecycle_mutation_admission_denied ->
+       [ Rollback_registry_admission_denied ]
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing) ->
        []
-     | Keeper_registry.Exact_entry_replaced ->
+     | Keeper_registry.Lifecycle_mutation_completed
+         Keeper_registry.Exact_entry_replaced ->
        [ Rollback_registry_occupied entry ]
-     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
        [ Rollback_registry_reservation_changed owner ])
   | Some entry -> [ Rollback_registry_occupied entry ]
 ;;
@@ -1678,6 +1693,7 @@ let rollback permit token config (journal : journal) payload _original_entry =
                         restored
                     else
                       Keeper_meta_store.write_meta_for_lifecycle
+                        permit
                         token
                         config
                         restored)))
@@ -1688,6 +1704,7 @@ let rollback permit token config (journal : journal) payload _original_entry =
   in
   let registry_errors =
     clear_rollback_registry
+      permit
       token
       config
       journal
@@ -1785,13 +1802,17 @@ let settle_replacement_before_reserved
            && entry.phase = Keeper_state_machine.Dead
            && Option.is_some (Eio.Promise.peek entry.done_p)
            && Keeper_registry.lane_has_exited entry ->
-      (match Keeper_registry.unregister_exact_for_lifecycle token entry with
-       | Keeper_registry.Exact_unregistered
-       | Keeper_registry.Exact_entry_missing ->
+      (match Keeper_registry.unregister_exact_for_lifecycle permit token entry with
+       | Keeper_registry.Lifecycle_mutation_admission_denied ->
+         [ Rollback_registry_admission_denied ]
+       | Keeper_registry.Lifecycle_mutation_completed
+           (Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing) ->
          []
-       | Keeper_registry.Exact_entry_replaced ->
+       | Keeper_registry.Lifecycle_mutation_completed
+           Keeper_registry.Exact_entry_replaced ->
          [ Rollback_registry_occupied entry ]
-       | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+       | Keeper_registry.Lifecycle_mutation_completed
+           (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
          [ Rollback_registry_reservation_changed owner ])
     | Some entry -> [ Rollback_registry_occupied entry ]
   in
@@ -2327,11 +2348,20 @@ let revive_locked
                 match original_entry with
                 | None -> Ok ()
                 | Some entry ->
-                  (match Keeper_registry.unregister_exact_for_lifecycle token entry with
-                   | Keeper_registry.Exact_unregistered -> Ok ()
-                   | Keeper_registry.Exact_entry_missing -> Error Registry_remove_missing
-                   | Keeper_registry.Exact_entry_replaced -> Error Registry_remove_replaced
-                   | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+                  (match Keeper_registry.unregister_exact_for_lifecycle permit token entry with
+                   | Keeper_registry.Lifecycle_mutation_admission_denied ->
+                     Error Registry_remove_replaced
+                   | Keeper_registry.Lifecycle_mutation_completed
+                       Keeper_registry.Exact_unregistered ->
+                     Ok ()
+                   | Keeper_registry.Lifecycle_mutation_completed
+                       Keeper_registry.Exact_entry_missing ->
+                     Error Registry_remove_missing
+                   | Keeper_registry.Lifecycle_mutation_completed
+                       Keeper_registry.Exact_entry_replaced ->
+                     Error Registry_remove_replaced
+                   | Keeper_registry.Lifecycle_mutation_completed
+                       (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
                      Error
                        (Registry_identity_conflict
                           { expected_trace_id = original.runtime.trace_id

@@ -110,10 +110,4 @@ val projection_to_yojson : projection -> Yojson.Safe.t
 
 module For_testing : sig
   val permit_matches : permit -> base_path:string -> string -> bool
-
-  val replace_current_row :
-    config:Workspace.config ->
-    keeper_name:string ->
-    row:string ->
-    (unit, string) result
 end

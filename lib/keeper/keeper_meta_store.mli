@@ -94,6 +94,7 @@ val write_meta :
     checked against the same BasePath/name key before entering the per-path
     CAS critical section. *)
 val write_meta_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
@@ -170,6 +171,7 @@ val remove_meta_if_identity :
   (unit, identity_remove_error) result
 
 val remove_meta_if_identity_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   Workspace.config ->
   name:string ->
@@ -218,6 +220,7 @@ val remove_meta_if_exact_identity :
   (unit, exact_identity_error) result
 
 val remove_meta_if_exact_identity_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   Workspace.config ->
   name:string ->
@@ -242,6 +245,7 @@ val write_meta_with_merge :
   (unit, string) result
 
 val write_meta_with_merge_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   ?max_retries:int ->
   merge:

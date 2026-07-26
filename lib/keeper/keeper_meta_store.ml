@@ -537,9 +537,31 @@ let write_meta config m =
     write_meta_typed config m |> Result.map_error write_meta_error_to_string)
 ;;
 
-let write_meta_for_lifecycle token config m =
-  write_meta_typed ~lifecycle_token:token config m
-  |> Result.map_error write_meta_error_to_string
+let with_lifecycle_mutation_admission permit config ~keeper_name ~denied fn =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ~base_path:config.Workspace.base_path
+      keeper_name
+      fn
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    denied
+;;
+
+let write_meta_for_lifecycle permit token config m =
+  with_lifecycle_mutation_admission
+    permit
+    config
+    ~keeper_name:m.name
+    ~denied:
+      (Error
+         "Keeper lifecycle metadata write requires the matching active durable admission permit")
+    (fun () ->
+    write_meta_typed ~lifecycle_token:token config m
+    |> Result.map_error write_meta_error_to_string)
 ;;
 
 let with_identity_write_admission permit config m ~denied fn =
@@ -667,13 +689,21 @@ let write_meta_with_merge ?max_retries ~merge config m =
     write_meta_with_merge_internal ?max_retries ~merge config m)
 ;;
 
-let write_meta_with_merge_for_lifecycle token ?max_retries ~merge config m =
-  write_meta_with_merge_internal
-    ~lifecycle_token:token
-    ?max_retries
-    ~merge
+let write_meta_with_merge_for_lifecycle permit token ?max_retries ~merge config m =
+  with_lifecycle_mutation_admission
+    permit
     config
-    m
+    ~keeper_name:m.name
+    ~denied:
+      (Error
+         "Keeper lifecycle metadata merge requires the matching active durable admission permit")
+    (fun () ->
+    write_meta_with_merge_internal
+      ~lifecycle_token:token
+      ?max_retries
+      ~merge
+      config
+      m)
 ;;
 
 (* Durable write-through of [compaction_rt.last_decision].
@@ -1008,18 +1038,33 @@ let remove_meta_if_identity config ~name ~trace_id ~generation =
 ;;
 
 let remove_meta_if_identity_for_lifecycle
+      permit
       token
       config
       ~name
       ~trace_id
       ~generation
   =
-  remove_meta_if_identity_internal
-    ~lifecycle_token:token
+  with_lifecycle_mutation_admission
+    permit
     config
-    ~name
-    ~trace_id
-    ~generation
+    ~keeper_name:name
+    ~denied:
+      (Error
+         (Remove_identity_lifecycle_admission_blocked
+            (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
+               { keeper_name = name
+               ; failure =
+                   Keeper_lifecycle_admission.Durable_transaction
+                   .Invalid_current_schema
+               })))
+    (fun () ->
+    remove_meta_if_identity_internal
+      ~lifecycle_token:token
+      config
+      ~name
+      ~trace_id
+      ~generation)
 ;;
 
 type exact_identity_error =
@@ -1165,6 +1210,7 @@ let remove_meta_if_exact_identity config ~name ~trace_id ~generation ~meta_versi
 ;;
 
 let remove_meta_if_exact_identity_for_lifecycle
+      permit
       token
       config
       ~name
@@ -1172,11 +1218,25 @@ let remove_meta_if_exact_identity_for_lifecycle
       ~generation
       ~meta_version
   =
-  remove_meta_if_exact_identity_internal
-    ~lifecycle_token:token
+  with_lifecycle_mutation_admission
+    permit
     config
-    ~name
-    ~trace_id
-    ~generation
-    ~meta_version
+    ~keeper_name:name
+    ~denied:
+      (Error
+         (Exact_identity_lifecycle_admission_blocked
+            (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
+               { keeper_name = name
+               ; failure =
+                   Keeper_lifecycle_admission.Durable_transaction
+                   .Invalid_current_schema
+               })))
+    (fun () ->
+    remove_meta_if_exact_identity_internal
+      ~lifecycle_token:token
+      config
+      ~name
+      ~trace_id
+      ~generation
+      ~meta_version)
 ;;

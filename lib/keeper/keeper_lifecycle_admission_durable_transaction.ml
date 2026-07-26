@@ -316,31 +316,4 @@ let projection_to_yojson projection =
 
 module For_testing = struct
   let permit_matches = permit_matches
-
-  let replace_current_row ~config ~keeper_name ~row =
-    match journal_parent config, journal_entropy () with
-    | Error _, _ | _, Error _ -> Error "test authority unavailable"
-    | Ok parent, Ok secure_random ->
-      (match
-         Head.read
-           ~secure_random
-           ~parent
-           ~leaf:(journal_leaf keeper_name)
-       with
-       | Error _ -> Error "test authority read failed"
-       | Ok snapshot ->
-         (match journal_entropy () with
-          | Error _ -> Error "test authority entropy unavailable"
-          | Ok secure_random ->
-            (match
-               Head.compare_and_swap
-                 ~secure_random
-                 ~parent
-                 ~leaf:(journal_leaf keeper_name)
-                 ~expected:(Head.snapshot_cursor snapshot)
-                 ~row
-             with
-             | Ok _ -> Ok ()
-             | Error _ -> Error "test authority publication failed")))
-  ;;
 end

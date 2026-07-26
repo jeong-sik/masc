@@ -2244,6 +2244,8 @@ let revive_locked
            Atomic.set entry.fiber_stop true;
            Keeper_keepalive.abort_launch_gate launch_gate;
            Keeper_keepalive.request_entry_stop entry;
+           (* See the launch gate above: only completion of the already-aborted
+              lane matters here; its terminal payload has no authority. *)
            ignore (Keeper_lane.await_exit entry.lane : Keeper_lane.exit);
            ignore
              (Eio.Promise.await entry.done_p

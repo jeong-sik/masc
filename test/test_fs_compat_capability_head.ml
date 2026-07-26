@@ -124,6 +124,51 @@ let check_publication_evidence label row (evidence : Head.publication_evidence) 
     (String.length evidence.Head.intended_sha256)
 ;;
 
+let cross_process_holder_arg = "--capability-head-cross-process-holder"
+
+let () =
+  if
+    Array.length Sys.argv = 5
+    && String.equal Sys.argv.(1) cross_process_holder_arg
+  then (
+    let directory = Sys.argv.(2) in
+    let leaf = Sys.argv.(3) in
+    let row = Sys.argv.(4) in
+    let exit_code =
+      try
+        Eio_main.run @@ fun env ->
+        let fs = Eio.Stdenv.fs env in
+        let secure_random = Eio.Stdenv.secure_random env in
+        with_parent ~fs directory @@ fun parent ->
+        match Head.read ~secure_random ~parent ~leaf with
+        | Error _ -> 2
+        | Ok expected ->
+          let hooks =
+            Head.For_testing.hooks
+              ~after_lock_acquired:(fun () ->
+                output_char stdout 'R';
+                flush stdout;
+                if input_char stdin <> 'X'
+                then failwith "invalid cross-process release signal")
+              ()
+          in
+          (match
+             Head.For_testing.compare_and_swap
+               hooks
+               ~secure_random
+               ~parent
+               ~leaf
+               ~expected:(Head.snapshot_cursor expected)
+               ~row
+           with
+           | Ok _ -> 0
+           | Error _ -> 3)
+      with
+      | _ -> 4
+    in
+    exit exit_code)
+;;
+
 let test_absent_publish_and_reopen ~fs ~secure_random () =
   with_tmp_dir "masc_capability_head_reopen_" @@ fun directory ->
   let leaf = "HEAD" in
@@ -329,6 +374,72 @@ let test_different_roots_do_not_false_share ~fs ~secure_random () =
   |> check_row "root A retains its authority" (Some "root-a");
   read ~secure_random ~parent:parent_b ~leaf "root B final read"
   |> check_row "root B progressed independently" (Some "root-b")
+;;
+
+let test_cross_process_lock_then_stale_cursor
+      ~fs
+      ~secure_random
+      ~process_mgr
+      ()
+  =
+  with_tmp_dir "masc_capability_head_cross_process_" @@ fun directory ->
+  let leaf = "HEAD" in
+  let child_row = "cross-process-winner" in
+  with_parent ~fs directory @@ fun parent ->
+  let original = read ~secure_random ~parent ~leaf "cross-process initial read" in
+  Eio.Switch.run @@ fun sw ->
+  let child_stdin, parent_stdin = Eio.Process.pipe ~sw process_mgr in
+  let parent_stdout, child_stdout = Eio.Process.pipe ~sw process_mgr in
+  let child =
+    Eio.Process.spawn
+      ~sw
+      process_mgr
+      ~stdin:child_stdin
+      ~stdout:child_stdout
+      ~executable:Sys.executable_name
+      [ Sys.executable_name
+      ; cross_process_holder_arg
+      ; directory
+      ; leaf
+      ; child_row
+      ]
+  in
+  Eio.Flow.close child_stdin;
+  Eio.Flow.close child_stdout;
+  let ready = Cstruct.create 1 in
+  Eio.Flow.read_exact parent_stdout ready;
+  check string
+    "separate process owns the stable lock"
+    "R"
+    (Cstruct.to_string ready);
+  Head.compare_and_swap
+    ~secure_random
+    ~parent
+    ~leaf
+    ~expected:(Head.snapshot_cursor original)
+    ~row:"contender-must-not-publish"
+  |> require_busy "cross-process contender";
+  Eio.Flow.copy_string "X" parent_stdin;
+  Eio.Flow.close parent_stdin;
+  Eio.Process.await_exn child;
+  Eio.Flow.close parent_stdout;
+  let current =
+    Head.compare_and_swap
+      ~secure_random
+      ~parent
+      ~leaf
+      ~expected:(Head.snapshot_cursor original)
+      ~row:"stale-cursor-must-not-publish"
+    |> require_conflict "cursor after cross-process publication"
+  in
+  check_row
+    "released child publication invalidates the original cursor"
+    (Some child_row)
+    current;
+  read ~secure_random ~parent ~leaf "cross-process final read"
+  |> check_row
+       "cross-process winner remains the exact HEAD authority"
+       (Some child_row)
 ;;
 
 let test_parent_cancellation_after_dispatch_returns_publication
@@ -553,8 +664,13 @@ let test_resource_settlement_warning_preserves_success ~fs ~secure_random () =
     |> require_publication "resource settlement"
   in
   (match Head.publication_settlement_warnings publication with
+   | [ Head.Resource_settlement_failed
+         ({ operation = Head.Settle_resources; _ } : Head.diagnostic) ] ->
+     ()
    | [] -> fail "resource-settlement failure was silently dropped"
-   | _ :: _ -> ());
+   | _ ->
+     fail
+       "resource settlement did not produce exactly one typed Settle_resources warning");
   Head.publication_evidence publication
   |> check_publication_evidence "resource settlement" "settled-row";
   read ~secure_random ~parent ~leaf "resource settlement final read"
@@ -565,6 +681,7 @@ let () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let secure_random = Eio.Stdenv.secure_random env in
+  let process_mgr = Eio.Stdenv.process_mgr env in
   run
     "fs_compat capability HEAD"
     [ ( "authority"
@@ -582,6 +699,11 @@ let () =
             (test_same_directory_contention_is_busy ~fs ~secure_random)
         ; test_case "different roots do not false-share" `Quick
             (test_different_roots_do_not_false_share ~fs ~secure_random)
+        ; test_case "cross-process lock and stale cursor" `Quick
+            (test_cross_process_lock_then_stale_cursor
+               ~fs
+               ~secure_random
+               ~process_mgr)
         ; test_case "parent cancellation after dispatch publishes once" `Quick
             (test_parent_cancellation_after_dispatch_returns_publication
                ~fs

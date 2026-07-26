@@ -56,9 +56,10 @@ type error =
   | Unsupported of string
   | Io_error of diagnostic
 
-(** In publication evidence, [intended_sha256] and [intended_length] describe
-    the exact on-disk HEAD payload: the caller-provided row followed by one LF.
-    They do not describe the row string before LF framing. *)
+(** In publication evidence, [intended_sha256] is the 64-character lowercase
+    SHA-256 hex digest and [intended_length] is the byte length of the exact
+    on-disk HEAD payload [row || 0x0A]. They do not describe [row] before LF
+    framing. *)
 type publication_evidence =
   { expected_cursor : cursor
   ; intended_sha256 : string
@@ -66,6 +67,9 @@ type publication_evidence =
   ; published_cursor : cursor
   }
 
+(** [intended_sha256] and [intended_length] have the same wire-payload
+    definition as in {!publication_evidence}: lowercase SHA-256 hex and byte
+    length over [row || 0x0A]. *)
 type publication_indeterminate =
   { expected_cursor : cursor
   ; intended_sha256 : string

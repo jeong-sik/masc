@@ -2592,7 +2592,7 @@
 (test
  (name test_fs_compat_capability_head)
  (modules test_fs_compat_capability_head)
- (libraries alcotest fs_compat eio eio_main unix))
+ (libraries alcotest cstruct fs_compat eio eio_main unix))
 
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
 (include stanzas/test_eio_resource_scope.inc)

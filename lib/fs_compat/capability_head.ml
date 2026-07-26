@@ -537,11 +537,11 @@ let verify_lock_binding lock =
 
 let normalize_result ~warnings ~set_success_warnings = function
   | Ok value -> Ok (set_success_warnings value warnings)
-    | Error (failed : failure) ->
-      Error
-        { failed with
-          settlement_warnings = failed.settlement_warnings @ warnings
-        }
+  | Error (failed : failure) ->
+    Error
+      { failed with
+        settlement_warnings = failed.settlement_warnings @ warnings
+      }
 
 let run_transaction ~hooks ~parent ~leaf ~publication_state ~set_success_warnings transaction =
   Eio.Fiber.check ();
@@ -616,11 +616,19 @@ let read ~secure_random ~parent ~leaf =
       ~parent
       ~leaf
       ~publication_state
-      ~set_success_warnings:(fun snapshot warnings ->
+      ~set_success_warnings:(fun (snapshot : snapshot) warnings ->
         { snapshot with settlement_warnings = snapshot.settlement_warnings @ warnings })
       (fun ~sw ~parent ~parent_stat ~warnings:_ ->
-        let* lock = open_lock ~sw ~secure_random ~parent ~leaf in
-        let* snapshot = read_current ~sw ~parent ~parent_stat ~leaf ~lock in
+        let* lock =
+          match open_lock ~sw ~secure_random ~parent ~leaf with
+          | Ok lock -> Ok lock
+          | Error error -> Error (failure error)
+        in
+        let* snapshot =
+          match read_current ~sw ~parent ~parent_stat ~leaf ~lock with
+          | Ok snapshot -> Ok snapshot
+          | Error error -> Error (failure error)
+        in
         Ok snapshot)
 
 let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row =

@@ -8,7 +8,14 @@ type inventory_transaction
 
 type create_outcome =
   | Created of prepared
-  | Reconciled_identical of prepared
+  | Reconciled_identical of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      }
+  | Reconciled_created of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      }
 
 type create_reconciliation_failure =
   | Reconciliation_read_failed of
@@ -30,6 +37,10 @@ type error =
   | Directory_prepare_failed of string
   | Parent_open_failed of string
   | Create_conflict of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      }
+  | Create_unsettled of
       { prepared : prepared
       ; initial_failure : Fs_compat.capability_write_error
       }
@@ -112,7 +123,8 @@ val delete :
   transaction_id:string ->
   immutable_ref ->
   (unit, error) result
-(** Idempotently removes the immutable payload and durably anchors absence. *)
+(** Idempotently removes the immutable payload and durably anchors absence.
+    The caller must continuously hold the matching revival authority lock. *)
 
 val authority_shard_for_keeper :
   keeper_name:string ->
@@ -120,12 +132,26 @@ val authority_shard_for_keeper :
 
 val authority_shard_leaf : authority_shard -> string
 
+val authority_shard_matches_keeper :
+  authority_shard ->
+  keeper_name:string ->
+  bool
+
+val inventory_authority_shards :
+  Workspace.config ->
+  (authority_shard list, error) result
+(** Enumerates only validated authority directories under the payload root.
+    The returned opaque shard may represent a create-before-[Reserved] orphan
+    and therefore does not claim a reversible keeper name. *)
+
 val inventory_transactions :
   Workspace.config ->
   authority_shard ->
   (inventory_transaction list, error) result
 (** Lists only the validated single-component transaction leaves in one
-    caller-locked authority shard. No raw filesystem path is exposed. *)
+    caller-locked authority shard. No raw filesystem path is exposed. The
+    caller must continuously hold the matching revival authority lock across
+    inventory, classification, and deletion. *)
 
 val inventory_transaction_matches :
   inventory_transaction ->
@@ -137,3 +163,5 @@ val delete_inventory_transaction :
   authority_shard:authority_shard ->
   inventory_transaction ->
   (unit, error) result
+(** Deletes one opaque inventory entry. The caller must continuously hold the
+    matching revival authority lock. *)

@@ -22,7 +22,7 @@ type prepared =
   }
 
 type authority_shard =
-  { keeper_name : string
+  { keeper_name : string option
   ; authority_leaf : string
   }
 
@@ -33,7 +33,14 @@ type inventory_transaction =
 
 type create_outcome =
   | Created of prepared
-  | Reconciled_identical of prepared
+  | Reconciled_identical of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      }
+  | Reconciled_created of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      }
 
 type create_reconciliation_failure =
   | Reconciliation_read_failed of
@@ -55,6 +62,10 @@ type error =
   | Directory_prepare_failed of string
   | Parent_open_failed of string
   | Create_conflict of
+      { prepared : prepared
+      ; initial_failure : Fs_compat.capability_write_error
+      }
+  | Create_unsettled of
       { prepared : prepared
       ; initial_failure : Fs_compat.capability_write_error
       }
@@ -536,12 +547,18 @@ let authority_shard_for_keeper ~keeper_name =
   then Error (Invalid_binding "keeper_name must be non-empty")
   else
     Ok
-      { keeper_name
+      { keeper_name = Some keeper_name
       ; authority_leaf = canonical_authority_leaf keeper_name
       }
 ;;
 
 let authority_shard_leaf shard = shard.authority_leaf
+
+let authority_shard_matches_keeper shard ~keeper_name =
+  String.equal
+    shard.authority_leaf
+    (canonical_authority_leaf keeper_name)
+;;
 
 let prepare payload =
   let* () = validate_payload payload in
@@ -679,40 +696,61 @@ let create config prepared =
     with
     | Ok () -> Ok (Created prepared)
     | Error initial_failure ->
-      (match observe_reference ~parent reference with
-       | Ok observed when String.equal observed prepared.bytes ->
-         (match Fs_compat.sync_directory_capability parent with
-          | Ok () -> Ok (Reconciled_identical prepared)
-          | Error failure ->
-            Error
-              (Create_reconciliation_failed
-                 { prepared
-                 ; initial_failure
-                 ; reconciliation_failure =
-                     Reconciliation_parent_sync_failed failure
-                 }))
-       | Ok _ ->
-         Error (Create_conflict { prepared; initial_failure })
-       | Error (Observation_read_failed failure) ->
-         (match failure.error with
-          | Fs_compat.Capability_exact_read.Length_mismatch _ ->
+      (match initial_failure.target_effect with
+       | Fs_compat.Target_created_incomplete
+       | Target_state_unknown
+       | Target_replaced ->
+         Error (Create_unsettled { prepared; initial_failure })
+       | (Target_unchanged | Target_created) as target_effect ->
+         (match observe_reference ~parent reference with
+          | Ok observed when String.equal observed prepared.bytes ->
+            (match Fs_compat.sync_directory_capability parent with
+             | Ok () ->
+               (match target_effect with
+                | Target_unchanged ->
+                  Ok
+                    (Reconciled_identical
+                       { prepared; initial_failure })
+                | Target_created ->
+                  Ok
+                    (Reconciled_created
+                       { prepared; initial_failure })
+                | Target_created_incomplete
+                | Target_state_unknown
+                | Target_replaced ->
+                  Error
+                    (Create_unsettled
+                       { prepared; initial_failure }))
+             | Error failure ->
+               Error
+                 (Create_reconciliation_failed
+                    { prepared
+                    ; initial_failure
+                    ; reconciliation_failure =
+                        Reconciliation_parent_sync_failed failure
+                    }))
+          | Ok _ ->
             Error (Create_conflict { prepared; initial_failure })
-          | _ ->
+          | Error (Observation_read_failed failure) ->
+            (match failure.error with
+             | Fs_compat.Capability_exact_read.Length_mismatch _ ->
+               Error (Create_conflict { prepared; initial_failure })
+             | _ ->
+               Error
+                 (Create_reconciliation_failed
+                    { prepared
+                    ; initial_failure
+                    ; reconciliation_failure =
+                        Reconciliation_read_failed failure
+                    }))
+          | Error (Observation_settlement_failed warnings) ->
             Error
               (Create_reconciliation_failed
                  { prepared
                  ; initial_failure
                  ; reconciliation_failure =
-                     Reconciliation_read_failed failure
-                 }))
-       | Error (Observation_settlement_failed warnings) ->
-         Error
-           (Create_reconciliation_failed
-              { prepared
-              ; initial_failure
-              ; reconciliation_failure =
-                  Reconciliation_read_settlement_failed warnings
-              })))
+                     Reconciliation_read_settlement_failed warnings
+                 })))
 ;;
 
 let validate_reference reference =
@@ -825,22 +863,93 @@ let delete
   |> Result.map_error (fun failure -> Delete_failed failure)
 ;;
 
+let authority_shard_is_valid shard =
+  valid_authority_leaf shard.authority_leaf
+  &&
+  match shard.keeper_name with
+  | None -> true
+  | Some keeper_name ->
+    String.equal
+      shard.authority_leaf
+      (canonical_authority_leaf keeper_name)
+;;
+
+let real_directory path =
+  try
+    match
+      (Eio_guard.run_in_systhread (fun () -> Unix.lstat path)).Unix.st_kind
+    with
+    | Unix.S_DIR -> Ok true
+    | _ -> Error (Inventory_failed ("inventory entry is not a real directory: " ^ path))
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal exception_ backtrace;
+    Error
+      (Inventory_failed
+         ("inventory directory inspection failed: "
+          ^ Printexc.to_string exception_))
+;;
+
+let inventory_authority_shards config =
+  let root = payload_directory config in
+  let* root_exists = real_directory root in
+  if not root_exists
+  then Ok []
+  else
+    match Safe_ops.list_dir_safe root with
+    | Error detail -> Error (Inventory_failed detail)
+    | Ok names ->
+      let rec collect accumulated = function
+        | [] ->
+          Ok
+            (List.sort
+               (fun left right ->
+                  String.compare
+                    left.authority_leaf
+                    right.authority_leaf)
+               accumulated)
+        | name :: rest ->
+          if not (valid_authority_leaf name)
+          then
+            Error
+              (Inventory_failed
+                 ("unexpected non-authority entry in payload root: "
+                  ^ name))
+          else
+            let path = Filename.concat root name in
+            let* is_directory = real_directory path in
+            if not is_directory
+            then
+              Error
+                (Inventory_failed
+                   ("authority shard disappeared during inventory: "
+                    ^ name))
+            else
+              collect
+                ({ keeper_name = None; authority_leaf = name }
+                 :: accumulated)
+                rest
+      in
+      collect [] names
+;;
+
 let inventory_transactions config shard =
-  let canonical =
-    canonical_authority_leaf shard.keeper_name
-  in
-  if
-    not (String.equal canonical shard.authority_leaf)
-    || not (valid_authority_leaf shard.authority_leaf)
+  if not (authority_shard_is_valid shard)
   then Error (Invalid_binding "authority shard is not canonical")
   else
     let directory =
       payload_shard_directory config shard.authority_leaf
     in
-    match Safe_ops.list_dir_safe directory with
-    | Error _ when not (Fs_compat.file_exists directory) -> Ok []
-    | Error detail -> Error (Inventory_failed detail)
-    | Ok names ->
+    let* directory_exists = real_directory directory in
+    if not directory_exists
+    then Ok []
+    else
+      match Safe_ops.list_dir_safe directory with
+      | Error detail -> Error (Inventory_failed detail)
+      | Ok names ->
       let rec collect accumulated = function
         | [] ->
           Ok
@@ -880,11 +989,8 @@ let delete_inventory_transaction
       ~authority_shard
       inventory
   =
-  let canonical =
-    canonical_authority_leaf authority_shard.keeper_name
-  in
   if
-    not (String.equal canonical authority_shard.authority_leaf)
+    not (authority_shard_is_valid authority_shard)
     || not
          (String.equal
             inventory.inventory_authority_leaf
@@ -994,6 +1100,9 @@ let error_to_string = function
     "revival payload parent open failed: " ^ detail
   | Create_conflict { initial_failure; _ } ->
     "revival payload create found conflicting immutable bytes after: "
+    ^ Fs_compat.capability_write_error_to_string initial_failure
+  | Create_unsettled { initial_failure; _ } ->
+    "revival payload create left an unsettled target requiring cleanup: "
     ^ Fs_compat.capability_write_error_to_string initial_failure
   | Create_reconciliation_failed
       { initial_failure; reconciliation_failure; _ } ->

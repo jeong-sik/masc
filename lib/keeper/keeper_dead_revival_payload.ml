@@ -423,9 +423,9 @@ let payload_digest bytes =
   domain_digest payload_digest_domain [ bytes ]
 ;;
 
-let transaction_leaf ~transaction_digest =
+let transaction_leaf_for_id ~transaction_id =
   let* () =
-    if is_lowercase_sha256 transaction_digest
+    if is_lowercase_sha256 transaction_id
     then Ok ()
     else Error (Invalid_binding "transaction digest must be a lowercase SHA-256")
   in
@@ -433,7 +433,7 @@ let transaction_leaf ~transaction_digest =
     (transaction_leaf_prefix
      ^ domain_digest
          transaction_leaf_domain
-         [ transaction_digest ]
+         [ transaction_id ]
      ^ json_leaf_suffix)
 ;;
 
@@ -573,7 +573,7 @@ let authority_shard_matches_keeper shard ~keeper_name =
 let prepare payload =
   let* () = validate_payload payload in
   let* transaction_leaf =
-    transaction_leaf ~transaction_digest:payload.transaction_id
+    transaction_leaf_for_id ~transaction_id:payload.transaction_id
   in
   let bytes = payload_to_bytes payload in
   let reference =
@@ -856,7 +856,7 @@ let validate_reference_binding
   then Error Payload_binding_mismatch
   else
     let* expected_transaction_leaf =
-      transaction_leaf ~transaction_digest:transaction_id
+      transaction_leaf_for_id ~transaction_id
     in
     if
       String.equal
@@ -1052,7 +1052,7 @@ let inventory_transactions config shard =
 ;;
 
 let inventory_transaction_matches inventory ~transaction_id =
-  match transaction_leaf ~transaction_digest:transaction_id with
+  match transaction_leaf_for_id ~transaction_id with
   | Error _ -> false
   | Ok expected ->
     String.equal inventory.inventory_transaction_leaf expected

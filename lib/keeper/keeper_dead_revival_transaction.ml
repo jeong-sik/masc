@@ -256,18 +256,6 @@ let journal_leaf keeper_name =
   ^ ".json"
 ;;
 
-let payload_transaction_leaf transaction_id =
-  "transaction-"
-  ^ sha256
-      (String.concat
-         "\000"
-         [ length_delimited
-             "masc.keeper-dead-revival-payload-transaction-leaf.v1"
-         ; length_delimited transaction_id
-         ])
-  ^ ".json"
-;;
-
 let journal_transaction_id
       ~owner_id
       ~keeper_name
@@ -468,6 +456,10 @@ let journal_of_json = function
           Payload.authority_shard_for_keeper ~keeper_name
           |> Result.map_error Payload.error_to_string
         in
+        let* transaction_leaf =
+          Payload.transaction_leaf_for_id ~transaction_id
+          |> Result.map_error Payload.error_to_string
+        in
         if
           not
             (String.equal
@@ -478,7 +470,7 @@ let journal_of_json = function
           not
             (String.equal
                (Payload.immutable_ref_transaction_leaf payload_ref)
-               (payload_transaction_leaf transaction_id))
+               transaction_leaf)
         then Error "journal payload slot differs from its transaction binding"
         else
           Ok
@@ -2199,23 +2191,18 @@ let recover_one config leaf =
            | Error detail -> Error (detail ^ "; " ^ release_detail))))
 ;;
 
-type protected_payload_slot =
-  { transaction_id : string
-  ; transaction_leaf : string
-  }
-
-let active_transactions_in_shard_locked config shard =
+let protect_shard_from_orphan_cleanup_locked config shard =
   let dir = journal_dir config in
   match Safe_ops.list_dir_safe dir with
-  | Error _ when not (Fs_compat.file_exists dir) -> Ok []
+  | Error _ when not (Fs_compat.file_exists dir) -> Ok false
   | Error detail -> Error detail
   | Ok files ->
     List.fold_left
       (fun result leaf ->
          let ( let* ) = Result.bind in
-         let* transactions = result in
+         let* protect_shard = result in
          if not (Filename.check_suffix leaf ".json")
-         then Ok transactions
+         then Ok protect_shard
          else
            match
              read_journal_leaf
@@ -2226,7 +2213,7 @@ let active_transactions_in_shard_locked config shard =
            with
            | Error error -> Error (error_to_string error)
            | Ok (_, _, None)
-           | Ok (_, _, Some (Cleared_tombstone _)) -> Ok transactions
+           | Ok (_, _, Some (Cleared_tombstone _)) -> Ok protect_shard
            | Ok (_, _, Some (Active_journal journal)) ->
              if
                String.equal
@@ -2236,21 +2223,19 @@ let active_transactions_in_shard_locked config shard =
                let transaction_leaf =
                  Payload.immutable_ref_transaction_leaf journal.payload_ref
                in
-               if
-                 String.equal
-                   transaction_leaf
-                   (payload_transaction_leaf journal.transaction_id)
+               let* expected_transaction_leaf =
+                 Payload.transaction_leaf_for_id
+                   ~transaction_id:journal.transaction_id
+                 |> Result.map_error Payload.error_to_string
+               in
+               if String.equal transaction_leaf expected_transaction_leaf
                then
-                 Ok
-                   ({ transaction_id = journal.transaction_id
-                    ; transaction_leaf
-                    }
-                    :: transactions)
+                 Ok true
                else
                  Error
                    "active journal payload slot differs from transaction binding"
-             else Ok transactions)
-      (Ok [])
+             else Ok protect_shard)
+      (Ok false)
       files
 ;;
 
@@ -2271,10 +2256,10 @@ let clean_orphan_shard config shard =
               Payload.inventory_transactions config shard
               |> Result.map_error Payload.error_to_string
             in
-            let* referenced =
-              active_transactions_in_shard_locked config shard
+            let* protect_shard =
+              protect_shard_from_orphan_cleanup_locked config shard
             in
-            if referenced <> []
+            if protect_shard
             then Ok 0
             else
               List.fold_left

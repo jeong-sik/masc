@@ -86,6 +86,10 @@ val immutable_ref_transaction_leaf : immutable_ref -> string
 val immutable_ref_sha256 : immutable_ref -> string
 val immutable_ref_byte_count : immutable_ref -> int64
 
+val transaction_leaf_for_id :
+  transaction_id:string ->
+  (string, error) result
+
 val prepare : payload -> (prepared, error) result
 val prepared_payload : prepared -> payload
 val prepared_ref : prepared -> immutable_ref

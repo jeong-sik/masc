@@ -132,8 +132,8 @@ let error_to_string error =
 ;;
 
 let validate_request request =
-  if request.owner_nonce < 0
-  then Error "owner generation must not be negative"
+  if request.owner_nonce <= 0
+  then Error "owner generation must be positive"
   else if String.equal (String.trim request.operator_operation_id) ""
   then Error "operator operation ID must not be empty"
   else Ok ()
@@ -400,7 +400,7 @@ let resume_admitted permit config ~keeper_name request =
         | exn ->
           (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
           ignore (Keeper_lifecycle_reservation.release token : _);
-          raise exn))
+          raise exn)
 ;;
 
 let resume config ~keeper_name request =

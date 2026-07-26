@@ -19,6 +19,7 @@ type rollback_error =
   | Rollback_meta_write_failed of string
   | Rollback_registry_occupied of Keeper_registry.registry_entry
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
+  | Rollback_registry_admission_denied
   | Rollback_payload_delete_failed of Keeper_dead_revival_payload.error
   | Rollback_journal_clear_failed of string
   | Rollback_runtime_assignment_failed of string
@@ -141,13 +142,6 @@ module For_testing : sig
     candidate:Keeper_meta_contract.keeper_meta ->
     string
 
-  val reserve_journal :
-    config:Workspace.config ->
-    owner_id:string ->
-    original:Keeper_meta_contract.keeper_meta ->
-    candidate:Keeper_meta_contract.keeper_meta ->
-    (string, error) result
-
   val current_journal_row :
     config:Workspace.config ->
     keeper_name:string ->
@@ -169,15 +163,4 @@ module For_testing : sig
     , error )
     result
 
-  val replace_with_reserved_journal :
-    config:Workspace.config ->
-    owner_id:string ->
-    original:Keeper_meta_contract.keeper_meta ->
-    candidate:Keeper_meta_contract.keeper_meta ->
-    (unit, error) result
-
-  val advance_to_launch_committed :
-    config:Workspace.config ->
-    keeper_name:string ->
-    (unit, error) result
 end

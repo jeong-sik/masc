@@ -1329,7 +1329,7 @@ let start_keepalive
   match lifecycle_token with
   | Some token ->
     (match
-       Keeper_lifecycle_admission.Durable_transaction
+       Keeper_lifecycle_admission_durable_transaction
        .with_revival_launch_admission_under_lock
          ctx.config
          ~keeper_name:meta.name

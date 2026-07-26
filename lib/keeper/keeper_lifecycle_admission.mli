@@ -46,7 +46,7 @@ val state_to_wire : state -> string
 val autonomous_denial_to_wire : autonomous_denial -> string
 
 module Durable_transaction : sig
-  type stage =
+  type stage = Keeper_lifecycle_admission_durable_transaction.stage =
     | Reserved
     | Durable_committed
     | Launch_committed
@@ -57,13 +57,14 @@ module Durable_transaction : sig
     | Rollback_cleanup_pending_from_durable_committed
     | Cleared
 
-  type evidence =
+  type evidence = Keeper_lifecycle_admission_durable_transaction.evidence =
     { keeper_name : string
     ; transaction_id : string
     ; stage : stage
     }
 
   type authority_failure =
+    Keeper_lifecycle_admission_durable_transaction.authority_failure =
     | Authority_path_unavailable
     | Filesystem_capability_unavailable
     | Entropy_unavailable
@@ -74,6 +75,7 @@ module Durable_transaction : sig
     | Invalid_current_schema
 
   type blocked_reason =
+    Keeper_lifecycle_admission_durable_transaction.blocked_reason =
     | Authority_unreadable of
         { keeper_name : string
         ; failure : authority_failure
@@ -88,23 +90,25 @@ module Durable_transaction : sig
         ; observed : evidence option
         }
 
-  type permit
+  type permit = Keeper_lifecycle_admission_durable_transaction.permit
 
-  type decision =
+  type decision = Keeper_lifecycle_admission_durable_transaction.decision =
     | Admitted of evidence option
     | Blocked of blocked_reason
 
-  type projection =
+  type projection = Keeper_lifecycle_admission_durable_transaction.projection =
     { keeper_name : string
     ; decision : decision
     }
 
   type 'a admission_result =
+    'a Keeper_lifecycle_admission_durable_transaction.admission_result =
     | Admission_completed of 'a
     | Admission_completed_with_attention of 'a * authority_failure
     | Admission_blocked of blocked_reason
 
   type 'a permit_lease_result =
+    'a Keeper_lifecycle_admission_durable_transaction.permit_lease_result =
     | Permit_lease_completed of 'a
     | Permit_lease_denied
 
@@ -125,25 +129,6 @@ module Durable_transaction : sig
     'a admission_result
   (** The point read and callback execute under the same per-Keeper durable
       authority lock used by revival and recovery. *)
-
-  val with_recovery_lifecycle_admission :
-    Workspace.config ->
-    keeper_name:string ->
-    transaction_id:string ->
-    (permit -> 'a) ->
-    'a admission_result
-  (** Acquire the ordinary per-Keeper durable authority lock, then admit only
-      the exact current-schema journal transaction discovered by recovery. *)
-
-  val with_revival_launch_admission_under_lock :
-    Workspace.config ->
-    keeper_name:string ->
-    owner_id:string ->
-    (permit -> 'a) ->
-    ('a, blocked_reason) result
-  (** Admit only the exact active [Durable_committed] row owned by the supplied
-      lifecycle reservation. The caller already holds the durable authority
-      lock continuously through launch. *)
 
   val inspect : Workspace.config -> keeper_name:string -> projection
   (** Backend-safe projection containing no journal payload or credential data. *)

@@ -1176,6 +1176,24 @@ let current_revival_journal_path config =
       (List.length rows)
 ;;
 
+let revival_journal_path config keeper_name =
+  let sha256 value =
+    Digestif.SHA256.(to_hex (digest_string value))
+  in
+  let length_delimited value =
+    Printf.sprintf "%d:%s" (String.length value) value
+  in
+  Filename.concat
+    (Filename.concat
+       (Workspace.masc_root_dir config)
+       "keeper-lifecycle-transactions")
+    ("revival-"
+     ^ sha256
+         ("keeper-dead-revival-journal-leaf-v1\000"
+          ^ length_delimited keeper_name)
+     ^ ".json")
+;;
+
 let write_revival_fixture path contents =
   let channel = open_out_bin path in
   Fun.protect
@@ -1231,6 +1249,74 @@ let create_unjournaled_revival_payload
      Alcotest.fail
        (Revival_payload.error_to_string error));
   observed
+;;
+
+let reserve_revival_journal_fixture ~config ~owner_id ~original ~candidate =
+  let observed =
+    create_unjournaled_revival_payload
+      ~config
+      ~owner_id
+      ~original
+      ~candidate
+  in
+  write_revival_fixture
+    (revival_journal_path config original.name)
+    observed.raw;
+  Ok observed.raw
+;;
+
+let replace_with_reserved_revival_journal_fixture
+      ~config
+      ~owner_id
+      ~original
+      ~candidate
+  =
+  let observed =
+    create_unjournaled_revival_payload
+      ~config
+      ~owner_id
+      ~original
+      ~candidate
+  in
+  write_revival_fixture
+    (current_revival_journal_path config)
+    observed.raw;
+  Ok ()
+;;
+
+let advance_revival_journal_to_launch_committed_fixture ~config ~keeper_name =
+  match
+    Keeper_dead_revival_transaction.For_testing.current_journal_row
+      ~config
+      ~keeper_name
+  with
+  | Error error -> Error error
+  | Ok None ->
+    Error
+      (Keeper_dead_revival_transaction.Journal_ownership_changed
+         "test launch source is missing")
+  | Ok (Some raw) ->
+    let stage =
+      Keeper_lifecycle_admission.Durable_transaction.stage_to_wire
+        Keeper_lifecycle_admission.Durable_transaction.Launch_committed
+    in
+    let updated =
+      match Yojson.Safe.from_string raw with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+                if String.equal key "stage"
+                then key, `String stage
+                else key, value)
+             fields)
+        |> Yojson.Safe.to_string
+      | _ -> Alcotest.fail "active revival journal is not an object"
+    in
+    write_revival_fixture
+      (current_revival_journal_path config)
+      updated;
+    Ok ()
 ;;
 
 let test_dead_revival_final_clear_failure_preserves_commit () =
@@ -1683,7 +1769,7 @@ let test_dead_revival_recovery_forwards_concurrent_launch_commit () =
     }
   in
   (match
-     Keeper_dead_revival_transaction.For_testing.reserve_journal
+     reserve_revival_journal_fixture
        ~config
        ~owner_id:"recovery-stage-race-owner"
        ~original
@@ -1699,7 +1785,7 @@ let test_dead_revival_recovery_forwards_concurrent_launch_commit () =
     Keeper_dead_revival_transaction.For_testing.with_recovery_claim_hook
       ~before_recovery_claim:(fun () ->
         match
-          Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
+          advance_revival_journal_to_launch_committed_fixture
             ~config
             ~keeper_name
         with
@@ -1831,7 +1917,7 @@ let test_dead_revival_launch_payload_damage_forward_cleans damage () =
     }
   in
   (match
-     Keeper_dead_revival_transaction.For_testing.reserve_journal
+     reserve_revival_journal_fixture
        ~config
        ~owner_id:"launch-payload-damage-owner"
        ~original
@@ -1845,7 +1931,7 @@ let test_dead_revival_launch_payload_damage_forward_cleans damage () =
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   (match
-     Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
+     advance_revival_journal_to_launch_committed_fixture
        ~config
        ~keeper_name
    with
@@ -1907,7 +1993,7 @@ let test_dead_revival_swapped_payload_ref_preserves_evidence () =
     }
   in
   (match
-     Keeper_dead_revival_transaction.For_testing.reserve_journal
+     reserve_revival_journal_fixture
        ~config
        ~owner_id:"swapped-ref-first-owner"
        ~original
@@ -2046,7 +2132,7 @@ let test_dead_revival_cleanup_pending_recovery
     }
   in
   (match
-     Keeper_dead_revival_transaction.For_testing.reserve_journal
+     reserve_revival_journal_fixture
        ~config
        ~owner_id:"cleanup-boundary-owner"
        ~original
@@ -2062,7 +2148,7 @@ let test_dead_revival_cleanup_pending_recovery
       | Ok () -> ()
       | Error detail -> Alcotest.fail detail);
      (match
-        Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
+        advance_revival_journal_to_launch_committed_fixture
           ~config
           ~keeper_name
       with
@@ -2342,7 +2428,7 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
           Keeper_dead_revival_transaction.For_testing.with_boundary_hooks
             ~after_journal_write:(fun () ->
               (match
-                 Keeper_dead_revival_transaction.For_testing.replace_with_reserved_journal
+                 replace_with_reserved_revival_journal_fixture
                    ~config
                    ~owner_id:"competing-revival-owner"
                    ~original
@@ -2457,7 +2543,7 @@ let test_dead_revival_existing_reserved_journal_blocks () =
       in
       let seeded_row =
         match
-          Keeper_dead_revival_transaction.For_testing.reserve_journal
+          reserve_revival_journal_fixture
             ~config
             ~owner_id:"seeded-unresolved-owner"
             ~original
@@ -2585,7 +2671,7 @@ let test_keeper_lifecycle_transaction_admission_current_schema () =
   in
   let reserved =
     match
-      Keeper_dead_revival_transaction.For_testing.reserve_journal
+      reserve_revival_journal_fixture
         ~config
         ~owner_id:"durable-start-admission-owner"
         ~original
@@ -2712,7 +2798,7 @@ let test_keeper_lifecycle_transaction_admission_waits_for_cleanup () =
   in
   let reserved_row =
     match
-      Keeper_dead_revival_transaction.For_testing.reserve_journal
+      reserve_revival_journal_fixture
         ~config
         ~owner_id:"durable-start-admission-cleanup-owner"
         ~original
@@ -2730,7 +2816,7 @@ let test_keeper_lifecycle_transaction_admission_waits_for_cleanup () =
     |> Yojson.Safe.Util.to_string
   in
   (match
-     Durable_admission.with_recovery_lifecycle_admission
+     Keeper_lifecycle_admission_durable_transaction.with_recovery_lifecycle_admission
        config
        ~keeper_name
        ~transaction_id
@@ -2820,7 +2906,7 @@ let test_keeper_lifecycle_transaction_admission_waits_for_cleanup () =
      Alcotest.fail
        (Durable_admission.blocked_reason_to_wire reason));
   (match
-     Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
+     advance_revival_journal_to_launch_committed_fixture
        ~config
        ~keeper_name
    with

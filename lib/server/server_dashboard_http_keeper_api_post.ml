@@ -1097,6 +1097,7 @@ let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
   | Invalid_request _ -> `Bad_request
   | Durable_meta_missing -> `Not_found
   | Reservation_conflict _
+  | Durable_lifecycle_admission_blocked _
   | Receipt_conflict _
   | Durable_owner_nonce_changed _
   | Durable_owner_identity_changed

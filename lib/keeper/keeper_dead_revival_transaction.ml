@@ -1154,36 +1154,6 @@ module For_testing = struct
     | Error failure -> invalid_arg (Payload.error_to_string failure)
   ;;
 
-  let create_and_verify_payload config journal prepared =
-    match Payload.create config prepared with
-    | Error failure ->
-      Error
-        (Payload_operation_failed
-           { operation = Payload_create; failure })
-    | Ok (Payload.Created _ | Payload.Reconciled_created _) ->
-      (match verify_payload config journal with
-       | Ok _ -> Ok ()
-       | Error failure ->
-         Error
-           (Payload_operation_failed
-              { operation = Payload_verify; failure }))
-  ;;
-
-  let reserve_journal ~config ~owner_id ~original ~candidate =
-    match make_prepared_journal ~owner_id ~original ~candidate with
-    | Error failure ->
-      Error
-        (Payload_operation_failed
-           { operation = Payload_prepare; failure })
-    | Ok (journal, prepared) ->
-      (match create_and_verify_payload config journal prepared with
-       | Error _ as error -> error
-       | Ok () ->
-         (match save_journal config journal with
-          | Ok () -> Ok (journal_to_bytes journal)
-          | Error error -> Error error))
-  ;;
-
   let current_journal_row ~config ~keeper_name =
     match
       read_current_journal
@@ -1231,59 +1201,6 @@ module For_testing = struct
     | Ok (_, _, Some (Cleared_tombstone _)) -> Ok `Cleared
   ;;
 
-  let replace_with_reserved_journal
-        ~config
-        ~owner_id
-        ~original
-        ~candidate
-    =
-    match make_prepared_journal ~owner_id ~original ~candidate with
-    | Error failure ->
-      Error
-        (Payload_operation_failed
-           { operation = Payload_prepare; failure })
-    | Ok (replacement, prepared) ->
-    (match
-      read_current_journal
-        ~invalid:(fun detail -> Journal_ownership_changed detail)
-        config
-        original.name
-    with
-    | Error error -> Error error
-    | Ok (_, _, None) ->
-      Error (Journal_ownership_changed "test replacement source is missing")
-    | Ok (parent, snapshot, Some _) ->
-      (match create_and_verify_payload config replacement prepared with
-       | Error _ as error -> error
-       | Ok () ->
-         publish_row
-           ~conflict:(fun detail -> Journal_ownership_changed detail)
-           ~parent
-           ~snapshot
-           ~row:(Active_journal replacement)
-           ()))
-  ;;
-
-  let advance_to_launch_committed ~config ~keeper_name =
-    match
-      read_current_journal
-        ~invalid:(fun detail -> Journal_ownership_changed detail)
-        config
-        keeper_name
-    with
-    | Error error -> Error error
-    | Ok (_, _, None) ->
-      Error (Journal_ownership_changed "test launch source is missing")
-    | Ok (_, _, Some (Cleared_tombstone _)) ->
-      Error (Journal_ownership_changed "test launch source is already cleared")
-    | Ok (parent, snapshot, Some (Active_journal current)) ->
-      publish_row
-        ~conflict:(fun detail -> Journal_ownership_changed detail)
-        ~parent
-        ~snapshot
-        ~row:(Active_journal { current with stage = Launch_committed })
-        ()
-  ;;
 end
 ;;
 
@@ -2801,7 +2718,7 @@ let recover_one config leaf =
   | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
   | Ok (_, _, Some (Active_journal discovered)) ->
     (match
-       Keeper_lifecycle_admission.Durable_transaction
+       Keeper_lifecycle_admission_durable_transaction
        .with_recovery_lifecycle_admission
          config
          ~keeper_name:discovered.keeper_name

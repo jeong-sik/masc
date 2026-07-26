@@ -10,6 +10,7 @@ type review_request =
   ; goal_version : int
   ; operation_id : string
   ; goal_json : Yojson.Safe.t
+  ; goal_updated_at : string
   ; completion_claim : string
   ; agent_name : string
   ; linked_tasks_json : Yojson.Safe.t
@@ -56,10 +57,11 @@ val parse_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
 val approval_authorizes :
   approval ->
+  goal_json:Yojson.Safe.t ->
+  reviewed_goal_updated_at:string ->
   goal_id:string ->
-  goal_version:int ->
+  expected_version:int ->
   operation_id:string ->
-  completion_digest:string ->
   bool
 
 val approval_metadata : approval -> approval_metadata

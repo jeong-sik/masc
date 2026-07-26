@@ -179,7 +179,6 @@ val complete_goal :
   expected:goal ->
   expected_state_version:int ->
   operation_id:string ->
-  completion_digest:string ->
   approval:Goal_completion_reviewer.approval ->
   (goal, conditional_update_error) result
 (** Consumes an exact semantic-review approval and persists [Completed] in one

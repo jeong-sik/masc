@@ -567,7 +567,6 @@ let complete_goal
       ~(expected : goal)
       ~expected_state_version
       ~operation_id
-      ~completion_digest
       ~approval
   =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
@@ -582,10 +581,11 @@ let complete_goal
         not
           (Goal_completion_reviewer.approval_authorizes
              approval
+             ~goal_json:(goal_to_yojson current)
+             ~reviewed_goal_updated_at:current.updated_at
              ~goal_id:current.id
-             ~goal_version:state.version
-             ~operation_id
-             ~completion_digest)
+             ~expected_version:state.version
+             ~operation_id)
       then Error Goal_approval_invalid
       else
         let metadata =

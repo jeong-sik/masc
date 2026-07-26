@@ -312,6 +312,8 @@ let conditional_goal_error_result
     (Goal_store.conditional_update_error_to_string error)
 ;;
 
+let goal_completion_operation_counter = Atomic.make 0
+
 let handle_goal_completion_request
       ~tool_name
       ~start_time
@@ -347,15 +349,21 @@ let handle_goal_completion_request
          ~code:Precondition_failed
          (msg ^ "; Goal remains nonterminal"))
   | Ok (linked_tasks, child_goals) ->
+    let operation_nonce =
+      Atomic.fetch_and_add goal_completion_operation_counter 1
+    in
+    let random_nonce = Random_id.hex ~bytes:32 in
     let operation_id =
       Digestif.SHA256.(
         digest_string
           (Printf.sprintf
-             "%s\000%d\000%s\000%.17g"
+             "%s\000%d\000%s\000%.17g\000%d\000%s"
              goal.id
              goal_version
              ctx.agent_name
-             (Time_compat.now ()))
+             (Time_compat.now ())
+             operation_nonce
+             random_nonce)
         |> to_hex)
     in
     let request : Goal_completion_reviewer.review_request =
@@ -363,6 +371,7 @@ let handle_goal_completion_request
       ; goal_version
       ; operation_id
       ; goal_json = Goal_store.goal_to_yojson goal
+      ; goal_updated_at = goal.updated_at
       ; completion_claim
       ; agent_name = ctx.agent_name
       ; linked_tasks_json =
@@ -379,7 +388,7 @@ let handle_goal_completion_request
      with
      | Some Goal_completion_reviewer.Approve,
        Goal_completion_reviewer.Structured_tool,
-       Some completion_digest,
+       Some _,
        Some approval ->
        (match
           Goal_store.complete_goal
@@ -387,7 +396,6 @@ let handle_goal_completion_request
             ~expected:goal
             ~expected_state_version:goal_version
             ~operation_id
-            ~completion_digest
             ~approval
         with
         | Error error ->

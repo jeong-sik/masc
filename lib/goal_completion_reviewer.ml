@@ -8,6 +8,7 @@ type review_request =
   ; goal_version : int
   ; operation_id : string
   ; goal_json : Yojson.Safe.t
+  ; goal_updated_at : string
   ; completion_claim : string
   ; agent_name : string
   ; linked_tasks_json : Yojson.Safe.t
@@ -31,11 +32,13 @@ type gate =
 
 type approval =
   { goal_id : string
-  ; goal_version : int
+  ; expected_version : int
   ; operation_id : string
   ; completion_digest : string
   ; evaluator_runtime : string
   ; reviewed_at : string
+  ; review_prompt_sha256 : string
+  ; review_evidence_sha256 : string
   ; completion_claim : string
   ; linked_task_ids : string list
   }
@@ -57,26 +60,94 @@ type review_result =
   ; fallback_reason : string option
   }
 
+let completion_digest
+      ~goal_json
+      ~reviewed_goal_updated_at
+      ~goal_id
+      ~expected_version
+      ~operation_id
+      ~evaluator_runtime
+      ~reviewed_at
+      ~review_prompt_sha256
+      ~review_evidence_sha256
+      ~completion_claim
+      ~linked_task_ids
+  =
+  `Assoc
+    [ "goal_id", `String goal_id
+    ; "expected_version", `Int expected_version
+    ; "operation_id", `String operation_id
+    ; "current_goal_snapshot", goal_json
+    ; "target_phase", `String "completed"
+    ; ( "proposed_last_review_note"
+      , `String "Configured LLM approved Goal completion" )
+    ; "proposed_last_review_at", `String reviewed_at
+    ; "proposed_completion_review_failure", `Null
+    ; ( "proposed_completion_receipt"
+      , `Assoc
+          [ "evaluator_runtime", `String evaluator_runtime
+          ; "reviewed_at", `String reviewed_at
+          ; "reviewed_goal_updated_at", `String reviewed_goal_updated_at
+          ; "review_prompt_sha256", `String review_prompt_sha256
+          ; "completion_claim", `String completion_claim
+          ; ( "linked_task_ids"
+            , `List (List.map (fun task_id -> `String task_id) linked_task_ids) )
+          ] )
+    ; "review_evidence_sha256", `String review_evidence_sha256
+    ]
+  |> Yojson.Safe.to_string
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
 let approval_authorizes
       approval
+      ~goal_json
+      ~reviewed_goal_updated_at
       ~goal_id
-      ~goal_version
+      ~expected_version
       ~operation_id
-      ~completion_digest
   =
+  let recomputed_digest =
+    completion_digest
+      ~goal_json
+      ~reviewed_goal_updated_at
+      ~goal_id
+      ~expected_version
+      ~operation_id
+      ~evaluator_runtime:approval.evaluator_runtime
+      ~reviewed_at:approval.reviewed_at
+      ~review_prompt_sha256:approval.review_prompt_sha256
+      ~review_evidence_sha256:approval.review_evidence_sha256
+      ~completion_claim:approval.completion_claim
+      ~linked_task_ids:approval.linked_task_ids
+  in
   String.equal approval.goal_id goal_id
-  && approval.goal_version = goal_version
+  && approval.expected_version = expected_version
   && String.equal approval.operation_id operation_id
-  && String.equal approval.completion_digest completion_digest
+  && String.equal approval.completion_digest recomputed_digest
 ;;
 
 let approval_metadata approval =
   { evaluator_runtime = approval.evaluator_runtime
   ; reviewed_at = approval.reviewed_at
-  ; review_prompt_sha256 = approval.completion_digest
+  ; review_prompt_sha256 = approval.review_prompt_sha256
   ; completion_claim = approval.completion_claim
   ; linked_task_ids = approval.linked_task_ids
   }
+;;
+
+let review_evidence_sha256 request =
+  `Assoc
+    [ "goal_json", request.goal_json
+    ; "completion_claim", `String request.completion_claim
+    ; "agent_name", `String request.agent_name
+    ; "linked_tasks_json", request.linked_tasks_json
+    ; "child_goals_json", request.child_goals_json
+    ]
+  |> Yojson.Safe.to_string
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
 ;;
 
 let report_tool_schema : Masc_domain.tool_schema =
@@ -275,13 +346,31 @@ let review request =
            match verdict with
            | Reject _ -> None
            | Approve ->
+             let reviewed_at = Masc_domain.now_iso () in
+             let review_evidence_sha256 = review_evidence_sha256 request in
+             let completion_digest =
+               completion_digest
+                 ~goal_json:request.goal_json
+                 ~reviewed_goal_updated_at:request.goal_updated_at
+                 ~goal_id:request.goal_id
+                 ~expected_version:request.goal_version
+                 ~operation_id:request.operation_id
+                 ~evaluator_runtime
+                 ~reviewed_at
+                 ~review_prompt_sha256
+                 ~review_evidence_sha256
+                 ~completion_claim:request.completion_claim
+                 ~linked_task_ids:request.linked_task_ids
+             in
              Some
                { goal_id = request.goal_id
-               ; goal_version = request.goal_version
+               ; expected_version = request.goal_version
                ; operation_id = request.operation_id
-               ; completion_digest = review_prompt_sha256
+               ; completion_digest
                ; evaluator_runtime
-               ; reviewed_at = Masc_domain.now_iso ()
+               ; reviewed_at
+               ; review_prompt_sha256
+               ; review_evidence_sha256
                ; completion_claim = request.completion_claim
                ; linked_task_ids = request.linked_task_ids
                }

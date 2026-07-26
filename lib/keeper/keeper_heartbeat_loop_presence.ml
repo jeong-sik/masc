@@ -57,12 +57,37 @@ let repair_identity_drift_for_keepalive ?lifecycle_token ~(ctx : _ context) (met
       expected_agent_name;
     None)
   else (
-    match
-      Keeper_identity_transition.replace_or_recover_exact
-        ~config:ctx.config
-        meta
-        ~expected_agent_name
-    with
+    let replacement =
+      match
+        Keeper_lifecycle_admission.Durable_transaction
+        .with_durable_lifecycle_admission
+          ctx.config
+          ~keeper_name:meta.name
+          (fun permit ->
+             Keeper_identity_transition.replace_or_recover_exact
+               permit
+               ~config:ctx.config
+               meta
+               ~expected_agent_name)
+      with
+      | Admission_completed result -> result
+      | Admission_completed_with_attention (result, failure) ->
+        Log.Keeper.error
+          "keepalive identity repair durable admission release requires attention \
+           keeper=%s failure=%s"
+          meta.name
+          (Keeper_lifecycle_admission.Durable_transaction
+           .authority_failure_to_wire
+             failure);
+        result
+      | Admission_blocked reason ->
+        Error
+          ("keepalive identity repair blocked by lifecycle authority: "
+           ^ Keeper_lifecycle_admission.Durable_transaction
+             .blocked_reason_to_wire
+               reason)
+    in
+    match replacement with
     | Error err ->
       Log.Keeper.error
         "keepalive identity repair failed for %s: %s"

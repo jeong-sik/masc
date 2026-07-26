@@ -120,6 +120,20 @@ val recover_meta_exact :
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
 
+val replace_meta_under_admission :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
+  Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
+val recover_meta_exact_under_admission :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
+  Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed

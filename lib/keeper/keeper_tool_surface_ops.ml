@@ -154,8 +154,10 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
   if String.equal expected_agent_name meta.agent_name then
     Ok (meta, None)
   else
+    let reseed permit =
     let* updated_meta =
       Keeper_identity_transition.replace_or_recover_exact
+        permit
         ~config
         meta
         ~expected_agent_name
@@ -176,6 +178,30 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
                ("previous_trace_id", `String previous_trace_id);
                ("new_trace_id", `String new_trace_id_raw);
              ]) )
+    in
+    match
+      Keeper_lifecycle_admission.Durable_transaction
+      .with_durable_lifecycle_admission
+        config
+        ~keeper_name:meta.name
+        reseed
+    with
+    | Admission_completed result -> result
+    | Admission_completed_with_attention (result, failure) ->
+      Log.Keeper.error
+        "keeper identity reseed durable admission release requires attention \
+         keeper=%s failure=%s"
+        meta.name
+        (Keeper_lifecycle_admission.Durable_transaction
+         .authority_failure_to_wire
+           failure);
+      result
+    | Admission_blocked reason ->
+      Error
+        ("keeper identity reseed blocked by lifecycle authority: "
+         ^ Keeper_lifecycle_admission.Durable_transaction
+           .blocked_reason_to_wire
+             reason)
 
 let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
   maybe_reseed_keeper_identity_config ~config:ctx.config meta

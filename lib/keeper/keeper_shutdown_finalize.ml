@@ -864,11 +864,12 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
                   ^ Keeper_lifecycle_reservation.snapshot_to_string owner
                 | Keeper_lifecycle_reservation.Released -> assert false
               in
-              (match result with
-               | Ok finalized ->
-                 Error (Completion_failed (finalized, detail))
-               | Error _ ->
-                 Error (Finalization_draining (operation, detail)))
+              Log.Keeper.error
+                "shutdown finalization lifecycle reservation release requires \
+                 attention keeper=%s detail=%s"
+                operation.keeper_name
+                detail;
+              result
             | None -> assert false)
        in
        match
@@ -882,14 +883,24 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
          deliver_finalized_completion ~config finalized
        | Admission_completed (Error _ as error) -> error
        | Admission_completed_with_attention (Ok finalized, failure) ->
-         Error
-           (Completion_failed
-              ( finalized
-              , "shutdown finalization durable admission release failed: "
-                ^ Keeper_lifecycle_admission.Durable_transaction
-                  .authority_failure_to_wire
-                    failure ))
-       | Admission_completed_with_attention (Error _ as error, _) -> error
+         Log.Keeper.error
+           "shutdown finalization durable admission release requires attention \
+            keeper=%s failure=%s"
+           operation.keeper_name
+           (Keeper_lifecycle_admission.Durable_transaction
+            .authority_failure_to_wire
+              failure);
+         deliver_finalized_completion ~config finalized
+       | Admission_completed_with_attention
+           ((Error _ as error), failure) ->
+         Log.Keeper.error
+           "shutdown finalization durable admission release requires attention \
+            keeper=%s failure=%s"
+           operation.keeper_name
+           (Keeper_lifecycle_admission.Durable_transaction
+            .authority_failure_to_wire
+              failure);
+         error
        | Admission_blocked reason ->
          Error
            (Finalization_draining

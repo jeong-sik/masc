@@ -6,10 +6,19 @@ type publication =
 let ( let* ) result fn = match result with Ok value -> fn value | Error error -> Error error
 
 let replace_or_recover_exact
+      (permit : Keeper_lifecycle_admission.Durable_transaction.permit)
       ~(config : Workspace.config)
       (meta : Keeper_meta_contract.keeper_meta)
       ~expected_agent_name
   =
+  if
+    not
+      (Keeper_lifecycle_admission.Durable_transaction.permit_matches
+         permit
+         ~base_path:config.Workspace.base_path
+         meta.name)
+  then Error "keeper identity transition lost durable lifecycle admission"
+  else
   let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let* source =
     Keeper_lifecycle_nonce.identity
@@ -85,9 +94,18 @@ let replace_or_recover_exact
   in
   let* () =
     match publication with
-    | Allocated witness -> Keeper_meta_store.replace_meta witness config updated
+    | Allocated witness ->
+      Keeper_meta_store.replace_meta_under_admission
+        permit
+        witness
+        config
+        updated
     | Recovered witness ->
-      Keeper_meta_store.recover_meta_exact witness config updated
+      Keeper_meta_store.recover_meta_exact_under_admission
+        permit
+        witness
+        config
+        updated
   in
   Ok updated
 ;;

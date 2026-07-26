@@ -51,9 +51,17 @@ let test_generation_is_required_and_positive () =
 let test_repairs_share_typed_transition () =
   let heartbeat = read_file "lib/keeper/keeper_heartbeat_loop_presence.ml" in
   let tools = read_file "lib/keeper/keeper_tool_surface_ops.ml" in
+  let transition = read_file "lib/keeper/keeper_identity_transition.ml" in
+  let meta_store = read_file "lib/keeper/keeper_meta_store.ml" in
   check_contains heartbeat
     "Keeper_identity_transition.replace_or_recover_exact";
   check_contains tools "Keeper_identity_transition.replace_or_recover_exact";
+  check_contains heartbeat "with_durable_lifecycle_admission";
+  check_contains tools "with_durable_lifecycle_admission";
+  check_contains transition "permit_matches";
+  check_contains transition "replace_meta_under_admission";
+  check_contains transition "recover_meta_exact_under_admission";
+  check_contains meta_store "identity_write_under_admission";
   check_not_contains heartbeat "nonce + 1";
   check_not_contains tools "nonce + 1"
 ;;

@@ -517,12 +517,14 @@ let with_ordinary_write_admission config ~keeper_name fn =
       fn
   with
   | Admission_completed result -> result
-  | Admission_completed_with_attention (Error _ as error, _) -> error
-  | Admission_completed_with_attention (Ok _, failure) ->
-    Error
-      (durable_admission_attention
-         "Keeper metadata admission release failed"
-         failure)
+  | Admission_completed_with_attention (result, failure) ->
+    Log.Keeper.error
+      "Keeper metadata durable admission lock release requires attention \
+       keeper=%s failure=%s"
+      keeper_name
+      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+         failure);
+    result
   | Admission_blocked reason ->
     Error
       (durable_admission_error
@@ -565,6 +567,24 @@ let recover_meta_exact ?lifecycle_token witness config m =
     config
     m
   |> Result.map_error write_meta_error_to_string
+;;
+
+let identity_write_under_admission permit write witness config m =
+  if
+    Keeper_lifecycle_admission.Durable_transaction.permit_matches
+      permit
+      ~base_path:config.Workspace.base_path
+      m.Keeper_meta_contract.name
+  then write witness config m
+  else Error "Keeper identity write lost durable lifecycle admission"
+;;
+
+let replace_meta_under_admission permit witness config m =
+  identity_write_under_admission permit replace_meta witness config m
+;;
+
+let recover_meta_exact_under_admission permit witness config m =
+  identity_write_under_admission permit recover_meta_exact witness config m
 ;;
 
 let is_version_conflict_error msg =

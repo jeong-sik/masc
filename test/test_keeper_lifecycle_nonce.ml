@@ -35,7 +35,7 @@ let target_nonce witness =
 let target_identity witness = Nonce.witness_target witness
 
 let with_admission ~base_path ~keeper_id fn =
-  let config = Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   match
     Masc.Keeper_lifecycle_admission.Durable_transaction
     .with_durable_lifecycle_admission
@@ -386,7 +386,7 @@ let test_reentrant_lease_drains_before_admission_release () =
   let module Admission =
     Masc.Keeper_lifecycle_admission.Durable_transaction
   in
-  let config = Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   Eio.Switch.run @@ fun sw ->
   let child_entered, resolve_child_entered = Eio.Promise.create () in
   let outer_body_returning, resolve_outer_body_returning =

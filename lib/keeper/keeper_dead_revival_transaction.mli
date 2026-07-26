@@ -20,7 +20,14 @@ type rollback_error =
   | Rollback_registry_occupied of Keeper_registry.registry_entry
   | Rollback_registry_invalid of Keeper_registry.registry_entry_validation_error
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
+  | Rollback_payload_delete_failed of Keeper_dead_revival_payload.error
   | Rollback_journal_clear_failed of string
+
+type payload_operation =
+  | Payload_prepare
+  | Payload_create
+  | Payload_verify
+  | Payload_delete
 
 type error =
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
@@ -38,6 +45,10 @@ type error =
   | Journal_read_settlement_failed of
       Fs_compat.Capability_head.settlement_warning list
   | Journal_write_failed of string
+  | Payload_operation_failed of
+      { operation : payload_operation
+      ; failure : Keeper_dead_revival_payload.error
+      }
   | Transaction_lock_failed of File_lock_eio.durable_lock_error
   | Post_commit_cleanup_required of
       { committed : Keeper_meta_contract.keeper_meta
@@ -133,6 +144,8 @@ module For_testing : sig
       | `Launch_committed
       | `Rollback_reserved
       | `Rollback_durable_committed
+      | `Forward_cleanup_pending
+      | `Rollback_cleanup_pending
       | `Cleared
       ]
     , error )

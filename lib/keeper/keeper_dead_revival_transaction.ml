@@ -2,6 +2,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 module Head = Fs_compat.Capability_head
+module Payload = Keeper_dead_revival_payload
 
 let after_nonce_allocation_hook : (unit -> unit) Atomic.t =
   Atomic.make (fun () -> ())
@@ -149,7 +150,14 @@ type rollback_error =
   | Rollback_registry_occupied of Keeper_registry.registry_entry
   | Rollback_registry_invalid of Keeper_registry.registry_entry_validation_error
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
+  | Rollback_payload_delete_failed of Payload.error
   | Rollback_journal_clear_failed of string
+
+type payload_operation =
+  | Payload_prepare
+  | Payload_create
+  | Payload_verify
+  | Payload_delete
 
 type error =
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
@@ -164,6 +172,10 @@ type error =
       }
   | Journal_read_settlement_failed of Head.settlement_warning list
   | Journal_write_failed of string
+  | Payload_operation_failed of
+      { operation : payload_operation
+      ; failure : Payload.error
+      }
   | Transaction_lock_failed of File_lock_eio.durable_lock_error
   | Post_commit_cleanup_required of
       { committed : keeper_meta
@@ -192,6 +204,8 @@ type journal_stage =
   | Launch_committed
   | Rollback_reserved
   | Rollback_durable_committed
+  | Forward_cleanup_pending
+  | Rollback_cleanup_pending
   | Cleared
 
 type journal =
@@ -200,8 +214,7 @@ type journal =
   ; keeper_name : string
   ; expected_trace_id : Keeper_id.Trace_id.t
   ; expected_generation : int
-  ; original : keeper_meta
-  ; candidate : keeper_meta
+  ; payload_ref : Payload.immutable_ref
   ; stage : journal_stage
   }
 
@@ -224,7 +237,7 @@ let journal_dir config =
   Filename.concat (Workspace.masc_root_dir config) "keeper-lifecycle-transactions"
 ;;
 
-let journal_schema = "masc.keeper-dead-revival-journal.v1"
+let journal_schema = "masc.keeper-dead-revival-journal.v2"
 let head_entropy_bytes = 32 * 33
 
 let sha256 value =
@@ -269,6 +282,10 @@ let journal_stage_to_json = function
   | Rollback_reserved -> `Assoc [ "rollback_reserved", `Bool true ]
   | Rollback_durable_committed ->
     `Assoc [ "rollback_durable_committed", `Bool true ]
+  | Forward_cleanup_pending ->
+    `Assoc [ "forward_cleanup_pending", `Bool true ]
+  | Rollback_cleanup_pending ->
+    `Assoc [ "rollback_cleanup_pending", `Bool true ]
   | Cleared -> `Assoc [ "cleared", `Bool true ]
 ;;
 
@@ -286,8 +303,7 @@ let journal_to_json journal =
     ; "keeper_name", `String journal.keeper_name
     ; "expected_trace_id", `String (Keeper_id.Trace_id.to_string journal.expected_trace_id)
     ; "expected_generation", `Int journal.expected_generation
-    ; "original", Keeper_meta_json.meta_to_json journal.original
-    ; "candidate", Keeper_meta_json.meta_to_json journal.candidate
+    ; "payload_ref", Payload.immutable_ref_to_json journal.payload_ref
     ; "stage", stage
     ]
 ;;
@@ -340,8 +356,7 @@ let exact_active_journal_fields fields =
     ; "keeper_name"
     ; "expected_trace_id"
     ; "expected_generation"
-    ; "original"
-    ; "candidate"
+    ; "payload_ref"
     ; "stage"
     ]
     fields
@@ -377,15 +392,21 @@ let required_stage fields =
     Ok Rollback_reserved
   | Some (`Assoc [ ("rollback_durable_committed", `Bool true) ]) ->
     Ok Rollback_durable_committed
+  | Some (`Assoc [ ("forward_cleanup_pending", `Bool true) ]) ->
+    Ok Forward_cleanup_pending
+  | Some (`Assoc [ ("rollback_cleanup_pending", `Bool true) ]) ->
+    Ok Rollback_cleanup_pending
   | Some (`Assoc [ ("cleared", `Bool true) ]) -> Ok Cleared
   | Some _ -> Error "journal stage must contain exactly one known constructor"
   | None -> Error "journal field stage is missing"
 ;;
 
-let required_meta key fields =
+let required_payload_ref key fields =
   match List.assoc_opt key fields with
   | None -> Error (Printf.sprintf "journal field %s is missing" key)
-  | Some json -> Keeper_meta_json.meta_of_json json
+  | Some json ->
+    Payload.immutable_ref_of_json json
+    |> Result.map_error Payload.error_to_string
 ;;
 
 let journal_of_json = function
@@ -406,7 +427,9 @@ let journal_of_json = function
         | Durable_committed
         | Launch_committed
         | Rollback_reserved
-        | Rollback_durable_committed ) as stage ->
+        | Rollback_durable_committed
+        | Forward_cleanup_pending
+        | Rollback_cleanup_pending ) as stage ->
         let* () = exact_active_journal_fields fields in
         let* transaction_id = required_string "transaction_id" fields in
         let* owner_id = required_string "owner_id" fields in
@@ -414,40 +437,28 @@ let journal_of_json = function
         let* trace_id_raw = required_string "expected_trace_id" fields in
         let* expected_trace_id = Keeper_id.Trace_id.of_string trace_id_raw in
         let* expected_generation = required_int "expected_generation" fields in
-        let* original = required_meta "original" fields in
-        let* candidate = required_meta "candidate" fields in
+        let* payload_ref = required_payload_ref "payload_ref" fields in
+        let* shard =
+          Payload.authority_shard_for_keeper ~keeper_name
+          |> Result.map_error Payload.error_to_string
+        in
         if
-          not (String.equal original.name keeper_name)
-          || not (String.equal candidate.name keeper_name)
-          || not
-               (Keeper_id.Trace_id.equal
-                  original.runtime.trace_id
-                  expected_trace_id)
-          || not (Int.equal original.runtime.nonce expected_generation)
-        then Error "journal metadata does not match its keeper lifecycle binding"
+          not
+            (String.equal
+               (Payload.immutable_ref_authority_leaf payload_ref)
+               (Payload.authority_shard_leaf shard))
+        then Error "journal payload authority differs from its keeper binding"
         else
-          let expected_transaction_id =
-            journal_transaction_id
-              ~owner_id
-              ~keeper_name
-              ~expected_trace_id
-              ~expected_generation
-              ~candidate_nonce:candidate.runtime.nonce
-          in
-          if not (String.equal transaction_id expected_transaction_id)
-          then Error "journal transaction_id does not bind owner and lifecycle nonce"
-          else
-            Ok
-              (Active_journal
-                 { transaction_id
-                 ; owner_id
-                 ; keeper_name
-                 ; expected_trace_id
-                 ; expected_generation
-                 ; original
-                 ; candidate
-                 ; stage
-                 }))
+          Ok
+            (Active_journal
+               { transaction_id
+               ; owner_id
+               ; keeper_name
+               ; expected_trace_id
+               ; expected_generation
+               ; payload_ref
+               ; stage
+               }))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "keeper lifecycle journal must be a JSON object"
 ;;
@@ -471,14 +482,14 @@ let reraise_fatal exception_ backtrace =
   | _ -> ()
 ;;
 
-let revival_authority_lock_path config leaf =
+let revival_authority_lock_path config authority_leaf =
   try
     let dir = Keeper_fs.ensure_dir (journal_dir config) in
     let lock_leaf =
       "authority-"
       ^ sha256
           ("keeper-dead-revival-authority-lock-v1\000"
-           ^ length_delimited leaf)
+           ^ length_delimited authority_leaf)
       ^ ".lock"
     in
     Ok (Filename.concat dir lock_leaf)
@@ -655,11 +666,13 @@ let same_transaction (left : journal) (right : journal) =
        left.expected_trace_id
        right.expected_trace_id
   && Int.equal left.expected_generation right.expected_generation
-  && Int.equal left.candidate.runtime.nonce right.candidate.runtime.nonce
+  && String.equal
+       (Payload.immutable_ref_to_bytes left.payload_ref)
+       (Payload.immutable_ref_to_bytes right.payload_ref)
 ;;
 
 type durable_publication_observation =
-  | Durable_publication_rollback_from of journal
+  | Durable_publication_rollback_from of journal_stage
   | Durable_publication_attention of error
 
 let observe_durable_publication config (expected : journal) =
@@ -687,10 +700,12 @@ let observe_durable_publication config (expected : journal) =
     (match current.stage with
      | Reserved
      | Durable_committed ->
-       Durable_publication_rollback_from current
+       Durable_publication_rollback_from current.stage
      | Launch_committed
+     | Forward_cleanup_pending
      | Rollback_reserved
      | Rollback_durable_committed
+     | Rollback_cleanup_pending
      | Cleared ->
        Durable_publication_attention
          (Journal_ownership_changed
@@ -730,11 +745,13 @@ let observe_launch_publication config (expected : journal) =
          "launch publication settled to another active transaction")
   | Ok (_, _, Some (Active_journal (current : journal))) ->
     (match current.stage with
-     | Launch_committed -> Launch_publication_committed
+     | Launch_committed
+     | Forward_cleanup_pending -> Launch_publication_committed
      | Durable_committed -> Launch_publication_not_committed
      | Reserved
      | Rollback_reserved
      | Rollback_durable_committed
+     | Rollback_cleanup_pending
      | Cleared ->
        Launch_publication_attention
          (Journal_ownership_changed
@@ -742,7 +759,7 @@ let observe_launch_publication config (expected : journal) =
              ^ Yojson.Safe.to_string (journal_stage_to_json current.stage))))
 ;;
 
-let reserve_journal config journal =
+let reserve_journal config (journal : journal) =
   match
     read_current_journal
       ~invalid:(fun detail -> Journal_conflict detail)
@@ -767,7 +784,7 @@ let reserve_journal config journal =
       ()
 ;;
 
-let transition_journal ?compare_and_swap config ~expected_stage journal =
+let transition_journal ?compare_and_swap config ~expected_stage (journal : journal) =
   match
     read_current_journal
       ~invalid:(fun detail -> Journal_ownership_changed detail)
@@ -795,7 +812,7 @@ let transition_journal ?compare_and_swap config ~expected_stage journal =
       ()
 ;;
 
-let save_journal config journal =
+let save_journal config (journal : journal) =
   match journal.stage with
   | Reserved -> reserve_journal config journal
   | Durable_committed ->
@@ -810,6 +827,10 @@ let save_journal config journal =
     Error
       (Journal_write_failed
          "rollback claim stages are owned by startup recovery")
+  | Forward_cleanup_pending | Rollback_cleanup_pending ->
+    Error
+      (Journal_write_failed
+         "cleanup claim stages require an exact predecessor")
   | Cleared ->
     Error (Journal_write_failed "Cleared is not a publishable revival stage")
 ;;
@@ -822,7 +843,7 @@ let save_launch_journal config journal =
     journal
 ;;
 
-let clear_journal config ~expected_stage journal =
+let clear_journal config ~expected_stage (journal : journal) =
   match
     read_current_journal
       ~invalid:(fun detail -> Journal_ownership_changed detail)
@@ -864,8 +885,8 @@ let clear_journal config ~expected_stage journal =
 ;;
 
 type recovery_claim =
-  | Recovery_rollback_claimed of journal * bool
-  | Recovery_forward_complete of journal
+  | Recovery_rollback_claimed of journal_stage * bool
+  | Recovery_forward_complete of journal_stage
   | Recovery_already_cleared
 
 let rec claim_recovery_rollback config journal attempts =
@@ -897,22 +918,28 @@ let rec claim_recovery_rollback config journal attempts =
         (Journal_ownership_changed
            "journal authority belongs to a different transaction")
     | Ok (_, _, Some (Active_journal current))
-      when current.stage = Launch_committed ->
-      Ok (Recovery_forward_complete current)
+      when current.stage = Launch_committed
+           || current.stage = Forward_cleanup_pending ->
+      Ok (Recovery_forward_complete current.stage)
     | Ok (_, _, Some (Active_journal current))
       when current.stage = Rollback_reserved ->
-      Ok (Recovery_rollback_claimed (current, false))
+      Ok (Recovery_rollback_claimed (current.stage, false))
     | Ok (_, _, Some (Active_journal current))
       when current.stage = Rollback_durable_committed ->
-      Ok (Recovery_rollback_claimed (current, true))
+      Ok (Recovery_rollback_claimed (current.stage, true))
+    | Ok (_, _, Some (Active_journal current))
+      when current.stage = Rollback_cleanup_pending ->
+      Ok (Recovery_rollback_claimed (current.stage, true))
     | Ok (parent, snapshot, Some (Active_journal current)) ->
       let claimed_stage, durable_committed =
         match current.stage with
         | Reserved -> Rollback_reserved, false
         | Durable_committed -> Rollback_durable_committed, true
         | Launch_committed
+        | Forward_cleanup_pending
         | Rollback_reserved
         | Rollback_durable_committed
+        | Rollback_cleanup_pending
         | Cleared ->
           assert false
       in
@@ -925,13 +952,13 @@ let rec claim_recovery_rollback config journal attempts =
            ~row:(Active_journal claimed)
            ()
        with
-       | Ok () -> Ok (Recovery_rollback_claimed (claimed, durable_committed))
+       | Ok () -> Ok (Recovery_rollback_claimed (claimed.stage, durable_committed))
        | Error (Journal_ownership_changed _) ->
          claim_recovery_rollback config journal (attempts - 1)
        | Error error -> Error error)
 ;;
 
-let make_reserved_journal ~owner_id ~original ~candidate =
+let make_reserved_journal ~owner_id ~original ~candidate ~payload_ref =
   let transaction_id =
     journal_transaction_id
       ~owner_id
@@ -945,25 +972,60 @@ let make_reserved_journal ~owner_id ~original ~candidate =
   ; keeper_name = original.name
   ; expected_trace_id = original.runtime.trace_id
   ; expected_generation = original.runtime.nonce
-  ; original
-  ; candidate
+  ; payload_ref
   ; stage = Reserved
   }
+;;
+
+let make_prepared_journal ~owner_id ~original ~candidate =
+  let transaction_id =
+    journal_transaction_id
+      ~owner_id
+      ~keeper_name:original.name
+      ~expected_trace_id:original.runtime.trace_id
+      ~expected_generation:original.runtime.nonce
+      ~candidate_nonce:candidate.runtime.nonce
+  in
+  let ( let* ) = Result.bind in
+  let* payload =
+    Payload.make_payload
+      ~transaction_id
+      ~owner_id
+      ~keeper_name:original.name
+      ~expected_trace_id:original.runtime.trace_id
+      ~expected_generation:original.runtime.nonce
+      ~original
+      ~candidate
+  in
+  let* prepared = Payload.prepare payload in
+  Ok
+    ( make_reserved_journal
+        ~owner_id
+        ~original
+        ~candidate
+        ~payload_ref:(Payload.prepared_ref prepared)
+    , prepared )
 ;;
 
 module For_testing = struct
   include Boundary_hooks_for_testing
 
   let reserved_journal_row ~owner_id ~original ~candidate =
-    make_reserved_journal ~owner_id ~original ~candidate
-    |> journal_to_bytes
+    match make_prepared_journal ~owner_id ~original ~candidate with
+    | Ok (journal, _) -> journal_to_bytes journal
+    | Error failure -> invalid_arg (Payload.error_to_string failure)
   ;;
 
   let reserve_journal ~config ~owner_id ~original ~candidate =
-    let journal = make_reserved_journal ~owner_id ~original ~candidate in
-    match save_journal config journal with
-    | Ok () -> Ok (journal_to_bytes journal)
-    | Error error -> Error error
+    match make_prepared_journal ~owner_id ~original ~candidate with
+    | Error failure ->
+      Error
+        (Payload_operation_failed
+           { operation = Payload_prepare; failure })
+    | Ok (journal, _) ->
+      (match save_journal config journal with
+       | Ok () -> Ok (journal_to_bytes journal)
+       | Error error -> Error error)
   ;;
 
   let current_journal_row ~config ~keeper_name =
@@ -997,6 +1059,10 @@ module For_testing = struct
     | Ok
         (_, _, Some (Active_journal { stage = Rollback_durable_committed; _ })) ->
       Ok `Rollback_durable_committed
+    | Ok (_, _, Some (Active_journal { stage = Forward_cleanup_pending; _ })) ->
+      Ok `Forward_cleanup_pending
+    | Ok (_, _, Some (Active_journal { stage = Rollback_cleanup_pending; _ })) ->
+      Ok `Rollback_cleanup_pending
     | Ok (_, _, Some (Active_journal { stage = Cleared; _ })) ->
       Error
         (Journal_ownership_changed
@@ -1010,10 +1076,13 @@ module For_testing = struct
         ~original
         ~candidate
     =
-    let replacement =
-      make_reserved_journal ~owner_id ~original ~candidate
-    in
-    match
+    match make_prepared_journal ~owner_id ~original ~candidate with
+    | Error failure ->
+      Error
+        (Payload_operation_failed
+           { operation = Payload_prepare; failure })
+    | Ok (replacement, _) ->
+    (match
       read_current_journal
         ~invalid:(fun detail -> Journal_ownership_changed detail)
         config
@@ -1028,7 +1097,7 @@ module For_testing = struct
         ~parent
         ~snapshot
         ~row:(Active_journal replacement)
-        ()
+        ())
   ;;
 
   let advance_to_launch_committed ~config ~keeper_name =
@@ -1100,7 +1169,16 @@ let rollback_error_to_string = function
   | Rollback_registry_reservation_changed owner ->
     "registry rollback lost reservation ownership: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
+  | Rollback_payload_delete_failed failure ->
+    "revival payload cleanup failed: " ^ Payload.error_to_string failure
   | Rollback_journal_clear_failed detail -> "journal clear failed: " ^ detail
+;;
+
+let payload_operation_to_string = function
+  | Payload_prepare -> "prepare"
+  | Payload_create -> "create"
+  | Payload_verify -> "verify"
+  | Payload_delete -> "delete"
 ;;
 
 let rec error_to_string = function
@@ -1126,6 +1204,11 @@ let rec error_to_string = function
     "keeper revival journal read settled with warnings: "
     ^ settlement_warning_detail (List.length warnings)
   | Journal_write_failed detail -> "keeper revival journal write failed: " ^ detail
+  | Payload_operation_failed { operation; failure } ->
+    Printf.sprintf
+      "keeper revival payload %s failed: %s"
+      (payload_operation_to_string operation)
+      (Payload.error_to_string failure)
   | Transaction_lock_failed failure ->
     "keeper revival transaction lock failed: "
     ^ File_lock_eio.durable_lock_error_to_string failure
@@ -1175,14 +1258,14 @@ let release_observed token keeper =
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
-let clear_candidate_registry token config journal =
+let clear_candidate_registry token config journal candidate =
   match
     Keeper_registry.get
       ~base_path:config.Workspace.base_path
       journal.keeper_name
   with
   | None -> []
-  | Some entry when same_identity entry.meta journal.candidate ->
+  | Some entry when same_identity entry.meta candidate ->
     Keeper_keepalive.request_entry_stop entry;
     (* Cancellation-safe rollback joins both terminal signals before exact
        unregister, so the replacement cannot inherit a live predecessor. *)
@@ -1219,39 +1302,96 @@ let restore_registry
           [ Rollback_registry_reservation_changed owner ]))
 ;;
 
-let rollback token config journal original_entry =
+let transition_cleanup_pending config ~expected_stage ~cleanup_stage journal =
+  let cleanup = { journal with stage = cleanup_stage } in
+  match transition_journal config ~expected_stage cleanup with
+  | Ok () -> Ok cleanup
+  | Error publication_error ->
+    (match
+       read_current_journal
+         ~invalid:(fun detail -> Journal_ownership_changed detail)
+         config
+         journal.keeper_name
+     with
+     | Ok (_, _, Some (Active_journal current))
+       when same_transaction current journal
+            && current.stage = cleanup_stage ->
+       Ok cleanup
+     | Ok (_, _, Some (Active_journal current))
+       when same_transaction current journal
+            && current.stage = expected_stage ->
+       Error publication_error
+     | Error error -> Error error
+     | Ok _ ->
+       Error
+         (Journal_ownership_changed
+            "cleanup publication settled to an unexpected transaction stage"))
+;;
+
+let delete_payload config (journal : journal) =
+  Payload.delete
+    config
+    ~keeper_name:journal.keeper_name
+    ~expected_authority_leaf:
+      (Payload.immutable_ref_authority_leaf journal.payload_ref)
+    ~transaction_id:journal.transaction_id
+    journal.payload_ref
+;;
+
+let rollback token config journal payload original_entry =
+  let original = Payload.payload_original payload in
+  let candidate = Payload.payload_candidate payload in
   let meta_errors =
     match Keeper_meta_store.read_meta config journal.keeper_name with
     | Error detail -> [ Rollback_meta_write_failed detail ]
     | Ok None -> [ Rollback_meta_missing ]
     | Ok (Some current)
-      when same_persisted_payload current journal.original -> []
-    | Ok (Some current) when not (same_identity current journal.candidate) ->
+      when same_persisted_payload current original -> []
+    | Ok (Some current) when not (same_identity current candidate) ->
       [ Rollback_meta_identity_changed ]
     | Ok (Some current)
-      when not (same_persisted_payload current journal.candidate) ->
+      when not (same_persisted_payload current candidate) ->
       [ Rollback_meta_payload_changed ]
     | Ok (Some current) ->
-      let restored = { journal.original with meta_version = current.meta_version } in
+      let restored = { original with meta_version = current.meta_version } in
       (match Keeper_meta_store.write_meta_for_lifecycle token config restored with
        | Ok () -> []
        | Error detail -> [ Rollback_meta_write_failed detail ])
   in
   let registry_errors =
-    clear_candidate_registry token config journal @ restore_registry token original_entry
+    clear_candidate_registry token config journal candidate
+    @ restore_registry token original_entry
   in
   let errors = meta_errors @ registry_errors in
   if errors <> []
   then errors
   else
-    match clear_journal config ~expected_stage:journal.stage journal with
-    | Ok () -> []
+    match
+      transition_cleanup_pending
+        config
+        ~expected_stage:journal.stage
+        ~cleanup_stage:Rollback_cleanup_pending
+        journal
+    with
     | Error error ->
       [ Rollback_journal_clear_failed (error_to_string error) ]
+    | Ok cleanup ->
+      (match delete_payload config cleanup with
+       | Error failure -> [ Rollback_payload_delete_failed failure ]
+       | Ok () ->
+         (match
+            clear_journal
+              config
+              ~expected_stage:Rollback_cleanup_pending
+              cleanup
+          with
+          | Ok () -> []
+          | Error error ->
+            [ Rollback_journal_clear_failed (error_to_string error) ]))
 ;;
 
-let fail_with_rollback token config journal original_entry cause error =
-  let errors = rollback token config journal original_entry in
+let fail_with_rollback token config journal payload original_entry cause error =
+  let errors = rollback token config journal payload original_entry in
   observe
     (if errors = [] then "rollback" else "rollback_failed")
     journal.keeper_name
@@ -1296,6 +1436,62 @@ let reserve_validated_journal config ~original journal =
      | Ok _ -> save_journal config journal)
 ;;
 
+let verify_payload config (journal : journal) =
+  Payload.read
+    config
+    ~expected_ref:journal.payload_ref
+    ~expected_authority_leaf:
+      (Payload.immutable_ref_authority_leaf journal.payload_ref)
+    ~transaction_id:journal.transaction_id
+    ~owner_id:journal.owner_id
+    ~keeper_name:journal.keeper_name
+    ~expected_trace_id:journal.expected_trace_id
+    ~expected_generation:journal.expected_generation
+;;
+
+let payload_failure operation failure =
+  Payload_operation_failed { operation; failure }
+;;
+
+let cleanup_unreserved_payload config journal ~cause =
+  match delete_payload config journal with
+  | Ok () -> cause
+  | Error failure ->
+    Log.Keeper.error
+      "keeper revival unreserved payload cleanup failed keeper=%s cause=%s cleanup=%s"
+      journal.keeper_name
+      (error_to_string cause)
+      (Payload.error_to_string failure);
+    payload_failure Payload_delete failure
+;;
+
+let forward_cleanup config (journal : journal) =
+  let cleanup_result =
+    match journal.stage with
+    | Launch_committed ->
+      transition_cleanup_pending
+        config
+        ~expected_stage:Launch_committed
+        ~cleanup_stage:Forward_cleanup_pending
+        journal
+    | Forward_cleanup_pending -> Ok journal
+    | _ ->
+      Error
+        (Journal_ownership_changed
+           "forward cleanup requires launch-committed authority")
+  in
+  match cleanup_result with
+  | Error _ as error -> error
+  | Ok cleanup ->
+    (match delete_payload config cleanup with
+     | Error failure -> Error (payload_failure Payload_delete failure)
+     | Ok () ->
+       clear_journal
+         config
+         ~expected_stage:Forward_cleanup_pending
+         cleanup)
+;;
+
 let revive_locked (ctx : _ context) ~original ~candidate =
   match
     Keeper_lifecycle_reservation.acquire
@@ -1310,24 +1506,35 @@ let revive_locked (ctx : _ context) ~original ~candidate =
   | Ok token ->
     observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
     let journal_for_cleanup = ref None in
+    let verified_payload_for_cleanup = ref None in
+    let journal_published = ref false in
     let launch_committed = ref false in
     let cleanup_pre_journal_cancellation () =
       Eio.Cancel.protect (fun () ->
         (match !journal_for_cleanup with
          | None -> ()
          | Some journal ->
-           (match
-              clear_journal
-                ctx.config
-                ~expected_stage:journal.stage
-                journal
-            with
-            | Ok () -> ()
-            | Error error ->
+           (match !journal_published, !verified_payload_for_cleanup with
+            | false, _ ->
+              (match delete_payload ctx.config journal with
+               | Ok () -> ()
+               | Error failure ->
+                 Log.Keeper.error
+                   "keeper lifecycle pre-reservation cancellation payload cleanup failed keeper=%s error=%s"
+                   original.name
+                   (Payload.error_to_string failure))
+            | true, Some payload ->
+              let errors = rollback token ctx.config journal payload None in
+              if errors <> []
+              then
               Log.Keeper.error
-                "keeper lifecycle pre-journal cancellation clear failed keeper=%s error=%s"
+                "keeper lifecycle reserved cancellation rollback failed keeper=%s errors=%s"
                 original.name
-                (error_to_string error)));
+                (String.concat "; " (List.map rollback_error_to_string errors))
+            | true, None ->
+              Log.Keeper.error
+                "keeper lifecycle reserved cancellation lost verified payload keeper=%s"
+                original.name));
         release_observed token original.name)
     in
     let protect_pre_journal fn =
@@ -1366,29 +1573,98 @@ let revive_locked (ctx : _ context) ~original ~candidate =
         runtime = { candidate.runtime with nonce }
       }
     in
-    let journal =
-      make_reserved_journal
-        ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
-        ~original
-        ~candidate
-    in
     let journal_result =
       protect_pre_journal (fun () ->
+      match
+        make_prepared_journal
+          ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
+          ~original
+          ~candidate
+      with
+      | Error failure -> Error (payload_failure Payload_prepare failure)
+      | Ok (journal, prepared) ->
         journal_for_cleanup := Some journal;
-        let result =
-          reserve_validated_journal
-            ctx.config
-            ~original
-            journal
-        in
-        invoke_after_journal_write_hook ();
-        result)
+        (match Payload.create ctx.config prepared with
+         | Error failure ->
+           Error
+             (cleanup_unreserved_payload
+                ctx.config
+                journal
+                ~cause:(payload_failure Payload_create failure))
+         | Ok (Payload.Created _ | Payload.Reconciled_created _) ->
+           (match verify_payload ctx.config journal with
+            | Error failure ->
+              Error
+                (cleanup_unreserved_payload
+                   ctx.config
+                   journal
+                   ~cause:(payload_failure Payload_verify failure))
+            | Ok payload ->
+              verified_payload_for_cleanup := Some payload;
+              let result =
+                let result =
+                  reserve_validated_journal
+                    ctx.config
+                    ~original
+                    journal
+                in
+                (match result with
+                 | Ok () -> journal_published := true
+                 | Error _ -> ());
+                invoke_after_journal_write_hook ();
+                result
+              in
+              (match result with
+               | Ok () ->
+                 journal_published := true;
+                 Ok (journal, payload)
+               | Error error ->
+                 (match
+                    read_current_journal
+                      ~invalid:(fun detail ->
+                        Journal_ownership_changed detail)
+                      ctx.config
+                      journal.keeper_name
+                  with
+                  | Ok
+                      (_, _, Some (Active_journal current))
+                    when same_transaction current journal
+                         && current.stage = Reserved ->
+                    journal_published := true;
+                    let errors =
+                      rollback
+                        token
+                        ctx.config
+                        journal
+                        payload
+                        None
+                    in
+                    if errors = []
+                    then Error error
+                    else
+                      Error
+                        (Rollback_failed
+                           { cause = error_to_string error
+                           ; errors
+                           })
+                  | Ok (_, _, None)
+                  | Ok (_, _, Some (Cleared_tombstone _)) ->
+                    Error
+                      (cleanup_unreserved_payload
+                         ctx.config
+                         journal
+                         ~cause:error)
+                  | Error attention -> Error attention
+                  | Ok (_, _, Some (Active_journal _)) ->
+                    Error
+                      (Journal_ownership_changed
+                         "reservation publication settled to an unexpected active transaction")))))
     in
     (match journal_result with
      | Error error ->
        release_observed token original.name;
        Error error
-     | Ok () ->
+     | Ok (journal, verified_payload) ->
        (* The cancellation handler must restore the exact pre-transaction
           registry lane after removal. This ref carries only that immutable
           snapshot across the exception boundary; transaction ownership and
@@ -1401,6 +1677,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
              token
              ctx.config
              journal
+             verified_payload
              None
              detail
              Durable_snapshot_changed
@@ -1409,6 +1686,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
              token
              ctx.config
              journal
+             verified_payload
              None
              "durable metadata missing"
              Durable_snapshot_missing
@@ -1419,6 +1697,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
              token
              ctx.config
              journal
+             verified_payload
              None
              "durable snapshot changed"
              Durable_snapshot_changed
@@ -1429,6 +1708,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                 token
                 ctx.config
                 journal
+                verified_payload
                 None
                 (registry_conflict_to_string conflict)
                 (Registry_conflict conflict)
@@ -1457,6 +1737,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                    token
                    ctx.config
                    journal
+                   verified_payload
                    original_entry
                    (registry_conflict_to_string conflict)
                    (Registry_conflict conflict)
@@ -1469,6 +1750,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                       token
                       ctx.config
                       journal
+                      verified_payload
                       original_entry
                       detail
                       (Durable_commit_failed detail)
@@ -1479,6 +1761,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                          token
                          ctx.config
                          journal
+                         verified_payload
                          original_entry
                          detail
                          (Durable_commit_unreadable detail)
@@ -1487,12 +1770,27 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                          token
                          ctx.config
                          journal
+                         verified_payload
                          original_entry
                          "committed metadata missing"
                          Durable_snapshot_missing
                      | Ok (Some committed) ->
+                       let expected_candidate =
+                         Payload.payload_candidate verified_payload
+                       in
+                       if not (same_persisted_payload committed expected_candidate)
+                       then
+                         fail_with_rollback
+                           token
+                           ctx.config
+                           journal
+                           verified_payload
+                           original_entry
+                           "committed metadata differs from verified revival payload"
+                           Durable_snapshot_changed
+                       else
                        let committed_journal =
-                         { journal with candidate = committed; stage = Durable_committed }
+                         { journal with stage = Durable_committed }
                        in
                        (match save_journal ctx.config committed_journal with
                         | Error publication_error ->
@@ -1501,11 +1799,12 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                                ctx.config
                                committed_journal
                            with
-                           | Durable_publication_rollback_from observed ->
+                           | Durable_publication_rollback_from observed_stage ->
                              fail_with_rollback
                                token
                                ctx.config
-                               observed
+                               { journal with stage = observed_stage }
+                               verified_payload
                                original_entry
                                (error_to_string publication_error)
                                publication_error
@@ -1551,6 +1850,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                                      token
                                      ctx.config
                                      committed_journal
+                                     verified_payload
                                      original_entry
                                      (error_to_string publication_error)
                                      publication_error
@@ -1574,9 +1874,8 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                                       | Some detail ->
                                         Error (Journal_write_failed detail)
                                       | None ->
-                                        clear_journal
+                                        forward_cleanup
                                           ctx.config
-                                          ~expected_stage:Launch_committed
                                           launch_journal
                                     in
                                     release_observed token committed.name;
@@ -1596,6 +1895,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                                token
                                ctx.config
                                committed_journal
+                               verified_payload
                                original_entry
                                (Keeper_keepalive.start_keepalive_outcome_to_string rejected)
                                (Launch_failed rejected)))))))
@@ -1607,7 +1907,12 @@ let revive_locked (ctx : _ context) ~original ~candidate =
          then
            Eio.Cancel.protect (fun () ->
              let errors =
-               rollback token ctx.config journal !original_entry_for_rollback
+               rollback
+                 token
+                 ctx.config
+                 journal
+                 verified_payload
+                 !original_entry_for_rollback
              in
              if errors <> []
              then
@@ -1620,10 +1925,16 @@ let revive_locked (ctx : _ context) ~original ~candidate =
 ;;
 
 let revive (ctx : _ context) ~original ~candidate =
-  let leaf = journal_leaf original.name in
-  match revival_authority_lock_path ctx.config leaf with
-  | Error error -> Error error
-  | Ok lock_path ->
+  match Payload.authority_shard_for_keeper ~keeper_name:original.name with
+  | Error failure -> Error (payload_failure Payload_prepare failure)
+  | Ok shard ->
+    (match
+       revival_authority_lock_path
+         ctx.config
+         (Payload.authority_shard_leaf shard)
+     with
+     | Error error -> Error error
+     | Ok lock_path ->
     (match
        File_lock_eio.with_durable_lock_observed
          ~lock_path
@@ -1651,7 +1962,28 @@ let revive (ctx : _ context) ~original ~candidate =
           keeper=%s error=%s"
          original.name
          (File_lock_eio.durable_lock_error_to_string failure);
-       Error error)
+       Error error))
+;;
+
+let recovery_payload_error failure =
+  "recovery payload verification failed: " ^ Payload.error_to_string failure
+;;
+
+let finish_rollback_cleanup config journal =
+  match delete_payload config journal with
+  | Error failure ->
+    Error
+      (rollback_error_to_string
+         (Rollback_payload_delete_failed failure))
+  | Ok () ->
+    (match
+       clear_journal
+         config
+         ~expected_stage:Rollback_cleanup_pending
+         journal
+     with
+     | Ok () -> Ok true
+     | Error error -> Error (error_to_string error))
 ;;
 
 let recover_one_locked config leaf =
@@ -1666,127 +1998,271 @@ let recover_one_locked config leaf =
   | Ok (_, _, None) -> Error "journal authority disappeared during recovery"
   | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
   | Ok (_, _, Some (Active_journal journal)) ->
-      let rollback_recovery () =
-        match
-          Keeper_lifecycle_reservation.acquire
-            ~base_path:config.Workspace.base_path
-            ~keeper_name:journal.keeper_name
-            ~expected_generation:journal.expected_generation
-            ~purpose:Keeper_lifecycle_reservation.Dead_revival
-        with
-        | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-          observe
-            "recovery_conflict"
-            journal.keeper_name
-            (Keeper_lifecycle_reservation.snapshot_to_string owner);
-          Error
-            ("recovery reservation conflict: "
-             ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
-         | Ok token ->
-          invoke_before_recovery_claim_hook ();
-          let result =
-            match claim_recovery_rollback config journal 8 with
-            | Error error -> Error (error_to_string error)
-            | Ok Recovery_already_cleared -> Ok false
-            | Ok (Recovery_forward_complete current) ->
-              (match
-                 clear_journal
-                   config
-                   ~expected_stage:Launch_committed
-                   current
-               with
-               | Ok () ->
-                 observe
-                   "recovery_forward_commit"
-                   current.keeper_name
-                   "journal cleared after rollback-stage race";
-                 Ok false
-               | Error error -> Error (error_to_string error))
-            | Ok (Recovery_rollback_claimed (claimed, durable_committed)) ->
-              let errors = rollback token config claimed None in
-              observe
-                (match errors with
-                 | [] -> "recovery"
-                 | _ -> "recovery_failed")
-                claimed.keeper_name
-                (String.concat "; " (List.map rollback_error_to_string errors));
-              (match errors with
-               | [] -> Ok durable_committed
-               | _ ->
-                 Error
-                   (String.concat
-                      "; "
-                      (List.map rollback_error_to_string errors)))
-          in
-          release_observed token journal.keeper_name;
-          result
-      in
-      match journal.stage with
-      | Launch_committed ->
-        (match
-           clear_journal
-             config
-             ~expected_stage:Launch_committed
-             journal
-         with
-         | Ok () ->
-           observe "recovery_forward_commit" journal.keeper_name "journal cleared";
-           Ok false
-         | Error error ->
-           Error
-             ("forward-commit journal cleanup failed: "
-              ^ error_to_string error))
-      | Reserved
-      | Durable_committed
-      | Rollback_reserved
-      | Rollback_durable_committed ->
-        rollback_recovery ()
-      | Cleared ->
-        Error "active journal unexpectedly carries Cleared stage"
+    let recover_forward journal =
+      match forward_cleanup config journal with
+      | Ok () ->
+        observe "recovery_forward_commit" journal.keeper_name "payload and journal cleared";
+        Ok false
+      | Error error ->
+        Error
+          ("forward-commit journal cleanup failed: "
+           ^ error_to_string error)
+    in
+    (match journal.stage with
+     | Forward_cleanup_pending -> recover_forward journal
+     | Rollback_cleanup_pending ->
+       finish_rollback_cleanup config journal
+     | Reserved
+     | Durable_committed
+     | Launch_committed
+     | Rollback_reserved
+     | Rollback_durable_committed ->
+       (match verify_payload config journal with
+        | Error failure -> Error (recovery_payload_error failure)
+        | Ok verified_payload ->
+          (match journal.stage with
+           | Launch_committed -> recover_forward journal
+           | Reserved
+           | Durable_committed
+           | Rollback_reserved
+           | Rollback_durable_committed ->
+             (match
+                Keeper_lifecycle_reservation.acquire
+                  ~base_path:config.Workspace.base_path
+                  ~keeper_name:journal.keeper_name
+                  ~expected_generation:journal.expected_generation
+                  ~purpose:Keeper_lifecycle_reservation.Dead_revival
+              with
+              | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+                observe
+                  "recovery_conflict"
+                  journal.keeper_name
+                  (Keeper_lifecycle_reservation.snapshot_to_string owner);
+                Error
+                  ("recovery reservation conflict: "
+                   ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+              | Ok token ->
+                invoke_before_recovery_claim_hook ();
+                let result =
+                  match claim_recovery_rollback config journal 8 with
+                  | Error error -> Error (error_to_string error)
+                  | Ok Recovery_already_cleared -> Ok false
+                  | Ok (Recovery_forward_complete stage) ->
+                    recover_forward { journal with stage }
+                  | Ok
+                      (Recovery_rollback_claimed
+                         (Rollback_cleanup_pending, _)) ->
+                    finish_rollback_cleanup
+                      config
+                      { journal with stage = Rollback_cleanup_pending }
+                  | Ok
+                      (Recovery_rollback_claimed
+                         (stage, durable_committed)) ->
+                    let claimed = { journal with stage } in
+                    let errors =
+                      rollback
+                        token
+                        config
+                        claimed
+                        verified_payload
+                        None
+                    in
+                    observe
+                      (if errors = [] then "recovery" else "recovery_failed")
+                      claimed.keeper_name
+                      (String.concat
+                         "; "
+                         (List.map rollback_error_to_string errors));
+                    if errors = []
+                    then Ok durable_committed
+                    else
+                      Error
+                        (String.concat
+                           "; "
+                           (List.map rollback_error_to_string errors))
+                in
+                release_observed token journal.keeper_name;
+                result)
+           | Launch_committed
+           | Forward_cleanup_pending
+           | Rollback_cleanup_pending
+           | Cleared -> assert false))
+     | Cleared ->
+       Error "active journal unexpectedly carries Cleared stage")
 ;;
 
 let recover_one config leaf =
-  match revival_authority_lock_path config leaf with
+  match
+    read_journal_leaf
+      ~invalid:(fun detail -> Journal_ownership_changed detail)
+      config
+      ~leaf
+      ~expected_keeper_name:None
+  with
+  | Error error -> Error (error_to_string error)
+  | Ok (_, _, None) ->
+    Error "journal authority disappeared during recovery discovery"
+  | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
+  | Ok (_, _, Some (Active_journal discovered)) ->
+    (match
+       revival_authority_lock_path
+         config
+         (Payload.immutable_ref_authority_leaf discovered.payload_ref)
+     with
+     | Error error -> Error (error_to_string error)
+     | Ok lock_path ->
+       (match
+          File_lock_eio.with_durable_lock_observed
+            ~lock_path
+            (fun () -> recover_one_locked config leaf)
+        with
+        | File_lock_eio.Lock_not_acquired failure ->
+          Error
+            ("recovery transaction lock failed: "
+             ^ File_lock_eio.durable_lock_error_to_string failure)
+        | File_lock_eio.Body_completed
+            { value; release_error = None } -> value
+        | File_lock_eio.Body_completed
+            { value; release_error = Some failure } ->
+          let release_detail =
+            "recovery transaction lock release failed: "
+            ^ File_lock_eio.durable_lock_error_to_string failure
+          in
+          (match value with
+           | Ok _ -> Error ("recovery completed; " ^ release_detail)
+           | Error detail -> Error (detail ^ "; " ^ release_detail))))
+;;
+
+let active_transactions_in_shard_locked config shard =
+  let dir = journal_dir config in
+  match Safe_ops.list_dir_safe dir with
+  | Error _ when not (Fs_compat.file_exists dir) -> Ok []
+  | Error detail -> Error detail
+  | Ok files ->
+    List.fold_left
+      (fun result leaf ->
+         let ( let* ) = Result.bind in
+         let* transactions = result in
+         if not (Filename.check_suffix leaf ".json")
+         then Ok transactions
+         else
+           match
+             read_journal_leaf
+               ~invalid:(fun detail -> Journal_ownership_changed detail)
+               config
+               ~leaf
+               ~expected_keeper_name:None
+           with
+           | Error error -> Error (error_to_string error)
+           | Ok (_, _, None)
+           | Ok (_, _, Some (Cleared_tombstone _)) -> Ok transactions
+           | Ok (_, _, Some (Active_journal journal)) ->
+             if
+               String.equal
+                 (Payload.immutable_ref_authority_leaf journal.payload_ref)
+                 (Payload.authority_shard_leaf shard)
+             then Ok (journal.transaction_id :: transactions)
+             else Ok transactions)
+      (Ok [])
+      files
+;;
+
+let clean_orphan_shard config shard =
+  match
+    revival_authority_lock_path
+      config
+      (Payload.authority_shard_leaf shard)
+  with
   | Error error -> Error (error_to_string error)
   | Ok lock_path ->
     (match
        File_lock_eio.with_durable_lock_observed
          ~lock_path
-         (fun () -> recover_one_locked config leaf)
+         (fun () ->
+            let ( let* ) = Result.bind in
+            let* inventory =
+              Payload.inventory_transactions config shard
+              |> Result.map_error Payload.error_to_string
+            in
+            let* referenced =
+              active_transactions_in_shard_locked config shard
+            in
+            List.fold_left
+              (fun result entry ->
+                 let* cleared = result in
+                 if
+                   List.exists
+                     (fun transaction_id ->
+                        Payload.inventory_transaction_matches
+                          entry
+                          ~transaction_id)
+                     referenced
+                 then Ok cleared
+                 else
+                   Payload.delete_inventory_transaction
+                     config
+                     ~authority_shard:shard
+                     entry
+                   |> Result.map (fun () -> cleared + 1)
+                   |> Result.map_error Payload.error_to_string)
+              (Ok 0)
+              inventory)
      with
      | File_lock_eio.Lock_not_acquired failure ->
-       Error
-         ("recovery transaction lock failed: "
-          ^ File_lock_eio.durable_lock_error_to_string failure)
-     | File_lock_eio.Body_completed { value; release_error = None } -> value
+       Error (File_lock_eio.durable_lock_error_to_string failure)
      | File_lock_eio.Body_completed
-         { value
-         ; release_error = Some failure
-         } ->
-       let release_detail =
-         "recovery transaction lock release failed: "
-         ^ File_lock_eio.durable_lock_error_to_string failure
-       in
-       (match value with
-        | Ok _ -> Error ("recovery completed; " ^ release_detail)
-        | Error detail -> Error (detail ^ "; " ^ release_detail)))
+         { value; release_error = None } -> value
+     | File_lock_eio.Body_completed
+         { value = _; release_error = Some failure } ->
+       Error (File_lock_eio.durable_lock_error_to_string failure))
 ;;
 
 let recover_pending config =
   let dir = journal_dir config in
-  match Safe_ops.list_dir_safe dir with
-  | Error _ when not (Fs_compat.file_exists dir) -> { recovered = 0; cleared = 0; unresolved = [] }
-  | Error detail -> { recovered = 0; cleared = 0; unresolved = [ dir, detail ] }
-  | Ok files ->
-    files
-    |> List.filter (fun file -> Filename.check_suffix file ".json")
-    |> List.fold_left
-         (fun summary file ->
-            let path = Filename.concat dir file in
-            match recover_one config file with
-            | Ok true -> { summary with recovered = summary.recovered + 1 }
-            | Ok false -> { summary with cleared = summary.cleared + 1 }
-            | Error detail ->
-              { summary with unresolved = (path, detail) :: summary.unresolved })
-         { recovered = 0; cleared = 0; unresolved = [] }
+  let summary =
+    match Safe_ops.list_dir_safe dir with
+    | Error _ when not (Fs_compat.file_exists dir) ->
+      { recovered = 0; cleared = 0; unresolved = [] }
+    | Error detail ->
+      { recovered = 0; cleared = 0; unresolved = [ dir, detail ] }
+    | Ok files ->
+      List.fold_left
+        (fun summary file ->
+           if not (Filename.check_suffix file ".json")
+           then summary
+           else
+             let path = Filename.concat dir file in
+             match recover_one config file with
+             | Ok true ->
+               { summary with recovered = summary.recovered + 1 }
+             | Ok false ->
+               { summary with cleared = summary.cleared + 1 }
+             | Error detail ->
+               { summary with
+                 unresolved = (path, detail) :: summary.unresolved
+               })
+        { recovered = 0; cleared = 0; unresolved = [] }
+        files
+  in
+  match Payload.inventory_authority_shards config with
+  | Error failure ->
+    { summary with
+      unresolved =
+        ("revival-payload-inventory", Payload.error_to_string failure)
+        :: summary.unresolved
+    }
+  | Ok shards ->
+    List.fold_left
+      (fun summary shard ->
+         match clean_orphan_shard config shard with
+         | Ok cleared ->
+           { summary with cleared = summary.cleared + cleared }
+         | Error detail ->
+           { summary with
+             unresolved =
+               (Payload.authority_shard_leaf shard, detail)
+               :: summary.unresolved
+           })
+      summary
+      shards
 ;;

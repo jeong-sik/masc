@@ -113,14 +113,13 @@ let persist_directive_meta_update
     result
   | Keeper_lifecycle_admission.Durable_transaction
     .Admission_completed_with_attention (result, failure) ->
-    (match result with
-     | Error _ -> result
-     | Ok _ ->
-       Error
-         ("directive metadata admission release failed: "
-          ^ Keeper_lifecycle_admission.Durable_transaction
-            .authority_failure_to_wire
-              failure))
+    Log.Keeper.error
+      "directive metadata durable admission lock release requires attention \
+       keeper=%s failure=%s"
+      entry.name
+      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+         failure);
+    result
   | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
     Error
       ("directive metadata blocked by lifecycle authority: "

@@ -681,10 +681,10 @@ export function ApprovalsSurface() {
 
         ${firstLoad
           ? html`<${LoadingState}>Gate 큐 불러오는 중...<//>`
-          : queueUnavailable || items === null
-            ? null
           : view === 'history'
             ? html`<${ApHistory} items=${resolvedItems} />`
+          : queueUnavailable || items === null
+            ? null
           : html`
         <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
           <div class="ov-kpi">

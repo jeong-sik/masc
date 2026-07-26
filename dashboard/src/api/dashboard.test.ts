@@ -1738,6 +1738,7 @@ describe('setGateMode', () => {
 describe('dashboard goals decoding', () => {
   it('retains direct keeper references without projecting blocker metadata', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [
         makeRawGoalNode({
           latest_keeper_ref: 'keeper-sangsu',
@@ -1765,6 +1766,7 @@ describe('dashboard goals decoding', () => {
 
   it('decodes explicit phase counts separately from active status', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [makeRawGoalNode()],
       summary: {
         total_goals: 3,
@@ -1789,6 +1791,7 @@ describe('dashboard goals decoding', () => {
 
   it('decodes goal attainment projections on tree payloads', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [
         makeRawGoalNode({
           metric: 'completion_pct',
@@ -1839,6 +1842,7 @@ describe('dashboard goals decoding', () => {
 
   it('falls back to unmeasured goal attainment when payloads are old', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [
         makeRawGoalNode({
           metric: 'latency',
@@ -1873,6 +1877,7 @@ describe('dashboard goals decoding', () => {
 
   it('retains keeper trust summary and latest event on goal detail payloads', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       goal: makeRawGoalNode(),
       linked_tasks: [],
       linked_keepers: [
@@ -2006,6 +2011,7 @@ describe('dashboard goals decoding', () => {
 
   it('accepts raw runtime_trust approval/execution keys on goal detail payloads', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       goal: makeRawGoalNode(),
       linked_tasks: [],
       linked_keepers: [

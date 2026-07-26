@@ -101,7 +101,6 @@ async function loadSurface(
       changed_at: '2026-06-19T00:00:00Z',
       recovery_status: 'completed',
       recovery_error: null,
-      reopened: 0,
       started: 0,
       queued: 0,
     })
@@ -359,7 +358,16 @@ describe('ApprovalsSurface', () => {
   it('renders an explicit unavailable state instead of an empty queue', async () => {
     const { ApprovalsSurface } = await loadSurface(
       null,
-      [],
+      [
+        {
+          id: 'appr-resolved-during-reset',
+          keeper_name: 'keeper-a',
+          tool_name: 'fs_write',
+          decision: 'reject',
+          decision_kind: 'reject',
+          resolved_at: '2026-07-27T00:00:00Z',
+        },
+      ],
       [],
       undefined,
       {
@@ -385,6 +393,11 @@ describe('ApprovalsSurface', () => {
     expect(container.querySelector('.ov-kpis')).toBeNull()
     expect(container.querySelector('[data-testid="approvals-aside"]')).toBeNull()
     expect(container.textContent).not.toContain('열린 승인 0건')
+
+    container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
+    await flushUi()
+    expect(container.querySelector('[data-testid="approvals-history-view"]')?.textContent)
+      .toContain('appr-resolved-during-reset')
   }, 20000)
 
   it('reports the observed Keeper count without classifying the queue', async () => {

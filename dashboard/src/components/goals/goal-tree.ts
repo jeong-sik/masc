@@ -298,7 +298,12 @@ async function refreshGoalDetail(goalId: string) {
     detailData.value = next
   } catch (err) {
     if (detailRequestSeq !== reqId) return
-    detailError.value = errorToString(err)
+    detailData.value = null
+    if (hydrateGoalTreeError(err)) {
+      detailError.value = treeError.value
+    } else {
+      detailError.value = errorToString(err)
+    }
   } finally {
     if (detailRequestSeq === reqId) detailLoading.value = false
   }

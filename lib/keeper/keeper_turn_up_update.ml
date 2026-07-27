@@ -741,6 +741,8 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                       Keeper_runtime_meta_transaction.prepare
                                         ~operation:
                                           Keeper_runtime_meta_journal.Update
+                                        ~shutdown_supersession:
+                                          (Some supersession)
                                         ~config:ctx.config
                                         ~keeper_name:candidate.name
                                         ~previous_runtime

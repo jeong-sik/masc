@@ -246,7 +246,7 @@ let create_keeper_admitted_body
         Result.bind
           (Keeper_lifecycle_nonce.create
              permit
-             ~base_path:ctx.config.base_path
+             ctx.config
              ~keeper_id:p.name
              ~owner_id:trace_id
              ())
@@ -396,6 +396,7 @@ let create_keeper_admitted_body
         match
           Keeper_runtime_meta_transaction.prepare
             ~operation:Keeper_runtime_meta_journal.Create
+            ~shutdown_supersession:None
             ~config:ctx.config
             ~keeper_name:p.name
             ~previous_runtime

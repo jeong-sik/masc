@@ -13,15 +13,19 @@ let identity ~owner_id ~nonce =
   else Ok { owner_id; nonce }
 ;;
 
-let witness_base_path witness = witness.base_path
+let witness_masc_root witness = witness.masc_root
 let witness_keeper_id witness = witness.keeper_id
 let witness_source witness = witness.source
 let witness_target witness = witness.target
 let identity_owner_id identity = identity.owner_id
 let identity_nonce identity = identity.nonce
 
-let witness_of_nonce ~base_path ~keeper_id ~source ~owner_id nonce =
-  { base_path; keeper_id; source; target = { owner_id; nonce } }
+let witness_of_nonce ~config ~keeper_id ~source ~owner_id nonce =
+  { masc_root = Workspace.masc_root_dir config
+  ; keeper_id
+  ; source
+  ; target = { owner_id; nonce }
+  }
 ;;
 
 let floor_for_create ~base_path ~keeper_id =
@@ -43,11 +47,11 @@ let floor_for_create ~base_path ~keeper_id =
     else Ok (Int64.succ generation)
 ;;
 
-let with_mutation_admission permit ~base_path ~keeper_id fn =
+let with_mutation_admission permit config ~keeper_id fn =
   match
     Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
-      ~base_path
+      ~base_path:config.Workspace.base_path
       keeper_id
       fn
   with
@@ -58,27 +62,28 @@ let with_mutation_admission permit ~base_path ~keeper_id fn =
     Error Lifecycle_admission_mismatch
 ;;
 
-let create_admitted ~base_path ~keeper_id ~owner_id () =
+let create_admitted config ~keeper_id ~owner_id () =
+  let base_path = config.Workspace.base_path in
   let* floor = floor_for_create ~base_path ~keeper_id in
   let* nonce =
-    next_for_base_path_with_hooks
+    next_for_config_with_hooks
       ~snapshot_warnings:Head.snapshot_settlement_warnings
       ~compare_and_swap:Head.compare_and_swap
-      ~base_path
+      ~config
       ~keeper_id
       ~owner_id
       ~floor
       ()
   in
-  Ok (witness_of_nonce ~base_path ~keeper_id ~source:None ~owner_id nonce)
+  Ok (witness_of_nonce ~config ~keeper_id ~source:None ~owner_id nonce)
 ;;
 
-let create permit ~base_path ~keeper_id ~owner_id () =
-  with_mutation_admission permit ~base_path ~keeper_id (fun () ->
-    create_admitted ~base_path ~keeper_id ~owner_id ())
+let create permit config ~keeper_id ~owner_id () =
+  with_mutation_admission permit config ~keeper_id (fun () ->
+    create_admitted config ~keeper_id ~owner_id ())
 ;;
 
-let replace ~base_path ~keeper_id ~source ~owner_id () =
+let replace config ~keeper_id ~source ~owner_id () =
   let floor =
     if Int64.compare source.nonce runtime_max_nonce >= 0
     then Error Nonce_exhausted
@@ -118,24 +123,25 @@ let replace ~base_path ~keeper_id ~source ~owner_id () =
       Head.For_testing.compare_and_swap hooks
   in
   let* nonce =
-    next_for_base_path_with_hooks
+    next_for_config_with_hooks
       ~snapshot_warnings:Head.snapshot_settlement_warnings
       ~compare_and_swap
-      ~base_path
+      ~config
       ~keeper_id
       ~owner_id
       ~expected_source:source
       ~floor
       ()
   in
-  Ok (witness_of_nonce ~base_path ~keeper_id ~source:(Some source) ~owner_id nonce)
+  Ok (witness_of_nonce ~config ~keeper_id ~source:(Some source) ~owner_id nonce)
 ;;
 
-let recover_exact_admitted ~base_path ~keeper_id ~source ~target () =
+let recover_exact_admitted config ~keeper_id ~source ~target () =
+  let base_path = config.Workspace.base_path in
   if Filename.is_relative base_path
   then Error (Invalid_base_path base_path)
   else
-    let* root = prepare_root ~base_path in
+    let* root = prepare_root config in
     let* secure_random = entropy_source () in
     match
       with_head_parent root (fun parent ->
@@ -181,25 +187,32 @@ let recover_exact_admitted ~base_path ~keeper_id ~source ~target () =
              && equal_identity target row_target
            in
            if forward
-           then Ok { base_path; keeper_id; source; target }
+           then
+             Ok
+               { masc_root = Workspace.masc_root_dir config
+               ; keeper_id
+               ; source
+               ; target
+               }
            else Error Authority_identity_mismatch)
 ;;
 
-let recover_exact permit ~base_path ~keeper_id ~source ~target () =
-  with_mutation_admission permit ~base_path ~keeper_id (fun () ->
+let recover_exact permit config ~keeper_id ~source ~target () =
+  with_mutation_admission permit config ~keeper_id (fun () ->
     recover_exact_admitted
-      ~base_path
+      config
       ~keeper_id
       ~source
       ~target
       ())
 ;;
 
-let recover_published_replace ~base_path ~keeper_id ~source () =
+let recover_published_replace config ~keeper_id ~source () =
+  let base_path = config.Workspace.base_path in
   if Filename.is_relative base_path
   then Error (Invalid_base_path base_path)
   else
-    let* root = prepare_root ~base_path in
+    let* root = prepare_root config in
     let* secure_random = entropy_source () in
     match
       with_head_parent root (fun parent ->
@@ -230,13 +243,18 @@ let recover_published_replace ~base_path ~keeper_id ~source () =
               when String.equal owner_id source.owner_id
                    && Int64.equal nonce source.nonce ->
               let target = { owner_id = row.allocated_to; nonce = row.nonce } in
-              Ok { base_path; keeper_id; source = Some source; target }
+              Ok
+                { masc_root = Workspace.masc_root_dir config
+                ; keeper_id
+                ; source = Some source
+                ; target
+                }
             | Some _, Some _ | None, None | Some _, None | None, Some _ ->
               Error Authority_identity_mismatch))
 ;;
 
 let settle_published_replace
-      ~base_path
+      ~config
       ~keeper_id
       ~source
       ~owner_id
@@ -248,7 +266,7 @@ let settle_published_replace
     then Error Authority_identity_mismatch
     else
       Ok
-        { base_path
+        { masc_root = Workspace.masc_root_dir config
         ; keeper_id
         ; source = Some source
         ; target = { owner_id; nonce }
@@ -260,7 +278,7 @@ let settle_published_replace
     exact_target nonce
   | Publication_indeterminate { nonce; _ } ->
     let* witness =
-      recover_published_replace ~base_path ~keeper_id ~source ()
+      recover_published_replace config ~keeper_id ~source ()
     in
     let target = witness.target in
     if String.equal target.owner_id owner_id
@@ -270,15 +288,15 @@ let settle_published_replace
   | error -> Error error
 ;;
 
-let replace_settled_admitted ~base_path ~keeper_id ~source ~owner_id () =
-  match replace ~base_path ~keeper_id ~source ~owner_id () with
+let replace_settled_admitted config ~keeper_id ~source ~owner_id () =
+  match replace config ~keeper_id ~source ~owner_id () with
   | Ok witness -> Ok (Settled_allocated witness)
   | Error
       (( Published_with_warnings _
        | Published_with_failure _
        | Publication_indeterminate _ ) as publication_error) ->
     settle_published_replace
-      ~base_path
+      ~config
       ~keeper_id
       ~source
       ~owner_id
@@ -286,15 +304,15 @@ let replace_settled_admitted ~base_path ~keeper_id ~source ~owner_id () =
     |> Result.map (fun witness ->
       Settled_recovered (witness, Some publication_error))
   | Error Authority_identity_mismatch ->
-    recover_published_replace ~base_path ~keeper_id ~source ()
+    recover_published_replace config ~keeper_id ~source ()
     |> Result.map (fun witness -> Settled_recovered (witness, None))
   | Error error -> Error error
 ;;
 
-let replace_settled permit ~base_path ~keeper_id ~source ~owner_id () =
-  with_mutation_admission permit ~base_path ~keeper_id (fun () ->
+let replace_settled permit config ~keeper_id ~source ~owner_id () =
+  with_mutation_admission permit config ~keeper_id (fun () ->
     replace_settled_admitted
-      ~base_path
+      config
       ~keeper_id
       ~source
       ~owner_id
@@ -416,7 +434,7 @@ module For_testing = struct
     | Publication_indeterminate
     | Cancellation_after_publication
 
-  let root_path_for_base_path = root_path_for_base_path
+  let root_path = root_path
   let authority_leaf = authority_leaf
 
   let with_fd_backed_parent_opening fn =

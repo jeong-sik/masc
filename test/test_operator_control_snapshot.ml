@@ -16,7 +16,7 @@ let seed_current_keeper_meta
          match
            Keeper_lifecycle_nonce.create
              permit
-             ~base_path:config.Workspace.base_path
+             config
              ~keeper_id:meta.name
              ~owner_id:
                (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -3354,9 +3354,22 @@ let test_runtime_meta_identical_target_honors_forward_preference () =
         { original with meta_version = original.meta_version + 1 }
       in
       let intent =
+        let shutdown_supersession =
+          match
+            Keeper_shutdown_supersession.preflight
+              ~config
+              ~keeper_name
+              ~actor:"operator"
+          with
+          | Ok supersession -> supersession
+          | Error error ->
+            Alcotest.fail
+              (Keeper_shutdown_supersession.error_to_string error)
+        in
         match
           Keeper_runtime_meta_transaction.prepare
             ~operation:Keeper_runtime_meta_journal.Update
+            ~shutdown_supersession:(Some shutdown_supersession)
             ~config
             ~keeper_name
             ~previous_runtime:None
@@ -3962,7 +3975,7 @@ let test_keeper_lifecycle_transaction_admission_waits_for_cleanup () =
           let replacement =
             Keeper_lifecycle_nonce.replace_settled
               permit
-              ~base_path:config.base_path
+              config
               ~keeper_id:keeper_name
               ~source
               ~owner_id:

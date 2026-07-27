@@ -71,7 +71,7 @@ val identity :
 
 val create :
   Keeper_lifecycle_admission.Durable_transaction.permit ->
-  base_path:string ->
+  Workspace.config ->
   keeper_id:string ->
   owner_id:string ->
   unit ->
@@ -79,7 +79,7 @@ val create :
 
 val recover_exact :
   Keeper_lifecycle_admission.Durable_transaction.permit ->
-  base_path:string ->
+  Workspace.config ->
   keeper_id:string ->
   source:identity option ->
   target:identity ->
@@ -90,7 +90,7 @@ val recover_exact :
 
 val replace_settled :
   Keeper_lifecycle_admission.Durable_transaction.permit ->
-  base_path:string ->
+  Workspace.config ->
   keeper_id:string ->
   source:identity ->
   owner_id:string ->
@@ -100,7 +100,7 @@ val replace_settled :
     from this call into an exact forward witness. No caller-provided
     publication claim and no reverse witness is accepted. *)
 
-val witness_base_path : _ witness -> string
+val witness_masc_root : _ witness -> string
 val witness_keeper_id : _ witness -> string
 val witness_source : _ witness -> identity option
 val witness_target : _ witness -> identity
@@ -118,7 +118,7 @@ module For_testing : sig
     | Publication_indeterminate
     | Cancellation_after_publication
 
-  val root_path_for_base_path : base_path:string -> string
+  val root_path : Workspace.config -> string
   val authority_leaf : keeper_id:string -> string
   val with_fd_backed_parent_opening : (unit -> 'a) -> 'a
 

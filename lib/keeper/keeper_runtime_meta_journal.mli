@@ -13,6 +13,7 @@ type intent =
   ; candidate_runtime : string option
   ; previous_meta : Keeper_meta_contract.keeper_meta option
   ; candidate_meta : Keeper_meta_contract.keeper_meta
+  ; shutdown_supersession : Keeper_shutdown_supersession.t option
   }
 
 type tombstone =
@@ -41,6 +42,7 @@ val make_intent :
   candidate_runtime:string option ->
   previous_meta:Keeper_meta_contract.keeper_meta option ->
   candidate_meta:Keeper_meta_contract.keeper_meta ->
+  shutdown_supersession:Keeper_shutdown_supersession.t option ->
   (intent, error) result
 
 val reserve : Workspace.config -> intent -> (unit, error) result
@@ -54,4 +56,3 @@ val admission_decision :
   Keeper_lifecycle_admission_durable_types.decision
 
 val is_journal_leaf : string -> bool
-

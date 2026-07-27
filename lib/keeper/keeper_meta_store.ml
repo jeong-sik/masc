@@ -352,8 +352,8 @@ let meta_identity_matches identity (meta : Keeper_meta_contract.keeper_meta) =
 
 let witness_binding_matches config m witness =
   String.equal
-    config.Workspace.base_path
-    (Keeper_lifecycle_nonce.witness_base_path witness)
+    (Workspace.masc_root_dir config)
+    (Keeper_lifecycle_nonce.witness_masc_root witness)
   && String.equal m.Keeper_meta_contract.name
        (Keeper_lifecycle_nonce.witness_keeper_id witness)
   && meta_identity_matches (Keeper_lifecycle_nonce.witness_target witness) m

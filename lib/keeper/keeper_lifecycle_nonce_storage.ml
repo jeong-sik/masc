@@ -25,10 +25,8 @@ let sha256 value =
   Digestif.SHA256.(to_hex (digest_string value))
 ;;
 
-let root_path_for_base_path ~base_path =
-  Filename.concat
-    (Common.masc_dir_from_base_path ~base_path)
-    root_leaf
+let root_path config =
+  Filename.concat (Workspace.masc_root_dir config) root_leaf
 ;;
 
 let authority_leaf ~keeper_id =
@@ -215,12 +213,12 @@ let directory_failure_to_string = function
     Printexc.to_string exception_
 ;;
 
-let rec prepare_root ~base_path =
+let rec prepare_root config =
   match Fs_compat.get_fs_opt () with
   | None -> Error Filesystem_capability_unavailable
   | Some fs ->
-    let ownership_root = Common.masc_dir_from_base_path ~base_path in
-    let root_path = root_path_for_base_path ~base_path in
+    let ownership_root = Workspace.masc_root_dir config in
+    let root_path = root_path config in
     (match
        Keeper_fs_durable_directory.ensure
          ~before_prepare:Fun.id
@@ -233,7 +231,7 @@ let rec prepare_root ~base_path =
      | Ok lease ->
        if Keeper_fs_durable_directory.lease_is_current lease
        then Ok Eio.Path.(fs / root_path)
-       else prepare_root ~base_path)
+       else prepare_root config)
 ;;
 
 let entropy_source () =
@@ -385,16 +383,17 @@ let rec allocate
         | Head.Unchanged, _ -> Error (Head_write_failed failure)))
 ;;
 
-let next_for_base_path_with_hooks
+let next_for_config_with_hooks
       ~snapshot_warnings
       ~compare_and_swap
-      ~base_path
+      ~config
       ~keeper_id
       ~owner_id
       ?expected_source
       ?(floor = 1L)
       ()
   =
+  let base_path = config.Workspace.base_path in
   if Filename.is_relative base_path
   then Error (Invalid_base_path base_path)
   else if
@@ -408,7 +407,7 @@ let next_for_base_path_with_hooks
   else if Int64.compare floor runtime_max_nonce > 0
   then Error (Runtime_nonce_out_of_range floor)
   else
-    let* root = prepare_root ~base_path in
+    let* root = prepare_root config in
     allocate
       ~snapshot_warnings
       ~compare_and_swap
@@ -421,11 +420,11 @@ let next_for_base_path_with_hooks
       ~floor
 ;;
 
-let next_for_base_path ~base_path ~keeper_id ~owner_id ?floor () =
-  next_for_base_path_with_hooks
+let next_for_config ~config ~keeper_id ~owner_id ?floor () =
+  next_for_config_with_hooks
     ~snapshot_warnings:Head.snapshot_settlement_warnings
     ~compare_and_swap:Head.compare_and_swap
-    ~base_path
+    ~config
     ~keeper_id
     ~owner_id
     ?floor

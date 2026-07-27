@@ -64,7 +64,7 @@ type replace
 type recover_exact
 
 type 'kind witness =
-  { base_path : string
+  { masc_root : string
   ; keeper_id : string
   ; source : identity option
   ; target : identity

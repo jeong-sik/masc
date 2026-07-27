@@ -5,12 +5,18 @@ let active_permit_lease_key : permit_lease Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
 
-let inherited_permit_scope_suppressed_key : bool Eio.Fiber.key =
+let inherited_permit_scope_suppressed_key : int Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
 
 let without_inherited_permit_scope fn =
-  Eio.Fiber.with_binding inherited_permit_scope_suppressed_key true fn
+  match Eio.Fiber.get active_permit_scope_key with
+  | None -> fn ()
+  | Some permit ->
+    Eio.Fiber.with_binding
+      inherited_permit_scope_suppressed_key
+      permit.scope_id
+      fn
 ;;
 
 let next_permit_scope = Atomic.make 0
@@ -63,10 +69,10 @@ let with_active_permit ~base_path ~keeper_name ~evidence fn =
 ;;
 
 let permit_scope_matches (permit : permit) ~base_path keeper_name =
-  not
-    (Option.value
-       ~default:false
-       (Eio.Fiber.get inherited_permit_scope_suppressed_key))
+  (match Eio.Fiber.get inherited_permit_scope_suppressed_key with
+   | None -> true
+   | Some suppressed_scope_id ->
+     not (Int.equal suppressed_scope_id permit.scope_id))
   && String.equal permit.base_path base_path
   && String.equal permit.keeper_name keeper_name
   &&

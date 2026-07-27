@@ -23,7 +23,7 @@ let replace_or_recover_exact_admitted
     match
       Keeper_lifecycle_nonce.replace_settled
         permit
-        ~base_path:config.base_path
+        config
         ~keeper_id:meta.name
         ~source
         ~owner_id:new_trace_id_raw

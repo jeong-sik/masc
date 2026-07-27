@@ -15,6 +15,8 @@ type recovery_failure =
   | Journal_failure of Journal.error
   | Runtime_convergence_failed of string
   | Metadata_convergence_failed of string
+  | Shutdown_supersession_failed of string
+  | Shutdown_supersession_binding_invalid
   | Unrelated_runtime_observed of string option
   | Unrelated_metadata_observed
   | Both_directions_failed of
@@ -34,6 +36,10 @@ let recovery_failure_to_string = function
     "runtime convergence failed: " ^ detail
   | Metadata_convergence_failed detail ->
     "metadata convergence failed: " ^ detail
+  | Shutdown_supersession_failed detail ->
+    "shutdown supersession failed: " ^ detail
+  | Shutdown_supersession_binding_invalid ->
+    "shutdown supersession does not bind this runtime/meta transaction"
   | Unrelated_runtime_observed None ->
     "runtime authority is outside both transaction targets: none"
   | Unrelated_runtime_observed (Some runtime_id) ->
@@ -61,6 +67,7 @@ end
 
 let prepare
       ~operation
+      ~shutdown_supersession
       ~config
       ~keeper_name
       ~previous_runtime
@@ -68,6 +75,13 @@ let prepare
       ~previous_meta
       ~candidate_meta
   =
+  if
+    not
+      (Option.for_all
+         (Keeper_shutdown_supersession.matches ~config ~keeper_name)
+         shutdown_supersession)
+  then Error Shutdown_supersession_binding_invalid
+  else
   match
     Journal.make_intent
       ~operation
@@ -76,6 +90,7 @@ let prepare
       ~candidate_runtime
       ~previous_meta
       ~candidate_meta
+      ~shutdown_supersession
   with
   | Error error -> Error (Journal_failure error)
   | Ok intent ->
@@ -328,11 +343,43 @@ let clear_exact config intent direction =
       (Metadata_convergence_failed
          "refusing to clear a transaction without an exact paired state")
   | Ok true ->
-    Journal.clear config intent
-    |> Result.map_error (fun error -> Journal_failure error)
+    let supersession_result =
+      match direction, intent.Journal.shutdown_supersession with
+      | `Rollback, _ | `Forward, None -> Ok ()
+      | `Forward, Some obligation ->
+        (match
+           Keeper_shutdown_supersession.commit_after_metadata_update
+             ~config
+             obligation
+         with
+         | Ok
+             ( Keeper_shutdown_supersession.No_shutdown_admission
+             | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
+           Ok ()
+         | Error
+             (Keeper_shutdown_supersession
+              .Metadata_committed_admission_owned_by_other _) ->
+           Ok ()
+         | Error error ->
+           Error
+             (Shutdown_supersession_failed
+                (Keeper_shutdown_supersession.error_to_string error)))
+    in
+    Result.bind supersession_result (fun () ->
+      Journal.clear config intent
+      |> Result.map_error (fun error -> Journal_failure error))
 ;;
 
 let recover ?lifecycle_token permit config intent ~prefer =
+  if
+    not
+      (Option.for_all
+         (Keeper_shutdown_supersession.matches
+            ~config
+            ~keeper_name:intent.Journal.keeper_name)
+         intent.Journal.shutdown_supersession)
+  then Error Shutdown_supersession_binding_invalid
+  else
   let runtime_observed =
     Runtime.runtime_id_for_keeper intent.Journal.keeper_name
   in

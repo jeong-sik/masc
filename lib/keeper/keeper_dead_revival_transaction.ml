@@ -1495,7 +1495,7 @@ let allocate_or_recover_replacement
     (match
        Keeper_lifecycle_nonce.replace_settled
          permit
-         ~base_path:config.Workspace.base_path
+         config
          ~keeper_id:original.name
          ~source
          ~owner_id
@@ -1759,7 +1759,7 @@ let rollback permit token config (journal : journal) payload _original_entry =
                   (nonce_error
                      (Keeper_lifecycle_nonce.recover_exact
                         permit
-                        ~base_path:config.base_path
+                        config
                         ~keeper_id:restored.name
                         ~source:(Some source)
                         ~target

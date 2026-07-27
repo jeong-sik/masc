@@ -127,7 +127,7 @@ let write_current_keeper_meta
             match
               Masc.Keeper_lifecycle_nonce.create
                 permit
-                ~base_path:config.Masc.Workspace.base_path
+                config
                 ~keeper_id:meta.name
                 ~owner_id:
                   (Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id)

@@ -30,6 +30,7 @@ val recovery_failure_to_string : recovery_failure -> string
 
 val prepare :
   operation:Keeper_runtime_meta_journal.operation ->
+  shutdown_supersession:Keeper_shutdown_supersession.t option ->
   config:Workspace.config ->
   keeper_name:string ->
   previous_runtime:string option ->
@@ -61,4 +62,3 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 end
-

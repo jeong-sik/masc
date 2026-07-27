@@ -20,6 +20,7 @@ type intent =
   ; candidate_runtime : string option
   ; previous_meta : keeper_meta option
   ; candidate_meta : keeper_meta
+  ; shutdown_supersession : Keeper_shutdown_supersession.t option
   }
 
 type tombstone =
@@ -92,6 +93,11 @@ let option_meta_to_json = function
   | Some meta -> Keeper_meta_json.meta_to_json meta
 ;;
 
+let option_shutdown_supersession_to_json = function
+  | None -> `Null
+  | Some obligation -> Keeper_shutdown_supersession.to_json obligation
+;;
+
 let binding_json
       ~owner_id
       ~keeper_name
@@ -100,6 +106,7 @@ let binding_json
       ~candidate_runtime
       ~previous_meta
       ~candidate_meta
+      ~shutdown_supersession
   =
   `Assoc
     [ "owner_id", `String owner_id
@@ -109,6 +116,8 @@ let binding_json
     ; "candidate_runtime", option_string_to_json candidate_runtime
     ; "previous_meta", option_meta_to_json previous_meta
     ; "candidate_meta", Keeper_meta_json.meta_to_json candidate_meta
+    ; ( "shutdown_supersession"
+      , option_shutdown_supersession_to_json shutdown_supersession )
     ]
 ;;
 
@@ -120,6 +129,7 @@ let transaction_id_for
       ~candidate_runtime
       ~previous_meta
       ~candidate_meta
+      ~shutdown_supersession
   =
   binding_json
     ~owner_id
@@ -129,6 +139,7 @@ let transaction_id_for
     ~candidate_runtime
     ~previous_meta
     ~candidate_meta
+    ~shutdown_supersession
   |> Yojson.Safe.to_string
   |> fun binding ->
   sha256 ("keeper-runtime-meta-transaction-v1\000" ^ binding)
@@ -167,6 +178,7 @@ let validate_intent (intent : intent) =
       ~candidate_runtime:intent.candidate_runtime
       ~previous_meta:intent.previous_meta
       ~candidate_meta:intent.candidate_meta
+      ~shutdown_supersession:intent.shutdown_supersession
   in
   if not (is_sha256 intent.transaction_id)
   then Error (Invalid_current "transaction_id is not a canonical SHA-256")
@@ -193,18 +205,31 @@ let validate_intent (intent : intent) =
            || intent.candidate_meta.runtime.nonce <= 0
          then Error (Invalid_current "candidate metadata binding is invalid")
          else
-           match intent.operation, intent.previous_meta with
-           | Create, None when Int.equal intent.candidate_meta.meta_version 0 ->
+           match
+             intent.operation,
+             intent.previous_meta,
+             intent.shutdown_supersession
+           with
+           | Create, None, None
+             when Int.equal intent.candidate_meta.meta_version 0 ->
              Ok ()
-           | Create, None ->
+           | Create, None, None ->
              Error
                (Invalid_current
                   "create candidate must begin at metadata version zero")
-           | Create, Some _ ->
+           | Create, Some _, _ ->
              Error (Invalid_current "create intent cannot contain previous metadata")
-           | Update, None ->
+           | Create, None, Some _ ->
+             Error
+               (Invalid_current
+                  "create intent cannot contain shutdown supersession")
+           | Update, None, _ ->
              Error (Invalid_current "update intent requires previous metadata")
-           | Update, Some previous
+           | Update, Some _, None ->
+             Error
+               (Invalid_current
+                  "update intent requires a shutdown supersession decision")
+           | Update, Some previous, Some _
              when previous.runtime.nonce > 0
                   && same_identity previous intent.candidate_meta
                   && Int.equal
@@ -224,6 +249,7 @@ let make_intent
       ~candidate_runtime
       ~previous_meta
       ~candidate_meta
+      ~shutdown_supersession
   =
   try
     let owner_id = sha256 (Crypto_rng.generate 32) in
@@ -236,6 +262,7 @@ let make_intent
         ~candidate_runtime
         ~previous_meta
         ~candidate_meta
+        ~shutdown_supersession
     in
     let intent =
       { transaction_id
@@ -246,6 +273,7 @@ let make_intent
       ; candidate_runtime
       ; previous_meta
       ; candidate_meta
+      ; shutdown_supersession
       }
     in
     Result.map (fun () -> intent) (validate_intent intent)
@@ -275,6 +303,8 @@ let row_to_json = function
       ; "candidate_runtime", option_string_to_json intent.candidate_runtime
       ; "previous_meta", option_meta_to_json intent.previous_meta
       ; "candidate_meta", Keeper_meta_json.meta_to_json intent.candidate_meta
+      ; ( "shutdown_supersession"
+        , option_shutdown_supersession_to_json intent.shutdown_supersession )
       ; "stage", stage_to_json (Active intent)
       ]
   | Cleared tombstone ->
@@ -333,6 +363,18 @@ let required_optional_meta key fields =
   | None -> Error (Invalid_current ("journal field " ^ key ^ " is missing"))
 ;;
 
+let required_optional_shutdown_supersession key fields =
+  match List.assoc_opt key fields with
+  | Some `Null -> Ok None
+  | Some json ->
+    Keeper_shutdown_supersession.of_json json
+    |> Result.map Option.some
+    |> Result.map_error (fun detail ->
+      Invalid_current
+        ("journal shutdown supersession is invalid: " ^ detail))
+  | None -> Error (Invalid_current ("journal field " ^ key ^ " is missing"))
+;;
+
 let row_of_json = function
   | `Assoc fields ->
     let ( let* ) = Result.bind in
@@ -364,6 +406,7 @@ let row_of_json = function
              ; "candidate_runtime"
              ; "previous_meta"
              ; "candidate_meta"
+             ; "shutdown_supersession"
              ; "stage"
              ]
              fields
@@ -375,6 +418,11 @@ let row_of_json = function
          let* candidate_runtime = required_runtime "candidate_runtime" fields in
          let* previous_meta = required_optional_meta "previous_meta" fields in
          let* candidate_meta = required_meta "candidate_meta" fields in
+         let* shutdown_supersession =
+           required_optional_shutdown_supersession
+             "shutdown_supersession"
+             fields
+         in
          let intent =
            { transaction_id
            ; owner_id
@@ -384,6 +432,7 @@ let row_of_json = function
            ; candidate_runtime
            ; previous_meta
            ; candidate_meta
+           ; shutdown_supersession
            }
          in
          let* () = validate_intent intent in

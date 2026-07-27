@@ -24,7 +24,7 @@ let with_admission ~base_path ~keeper_id fn =
     .with_durable_lifecycle_admission
       config
       ~keeper_name:keeper_id
-      fn
+      (fun permit -> fn config permit)
   with
   | Admission_completed result -> result
   | Admission_completed_with_attention (result, _) -> result
@@ -36,8 +36,8 @@ let with_admission ~base_path ~keeper_id fn =
 ;;
 
 let create_result ~base_path ~keeper_id ~owner_id =
-  with_admission ~base_path ~keeper_id (fun permit ->
-    Nonce.create permit ~base_path ~keeper_id ~owner_id ())
+  with_admission ~base_path ~keeper_id (fun config permit ->
+    Nonce.create permit config ~keeper_id ~owner_id ())
 ;;
 
 let create ~base_path ~keeper_id ~owner_id =
@@ -50,10 +50,10 @@ let settled_target = function
 ;;
 
 let replace_target ~base_path ~keeper_id ~source ~owner_id =
-  with_admission ~base_path ~keeper_id (fun permit ->
+  with_admission ~base_path ~keeper_id (fun config permit ->
     Nonce.replace_settled
       permit
-      ~base_path
+      config
       ~keeper_id
       ~source
       ~owner_id
@@ -63,10 +63,10 @@ let replace_target ~base_path ~keeper_id ~source ~owner_id =
 ;;
 
 let replace_settled ~base_path ~keeper_id ~source ~owner_id =
-  with_admission ~base_path ~keeper_id (fun permit ->
+  with_admission ~base_path ~keeper_id (fun config permit ->
     Nonce.replace_settled
       permit
-      ~base_path
+      config
       ~keeper_id
       ~source
       ~owner_id
@@ -74,10 +74,10 @@ let replace_settled ~base_path ~keeper_id ~source ~owner_id =
 ;;
 
 let recover_exact ~base_path ~keeper_id ~source ~target =
-  with_admission ~base_path ~keeper_id (fun permit ->
+  with_admission ~base_path ~keeper_id (fun config permit ->
     Nonce.recover_exact
       permit
-      ~base_path
+      config
       ~keeper_id
       ~source
       ~target
@@ -85,8 +85,9 @@ let recover_exact ~base_path ~keeper_id ~source ~target =
 ;;
 
 let authority_path ~base_path ~keeper_id =
+  let config = Masc.Workspace.default_config base_path in
   Filename.concat
-    (Nonce.For_testing.root_path_for_base_path ~base_path)
+    (Nonce.For_testing.root_path config)
     (Nonce.For_testing.authority_leaf ~keeper_id)
 ;;
 
@@ -112,7 +113,11 @@ let test_first_no_evidence_is_one () =
   let witness = create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" in
   check int64 "first allocation" 1L (target_nonce witness);
   check string "keeper binding" "keeper-a" (Nonce.witness_keeper_id witness);
-  check string "base path binding" base_path (Nonce.witness_base_path witness);
+  check
+    string
+    "workspace root binding"
+    (Masc.Workspace.masc_root_dir (Masc.Workspace.default_config base_path))
+    (Nonce.witness_masc_root witness);
   check (option int64) "create has no source" None
     (Nonce.witness_source witness |> Option.map Nonce.identity_nonce)
 ;;
@@ -388,10 +393,10 @@ let test_out_of_range_floor_is_rejected_before_head_creation () =
   let module Storage = Masc.Keeper_lifecycle_nonce_storage in
   let keeper_id = "keeper-a" in
   let result =
-    Storage.next_for_base_path_with_hooks
+    Storage.next_for_config_with_hooks
       ~snapshot_warnings:Storage.Head.snapshot_settlement_warnings
       ~compare_and_swap:Storage.Head.compare_and_swap
-      ~base_path
+      ~config:(Masc.Workspace.default_config base_path)
       ~keeper_id
       ~owner_id:"trace-a"
       ~floor:(Int64.succ (Int64.of_int max_int))
@@ -420,6 +425,24 @@ let test_invalid_current_evidence_is_generic () =
   | Error (Nonce.Corrupt_current (Nonce.Invalid_current _)) -> ()
   | Error error -> failf "unexpected invalid-current error: %s" (Nonce.error_to_string error)
   | Ok witness -> failf "invalid evidence allocated nonce %Ld" (target_nonce witness)
+;;
+
+let test_authority_root_is_cluster_scoped () =
+  with_base "masc_lifecycle_witness_cluster_scope_" @@ fun base_path ->
+  let default_config = Masc.Workspace.default_config base_path in
+  let cluster_config =
+    { default_config with
+      backend_config =
+        { default_config.backend_config with cluster_name = "cluster-b" }
+    }
+  in
+  check bool
+    "same keeper in different clusters has a distinct authority root"
+    true
+    (not
+       (String.equal
+          (Nonce.For_testing.root_path default_config)
+          (Nonce.For_testing.root_path cluster_config)))
 ;;
 
 let () =
@@ -465,6 +488,10 @@ let () =
             `Quick
             test_out_of_range_floor_is_rejected_before_head_creation
         ; test_case "invalid current evidence is generic" `Quick test_invalid_current_evidence_is_generic
+        ; test_case
+            "authority root is cluster scoped"
+            `Quick
+            test_authority_root_is_cluster_scoped
         ; test_case
             "reentrant lease drains before admission release"
             `Quick

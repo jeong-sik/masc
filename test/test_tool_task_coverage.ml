@@ -2021,6 +2021,50 @@ let () =
       (Json_util.assoc_member_opt "next_action" (Tool_result.data result) = None);
     assert_goal_still_executing ctx ~goal_id)
 
+let () =
+  test "keeper stale verification no-op suppresses Goal completion cue"
+    (fun () ->
+       let ctx = make_test_ctx () in
+       let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
+       let goal_id = "goal-stale-verification" in
+       ignore (create_executing_goal ctx ~goal_id);
+       add_goal_linked_task ctx ~goal_id ~title:"Already completed task";
+       start_task_001 ctx;
+       let done_result =
+         Task.Tool.handle_done
+           ~tool_name:"test_tool"
+           ~start_time:0.0
+           ctx
+           (`Assoc
+              [ "task_id", `String "task-001"
+              ; "notes", `String "The linked task is already complete."
+              ; "evidence_refs", `List [ `String "commit:abc123" ]
+              ])
+       in
+       if not (Tool_result.is_success done_result) then
+         failwith (Tool_result.message done_result);
+       let stale_result =
+         keeper_transition
+           verifier_ctx
+           (`Assoc
+              [ "task_id", `String "task-001"
+              ; "action", `String "approve"
+              ; "notes", `String "stale verifier delivery"
+              ])
+       in
+       if not (Tool_result.is_success stale_result) then
+         failwith (Tool_result.message stale_result);
+       assert
+         (str_contains
+            (Tool_result.message stale_result)
+            "Stale verification verdict ignored");
+       assert
+         (Json_util.assoc_member_opt
+            "next_action"
+            (Tool_result.data stale_result)
+          = None);
+       assert_goal_still_executing ctx ~goal_id)
+
 let () = test "handle_transition_submitter_may_deliver_llm_verdict" (fun () ->
   (
     let worker_ctx = make_test_ctx_with_agent "worker" in

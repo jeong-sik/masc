@@ -268,7 +268,17 @@ and handle_transition
       ctx
       ~task_id
       ~action_s
-  | Some _ ->
+  | Some task_before ->
+  let task_was_done_before =
+    match task_before.task_status with
+    | Masc_domain.Done _ -> true
+    | Masc_domain.Todo
+    | Masc_domain.Claimed _
+    | Masc_domain.InProgress _
+    | Masc_domain.AwaitingVerification _
+    | Masc_domain.Cancelled _ ->
+      false
+  in
   let release_owner_mismatch_rejection =
     match action, task_opt with
     | Masc_domain.Release, Some task ->
@@ -702,7 +712,8 @@ and handle_transition
             | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
    | Error _, _ -> ());
   match result, task_list_projection with
-  | Ok message, Tool_capability_projection.Keeper_tasks_list ->
+  | Ok message, Tool_capability_projection.Keeper_tasks_list
+    when not task_was_done_before ->
     (match goal_completion_next_action ~config:ctx.config ~task_id with
      | Some next_action ->
        Tool_result.make_ok
@@ -716,6 +727,8 @@ and handle_transition
               ])
          ()
      | None -> result_to_response ~tool_name ~start_time result)
+  | Ok _, Tool_capability_projection.Keeper_tasks_list ->
+    result_to_response ~tool_name ~start_time result
   | Error _, Tool_capability_projection.Keeper_tasks_list ->
     result_to_response ~tool_name ~start_time result
   | (Ok _ | Error _), Tool_capability_projection.External_masc_tasks ->

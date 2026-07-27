@@ -70,8 +70,6 @@ let validation_error_result
     (Yojson.Safe.to_string data)
 ;;
 
-let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
-
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
    lifecycle SSOT) instead of hand-rolling them here, so the validator, the MCP
    schema enum, and the type can never drift apart. *)
@@ -104,27 +102,6 @@ let make_type_field_error ~field ~constraint_violated ~expected ~received =
    unexpected horizon key is governed by the schema's additionalProperties
    policy, not a hand-written substring guard. *)
 
-let parse_optional_goal_status args field =
-  (* The typed goal_status is gone (RFC-0352 slice 1); the arg survives only
-     so an explicit "status" input keeps its two-stage rejection: enum
-     validation first, then the lifecycle-arg rejection in the handler. *)
-  match Json_util.assoc_member_opt field args with
-  | None | Some `Null -> Ok None
-  | Some (`String raw) when String.trim raw = "" -> Ok None
-  | Some (`String raw) ->
-    let normalized = String.lowercase_ascii (String.trim raw) in
-    if List.mem normalized goal_status_strings
-    then Ok (Some normalized)
-    else Error (make_enum_field_error ~field ~allowed:goal_status_strings ~received:raw)
-  | Some json ->
-    Error
-      (make_type_field_error
-         ~field
-         ~constraint_violated:Type_string
-         ~expected:"string"
-         ~received:(Yojson.Safe.to_string json))
-;;
-
 let parse_optional_goal_phase args field =
   match Json_util.assoc_member_opt field args with
   | None | Some `Null -> Ok None
@@ -141,22 +118,6 @@ let parse_optional_goal_phase args field =
          ~constraint_violated:Type_string
          ~expected:"string"
          ~received:(Yojson.Safe.to_string json))
-;;
-
-let reject_retired_goal_list_status args =
-  match args with
-  | `Assoc fields ->
-    (match List.assoc_opt "status" fields with
-     | None -> Ok ()
-     | Some json ->
-       Error
-         { field = "status"
-         ; constraint_violated = One_of goal_phase_strings
-         ; message = "status filter was removed from masc_goal_list; use phase"
-         ; expected = Some "phase"
-         ; received = Some (Yojson.Safe.to_string json)
-         })
-  | _ -> Ok ()
 ;;
 
 let goal_upsert_lifecycle_error ~tool_name ~start_time field =
@@ -235,80 +196,6 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ])
 ;;
 
-let linked_task_evidence (ctx : context) (goal : Goal_store.goal) =
-  match Workspace.read_backlog_r ctx.config with
-  | Error msg -> Error ("Goal completion task evidence unavailable: " ^ msg)
-  | Ok backlog ->
-    (match Workspace_goal_index.read_goal_task_links_r ctx.config with
-     | Error msg -> Error ("Goal completion task links unavailable: " ^ msg)
-     | Ok goal_task_links ->
-       let index =
-         Workspace_goal_index.build_goal_task_index
-           ~goal_task_links
-           backlog.tasks
-       in
-       let linked_tasks =
-         Workspace_goal_index.tasks_for_goal index ~goal_id:goal.id
-       in
-       Ok linked_tasks)
-;;
-
-let goal_completion_evidence (ctx : context) (goal : Goal_store.goal) =
-  match linked_task_evidence ctx goal with
-  | Error _ as error -> error
-  | Ok linked_tasks ->
-    let child_goals =
-      Goal_store.list_goals ctx.config ()
-      |> List.filter (fun (candidate : Goal_store.goal) ->
-           candidate.parent_goal_id = Some goal.id)
-    in
-    Ok (linked_tasks, child_goals)
-;;
-
-let persist_nonterminal_goal_review
-      (ctx : context)
-      (goal : Goal_store.goal)
-      ~failure
-      ~reason
-  =
-  Goal_store.record_completion_review_failure_if_unchanged
-    ctx.config
-    ~expected:goal
-    ~failure
-    ~review_note:reason
-    ~reviewed_at:(Masc_domain.now_iso ())
-;;
-
-let conditional_goal_error_result
-      ~tool_name
-      ~start_time
-      (error : Goal_store.conditional_update_error)
-  =
-  let code =
-    match error with
-    | Goal_store.Goal_not_found -> Not_found
-    | Goal_store.Goal_snapshot_changed -> Conflict
-    | Goal_store.Goal_approval_invalid -> Conflict
-    | Goal_store.Goal_persistence_failed _ -> Internal_error
-  in
-  let class_ =
-    match error with
-    | Goal_store.Goal_not_found | Goal_store.Goal_snapshot_changed ->
-      Tool_result.Workflow_rejection
-    | Goal_store.Goal_approval_invalid ->
-      Tool_result.Workflow_rejection
-    | Goal_store.Goal_persistence_failed _ -> Tool_result.Runtime_failure
-  in
-  error_result_typed
-    ~class_
-    ~tool_name
-    ~start_time
-    ~code
-    (Goal_store.conditional_update_error_to_string error)
-;;
-
-let goal_completion_operation_counter = Atomic.make 0
-
 let handle_goal_completion_request
       ~tool_name
       ~start_time
@@ -321,205 +208,77 @@ let handle_goal_completion_request
     "Goal completion review requested goal_id=%s actor=%s"
     goal.id
     ctx.agent_name;
-  match goal_completion_evidence ctx goal with
-  | Error msg ->
-    (match
-       persist_nonterminal_goal_review
-         ctx
-         goal
-         ~failure:Goal_store.Unavailable
-         ~reason:msg
-     with
-     | Error error ->
-       conditional_goal_error_result ~tool_name ~start_time error
-     | Ok _ ->
-       Log.Workspace.warn
-         "Goal completion remains nonterminal goal_id=%s outcome=unavailable \
-          stage=evidence"
-         goal.id;
-       error_result_typed
-         ~class_:Tool_result.Transient_error
-         ~tool_name
-         ~start_time
-         ~code:Precondition_failed
-         (msg ^ "; Goal remains nonterminal"))
-  | Ok (linked_tasks, child_goals) ->
-    let operation_nonce =
-      Atomic.fetch_and_add goal_completion_operation_counter 1
-    in
-    let random_nonce = Random_id.hex ~bytes:32 in
-    let operation_id =
-      Digestif.SHA256.(
-        digest_string
-          (Printf.sprintf
-             "%s\000%d\000%s\000%.17g\000%d\000%s"
-             goal.id
-             goal_version
-             ctx.agent_name
-             (Time_compat.now ())
-             operation_nonce
-             random_nonce)
-        |> to_hex)
-    in
-    let request : Goal_completion_reviewer.review_request =
-      { workspace_identity = Goal_store.canonical_workspace_identity ctx.config
-      ; goal_id = goal.id
-      ; goal_version
-      ; operation_id
-      ; goal_json = Goal_store.goal_to_yojson goal
-      ; goal_updated_at = goal.updated_at
-      ; completion_claim
-      ; requesting_agent = ctx.agent_name
-      ; linked_tasks_json =
-          `List (List.map Masc_domain.task_to_yojson linked_tasks)
-      ; linked_task_ids =
-          List.map (fun (task : Masc_domain.task) -> task.id) linked_tasks
-      ; child_goals_json =
-          `List (List.map Goal_store.goal_to_yojson child_goals)
-      }
-    in
-    let review = Goal_completion_reviewer.review request in
-    (match
-       review.verdict, review.gate, review.review_prompt_sha256, review.approval
-     with
-     | Some Goal_completion_reviewer.Approve,
-       Goal_completion_reviewer.Structured_tool,
-       Some _,
-       Some approval ->
-       let backlog_lock_path =
-         Filename.concat (Workspace_utils.tasks_dir ctx.config) ".backlog"
-       in
-       let completion_result =
-         Workspace_utils.with_file_lock ctx.config backlog_lock_path (fun () ->
-           Workspace_utils.with_file_lock
-             ctx.config
-             (Workspace_goal_index.goal_task_links_lock_path ctx.config)
-             (fun () ->
-                Goal_store.complete_goal
-                  ctx.config
-                  ~expected:goal
-                  ~expected_state_version:goal_version
-                  ~operation_id
-                  ~approval
-                  ~read_current_linked_tasks:(fun () ->
-                    match linked_task_evidence ctx goal with
-                    | Error _ as error -> error
-                    | Ok current_linked_tasks ->
-                      Ok
-                        ( `List
-                            (List.map
-                               Masc_domain.task_to_yojson
-                               current_linked_tasks)
-                        , List.map
-                            (fun (task : Masc_domain.task) -> task.id)
-                            current_linked_tasks ))))
-       in
-       (match completion_result
-        with
-        | Error error ->
-          conditional_goal_error_result ~tool_name ~start_time error
-        | Ok updated_goal ->
-          Log.Workspace.info
-            "Goal completion approved goal_id=%s evaluator_runtime=%s \
-             reviewed_goal_updated_at=%s"
-            goal.id
-            review.evaluator_runtime
-            goal.updated_at;
-          emit_goal_event
-            ctx
-            ~goal_id:goal.id
-            ~event_type:"goal_completion_approved"
-            ~payload:
-              (`Assoc
-                 [ "actor", `String ctx.agent_name
-                 ; "evaluator_runtime", `String review.evaluator_runtime
-                 ; "reviewed_at", `String (Masc_domain.now_iso ())
-                 ]);
-          ok_result
-            ~tool_name
-            ~start_time
-            [ "goal_id", `String goal.id
-            ; "action", `String "request_complete"
-            ; "goal", Goal_store.goal_to_yojson updated_goal
-            ])
-     | Some (Goal_completion_reviewer.Reject reason),
-       Goal_completion_reviewer.Structured_tool,
-       _,
-       _ ->
-       (match
-          persist_nonterminal_goal_review
-            ctx
-            goal
-            ~failure:Goal_store.Rejected
-            ~reason
-        with
-        | Error error ->
-          conditional_goal_error_result ~tool_name ~start_time error
-        | Ok _ ->
-          Log.Workspace.warn
-            "Goal completion remains nonterminal goal_id=%s outcome=rejected \
-             evaluator_runtime=%s"
-            goal.id
-            review.evaluator_runtime;
-          error_result_typed
-            ~tool_name
-            ~start_time
-            ~code:Precondition_failed
-            ("Configured LLM rejected Goal completion: " ^ reason))
-     | None,
-       ( Goal_completion_reviewer.Invalid_verdict
-       | Goal_completion_reviewer.Evaluator_unavailable ),
-       _,
-       _ ->
-       let reason =
-         Option.value
-           ~default:"Configured LLM returned no valid Goal completion verdict"
-           review.fallback_reason
-       in
-       (match
-          persist_nonterminal_goal_review
-            ctx
-            goal
-            ~failure:Goal_store.Unavailable
-            ~reason
-        with
-        | Error error ->
-          conditional_goal_error_result ~tool_name ~start_time error
-        | Ok _ ->
-          Log.Workspace.warn
-            "Goal completion remains nonterminal goal_id=%s \
-             outcome=unavailable evaluator_runtime=%s"
-            goal.id
-            review.evaluator_runtime;
-          error_result_typed
-            ~class_:Tool_result.Transient_error
-            ~tool_name
-            ~start_time
-            ~code:Precondition_failed
-            (reason ^ "; Goal remains nonterminal"))
-     | Some _, (Goal_completion_reviewer.Invalid_verdict
-               | Goal_completion_reviewer.Evaluator_unavailable), _, _
-     | None, Goal_completion_reviewer.Structured_tool, _, _
-     | Some Goal_completion_reviewer.Approve,
-       Goal_completion_reviewer.Structured_tool,
-       _,
-       _ ->
-       error_result_typed
-         ~class_:Tool_result.Runtime_failure
-         ~tool_name
-         ~start_time
-         ~code:Internal_error
-         "Goal completion reviewer returned an inconsistent typed outcome")
+  match
+    Goal_completion_authority.request_completion
+      ~config:ctx.config
+      ~requesting_agent:ctx.agent_name
+      ~expected:goal
+      ~expected_state_version:goal_version
+      ~completion_claim
+  with
+  | Ok completed ->
+    Log.Workspace.info
+      "Goal completion approved goal_id=%s evaluator_runtime=%s reviewed_goal_updated_at=%s"
+      goal.id
+      completed.evaluator_runtime
+      goal.updated_at;
+    emit_goal_event
+      ctx
+      ~goal_id:goal.id
+      ~event_type:"goal_completion_approved"
+      ~payload:
+        (`Assoc
+           [ "actor", `String ctx.agent_name
+           ; "evaluator_runtime", `String completed.evaluator_runtime
+           ; "reviewed_at", `String completed.reviewed_at
+           ]);
+    ok_result
+      ~tool_name
+      ~start_time
+      [ "goal_id", `String goal.id
+      ; "action", `String "request_complete"
+      ; "goal", Goal_store.goal_to_yojson completed.goal
+      ]
+  | Error (Goal_completion_authority.Rejected { reason; evaluator_runtime }) ->
+    Log.Workspace.warn
+      "Goal completion remains nonterminal goal_id=%s outcome=rejected evaluator_runtime=%s"
+      goal.id
+      evaluator_runtime;
+    error_result_typed
+      ~tool_name
+      ~start_time
+      ~code:Precondition_failed
+      ("Configured runtime rejected Goal completion: " ^ reason)
+  | Error (Goal_completion_authority.Unavailable { reason; evaluator_runtime }) ->
+    Log.Workspace.warn
+      "Goal completion remains nonterminal goal_id=%s outcome=unavailable evaluator_runtime=%s"
+      goal.id
+      evaluator_runtime;
+    error_result_typed
+      ~class_:Tool_result.Transient_error
+      ~tool_name
+      ~start_time
+      ~code:Precondition_failed
+      (reason ^ "; Goal remains nonterminal")
+  | Error (Goal_completion_authority.Conflict reason) ->
+    error_result_typed
+      ~tool_name
+      ~start_time
+      ~code:Conflict
+      reason
+  | Error (Goal_completion_authority.Persistence_failed reason) ->
+    error_result_typed
+      ~class_:Tool_result.Runtime_failure
+      ~tool_name
+      ~start_time
+      ~code:Internal_error
+      reason
 ;;
 
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
-  match
-    ( reject_retired_goal_list_status args
-    , parse_optional_goal_phase args "phase" )
-  with
-  | Error err, _ | _, Error err ->
-    validation_error_result ~tool_name ~start_time [ err ]
-  | Ok (), Ok phase ->
+  match parse_optional_goal_phase args "phase" with
+  | Error err -> validation_error_result ~tool_name ~start_time [ err ]
+  | Ok phase ->
     let goals = Goal_store.list_goals ctx.config ?phase () in
     let rollup = Goal_store.compute_rollup goals in
     ok_result
@@ -533,23 +292,21 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
 ;;
 let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
-    ( parse_optional_goal_status args "status"
-    , parse_optional_goal_phase args "phase"
+    ( parse_optional_goal_phase args "phase"
     , parse_optional_priority args "priority" )
   with
-  | Error err, _, _ | _, Error err, _ | _, _, Error err ->
+  | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
-  | Ok status, Ok phase, Ok priority ->
+  | Ok phase, Ok priority ->
     let id = get_string_opt args "id" in
     let title = get_string_opt args "title" in
     let metric = get_string_opt args "metric" in
     let target_value = get_string_opt args "target_value" in
     let due_date = get_string_opt args "due_date" in
     let parent_goal_id = get_string_opt args "parent_goal_id" in
-    (match phase, status with
-     | Some _, _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "phase"
-     | _, Some _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "status"
-     | _ ->
+    (match phase with
+     | Some _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "phase"
+     | None ->
        (match
           Goal_store.upsert_goal
             ctx.config

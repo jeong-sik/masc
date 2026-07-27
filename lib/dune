@@ -4,7 +4,9 @@
  (public_name masc)
  (private_modules
   keeper_fs_durable_directory
-  keeper_exact_flow_scope)
+  keeper_exact_flow_scope
+  goal_state_internal
+  goal_completion_authority)
  (libraries
   mcp_protocol
   mcp_protocol.eio

@@ -68,6 +68,11 @@ val read_goal_task_links_r :
   Workspace_utils_backend_setup.config ->
   ((string * string list) list, string) result
 
+val read_goal_task_links_current_r :
+  Workspace_utils_backend_setup.config ->
+  ((string * string list) list, string) result
+(** Strict uncached point read of the primary current-schema link registry. *)
+
 (** Persist the goal-task link registry. *)
 val write_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list -> unit

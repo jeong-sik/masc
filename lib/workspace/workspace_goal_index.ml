@@ -103,6 +103,86 @@ let links_of_yojson = function
   | _ -> []
 ;;
 
+let ( let* ) = Result.bind
+
+let exact_link_fields expected fields =
+  let names = List.map fst fields in
+  let rec duplicate seen = function
+    | [] -> None
+    | name :: rest ->
+      if List.mem name seen then Some name else duplicate (name :: seen) rest
+  in
+  match duplicate [] names with
+  | Some name -> Error (Printf.sprintf "duplicate goal-link field %S" name)
+  | None when List.exists (fun name -> not (List.mem name expected)) names ->
+    Error "unknown goal-link field"
+  | None when List.exists (fun name -> not (List.mem name names)) expected ->
+    Error "missing goal-link field"
+  | None -> Ok ()
+;;
+
+let decode_current_link = function
+  | `Assoc fields ->
+    let* () = exact_link_fields [ "goal_id"; "task_ids" ] fields in
+    let* goal_id =
+      match List.assoc "goal_id" fields with
+      | `String value when value <> "" -> Ok value
+      | _ -> Error "goal link goal_id must be a non-empty string"
+    in
+    let* task_ids =
+      match List.assoc "task_ids" fields with
+      | `List values ->
+        let rec collect seen acc = function
+          | [] -> Ok (List.rev acc)
+          | `String value :: rest when value <> "" && not (List.mem value seen) ->
+            collect (value :: seen) (value :: acc) rest
+          | `String _ :: _ -> Error "goal link task_ids must be non-empty and unique"
+          | _ -> Error "goal link task_ids must contain strings"
+        in
+        collect [] [] values
+      | _ -> Error "goal link task_ids must be an array"
+    in
+    Ok (goal_id, task_ids)
+  | _ -> Error "goal link row must be an object"
+;;
+
+let decode_current_links = function
+  | `Assoc fields ->
+    let* () = exact_link_fields [ "version"; "last_updated"; "links" ] fields in
+    let* () =
+      match List.assoc "version" fields with
+      | `Int 1 -> Ok ()
+      | _ -> Error "goal-link registry version must be 1"
+    in
+    let* () =
+      match List.assoc "last_updated" fields with
+      | `String _ -> Ok ()
+      | _ -> Error "goal-link registry last_updated must be a string"
+    in
+    (match List.assoc "links" fields with
+     | `List rows ->
+       let rec collect seen acc = function
+         | [] -> Ok (normalize_link_set (List.rev acc))
+         | row :: rest ->
+           let* ((goal_id, _) as link) = decode_current_link row in
+           if List.mem goal_id seen
+           then Error "goal-link registry goal_ids must be unique"
+           else collect (goal_id :: seen) (link :: acc) rest
+       in
+       collect [] [] rows
+     | _ -> Error "goal-link registry links must be an array")
+  | _ -> Error "goal-link registry must be an object"
+;;
+
+let read_goal_task_links_current_r config =
+  let path = goal_task_links_path config in
+  if not (path_exists config path) then Ok []
+  else
+    match read_json_result config path with
+    | Ok json -> decode_current_links json
+    | Error message -> Error message
+;;
+
 let read_goal_task_links_r config =
   let primary_path = goal_task_links_path config in
   match read_json_result config primary_path with

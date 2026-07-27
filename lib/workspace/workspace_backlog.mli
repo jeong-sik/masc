@@ -10,6 +10,9 @@ val decode_backlog : path:string ->
            Yojson.Safe.t -> (Masc_domain.backlog, string) result
 val read_backlog_r : Workspace_utils_backend_setup.config ->
            (Masc_domain.backlog, string) result
+val read_backlog_current_r : Workspace_utils_backend_setup.config ->
+           (Masc_domain.backlog, string) result
+(** Strict uncached point read of the primary current-schema backlog. *)
 val read_backlog : Workspace_utils_backend_setup.config -> Masc_domain.backlog
 val write_backlog :
   ?after_commit:(unit -> unit) ->

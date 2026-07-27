@@ -199,7 +199,6 @@ val get_goal_with_version :
 type conditional_update_error =
   | Goal_not_found
   | Goal_snapshot_changed
-  | Goal_approval_invalid
   | Goal_persistence_failed of string
 
 val conditional_update_error_to_string : conditional_update_error -> string
@@ -222,18 +221,6 @@ val record_completion_review_failure_if_unchanged :
   (goal, conditional_update_error) result
 (** Persists a failed completion review without exposing a generic goal-record
     mutation callback. *)
-
-val complete_goal :
-  Workspace_utils.config ->
-  expected:goal ->
-  expected_state_version:int ->
-  operation_id:string ->
-  approval:Goal_completion_reviewer.approval ->
-  read_current_linked_tasks:
-    (unit -> (Yojson.Safe.t * string list, string) result) ->
-  (goal, conditional_update_error) result
-(** Consumes an exact semantic-review approval and persists [Completed] in one
-    lock/CAS transaction. This is the only completion mutation authority. *)
 
 type delete_goal_outcome =
   | Deleted
@@ -260,7 +247,7 @@ val delete_goal :
 
 val list_goals :
   Workspace_utils.config ->
-  ?phase:Goal_phase.view ->
+  ?phase:Phase.view ->
   unit ->
   goal list
 (** Reads the state, applies optional filters, then sorts
@@ -289,7 +276,7 @@ val upsert_goal :
     Errors when [title] is omitted or empty for a new Goal, or when a caller
     tries to mutate a completed Goal before reopening it. *)
 exception Current_state_invalid of string
-(** Raised when a present primary/recovery file is not the exact current
+(** Raised when a present primary file is not the exact current
     schema. Invalid state is never projected as an empty Goal set. *)
 
 val canonical_workspace_identity :

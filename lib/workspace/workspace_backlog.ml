@@ -41,6 +41,13 @@ let file_stat_opt path =
 let clear_backlog_cache_for path =
   Stdlib.Mutex.protect backlog_cache_mu (fun () -> Hashtbl.remove backlog_cache path)
 
+let read_backlog_current_r config =
+  let path = backlog_path config in
+  match read_json_result config path with
+  | Ok json -> decode_backlog ~path json
+  | Error message -> Error message
+;;
+
 let read_backlog_r config =
   let path = backlog_path config in
   let cached =

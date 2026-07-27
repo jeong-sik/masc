@@ -255,35 +255,6 @@ let test_goal_list_ignores_blank_optional_filters () =
     (Yojson.Safe.Util.member "count" listed_json |> Yojson.Safe.Util.to_int)
 ;;
 
-let test_goal_list_rejects_status_filter () =
-  with_workspace
-  @@ fun config ->
-  let rejected =
-    Tool_workspace.dispatch
-      (workspace_ctx config)
-      ~name:"masc_goal_list"
-      ~args:(`Assoc [ "status", `String "active" ])
-  in
-  let error_json = expect_error rejected in
-  check
-    string
-    "status filter blocked"
-    "validation_error"
-    (get_string_field error_json "error_code");
-  check
-    bool
-    "error points to removed status"
-    true
-    (contains_substring (Yojson.Safe.to_string error_json) "status filter was removed");
-  let field_errors =
-    Yojson.Safe.Util.member "field_errors" error_json |> Yojson.Safe.Util.to_list
-  in
-  match field_errors with
-  | field_error :: _ ->
-    check string "field" "status" (get_string_field field_error "field")
-  | [] -> fail "expected status field error"
-;;
-
 let test_goal_upsert_rejects_lifecycle_fields () =
   with_workspace
   @@ fun config ->
@@ -303,34 +274,7 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     bool
     "phase error points at transition"
     true
-    (contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
-  let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Existing goal" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  let rejected_status =
-    Tool_workspace.dispatch
-      (workspace_ctx config)
-      ~name:"masc_goal_upsert"
-      ~args:(`Assoc [ "id", `String goal.id; "status", `String "dropped" ])
-  in
-  let status_error = expect_error rejected_status in
-  check
-    string
-    "terminal status blocked"
-    "validation_error"
-    (get_string_field status_error "error_code");
-  let saved_goal =
-    match Goal_store.get_goal config ~goal_id:goal.id with
-    | Some goal -> goal
-    | None -> fail "goal missing after rejected upsert"
-  in
-  check
-    string
-    "phase unchanged after rejected status"
-    "executing"
-    (Goal_phase.to_string saved_goal.phase)
+    (contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition")
 ;;
 
 let test_goal_review_removed_from_dispatch () =
@@ -378,16 +322,16 @@ let current_goal config goal_id =
 
 let test_goal_completion_verdict_parser_is_exact () =
   let expect_invalid label json =
-    match Goal_completion_reviewer.parse_verdict_from_json json with
+    match Goal_completion_contract.parse_verdict_from_json json with
     | Error _ -> ()
     | Ok _ -> fail (label ^ " unexpectedly produced a verdict")
   in
   (match
-     Goal_completion_reviewer.parse_verdict_from_json
+     Goal_completion_contract.parse_verdict_from_json
        (`Assoc [ "verdict", `String "APPROVE" ])
    with
-   | Ok Goal_completion_reviewer.Approve -> ()
-   | Ok (Goal_completion_reviewer.Reject _) | Error _ ->
+   | Ok Goal_completion_contract.Approve -> ()
+   | Ok (Goal_completion_contract.Reject _) | Error _ ->
      fail "exact APPROVE verdict did not parse");
   expect_invalid
     "APPROVE with reason"
@@ -476,10 +420,6 @@ let () =
             "list ignores blank optional filters"
             `Quick
             test_goal_list_ignores_blank_optional_filters
-        ; test_case
-            "list rejects status filter"
-            `Quick
-            test_goal_list_rejects_status_filter
         ; test_case
             "upsert rejects lifecycle fields"
             `Quick

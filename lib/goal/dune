@@ -1,11 +1,8 @@
 (include_subdirs no)
 
-;; Goal domain — pure goal logic (store / phase / verification / convergence /
-;; janitor). Decoupled from the masc mega-library: persistence goes through
-;; the already-separate masc_workspace library (Workspace_utils), never the
-;; mega-lib Workspace facade. Dependency direction is one-way: consumers
-;; (workspace_goals adapter, dashboards) depend on masc_goal; masc_goal depends
-;; only on neutral libraries below.
+;; Goal domain: read-only Goal views, nonterminal transitions, persistence, and
+;; pure completion digest contracts. Runtime/provider execution belongs to the
+;; main-library Goal_completion_authority adapter.
 
 (library
  (name masc_goal)
@@ -17,16 +14,9 @@
   masc_config
   masc_log
   masc_workspace
-  masc_runtime
-  masc.prompt_registry
-  masc.config
-  masc_eio_context
   shared_audit
   time_compat
   fs_compat
-  agent_sdk
-  agent_sdk.base
-  agent_sdk.llm_provider
   digestif
   yojson
   eio

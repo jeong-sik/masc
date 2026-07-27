@@ -556,9 +556,6 @@ let parse_goal_phase = function
 let goals_path config =
   Filename.concat (Workspace_utils.masc_dir config) "goals.json"
 
-let goals_recovery_path config =
-  goals_path config ^ ".last-good"
-
 let ensure_dirs config =
   Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
@@ -575,84 +572,266 @@ let canonical_workspace_identity config =
     Error "Goal workspace identity is unavailable; reset is required"
 ;;
 
+let exact_object_fields ~kind expected fields =
+  let names = List.map fst fields in
+  let rec first_duplicate seen = function
+    | [] -> None
+    | name :: rest ->
+      if List.mem name seen then Some name else first_duplicate (name :: seen) rest
+  in
+  match first_duplicate [] names with
+  | Some name -> Error (Printf.sprintf "%s has duplicate field %S" kind name)
+  | None ->
+    (match List.find_opt (fun name -> not (List.mem name expected)) names with
+     | Some name -> Error (Printf.sprintf "%s has unknown field %S" kind name)
+     | None ->
+       (match List.find_opt (fun name -> not (List.mem name names)) expected with
+        | Some name -> Error (Printf.sprintf "%s is missing field %S" kind name)
+        | None -> Ok ()))
+;;
+
+let string_field kind name fields =
+  match List.assoc name fields with
+  | `String value -> Ok value
+  | _ -> Error (Printf.sprintf "%s field %S must be a string" kind name)
+;;
+
+let string_or_null_field kind name fields =
+  match List.assoc name fields with
+  | `Null | `String _ -> Ok ()
+  | _ -> Error (Printf.sprintf "%s field %S must be a string or null" kind name)
+;;
+
+let receipt_field_names =
+  [ "workspace_identity"
+  ; "expected_state_version"
+  ; "operation_id"
+  ; "completion_digest"
+  ; "review_evidence_sha256"
+  ; "evaluator_runtime"
+  ; "reviewed_at"
+  ; "reviewed_goal_updated_at"
+  ; "review_prompt_sha256"
+  ; "completion_claim"
+  ; "requesting_agent"
+  ; "linked_task_ids"
+  ]
+;;
+
+let validate_receipt_json = function
+  | `Assoc fields ->
+    let* () = exact_object_fields ~kind:"completion receipt" receipt_field_names fields in
+    let string_fields =
+      [ "workspace_identity"
+      ; "operation_id"
+      ; "completion_digest"
+      ; "review_evidence_sha256"
+      ; "evaluator_runtime"
+      ; "reviewed_at"
+      ; "reviewed_goal_updated_at"
+      ; "review_prompt_sha256"
+      ; "completion_claim"
+      ; "requesting_agent"
+      ]
+    in
+    let rec validate_strings = function
+      | [] -> Ok ()
+      | name :: rest ->
+        let* value = string_field "completion receipt" name fields in
+        if String.equal value ""
+        then Error (Printf.sprintf "completion receipt field %S must be non-empty" name)
+        else validate_strings rest
+    in
+    let* () = validate_strings string_fields in
+    let* () =
+      match List.assoc "expected_state_version" fields with
+      | `Int version when version >= 1 -> Ok ()
+      | _ -> Error "completion receipt expected_state_version must be a positive integer"
+    in
+    (match List.assoc "linked_task_ids" fields with
+     | `List values when List.for_all (function `String value -> value <> "" | _ -> false) values ->
+       let ids = List.map (function `String value -> value | _ -> assert false) values in
+       let rec unique seen = function
+         | [] -> Ok ()
+         | id :: rest ->
+           if List.mem id seen
+           then Error "completion receipt linked_task_ids must be unique"
+           else unique (id :: seen) rest
+       in
+       unique [] ids
+     | _ -> Error "completion receipt linked_task_ids must contain only non-empty strings")
+  | _ -> Error "completion receipt must be an object"
+;;
+
+let goal_field_names =
+  [ "id"
+  ; "title"
+  ; "metric"
+  ; "target_value"
+  ; "due_date"
+  ; "priority"
+  ; "phase"
+  ; "parent_goal_id"
+  ; "last_review_note"
+  ; "last_review_at"
+  ; "completion_review_failure"
+  ; "completion_receipt"
+  ; "created_at"
+  ; "updated_at"
+  ]
+;;
+
+let validate_goal_json = function
+  | `Assoc fields ->
+    let* () = exact_object_fields ~kind:"Goal" goal_field_names fields in
+    let* id = string_field "Goal" "id" fields in
+    let* _title = string_field "Goal" "title" fields in
+    let* _created_at = string_field "Goal" "created_at" fields in
+    let* _updated_at = string_field "Goal" "updated_at" fields in
+    let* () =
+      if String.equal id "" then Error "Goal id must be non-empty" else Ok ()
+    in
+    let rec validate_options = function
+      | [] -> Ok ()
+      | name :: rest ->
+        let* () = string_or_null_field "Goal" name fields in
+        validate_options rest
+    in
+    let* () =
+      validate_options
+        [ "metric"; "target_value"; "due_date"; "parent_goal_id"
+        ; "last_review_note"; "last_review_at"
+        ]
+    in
+    let* () =
+      match List.assoc "priority" fields with
+      | `Int value when value >= 1 && value <= 5 -> Ok ()
+      | _ -> Error "Goal priority must be an integer in 1..5"
+    in
+    let* phase =
+      match List.assoc "phase" fields with
+      | `String ("executing" as phase)
+      | `String ("blocked" as phase)
+      | `String ("paused" as phase)
+      | `String ("completed" as phase)
+      | `String ("dropped" as phase) -> Ok phase
+      | _ -> Error "Goal phase must be an exact current-schema token"
+    in
+    let* () =
+      match List.assoc "completion_review_failure" fields with
+      | `Null | `String "rejected" | `String "unavailable" -> Ok ()
+      | _ -> Error "Goal completion_review_failure has an invalid value"
+    in
+    let receipt = List.assoc "completion_receipt" fields in
+    let* () =
+      match phase, receipt, List.assoc "completion_review_failure" fields with
+      | "completed", (`Assoc _ as receipt), `Null -> validate_receipt_json receipt
+      | "completed", _, _ -> Error "Completed Goal requires one receipt and no review failure"
+      | _, `Null, _ -> Ok ()
+      | _, _, _ -> Error "Nonterminal Goal must not carry a completion receipt"
+    in
+    Ok id
+  | _ -> Error "Goal must be an object"
+;;
+
+let validate_current_state_json = function
+  | `Assoc fields ->
+    let* () = exact_object_fields ~kind:"Goal state" [ "version"; "updated_at"; "goals" ] fields in
+    let* () =
+      match List.assoc "version" fields with
+      | `Int version when version >= 1 -> Ok ()
+      | _ -> Error "Goal state version must be a positive integer"
+    in
+    let* _updated_at = string_field "Goal state" "updated_at" fields in
+    (match List.assoc "goals" fields with
+     | `List rows ->
+       let rec validate seen = function
+         | [] -> Ok ()
+         | row :: rest ->
+           let* id = validate_goal_json row in
+           if List.mem id seen
+           then Error (Printf.sprintf "Goal state has duplicate id %S" id)
+           else validate (id :: seen) rest
+       in
+       validate [] rows
+     | _ -> Error "Goal state goals must be an array")
+  | _ -> Error "Goal state must be an object"
+;;
+
+let validate_loaded_state config state =
+  let* workspace_identity = canonical_workspace_identity config in
+  let rec validate = function
+    | [] -> Ok ()
+    | goal :: rest ->
+      let* () = validate_completion_invariant goal in
+      let* () =
+        match Phase.is_completed goal.phase, goal.completion_receipt with
+        | false, None -> Ok ()
+        | true, Some receipt ->
+          if not (String.equal receipt.workspace_identity workspace_identity)
+          then Error "Completed Goal receipt belongs to a different workspace"
+          else
+            let target_goal_json =
+              goal_to_yojson { goal with completion_receipt = None }
+            in
+            let expected_digest =
+              Goal_completion_contract.completion_digest
+                ~workspace_identity:receipt.workspace_identity
+                ~goal_json:target_goal_json
+                ~reviewed_goal_updated_at:receipt.reviewed_goal_updated_at
+                ~goal_id:goal.id
+                ~expected_version:receipt.expected_state_version
+                ~operation_id:receipt.operation_id
+                ~evaluator_runtime:receipt.evaluator_runtime
+                ~reviewed_at:receipt.reviewed_at
+                ~review_prompt_sha256:receipt.review_prompt_sha256
+                ~review_evidence_sha256:receipt.review_evidence_sha256
+                ~completion_claim:receipt.completion_claim
+                ~requesting_agent:receipt.requesting_agent
+                ~linked_task_ids:receipt.linked_task_ids
+            in
+            if String.equal expected_digest receipt.completion_digest
+            then Ok ()
+            else Error "Completed Goal receipt target digest does not match persisted Goal"
+        | _ -> Error generic_completion_error
+      in
+      validate rest
+  in
+  validate state.goals
+;;
+
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
 
 let read_state config =
   ensure_dirs config;
   let path = goals_path config in
-  if Workspace_utils.path_exists config path then
-    match Workspace_utils.read_json_result config path with
-    | Ok json ->
-        (match state_of_yojson json with
-         | Ok state -> state
-         | Error primary_msg ->
-             let recovery = goals_recovery_path config in
-             if Workspace_utils.path_exists config recovery then
-               match Workspace_utils.read_json_result config recovery with
-               | Ok recovery_json ->
-                   (match state_of_yojson recovery_json with
-                    | Ok state ->
-                        Log.Misc.warn
-                          "goal_store: primary goals.json corrupt (%s), recovered from %s"
-                          primary_msg recovery;
-                        state
-                    | Error recovery_msg ->
-                        Log.Misc.error
-                          "goal_store: both primary and recovery goals.json corrupt (primary: %s, recovery: %s)"
-                          primary_msg recovery_msg;
-                        raise_current_state_invalid ())
-               | Error recovery_read_msg ->
-                   Log.Misc.warn
-                     "goal_store: goals.json corrupt (%s), recovery read failed: %s"
-                     primary_msg recovery_read_msg;
-                    raise_current_state_invalid ()
-             else
-               (Log.Misc.warn
-                  "goal_store: goals.json corrupt (%s), no .last-good available"
-                  primary_msg;
-                raise_current_state_invalid ()))
-    | Error primary_msg ->
-        let recovery = goals_recovery_path config in
-        if Workspace_utils.path_exists config recovery then
-          match Workspace_utils.read_json_result config recovery with
-          | Ok recovery_json ->
-              (match state_of_yojson recovery_json with
-               | Ok state ->
-                   Log.Misc.warn
-                     "goal_store: primary goals.json unreadable (%s), recovered from %s"
-                     primary_msg recovery;
-                   state
-               | Error recovery_msg ->
-                   Log.Misc.error
-                     "goal_store: primary unreadable (%s), recovery corrupt (%s)"
-                     primary_msg recovery_msg;
-                   raise_current_state_invalid ())
-          | Error recovery_msg ->
-              Log.Misc.error
-                "goal_store: primary unreadable (%s), recovery unreadable (%s)"
-                primary_msg recovery_msg;
-              raise_current_state_invalid ()
-        else
-          (Log.Misc.warn
-             "goal_store: goals.json unreadable (%s), no .last-good available"
-             primary_msg;
-           raise_current_state_invalid ())
+  if not (Workspace_utils.path_exists config path) then default_state ()
   else
-    default_state ()
+    match Workspace_utils.read_json_result config path with
+    | Error message ->
+      Log.Misc.warn "goal_store: current goals.json is unreadable: %s" message;
+      raise_current_state_invalid ()
+    | Ok json ->
+      (match validate_current_state_json json with
+       | Error message ->
+         Log.Misc.warn "goal_store: current goals.json shape is invalid: %s" message;
+         raise_current_state_invalid ()
+       | Ok () ->
+         (match state_of_yojson json with
+          | Error message ->
+            Log.Misc.warn "goal_store: current goals.json decode failed: %s" message;
+            raise_current_state_invalid ()
+          | Ok state ->
+            (match validate_loaded_state config state with
+             | Ok () -> state
+             | Error message ->
+               Log.Misc.warn "goal_store: current goals.json invariant failed: %s" message;
+               raise_current_state_invalid ())))
 
 let write_state_unchecked config state =
   ensure_dirs config;
-  let json = state_to_yojson state in
-  let* () = Workspace_utils.write_json_result config (goals_path config) json in
-  (match Workspace_utils.write_json_result config (goals_recovery_path config) json with
-   | Ok () -> ()
-   | Error msg ->
-     Log.Misc.warn
-       "goal_store: primary goals.json committed; recovery mirror write failed for %s: %s"
-       (goals_recovery_path config)
-       msg);
-  Ok ()
+  Workspace_utils.write_json_result config (goals_path config) (state_to_yojson state)
 
 let write_state_result config state =
   if List.exists
@@ -747,7 +926,6 @@ let update_goal config ~goal_id f =
 type conditional_update_error =
   | Goal_not_found
   | Goal_snapshot_changed
-  | Goal_approval_invalid
   | Goal_persistence_failed of string
 
 let conditional_update_error_to_string = function
@@ -755,7 +933,6 @@ let conditional_update_error_to_string = function
   | Goal_snapshot_changed ->
     "Goal changed while completion was being reviewed; obtain a new verdict \
      for the current Goal snapshot"
-  | Goal_approval_invalid ->
     "Goal completion approval does not authorize this exact operation"
   | Goal_persistence_failed msg -> msg
 ;;
@@ -822,104 +999,6 @@ let record_completion_review_failure_if_unchanged
     ; completion_receipt = None
     })
 ;;
-
-let complete_goal
-      config
-      ~(expected : goal)
-      ~expected_state_version
-      ~operation_id
-      ~approval
-      ~read_current_linked_tasks
-  =
-  Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-    let state = read_state config in
-    match find_goal state.goals expected.id with
-    | None -> Error Goal_not_found
-    | Some current
-      when state.version <> expected_state_version || current <> expected ->
-      Error Goal_snapshot_changed
-    | Some current ->
-      if not (Phase.is_executing current.phase)
-      then Error Goal_approval_invalid
-      else if
-        List.exists
-          (fun goal ->
-             match goal.completion_receipt with
-             | Some receipt -> String.equal receipt.operation_id operation_id
-             | None -> false)
-          state.goals
-      then Error Goal_approval_invalid
-      else
-        (match read_current_linked_tasks () with
-         | Error msg -> Error (Goal_persistence_failed msg)
-         | Ok (linked_tasks_json, linked_task_ids) ->
-           let child_goals_json =
-             state.goals
-             |> List.filter (fun goal ->
-               match goal.parent_goal_id with
-               | Some parent_goal -> String.equal parent_goal current.id
-               | None -> false)
-             |> List.map goal_to_yojson
-             |> fun goals -> `List goals
-           in
-           let workspace_identity = canonical_workspace_identity config in
-           if
-             not
-               (Goal_completion_reviewer.approval_authorizes
-                  approval
-                  ~workspace_identity
-                  ~goal_json:(goal_to_yojson current)
-                  ~reviewed_goal_updated_at:current.updated_at
-                  ~goal_id:current.id
-                  ~expected_version:state.version
-                  ~operation_id
-                  ~linked_tasks_json
-                  ~linked_task_ids
-                  ~child_goals_json)
-           then Error Goal_approval_invalid
-           else
-             let metadata =
-               Goal_completion_reviewer.approval_metadata approval
-             in
-             let receipt =
-               { workspace_identity = metadata.workspace_identity
-               ; expected_state_version = metadata.expected_version
-               ; operation_id = metadata.operation_id
-               ; completion_digest = metadata.completion_digest
-               ; review_evidence_sha256 = metadata.review_evidence_sha256
-               ; evaluator_runtime = metadata.evaluator_runtime
-               ; reviewed_at = metadata.reviewed_at
-               ; reviewed_goal_updated_at = metadata.reviewed_goal_updated_at
-               ; review_prompt_sha256 = metadata.review_prompt_sha256
-               ; completion_claim = metadata.completion_claim
-               ; requesting_agent = metadata.requesting_agent
-               ; linked_task_ids = metadata.linked_task_ids
-               }
-             in
-             let now = Masc_domain.now_iso () in
-             let updated_goal =
-               { current with
-                 phase = Phase.completed
-               ; last_review_note =
-                   Some "Configured runtime approved Goal completion"
-               ; last_review_at = Some metadata.reviewed_at
-               ; completion_review_failure = None
-               ; completion_receipt = Some receipt
-               ; updated_at = now
-               }
-             in
-             (match validate_completion_invariant updated_goal with
-              | Error msg -> Error (Goal_persistence_failed msg)
-              | Ok () ->
-                let next_state =
-                  { version = state.version + 1
-                  ; updated_at = now
-                  ; goals = replace_goal state.goals updated_goal
-                  }
-                in
-                (match write_state_unchecked config next_state with
-                 | Ok () -> Ok updated_goal
-                 | Error msg -> Error (Goal_persistence_failed msg)))))
 
 type delete_goal_outcome =
   | Deleted

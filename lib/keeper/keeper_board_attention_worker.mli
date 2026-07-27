@@ -130,6 +130,9 @@ module For_testing : sig
          (failed:Keeper_board_attention_exact_flow.advance_source ->
           next:Keeper_board_attention_exact_flow.candidate_visit ->
           (unit, string) result) ->
+       commit_domain:
+         (Keeper_board_attention_exact_flow.domain_terminal ->
+          (unit, string) result) ->
        'prepared ->
        ( Keeper_board_attention_candidate.judgment
        , string Keeper_board_attention_exact_flow.execution_error )
@@ -155,6 +158,9 @@ module For_testing : sig
        before_advance:
          (failed:Keeper_board_attention_exact_flow.advance_source ->
           next:Keeper_board_attention_exact_flow.candidate_visit ->
+          (unit, string) result) ->
+       commit_domain:
+         (Keeper_board_attention_exact_flow.domain_terminal ->
           (unit, string) result) ->
        'prepared ->
        ( Keeper_board_attention_candidate.judgment
@@ -185,6 +191,9 @@ module For_testing : sig
        before_advance:
          (failed:Keeper_board_attention_exact_flow.advance_source ->
           next:Keeper_board_attention_exact_flow.candidate_visit ->
+          (unit, string) result) ->
+       commit_domain:
+         (Keeper_board_attention_exact_flow.domain_terminal ->
           (unit, string) result) ->
        'prepared ->
        ( Keeper_board_attention_candidate.judgment

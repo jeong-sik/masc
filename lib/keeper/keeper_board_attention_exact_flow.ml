@@ -37,6 +37,14 @@ type advance_source =
   | Executed_failure of attempt_provenance
   | Predispatch_rejection of candidate_visit
 
+type domain_rejection =
+  | Execution_provenance_mismatch of string
+  | Invalid_domain_output of string
+
+type domain_terminal =
+  | Domain_valid of Keeper_board_attention_candidate.judgment
+  | Domain_rejected of domain_rejection
+
 type 'callback_error execution_error =
   | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
@@ -54,7 +62,21 @@ type 'callback_error execution_error =
   | Exact_execution_failed of attempt_provenance list
   | Provenance_mismatch of string
   | Domain_output_invalid of string
-  | Domain_settlement_failed
+  | Domain_terminal_persistence_failed of
+      { terminal : domain_terminal
+      ; cause : 'callback_error
+      }
+  | Domain_settlement_intent_persistence_failed of
+      { terminal : domain_terminal
+      ; cause : Keeper_exact_flow_scope.evidence_commit_error
+      }
+  | Domain_settlement_in_progress of domain_terminal
+  | Domain_settlement_conflict of domain_terminal
+
+type 'callback_error commit_error =
+  | Terminal_persistence_failed of 'callback_error
+  | Settlement_intent_persistence_failed of
+      Keeper_exact_flow_scope.evidence_commit_error
 
 type 'callback_error guarded_callback_error =
   | Durable_callback_failed of 'callback_error
@@ -255,7 +277,7 @@ let require_equal ~field left right =
   then Ok ()
   else
     Error
-      (Provenance_mismatch
+      (Execution_provenance_mismatch
          (Printf.sprintf "%s mismatch left=%S right=%S" field left right))
 ;;
 
@@ -273,7 +295,7 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
     | Some admitted -> Ok admitted
     | None ->
       Error
-        (Provenance_mismatch
+        (Execution_provenance_mismatch
            ("selected slot has no admitted evidence: " ^ slot_id))
   in
   let call_id = string_of_call_id success.call_id in
@@ -328,7 +350,7 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
   in
   let* items =
     Keeper_board_attention_judgment.batch_of_yojson success.output
-    |> Result.map_error (fun detail -> Domain_output_invalid detail)
+    |> Result.map_error (fun detail -> Invalid_domain_output detail)
   in
   match items with
   | [ item ]
@@ -345,14 +367,14 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
       }
   | [ item ] ->
     Error
-      (Domain_output_invalid
+      (Invalid_domain_output
          (Printf.sprintf
             "singleton verdict identity mismatch expected=%S actual=%S"
             candidate.candidate_id
             item.candidate_id))
   | items ->
     Error
-      (Domain_output_invalid
+      (Invalid_domain_output
          (Printf.sprintf
             "singleton verdict count must be exactly one, got %d"
              (List.length items)))
@@ -365,8 +387,12 @@ type terminal_outcome =
   | Before_dispatch_persistence_failure
   | Before_advance_persistence_failure
   | Exact_execution_failure
-  | Execution_provenance_mismatch
-  | Invalid_domain_output
+  | Execution_provenance_mismatch_outcome
+  | Invalid_domain_output_outcome
+  | Domain_terminal_persistence_failure
+  | Domain_settlement_intent_persistence_failure
+  | Domain_settlement_in_progress_outcome
+  | Domain_settlement_conflict_outcome
 
 let terminal_outcome_to_string = function
   | Owner_unregistered -> "owner_unregistered_deferred"
@@ -375,8 +401,16 @@ let terminal_outcome_to_string = function
   | Before_dispatch_persistence_failure -> "before_dispatch_persistence_failure"
   | Before_advance_persistence_failure -> "before_advance_persistence_failure"
   | Exact_execution_failure -> "exact_execution_failure"
-  | Execution_provenance_mismatch -> "execution_provenance_mismatch"
-  | Invalid_domain_output -> "invalid_domain_output"
+  | Execution_provenance_mismatch_outcome -> "execution_provenance_mismatch"
+  | Invalid_domain_output_outcome -> "invalid_domain_output"
+  | Domain_terminal_persistence_failure ->
+    "domain_terminal_persistence_failure"
+  | Domain_settlement_intent_persistence_failure ->
+    "domain_settlement_intent_persistence_failure"
+  | Domain_settlement_in_progress_outcome ->
+    "domain_settlement_in_progress"
+  | Domain_settlement_conflict_outcome ->
+    "domain_settlement_conflict"
 ;;
 
 let terminal_outcome = function
@@ -388,9 +422,16 @@ let terminal_outcome = function
   | Error (Before_advance_persistence_failed _) ->
     Before_advance_persistence_failure
   | Error (Exact_execution_failed _) -> Exact_execution_failure
-  | Error (Provenance_mismatch _) -> Execution_provenance_mismatch
-  | Error (Domain_output_invalid _) -> Invalid_domain_output
-  | Error Domain_settlement_failed -> Exact_execution_failure
+  | Error (Provenance_mismatch _) -> Execution_provenance_mismatch_outcome
+  | Error (Domain_output_invalid _) -> Invalid_domain_output_outcome
+  | Error (Domain_terminal_persistence_failed _) ->
+    Domain_terminal_persistence_failure
+  | Error (Domain_settlement_intent_persistence_failed _) ->
+    Domain_settlement_intent_persistence_failure
+  | Error (Domain_settlement_in_progress _) ->
+    Domain_settlement_in_progress_outcome
+  | Error (Domain_settlement_conflict _) ->
+    Domain_settlement_conflict_outcome
 ;;
 
 let observe_terminal prepared result =
@@ -401,7 +442,52 @@ let observe_terminal prepared result =
     (result |> terminal_outcome |> terminal_outcome_to_string)
 ;;
 
-let execute_current ?clock ~before_dispatch ~before_advance prepared =
+let settle_domain ~commit_domain prepared success terminal =
+  let disposition =
+    match terminal with
+    | Domain_valid _ -> Exact_output.Domain_valid
+    | Domain_rejected _ -> Exact_output.Domain_rejected
+  in
+  let commit intent =
+    Eio.Cancel.protect (fun () ->
+      let* () =
+        commit_domain terminal
+        |> Result.map_error (fun cause -> Terminal_persistence_failed cause)
+      in
+      Keeper_exact_flow_scope.commit_domain_settlement_intent
+        prepared.flow_scope
+        intent
+      |> Result.map_error (fun cause ->
+        Settlement_intent_persistence_failed cause))
+  in
+  match
+    Exact_output.commit_and_settle_flow_domain
+      ~commit
+      success
+      disposition
+  with
+  | Ok _ ->
+    (match terminal with
+     | Domain_valid judgment -> Ok judgment
+     | Domain_rejected (Execution_provenance_mismatch detail) ->
+       Error (Provenance_mismatch detail)
+     | Domain_rejected (Invalid_domain_output detail) ->
+       Error (Domain_output_invalid detail))
+  | Error
+      (Exact_output.Domain_commit_failed
+         (Terminal_persistence_failed cause)) ->
+    Error (Domain_terminal_persistence_failed { terminal; cause })
+  | Error
+      (Exact_output.Domain_commit_failed
+         (Settlement_intent_persistence_failed cause)) ->
+    Error (Domain_settlement_intent_persistence_failed { terminal; cause })
+  | Error Exact_output.Domain_settlement_in_progress ->
+    Error (Domain_settlement_in_progress terminal)
+  | Error Exact_output.Domain_settlement_conflict ->
+    Error (Domain_settlement_conflict terminal)
+;;
+
+let execute_current ?clock ~before_dispatch ~before_advance ~commit_domain prepared =
   let with_current callback =
     match
       Keeper_exact_flow_scope.with_current
@@ -437,7 +523,11 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
         prepared.attempt
     with
     | Ok success ->
-      let judgment = judgment_of_success prepared.candidate success in
+      let terminal =
+        match judgment_of_success prepared.candidate success with
+        | Ok judgment -> Domain_valid judgment
+        | Error rejection -> Domain_rejected rejection
+      in
       (match
          Keeper_exact_flow_scope.with_settlement
            prepared.flow_scope
@@ -446,24 +536,7 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
                 ~base_path:prepared.base_path
                 ~keeper_name:prepared.keeper_name)
            (fun () ->
-              match judgment with
-              | Ok judgment ->
-                (match
-                   Exact_output.settle_flow_domain
-                     success
-                     Exact_output.Domain_valid
-                 with
-                 | Ok _ -> Ok judgment
-                 | Error _ -> Error Domain_settlement_failed)
-              | Error error ->
-                ignore
-                  (Exact_output.settle_flow_domain
-                     success
-                     Exact_output.Domain_rejected
-                   : ( Exact_output.domain_settlement_receipt
-                     , Exact_output.domain_settlement_error )
-                       result);
-                Error error)
+              settle_domain ~commit_domain prepared success terminal)
        with
        | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
          Error Owner_unregistered_deferred
@@ -534,12 +607,17 @@ let with_settlement_generation prepared callback =
     callback
 ;;
 
-let execute ?clock ~before_dispatch ~before_advance prepared =
+let execute ?clock ~before_dispatch ~before_advance ~commit_domain prepared =
   match
     with_current_generation prepared (fun () -> ())
   with
   | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
     Error Owner_unregistered_deferred
   | Keeper_exact_flow_scope.Current () ->
-    execute_current ?clock ~before_dispatch ~before_advance prepared
+    execute_current
+      ?clock
+      ~before_dispatch
+      ~before_advance
+      ~commit_domain
+      prepared
 ;;

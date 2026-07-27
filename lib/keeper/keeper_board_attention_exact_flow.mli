@@ -47,6 +47,17 @@ type advance_source =
     carries only the immutable candidate visit because no attempt receipt
     exists. *)
 
+type domain_rejection =
+  | Execution_provenance_mismatch of string
+  | Invalid_domain_output of string
+
+type domain_terminal =
+  | Domain_valid of Keeper_board_attention_candidate.judgment
+  | Domain_rejected of domain_rejection
+(** Closed provider-neutral Board terminal passed to the caller's durable
+    commit boundary. No OAS preference changes before this terminal and the
+    current settlement intent are durable. *)
+
 type 'callback_error execution_error =
   | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
@@ -64,7 +75,16 @@ type 'callback_error execution_error =
   | Exact_execution_failed of attempt_provenance list
   | Provenance_mismatch of string
   | Domain_output_invalid of string
-  | Domain_settlement_failed
+  | Domain_terminal_persistence_failed of
+      { terminal : domain_terminal
+      ; cause : 'callback_error
+      }
+  | Domain_settlement_intent_persistence_failed of
+      { terminal : domain_terminal
+      ; cause : Keeper_exact_flow_scope.evidence_commit_error
+      }
+  | Domain_settlement_in_progress of domain_terminal
+  | Domain_settlement_conflict of domain_terminal
 
 type prepared
 
@@ -90,15 +110,19 @@ val execute :
     (failed:advance_source ->
      next:candidate_visit ->
      (unit, 'callback_error) result) ->
+  commit_domain:
+    (domain_terminal -> (unit, 'callback_error) result) ->
   prepared ->
   ( Keeper_board_attention_candidate.judgment
   , 'callback_error execution_error )
   result
 (** Execute the prepared affine flow exactly once. Domain identity and
     provenance failures are terminal results and never request OAS
-    advancement. Cancellation is not caught. The caller's durable callback
-    progress is the sole terminalization authority and must be quarantined
-    under cancellation protection; no OAS receipt state is inspected. *)
+    advancement. [commit_domain] must idempotently persist the closed Board
+    terminal. The adapter then persists the opaque current OAS settlement
+    intent through the owner scope before OAS may apply a preference.
+    Cancellation is not caught; committed current-schema evidence is recovered
+    by the scope journal and no OAS receipt state is inspected. *)
 (** Cancellation is propagated promptly without protected partition I/O.
     Durable [Bound] or [Advancing] progress is quarantined only by the subsequent
     process-start recovery path. *)

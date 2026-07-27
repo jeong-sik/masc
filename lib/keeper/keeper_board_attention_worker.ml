@@ -853,9 +853,24 @@ let execution_disposition partition = function
       (preserve_durable_progress
          partition
          (Partition.Domain_output_invalid detail))
-  | Exact_flow.Domain_settlement_failed ->
+  | Exact_flow.Domain_terminal_persistence_failed { terminal = _; cause } ->
     Execution_blocked
-      (preserve_durable_progress partition Partition.Exact_execution_terminal)
+      (Partition.Durable_partition_invariant
+         ("domain terminal persistence failed: " ^ cause))
+  | Exact_flow.Domain_settlement_intent_persistence_failed
+      { terminal = _; cause } ->
+    Execution_blocked
+      (Partition.Durable_partition_invariant
+         ("domain settlement intent persistence failed: "
+          ^ Keeper_exact_flow_scope.evidence_commit_error_to_string cause))
+  | Exact_flow.Domain_settlement_in_progress _ ->
+    Execution_blocked
+      (Partition.Durable_partition_invariant
+         "domain settlement is already in progress")
+  | Exact_flow.Domain_settlement_conflict _ ->
+    Execution_blocked
+      (Partition.Durable_partition_invariant
+         "domain settlement conflicts with durable evidence")
 ;;
 
 let confirm_exact_transition latest_partition operation = function
@@ -899,6 +914,64 @@ let before_advance
     ~source
     ~next
   |> confirm_exact_transition latest_partition "exact before-advance record"
+;;
+
+let domain_rejection_reason = function
+  | Exact_flow.Execution_provenance_mismatch detail ->
+    Partition.Execution_provenance_mismatch detail
+  | Exact_flow.Invalid_domain_output detail ->
+    Partition.Domain_output_invalid detail
+;;
+
+let commit_domain_terminal
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      candidate
+  = function
+  | Exact_flow.Domain_valid judgment ->
+    Candidate.record_judgment ~base_path candidate judgment
+    |> Result.map ignore
+  | Exact_flow.Domain_rejected rejection ->
+    let reason = domain_rejection_reason rejection in
+    let* transition =
+      Partition.block
+        ~now:(now ())
+        ~worker_epoch
+        ~base_path
+        ~partition:!latest_partition
+        reason
+    in
+    let* blocked = confirm_blocked_transition ~base_path transition in
+    latest_partition := blocked;
+    quarantine_blocked_partition ~base_path blocked
+;;
+
+let refresh_committed_blocked_step ~base_path latest_partition =
+  let partition_id = (!latest_partition).Partition.partition_id in
+  let keeper_name = (!latest_partition).Partition.keeper_name in
+  let* partitions = Partition.load ~base_path ~keeper_name in
+  match
+    List.find_opt
+      (fun partition ->
+         String.equal partition.Partition.partition_id partition_id)
+      partitions
+  with
+  | None ->
+    Error ("Board attention partition disappeared: " ^ partition_id)
+  | Some ({ state = Partition.Blocked { reason; _ }; _ } as blocked) ->
+    let* confirmation = Partition.confirm_blocked ~base_path ~partition:blocked in
+    let* blocked = confirm_blocked_transition ~base_path confirmation in
+    latest_partition := blocked;
+    let* () = quarantine_blocked_partition ~base_path blocked in
+    Ok
+      (Some
+         (Partition_blocked
+            { candidate_id = blocked.candidate_id; reason }))
+  | Some current ->
+    latest_partition := current;
+    Ok None
 ;;
 
 let complete_existing_judgment
@@ -998,6 +1071,7 @@ let process_pending
       ~base_path
       ~execute
       latest_partition
+      candidate
       prepared
   =
   match
@@ -1006,29 +1080,42 @@ let process_pending
         (before_dispatch ~worker_epoch ~base_path latest_partition)
       ~before_advance:
         (before_advance ~worker_epoch ~base_path latest_partition)
+      ~commit_domain:
+        (commit_domain_terminal
+           ~now
+           ~worker_epoch
+           ~base_path
+           latest_partition
+           candidate)
       prepared
   with
   | Error error ->
-    (match execution_disposition !latest_partition error with
-     | Execution_owner_deferred ->
-       Ok
-         (Owner_unregistered_deferred
-            { candidate_id = (!latest_partition).candidate_id })
-     | Execution_blocked reason ->
-       (match
-          with_current prepared (fun () ->
-            blocked_step
-              ~now:(now ())
-              ~worker_epoch
-              ~base_path
-              !latest_partition
-              reason)
-        with
-        | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    let* committed =
+      refresh_committed_blocked_step ~base_path latest_partition
+    in
+    (match committed with
+     | Some step -> Ok step
+     | None ->
+       (match execution_disposition !latest_partition error with
+        | Execution_owner_deferred ->
           Ok
             (Owner_unregistered_deferred
                { candidate_id = (!latest_partition).candidate_id })
-        | Keeper_exact_flow_scope.Current step -> step))
+        | Execution_blocked reason ->
+          (match
+             with_current prepared (fun () ->
+               blocked_step
+                 ~now:(now ())
+                 ~worker_epoch
+                 ~base_path
+                 !latest_partition
+                 reason)
+           with
+           | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+             Ok
+               (Owner_unregistered_deferred
+                  { candidate_id = (!latest_partition).candidate_id })
+           | Keeper_exact_flow_scope.Current step -> step)))
   | Ok judgment ->
     (match
        with_current prepared (fun () ->
@@ -1091,6 +1178,7 @@ let process_claimed
                ~base_path
                ~execute
                latest_partition
+               candidate
                prepared
            | Some _ | None ->
              Error

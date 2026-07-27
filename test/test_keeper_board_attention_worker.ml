@@ -249,7 +249,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
   let third = provenance "third" in
   let callbacks = ref [] in
   let observed_time = ref 3.0 in
-  let execute ~before_dispatch ~before_advance _candidate =
+  let execute ~commit_domain:_ ~before_dispatch ~before_advance _candidate =
     ok "bind first" (before_dispatch first);
     (match (load_one_partition ~base_path).state with
      | P.Running { progress = P.Bound durable; _ }
@@ -364,7 +364,7 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        ~base_path
        ~keeper_name:"sangsu"
        ~prepare
-       ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
+       ~execute:(fun ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _ ->
          Alcotest.fail "setup error reached execution")
    with
    | Error detail ->
@@ -432,7 +432,7 @@ let test_claim_generation_change_discards_without_sibling_selection () =
     Ok candidate
   in
   let execute_calls = ref 0 in
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     incr execute_calls;
     Alcotest.fail "claim retry exhaustion dispatched a prepared attempt"
   in
@@ -521,7 +521,7 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
     incr prepare_calls;
     Ok candidate
   in
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     incr execute_calls;
     Alcotest.fail "exhausted exact claim dispatched a prepared attempt"
   in
@@ -884,7 +884,7 @@ let test_execution_error_preserves_bound_progress_without_hot_retry () =
   let persisted = record ~base_path (candidate ()) in
   let exact = provenance "terminal" in
   let calls = ref 0 in
-  let execute ~before_dispatch ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch ~before_advance:_ _candidate =
     incr calls;
     ok "bind terminal attempt" (before_dispatch exact);
     Error (E.Exact_execution_failed [ exact ])
@@ -914,7 +914,7 @@ let test_completion_failure_preserves_bound_provenance () =
   let persisted = record ~base_path (candidate ()) in
   let bound = provenance "completion-bound" in
   let mismatched = provenance "completion-mismatch" in
-  let execute ~before_dispatch ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch ~before_advance:_ _candidate =
     ok "bind successful exact execution" (before_dispatch bound);
     Ok (judgment mismatched J.Not_relevant)
   in
@@ -950,7 +950,7 @@ let test_flow_already_started_blocks_unbound_without_hot_retry () =
   with_temp_base "board-attention-worker-flow-replayed" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let calls = ref 0 in
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     incr calls;
     Error (E.Flow_already_started [ provenance "already-started" ])
   in
@@ -978,7 +978,7 @@ let test_domain_error_quarantines_bound_progress_without_hot_retry () =
   let persisted = record ~base_path (candidate ()) in
   let exact = provenance "domain-invalid" in
   let calls = ref 0 in
-  let execute ~before_dispatch ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch ~before_advance:_ _candidate =
     incr calls;
     ok "bind domain-invalid attempt" (before_dispatch exact);
     Error (E.Domain_output_invalid "singleton candidate identity mismatch")
@@ -1019,7 +1019,7 @@ let test_bound_cancellation_is_prompt_and_process_recoverable () =
          (process
             ~base_path
             ~prepare:(fun candidate -> Ok candidate)
-            ~execute:(fun ~before_dispatch ~before_advance:_ _candidate ->
+            ~execute:(fun ~commit_domain:_ ~before_dispatch ~before_advance:_ _candidate ->
               ok "bind cancelled attempt" (before_dispatch exact);
               Eio.Promise.resolve publish_entered ();
               Eio.Promise.await never)
@@ -1070,7 +1070,7 @@ let test_released_cancellation_is_prompt_and_process_recoverable () =
          (process
             ~base_path
             ~prepare:(fun candidate -> Ok candidate)
-            ~execute:(fun ~before_dispatch ~before_advance _candidate ->
+            ~execute:(fun ~commit_domain:_ ~before_dispatch ~before_advance _candidate ->
               ok "bind failed attempt" (before_dispatch failed);
               ok
                 "record failed attempt"
@@ -1142,7 +1142,7 @@ let test_unbound_cancellation_waits_for_process_start_recovery () =
          (process
             ~base_path
             ~prepare:(fun candidate -> Ok candidate)
-            ~execute:(fun ~before_dispatch:_ ~before_advance:_ _candidate ->
+            ~execute:(fun ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate ->
               Eio.Promise.resolve publish_entered ();
               Eio.Promise.await never)
           : (W.step, string) result);
@@ -1182,7 +1182,7 @@ let test_terminal_root_does_not_strand_ready_sibling () =
        ~base_path
        ~keeper_name:"sangsu"
        ~prepare:(fun candidate -> Ok candidate)
-       ~execute:(fun ~before_dispatch ~before_advance:_ observed ->
+       ~execute:(fun ~commit_domain:_ ~before_dispatch ~before_advance:_ observed ->
          calls := !calls @ [ observed.A.candidate_id ];
          if String.equal observed.candidate_id first.candidate_id
          then Error (E.Exact_execution_failed [])
@@ -1219,7 +1219,7 @@ let test_completed_startup_replays_owner_wake () =
        (process
           ~base_path
           ~prepare:(fun candidate -> Ok candidate)
-          ~execute:(fun ~before_dispatch ~before_advance:_ _candidate ->
+          ~execute:(fun ~commit_domain:_ ~before_dispatch ~before_advance:_ _candidate ->
             ok "bind replay attempt" (before_dispatch exact);
             Ok (judgment exact J.Relevant)))
       : W.step);
@@ -1256,7 +1256,7 @@ let test_existing_judgment_skips_exact_flow () =
        (process
           ~base_path
           ~prepare:(fun _ -> Alcotest.fail "prior judgment invoked exact preparation")
-          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
+          ~execute:(fun ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _ ->
             Alcotest.fail "prior judgment invoked exact execution"))
    with
    | W.Judgment_completed { candidate_id; _ }
@@ -1300,7 +1300,7 @@ let test_existing_consumed_skips_exact_flow_and_settles () =
        (process
           ~base_path
           ~prepare:(fun _ -> Alcotest.fail "consumed candidate invoked exact preparation")
-          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
+          ~execute:(fun ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _ ->
             Alcotest.fail "consumed candidate invoked exact execution"))
    with
    | W.Candidate_already_consumed { candidate_id }
@@ -1424,7 +1424,7 @@ let test_unexpected_exception_is_terminal_without_hot_retry () =
   with_temp_base "board-attention-worker-unexpected" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let calls = ref 0 in
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     incr calls;
     raise (Failure "injected exact worker exception")
   in
@@ -1450,7 +1450,7 @@ let test_unexpected_exception_is_terminal_without_hot_retry () =
 let test_requested_blocked_recovery_and_sequential_cas_converge () =
   with_temp_base "board-attention-worker-manual-requeue" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     raise (Failure "injected exact worker exception")
   in
   (match
@@ -1526,7 +1526,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   with_temp_base "board-attention-worker-manual-requeue-interleaving" @@ fun base_path ->
   let persisted = record ~base_path (candidate ~id:"candidate-interleaving" ()) in
   let failed_exact = provenance "manual-requeue-failure" in
-  let execute ~before_dispatch ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch ~before_advance:_ _candidate =
     ok "bind failed manual requeue attempt" (before_dispatch failed_exact);
     raise (Failure "injected exact worker exception")
   in
@@ -1553,7 +1553,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
          ~requested_at:30.0)
   in
   let execute_calls = ref 0 in
-  let execute_before_authorization ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute_before_authorization ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     incr execute_calls;
     Alcotest.fail "requeue-requested candidate became claimable"
   in
@@ -1669,7 +1669,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
    | _ -> Alcotest.fail "Requeued+Blocked recovery did not commit Ready");
   let exact = provenance "manual-requeue-success" in
-  let execute ~before_dispatch ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch ~before_advance:_ _candidate =
     ok "bind manual requeue attempt" (before_dispatch exact);
     Ok (judgment exact J.Not_relevant)
   in
@@ -1711,7 +1711,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
 let test_ready_requested_recovery_fails_closed () =
   with_temp_base "board-attention-worker-ready-requested" @@ fun base_path ->
   let persisted = record ~base_path (candidate ~id:"candidate-ready-requested" ()) in
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     raise (Failure "injected exact worker exception")
   in
   ignore
@@ -1784,7 +1784,7 @@ let test_ready_requested_recovery_fails_closed () =
 let test_stale_quarantine_generation_is_rejected () =
   with_temp_base "board-attention-worker-stale-quarantine" @@ fun base_path ->
   let persisted = record ~base_path (candidate ~id:"candidate-stale-generation" ()) in
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     raise (Failure "injected exact worker exception")
   in
   ignore
@@ -1835,7 +1835,7 @@ let test_stale_quarantine_generation_is_rejected () =
 let test_same_quarantine_command_cas_loser_converges () =
   with_temp_base "board-attention-worker-same-command-cas" @@ fun base_path ->
   ignore (record ~base_path (candidate ()) : A.candidate);
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     raise (Failure "injected exact worker exception")
   in
   (match
@@ -1904,7 +1904,7 @@ let test_same_quarantine_command_cas_loser_converges () =
 let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
   with_temp_base "board-attention-worker-stale-blocked-generation" @@ fun base_path ->
   ignore (record ~base_path (candidate ()) : A.candidate);
-  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+  let execute ~commit_domain:_ ~before_dispatch:_ ~before_advance:_ _candidate =
     raise (Failure "injected first exact worker exception")
   in
   (match

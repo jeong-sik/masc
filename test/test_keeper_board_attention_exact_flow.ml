@@ -320,6 +320,20 @@ let test_explicit_lane_failover_and_success_provenance () =
          when String.equal candidate_id candidate.candidate_id -> ()
        | Ok _ -> Alcotest.fail "production exact flow did not complete"
        | Error detail -> Alcotest.fail detail);
+      (match
+         Candidate.load_candidates
+           ~base_path
+           ~keeper_name:candidate.keeper_name
+       with
+       | Ok [ { status = Candidate.Judged { judgment; _ }; _ } ] ->
+         Alcotest.(check string)
+           "domain judgment is durable before owner delivery"
+           third.id
+           judgment.slot_id
+       | Ok _ ->
+         Alcotest.fail
+           "successful OAS settlement did not leave one durable Judged candidate"
+       | Error detail -> Alcotest.fail detail);
       Alcotest.(check int)
         "B rejected before HTTP"
         0
@@ -412,6 +426,7 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
         | Error _ -> Alcotest.fail "valid domain-mismatch fixture was not admitted"
       in
       let dispatches = ref [] in
+      let domain_terminals = ref [] in
       let before_dispatch provenance : (unit, string) result =
         dispatches := provenance :: !dispatches;
         Ok ()
@@ -430,11 +445,16 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
           "domain-invalid OAS success must not advance from %s"
           failed_slot_id
       in
+      let commit_domain terminal : (unit, string) result =
+        domain_terminals := terminal :: !domain_terminals;
+        Ok ()
+      in
       (match
          Exact_flow.execute
            ~clock
            ~before_dispatch
            ~before_advance
+           ~commit_domain
            prepared
        with
        | Error (Exact_flow.Domain_output_invalid _) -> ()
@@ -442,6 +462,13 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
        | Error _ -> Alcotest.fail "wrong candidate id produced a non-domain error");
       Alcotest.(check int) "domain-invalid slot dispatched once" 1 (Fixture.post_count invalid);
       Alcotest.(check int) "second slot was not dispatched" 0 (Fixture.post_count unused);
+      (match !domain_terminals with
+       | [ Exact_flow.Domain_rejected
+             (Exact_flow.Invalid_domain_output _) ] ->
+         ()
+       | _ ->
+         Alcotest.fail
+           "domain rejection was not durably committed before settlement");
       match List.rev !dispatches with
       | [ provenance ] ->
         Alcotest.(check string)
@@ -449,6 +476,67 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
           first.id
           provenance.slot_id
       | _ -> Alcotest.fail "domain-invalid success dispatched more than once"))
+;;
+
+let test_domain_terminal_persistence_failure_is_typed () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-domain-commit-failure" in
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      publish_lane
+        [ target "board-attention-domain-commit-failure" server.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ ->
+          Alcotest.fail "domain commit failure fixture was not admitted"
+      in
+      let callback_count = ref 0 in
+      let commit_domain terminal : (unit, string) result =
+        incr callback_count;
+        match terminal with
+        | Exact_flow.Domain_valid _ ->
+          Error "injected Board terminal persistence failure"
+        | Exact_flow.Domain_rejected _ ->
+          Alcotest.fail "valid fixture reached the rejection commit boundary"
+      in
+      (match
+         Exact_flow.execute
+           ~clock
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+           ~commit_domain
+           prepared
+       with
+       | Error
+           (Exact_flow.Domain_terminal_persistence_failed
+              { terminal = Exact_flow.Domain_valid _
+              ; cause
+              })
+         when String.equal
+                cause
+                "injected Board terminal persistence failure" ->
+         ()
+       | Ok _ ->
+         Alcotest.fail "OAS settled despite Board terminal commit failure"
+       | Error _ ->
+         Alcotest.fail "Board terminal commit failure lost its typed cause");
+      Alcotest.(check int)
+        "domain terminal callback invoked once"
+        1
+        !callback_count;
+      Alcotest.(check int)
+        "generation dispatched once before domain commit"
+        1
+        (Fixture.post_count server)))
 ;;
 
 let test_missing_lane_is_setup_error_without_dispatch () =
@@ -690,6 +778,10 @@ let () =
             "strict singleton candidate id is domain-terminal"
             `Quick
             test_domain_candidate_id_mismatch_does_not_advance
+        ; Alcotest.test_case
+            "domain terminal persistence failure remains typed"
+            `Quick
+            test_domain_terminal_persistence_failure_is_typed
         ; Alcotest.test_case
             "missing lane is setup error without dispatch"
             `Quick

@@ -228,7 +228,14 @@ let claim_task_r config ~agent_name ~task_id ()
                  ~task:claimed_task
              with
              | Some projection -> projection
-             | None -> ""
+             | None ->
+               Log.Task.error
+                 ~keeper_name:agent_name
+                 "verification claim committed without an evidence projection (task=%s)"
+                 task_id;
+               Printf.sprintf
+                 "verification_request projection unavailable after assignment for %s; ACTION: stop and report this invariant failure"
+                 task_id
            in
            Ok
              (`New_claim

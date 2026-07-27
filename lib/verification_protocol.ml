@@ -134,7 +134,13 @@ let create_submit_request ~(config : Workspace.config)
   let output =
     match spec.output with
     | `Assoc fields ->
-      `Assoc (("submitted_evidence_snapshot", evidence_snapshot) :: fields)
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if String.equal key "submitted_evidence"
+             then key, evidence_snapshot
+             else key, value)
+           fields)
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
       as impossible ->
       impossible

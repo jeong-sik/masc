@@ -336,7 +336,24 @@ let test_list_requests_ignores_legacy_root_entries () =
       (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error))
 
 let create_evidence_request ~base_path ~request_id ~artifact_path =
-  let submitted_evidence = [ artifact_path; "executor summary" ] in
+  let profile_path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path
+      ~agent_name:"keeper-executor-agent"
+  in
+  Fs_compat.mkdir_p (Filename.dirname profile_path);
+  Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
+  let submitted_evidence =
+    match
+      Playground_paths.parse_playground_file_path
+        ~base_path
+        ~abs_path:artifact_path
+    with
+    | Some { keeper_name = "executor"; relative_path } ->
+      [ "artifact:" ^ relative_path; "note:executor summary" ]
+    | Some _ | None ->
+      [ "artifact:../outside-worker-playground"; "note:executor summary" ]
+  in
   let evidence_snapshot =
     VS.snapshot_submitted_evidence_json
       ~base_path
@@ -350,10 +367,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
       ~task_id:"task-001"
       ~output:
         (`Assoc
-            [ ( "submitted_evidence"
-              , `List (List.map (fun value -> `String value) submitted_evidence) )
-            ; "submitted_evidence_snapshot", evidence_snapshot
-            ])
+            [ "submitted_evidence", evidence_snapshot ])
       ~criteria:[ V.Custom "inspect artifact" ]
       ~worker:"keeper-executor-agent"
       ()
@@ -492,7 +506,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
             VS.Evidence_artifact
               { reference = "artifact:artifacts/proof.txt"
               ; content = "docker-relative-proof"
-              ; sha256
+              ; content_sha256
               ; _
               }
             :: VS.Evidence_note "executor summary"
@@ -502,7 +516,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
       Alcotest.(check string)
         "snapshot hash covers persisted bounded content"
         Digestif.SHA256.(digest_string "docker-relative-proof" |> to_hex)
-        sha256
+        content_sha256
     | _ ->
       (match
          inspect_evidence
@@ -661,6 +675,62 @@ let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
           Alcotest.fail
             "relative traversal and symlink escape must persist typed unreadable snapshots"))
 
+let test_submit_snapshot_rejects_bare_and_absolute_references () =
+  with_eio_temp_dir (fun base_path ->
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-executor-agent"
+      ~sandbox_profile:"docker";
+    let producer_root =
+      Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path
+        ~agent_name:"keeper-executor-agent"
+    in
+    Fs_compat.mkdir_p producer_root;
+    let absolute_path = Filename.concat producer_root "absolute.txt" in
+    Fs_compat.save_file absolute_path "must-not-be-read";
+    let request_id = "vrf-explicit-reference-hard-cut" in
+    let snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-executor-agent"
+        [ "artifacts/bare.txt"; absolute_path ]
+    in
+    ignore
+      (match
+         V.create_request
+           ~base_path
+           ~request_id
+           ~task_id:"task-001"
+           ~output:(`Assoc [ "submitted_evidence", snapshot ])
+           ~criteria:[ V.Custom "inspect explicit refs" ]
+           ~worker:"keeper-executor-agent"
+           ()
+       with
+       | Ok request -> request
+       | Error detail -> Alcotest.fail detail);
+    match
+      inspect_evidence
+        ~base_path
+        ~request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
+        ~viewer:"keeper-verifier-agent"
+        ()
+    with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact_unreadable
+              { reason = VS.Evidence_invalid_reference; _ }
+            :: VS.Evidence_artifact_unreadable
+                 { reason = VS.Evidence_invalid_reference; _ }
+            :: []
+        ; _
+        } ->
+      ()
+    | _ ->
+      Alcotest.fail
+        "bare and absolute references must remain typed invalid without file reads")
+
 let test_submitted_evidence_inspection_rejects_cross_playground_path () =
   with_eio_temp_dir (fun base_path ->
     let other_dir =
@@ -684,7 +754,7 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
     | VS.Evidence_available
         { items =
             VS.Evidence_artifact_unreadable
-              { reason = VS.Evidence_outside_worker_playground; _ }
+              { reason = VS.Evidence_invalid_reference; _ }
             :: _
         ; _
         } ->
@@ -787,7 +857,7 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
      | VS.Evidence_available
          { items =
              VS.Evidence_artifact_unreadable
-               { reason = VS.Evidence_outside_worker_playground; _ }
+               { reason = VS.Evidence_symbolic_link; _ }
              :: _
          ; _
          } ->
@@ -847,12 +917,10 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
           ~output:
             (`Assoc
                 [ ( "submitted_evidence"
-                  , `List [ `String artifact_path ] )
-                ; ( "submitted_evidence_snapshot"
                   , VS.snapshot_submitted_evidence_json
                       ~base_path
                       ~worker:"keeper-executor-agent"
-                      [ artifact_path ] )
+                      [ "artifact:assignment.txt" ] )
                 ])
           ~criteria:[ V.Custom "inspect artifact" ]
           ~worker:"keeper-executor-agent"
@@ -1258,6 +1326,8 @@ let () =
         test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd;
       Alcotest.test_case "submit snapshot rejects traversal and symlink escape" `Quick
         test_submit_snapshot_rejects_relative_traversal_and_symlink_escape;
+      Alcotest.test_case "submit snapshot rejects bare and absolute refs" `Quick
+        test_submit_snapshot_rejects_bare_and_absolute_references;
       Alcotest.test_case "submitted evidence rejects cross playground" `Quick
         test_submitted_evidence_inspection_rejects_cross_playground_path;
       Alcotest.test_case "submitted evidence bounded UTF-8" `Quick

@@ -33,7 +33,7 @@ type submitted_evidence_item =
       ; content : string
       ; bytes : int
       ; truncated : bool
-      ; sha256 : string
+      ; content_sha256 : string
       }
   | Evidence_artifact_unreadable of
       { reference : string
@@ -65,8 +65,9 @@ val snapshot_submitted_evidence_json :
 (** Materialize submitted evidence once at the producer's submit boundary.
     ["artifact:<relative-path>"] is rooted at the producer's declared sandbox;
     absolute paths remain accepted only when contained by that same playground.
-    The artifact SHA-256 covers the bounded UTF-8 content persisted in the
-    snapshot, not bytes omitted beyond the projection cap. *)
+    [content_sha256] covers the bounded UTF-8 content persisted in the
+    snapshot, not bytes omitted beyond the projection cap. Bare and absolute
+    references are persisted as typed invalid references. *)
 val inspect_submitted_evidence :
   base_path:string ->
   request_id:string ->

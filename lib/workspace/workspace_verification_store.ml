@@ -33,7 +33,7 @@ type submitted_evidence_item =
       ; content : string
       ; bytes : int
       ; truncated : bool
-      ; sha256 : string
+      ; content_sha256 : string
       }
   | Evidence_artifact_unreadable of
       { reference : string
@@ -78,20 +78,21 @@ let evidence_read_failure_of_string = function
          (String.sub raw 11 (String.length raw - 11)))
   | raw -> Error (Printf.sprintf "unknown evidence read failure %S" raw)
 
-let sha256 content =
+let content_sha256 content =
   Digestif.SHA256.(digest_string content |> to_hex)
 
 let submitted_evidence_item_to_yojson = function
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
-  | Evidence_artifact { reference; content; bytes; truncated; sha256 } ->
+  | Evidence_artifact
+      { reference; content; bytes; truncated; content_sha256 } ->
     `Assoc
       [ "kind", `String "artifact"
       ; "reference", `String reference
       ; "content", `String content
       ; "bytes", `Int bytes
       ; "truncated", `Bool truncated
-      ; "sha256", `String sha256
+      ; "content_sha256", `String content_sha256
       ]
   | Evidence_artifact_unreadable { reference; reason } ->
     `Assoc
@@ -124,7 +125,7 @@ let submitted_evidence_item_of_yojson = function
        let open Result.Syntax in
        let* reference = string_field "reference" in
        let* content = string_field "content" in
-       let* expected_sha256 = string_field "sha256" in
+       let* expected_content_sha256 = string_field "content_sha256" in
        let* bytes =
          match List.assoc_opt "bytes" fields with
          | Some (`Int value) when value >= 0 -> Ok value
@@ -145,8 +146,23 @@ let submitted_evidence_item_of_yojson = function
                 (Json_util.excerpt value))
          | None -> Error "submitted evidence snapshot is missing truncated"
        in
-       if not (String.equal expected_sha256 (sha256 content))
-       then Error "submitted evidence snapshot sha256 does not match persisted content"
+       let content_bytes = String.length content in
+       if
+         not
+           (String.equal
+              expected_content_sha256
+              (content_sha256 content))
+       then
+         Error
+           "submitted evidence snapshot content_sha256 does not match persisted content"
+       else if truncated && bytes <= content_bytes
+       then
+         Error
+           "truncated submitted evidence snapshot must report more source bytes than persisted content"
+       else if (not truncated) && bytes <> content_bytes
+       then
+         Error
+           "non-truncated submitted evidence snapshot bytes must equal persisted content length"
        else
          Ok
            (Evidence_artifact
@@ -154,7 +170,7 @@ let submitted_evidence_item_of_yojson = function
               ; content
               ; bytes
               ; truncated
-              ; sha256 = expected_sha256
+              ; content_sha256 = expected_content_sha256
               })
      | Some (`String "artifact_unreadable") ->
        let open Result.Syntax in
@@ -335,7 +351,7 @@ let submitted_evidence_snapshot_of_request_json = function
   | `Assoc fields ->
     (match List.assoc_opt "output" fields with
      | Some (`Assoc output_fields) ->
-       (match List.assoc_opt "submitted_evidence_snapshot" output_fields with
+       (match List.assoc_opt "submitted_evidence" output_fields with
         | Some (`List values) ->
           let rec collect acc = function
             | [] -> Ok (List.rev acc)
@@ -348,10 +364,10 @@ let submitted_evidence_snapshot_of_request_json = function
         | Some other ->
           Error
             (Printf.sprintf
-               "submitted_evidence_snapshot must be a list, got %s"
+               "submitted_evidence must be a typed snapshot list, got %s"
                (Json_util.excerpt other))
         | None ->
-          Error "verification request output has no submitted_evidence_snapshot")
+          Error "verification request output has no submitted_evidence")
      | Some other ->
        Error
          (Printf.sprintf
@@ -462,56 +478,6 @@ let read_regular_file_prefix ~ownership_root path =
      | Utf8_incomplete_at _ | Utf8_invalid ->
        Error Evidence_invalid_utf8)
 
-let inspect_artifact_reference ~base_path ~worker reference =
-  let canonical_base =
-    try Ok (Unix.realpath (project_root_of_base_path base_path)) with
-    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Evidence_missing
-    | exn -> Error (Evidence_read_error (Printexc.to_string exn))
-  in
-  let canonical_target =
-    try Ok (Unix.realpath reference) with
-    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Evidence_missing
-    | exn -> Error (Evidence_read_error (Printexc.to_string exn))
-  in
-  match canonical_base, canonical_target with
-  | Error reason, _ | _, Error reason ->
-    Evidence_artifact_unreadable { reference; reason }
-  | Ok canonical_base, Ok canonical_target ->
-    (match
-       Playground_paths.parse_playground_file_path
-         ~base_path:canonical_base
-         ~abs_path:canonical_target
-     with
-     | Some parsed
-       when String.equal
-              parsed.Playground_paths.keeper_name
-              (Playground_paths.sanitize_keeper_name worker) ->
-       let relative_suffix = "/" ^ parsed.relative_path in
-       let ownership_root =
-         String.sub
-           canonical_target
-           0
-           (String.length canonical_target - String.length relative_suffix)
-       in
-       (match
-          read_regular_file_prefix
-            ~ownership_root
-            canonical_target
-        with
-        | Error reason ->
-          Evidence_artifact_unreadable { reference; reason }
-        | Ok (content, bytes, truncated) ->
-          Evidence_artifact
-            { reference
-            ; content
-            ; bytes
-            ; truncated
-            ; sha256 = sha256 content
-            })
-     | Some _ | None ->
-       Evidence_artifact_unreadable
-         { reference; reason = Evidence_outside_worker_playground })
-
 let artifact_reference_prefix = "artifact:"
 let note_reference_prefix = "note:"
 
@@ -556,7 +522,7 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
         ; content
         ; bytes
         ; truncated
-        ; sha256 = sha256 content
+        ; content_sha256 = content_sha256 content
         }
 
 let snapshot_submitted_evidence_item ~base_path ~worker reference =
@@ -569,9 +535,11 @@ let snapshot_submitted_evidence_item ~base_path ~worker reference =
       relative_path
   | None ->
     (match strip_prefix ~prefix:note_reference_prefix reference with
-     | Some note -> Evidence_note note
-     | None when Filename.is_relative reference -> Evidence_note reference
-     | None -> inspect_artifact_reference ~base_path ~worker reference)
+     | Some note when not (String.equal (String.trim note) "") ->
+       Evidence_note note
+     | Some _ | None ->
+       Evidence_artifact_unreadable
+         { reference; reason = Evidence_invalid_reference })
 
 let snapshot_submitted_evidence_json ~base_path ~worker references =
   `List

@@ -416,10 +416,10 @@ let add_verification_evidence_projection
         | Workspace_verification_store.Evidence_note note ->
           Printf.bprintf buf "      - note: %s\n" note
         | Workspace_verification_store.Evidence_artifact
-            { reference; content; bytes; truncated; sha256 } ->
+            { reference; content; bytes; truncated; content_sha256 } ->
           Printf.bprintf buf
-            "      - artifact: %s bytes=%d truncated=%b sha256=%s content=untrusted_evidence\n"
-            reference bytes truncated sha256;
+            "      - artifact: %s bytes=%d truncated=%b content_sha256=%s content=untrusted_evidence\n"
+            reference bytes truncated content_sha256;
           add_indented_evidence_content buf content
         | Workspace_verification_store.Evidence_artifact_unreadable
             { reference; reason } ->

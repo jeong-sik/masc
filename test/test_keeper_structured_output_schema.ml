@@ -171,6 +171,59 @@ let test_without_response_format_is_capability_independent () =
        [ schema_capable; json_object_only ])
 ;;
 
+let asks_for_json_syntax_only provider_cfg =
+  match provider_cfg.Llm_provider.Provider_config.response_format with
+  | Agent_sdk.Types.JsonMode ->
+    Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema
+  | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false
+;;
+
+(* [json_syntax_only] must reach both provider classes, including the
+   json_object-only one that rejects json_schema. That rejection is what pushed
+   these call sites to prose, and it does not apply here: a request carrying
+   [JsonMode] with no output_schema is not a schema request, so
+   [validate_output_schema_request] never consults the capability. If a future
+   change made [JsonMode] count as one, the last assertion fails rather than the
+   fleet silently returning to prose. *)
+let test_json_syntax_only_is_capability_independent () =
+  let schema_capable =
+    Keeper_structured_output_schema.json_syntax_only
+      (schema_capable_oas_provider_config ())
+  in
+  let json_object_only =
+    Keeper_structured_output_schema.json_syntax_only
+      (prompt_tier_oas_provider_config ())
+  in
+  check bool "schema-capable provider asks for JSON syntax" true
+    (asks_for_json_syntax_only schema_capable);
+  check bool "json_object-only provider asks for JSON syntax" true
+    (asks_for_json_syntax_only json_object_only);
+  check bool "neither request is a schema request" true
+    (List.for_all
+       (fun cfg ->
+          match Llm_provider.Provider_config.validate_output_schema_request cfg with
+          | Ok () -> true
+          | Error _ -> false)
+       [ schema_capable; json_object_only ])
+;;
+
+(* Composing over a config that already carries a native schema must drop it.
+   Keeping the schema while setting [JsonMode] would send both fields and turn
+   the request back into a schema request — the capability branch this avoids. *)
+let test_json_syntax_only_drops_an_attached_schema () =
+  let base =
+    Keeper_structured_output_schema.apply_to_provider_config
+      Keeper_structured_output_schema.librarian_episode_output_schema
+      (schema_capable_oas_provider_config ())
+  in
+  check bool "base starts with a native schema attached" true
+    (has_json_schema_response_format
+       Keeper_structured_output_schema.librarian_episode_output_schema
+       base);
+  check bool "json_syntax_only drops it" true
+    (asks_for_json_syntax_only (Keeper_structured_output_schema.json_syntax_only base))
+;;
+
 (* #25266: a json_object-only provider (structured_output=false,
    response_format_json=true — GLM/DeepSeek/Kimi's OpenAI-compat endpoints)
    must get JsonMode from the three-tier selector, not be dropped to the
@@ -479,6 +532,14 @@ let () =
             "without_response_format is capability-independent"
             `Quick
             test_without_response_format_is_capability_independent
+        ; test_case
+            "json_syntax_only is capability-independent"
+            `Quick
+            test_json_syntax_only_is_capability_independent
+        ; test_case
+            "json_syntax_only drops an attached schema"
+            `Quick
+            test_json_syntax_only_drops_an_attached_schema
         ] )
     ; ( "dashboard schemas"
       , [ test_case

@@ -162,8 +162,14 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
    (2) #22768("native schema or fail before HTTP")이 native 미선언을 빌드 실패로
    만들었다가 뒤집힌 이력이 있다 — 미지원 preset의 fusion을 영구 불능으로 만들기
    때문이며, 2026-06-17~06-30 prompt 계약만으로 성공한 run이 다수다. *)
+(* (1)은 json_schema에 대한 관측이고 json_object에는 해당하지 않는다: 2026-07-27
+   probe 에서 ollama_cloud/deepseek-v4-flash 는 response_format={"type":"json_object"}
+   에 200 + 펜스 없는 JSON 문서로 답했다. 스키마를 조용히 무시하는 엔드포인트가
+   문서 요구는 지킨다. (2)의 이력도 그대로 유지된다 — json_object 는 capability
+   분기를 만들지 않으므로 미지원 preset 이 빌드/실행 실패로 가지 않고, 지원하지
+   않는 백엔드는 필드를 버린다. 계약을 지키는 것은 여전히 프롬프트와 파서다. *)
 let apply_fusion_judge_output_contract provider_cfg =
-  Ok (Keeper_structured_output_schema.without_response_format provider_cfg)
+  Ok (Keeper_structured_output_schema.json_syntax_only provider_cfg)
 
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
    서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고

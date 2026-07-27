@@ -59,6 +59,24 @@ val without_response_format
     already become a typed error rather than a bad write. Every provider then
     takes one identical request path with no capability branch. *)
 
+val json_syntax_only
+  :  Llm_provider.Provider_config.t
+  -> Llm_provider.Provider_config.t
+(** Ask the provider for a JSON document and for nothing else: [JsonMode] with no
+    output schema. For call sites whose prompt states the object shape and whose
+    parser is total, but which still need the reply to be a JSON document rather
+    than prose that happens to contain one.
+
+    Unlike {!apply_to_provider_config} this requests no schema, so it takes no
+    capability branch: [validate_output_schema_request] only consults the
+    capability when a schema is actually requested, and [JsonMode] with
+    [output_schema = None] is not a schema request. The json_object-only
+    endpoints (GLM/DeepSeek/Kimi) that rejected json_schema accept this.
+
+    Providers with no json_object mode drop the field at the backend, so this is
+    a no-op there rather than an error — the prompt contract and the total parser
+    remain the guarantee in both cases. *)
+
 val anti_rationalization_reviewer_provider_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t

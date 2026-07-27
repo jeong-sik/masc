@@ -291,6 +291,37 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
   }
 ;;
 
+(* Ask the provider for a JSON document and for nothing else. This is the third
+   option the boundary did not have: {!apply_to_provider_config} demands a schema
+   and {!without_response_format} asks for no wire format at all, so a call site
+   that needs only "the reply parses as JSON" had to fall all the way to prose and
+   re-parse it.
+
+   The objection recorded above is about json_schema and does not reach here.
+   [Provider_config.structured_schema_requested] counts a request as a schema
+   request only when [output_schema] is set or [response_format] is [JsonSchema];
+   [JsonMode] with no output_schema is neither, so
+   [validate_output_schema_request] returns [Ok] without consulting the capability
+   at all (oas provider_config.ml:570-575, :619-636 at pin 3d4ee19a). The
+   json_object-only endpoints that rejected json_schema accept this one.
+
+   Measured on the live fleet 2026-07-27 with response_format={"type":"json_object"}:
+   glm-coding/GLM-5-Turbo and ollama_cloud/deepseek-v4-flash each answered 200 with a
+   bare JSON document and no markdown fence — GLM-5-Turbo being the runtime whose
+   fenced reply stopped taskmaster (#25789). Anthropic has no json_object mode and
+   [backend_anthropic.ml:138] drops the field, so those runtimes keep exactly today's
+   behaviour.
+
+   The prompt contract and the total parser stay in place either way. This does not
+   move the contract onto the wire; it removes the case where the model was never
+   asked for JSON at all. *)
+let json_syntax_only (provider_cfg : Llm_provider.Provider_config.t) =
+  { provider_cfg with
+    response_format = Agent_sdk.Types.JsonMode
+  ; output_schema = None
+  }
+;;
+
 (* The anti-rationalization reviewer's verdict channel is the
    [report_review_verdict] tool call: exactly-once dispatch enforced in
    [Workspace_metric_hooks], args re-validated by the total parser

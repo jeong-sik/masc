@@ -63,7 +63,14 @@ let with_facts_lock ?clock ~keeper_id f =
    only a capability branch: [validate_output_schema_request] rejects
    json_schema on every json_object-only endpoint, and the parse path never
    read a provider-side field anyway — [structured_json_of_response] extracts
-   JSON from the response's visible text. *)
+   JSON from the response's visible text.
+
+   Extracting JSON from visible text still requires the visible text to be a JSON
+   document, which is the part nothing was asking for. 36 replies failed that parse
+   on the live fleet (APC free_text_json_contracts), and none of them were markdown
+   fences — they opened a document and then diverged or stopped. [json_syntax_only]
+   asks for the document without asking for a schema, so the capability branch above
+   is still not taken. *)
 let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
@@ -71,7 +78,7 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
     | Some _ | None -> Some consolidation_max_tokens
   in
   Keeper_structured_output_schema.for_deterministic_subcall ~max_tokens provider_cfg
-  |> Keeper_structured_output_schema.without_response_format
+  |> Keeper_structured_output_schema.json_syntax_only
 ;;
 
 module For_testing = struct

@@ -23,7 +23,6 @@ let sample_synthesis : Fusion_types.judge_synthesis =
   ; decision = Fusion_types.Answer "ok"
   }
 
-let fusion_schema = Keeper_structured_output_schema.fusion_judge_output_schema
 
 let restore_model_catalog previous =
   match previous with
@@ -61,7 +60,13 @@ let response_with_text text : Agent_sdk.Types.api_response =
   ; telemetry = None
   }
 
-let test_output_contract_keeps_native_schema_when_supported () =
+(* These three cases were written against the 3-tier selector (#25324) and kept
+   asserting it after the code became single-tier: [apply_fusion_judge_output_contract]
+   stopped reading capability when it moved to [without_response_format], so the native
+   case has been asserting a schema the function cannot produce. They are rewritten to
+   the contract fusion_judge.mli states — one request shape for every provider — with
+   the schema-capable case kept as the one that proves capability is not consulted. *)
+let test_output_contract_asks_no_schema_of_a_schema_capable_provider () =
   let cfg =
     provider_cfg
       ~kind:Llm_provider.Provider_config.Anthropic
@@ -69,16 +74,14 @@ let test_output_contract_keeps_native_schema_when_supported () =
       ~base_url:"https://api.anthropic.test"
   in
   match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Error msg -> fail ("expected native schema config: " ^ msg)
+  | Error msg -> fail ("single-tier contract must not fail the build: " ^ msg)
   | Ok configured ->
-    check bool "response_format uses JsonSchema" true
+    check bool "response_format asks for JSON syntax, not a schema" true
       (match configured.response_format with
-       | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal fusion_schema schema
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-    check bool "output_schema mirrors schema" true
-      (match configured.output_schema with
-       | Some schema -> Yojson.Safe.equal fusion_schema schema
-       | None -> false)
+       | Agent_sdk.Types.JsonMode -> true
+       | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false);
+    check bool "no output_schema is attached even though the provider accepts one" true
+      (Option.is_none configured.output_schema)
 
 (* Prompt tier: 기본 카탈로그의 deepseek-v4-pro 항목은 native schema도 json_object
    response format도 선언하지 않으므로, 3-tier 선택기(#25324)에서도 schema 없이
@@ -99,8 +102,8 @@ let test_output_contract_prompt_tier_when_schema_is_not_native () =
   | Ok configured ->
     check bool "no native schema is attached (prompt tier)" true
       (match configured.response_format with
-       | Agent_sdk.Types.Off -> true
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+       | Agent_sdk.Types.JsonMode -> true
+       | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false);
     check bool "output_schema stays empty (prompt tier)" true
       (Option.is_none configured.output_schema)
 
@@ -143,8 +146,8 @@ let test_output_contract_prompt_tier_when_no_output_contract_is_known () =
   | Ok configured ->
     check bool "no native schema is attached (prompt tier)" true
       (match configured.response_format with
-       | Agent_sdk.Types.Off -> true
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+       | Agent_sdk.Types.JsonMode -> true
+       | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false);
     check bool "output_schema stays empty (prompt tier)" true
       (Option.is_none configured.output_schema)
 
@@ -343,9 +346,9 @@ let () =
   run "fusion_judge_usage"
     [ ( "output_contract"
       , [ test_case
-            "keeps native schema when supported"
+            "asks no schema of a schema-capable provider"
             `Quick
-            test_output_contract_keeps_native_schema_when_supported
+            test_output_contract_asks_no_schema_of_a_schema_capable_provider
         ; test_case
             "prompt tier when native schema is not available"
             `Quick

@@ -547,18 +547,21 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
           "configured max_tokens cap is preserved"
           (Some 512)
           !seen_max_tokens;
-        (* The contract lives in the prompt and the parser, not in a wire
-           response_format. Pinning [Off] keeps the request identical across
-           providers: reintroducing a schema demand would make every
-           json_object-only endpoint (GLM/DeepSeek/Kimi) fail capability
-           validation and silently fall back to this same prompt path. *)
+        (* The object shape lives in the prompt and the parser, not in a wire
+           schema. What does go on the wire is the demand that the reply be a
+           JSON document at all: pinning [JsonMode] keeps the request identical
+           across providers, because it is not a schema request and so takes no
+           capability branch, while reintroducing a schema demand would make
+           every json_object-only endpoint (GLM/DeepSeek/Kimi) fail capability
+           validation and fall back to prose. [Off] was the previous pin and
+           produced 36 unparseable replies on the live fleet. *)
         Alcotest.(check (option bool))
-          "no response format is requested"
+          "JSON syntax is requested, without a schema"
           (Some true)
           (Option.map
              (function
-               | Atypes.Off -> true
-               | Atypes.JsonMode | Atypes.JsonSchema _ -> false)
+               | Atypes.JsonMode -> true
+               | Atypes.Off | Atypes.JsonSchema _ -> false)
              !seen_response_format);
         Alcotest.(check bool)
           "no output schema is attached"
@@ -590,11 +593,11 @@ let test_resolver_is_capability_independent () =
   in
   let resolved = Runtime.resolve_provider_for_consolidation json_object_only_cfg in
   Alcotest.(check bool)
-    "json_object-only provider still gets no response format"
+    "json_object-only provider gets the same JSON-syntax request as everyone else"
     true
     (match resolved.Llm_provider.Provider_config.response_format with
-     | Atypes.Off -> true
-     | Atypes.JsonMode | Atypes.JsonSchema _ -> false);
+     | Atypes.JsonMode -> true
+     | Atypes.Off | Atypes.JsonSchema _ -> false);
   Alcotest.(check bool)
     "no output_schema is attached"
     true

@@ -67,9 +67,16 @@ let build_prompt ~keeper_name request =
    than the schema can: it fixes the exact field set and couples decision to
    guidance (null for await_external_input, non-empty otherwise), which JSON
    Schema cannot express without oneOf. Keeper_failure_judgment_contract
-   re-checks every one of those on the way in. *)
+   re-checks every one of those on the way in.
+
+   Asking for JSON syntax is not the same as asking for that schema: it demands a
+   document, not a shape, so the contract above still lives in the prompt and in
+   [Keeper_failure_judgment_contract]. What it removes is the case this boundary
+   was actually failing on — a reply that never was a JSON document. GLM-5-Turbo
+   fenced its answer and stopped taskmaster (#25789); the same runtime answers
+   json_object with a bare document. *)
 let apply_output_schema provider_config =
-  Ok (Keeper_structured_output_schema.without_response_format provider_config)
+  Ok (Keeper_structured_output_schema.json_syntax_only provider_config)
 ;;
 
 let reject_unregistered_tool ~name ~args:_ =

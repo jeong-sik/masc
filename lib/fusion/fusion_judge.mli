@@ -1,9 +1,10 @@
 (** Fusion — 심판. 패널 답들을 judge 모델에 넘겨 구조화 종합({!Fusion_types.judge_synthesis})을 받는다.
 
-    Judge 출력 계약은 **단일 tier**다. [apply_fusion_judge_output_contract]
-    (fusion_judge.ml:165-166)는 capability를 읽지 않고
-    [Keeper_structured_output_schema.without_response_format]를 무조건 적용한다 —
-    [response_format = Off], [output_schema = None]. 계약은 프롬프트의
+    Judge 출력 계약은 **단일 tier**다. [apply_fusion_judge_output_contract]는
+    capability를 읽지 않고 [Keeper_structured_output_schema.json_syntax_only]를
+    무조건 적용한다 — [response_format = JsonMode], [output_schema = None].
+    스키마 요청이 아니므로 [validate_output_schema_request]는 capability를 보지
+    않고, json_object 미지원 백엔드는 필드를 버린다. 계약은 프롬프트의
     {!Fusion_judge_parse.expected_json_doc} 지시로만 나가고, 응답은
     {!Fusion_judge_parse.of_string}의 strict 파싱을 통과해야 하며 위반은
     [Parse_error]로 fail-loud한다.

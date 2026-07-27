@@ -4,8 +4,10 @@ import {
   goalTreeApprovalQueueState,
   goalTreeData,
   goalTreeError,
+  hydrateGoalTreeObservationError,
   hydrateGoalTreeSnapshot,
 } from './goal-tree-state'
+import { gateObservationErrorState } from './lib/gate-observation-state'
 
 describe('goal tree approval queue authority', () => {
   beforeEach(() => {
@@ -46,6 +48,30 @@ describe('goal tree approval queue authority', () => {
     expect(goalTreeApprovalQueueState.value).toEqual(unavailable)
     expect(goalTreeError.value).toBe(
       '! Gate durable queue unavailable · runtime reset required: pending store requires reset',
+    )
+  })
+
+  it('replaces stale ready state with the shared typed observation error', () => {
+    expect(hydrateGoalTreeSnapshot({
+      approval_queue_state: { state: 'ready' },
+      tree: [],
+      summary: {
+        total_goals: 0,
+        active_goals: 0,
+        phase_counts: {},
+        total_tasks: 0,
+        done_tasks: 0,
+        pending_approvals: 0,
+      },
+    })).toBe(true)
+
+    hydrateGoalTreeObservationError(new Error('tree fetch failed'))
+
+    const expected = gateObservationErrorState('tree fetch failed')
+    expect(goalTreeData.value).toBeNull()
+    expect(goalTreeApprovalQueueState.value).toEqual(expected)
+    expect(goalTreeError.value).toBe(
+      `${expected.icon} ${expected.title}: ${expected.operator_detail}`,
     )
   })
 })

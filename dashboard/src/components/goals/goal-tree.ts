@@ -13,6 +13,7 @@ import {
   goalTreeError as treeError,
   goalTreeLoading as treeLoading,
   hydrateGoalTreeError,
+  hydrateGoalTreeObservationError,
   hydrateGoalTreeSnapshot,
 } from '../../goal-tree-state'
 import { workspaceFsmSnapshot } from '../../store'
@@ -274,11 +275,15 @@ async function refreshTree() {
   treeLoading.value = true
   treeError.value = null
   try {
-    hydrateGoalTreeSnapshot(await fetchDashboardGoalsTree())
+    const payload = await fetchDashboardGoalsTree()
+    if (!hydrateGoalTreeSnapshot(payload)) {
+      hydrateGoalTreeObservationError(
+        new Error('Goal Store tree payload was malformed'),
+      )
+    }
   } catch (err) {
     if (!hydrateGoalTreeError(err)) {
-      treeData.value = null
-      treeError.value = errorToString(err)
+      hydrateGoalTreeObservationError(err)
     }
   } finally {
     treeLoading.value = false

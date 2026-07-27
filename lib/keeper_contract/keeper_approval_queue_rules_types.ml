@@ -19,7 +19,7 @@ type hitl_context_summary =
 
 let current_hitl_context_summary_version = 2
 
-and summary_status =
+type summary_status =
   | Summary_not_requested
   | Summary_pending
   | Summary_available of hitl_context_summary

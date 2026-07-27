@@ -2,6 +2,7 @@ import { signal } from '@preact/signals'
 
 import { decodeKeeperApprovalQueueState } from './api/dashboard-gate'
 import { DashboardGoalsApprovalQueueUnavailableError } from './api/dashboard-goals'
+import { gateObservationErrorState } from './lib/gate-observation-state'
 import type { DashboardGoalsTreeResponse, KeeperApprovalQueueState } from './types'
 
 export const goalTreeData = signal<DashboardGoalsTreeResponse | null>(null)
@@ -22,6 +23,19 @@ export function hydrateGoalTreeError(error: unknown): boolean {
   if (!(error instanceof DashboardGoalsApprovalQueueUnavailableError)) return false
   applyUnavailableState(error.approval_queue_state)
   return true
+}
+
+export function hydrateGoalTreeObservationError(error: unknown): void {
+  const detail = error instanceof Error
+    ? error.message
+    : typeof error === 'string' && error.length > 0
+      ? error
+      : 'Goal tree observation failed'
+  const state = gateObservationErrorState(detail)
+  goalTreeApprovalQueueState.value = state
+  goalTreeData.value = null
+  goalTreeError.value = `${state.icon} ${state.title}: ${state.operator_detail}`
+  goalTreeLoading.value = false
 }
 
 export function hydrateGoalTreeSnapshot(payload: unknown): boolean {

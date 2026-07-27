@@ -57,6 +57,7 @@ import {
   goalTreeError,
   goalTreeLoading,
   hydrateGoalTreeError,
+  hydrateGoalTreeObservationError,
   hydrateGoalTreeSnapshot,
 } from './goal-tree-state'
 import {
@@ -720,7 +721,11 @@ function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
     )
   }
   if (data.goals && !bootstrapSliceError(data.goals)) {
-    hydrateGoalTreeSnapshot(data.goals)
+    if (!hydrateGoalTreeSnapshot(data.goals)) {
+      hydrateGoalTreeObservationError(
+        new Error('Goal Store tree payload was malformed'),
+      )
+    }
   }
 }
 
@@ -1273,14 +1278,16 @@ export async function refreshGoals(): Promise<void> {
         generatedAt ??= tree.value.generated_at
       } else {
         const message = 'Goal Store tree payload was malformed'
-        goalTreeError.value = message
-        errors.push(message)
+        hydrateGoalTreeObservationError(new Error(message))
+        errors.push(goalTreeError.value ?? message)
       }
     } else {
       console.warn('[Goals] tree fetch error:', tree.reason)
-      hydrateGoalTreeError(tree.reason)
-      const message = errorMessageOr(tree.reason, 'Goal Store tree failed to load')
-      goalTreeError.value = message
+      if (!hydrateGoalTreeError(tree.reason)) {
+        hydrateGoalTreeObservationError(tree.reason)
+      }
+      const message = goalTreeError.value
+        ?? errorMessageOr(tree.reason, 'Goal Store tree failed to load')
       errors.push(message)
     }
     if (errors.length > 0) {
@@ -1295,9 +1302,8 @@ export async function refreshGoals(): Promise<void> {
     }
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
-    const message = errorMessageOr(err, 'Goal refresh failed')
-    goalTreeError.value = message
-    goalTreeData.value = null
+    hydrateGoalTreeObservationError(err)
+    const message = goalTreeError.value ?? errorMessageOr(err, 'Goal refresh failed')
     lastGoalsRefreshAt.value = null
     showToast(WORK_GOAL_LOAD_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
   } finally {

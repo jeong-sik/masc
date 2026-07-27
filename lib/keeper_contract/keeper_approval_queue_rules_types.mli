@@ -20,7 +20,7 @@ type hitl_context_summary =
 
 val current_hitl_context_summary_version : int
 
-and summary_status =
+type summary_status =
   | Summary_not_requested
   | Summary_pending
   | Summary_available of hitl_context_summary

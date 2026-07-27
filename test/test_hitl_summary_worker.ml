@@ -181,6 +181,51 @@ exception Cancel_after_request_arrived
 
 let unknown_writer _path _body = raise Unknown_writer_failure
 
+let exact_queue_ops
+      ?bind_writer
+      ?release_writer
+      ?complete_writer
+      ?quarantine_writer
+      ?after_bind
+      ()
+  =
+  let bind =
+    Option.map
+      (fun save_file_atomic_strict_staged ->
+         Q.For_testing.bind_summary_exact_attempt_with_writer
+           ~save_file_atomic_strict_staged)
+      bind_writer
+  in
+  let release_before_dispatch =
+    Option.map
+      (fun save_file_atomic_strict_staged ->
+         Q.For_testing.release_summary_exact_attempt_before_dispatch_with_writer
+           ~save_file_atomic_strict_staged)
+      release_writer
+  in
+  let complete =
+    Option.map
+      (fun save_file_atomic_strict_staged ->
+         Q.For_testing.complete_summary_exact_attempt_with_writer
+           ~save_file_atomic_strict_staged)
+      complete_writer
+  in
+  let quarantine =
+    Option.map
+      (fun save_file_atomic_strict_staged ->
+         Q.For_testing.quarantine_summary_exact_attempt_with_writer
+           ~save_file_atomic_strict_staged)
+      quarantine_writer
+  in
+  Worker.For_testing.make_exact_queue_ops
+    ?bind
+    ?release_before_dispatch
+    ?complete
+    ?quarantine
+    ?after_bind
+    ()
+;;
+
 let[@inline never] raise_injected_cancellation expected_backtrace payload =
   try raise (Eio.Cancel.Cancelled payload) with
   | Eio.Cancel.Cancelled _ as cancellation ->
@@ -526,8 +571,8 @@ let test_cancellation_between_candidates_terminalizes_released_identity () =
        in
        let observed_payload =
          match
-           Worker.For_testing.execute_prepared_flow_with_writers
-             ~bind_writer
+           Worker.For_testing.execute_prepared_flow_with_queue_ops
+             ~queue_ops:(exact_queue_ops ~bind_writer ())
              ~net
              ~clock
              ~on_summary:(fun _ ->
@@ -675,8 +720,9 @@ let test_visible_bind_blocks_dispatch () =
             ~source:"hitl-visible-bind"
             [ { id = "hitl-visible-bind"; base_url = server.base_url } ]);
        let entry = pending_entry ~base_path () in
-       Worker.For_testing.execute_prepared_flow_with_writers
-         ~bind_writer:visible_after_rename_writer
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:
+           (exact_queue_ops ~bind_writer:visible_after_rename_writer ())
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "unconfirmed bind delivered a summary")
@@ -722,8 +768,9 @@ let test_visible_advance_blocks_successor () =
          [ "hitl-advance-unreachable"; "hitl-advance-successor" ]
          (F.resolver_snapshot ~source:"hitl-visible-advance" fixtures);
        let entry = pending_entry ~base_path () in
-       Worker.For_testing.execute_prepared_flow_with_writers
-         ~release_writer:visible_after_rename_writer
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:
+           (exact_queue_ops ~release_writer:visible_after_rename_writer ())
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "unconfirmed release advanced the flow")
@@ -770,8 +817,9 @@ let test_visible_completion_blocks_gate_delivery () =
        let successor = pending_entry ~input_tag:"successor" ~base_path () in
        let delivered = ref false in
        (match
-          Worker.For_testing.execute_prepared_flow_with_writers
-            ~complete_writer:visible_after_rename_writer
+          Worker.For_testing.execute_prepared_flow_with_queue_ops
+            ~queue_ops:
+              (exact_queue_ops ~complete_writer:visible_after_rename_writer ())
             ~net
             ~clock
             ~on_summary:(fun _ -> delivered := true)
@@ -877,8 +925,9 @@ let test_completion_identity_conflict_stays_deterministic () =
        in
        let delivered = ref false in
        (match
-          Worker.For_testing.execute_prepared_flow_with_writers
-            ~after_bind:replace_bound_identity
+          Worker.For_testing.execute_prepared_flow_with_queue_ops
+            ~queue_ops:
+              (exact_queue_ops ~after_bind:replace_bound_identity ())
             ~net
             ~clock
             ~on_summary:(fun _ -> delivered := true)
@@ -1111,7 +1160,8 @@ let test_manual_resolution_race_is_conclusive () =
        let delivered = ref false in
        let finish_outcome = ref None in
        (match
-          Worker.For_testing.spawn_with_writers
+          Worker.For_testing.spawn_with_queue_ops
+            ~queue_ops:(exact_queue_ops ())
             ~sw
             ~entry
             ~on_summary:(fun _ -> delivered := true)
@@ -1233,8 +1283,8 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
                 Eio.Switch.run
                 @@ fun worker_sw ->
                 match
-                  Worker.For_testing.spawn_with_writers
-                    ~bind_writer
+                  Worker.For_testing.spawn_with_queue_ops
+                    ~queue_ops:(exact_queue_ops ~bind_writer ())
                     ~sw:worker_sw
                     ~entry
                     ~on_summary:(fun _ ->
@@ -1327,12 +1377,15 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
                   Gate.For_testing.spawn_auto_judge_entry_with_worker
                     ~spawn_worker:
                       (fun ~sw ~entry ~on_summary ~on_finish () ->
-                         Worker.For_testing.spawn_with_writers
-                           ~bind_writer:(fun _path _body ->
-                             incr bind_calls;
-                             raise_injected_cancellation
-                               expected_backtrace
-                               payload)
+                         Worker.For_testing.spawn_with_queue_ops
+                           ~queue_ops:
+                             (exact_queue_ops
+                                ~bind_writer:(fun _path _body ->
+                                  incr bind_calls;
+                                  raise_injected_cancellation
+                                    expected_backtrace
+                                    payload)
+                                ())
                            ~sw
                            ~entry
                            ~on_summary
@@ -1427,10 +1480,15 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
                 Eio.Switch.run
                 @@ fun worker_sw ->
                 match
-                  Worker.For_testing.spawn_with_writers
-                    ~quarantine_writer:unknown_writer
-                    ~after_bind:(fun () ->
-                      raise_injected_cancellation expected_backtrace payload)
+                  Worker.For_testing.spawn_with_queue_ops
+                    ~queue_ops:
+                      (exact_queue_ops
+                         ~quarantine_writer:unknown_writer
+                         ~after_bind:(fun () ->
+                           raise_injected_cancellation
+                             expected_backtrace
+                             payload)
+                         ())
                     ~sw:worker_sw
                     ~entry
                     ~on_summary:(fun _ ->
@@ -1569,8 +1627,9 @@ let test_visible_uncertainty_withholds_production_drain () =
               Gate.For_testing.spawn_auto_judge_entry_with_worker
                 ~spawn_worker:
             (fun ~sw ~entry ~on_summary ~on_finish () ->
-                     Worker.For_testing.spawn_with_writers
-                       ~complete_writer:visible_writer
+                     Worker.For_testing.spawn_with_queue_ops
+                       ~queue_ops:
+                         (exact_queue_ops ~complete_writer:visible_writer ())
                        ~sw
                        ~entry
                        ~on_summary

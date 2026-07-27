@@ -606,9 +606,10 @@ export function ApprovalsSurface() {
   }, [])
 
   const items = gateData.value?.approval_queue ?? null
+  const approvalQueueState = gateData.value?.approval_queue_state
   const queueUnavailable =
-    gateData.value?.approval_queue_state?.state === 'unavailable'
-      ? gateData.value.approval_queue_state
+    approvalQueueState && approvalQueueState.state !== 'ready'
+      ? approvalQueueState
       : null
   const resolvedItems = gateData.value?.recent_resolved ?? []
   const rules = gateData.value?.approval_rules ?? []

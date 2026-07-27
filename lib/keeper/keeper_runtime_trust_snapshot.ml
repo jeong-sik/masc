@@ -238,8 +238,7 @@ let pending_approval_projection_with_reader
        (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
     ~base_path ~keeper_name =
   match
-    Keeper_runtime_trust_timeline.For_testing
-    .pending_approval_json_with_reader
+    Keeper_runtime_trust_timeline.pending_approval_json_with_reader
       ~read_pending ~base_path ~keeper_name
   with
   | Ok entries ->

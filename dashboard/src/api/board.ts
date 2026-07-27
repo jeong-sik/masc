@@ -85,7 +85,18 @@ function normalizeGateJudgment(raw: unknown): GateJudgment | null {
 const CURRENT_HITL_CONTEXT_SUMMARY_VERSION = 2
 
 function normalizeHitlContextSummary(raw: unknown): HitlContextSummary | null {
-  if (!isRecord(raw)) return null
+  if (
+    !isRecord(raw)
+    || !hasOnlyKeys(raw, [
+      'summary_version',
+      'generated_at',
+      'model_run_id',
+      'context_summary',
+      'key_questions',
+      'judgment',
+      'rationale',
+    ])
+  ) return null
   const summaryVersion = asInt(raw.summary_version)
   const generatedAt = asNullableIsoTimestamp(raw.generated_at)
   const modelRunId = asString(raw.model_run_id, '').trim()
@@ -125,10 +136,12 @@ function normalizeHitlSummaryStatus(raw: unknown): HitlSummaryStatus | null {
   if (!isRecord(raw)) return null
   switch (raw.status) {
     case 'available': {
+      if (!hasOnlyKeys(raw, ['status', 'summary'])) return null
       const summary = normalizeHitlContextSummary(raw.summary)
       return summary ? { status: 'available', summary } : null
     }
     case 'failed': {
+      if (!hasOnlyKeys(raw, ['status', 'reason', 'retryable'])) return null
       const reason = asString(raw.reason, '').trim()
       return reason && raw.retryable === false
         ? { status: 'failed', reason }

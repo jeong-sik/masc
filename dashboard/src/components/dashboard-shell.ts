@@ -991,7 +991,9 @@ export function SideRail({
   // Approvals/Command surfaces read, so the badge tracks resolutions live.
   const approvalQueueState = gateData.value?.approval_queue_state
   const approvalQueueUnavailable =
-    approvalQueueState?.state === 'unavailable' ? approvalQueueState : null
+    approvalQueueState && approvalQueueState.state !== 'ready'
+      ? approvalQueueState
+      : null
   const openApprovals =
     approvalQueueState?.state === 'ready'
       ? gateData.value?.approval_queue?.length ?? null

@@ -66,7 +66,7 @@ function AttentionIndicatorV2() {
   }, [open])
 
   const a = computeAttention()
-  if (a.approvalQueueState?.state === 'unavailable') {
+  if (a.approvalQueueState && a.approvalQueueState.state !== 'ready') {
     const state = a.approvalQueueState
     return html`
       <button

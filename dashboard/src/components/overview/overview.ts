@@ -1070,7 +1070,7 @@ function OverviewKpiStrip({
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
       <${OverviewKpi} label="실행 중 keeper" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
-      ${approvalQueueState?.state === 'unavailable'
+      ${approvalQueueState && approvalQueueState.state !== 'ready'
         ? html`<${OverviewKpi}
             label="열린 Gate"
             value=${`${approvalQueueState.icon} ${approvalQueueState.title}`}
@@ -1316,12 +1316,12 @@ function OverviewDomainSection({
       <!-- APPROVALS · overview.jsx:182-198 -->
       <${DomainCard}
         title="Gate · HITL"
-        count=${approvalQueueState?.state === 'unavailable'
+        count=${approvalQueueState && approvalQueueState.state !== 'ready'
           ? approvalQueueState.icon
           : digest.openGateRequests === null
             ? null
             : String(digest.openGateRequests)}
-        tone=${approvalQueueState?.state === 'unavailable'
+        tone=${approvalQueueState && approvalQueueState.state !== 'ready'
           ? approvalQueueState.severity
           : digest.openGateRequests === null || digest.openGateRequests > 0
             ? 'warn'
@@ -1331,7 +1331,7 @@ function OverviewDomainSection({
         testId="domain-approvals"
       >
         <div class="ov-mini-list">
-          ${approvalQueueState?.state === 'unavailable'
+          ${approvalQueueState && approvalQueueState.state !== 'ready'
             ? html`
                 <div
                   class="ov-mini-row"

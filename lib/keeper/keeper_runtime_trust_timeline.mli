@@ -73,15 +73,13 @@ val pending_approval_json :
   keeper_name:string ->
   (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result
 
-module For_testing : sig
-  val pending_approval_json_with_reader :
-    read_pending:
-      (base_path:string ->
-      (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result) ->
-    base_path:string ->
-    keeper_name:string ->
-    (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result
-end
+val pending_approval_json_with_reader :
+  read_pending:
+    (base_path:string ->
+    (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result) ->
+  base_path:string ->
+  keeper_name:string ->
+  (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result
 
 val sort_timeline_events : Yojson.Safe.t list -> Yojson.Safe.t list
 

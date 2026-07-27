@@ -415,10 +415,6 @@ let pending_approval_json ~(base_path : string) ~(keeper_name : string) =
       Keeper_approval_queue.list_pending_dashboard_json_for_workspace
     ~base_path ~keeper_name
 
-module For_testing = struct
-  let pending_approval_json_with_reader = pending_approval_json_with_reader
-end
-
 let sort_timeline_events events =
   List.sort
     (fun left right ->

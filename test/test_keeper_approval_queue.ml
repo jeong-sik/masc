@@ -1645,6 +1645,21 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
              (AQ.exact_attempt_status_to_string status)
          | _ -> Alcotest.failf "%s did not retain an exact binding" label
        in
+       let resolved_id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-exact-staged-resolved"
+           ~input:(`Assoc [ "request", `String "resolved" ])
+       in
+       (match
+          AQ.resolve_with_policy
+            ~base_path
+            ~id:resolved_id
+            ~decision:AQ.Decision.Approve
+            ()
+        with
+        | Ok _ -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let bind_id, bind_identity = prepare "bind" in
        check_visible_update
          "visible bind"
@@ -1678,9 +1693,33 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             > revision_before_failure);
          (match AQ.list_pending_entries_for_workspace ~base_path with
           | Error _ -> ()
-          | Ok _ ->
+         | Ok _ ->
             Alcotest.fail
               "runtime write failure did not latch workspace unavailable");
+         (match
+            AQ.submit_pending
+              ~base_path
+              ~keeper_name:"queue-exact-staged-before-rename"
+              ~tool_name:"fs_write"
+              ~input:(`Assoc [ "request", `String "before-rename" ])
+              ()
+          with
+          | Error _ -> ()
+          | Ok _ ->
+            Alcotest.fail
+              "unavailable queue reported a duplicate submission as success");
+         (match
+            AQ.resolve_with_policy
+              ~base_path
+              ~id:resolved_id
+              ~decision:AQ.Decision.Approve
+              ()
+          with
+          | Error (AQ.Persistence_failed _) -> ()
+          | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
+          | Ok _ ->
+            Alcotest.fail
+              "unavailable queue delivered a stale resolution as success");
          AQ.For_testing.reset_runtime_state ();
          ignore (install_exn ~base_path);
          (match pending_entry_exn before_id with

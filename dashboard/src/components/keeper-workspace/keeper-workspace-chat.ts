@@ -371,9 +371,10 @@ function ChatHeader({
   const live = phasePulse(keeper.lifecycle_phase)
   const pendingApprovals = keeperPendingApprovals(keeper.name)
   const pendingApprovalCount = pendingApprovals?.length ?? null
+  const approvalQueueState = gateData.value?.approval_queue_state
   const approvalQueueUnavailable =
-    gateData.value?.approval_queue_state?.state === 'unavailable'
-      ? gateData.value.approval_queue_state
+    approvalQueueState && approvalQueueState.state !== 'ready'
+      ? approvalQueueState
       : null
 
   // Single-row header: identity + status + actions only. Runtime / model /

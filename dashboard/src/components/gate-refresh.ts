@@ -3,7 +3,7 @@ import { registerGateRefresh } from '../sse-store'
 import {
   gateResource,
   gateError,
-  gateUnavailableSnapshot,
+  gateObservationErrorSnapshot,
 } from './gate-signals'
 
 export async function refreshGate(opts?: { force?: boolean }) {
@@ -13,7 +13,7 @@ export async function refreshGate(opts?: { force?: boolean }) {
   if (s.error) {
     gateError.value = s.error
     gateResource.state.value = {
-      data: gateUnavailableSnapshot(s.error),
+      data: gateObservationErrorSnapshot(s.error),
       loading: false,
       error: s.error,
     }

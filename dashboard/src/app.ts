@@ -283,7 +283,7 @@ export function App() {
   const approvalsBadge =
     gateData.value?.approval_queue_state?.state === 'ready'
       ? { state: 'ready' as const, count: gateData.value.approval_queue?.length ?? 0 }
-      : gateData.value?.approval_queue_state?.state === 'unavailable'
+      : gateData.value?.approval_queue_state
         ? gateData.value.approval_queue_state
         : undefined
 

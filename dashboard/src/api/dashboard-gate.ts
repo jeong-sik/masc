@@ -31,7 +31,9 @@ function gateSnapshotProtocolDrift(detail: string): never {
   })
 }
 
-export function decodeKeeperApprovalQueueState(raw: unknown): KeeperApprovalQueueState | null {
+export function decodeKeeperApprovalQueueState(
+  raw: unknown,
+): Exclude<KeeperApprovalQueueState, { state: 'observation_error' }> | null {
   if (!isRecord(raw)) return null
   if (raw.state === 'ready' && Object.keys(raw).length === 1) {
     return { state: 'ready' }

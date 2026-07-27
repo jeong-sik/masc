@@ -440,6 +440,35 @@ describe('normalizeKeeperApprovalQueueItem', () => {
         summary_status: { status: 'available', summary: { context_summary: '  ' } },
       }),
     ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: {
+          status: 'failed',
+          reason: 'summary generation failed',
+          retryable: false,
+          unknown_status_field: true,
+        },
+      }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: {
+          status: 'available',
+          summary: {
+            summary_version: 2,
+            generated_at: 1_783_123_200,
+            model_run_id: 'run-summary-drift',
+            context_summary: 'Current summary.',
+            key_questions: [],
+            judgment: 'require_human',
+            rationale: 'Current rationale.',
+            unknown_summary_field: true,
+          },
+        },
+      }),
+    ).toBeNull()
   })
 })
 

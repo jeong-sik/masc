@@ -43,7 +43,7 @@ const SURFACES = [
 export interface NavBadges {
   readonly approvals?:
     | { readonly state: 'ready'; readonly count: number }
-    | Extract<KeeperApprovalQueueState, { state: 'unavailable' }>
+    | Exclude<KeeperApprovalQueueState, { state: 'ready' }>
 }
 
 type RailEntry = Exclude<(typeof SURFACES)[number], 'sep'>
@@ -87,7 +87,7 @@ export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobi
     badge?.state === 'ready' ? badge.count : 0
   const renderBadge = (badge: NavBadges['approvals']) => {
     if (!badge) return null
-    if (badge.state === 'unavailable') {
+    if (badge.state !== 'ready') {
       return html`
         <span
           class="nav-badge"

@@ -96,7 +96,7 @@ describe('Gate resource (stale-while-revalidate)', () => {
     expect(signals.gateData.value?.approval_queue).toHaveLength(0)
   })
 
-  it('replaces stale ready data with typed unavailable when a refresh fails', async () => {
+  it('replaces stale ready data with a typed observation error when refresh fails', async () => {
     const { fetchDashboardGate, signals, actions } = await loadGate()
 
     fetchDashboardGate.mockResolvedValueOnce(response([queueItem('a1')]))
@@ -108,9 +108,9 @@ describe('Gate resource (stale-while-revalidate)', () => {
     expect(signals.gateData.value).toEqual({
       approval_queue: null,
       approval_queue_state: {
-        state: 'unavailable',
-        code: 'reset_required',
-        title: 'Gate durable queue unavailable · runtime reset required',
+        state: 'observation_error',
+        code: 'observation_failed',
+        title: 'Gate observation unavailable',
         operator_detail: 'Gate 새로고침 실패',
         severity: 'bad',
         icon: '!',

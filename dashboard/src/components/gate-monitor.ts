@@ -4,7 +4,7 @@ import { useSignal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
-import { ErrorState, LoadingState } from './common/feedback-state'
+import { LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
 import { TextInput } from './common/input'
 import { StatTile } from './common/stat-tile'
@@ -15,6 +15,7 @@ import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-ref
 import { useSavedSignal } from '../lib/saved-signal'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { gateObservationErrorState } from '../lib/gate-observation-state'
 import { get, type GetOptions } from '../api/core'
 import { decodeKeeperApprovalQueueState } from '../api/dashboard-gate'
 import type { KeeperApprovalQueueState } from '../types'
@@ -157,7 +158,10 @@ export function GateMonitor() {
   }, [resource, windowMinutes.value])
 
   const current = resource.state.value
-  const data = current.data
+  const data = current.error ? null : current.data
+  const approvalQueueState = current.error
+    ? gateObservationErrorState(current.error)
+    : data?.approval_queue_state ?? null
   const allRejections = data?.tool_rejections ?? []
   const visibleRejections = useMemo(
     () => filterToolRejections(allRejections, query.value),
@@ -190,8 +194,6 @@ export function GateMonitor() {
         ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 
-      ${current.error ? html`<${ErrorState} message=${current.error} />` : null}
-
       ${current.loading && !data
         ? html`<${LoadingState}>Gate metrics 불러오는 중...<//>`
         : null}
@@ -222,16 +224,16 @@ export function GateMonitor() {
               />
             </div>
           </div>
-        ` : data?.approval_queue_state.state === 'unavailable' ? html`
+        ` : approvalQueueState && approvalQueueState.state !== 'ready' ? html`
           <div
             role="alert"
-            data-severity=${data.approval_queue_state.severity}
+            data-severity=${approvalQueueState.severity}
             class="flex items-start gap-3 rounded-[var(--r-2)] border border-[var(--color-danger-border)] bg-[var(--color-danger-subtle)] p-3"
           >
-            <span aria-hidden="true" class="font-bold text-[var(--color-danger-fg)]">${data.approval_queue_state.icon}</span>
+            <span aria-hidden="true" class="font-bold text-[var(--color-danger-fg)]">${approvalQueueState.icon}</span>
             <div class="min-w-0">
-              <div class="text-sm font-semibold text-[var(--color-danger-fg)]">${data.approval_queue_state.title}</div>
-              <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${data.approval_queue_state.operator_detail}</div>
+              <div class="text-sm font-semibold text-[var(--color-danger-fg)]">${approvalQueueState.title}</div>
+              <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${approvalQueueState.operator_detail}</div>
             </div>
           </div>
         ` : null}

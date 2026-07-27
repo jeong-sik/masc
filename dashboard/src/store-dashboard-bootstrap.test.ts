@@ -31,9 +31,13 @@ vi.mock('./api/dashboard-mission', () => ({
   fetchDashboardPlanning: apiMocks.fetchDashboardPlanning,
 }))
 
-vi.mock('./api/dashboard-goals', () => ({
-  fetchDashboardGoalsTree: apiMocks.fetchDashboardGoalsTree,
-}))
+vi.mock('./api/dashboard-goals', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./api/dashboard-goals')>()
+  return {
+    ...actual,
+    fetchDashboardGoalsTree: apiMocks.fetchDashboardGoalsTree,
+  }
+})
 
 vi.mock('./sse', () => ({
   journal: {

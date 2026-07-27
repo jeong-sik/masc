@@ -139,6 +139,14 @@ export type KeeperApprovalQueueState =
       severity: 'bad'
       icon: '!'
     }
+  | {
+      state: 'observation_error'
+      code: 'observation_failed'
+      title: string
+      operator_detail: string
+      severity: 'bad'
+      icon: '!'
+    }
 
 export interface KeeperResolvedApprovalItem {
   id: string

@@ -2774,31 +2774,31 @@ let submit_pending
   let stored =
     with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
-      match
-        find_pending_id_in_map
-          map
-          ~base_path
-          ~keeper_name
-          ~tool_name
-          ~input_hash
-          ~turn_id
-          ~task_id
-          ~goal_id
-          ~goal_ids
-          ~continuation_channel
-      with
-      | Some id -> Ok (id, None)
-      | None ->
-        let id = generate_id () in
-        (match next_sequence_lifecycle ~base_path with
-         | Uninstalled ->
-           Error
-             { path = pending_store_path ~base_path
-             ; reason =
-                 "gate_pending store is not installed; submit requires a completed install"
-             }
-         | Unavailable error -> Error error
-         | Ready sequence ->
+      match next_sequence_lifecycle ~base_path with
+      | Uninstalled ->
+        Error
+          { path = pending_store_path ~base_path
+          ; reason =
+              "gate_pending store is not installed; submit requires a completed install"
+          }
+      | Unavailable error -> Error error
+      | Ready sequence ->
+        (match
+           find_pending_id_in_map
+             map
+             ~base_path
+             ~keeper_name
+             ~tool_name
+             ~input_hash
+             ~turn_id
+             ~task_id
+             ~goal_id
+             ~goal_ids
+             ~continuation_channel
+         with
+         | Some id -> Ok (id, None)
+         | None ->
+           let id = generate_id () in
            if sequence = max_int
            then
              Error
@@ -2892,6 +2892,21 @@ let rec claim_resolution id =
 
 let release_resolution_claim id =
   atomic_update resolution_claims (fun claims -> Resolution_claims.remove id claims)
+;;
+
+let resolve_store_readiness_error ~base_path ~approval_id =
+  match next_sequence_lifecycle ~base_path with
+  | Ready _ -> Ok ()
+  | Unavailable storage_error ->
+    Error (Persistence_failed { approval_id; storage_error })
+  | Uninstalled ->
+    let storage_error =
+      { path = pending_store_path ~base_path
+      ; reason =
+          "gate_pending store is not installed; resolution requires a completed install"
+      }
+    in
+    Error (Persistence_failed { approval_id; storage_error })
 ;;
 
 type journal_error =
@@ -3019,39 +3034,42 @@ let remember_rule_for_delivery delivery =
 let complete_delivery delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
-  if delivery.grant_consumed
-  then Ok { remembered_rule = None }
-  else
-  match deliver_resolution ~base_path delivery.entry delivery.decision with
-  | Error reason -> Error (Delivery_failed { approval_id = id; reason })
+  match resolve_store_readiness_error ~base_path ~approval_id:id with
+  | Error _ as error -> error
   | Ok () ->
-    (match remember_rule_for_delivery delivery with
-     | Error storage_error ->
-       Error (Persistence_failed { approval_id = id; storage_error })
-     | Ok remembered_rule ->
-       let finish () =
-         resolve_entry
-           ~base_path
-           delivery.entry
-           ~source:delivery.source
-           delivery.decision;
-         signal_resolution_after_commit
-           ~base_path
-           ~keeper_name:delivery.entry.keeper_name
-           ~approval_id:id;
-         Ok { remembered_rule }
-       in
-       (match delivery.decision with
-        | Decision.Approve ->
-          (* Keep the resolved journal entry until the exact Gate request
-             consumes it. The wake event is only a correlation message and
-             cannot become a second authorization SSOT. *)
-          finish ()
-        | Decision.Reject _ | Decision.Edit _ ->
-          (match remove_delivery_from_store delivery with
-           | Error storage_error ->
-             Error (Persistence_failed { approval_id = id; storage_error })
-           | Ok () -> finish ())))
+    if delivery.grant_consumed
+    then Ok { remembered_rule = None }
+    else
+      (match deliver_resolution ~base_path delivery.entry delivery.decision with
+       | Error reason -> Error (Delivery_failed { approval_id = id; reason })
+       | Ok () ->
+         (match remember_rule_for_delivery delivery with
+          | Error storage_error ->
+            Error (Persistence_failed { approval_id = id; storage_error })
+          | Ok remembered_rule ->
+            let finish () =
+              resolve_entry
+                ~base_path
+                delivery.entry
+                ~source:delivery.source
+                delivery.decision;
+              signal_resolution_after_commit
+                ~base_path
+                ~keeper_name:delivery.entry.keeper_name
+                ~approval_id:id;
+              Ok { remembered_rule }
+            in
+            (match delivery.decision with
+             | Decision.Approve ->
+               (* Keep the resolved journal entry until the exact Gate request
+                  consumes it. The wake event is only a correlation message and
+                  cannot become a second authorization SSOT. *)
+               finish ()
+             | Decision.Reject _ | Decision.Edit _ ->
+               (match remove_delivery_from_store delivery with
+                | Error storage_error ->
+                  Error (Persistence_failed { approval_id = id; storage_error })
+                | Ok () -> finish ()))))
 ;;
 
 let compare_pending_order left right =
@@ -3224,61 +3242,64 @@ let resolve_with_policy
       ()
   : (resolution_result, resolve_error) result
   =
-  let belongs_to_workspace () =
-    match SMap.find_opt id (Atomic.get pending) with
-    | Some entry -> String.equal entry.audit_base_path base_path
-    | None ->
-      (match SMap.find_opt id (Atomic.get deliveries) with
-       | Some delivery -> String.equal delivery.entry.audit_base_path base_path
-       | None -> false)
-  in
-  if not (belongs_to_workspace ())
-  then Error (Not_found id)
-  else if not (claim_resolution id)
-  then Error (Already_resolved id)
-  else
-    Fun.protect
-      ~finally:(fun () -> release_resolution_claim id)
-      (fun () ->
-         if not (belongs_to_workspace ())
-         then Error (Not_found id)
-         else match SMap.find_opt id (Atomic.get pending) with
-         | Some _ ->
-           let remember_rule =
-             match decision with
-             | Decision.Approve -> remember_rule
-             | Decision.Reject _ | Decision.Edit _ -> false
-           in
-           let rule_expires_at =
-             if remember_rule then rule_expires_at else None
-           in
-           (match
-              journal_resolution
-                ~id
-                ~decision
-                ~source
-                ~remember_rule
-                ~rule_expires_at
-                ~created_by
-            with
-            | Error Journal_not_found -> Error (Not_found id)
-            | Error (Journal_storage storage_error) ->
-              Error (Persistence_failed { approval_id = id; storage_error })
-            | Ok delivery -> complete_delivery delivery)
-         | None ->
-           (match SMap.find_opt id (Atomic.get deliveries) with
-            | None -> Error (Not_found id)
-            | Some delivery ->
-              let same_request =
-                approval_decision_equal decision delivery.decision
-                && source = delivery.source
-                && remember_rule = delivery.remember_rule
-                && rule_expires_at = delivery.rule_expires_at
-                && created_by = delivery.created_by
-              in
-              if same_request
-              then complete_delivery delivery
-              else Error (Already_resolved id)))
+  match resolve_store_readiness_error ~base_path ~approval_id:id with
+  | Error _ as error -> error
+  | Ok () ->
+    let belongs_to_workspace () =
+      match SMap.find_opt id (Atomic.get pending) with
+      | Some entry -> String.equal entry.audit_base_path base_path
+      | None ->
+        (match SMap.find_opt id (Atomic.get deliveries) with
+         | Some delivery -> String.equal delivery.entry.audit_base_path base_path
+         | None -> false)
+    in
+    if not (belongs_to_workspace ())
+    then Error (Not_found id)
+    else if not (claim_resolution id)
+    then Error (Already_resolved id)
+    else
+      Fun.protect
+        ~finally:(fun () -> release_resolution_claim id)
+        (fun () ->
+           if not (belongs_to_workspace ())
+           then Error (Not_found id)
+           else match SMap.find_opt id (Atomic.get pending) with
+           | Some _ ->
+             let remember_rule =
+               match decision with
+               | Decision.Approve -> remember_rule
+               | Decision.Reject _ | Decision.Edit _ -> false
+             in
+             let rule_expires_at =
+               if remember_rule then rule_expires_at else None
+             in
+             (match
+                journal_resolution
+                  ~id
+                  ~decision
+                  ~source
+                  ~remember_rule
+                  ~rule_expires_at
+                  ~created_by
+              with
+              | Error Journal_not_found -> Error (Not_found id)
+              | Error (Journal_storage storage_error) ->
+                Error (Persistence_failed { approval_id = id; storage_error })
+              | Ok delivery -> complete_delivery delivery)
+           | None ->
+             (match SMap.find_opt id (Atomic.get deliveries) with
+              | None -> Error (Not_found id)
+              | Some delivery ->
+                let same_request =
+                  approval_decision_equal decision delivery.decision
+                  && source = delivery.source
+                  && remember_rule = delivery.remember_rule
+                  && rule_expires_at = delivery.rule_expires_at
+                  && created_by = delivery.created_by
+                in
+                if same_request
+                then complete_delivery delivery
+                else Error (Already_resolved id)))
 ;;
 
 (* ── Query ────────────────────────────────────────────────── *)

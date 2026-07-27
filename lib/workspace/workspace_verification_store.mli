@@ -24,7 +24,6 @@ type evidence_read_failure =
   | Evidence_invalid_utf8
   | Evidence_symbolic_link
   | Evidence_changed_during_read
-  | Evidence_too_large
   | Evidence_read_error of string
 
 type submitted_evidence_item =
@@ -55,8 +54,8 @@ type submitted_evidence_access =
       }
 
 val evidence_read_failure_to_string : evidence_read_failure -> string
-val evidence_read_failure_of_exact_read_error :
-  Fs_compat.Capability_exact_read.error -> evidence_read_failure
+val evidence_read_failure_of_owned_read_failure :
+  Fs_compat.owned_regular_file_read_failure -> evidence_read_failure
 val inspect_submitted_evidence :
   base_path:string ->
   request_id:string ->

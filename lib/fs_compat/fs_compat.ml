@@ -780,7 +780,8 @@ let read_exact_file_descriptor ~path fd length =
   | cause -> owned_file_operation_error ~path Read_contents cause
 ;;
 
-let load_owned_regular_file_blocking ~ownership_root path =
+let load_owned_regular_file_blocking_with
+    ~ownership_root ~read_descriptor path =
   let parent = Filename.dirname path in
   let inspect_parent () =
     try
@@ -854,7 +855,7 @@ let load_owned_regular_file_blocking ~ownership_root path =
                | Ok false ->
                  owned_file_error (Filesystem_identity_changed { path })
                | Ok true ->
-                 (match read_exact_file_descriptor ~path fd descriptor.st_size with
+                 (match read_descriptor ~path fd descriptor with
                   | Error _ as error -> error
                   | Ok content ->
                     (match Unix.fstat fd with
@@ -887,6 +888,14 @@ let load_owned_regular_file_blocking ~ownership_root path =
              Error { error with close_failure = Some cause })))
 ;;
 
+let load_owned_regular_file_blocking ~ownership_root path =
+  load_owned_regular_file_blocking_with
+    ~ownership_root
+    ~read_descriptor:(fun ~path fd descriptor ->
+      read_exact_file_descriptor ~path fd descriptor.Unix.st_size)
+    path
+;;
+
 let load_owned_regular_file ~ownership_root path =
   with_fs_or_fallback
     ~path
@@ -895,6 +904,52 @@ let load_owned_regular_file ~ownership_root path =
        let result =
          Eio_unix.run_in_systhread (fun () ->
            load_owned_regular_file_blocking ~ownership_root path)
+       in
+       Eio.Fiber.check ();
+       result)
+;;
+
+type owned_regular_file_prefix =
+  { content : string
+  ; file_size : int
+  ; truncated : bool
+  }
+
+let load_owned_regular_file_prefix_blocking
+    ~ownership_root ~max_bytes path =
+  if max_bytes < 0
+  then
+    owned_file_operation_error
+      ~path
+      Read_contents
+      (Invalid_argument "max_bytes must be non-negative")
+  else
+    load_owned_regular_file_blocking_with
+      ~ownership_root
+      ~read_descriptor:(fun ~path fd descriptor ->
+        let length = min max_bytes descriptor.Unix.st_size in
+        match read_exact_file_descriptor ~path fd length with
+        | Error _ as error -> error
+        | Ok content ->
+          Ok
+            { content
+            ; file_size = descriptor.Unix.st_size
+            ; truncated = descriptor.Unix.st_size > length
+            })
+      path
+;;
+
+let load_owned_regular_file_prefix ~ownership_root ~max_bytes path =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      load_owned_regular_file_prefix_blocking
+        ~ownership_root ~max_bytes path)
+    (fun _fs ->
+       let result =
+         Eio_unix.run_in_systhread (fun () ->
+           load_owned_regular_file_prefix_blocking
+             ~ownership_root ~max_bytes path)
        in
        Eio.Fiber.check ();
        result)

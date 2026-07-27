@@ -24,7 +24,6 @@ type evidence_read_failure =
   | Evidence_invalid_utf8
   | Evidence_symbolic_link
   | Evidence_changed_during_read
-  | Evidence_too_large
   | Evidence_read_error of string
 
 type submitted_evidence_item =
@@ -61,7 +60,6 @@ let evidence_read_failure_to_string = function
   | Evidence_invalid_utf8 -> "invalid_utf8"
   | Evidence_symbolic_link -> "symbolic_link"
   | Evidence_changed_during_read -> "changed_during_read"
-  | Evidence_too_large -> "too_large"
   | Evidence_read_error detail -> "read_error:" ^ detail
 
 let project_root_of_base_path base_path =
@@ -291,7 +289,6 @@ let load_request_for_evidence base_path req_id =
            (Printexc.to_string exn))
 
 let verification_evidence_max_bytes = 20_000
-let verification_evidence_max_exact_read_bytes = 200_000L
 
 type utf8_scan =
   | Utf8_valid
@@ -335,85 +332,39 @@ let scan_utf8 bytes =
   in
   loop 0
 
-let exact_read_operation_to_string = function
-  | Fs_compat.Capability_exact_read.Pin_parent -> "pin_parent"
-  | Open_parent_descriptor -> "open_parent_descriptor"
-  | Open_leaf -> "open_leaf"
-  | Inspect_opened -> "inspect_opened"
-  | Allocate -> "allocate"
-  | Read_exact -> "read_exact"
-  | Inspect_after_read -> "inspect_after_read"
-  | Close_leaf -> "close_leaf"
-  | Settle_parent_resources -> "settle_parent_resources"
-  | Observe_parent_cancellation -> "observe_parent_cancellation"
+let evidence_read_failure_of_owned_read_failure = function
+  | Fs_compat.Ownership_boundary_rejected _ ->
+    Evidence_outside_worker_playground
+  | Path_is_not_regular_file { kind = Unix.S_LNK; _ } ->
+    Evidence_symbolic_link
+  | Path_is_not_regular_file _ ->
+    Evidence_not_regular_file
+  | Filesystem_identity_changed _ ->
+    Evidence_changed_during_read
+  | Owned_file_operation_failed { cause; _ } ->
+    Evidence_read_error (Printexc.to_string cause)
 
-let exact_read_diagnostic_to_string
-    (diagnostic : Fs_compat.Capability_exact_read.diagnostic) =
-  Printf.sprintf
-    "%s:%s"
-    (exact_read_operation_to_string diagnostic.operation)
-    diagnostic.detail
-
-let evidence_read_failure_of_exact_read_error = function
-  | Fs_compat.Capability_exact_read.Missing -> Evidence_missing
-  | Symbolic_link -> Evidence_symbolic_link
-  | Not_regular _ -> Evidence_not_regular_file
-  | Changed_during_read -> Evidence_changed_during_read
-  | Length_exceeds_max _ -> Evidence_too_large
-  | Invalid_leaf detail -> Evidence_read_error ("invalid_leaf:" ^ detail)
-  | Invalid_length_bounds _ -> Evidence_read_error "invalid_length_bounds"
-  | Length_not_representable length ->
-    Evidence_read_error
-      (Printf.sprintf "length_not_representable:%Ld" length)
-  | Cancelled diagnostic ->
-    Evidence_read_error
-      ("cancelled:" ^ exact_read_diagnostic_to_string diagnostic)
-  | Parent_descriptor_unavailable ->
-    Evidence_read_error "parent_descriptor_unavailable"
-  | Unsafe_link_count count ->
-    Evidence_read_error (Printf.sprintf "unsafe_link_count:%d" count)
-  | Unsafe_mode mode ->
-    Evidence_read_error (Printf.sprintf "unsafe_mode:%o" mode)
-  | Length_mismatch { expected_length; observed_length } ->
-    Evidence_read_error
-      (Printf.sprintf
-         "length_mismatch:expected=%Ld:observed=%Ld"
-         expected_length
-         observed_length)
-  | Io_error diagnostic ->
-    Evidence_read_error
-      (exact_read_diagnostic_to_string diagnostic)
-
-let read_regular_file_prefix path stat =
-  match Fs_compat.get_fs_opt () with
-  | None -> Error (Evidence_read_error "eio_filesystem_unavailable")
-  | Some fs ->
-    let parent = Eio.Path.(fs / Filename.dirname path) in
-    let leaf = Filename.basename path in
-    let expected_length = Int64.of_int stat.Unix.st_size in
-    (match
-       Fs_compat.Capability_exact_read.read
-         ~parent
-         ~leaf
-         ~expected_length
-         ~max_length:verification_evidence_max_exact_read_bytes
-     with
-     | Error failure ->
-       Error (evidence_read_failure_of_exact_read_error failure.error)
-     | Ok observation ->
-       let exact_bytes =
-         Fs_compat.Capability_exact_read.observation_bytes observation
-       in
-       let exact_length = String.length exact_bytes in
-       let requested = min verification_evidence_max_bytes exact_length in
-       let raw = String.sub exact_bytes 0 requested in
-       let source_truncated = exact_length > requested in
-       match scan_utf8 raw with
-       | Utf8_valid -> Ok (raw, exact_length, source_truncated)
-       | Utf8_incomplete_at index when source_truncated ->
-         Ok (String.sub raw 0 index, exact_length, true)
-       | Utf8_incomplete_at _ | Utf8_invalid ->
-         Error Evidence_invalid_utf8)
+let read_regular_file_prefix ~ownership_root path =
+  match
+    Fs_compat.load_owned_regular_file_prefix
+      ~ownership_root
+      ~max_bytes:verification_evidence_max_bytes
+      path
+  with
+  | Error error ->
+    Error (evidence_read_failure_of_owned_read_failure error.failure)
+  | Ok None -> Error Evidence_missing
+  | Ok (Some prefix) ->
+    (match scan_utf8 prefix.content with
+     | Utf8_valid ->
+       Ok (prefix.content, prefix.file_size, prefix.truncated)
+     | Utf8_incomplete_at index when prefix.truncated ->
+       Ok
+         ( String.sub prefix.content 0 index
+         , prefix.file_size
+         , true )
+     | Utf8_incomplete_at _ | Utf8_invalid ->
+       Error Evidence_invalid_utf8)
 
 let inspect_artifact_reference ~base_path ~worker reference =
   let canonical_base =
@@ -439,20 +390,22 @@ let inspect_artifact_reference ~base_path ~worker reference =
        when String.equal
               parsed.Playground_paths.keeper_name
               (Playground_paths.sanitize_keeper_name worker) ->
-       (try
-          let stat = Unix.stat canonical_target in
-          match read_regular_file_prefix canonical_target stat with
-          | Error reason ->
-            Evidence_artifact_unreadable { reference; reason }
-          | Ok (content, bytes, truncated) ->
-            Evidence_artifact { reference; content; bytes; truncated }
+       let relative_suffix = "/" ^ parsed.relative_path in
+       let ownership_root =
+         String.sub
+           canonical_target
+           0
+           (String.length canonical_target - String.length relative_suffix)
+       in
+       (match
+          read_regular_file_prefix
+            ~ownership_root
+            canonical_target
         with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Evidence_artifact_unreadable
-            { reference
-            ; reason = Evidence_read_error (Printexc.to_string exn)
-            })
+        | Error reason ->
+          Evidence_artifact_unreadable { reference; reason }
+        | Ok (content, bytes, truncated) ->
+          Evidence_artifact { reference; content; bytes; truncated })
      | Some _ | None ->
        Evidence_artifact_unreadable
          { reference; reason = Evidence_outside_worker_playground })

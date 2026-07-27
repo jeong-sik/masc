@@ -416,7 +416,8 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "large-artifact.txt" in
     let ascii_prefix = String.make 19_999 'a' in
-    Fs_compat.save_file artifact_path (ascii_prefix ^ "한글");
+    let full_artifact = ascii_prefix ^ "한글" ^ String.make 250_000 'z' in
+    Fs_compat.save_file artifact_path full_artifact;
     let request_id = "vrf-bounded-evidence" in
     ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
     match
@@ -433,7 +434,8 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
             :: _
         ; _
         } ->
-      Alcotest.(check int) "full artifact byte count preserved" 20_005 bytes;
+      Alcotest.(check int) "full artifact byte count preserved"
+        (String.length full_artifact) bytes;
       Alcotest.(check int) "UTF-8 boundary stays below 20KB cap" 19_999
         (String.length content);
       Alcotest.(check string) "incomplete UTF-8 codepoint removed"
@@ -532,8 +534,8 @@ let test_changed_during_read_maps_to_typed_unreadable_reason () =
   Alcotest.(check string)
     "exact-read race remains typed"
     "changed_during_read"
-    (VS.evidence_read_failure_of_exact_read_error
-       Fs_compat.Capability_exact_read.Changed_during_read
+    (VS.evidence_read_failure_of_owned_read_failure
+       (Fs_compat.Filesystem_identity_changed { path = "artifact.txt" })
      |> VS.evidence_read_failure_to_string)
 
 let test_submitted_evidence_requires_task_and_request_assignment () =

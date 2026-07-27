@@ -219,6 +219,22 @@ val load_owned_regular_file
   -> string
   -> (string option, owned_regular_file_read_error) result
 
+type owned_regular_file_prefix =
+  { content : string
+  ; file_size : int
+  ; truncated : bool
+  }
+
+val load_owned_regular_file_prefix
+  :  ownership_root:string
+  -> max_bytes:int
+  -> string
+  -> (owned_regular_file_prefix option, owned_regular_file_read_error) result
+(** Bounded-prefix sibling of {!load_owned_regular_file}. It preserves the
+    same no-follow parent-chain, descriptor identity, regular-file, and
+    changed-during-read checks, but reads at most [max_bytes]. The existing
+    whole-file API and its callers are unchanged. *)
+
 val owned_regular_file_read_error_to_string
   :  owned_regular_file_read_error
   -> string

@@ -111,11 +111,6 @@ val should_record_cadence_backoff_after_error : extraction_error -> bool
     a durable unsettled prior-attempt guard defer cadence; local deterministic
     setup failures stay due. *)
 
-val per_keeper_execution_slot_capacity : unit -> int
-(** Per-keeper librarian execution slot capacity from
-    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT] (default 1, 0 disables the
-    gate). The capacity is applied per keeper, not fleet-wide. *)
-
 val extract_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string

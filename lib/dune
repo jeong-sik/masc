@@ -3,8 +3,7 @@
  (name masc)
  (public_name masc)
  (private_modules
-  keeper_fs_durable_directory
-  keeper_exact_flow_scope)
+  keeper_fs_durable_directory)
  (libraries
   mcp_protocol
   mcp_protocol.eio

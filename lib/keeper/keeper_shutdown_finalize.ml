@@ -554,7 +554,7 @@ let remove_session_dir ~config operation =
   else Ok ()
 ;;
 
-let begin_exact_retirement ~base_path operation entry =
+let validate_exact_registry_generation ~base_path operation entry =
   match operation.lane_ownership, entry with
   | Dormant_meta, None ->
     Keeper_lifecycle_reservation.with_key_lock
@@ -572,17 +572,7 @@ let begin_exact_retirement ~base_path operation entry =
          | None -> Ok ())
   | Dormant_meta, Some _ ->
     Error "dormant Keeper operation found a registered lane before finalization"
-  | Registered_lane expected_lane_id, None ->
-    (match
-       Keeper_exact_flow_scope.begin_retirement
-         ~base_path
-         ~keeper_name:operation.keeper_name
-         ~expected_lane_id
-     with
-     | Keeper_exact_flow_scope.Retirement_draining
-     | Keeper_exact_flow_scope.Retirement_not_allocated -> Ok ()
-     | Keeper_exact_flow_scope.Retirement_owner_replaced ->
-       Error "Keeper exact owner was replaced before finalization")
+  | Registered_lane _, None -> Ok ()
   | Registered_lane expected_lane_id, Some entry ->
     if
       not
@@ -590,17 +580,7 @@ let begin_exact_retirement ~base_path operation entry =
            (Keeper_lane.id entry.Keeper_registry.lane)
            expected_lane_id)
     then Error "Keeper registry lane changed before finalization"
-    else
-      (match
-         Keeper_exact_flow_scope.begin_retirement
-           ~base_path
-           ~keeper_name:operation.keeper_name
-           ~expected_lane_id
-       with
-       | Keeper_exact_flow_scope.Retirement_draining
-       | Keeper_exact_flow_scope.Retirement_not_allocated -> Ok ()
-       | Keeper_exact_flow_scope.Retirement_owner_replaced ->
-         Error "Keeper exact owner was replaced before finalization")
+    else Ok ()
 ;;
 
 let unregister_retired_exact ~base_path operation entry =
@@ -608,12 +588,7 @@ let unregister_retired_exact ~base_path operation entry =
   | Dormant_meta, None -> Ok false
   | Dormant_meta, Some _ ->
     Error "dormant Keeper operation found a registered lane before finalization"
-  | Registered_lane expected_lane_id, None ->
-    Keeper_exact_flow_scope.release_owner
-      ~base_path
-      ~keeper_name:operation.keeper_name
-      ~expected_lane_id;
-    Ok false
+  | Registered_lane _, None -> Ok false
   | Registered_lane expected_lane_id, Some entry ->
     if
       not
@@ -624,12 +599,7 @@ let unregister_retired_exact ~base_path operation entry =
     else
       (match Keeper_registry.unregister_exact entry with
        | Keeper_registry.Exact_unregistered
-       | Keeper_registry.Exact_entry_missing ->
-         Keeper_exact_flow_scope.release_owner
-           ~base_path
-           ~keeper_name:operation.keeper_name
-           ~expected_lane_id;
-         Ok true
+       | Keeper_registry.Exact_entry_missing -> Ok true
      | Keeper_registry.Exact_entry_replaced ->
        Error "Keeper registry lane was replaced during finalization"
      | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
@@ -774,7 +744,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
          | Ok persisted_finalized ->
            deliver_finalized_completion ~config persisted_finalized)
   in
-  match begin_exact_retirement ~base_path:config.base_path operation entry with
+  match validate_exact_registry_generation ~base_path:config.base_path operation entry with
   | Error detail -> block ~config operation Registry_unregister detail
   | Ok () ->
     (match require_released_summary_owner () with

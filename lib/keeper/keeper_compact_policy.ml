@@ -193,9 +193,6 @@ let terminal_rejection terminalizer cause =
   | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
     summarization_rejection
       Keeper_compaction_llm_summarizer.Exact_flow_already_started
-  | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
-    summarization_rejection
-      Keeper_compaction_llm_summarizer.Exact_owner_unregistered_deferred
 ;;
 
 let requested_messages_with_plan
@@ -485,12 +482,7 @@ let compact_for_request_typed_with
          | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
            reject
              (summarization_rejection
-                Keeper_compaction_llm_summarizer.Exact_flow_already_started)
-         | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
-           reject
-             (summarization_rejection
-                Keeper_compaction_llm_summarizer
-                .Exact_owner_unregistered_deferred))
+                Keeper_compaction_llm_summarizer.Exact_flow_already_started))
       | Ok evidence ->
         let compacted_ctx = sync_oas_context compacted_ctx in
         Log.Harness.emit

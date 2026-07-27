@@ -2619,20 +2619,6 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
                 meta.name
                 meta
             in
-            let old_flow_scope =
-              match
-                Masc.Keeper_exact_flow_scope.for_registered
-                  ~registered_lane_id:(fun () ->
-                    match R.get ~base_path:config.base_path meta.name with
-                    | Some current -> Some (Lane.id current.lane)
-                    | None -> None)
-                  ~base_path:config.base_path
-                  ~keeper_name:meta.name
-                  ~surface:Masc.Keeper_exact_flow_scope.Hitl_summary
-              with
-              | Ok scope -> scope
-              | Error detail -> fail detail
-            in
             let approval_id =
               install_pending_summary
                 ~base_path:config.base_path
@@ -2705,30 +2691,6 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
             check bool "registry identity retained while draining" true
               (Option.is_some
                  (R.get ~base_path:config.base_path meta.name));
-            (match
-               Masc.Keeper_exact_flow_scope.with_current
-                 old_flow_scope
-                 ~registered_lane_id:(fun () ->
-                   match R.get ~base_path:config.base_path meta.name with
-                   | Some current -> Some (Lane.id current.lane)
-                   | None -> None)
-                 (fun () -> ())
-             with
-             | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
-             | Masc.Keeper_exact_flow_scope.Current () ->
-               fail "draining owner admitted new exact work");
-            (match
-               Masc.Keeper_exact_flow_scope.with_settlement
-                 old_flow_scope
-                 ~registered_lane_id:(fun () ->
-                   match R.get ~base_path:config.base_path meta.name with
-                   | Some current -> Some (Lane.id current.lane)
-                   | None -> None)
-                 (fun () -> ())
-             with
-             | Masc.Keeper_exact_flow_scope.Current () -> ()
-             | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-               fail "draining owner rejected bound settlement");
             let pending =
               match Approval_queue.For_testing.get_pending_entry_unchecked ~id:approval_id with
               | Some pending -> pending

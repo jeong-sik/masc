@@ -148,13 +148,11 @@ val commit_prepared_compaction :
   prepared_compaction -> prepared_commit_outcome
 
 module For_testing : sig
-  type domain_valid_failure =
-    | Domain_valid_error of string
-    | Domain_valid_exception of exn
-
   val commit_prepared_compaction_with_history :
     ?after_checkpoint_installed:(unit -> unit) ->
-    ?domain_valid_failure:domain_valid_failure ->
+    ?complete_post_success_commit:
+      (Keeper_compaction_llm_summarizer.post_success_terminalizer ->
+       (unit, string) result) ->
     save_oas_history:
       (session_dir:string -> Agent_sdk.Checkpoint.t -> unit) ->
     prepared_compaction ->

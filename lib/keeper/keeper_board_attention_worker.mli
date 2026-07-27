@@ -14,7 +14,6 @@ type step =
   | Idle
   | Contended of contention
   | Rescan_later of contention
-  | Owner_unregistered_deferred of { candidate_id : string }
   | Judgment_completed of
       { candidate_id : string
       ; owner_wake : Keeper_registry.exact_wakeup_outcome
@@ -31,7 +30,6 @@ type retry_reason =
 
 type drain_outcome =
   | Drained
-  | Owner_generation_deferred of { candidate_id : string }
   | Retry_later of
       { contention : contention
       ; reason : retry_reason

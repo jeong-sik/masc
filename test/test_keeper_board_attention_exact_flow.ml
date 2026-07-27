@@ -381,7 +381,7 @@ let test_explicit_lane_failover_and_success_provenance () =
           "expected Bound(A), Advancing(A->B), Advancing(B->C), Bound(C), Completed(C)"))
 ;;
 
-let test_domain_candidate_id_mismatch_does_not_advance () =
+let test_domain_candidate_id_mismatch_advances_to_declared_successor () =
   with_prompt_registry (fun () ->
     run_eio (fun ~sw ~net ~clock ->
       let candidate = candidate "board-attention-domain-mismatch" in
@@ -394,7 +394,7 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
              (Fixture.openai_response
                 (judgment_output ~candidate_id:"different-candidate")))
       in
-      let unused =
+      let successor =
         Fixture.start_server
           ~sw
           ~net
@@ -404,7 +404,7 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
                 (judgment_output ~candidate_id:candidate.candidate_id)))
       in
       let first = target "board-attention-domain-invalid" invalid.base_url in
-      let second = target "board-attention-must-not-run" unused.base_url in
+      let second = target "board-attention-domain-successor" successor.base_url in
       publish_lane [ first; second ];
       let prepared =
         match prepare_exact ~net:(Some net) candidate with
@@ -416,9 +416,10 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
         dispatches := provenance :: !dispatches;
         Ok ()
       in
+      let advances = ref [] in
       let before_advance
             ~(failed : Exact_flow.advance_source)
-            ~next:_
+            ~(next : Exact_flow.candidate_visit)
         : (unit, string) result
         =
         let failed_slot_id =
@@ -426,9 +427,8 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
           | Exact_flow.Executed_failure provenance -> provenance.slot_id
           | Exact_flow.Predispatch_rejection visit -> visit.slot_id
         in
-        Alcotest.failf
-          "domain-invalid OAS success must not advance from %s"
-          failed_slot_id
+        advances := (failed_slot_id, next.slot_id) :: !advances;
+        Ok ()
       in
       (match
          Exact_flow.execute
@@ -437,18 +437,29 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
            ~before_advance
            prepared
        with
-       | Error (Exact_flow.Domain_output_invalid _) -> ()
-       | Ok _ -> Alcotest.fail "wrong singleton candidate id was accepted"
-       | Error _ -> Alcotest.fail "wrong candidate id produced a non-domain error");
+       | Ok judgment ->
+         Alcotest.(check string)
+           "success came from declared successor"
+           second.id
+           judgment.slot_id
+       | Error _ -> Alcotest.fail "declared semantic successor did not complete");
       Alcotest.(check int) "domain-invalid slot dispatched once" 1 (Fixture.post_count invalid);
-      Alcotest.(check int) "second slot was not dispatched" 0 (Fixture.post_count unused);
+      Alcotest.(check int) "declared successor dispatched once" 1 (Fixture.post_count successor);
+      Alcotest.(check (list (pair string string)))
+        "successor bind records one local A-to-B journal transition"
+        [ first.id, second.id ]
+        (List.rev !advances);
       match List.rev !dispatches with
-      | [ provenance ] ->
+      | [ first_provenance; second_provenance ] ->
         Alcotest.(check string)
-          "only admitted first slot reached dispatch"
+          "first declared slot reached dispatch first"
           first.id
-          provenance.slot_id
-      | _ -> Alcotest.fail "domain-invalid success dispatched more than once"))
+          first_provenance.slot_id;
+        Alcotest.(check string)
+          "declared successor reached dispatch second"
+          second.id
+          second_provenance.slot_id
+      | _ -> Alcotest.fail "semantic failover did not preserve declared dispatch order"))
 ;;
 
 let test_missing_lane_is_setup_error_without_dispatch () =
@@ -526,153 +537,6 @@ let test_prepare_resumable_status_gate () =
     (quarantined (Candidate.Requeued { requeued_at = 4.0 }))
 ;;
 
-let test_replaced_owner_defers_final_projection_without_mutation () =
-  with_prompt_registry (fun () ->
-    run_eio (fun ~sw ~net ~clock ->
-      let candidate = candidate "board-attention-owner-replaced" in
-      let response =
-        Fixture.openai_response
-          (judgment_output ~candidate_id:candidate.candidate_id)
-      in
-      let server = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
-      publish_lane [ target "board-attention-owner-replaced" server.base_url ];
-      let prepared =
-        match prepare_exact ~net:(Some net) candidate with
-        | Ok prepared -> prepared
-        | Error _ -> Alcotest.fail "Board exact flow was not prepared"
-      in
-      let keeper_name =
-        "board-attention-exact-test-" ^ candidate.Candidate.candidate_id
-      in
-      let base_path = "/tmp/masc-board-attention-exact-flow" in
-      let old_entry =
-        match Keeper_registry.get ~base_path keeper_name with
-        | Some entry -> entry
-        | None -> Alcotest.fail "prepared Board owner disappeared"
-      in
-      (match Keeper_registry.unregister_exact old_entry with
-       | Keeper_registry.Exact_unregistered -> ()
-       | _ -> Alcotest.fail "old Board owner was not unregistered");
-      let replacement_meta =
-        Masc_test_deps.meta_of_json_fixture
-          (`Assoc
-            [ "name", `String keeper_name
-            ; "trace_id", `String ("replacement-" ^ keeper_name)
-            ])
-        |> Result.get_ok
-      in
-      ignore
-        (Keeper_registry.register_offline
-           ~base_path
-           keeper_name
-           replacement_meta);
-      let projection_mutations = ref 0 in
-      (match
-         Exact_flow.with_current_generation prepared (fun () ->
-           incr projection_mutations)
-       with
-       | Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
-       | Keeper_exact_flow_scope.Current () ->
-         Alcotest.fail "replaced Board owner committed a stale projection");
-      Alcotest.(check int)
-        "stale final projection mutates nothing"
-        0
-        !projection_mutations))
-;;
-
-let test_owner_replacement_during_post_defers_success_projection () =
-  with_prompt_registry (fun () ->
-    run_eio (fun ~sw ~net ~clock ->
-      with_temp_base "board-owner-replacement" @@ fun base_path ->
-      Fun.protect
-        ~finally:(fun () -> Keeper_registry.For_testing.clear ())
-        (fun () ->
-           let candidate = candidate "board-owner-replacement-post" in
-           (match Candidate.record ~base_path candidate with
-            | Candidate.Recorded _ -> ()
-            | Candidate.Duplicate _ ->
-              Alcotest.fail "fresh Board candidate was duplicated"
-            | Candidate.Record_error detail -> Alcotest.fail detail);
-           let meta =
-             Masc_test_deps.meta_of_json_fixture
-               (`Assoc
-                 [ "name", `String candidate.keeper_name
-                 ; "trace_id", `String "trace-board-owner-replacement-post"
-                 ])
-             |> Result.get_ok
-           in
-           let old_owner =
-             Keeper_registry.register_offline
-               ~base_path
-               candidate.keeper_name
-               meta
-           in
-           let replace_owner () =
-             (match Keeper_registry.unregister_exact old_owner with
-              | Keeper_registry.Exact_unregistered -> ()
-              | _ -> Alcotest.fail "Board old owner was not unregistered");
-             let replacement_meta =
-               Masc_test_deps.meta_of_json_fixture
-                 (`Assoc
-                   [ "name", `String candidate.keeper_name
-                   ; "trace_id", `String "trace-board-owner-replacement-next"
-                   ])
-               |> Result.get_ok
-             in
-             ignore
-               (Keeper_registry.register_offline
-                  ~base_path
-                  candidate.keeper_name
-                  replacement_meta)
-           in
-           let server =
-             Fixture.start_server
-               ~on_request_before_reply:replace_owner
-               ~sw
-               ~net
-               ~clock
-               (Fixture.Reply
-                  (Fixture.openai_response
-                     (judgment_output
-                        ~candidate_id:candidate.candidate_id)))
-           in
-           publish_lane
-             [ target "board-owner-replacement-post" server.base_url ];
-           (match
-              Worker.For_testing.process_next_exact
-                ~clock
-                ~net:(Some net)
-                ~now:(fun () -> 3.0)
-                ~worker_epoch:(Partition.Worker_epoch.generate ())
-                ~base_path
-                ~keeper_name:candidate.keeper_name
-            with
-            | Ok (Worker.Owner_unregistered_deferred _) -> ()
-            | Ok _ ->
-              Alcotest.fail "stale Board owner projected a successful judgment"
-            | Error detail -> Alcotest.fail detail);
-           Alcotest.(check int)
-             "real Board POST crossed replacement hook once"
-             1
-             (Fixture.post_count server);
-           (match
-              Candidate.load_candidates
-                ~base_path
-                ~keeper_name:candidate.keeper_name
-            with
-            | Ok [ { status = Candidate.Pending { last_delivery_failure = None }; _ } ] ->
-              ()
-            | Ok _ -> Alcotest.fail "stale Board success mutated the candidate"
-            | Error detail -> Alcotest.fail detail);
-           match
-             Partition.load ~base_path ~keeper_name:candidate.keeper_name
-           with
-           | Ok [ { state = Partition.Running { progress = Partition.Bound _; _ }; _ } ] ->
-             ()
-           | Ok _ ->
-             Alcotest.fail "stale Board success blocked or completed the partition"
-           | Error detail -> Alcotest.fail detail)))
-;;
 
 let () =
   Alcotest.run
@@ -687,21 +551,13 @@ let () =
             `Quick
             test_explicit_lane_failover_and_success_provenance
         ; Alcotest.test_case
-            "strict singleton candidate id is domain-terminal"
+            "strict singleton mismatch advances to declared successor"
             `Quick
-            test_domain_candidate_id_mismatch_does_not_advance
+            test_domain_candidate_id_mismatch_advances_to_declared_successor
         ; Alcotest.test_case
             "missing lane is setup error without dispatch"
             `Quick
             test_missing_lane_is_setup_error_without_dispatch
-        ; Alcotest.test_case
-            "replaced owner defers final projection"
-            `Quick
-            test_replaced_owner_defers_final_projection_without_mutation
-        ; Alcotest.test_case
-            "owner replacement during POST defers success projection"
-            `Quick
-            test_owner_replacement_during_post_defers_success_projection
         ] )
     ]
 ;;

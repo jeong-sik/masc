@@ -100,6 +100,12 @@ attempt_outcome x source_state -> source_transition
 OCaml public interface는 proof와 receipt를 abstract type으로 노출한다. consumer는
 record literal, public variant constructor, string parse로 이를 위조할 수 없다.
 
+`terminal_domain_proof`의 유일한 mint authority는 source domain을 exhaustive하게
+판정하는 모듈이다. 이 모듈은 closed source-terminal judgment와 그 evidence를
+입력으로 요구한다. attempt outcome, persistence module, settlement module은 proof를
+mint할 수 없고, attempt-level `Terminal`만으로 source-terminal judgment를 만들 수
+없다.
+
 ### N4. Blocked preserves the source
 
 Recoverable attempt failure는 source를 다음 durable 상태로 이동한다.
@@ -110,13 +116,18 @@ Blocked {
   recovery;
   source_ref;
   attempt_ref;
+  observation_generation;
+  transition_receipt_ref;
+  recovery_precondition;
   observed_at;
 }
 ```
 
 `reason`과 `recovery`는 closed variants다. `source_ref`는 원본 source authority를
-유지한다. `observed_at`은 ordering evidence일 뿐 TTL이나 가격 정책에 사용하지
-않는다.
+유지한다. `observation_generation`과 `transition_receipt_ref`는 blocked transition과
+같은 durable authority에 기록되어 reload 후 다른 mutable source에서 재구성하지
+않는다. `recovery_precondition`은 rearm에 필요한 typed evidence identity를 고정한다.
+`observed_at`은 ordering evidence일 뿐 TTL이나 가격 정책에 사용하지 않는다.
 
 ### N5. Reason survives every projection
 
@@ -225,8 +236,12 @@ call-site가 transition 내용을 바꾸거나 successor를 별도로 덧붙이�
 - attempt evidence를 terminal로 보존한다.
 - source는 consumed가 아니라 typed blocked/recovery state가 된다.
 - 같은 immutable attempt replay는 금지한다.
-- 다른 opaque slot을 사용할 수 있는지는 OAS outer execution contract가 판단한다.
-- recovery가 없으면 operator-visible `Compaction_ineffective`로 block한다.
+- 현재 contract에서는 reduction 판정이 OAS outer call 성공과 `plan_of_json` 이후에
+  일어나므로 candidate advancement가 이미 끝났다. 두 번째 outer call을 failover로
+  위장하지 않는다.
+- operator-visible `Compaction_ineffective`로 block한다.
+- 향후 OAS가 caller-supplied in-call domain validation을 명시적으로 제공할 때만
+  동일 outer call 안의 opaque slot advancement를 별도 versioned contract로 검토한다.
 
 ### Compaction increased checkpoint
 
@@ -239,14 +254,32 @@ call-site가 transition 내용을 바꾸거나 successor를 별도로 덧붙이�
 transition을 durable하게 준비하고, 동일 generation에서 중복 실행되지 않도록
 fence한다.
 
+### Recovery rearm authority
+
+Generation 증가는 그 자체로 recovery evidence가 아니다. blocked source를 다시
+runnable로 만드는 transition은 저장된 `recovery_precondition`과 다른 다음 evidence
+중 하나를 소비해야 한다.
+
+- source HEAD 또는 immutable input digest의 변화
+- OAS가 발행한 새로운 typed capacity evidence identity
+- abstract operator rearm authority
+- RFC가 별도로 허용한 closed domain recovery event
+
+주기 wake, 동일 오류의 재전달, process restart, generation 번호 증가는 rearm
+authority가 아니다. rearm transition은 소비한 evidence identity를 receipt에
+기록하며 같은 evidence로 다음 generation을 다시 만들 수 없다.
+
 ## 7. Concurrency and crash contract
 
 1. source HEAD와 attempt generation을 읽는다.
-2. immutable transition을 준비한다.
-3. source state와 successor 또는 blocked reason을 하나의 commit authority로
-   기록한다.
-4. receipt가 durable한 뒤 lease를 해제한다.
-5. crash recovery는 receipt/journal을 재생하거나 current HEAD와 일치함을 증명한
+2. blocked reason, recovery precondition, successor를 포함한 immutable transition을
+   준비한다.
+3. recovery intent journal을 durable하게 기록한다.
+4. attempt terminal과 source state를 같은 atomic authority로 commit한다. 저장소가
+   이를 한 commit으로 지원하지 않으면 recovery journal이 먼저 durable해야 하며
+   attempt terminal 뒤의 crash에서 반드시 재생 가능해야 한다.
+5. transition receipt가 durable한 뒤 lease를 해제한다.
+6. crash recovery는 receipt/journal을 재생하거나 current HEAD와 일치함을 증명한
    뒤에만 journal을 지운다.
 
 다음 crash point를 각각 증명해야 한다.
@@ -258,7 +291,8 @@ fence한다.
 - lease release 전후
 
 어떤 crash point에서도 source가 `Consumed`인데 terminal proof와 successor가 모두
-없는 상태는 도달 불능이어야 한다.
+없는 상태는 도달 불능이어야 한다. attempt가 terminal인데 blocked/successor
+transition과 recovery journal이 모두 없는 상태도 도달 불능이어야 한다.
 
 ## 8. Required projections
 
@@ -284,8 +318,11 @@ UI는 block을 crash나 success로 표현하지 않는다. 색상, 아이콘, �
 | repeated incompressible input | bounded work, durable blocked, no busy loop |
 | crash at every settlement boundary | source retained or successor durable |
 | queue/server reload | exact reason code retained |
-| Health/API/Dashboard | same generation, status, reason, receipt |
+| Health/API/SSE/Dashboard | same generation, status, reason, receipt |
 | recovery stimulus | one fenced transition back to runnable |
+| unchanged recovery evidence | cannot advance to another generation |
+| attempt terminal only | cannot mint terminal-domain proof |
+| empty queue / all sources blocked | lifecycle and attention loop remain running until explicit stop |
 | old pre-1.0 row | explicit reset-required; no migration/default decoder |
 
 Full Cycle acceptance is fresh-state only:
@@ -295,7 +332,7 @@ source
 -> attempt
 -> typed capacity evidence
 -> blocked
--> Health/API/Dashboard observation
+-> Health/API/SSE/Dashboard observation
 -> recovery stimulus
 -> runnable successor
 -> successful output

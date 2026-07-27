@@ -82,7 +82,12 @@ val get_all_messages_raw :
 (** List tasks with optional filters, returning a formatted string. *)
 val list_tasks :
   ?include_done:bool -> ?include_cancelled:bool -> ?status:string ->
+  ?verification_viewer:string ->
   config -> string
+(** [verification_viewer] is supplied only by the trusted Keeper task tool.
+    For an AwaitingVerification task, the matching assigned verifier receives
+    a bounded read-only projection of the request's submitted evidence.
+    Other callers receive request metadata only. *)
 
 (** Return recent messages as a formatted string. *)
 val get_messages : config -> since_seq:int -> limit:int -> string

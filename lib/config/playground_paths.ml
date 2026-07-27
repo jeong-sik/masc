@@ -88,6 +88,52 @@ let repos_path (name : string) : string =
 let bundle_paths (name : string) : string list =
   [ bundle_root name; mind_path name; repos_path name ]
 
+type playground_file_path =
+  { keeper_name : string
+  ; relative_path : string
+  }
+
+let parse_playground_file_path ~base_path ~abs_path =
+  if Filename.is_relative abs_path then None
+  else
+    let base =
+      let n = String.length base_path in
+      if n > 1 && base_path.[n - 1] = '/'
+      then String.sub base_path 0 (n - 1)
+      else base_path
+    in
+    let base_with_slash = if String.equal base "/" then base else base ^ "/" in
+    if not (String.starts_with ~prefix:base_with_slash abs_path) then None
+    else
+      let rel =
+        String.sub abs_path (String.length base_with_slash)
+          (String.length abs_path - String.length base_with_slash)
+      in
+      let safe_relative keeper_name segments =
+        if
+          String.equal keeper_name ""
+          || segments = []
+          || List.exists
+               (fun segment ->
+                  String.equal segment ""
+                  || String.equal segment "."
+                  || String.equal segment "..")
+               segments
+        then None
+        else
+          Some
+            { keeper_name
+            ; relative_path = String.concat "/" segments
+            }
+      in
+      match String.split_on_char '/' rel with
+      | ".masc" :: "playground" :: "docker" :: keeper_name :: segments ->
+        safe_relative keeper_name segments
+      | ".masc" :: "playground" :: keeper_name :: segments ->
+        safe_relative keeper_name segments
+      | _ -> None
+;;
+
 (* RFC-0128 §4.5 — parse a sandbox playground absolute file path back
    into [(repo_id, rel_path)]. Used by the keeper write path so that
    files keepers edit inside their per-keeper repo clones map to the

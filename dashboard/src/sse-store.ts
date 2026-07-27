@@ -65,6 +65,7 @@ import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
 import {
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
+  SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
 } from './schemas/sse'
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
@@ -584,9 +585,15 @@ export function routeServerPushEvent(event: SSEEvent): void {
     scheduleIdeWorkspaceRefresh()
   }
 
+  // summary_updated carries the Auto Judge verdict transition (summary
+  // pending -> available, disposition in_flight -> settled). Without it the
+  // queue only refreshes on arrival and terminal resolution, so a verdict of
+  // require_human leaves the row rendering "generating summary" until the
+  // periodic sweep (120-180s) even though the judge settled in ~2s.
   const approvalRefreshEvent =
     event.type === SSE_APPROVAL_PENDING_EVENT
     || event.type === SSE_APPROVAL_RESOLVED_EVENT
+    || event.type === SSE_APPROVAL_SUMMARY_UPDATED_EVENT
 
   if (
     event.type.startsWith('decision_')

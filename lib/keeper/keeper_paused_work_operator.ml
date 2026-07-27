@@ -233,6 +233,20 @@ let admission_busy = function
     None
 ;;
 
+let error_to_yojson error =
+  let fields =
+    [ "ok", `Bool false; "error", `String (error_to_string error) ]
+  in
+  match admission_busy error with
+  | None -> `Assoc fields
+  | Some block ->
+    `Assoc
+      (fields
+       @ [ "error_code", `String "keeper_turn_admission_busy"
+         ; "admission", Keeper_turn_admission.autonomous_block_to_yojson block
+         ])
+;;
+
 let error_class = function
   | Invalid_request _ -> `Bad_request
   | Resume_rejected { cause = Resume.Invalid_request _; _ }

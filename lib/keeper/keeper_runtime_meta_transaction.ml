@@ -504,7 +504,10 @@ let recover_leaf config leaf =
          (fun permit ->
             recover permit config intent ~prefer:`Rollback)
      with
-     | Admission_completed result -> Result.map (fun value -> `Recovered value) result
+     | Admission_completed result ->
+       result
+       |> Result.map (fun value -> `Recovered value)
+       |> Result.map_error recovery_failure_to_string
      | Admission_completed_with_attention (result, failure) ->
        (match result with
         | Ok value -> Ok (`Recovered value)

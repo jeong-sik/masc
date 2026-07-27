@@ -282,6 +282,41 @@ let blocked_reason_to_wire = function
     "revival_transaction_mismatch"
 ;;
 
+let evidence_binding_to_wire (evidence : evidence) =
+  Printf.sprintf
+    "keeper=%s,transaction=%s,stage=%s"
+    evidence.keeper_name
+    evidence.transaction_id
+    (stage_to_wire evidence.stage)
+;;
+
+let blocked_reason_to_detail_wire = function
+  | Authority_unreadable { keeper_name; failure } ->
+    Printf.sprintf
+      "authority_unreadable:keeper=%s,failure=%s"
+      keeper_name
+      (authority_failure_to_wire failure)
+  | Authority_invalid { keeper_name; failure } ->
+    Printf.sprintf
+      "authority_invalid:keeper=%s,failure=%s"
+      keeper_name
+      (authority_failure_to_wire failure)
+  | Rollback_capable_authority evidence ->
+    "rollback_capable_authority:" ^ evidence_binding_to_wire evidence
+  | Forward_cleanup_authority evidence ->
+    "forward_cleanup_authority:" ^ evidence_binding_to_wire evidence
+  | Runtime_meta_authority evidence ->
+    "runtime_meta_authority:" ^ evidence_binding_to_wire evidence
+  | Revival_transaction_mismatch { keeper_name; observed } ->
+    Printf.sprintf
+      "revival_transaction_mismatch:keeper=%s,observed=%s"
+      keeper_name
+      (Option.fold
+         ~none:"none"
+         ~some:evidence_binding_to_wire
+         observed)
+;;
+
 let evidence_to_yojson (evidence : evidence) =
   `Assoc
     [ "keeper_name", `String evidence.keeper_name

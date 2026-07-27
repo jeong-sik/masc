@@ -502,6 +502,10 @@ let () =
             "permit scope is cluster scoped"
             `Quick
             test_permit_scope_is_cluster_scoped
+        ; test_case
+            "blocked reason detail preserves exact evidence"
+            `Quick
+            test_blocked_reason_detail_wire_preserves_exact_evidence
         ] )
     ]
 ;;

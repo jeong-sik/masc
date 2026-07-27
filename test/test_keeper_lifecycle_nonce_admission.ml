@@ -216,3 +216,21 @@ let test_permit_scope_is_cluster_scoped () =
   | Admission.Admission_blocked reason ->
     fail (Admission.blocked_reason_to_wire reason)
 ;;
+
+let test_blocked_reason_detail_wire_preserves_exact_evidence () =
+  let module Admission =
+    Masc.Keeper_lifecycle_admission.Durable_transaction
+  in
+  let reason =
+    Admission.Runtime_meta_authority
+      { keeper_name = "sangsu"
+      ; transaction_id = "tx-current"
+      ; stage = Admission.Durable_committed
+      }
+  in
+  check
+    string
+    "detail retains the exact durable authority"
+    "runtime_meta_authority:keeper=sangsu,transaction=tx-current,stage=durable_committed"
+    (Admission.blocked_reason_to_detail_wire reason)
+;;

@@ -1025,7 +1025,7 @@ let blocked_keeper_detail_json
       [ ( "lifecycle_admission_reason"
         , `String
             (Keeper_lifecycle_admission.Durable_transaction
-             .blocked_reason_to_wire
+             .blocked_reason_to_detail_wire
                blocked_reason) )
       ]
   in
@@ -1456,11 +1456,14 @@ let keeper_fleet_safety_health_json
       let config = Mcp_server.workspace_config state in
       autoboot_scan.autoboot_names
       |> List.filter_map (fun keeper_name ->
-        match
-          Keeper_runtime_meta_journal.admission_decision
+        let projection :
+          Keeper_lifecycle_admission.Durable_transaction.projection
+          =
+          Keeper_lifecycle_admission.Durable_transaction.inspect
             config
-            keeper_name
-        with
+            ~keeper_name
+        in
+        match projection.decision with
         | Keeper_lifecycle_admission.Durable_transaction.Admitted _ -> None
         | Keeper_lifecycle_admission.Durable_transaction.Blocked reason ->
           Some (keeper_name, reason))
@@ -1564,10 +1567,10 @@ let keeper_fleet_safety_health_json
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
-    else if active_task_owner_without_executable_fiber
-    then Some "active_task_owner_without_executable_fiber"
     else if lifecycle_admission_blocked
     then Some "keeper_lifecycle_admission_blocked"
+    else if active_task_owner_without_executable_fiber
+    then Some "active_task_owner_without_executable_fiber"
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in

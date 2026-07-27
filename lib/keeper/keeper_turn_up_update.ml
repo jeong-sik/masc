@@ -765,7 +765,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                    in
                                    let gate = ref None in
                                    let launch_committed = ref false in
-                                   let last_recovery_failure = ref None in
                                    let settle_registered_lane () =
                                      Option.iter abort_launch_gate !gate;
                                      match
@@ -783,6 +782,18 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                          Eio.Promise.await entry.done_p
                                        in
                                        ()
+                                   in
+                                   let stop_registered_lane_without_wait () =
+                                     Option.iter abort_launch_gate !gate;
+                                     match
+                                       Keeper_registry.get
+                                         ~base_path:ctx.config.base_path
+                                         candidate.name
+                                     with
+                                     | None -> ()
+                                     | Some entry ->
+                                       Atomic.set entry.fiber_stop true;
+                                       request_entry_stop entry
                                    in
                                    let recover failure =
                                      settle_registered_lane ();
@@ -806,7 +817,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                          .recovery_failure_to_string
                                            recovery_failure
                                        in
-                                       last_recovery_failure := Some detail;
                                        Log.Keeper.error
                                          "keeper update exact recovery failed \
                                           keeper=%s detail=%s"
@@ -1066,29 +1076,12 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                                               rejected)))))))
                                  in
                                  (try commit_candidate () with
-                                   | Eio.Cancel.Cancelled cause ->
+                                   | Eio.Cancel.Cancelled _ as cancelled ->
                                      let backtrace =
                                        Printexc.get_raw_backtrace ()
                                      in
                                      if not !launch_committed
-                                     then
-                                      ignore
-                                        (recover
-                                             "keeper update cancelled before \
-                                              launch commit"
-                                            : tool_result);
-                                     let cancelled =
-                                       match !last_recovery_failure with
-                                       | None -> Eio.Cancel.Cancelled cause
-                                       | Some detail ->
-                                         Eio.Cancel.Cancelled
-                                           (Failure
-                                              (Printf.sprintf
-                                                 "keeper update cancellation \
-                                                  recovery failed: %s; original=%s"
-                                                 detail
-                                                 (Printexc.to_string cause)))
-                                     in
+                                     then stop_registered_lane_without_wait ();
                                      Printexc.raise_with_backtrace cancelled backtrace))))))
                in
                let run_update permit =

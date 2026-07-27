@@ -116,6 +116,7 @@ val inspect : Workspace.config -> keeper_name:string -> projection
 val stage_to_wire : stage -> string
 val authority_failure_to_wire : authority_failure -> string
 val blocked_reason_to_wire : blocked_reason -> string
+val blocked_reason_to_detail_wire : blocked_reason -> string
 val blocked_reason_to_yojson : blocked_reason -> Yojson.Safe.t
 val projection_to_yojson : projection -> Yojson.Safe.t
 

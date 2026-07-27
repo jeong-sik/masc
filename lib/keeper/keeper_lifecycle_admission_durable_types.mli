@@ -53,6 +53,7 @@ type permit_lifecycle =
 
 type permit =
   { base_path : string
+  ; masc_root : string
   ; keeper_name : string
   ; evidence : evidence option
   ; scope_id : int

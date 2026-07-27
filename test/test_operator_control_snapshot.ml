@@ -1,4 +1,6 @@
 module Types = Masc_domain
+module Durable_admission =
+  Keeper_lifecycle_admission.Durable_transaction
 
 open Masc
 open Test_operator_control_support

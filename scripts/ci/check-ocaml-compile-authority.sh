@@ -87,10 +87,49 @@ do
 done
 
 full_compile_count="$(
-  grep -Ec \
-    '^[[:space:]]+(opam exec -- )?(scripts/dune-local\.sh|dune) build .*@(default|check|install)' \
-    "${workflow}" \
-    || true
+  python3 - "${workflow}" <<'PY'
+import shlex
+import sys
+
+
+def count_full_compiles(lines: list[str]) -> int:
+    count = 0
+    for line in lines:
+        try:
+            tokens = shlex.split(line, comments=True, posix=True)
+        except ValueError:
+            continue
+        for index, token in enumerate(tokens[:-1]):
+            command = token.removeprefix("./")
+            if command not in {"dune", "scripts/dune-local.sh"}:
+                continue
+            if tokens[index + 1] != "build":
+                continue
+            targets = tokens[index + 2 :]
+            if any(target in {"@default", "@check", "@install"} for target in targets):
+                count += 1
+                break
+    return count
+
+
+probes = {
+    "# dune build @check": 0,
+    'run: echo "dune build @check"': 0,
+    "run: dune build @check": 1,
+    "OCAMLPARAM=x opam exec -- dune build @install": 1,
+    "./scripts/dune-local.sh build @default": 1,
+}
+for probe, expected in probes.items():
+    actual = count_full_compiles([probe])
+    if actual != expected:
+        raise SystemExit(
+            f"internal full-compile detector failure: {probe!r}: "
+            f"expected {expected}, got {actual}"
+        )
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(count_full_compiles(handle))
+PY
 )"
 [ "${full_compile_count}" -eq 1 ] \
   || fail "ci.yml must contain exactly one full OCaml compile command, found ${full_compile_count}"

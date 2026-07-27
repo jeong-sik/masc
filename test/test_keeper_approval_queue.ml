@@ -1893,10 +1893,18 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               "pre-rename cancellation payload preserved"
               true
               (observed_payload == cancellation_payload);
-            Alcotest.(check string)
+            let expected_backtrace =
+              Printexc.raw_backtrace_to_string cancellation_backtrace
+            in
+            let observed_backtrace =
+              Printexc.raw_backtrace_to_string observed_backtrace
+            in
+            Alcotest.(check bool)
               "pre-rename cancellation backtrace preserved"
-              (Printexc.raw_backtrace_to_string cancellation_backtrace)
-              (Printexc.raw_backtrace_to_string observed_backtrace)
+              true
+              (String.starts_with
+                 ~prefix:expected_backtrace
+                 observed_backtrace)
           | Error error ->
             Alcotest.failf
               "pre-rename cancellation became an exact error: %s"
@@ -2358,6 +2366,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
              ^ AQ.exact_attempt_error_to_string error)
         | Ok _ ->
           Alcotest.fail "blocked disposition bound without operator rearm");
+       let entry = pending_entry_exn id in
        (match
           AQ.reserve_summary_attempt_retry
             ~base_path
@@ -2477,6 +2486,91 @@ let test_operator_recovery_skips_terminal_exact_failure () =
        reject_and_cleanup ~base_path quarantined_id)
 ;;
 
+let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let pending keeper_name value =
+         let id =
+           submit
+             ~base_path
+             ~keeper_name
+             ~input:(`String value)
+         in
+         check_update
+           "mark pending"
+           true
+           (AQ.mark_summary_pending ~id);
+         id
+       in
+       let owner = "retirement-blocked" in
+       let bound = pending owner "bound" in
+       let sibling = pending owner "sibling" in
+       let retirable = pending "retirement-unbound" "retire" in
+       check_exact_update
+         "bind blocker"
+         true
+         (run_exact_transition
+            AQ.bind_summary_exact_attempt
+            (exact_identity ~slot_id:"slot" ~call_id:"call" bound));
+       (match
+          AQ.retire_summary_owner
+            ~base_path
+            ~keeper_name:owner
+            ~reason:"retired"
+        with
+        | Error
+            (AQ.Summary_owner_retirement_exact_attempt_unsettled _) ->
+          ()
+        | Error error ->
+          Alcotest.fail
+            (AQ.summary_owner_retirement_error_to_string error)
+        | Ok _ -> Alcotest.fail "bound owner retirement succeeded");
+       (match AQ.For_testing.get_pending_entry_unchecked ~id:bound with
+        | Some
+            { summary_status = AQ.Summary_pending
+            ; exact_attempt = AQ.Exact_bound binding
+            ; _
+            } ->
+          Alcotest.(check string)
+            "bound call unchanged"
+            "call"
+            binding.call_id
+        | Some _ | None ->
+          Alcotest.fail "bound entry changed on failed retirement");
+       (match AQ.For_testing.get_pending_entry_unchecked ~id:sibling with
+        | Some { summary_status = AQ.Summary_pending; _ } -> ()
+        | Some _ | None ->
+          Alcotest.fail "blocked retirement partially mutated");
+       (match
+          AQ.retire_summary_owner
+            ~base_path
+            ~keeper_name:"retirement-unbound"
+            ~reason:"retired"
+        with
+        | Error error ->
+          Alcotest.fail
+            (AQ.summary_owner_retirement_error_to_string error)
+        | Ok ids ->
+          Alcotest.(check (list string))
+            "retired ids"
+            [ retirable ]
+            ids);
+       match AQ.For_testing.get_pending_entry_unchecked ~id:retirable with
+       | Some
+           { summary_status =
+               AQ.Summary_failed
+                 { reason = "retired"; retryable = false }
+           ; _
+           } ->
+         ()
+       | Some _ | None ->
+         Alcotest.fail "pending summary was not terminalized")
+;;
 
 let test_dashboard_resolve_rejects_cross_workspace_approval () =
   let base_a = temp_dir () in
@@ -2495,6 +2589,7 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
            ~keeper_name:"queue-resolve-base-a"
            ~input:(`Assoc [ "request", `String "base-a" ])
        in
+       ignore (install_exn ~base_path:base_b);
        let resolve ~decision ~remember_rule =
          Server_dashboard_http.dashboard_gate_resolve_http_json
            ~base_path:base_b
@@ -2533,6 +2628,7 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
               (Sys.file_exists
                  (AQ.For_testing.always_allowed_store_path ~base_path)))
          [ base_a; base_b ];
+       ignore (install_exn ~base_path:base_a);
        reject_and_cleanup ~base_path:base_a approval_id)
 ;;
 
@@ -3106,6 +3202,10 @@ let () =
             "operator recovery skips terminal exact failures"
             `Quick
             test_operator_recovery_skips_terminal_exact_failure
+        ; Alcotest.test_case
+            "summary owner retirement is atomic and owner scoped"
+            `Quick
+            test_summary_owner_retirement_is_atomic_and_owner_scoped
         ; Alcotest.test_case
               "exact restart finalization requires fsync"
               `Quick

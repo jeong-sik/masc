@@ -11,6 +11,43 @@ open Keeper_types_profile
 open Keeper_keepalive
 open Keeper_turn_up_args
 
+let resume_operator_pause
+    (ctx : _ context)
+    (old : keeper_meta)
+  =
+  match old.paused, old.latched_reason with
+  | true, (None | Some (Keeper_latched_reason.Operator_paused _)) ->
+    let request : Keeper_paused_work_resume_transaction.request =
+      { owner_nonce = old.runtime.nonce
+      ; operator_operation_id =
+          Random_id.prefixed ~prefix:"keeper-up-resume-" ~bytes:16
+      }
+    in
+    (match
+       Keeper_paused_work_resume_transaction.resume
+         ctx.config
+         ~keeper_name:old.name
+         request
+     with
+     | Error error ->
+       Error
+         ("explicit keeper up could not resume operator pause: "
+          ^ Keeper_paused_work_resume_transaction.error_to_string error)
+     | Ok _ ->
+       (match Keeper_meta_store.read_meta ctx.config old.name with
+        | Error detail ->
+          Error ("resumed keeper metadata read failed: " ^ detail)
+        | Ok None -> Error "resumed keeper metadata disappeared"
+        | Ok (Some resumed) when resumed.paused ->
+          Error "explicit keeper up committed but pause remained set"
+        | Ok (Some resumed) -> Ok resumed))
+  | false, _
+  | true, Some
+      ( Keeper_latched_reason.Dead_tombstone
+      | Keeper_latched_reason.Transcript_corruption_reset_required ) ->
+    Ok old
+;;
+
 let resolve_active_goal_ids config p old_ids =
   let active_goal_ids =
     match p.active_goal_ids_opt with
@@ -35,6 +72,9 @@ let resolve_active_goal_ids config p old_ids =
 let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
+  match resume_operator_pause ctx old with
+  | Error message -> tool_result_error message
+  | Ok old ->
   match old.latched_reason with
   | Some Keeper_latched_reason.Dead_tombstone ->
     tool_result_error_data
@@ -180,12 +220,22 @@ let update_keeper ?(preserve_prompt_defaults = false)
             tool_result_error err
           | Ok () ->
             (match
-               Keeper_turn_up_config_persistence.persist
+               Keeper_shutdown_supersession.preflight
                  ~config:ctx.config
-                 ~parsed:p
-                 ~meta:updated
+                 ~keeper_name:updated.name
+                 ~actor:ctx.agent_name
              with
-             | Error e ->
+             | Error error ->
+               tool_result_error
+                 (Keeper_shutdown_supersession.error_to_string error)
+             | Ok supersession ->
+             (match
+                Keeper_turn_up_config_persistence.persist
+                  ~config:ctx.config
+                  ~parsed:p
+                  ~meta:updated
+              with
+              | Error e ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string TurnUpUpdateFailures)
                  ~labels:
@@ -197,7 +247,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  ();
                tool_result_error
                  (Printf.sprintf "declarative keeper config write failed: %s" e)
-             | Ok _ ->
+              | Ok _ ->
             let enqueue_goal_assignment_wakes (meta : keeper_meta) =
               let (_ : string list) =
                 Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
@@ -230,6 +280,17 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  ();
                tool_result_error e
              | Ok () ->
+               (match
+                  Keeper_shutdown_supersession.commit_after_metadata_update
+                    ~config:ctx.config
+                    supersession
+                with
+                | Error error ->
+                  tool_result_error
+                    (Keeper_shutdown_supersession.error_to_string error)
+                | Ok
+                    ( Keeper_shutdown_supersession.No_shutdown_admission
+                    | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
                (* RFC-0315 P3 W0: goals that newly entered active_goal_ids
                   wake the keeper once at the assignment edge. Enqueue is
                   durable, so the keepalive restart below delivers it on the
@@ -265,4 +326,4 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   tool_result_error
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected))))))
+                       (start_keepalive_outcome_to_string rejected))))))))

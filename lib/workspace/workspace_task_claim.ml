@@ -220,9 +220,20 @@ let claim_task_r config ~agent_name ~task_id ()
                ; "task", `String task_id
                ; "ts", `String (now_iso ())
                ]);
+           let evidence_projection =
+             Workspace_query.verification_evidence_projection
+               config
+               ~viewer:agent_name
+               ~task:claimed_task
+             |> Option.value ~default:""
+           in
            Ok
              (`New_claim
-               (Printf.sprintf "%s assigned as verifier for %s" agent_name task_id))
+               (Printf.sprintf
+                  "%s assigned as verifier for %s\n%s"
+                  agent_name
+                  task_id
+                  evidence_projection))
          | `Claimed_ok ->
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks

@@ -20,6 +20,7 @@ type evidence_read_failure =
   | Evidence_missing
   | Evidence_not_regular_file
   | Evidence_outside_worker_playground
+  | Evidence_invalid_reference
   | Evidence_invalid_utf8
   | Evidence_symbolic_link
   | Evidence_changed_during_read
@@ -32,6 +33,7 @@ type submitted_evidence_item =
       ; content : string
       ; bytes : int
       ; truncated : bool
+      ; sha256 : string
       }
   | Evidence_artifact_unreadable of
       { reference : string
@@ -55,6 +57,16 @@ type submitted_evidence_access =
 val evidence_read_failure_to_string : evidence_read_failure -> string
 val evidence_read_failure_of_owned_read_failure :
   Fs_compat.owned_regular_file_read_failure -> evidence_read_failure
+val snapshot_submitted_evidence_json :
+  base_path:string ->
+  worker:string ->
+  string list ->
+  Yojson.Safe.t
+(** Materialize submitted evidence once at the producer's submit boundary.
+    ["artifact:<relative-path>"] is rooted at the producer's declared sandbox;
+    absolute paths remain accepted only when contained by that same playground.
+    The artifact SHA-256 covers the bounded UTF-8 content persisted in the
+    snapshot, not bytes omitted beyond the projection cap. *)
 val inspect_submitted_evidence :
   base_path:string ->
   request_id:string ->

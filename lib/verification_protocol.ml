@@ -32,6 +32,7 @@ type submit_request_spec =
       (* task-1664: [required_artifacts] / [submitted_evidence] JSON fields
          spliced next to the flat [evidence_refs] so verifiers can tell the
          contract's demanded artifacts apart from what the agent submitted. *)
+  ; submitted_evidence : string list
   }
 
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
@@ -64,11 +65,14 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
      | None -> []) in
   (* task-1664: derive the typed required/submitted split from the task (the
      SSOT), and splice it next to the unchanged flat [evidence_refs] field. *)
+  let verification_evidence =
+    Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
+      ~submitted_evidence_refs:evidence_refs
+      task
+  in
   let evidence_fields =
     Masc_task_handlers.Tool_task_completion_review.verification_evidence_fields
-      (Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
-         ~submitted_evidence_refs:evidence_refs
-         task)
+      verification_evidence
   in
   let output =
     `Assoc
@@ -89,6 +93,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   ; board_title
   ; board_content
   ; evidence_fields
+  ; submitted_evidence = verification_evidence.submitted_evidence
   }
 
 let warn_contract_gap (task : Masc_domain.task) =
@@ -120,9 +125,23 @@ let create_submit_request ~(config : Workspace.config)
   let base_path = config.Workspace.base_path in
   warn_contract_gap task;
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
+  let evidence_snapshot =
+    Workspace_verification_store.snapshot_submitted_evidence_json
+      ~base_path
+      ~worker:assignee
+      spec.submitted_evidence
+  in
+  let output =
+    match spec.output with
+    | `Assoc fields ->
+      `Assoc (("submitted_evidence_snapshot", evidence_snapshot) :: fields)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      as impossible ->
+      impossible
+  in
   match
     Verification.create_request ~base_path ~task_id:task.id ~request_id:verification_id
-      ~output:spec.output ~criteria:spec.criteria ~worker:assignee ()
+      ~output ~criteria:spec.criteria ~worker:assignee ()
   with
   | Ok _ -> Ok ()
   | Error e ->

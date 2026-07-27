@@ -336,6 +336,13 @@ let test_list_requests_ignores_legacy_root_entries () =
       (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error))
 
 let create_evidence_request ~base_path ~request_id ~artifact_path =
+  let submitted_evidence = [ artifact_path; "executor summary" ] in
+  let evidence_snapshot =
+    VS.snapshot_submitted_evidence_json
+      ~base_path
+      ~worker:"keeper-executor-agent"
+      submitted_evidence
+  in
   match
     V.create_request
       ~base_path
@@ -344,10 +351,8 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
       ~output:
         (`Assoc
             [ ( "submitted_evidence"
-              , `List
-                  [ `String artifact_path
-                  ; `String "executor summary"
-                  ] )
+              , `List (List.map (fun value -> `String value) submitted_evidence) )
+            ; "submitted_evidence_snapshot", evidence_snapshot
             ])
       ~criteria:[ V.Custom "inspect artifact" ]
       ~worker:"keeper-executor-agent"
@@ -355,6 +360,44 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
   with
   | Ok request -> request
   | Error detail -> Alcotest.fail detail
+
+let write_keeper_profile ~base_path ~keeper_name ~sandbox_profile =
+  let path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path
+      ~agent_name:keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file
+    path
+    (Printf.sprintf "[keeper]\nsandbox_profile = %S\n" sandbox_profile)
+
+let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
+  let config = W.default_config base_path in
+  ignore (W.init config ~agent_name:None);
+  ignore
+    (W.add_task
+       config
+       ~title:"Produce typed verification evidence"
+       ~priority:1
+       ~description:"");
+  let task =
+    match (W.read_backlog config).tasks with
+    | [ task ] -> task
+    | tasks ->
+      Alcotest.failf "expected one task, got %d" (List.length tasks)
+  in
+  (match
+     VP.create_submit_request
+       ~config
+       ~task
+       ~assignee:"keeper-executor-agent"
+       ~verification_id:request_id
+       ~evidence_refs
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  task
 
 let inspect_evidence ?(task_id = "task-001")
     ?(task_worker = "keeper-executor-agent") ~base_path ~request_id
@@ -409,6 +452,214 @@ let test_submitted_evidence_inspection_is_assigned_and_contained () =
     with
     | VS.Evidence_metadata_only _ -> ()
     | _ -> Alcotest.fail "non-assigned keeper must receive metadata only")
+
+let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () =
+  with_eio_temp_dir (fun base_path ->
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-executor-agent"
+      ~sandbox_profile:"docker";
+    let artifact_dir =
+      Filename.concat
+        (Keeper_sandbox_config.host_root_abs_of_agent
+           ~base_path
+           ~agent_name:"keeper-executor-agent")
+        "artifacts"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    Fs_compat.save_file
+      (Filename.concat artifact_dir "proof.txt")
+      "docker-relative-proof";
+    let request_id = "vrf-docker-relative-snapshot" in
+    let task =
+      create_protocol_evidence_request
+        ~base_path
+        ~request_id
+        ~evidence_refs:
+          [ "artifact:artifacts/proof.txt"; "note:executor summary" ]
+    in
+    match
+      inspect_evidence
+        ~task_id:task.id
+        ~base_path
+        ~request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
+        ~viewer:"keeper-verifier-agent"
+        ()
+    with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact
+              { reference = "artifact:artifacts/proof.txt"
+              ; content = "docker-relative-proof"
+              ; sha256
+              ; _
+              }
+            :: VS.Evidence_note "executor summary"
+            :: []
+        ; _
+        } ->
+      Alcotest.(check string)
+        "snapshot hash covers persisted bounded content"
+        Digestif.SHA256.(digest_string "docker-relative-proof" |> to_hex)
+        sha256
+    | _ ->
+      (match
+         inspect_evidence
+           ~task_id:task.id
+           ~base_path
+           ~request_id
+           ~task_verifier:(Some "keeper-verifier-agent")
+           ~viewer:"keeper-verifier-agent"
+           ()
+       with
+       | VS.Evidence_available
+           { items =
+               VS.Evidence_artifact_unreadable { reason; _ } :: _
+           ; _
+           } ->
+         Alcotest.failf
+           "Docker-relative artifact snapshot unreadable: %s"
+           (VS.evidence_read_failure_to_string reason)
+       | VS.Evidence_available { items; _ } ->
+         Alcotest.failf
+           "expected explicit artifact and note snapshot, got %d items"
+           (List.length items)
+       | VS.Evidence_metadata_only _ ->
+         Alcotest.fail "assigned verifier unexpectedly received metadata only"
+       | VS.Evidence_unavailable { reason; _ } ->
+         Alcotest.failf "persisted evidence snapshot unavailable: %s" reason))
+
+let test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd () =
+  with_eio_temp_dir (fun base_path ->
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-executor-agent"
+      ~sandbox_profile:"docker";
+    let artifact_dir =
+      Filename.concat
+        (Keeper_sandbox_config.host_root_abs_of_agent
+           ~base_path
+           ~agent_name:"keeper-executor-agent")
+        "artifacts"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "immutable.txt" in
+    Fs_compat.save_file artifact_path "submit-time-content";
+    let request_id = "vrf-immutable-snapshot" in
+    let task =
+      create_protocol_evidence_request
+        ~base_path
+        ~request_id
+        ~evidence_refs:[ "artifact:artifacts/immutable.txt" ]
+    in
+    Fs_compat.save_file artifact_path "mutated-after-submit";
+    Sys.remove artifact_path;
+    let verifier_cwd = Filename.concat base_path "verifier-cwd" in
+    Fs_compat.mkdir_p verifier_cwd;
+    let original_cwd = Sys.getcwd () in
+    Fun.protect
+      ~finally:(fun () -> Sys.chdir original_cwd)
+      (fun () ->
+        Sys.chdir verifier_cwd;
+        match
+          inspect_evidence
+            ~task_id:task.id
+            ~base_path
+            ~request_id
+            ~task_verifier:(Some "keeper-verifier-agent")
+            ~viewer:"keeper-verifier-agent"
+            ()
+        with
+        | VS.Evidence_available
+            { items =
+                VS.Evidence_artifact
+                  { content = "submit-time-content"; _ }
+                :: []
+            ; _
+            } ->
+          ()
+        | _ ->
+          (match
+             inspect_evidence
+               ~task_id:task.id
+               ~base_path
+               ~request_id
+               ~task_verifier:(Some "keeper-verifier-agent")
+               ~viewer:"keeper-verifier-agent"
+               ()
+           with
+           | VS.Evidence_available
+               { items =
+                   VS.Evidence_artifact_unreadable { reason; _ } :: _
+               ; _
+               } ->
+             Alcotest.failf
+               "immutable artifact snapshot unreadable: %s"
+               (VS.evidence_read_failure_to_string reason)
+           | VS.Evidence_available { items; _ } ->
+             Alcotest.failf
+               "expected one immutable artifact snapshot, got %d items"
+               (List.length items)
+           | VS.Evidence_metadata_only _ ->
+             Alcotest.fail "assigned verifier unexpectedly received metadata only"
+           | VS.Evidence_unavailable { reason; _ } ->
+             Alcotest.failf "persisted evidence snapshot unavailable: %s" reason)))
+
+let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
+  with_eio_temp_dir (fun base_path ->
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-executor-agent"
+      ~sandbox_profile:"docker";
+    let producer_root =
+      Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path
+        ~agent_name:"keeper-executor-agent"
+    in
+    let artifact_dir = Filename.concat producer_root "artifacts" in
+    Fs_compat.mkdir_p artifact_dir;
+    let outside_path = Filename.concat base_path "outside-relative-secret.txt" in
+    Fs_compat.save_file outside_path "outside";
+    let symlink_path = Filename.concat artifact_dir "escape.txt" in
+    Unix.symlink outside_path symlink_path;
+    let request_id = "vrf-relative-boundary-snapshot" in
+    let task =
+      create_protocol_evidence_request
+        ~base_path
+        ~request_id
+        ~evidence_refs:
+          [ "artifact:../outside-relative-secret.txt"
+          ; "artifact:artifacts/escape.txt"
+          ]
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.unlink symlink_path with
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+      (fun () ->
+        match
+          inspect_evidence
+            ~task_id:task.id
+            ~base_path
+            ~request_id
+            ~task_verifier:(Some "keeper-verifier-agent")
+            ~viewer:"keeper-verifier-agent"
+            ()
+        with
+        | VS.Evidence_available
+            { items =
+                VS.Evidence_artifact_unreadable
+                  { reason = VS.Evidence_invalid_reference; _ }
+                :: VS.Evidence_artifact_unreadable
+                     { reason = VS.Evidence_symbolic_link; _ }
+                :: []
+            ; _
+            } ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "relative traversal and symlink escape must persist typed unreadable snapshots"))
 
 let test_submitted_evidence_inspection_rejects_cross_playground_path () =
   with_eio_temp_dir (fun base_path ->
@@ -597,6 +848,11 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
             (`Assoc
                 [ ( "submitted_evidence"
                   , `List [ `String artifact_path ] )
+                ; ( "submitted_evidence_snapshot"
+                  , VS.snapshot_submitted_evidence_json
+                      ~base_path
+                      ~worker:"keeper-executor-agent"
+                      [ artifact_path ] )
                 ])
           ~criteria:[ V.Custom "inspect artifact" ]
           ~worker:"keeper-executor-agent"
@@ -712,7 +968,11 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
     (match
        W.claim_task_r config ~agent_name:"keeper-verifier-agent" ~task_id:"task-001" ()
      with
-     | Ok _ -> ()
+     | Ok message ->
+       Alcotest.(check bool)
+         "claim response carries persisted snapshot"
+         true
+         (contains_substring message "full-cycle-evidence")
      | Error err ->
        Alcotest.fail
          ("verifier claim failed: " ^ Masc_domain.masc_error_to_string err));
@@ -992,6 +1252,12 @@ let () =
         test_list_requests_ignores_legacy_root_entries;
       Alcotest.test_case "submitted evidence assigned and contained" `Quick
         test_submitted_evidence_inspection_is_assigned_and_contained;
+      Alcotest.test_case "submit snapshot resolves Docker relative refs" `Quick
+        test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note;
+      Alcotest.test_case "submit snapshot is immutable and cwd-independent" `Quick
+        test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd;
+      Alcotest.test_case "submit snapshot rejects traversal and symlink escape" `Quick
+        test_submit_snapshot_rejects_relative_traversal_and_symlink_escape;
       Alcotest.test_case "submitted evidence rejects cross playground" `Quick
         test_submitted_evidence_inspection_rejects_cross_playground_path;
       Alcotest.test_case "submitted evidence bounded UTF-8" `Quick

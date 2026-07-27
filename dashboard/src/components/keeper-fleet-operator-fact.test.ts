@@ -17,6 +17,8 @@ function fact(
     task_status: null,
     reason: 'durable_paused_autoboot_enabled',
     action: 'resume_or_leave_paused',
+    execution_truth: 'paused_dead',
+    non_executable_cause: 'lifecycle_denied',
     operator_action_type: null,
     operator_tool_name: null,
     operator_action_confirm_required: null,
@@ -33,6 +35,8 @@ describe('keeper fleet operator fact presentation', () => {
     expect(presentation.Icon).toBe(CirclePause)
     expect(presentation.action).toContain('resume selected paused keepers')
     expect(presentation.reason).toBe('durable_paused_autoboot_enabled')
+    expect(presentation.executionTruth).toBe('paused_dead')
+    expect(presentation.nonExecutableCause).toBe('lifecycle_denied')
   })
 
   it('fails a missing current fleet fact closed', () => {

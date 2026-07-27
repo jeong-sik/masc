@@ -492,7 +492,73 @@ let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).co
 type keeper_execution_owner =
   { keeper_name : string
   ; truth : Keeper_activation_readiness.owner_execution_truth
+  ; non_executable_cause : keeper_non_executable_cause option
   }
+and keeper_non_executable_cause =
+  | Cause_owner_absent_from_snapshot
+  | Cause_owner_unregistered
+  | Cause_fiber_dead
+  | Cause_lane_exited
+  | Cause_completion_settled
+  | Cause_autoboot_disabled
+  | Cause_proactive_disabled
+  | Cause_lifecycle_denied
+  | Cause_runtime_terminal
+  | Cause_shutdown_fenced
+  | Cause_metadata_unavailable
+  | Cause_runtime_not_live
+
+let keeper_non_executable_cause_to_wire = function
+  | Cause_owner_absent_from_snapshot -> "owner_absent_from_snapshot"
+  | Cause_owner_unregistered -> "owner_unregistered"
+  | Cause_fiber_dead -> "fiber_dead"
+  | Cause_lane_exited -> "lane_exited"
+  | Cause_completion_settled -> "completion_settled"
+  | Cause_autoboot_disabled -> "autoboot_disabled"
+  | Cause_proactive_disabled -> "proactive_disabled"
+  | Cause_lifecycle_denied -> "lifecycle_denied"
+  | Cause_runtime_terminal -> "runtime_terminal"
+  | Cause_shutdown_fenced -> "shutdown_fenced"
+  | Cause_metadata_unavailable -> "metadata_unavailable"
+  | Cause_runtime_not_live -> "runtime_not_live"
+;;
+
+let owner_execution_truth_to_wire = function
+  | Keeper_activation_readiness.Executable -> "executable"
+  | Keeper_activation_readiness.Recoverable -> "recoverable"
+  | Keeper_activation_readiness.Retained_disabled _ -> "retained_disabled"
+  | Keeper_activation_readiness.Paused_dead _ -> "paused_dead"
+  | Keeper_activation_readiness.Shutdown_fenced _ -> "shutdown_fenced"
+  | Keeper_activation_readiness.Unknown _ -> "unknown"
+;;
+
+let non_executable_cause ~registry_entry = function
+  | Keeper_activation_readiness.Executable -> None
+  | Keeper_activation_readiness.Recoverable ->
+    Some
+      (match registry_entry with
+       | None -> Cause_owner_unregistered
+       | Some (entry : Keeper_registry.registry_entry) ->
+         if not entry.conditions.fiber_alive then Cause_fiber_dead
+         else if Keeper_registry.lane_has_exited entry then Cause_lane_exited
+         else if Option.is_some (Eio.Promise.peek entry.done_p) then
+           Cause_completion_settled
+         else Cause_runtime_not_live)
+  | Keeper_activation_readiness.Retained_disabled
+      Keeper_activation_readiness.Retained_autoboot_disabled ->
+    Some Cause_autoboot_disabled
+  | Keeper_activation_readiness.Retained_disabled
+      Keeper_activation_readiness.Retained_proactive_disabled ->
+    Some Cause_proactive_disabled
+  | Keeper_activation_readiness.Paused_dead
+      (Keeper_activation_readiness.Persisted_lifecycle_denied _) ->
+    Some Cause_lifecycle_denied
+  | Keeper_activation_readiness.Paused_dead
+      (Keeper_activation_readiness.Runtime_terminal _) ->
+    Some Cause_runtime_terminal
+  | Keeper_activation_readiness.Shutdown_fenced _ -> Some Cause_shutdown_fenced
+  | Keeper_activation_readiness.Unknown _ -> Some Cause_metadata_unavailable
+;;
 
 type keeper_execution_snapshot =
   { owners : keeper_execution_owner list
@@ -518,6 +584,7 @@ let keeper_execution_snapshot config =
   let owners =
     List.map
       (fun keeper_name ->
+        let registry_entry = Keeper_registry.get ~base_path keeper_name in
         let meta_result =
           match Keeper_meta_store.read_effective_meta config keeper_name with
           | Ok (Some meta) -> Ok meta
@@ -529,7 +596,7 @@ let keeper_execution_snapshot config =
         in
         let runtime =
           Keeper_activation_readiness.owner_runtime_of_registry_entry
-            (Keeper_registry.get ~base_path keeper_name)
+            registry_entry
         in
         let truth =
           Keeper_activation_readiness.classify_owner_execution
@@ -537,7 +604,11 @@ let keeper_execution_snapshot config =
             ~runtime
             meta_result
         in
-        { keeper_name; truth })
+        {
+          keeper_name;
+          truth;
+          non_executable_cause = non_executable_cause ~registry_entry truth;
+        })
       owner_names
   in
   let executable_names =
@@ -564,6 +635,19 @@ let owner_execution_truth snapshot ~keeper_name =
   | None ->
     Keeper_activation_readiness.Unknown
       "owner absent from canonical execution snapshot"
+;;
+
+let owner_execution_fact snapshot ~keeper_name =
+  match
+    List.find_opt
+      (fun owner -> String.equal owner.keeper_name keeper_name)
+      snapshot.owners
+  with
+  | Some owner -> owner.truth, owner.non_executable_cause
+  | None ->
+    ( Keeper_activation_readiness.Unknown
+        "owner absent from canonical execution snapshot"
+    , Some Cause_owner_absent_from_snapshot )
 ;;
 
 let string_set_of_list values =
@@ -916,12 +1000,16 @@ let blocked_keeper_detail_json
     ?base_path
     ?(last_blocker = `Null)
     ?phase_detail
+    ~execution_snapshot
     ~keeper_bootstrap_enabled
     ~bootable_set
     ~capacity_set
     ~paused_set
     ~read_error_set
     name =
+  let execution_truth, non_executable_cause =
+    owner_execution_fact execution_snapshot ~keeper_name:name
+  in
   let is_paused = String_set.mem name paused_set in
   let is_bootable = String_set.mem name bootable_set in
   let is_capacity = String_set.mem name capacity_set in
@@ -1061,6 +1149,11 @@ let blocked_keeper_detail_json
        ("keeper_name", `String name);
        ("reason", `String (blocked_keeper_reason_label reason));
        ("action", `String (blocked_keeper_action_label reason));
+       ("execution_truth", `String (owner_execution_truth_to_wire execution_truth));
+       ( "non_executable_cause"
+       , match non_executable_cause with
+         | Some cause -> `String (keeper_non_executable_cause_to_wire cause)
+         | None -> `Null );
        ("phase", Json_util.string_opt_to_json phase_name);
        ("last_blocker", last_blocker);
        ("bootable", `Bool is_bootable);
@@ -1291,11 +1384,18 @@ let active_task_owner_blocked_name row =
   | Some keeper_name -> keeper_name
   | None -> row.agent_name
 
-let active_task_owner_blocked_detail_json row =
+let active_task_owner_blocked_detail_json ~execution_snapshot row =
   let reason =
     match row.keeper_name with
     | Some _ -> Not_running
     | None -> No_keeper_binding
+  in
+  let execution_truth, non_executable_cause =
+    match row.keeper_name with
+    | Some keeper_name -> owner_execution_fact execution_snapshot ~keeper_name
+    | None ->
+      ( Keeper_activation_readiness.Unknown "task owner has no Keeper binding"
+      , Some Cause_owner_absent_from_snapshot )
   in
   `Assoc
     ([
@@ -1305,6 +1405,11 @@ let active_task_owner_blocked_detail_json row =
        ("task_status", `String row.task_status);
        ("reason", `String (blocked_keeper_reason_label reason));
        ("action", `String (blocked_keeper_action_label reason));
+       ("execution_truth", `String (owner_execution_truth_to_wire execution_truth));
+       ( "non_executable_cause"
+       , match non_executable_cause with
+         | Some cause -> `String (keeper_non_executable_cause_to_wire cause)
+         | None -> `Null );
      ]
      @ blocked_keeper_operator_action_fields reason)
 
@@ -1472,7 +1577,7 @@ let keeper_fleet_safety_health_json
   let blocked_keepers =
     if active_task_owner_is_selected_blocker then
       active_task_owner_scan.active_task_owner_without_executable_fibers
-      |> List.map active_task_owner_blocked_detail_json
+      |> List.map (active_task_owner_blocked_detail_json ~execution_snapshot)
     else
       blocked_keeper_names
       |> List.map
@@ -1481,6 +1586,7 @@ let keeper_fleet_safety_health_json
                ?base_path:runtime_base_path
                ~last_blocker:(paused_keeper_last_blocker_json paused_keepers_json name)
                ?phase_detail:(phase_detail name)
+               ~execution_snapshot
                ~keeper_bootstrap_enabled
                ~bootable_set
                ~capacity_set

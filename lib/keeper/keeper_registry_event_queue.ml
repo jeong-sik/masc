@@ -385,6 +385,13 @@ let peek_when_result ~base_path name ~ready =
       ~ready
 ;;
 
+let validate_pending_selection_result ~base_path name ~selection =
+  Keeper_event_queue_persistence.validate_pending_selection_result
+    ~base_path
+    ~keeper_name:name
+    ~selection
+;;
+
 let ack_pending_result ~base_path name ~selection =
   Keeper_event_queue_persistence.ack_pending_result
     ~base_path

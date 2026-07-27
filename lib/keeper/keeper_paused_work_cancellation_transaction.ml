@@ -40,6 +40,7 @@ type success =
   }
 
 type error =
+  | Admission_busy of Keeper_turn_admission.autonomous_block
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Failed of
       { cause : failure
@@ -79,6 +80,8 @@ let release_outcome_to_string = function
 ;;
 
 let error_to_string = function
+  | Admission_busy _ ->
+    "keeper_turn_admission_busy: operation=cancel_pending"
   | Reservation_conflict owner ->
     "Keeper lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -239,7 +242,15 @@ let cancel_with_lifecycle
       { settlement = Keeper_registry_event_queue.Already_settled receipt
       ; reservation_release = None
       }
-  | Ok None -> acquire ()
+  | Ok None ->
+    (match
+       Keeper_turn_admission.run_admin_if_free
+         ~base_path
+         ~keeper_name
+         acquire
+     with
+     | `Ran outcome -> outcome
+     | `Busy block -> Error (Admission_busy block))
 ;;
 
 let cancel config ~keeper_name request =

@@ -503,6 +503,7 @@ let operation_of_observed_commit
 let run_admitted_with
       ~append_compaction_manifest
       ~prepare_compaction
+      ~already_admitted
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
   =
@@ -511,26 +512,34 @@ let run_admitted_with
      still enter while planning; the final admission and source CAS close that
      race without stranding [compaction_active]. *)
   match
-    Keeper_turn_admission.run_compaction_if_free
-      ~base_path:config.base_path
-      ~keeper_name:meta.name
-      (fun () -> ())
+    if already_admitted
+    then `Ran ()
+    else
+      Keeper_turn_admission.run_compaction_if_free
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+        (fun () -> ())
   with
   | `Busy block -> `Busy block
   | `Ran () ->
     let base_dir, preparation = prepare_with ~prepare_compaction ~config ~meta in
     let final_admission () =
-      Keeper_turn_admission.run_compaction_if_free
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
-        (fun () ->
+      let run () =
           match run_start_lifecycle ~config ~meta with
           | Error failure -> Error failure
           | Ok () ->
             finish_preparation
               ~config
               ~meta
-              preparation)
+              preparation
+      in
+      if already_admitted
+      then `Ran (run ())
+      else
+        Keeper_turn_admission.run_compaction_if_free
+          ~base_path:config.base_path
+          ~keeper_name:meta.name
+          run
     in
     let admitted = final_admission () in
     (match admitted
@@ -640,6 +649,7 @@ let run_admitted_with
 
 let run_admitted
     ?exact_execution_guard
+    ?before_dispatch_authority
     ~config
     ~meta
     () =
@@ -647,12 +657,36 @@ let run_admitted
     ~append_compaction_manifest:append_manifest
     ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
       Keeper_context_runtime.prepare_compaction
+        ?before_dispatch_authority
         ?exact_execution_guard
         ~base_path
         ~base_dir
         ~meta
         ~trigger
         ())
+    ~already_admitted:false
+    ~config
+    ~meta
+;;
+
+let run_under_admission
+    ?exact_execution_guard
+    ?before_dispatch_authority
+    ~config
+    ~meta
+    () =
+  run_admitted_with
+    ~append_compaction_manifest:append_manifest
+    ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
+      Keeper_context_runtime.prepare_compaction
+        ?before_dispatch_authority
+        ?exact_execution_guard
+        ~base_path
+        ~base_dir
+        ~meta
+        ~trigger
+        ())
+    ~already_admitted:true
     ~config
     ~meta
 ;;

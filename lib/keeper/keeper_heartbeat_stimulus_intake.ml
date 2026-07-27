@@ -320,7 +320,7 @@ let heartbeat_event_intake
       ~meta_after_triage
       ~pending_board_events
   =
-  (* RFC-0020 §3 Rule 4 — lease at most one new Event Layer stimulus per
+(* RFC-0020 §3 Rule 4 — select at most one new Event Layer stimulus per
      turn. The queue chooses the earliest ready stimulus while preserving
      every skipped unready entry in place. Board, Connector, HITL, Schedule,
      Fusion, and Goal inputs therefore share one lane order instead of a

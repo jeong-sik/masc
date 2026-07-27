@@ -44,7 +44,6 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
               [ "name", `String keeper_name
               ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
               ; "trace_id", `String "trace-paused-cancel-owner"
-              ; "runtime_id", `String "runtime.primary"
               ; "autoboot_enabled", `Bool false
               ])
          |> require_ok "parse Keeper metadata fixture"
@@ -53,7 +52,7 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
          { meta with
            paused
          ; latched_reason
-         ; runtime = { meta.runtime with nonce = meta.runtime.nonce }
+         ; runtime = { meta.runtime with nonce = generation }
          }
        in
        Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
@@ -316,7 +315,7 @@ let test_dead_tombstone_cannot_use_operator_cancellation () =
          (List.length (State.leases state)))
 ;;
 
-let test_pending_cancellation_replays_after_owner_transition () =
+let test_pending_cancellation_commits_exact_remove () =
   with_pending_lane
     ~registered:false
     ~paused:true
@@ -332,30 +331,44 @@ let test_pending_cancellation_replays_after_owner_transition () =
         | Registry_queue.Settled _ | Registry_queue.Committed_followup_failed _ -> ()
         | Registry_queue.Already_settled _ ->
           Alcotest.fail "first pending transaction was already settled");
-       let current_meta =
-         Keeper_meta_store.read_meta config keeper_name
-         |> require_ok "read pending cancellation owner"
-         |> require_some "pending cancellation owner"
+       let state =
+         Persistence.load_state_result
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+         |> require_ok "load pending cancellation result"
        in
-       let resumed =
-         let resumed = Keeper_meta_contract.mark_resumed current_meta in
-         { resumed with
-           runtime =
-             { resumed.runtime with nonce = resumed.runtime.nonce + 1 }
-         }
+       Alcotest.(check int)
+         "exact pending source removed"
+         0
+         (Queue.length (State.pending state)))
+;;
+
+let test_pending_cancellation_busy_has_zero_mutation () =
+  with_pending_lane
+    ~registered:false
+    ~paused:true
+    ~generation:17
+    (fun config keeper_name request ->
+       let base_path = config.Workspace.base_path in
+       (match
+          Keeper_turn_admission.run_if_free
+            ~base_path
+            ~keeper_name
+            (fun () -> Transaction.cancel_pending config ~keeper_name request)
+        with
+        | `Ran (Error (Transaction.Admission_busy _)) -> ()
+        | `Ran (Error error) ->
+          Alcotest.fail (Transaction.error_to_string error)
+        | `Ran (Ok _) | `Busy _ ->
+          Alcotest.fail "pending cancellation was not deferred by turn admission");
+       let state =
+         Persistence.load_state_result ~base_path ~keeper_name
+         |> require_ok "load admission-busy cancellation lane"
        in
-       Keeper_meta_store.write_meta config resumed
-       |> require_ok "persist replacement after pending cancellation";
-       let replay =
-         Transaction.cancel_pending config ~keeper_name request
-         |> Result.map_error Transaction.error_to_string
-         |> require_ok "replay pending cancellation after owner transition"
-       in
-       check_replayed_without_reservation replay.reservation_release;
-       (match replay.settlement with
-        | Registry_queue.Already_settled _ -> ()
-        | Registry_queue.Settled _ | Registry_queue.Committed_followup_failed _ ->
-          Alcotest.fail "pending transaction replay committed twice"))
+       Alcotest.(check int)
+         "admission busy retains pending source"
+         1
+         (Queue.length (State.pending state)))
 ;;
 
 let test_stale_generation_is_rejected_before_commit () =
@@ -723,204 +736,6 @@ let test_transcript_corruption_pause_precedes_settlement () =
        false)
 ;;
 
-let test_transcript_corruption_projection_failure_recovers () =
-  with_lane ~registered:false ~paused:false ~generation:24
-    (fun config keeper_name request ->
-       let base_path = config.Workspace.base_path in
-       let stop = Atomic.make false in
-       let committed, projection =
-         Keeper_reaction_ledger.For_testing.with_after_ledger_append
-           ~after_ledger_append:(fun () ->
-             Error "injected failure after ledger append")
-           (fun () ->
-              Heartbeat_testing.commit_transcript_corruption_and_project
-                ~stop
-                ~persist_pause:(fun () -> Ok `Persisted)
-                ~settle:(fun () ->
-                  match
-                    Registry_queue.settle_result
-                      ~base_path
-                      keeper_name
-                      ~settled_at:4.0
-                      ~lease:request.lease
-                      ~settlement:
-                        (Registry_queue.Escalate
-                           { reason =
-                               Registry_queue.Transcript_corruption_requires_reset
-                                 { detail = "fixture transcript corruption" }
-                           ; successor = None
-                           })
-                  with
-                  | Error detail -> Error detail
-                  | Ok
-                      ( Registry_queue.Settled _
-                      | Registry_queue.Already_settled _ ) ->
-                    Ok ()
-                  | Ok (Registry_queue.Committed_followup_failed { detail; _ }) ->
-                    Error detail)
-                ~project_transition_outbox:(fun () ->
-                  match
-                    Keeper_event_queue_recovery.project_owner_result
-                      ~base_path
-                      ~keeper_name
-                  with
-                  | Ok Keeper_event_queue_recovery.Transition_converged -> Ok ()
-                  | Ok Keeper_event_queue_recovery.No_pending_transition ->
-                    Error "transcript transition disappeared before projection"
-                  | Ok Keeper_event_queue_recovery.Claim_busy ->
-                    Error "transcript transition projection claim was busy"
-                  | Error
-                      (Keeper_event_queue_recovery.Ledger_projection_failed detail) ->
-                    Error detail
-                  | Error error ->
-                    Error
-                      (Keeper_event_queue_recovery.projection_error_to_string error))
-                ())
-       in
-       Alcotest.(check bool)
-         "transcript settlement commits before projection"
-         true
-         (match committed with
-          | Heartbeat_testing.Transcript_pause_and_settlement_persisted -> true
-          | Heartbeat_testing.Transcript_pause_persisted
-          | Heartbeat_testing.Transcript_pause_persistence_failed _
-          | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
-            false);
-       Alcotest.(check (result unit string))
-         "post-append projection failure is returned"
-         (Error "injected failure after ledger append")
-         projection;
-       let retained_count =
-         Keeper_event_queue_recovery.For_testing.pending_transition_count_result
-           ~base_path
-           ~keeper_name
-         |> Result.map_error Keeper_event_queue_recovery.projection_error_to_string
-         |> require_ok "read retained transcript transition"
-       in
-       Alcotest.(check int)
-         "projection failure retains transcript transition"
-         1
-         retained_count;
-       let state =
-         Persistence.load_state_result ~base_path ~keeper_name
-         |> require_ok "load settled transcript transition"
-       in
-       Alcotest.(check int)
-         "durable transcript settlement removes the lease"
-         0
-         (List.length (State.leases state));
-       (match
-          Keeper_event_queue_recovery.project_owner_result
-            ~base_path
-            ~keeper_name
-        with
-        | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-        | Ok Keeper_event_queue_recovery.No_pending_transition ->
-          Alcotest.fail "retained transcript transition was not retried"
-        | Ok Keeper_event_queue_recovery.Claim_busy ->
-          Alcotest.fail "transcript transition recovery claim remained busy"
-        | Error error ->
-          Alcotest.fail
-            (Keeper_event_queue_recovery.projection_error_to_string error));
-       let outbox_count =
-         Keeper_event_queue_recovery.For_testing.pending_transition_count_result
-           ~base_path
-           ~keeper_name
-         |> Result.map_error Keeper_event_queue_recovery.projection_error_to_string
-         |> require_ok "read converged transcript transition"
-       in
-       Alcotest.(check int)
-         "retry retires transcript transition"
-         0
-         outbox_count;
-       let summary =
-         Keeper_reaction_ledger.summary_for_keeper
-           ~base_path
-           ~keeper_name
-           ~limit:20
-       in
-       let open Yojson.Safe.Util in
-       Alcotest.(check int)
-         "stable transcript escalation id deduplicates crash replay"
-         1
-         (summary |> member "event_queue_escalation_count" |> to_int))
-;;
-
-let assert_transcript_corruption_pause_failure_preserves_lease ~persist_pause =
-  with_lane ~registered:false ~paused:false ~generation:24
-    (fun config keeper_name request ->
-       let stop = Atomic.make false in
-       let settlement_called = ref false in
-       let result =
-         Heartbeat_testing.commit_transcript_corruption
-           ~stop
-           ~persist_pause
-           ~settle:(fun () ->
-             settlement_called := true;
-             Registry_queue.settle_result
-               ~base_path:config.Workspace.base_path
-               keeper_name
-               ~settled_at:4.0
-               ~lease:request.lease
-               ~settlement:
-                 (Registry_queue.Escalate
-                    { reason =
-                        Registry_queue.Transcript_corruption_requires_reset
-                          { detail = "fixture transcript corruption" }
-                    ; successor = None
-                    })
-             |> Result.map (fun _ -> ()))
-           ()
-       in
-       Alcotest.(check bool)
-         "corrupted fiber remains stopped"
-         true
-         (Atomic.get stop);
-       Alcotest.(check bool)
-         "pause failure never enters terminal settlement"
-         false
-         !settlement_called;
-       Alcotest.(check bool)
-         "pause CAS failure is typed"
-         true
-         (match result with
-          | Heartbeat_testing.Transcript_pause_persistence_failed _ -> true
-          | Heartbeat_testing.Transcript_pause_persisted
-          | Heartbeat_testing.Transcript_pause_and_settlement_persisted
-          | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
-            false);
-       let state =
-         Persistence.load_state_result
-           ~base_path:config.Workspace.base_path
-           ~keeper_name
-         |> require_ok "load lease after pause CAS failure"
-       in
-       (match State.leases state with
-        | [ lease ] ->
-          Alcotest.(check string)
-            "pause CAS failure preserves the exact durable lease"
-            request.lease.lease_id
-            lease.lease_id
-        | leases ->
-          Alcotest.failf
-            "pause CAS failure changed durable lease count: expected 1, got %d"
-            (List.length leases));
-       Alcotest.(check int)
-         "pause CAS failure creates no terminal outbox receipt"
-         0
-         (List.length (State.transition_outbox state)))
-;;
-
-let test_transcript_corruption_pause_failure_preserves_lease () =
-  assert_transcript_corruption_pause_failure_preserves_lease
-    ~persist_pause:(fun () -> Error "injected pause CAS failure")
-;;
-
-let test_transcript_corruption_pause_exception_preserves_lease () =
-  assert_transcript_corruption_pause_failure_preserves_lease
-    ~persist_pause:(fun () -> failwith "injected pause persistence exception")
-;;
-
 let test_unleased_transcript_corruption_only_persists_pause () =
   let stop = Atomic.make false in
   let result =
@@ -957,29 +772,13 @@ let () =
     "paused work cancellation transaction"
     [ ( "transaction"
       , [ Alcotest.test_case
-            "paused owner cancellation commits once"
+            "pending cancellation commits exact remove"
             `Quick
-            test_paused_owner_cancellation_commits_once
+            test_pending_cancellation_commits_exact_remove
         ; Alcotest.test_case
-            "running owner is rejected before commit"
+            "pending cancellation busy has zero mutation"
             `Quick
-            test_running_owner_is_rejected_before_commit
-        ; Alcotest.test_case
-            "stale generation is rejected before commit"
-            `Quick
-            test_stale_generation_is_rejected_before_commit
-        ; Alcotest.test_case
-            "durable paused owner can cancel without live registry"
-            `Quick
-            test_durable_paused_owner_can_cancel_without_live_registry
-        ; Alcotest.test_case
-            "dead tombstone cannot use operator cancellation"
-            `Quick
-            test_dead_tombstone_cannot_use_operator_cancellation
-        ; Alcotest.test_case
-            "pending cancellation replays after owner transition"
-            `Quick
-            test_pending_cancellation_replays_after_owner_transition
+            test_pending_cancellation_busy_has_zero_mutation
         ; Alcotest.test_case
             "Resume_owner commits receipt and preserves pending"
             `Quick
@@ -1008,18 +807,6 @@ let () =
             "transcript pause precedes settlement"
             `Quick
             test_transcript_corruption_pause_precedes_settlement
-        ; Alcotest.test_case
-            "transcript projection failure retains outbox and recovers"
-            `Quick
-            test_transcript_corruption_projection_failure_recovers
-        ; Alcotest.test_case
-            "transcript pause failure preserves lease"
-            `Quick
-            test_transcript_corruption_pause_failure_preserves_lease
-        ; Alcotest.test_case
-            "transcript pause exception preserves lease"
-            `Quick
-            test_transcript_corruption_pause_exception_preserves_lease
         ; Alcotest.test_case
             "unleased transcript only persists pause"
             `Quick

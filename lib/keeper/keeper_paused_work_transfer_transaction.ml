@@ -14,6 +14,7 @@ type projection_stage =
 
 type failure =
   | Invalid_request of string
+  | Admission_busy of Keeper_turn_admission.autonomous_block
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -79,6 +80,8 @@ let projection_stage_to_string = function
 
 let failure_to_string = function
   | Invalid_request detail -> "invalid Transfer_owner request: " ^ detail
+  | Admission_busy _ ->
+    "keeper_turn_admission_busy: operation=transfer_pending"
   | Reservation_conflict owner ->
     "Transfer_owner lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -412,7 +415,7 @@ let run_owned receipt_lock config ~from_keeper ~to_keeper request =
   Ok (receipt, commit_status, projection)
 ;;
 
-let transfer_pending config ~from_keeper ~to_keeper request =
+let transfer_pending_under_admission config ~from_keeper ~to_keeper request =
   match validate_request ~from_keeper ~to_keeper request with
   | Error detail ->
     Error { cause = Invalid_request detail; reservation_release = None }
@@ -451,4 +454,21 @@ let transfer_pending config ~from_keeper ~to_keeper request =
           (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
           ignore (Keeper_lifecycle_reservation.release token : _);
           raise exn))
+;;
+
+let transfer_pending config ~from_keeper ~to_keeper request =
+  match
+    Keeper_turn_admission.run_admin_if_free
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:from_keeper
+      (fun () ->
+         transfer_pending_under_admission
+           config
+           ~from_keeper
+           ~to_keeper
+           request)
+  with
+  | `Ran outcome -> outcome
+  | `Busy block ->
+    Error { cause = Admission_busy block; reservation_release = None }
 ;;

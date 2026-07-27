@@ -912,6 +912,12 @@ let peek_when_result ~base_path ~keeper_name ~ready =
   | Ok state -> Ok (State.peek_when ~ready state)
 ;;
 
+let validate_pending_selection_result ~base_path ~keeper_name ~selection =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> State.validate_pending_selection ~selection state
+;;
+
 let ack_pending_result
       ?(after_commit = fun _ -> ())
       ~base_path

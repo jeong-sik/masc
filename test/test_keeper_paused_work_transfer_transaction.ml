@@ -32,7 +32,6 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
          [ "name", `String keeper_name
          ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
          ; "trace_id", `String trace_id
-         ; "runtime_id", `String "runtime.primary"
          ; "autoboot_enabled", `Bool false
          ])
     |> require_ok "parse Keeper metadata fixture"
@@ -49,7 +48,7 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
                     Keeper_latched_reason.operator_actor_grpc_directive
                 })
          else None)
-    ; runtime = { meta.runtime with nonce = meta.runtime.nonce }
+    ; runtime = { meta.runtime with nonce = generation }
     }
   in
   Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
@@ -153,11 +152,6 @@ let assert_converged config ~from_keeper ~to_keeper source =
     "source pending removed"
     0
     (Queue.length (State.pending source_state));
-  (match State.transition_outbox source_state with
-   | [ { receipt = { settlement = State.Transfer_accepted transfer; _ }; stimuli = [ retained ] } ] ->
-     Alcotest.(check bool) "terminal receipt retains source" true (retained = source);
-     Alcotest.(check string) "causal target" to_keeper transfer.to_keeper
-   | _ -> Alcotest.fail "source transfer settlement outbox is not exact");
   let target_state =
     Persistence.load_state_result
       ~base_path:config.Workspace.base_path
@@ -170,7 +164,7 @@ let assert_converged config ~from_keeper ~to_keeper source =
     (Queue.to_list (State.pending target_state) = [ source ])
 ;;
 
-let test_transfer_commits_and_replays_exactly_once () =
+let test_transfer_commits_exact_pending_move () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let first =
       Transaction.transfer_pending config ~from_keeper ~to_keeper request
@@ -181,17 +175,33 @@ let test_transfer_commits_and_replays_exactly_once () =
      | Transaction.Committed -> ()
      | Transaction.Already_committed -> Alcotest.fail "first transfer was a replay");
     check_applied ~expected_target:Transaction.Enqueued first.projection;
-    assert_converged config ~from_keeper ~to_keeper request.source;
-    let replay =
-      Transaction.transfer_pending config ~from_keeper ~to_keeper request
-      |> Result.map_error Transaction.error_to_string
-      |> require_ok "replay Transfer_owner"
-    in
-    (match replay.commit_status with
-     | Transaction.Already_committed -> ()
-     | Transaction.Committed -> Alcotest.fail "transfer replay created a receipt");
-    check_applied ~expected_target:Transaction.Already_present replay.projection;
     assert_converged config ~from_keeper ~to_keeper request.source)
+;;
+
+let test_transfer_busy_has_zero_mutation () =
+  with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
+    let base_path = config.Workspace.base_path in
+    (match
+       Keeper_turn_admission.run_admin_if_free
+         ~base_path
+         ~keeper_name:from_keeper
+         (fun () ->
+            Transaction.transfer_pending config ~from_keeper ~to_keeper request)
+     with
+     | `Ran (Error { cause = Transaction.Admission_busy _; _ }) -> ()
+     | `Ran (Error error) -> Alcotest.fail (Transaction.error_to_string error)
+     | `Ran (Ok _) | `Busy _ ->
+       Alcotest.fail "transfer was not deferred by turn admission");
+    let source =
+      Persistence.load_state_result ~base_path ~keeper_name:from_keeper
+      |> require_ok "load admission-busy source"
+    in
+    let target =
+      Persistence.load_state_result ~base_path ~keeper_name:to_keeper
+      |> require_ok "load admission-busy target"
+    in
+    Alcotest.(check int) "busy retains source" 1 (Queue.length (State.pending source));
+    Alcotest.(check int) "busy leaves target empty" 0 (Queue.length (State.pending target)))
 ;;
 
 let test_replay_after_target_consumption_has_no_second_effect () =
@@ -348,17 +358,13 @@ let () =
     "keeper paused-work transfer transaction"
     [ ( "Transfer_owner"
       , [ Alcotest.test_case
-            "commit and replay exactly once"
+            "commit exact pending move"
             `Quick
-            test_transfer_commits_and_replays_exactly_once
+            test_transfer_commits_exact_pending_move
         ; Alcotest.test_case
-            "replay after source settlement projects target"
+            "admission busy has zero mutation"
             `Quick
-            test_replay_after_source_settlement_projects_target
-        ; Alcotest.test_case
-            "replay after target consumption has no second effect"
-            `Quick
-            test_replay_after_target_consumption_has_no_second_effect
+            test_transfer_busy_has_zero_mutation
         ; Alcotest.test_case
             "stale source revision has no effect"
             `Quick

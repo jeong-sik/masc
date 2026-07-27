@@ -245,7 +245,7 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v6"
+let schema = "keeper.event_queue.state.v7"
 
 let empty =
   { revision = 0L
@@ -411,60 +411,67 @@ let rec dequeue_first_ready ~ready skipped pending =
 ;;
 
 let peek_when ~ready state =
-  if state.transition_outbox <> []
-  then None
-  else
-    match
-      dequeue_first_ready
-        ~ready
-        []
-        state.pending
-    with
-    | None -> None
-    | Some (stimulus, _) ->
-      Some
-        { source_revision = state.revision
-        ; kind = Single
-        ; stimuli = [ stimulus ]
-        }
+  match dequeue_first_ready ~ready [] state.pending with
+  | None -> None
+  | Some (stimulus, _) ->
+    Some
+      { source_revision = state.revision
+      ; kind = Single
+      ; stimuli = [ stimulus ]
+      }
+;;
+
+let validate_pending_selection ~(selection : pending_selection) state =
+  match selection.stimuli with
+  | [] -> Error "event queue pending selection must not be empty"
+  | _ :: _ :: _ when selection.kind = Single ->
+    Error "single event queue pending selection must contain exactly one stimulus"
+  | stimuli ->
+    let selected candidate =
+      List.exists
+        (fun expected ->
+           Keeper_event_queue.stimulus_identity_equal expected candidate)
+        stimuli
+    in
+    let matching =
+      Keeper_event_queue.to_list state.pending |> List.filter selected
+    in
+    if List.length matching <> List.length stimuli
+    then Error "event queue pending selection is no longer present exactly once"
+    else if
+      not
+        (List.for_all
+           (fun expected ->
+              List.exists
+                (fun actual ->
+                   actual = expected
+                   && Keeper_event_queue.stimulus_identity_equal expected actual)
+                matching)
+           stimuli)
+    then Error "event queue pending selection typed snapshot changed"
+    else Ok ()
 ;;
 
 let ack_pending ~(selection : pending_selection) state =
-  match selection.stimuli with
-    | [] -> Error "event queue pending selection must not be empty"
-    | _ :: _ :: _ when selection.kind = Single ->
-      Error "single event queue pending selection must contain exactly one stimulus"
-    | stimuli ->
-      let selected candidate =
-        List.exists
-          (fun expected ->
-             Keeper_event_queue.stimulus_identity_equal expected candidate)
-          stimuli
-      in
-      let matching, retained =
-        Keeper_event_queue.to_list state.pending |> List.partition selected
-      in
-      if List.length matching <> List.length stimuli
-      then Error "event queue pending selection is no longer present exactly once"
-      else if
-        not
-          (List.for_all
-             (fun expected ->
-                List.exists
-                  (fun actual ->
-                     actual = expected
-                     && Keeper_event_queue.stimulus_identity_equal expected actual)
-                  matching)
-             stimuli)
-      then Error "event queue pending selection typed snapshot changed"
-      else
-        let pending =
-          List.fold_left
-            Keeper_event_queue.enqueue
-            Keeper_event_queue.empty
-            retained
-        in
-        Ok { state with pending }
+  match validate_pending_selection ~selection state with
+  | Error _ as error -> error
+  | Ok () ->
+    let selected candidate =
+      List.exists
+        (fun expected ->
+           Keeper_event_queue.stimulus_identity_equal expected candidate)
+        selection.stimuli
+    in
+    let retained =
+      Keeper_event_queue.to_list state.pending |> List.filter (Fun.negate selected)
+    in
+    let pending =
+      List.fold_left
+        Keeper_event_queue.enqueue
+        Keeper_event_queue.empty
+        retained
+    in
+    Ok { state with pending }
 ;;
 
 let claim_when ~claimed_at ~ready state =
@@ -3396,22 +3403,7 @@ let to_yojson state =
   `Assoc
     [ "schema", `String schema
     ; "revision", int64_json state.revision
-    ; "next_lease_sequence", int64_json state.next_lease_sequence
     ; "pending", Keeper_event_queue.queue_to_yojson state.pending
-    ; "leases", `List (List.map lease_to_yojson state.leases)
-    ; ( "last_settlement"
-      , match state.last_settlement with
-        | None -> `Null
-        | Some receipt -> transition_receipt_to_yojson receipt )
-    ; ( "transition_outbox"
-      , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
-    ; ( "accepted_transfer_projections"
-      , `List
-          (List.map
-             accepted_transfer_projection_to_yojson
-             state.accepted_transfer_projections) )
-    ; ( "exact_execution_bindings"
-      , `List (List.map exact_execution_binding_to_yojson state.exact_execution_bindings) )
     ]
 ;;
 
@@ -3565,73 +3557,19 @@ let of_yojson json =
   if not (String.equal schema_value schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   else
-    let expected_fields =
-      [ "schema"
-      ; "revision"
-      ; "next_lease_sequence"
-      ; "pending"
-      ; "leases"
-      ; "last_settlement"
-      ; "transition_outbox"
-      ; "accepted_transfer_projections"
-      ; "exact_execution_bindings"
-      ]
-    in
+    let expected_fields = [ "schema"; "revision"; "pending" ] in
     let* () = exact_fields ~context ~expected:expected_fields fields in
     let* revision = int64_field ~context "revision" fields in
-    let* next_lease_sequence = int64_field ~context "next_lease_sequence" fields in
     let* pending_json = required_field ~context "pending" fields in
     let* pending = Keeper_event_queue.queue_of_yojson pending_json in
-    let* leases = list_field ~context "leases" lease_of_yojson fields in
-    let* last_settlement =
-      match List.assoc_opt "last_settlement" fields with
-      | Some `Null -> Ok None
-      | Some json -> transition_receipt_of_yojson json |> Result.map Option.some
-      | None -> Error "keeper event queue state missing required field last_settlement"
-    in
-    let* transition_outbox =
-      list_field ~context "transition_outbox" outbox_entry_of_yojson fields
-    in
-    let* accepted_transfer_projections =
-      list_field
-        ~context
-        "accepted_transfer_projections"
-        accepted_transfer_projection_of_yojson
-        fields
-    in
-    let* bindings_json =
-      match List.assoc_opt "exact_execution_bindings" fields with
-      | Some (`List bindings) -> Ok bindings
-      | Some _ ->
-        Error "keeper event queue state exact_execution_bindings must be a list"
-      | None ->
-        Error "keeper event queue state missing exact_execution_bindings"
-    in
-    let* () =
-      if
-        List.exists
-          (function
-            | `Assoc fields -> not (List.mem_assoc "disposition" fields)
-            | _ -> true)
-          bindings_json
-      then Error "v5 exact execution binding requires disposition evidence field"
-      else Ok ()
-    in
-    let rec decode_bindings acc = function
-      | [] -> Ok (List.rev acc)
-      | binding_json :: rest ->
-        let* binding = exact_execution_binding_of_yojson binding_json in
-        decode_bindings (binding :: acc) rest
-    in
-    let* exact_execution_bindings = decode_bindings [] bindings_json in
     validate_state
       { revision
-      ; next_lease_sequence
+      ; next_lease_sequence = 1L
       ; pending
-      ; leases
-      ; last_settlement
-      ; transition_outbox
-      ; accepted_transfer_projections
-      ; exact_execution_bindings
+      ; leases = []
+      ; last_settlement = None
+      ; transition_outbox = []
+      ; accepted_transfer_projections = []
+      ; exact_execution_bindings = []
       }
 ;;

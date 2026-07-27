@@ -9,6 +9,7 @@ type request =
 
 type failure =
   | Invalid_request of string
+  | Admission_busy of Keeper_turn_admission.autonomous_block
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -51,6 +52,8 @@ let ( let* ) = Result.bind
 let failure_to_string = function
   | Invalid_request detail ->
     "invalid Settle_from_source_terminal request: " ^ detail
+  | Admission_busy _ ->
+    "keeper_turn_admission_busy: operation=settle_from_source_terminal"
   | Reservation_conflict owner ->
     "Settle_from_source_terminal lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -305,7 +308,7 @@ let run_owned receipt_lock config ~keeper_name request =
   Ok (receipt, commit_status, projection)
 ;;
 
-let settle_pending config ~keeper_name request =
+let settle_pending_under_admission config ~keeper_name request =
   match validate_request request with
   | Error detail ->
     Error { cause = Invalid_request detail; reservation_release = None }
@@ -344,4 +347,16 @@ let settle_pending config ~keeper_name request =
           (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
           ignore (Keeper_lifecycle_reservation.release token : _);
           raise exn))
+;;
+
+let settle_pending config ~keeper_name request =
+  match
+    Keeper_turn_admission.run_admin_if_free
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+      (fun () -> settle_pending_under_admission config ~keeper_name request)
+  with
+  | `Ran outcome -> outcome
+  | `Busy block ->
+    Error { cause = Admission_busy block; reservation_release = None }
 ;;

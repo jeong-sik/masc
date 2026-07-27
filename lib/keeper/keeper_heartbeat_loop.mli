@@ -221,17 +221,6 @@ module For_testing : sig
     Keeper_turn_driver.deferred_runtime_lane ->
     bool
 
-  type transition_projection_gate =
-    | Projection_ready_for_cycle
-    | Projection_deferred_nonfailure
-    | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
-
-  val classify_transition_projection :
-    ( Keeper_event_queue_recovery.projection_outcome
-    , Keeper_event_queue_recovery.projection_error )
-    result ->
-    transition_projection_gate
-
   type transcript_corruption_commit =
     | Transcript_pause_persisted
     | Transcript_pause_and_settlement_persisted
@@ -245,17 +234,5 @@ module For_testing : sig
     ?settle:(unit -> (unit, string) result) ->
     unit ->
     transcript_corruption_commit
-
-  val commit_transcript_corruption_and_project :
-    stop:bool Atomic.t ->
-    persist_pause:
-      (unit -> ([ `Persisted | `No_durable_meta ], string) result) ->
-    ?settle:(unit -> (unit, string) result) ->
-    project_transition_outbox:(unit -> (unit, string) result) ->
-    unit ->
-    transcript_corruption_commit * (unit, string) result
-  (** Execute the production transcript-corruption commit/project sequence.
-      Projection runs only after durable pause and settlement return, outside
-      the cancellation-protected commit region. *)
 
 end

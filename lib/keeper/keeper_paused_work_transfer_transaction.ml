@@ -80,8 +80,10 @@ let projection_stage_to_string = function
 
 let failure_to_string = function
   | Invalid_request detail -> "invalid Transfer_owner request: " ^ detail
-  | Admission_busy _ ->
-    "keeper_turn_admission_busy: operation=transfer_pending"
+  | Admission_busy block ->
+    Printf.sprintf
+      "keeper_turn_admission_busy: operation=transfer_pending %s"
+      (Keeper_turn_admission.autonomous_block_to_string block)
   | Reservation_conflict owner ->
     "Transfer_owner lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner

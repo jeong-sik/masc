@@ -52,8 +52,10 @@ let ( let* ) = Result.bind
 let failure_to_string = function
   | Invalid_request detail ->
     "invalid Settle_from_source_terminal request: " ^ detail
-  | Admission_busy _ ->
-    "keeper_turn_admission_busy: operation=settle_from_source_terminal"
+  | Admission_busy block ->
+    Printf.sprintf
+      "keeper_turn_admission_busy: operation=settle_from_source_terminal %s"
+      (Keeper_turn_admission.autonomous_block_to_string block)
   | Reservation_conflict owner ->
     "Settle_from_source_terminal lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner

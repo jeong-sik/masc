@@ -98,12 +98,12 @@ val provider_timeout_observation_reasons : string list
 val record_provider_timeout_observation :
   base_path:string -> keeper_name:string -> unit
 
-(** Closed accounting status for one keepalive cycle. A deferred projection
-    performs no turn accounting, crash accounting, or work-health refresh. *)
+(** Closed accounting status for one keepalive cycle. Admission busy performs
+    no turn accounting, crash accounting, or work-health refresh. *)
 type keepalive_cycle_status =
   | Turn_cycle_completed
   | Turn_cycle_crashed
-  | Deferred_projection_busy
+  | Turn_cycle_busy of Keeper_turn_admission.autonomous_block
 
 (** Outcome of one keepalive cycle evaluation.
 
@@ -111,8 +111,9 @@ type keepalive_cycle_status =
     keep the keeper fiber alive (T6 audit), or a durable event-queue
     claim/settlement did not commit. The failure has already been recorded via
     [Keeper_registry.increment_turn_failures], so the caller dispatches
-    [Turn_failed]. [Deferred_projection_busy] is a typed nonfailure and must
-    not dispatch either turn status or refresh the work-as-heartbeat lease. *)
+    [Turn_failed]. [Turn_cycle_busy] preserves its typed admission reason and
+    must not dispatch either turn status or refresh the work-as-heartbeat
+    lease. *)
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
@@ -139,16 +140,6 @@ val compaction_outcome_of_cycle_outcome :
     operator's manual commit maps to [`Committed] (count + reset).
     Outcomes with no compaction involvement return [None]. *)
 
-
-val project_transition_outbox :
-  base_path:string ->
-  keeper_name:string ->
-  ( Keeper_event_queue_recovery.projection_outcome
-  , Keeper_event_queue_recovery.projection_error )
-  result
-(** Idempotently materialize the lane's single durable transition into the
-    reaction ledger, then retire the outbox entry. New claims remain blocked
-    while this projection is incomplete. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

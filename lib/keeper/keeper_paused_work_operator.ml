@@ -219,6 +219,20 @@ let error_to_string = function
   | Source_terminal_rejected error -> Source_terminal.error_to_string error
 ;;
 
+let admission_busy = function
+  | Cancellation_rejected (Cancellation.Admission_busy block) -> Some block
+  | Transfer_rejected { cause = Transfer.Admission_busy block; _ } -> Some block
+  | Source_terminal_rejected
+      { cause = Source_terminal.Admission_busy block; _ } ->
+    Some block
+  | Invalid_request _
+  | Resume_rejected _
+  | Cancellation_rejected _
+  | Transfer_rejected _
+  | Source_terminal_rejected _ ->
+    None
+;;
+
 let error_class = function
   | Invalid_request _ -> `Bad_request
   | Resume_rejected { cause = Resume.Invalid_request _; _ }

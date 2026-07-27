@@ -53,6 +53,12 @@ type autonomous_block =
         slot when the durable chat backlog was the actual fence. *)
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
+val autonomous_block_kind : autonomous_block -> string
+val autonomous_block_to_string : autonomous_block -> string
+val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
+(** Canonical typed projections for admission diagnostics. Consumers must not
+    recover block detail by parsing prose. *)
+
 type rejection =
   { waiting : int (** chat requests already waiting on this keeper's slot *)
   ; in_flight : in_flight_info option

@@ -80,8 +80,10 @@ let release_outcome_to_string = function
 ;;
 
 let error_to_string = function
-  | Admission_busy _ ->
-    "keeper_turn_admission_busy: operation=cancel_pending"
+  | Admission_busy block ->
+    Printf.sprintf
+      "keeper_turn_admission_busy: operation=cancel_pending %s"
+      (Keeper_turn_admission.autonomous_block_to_string block)
   | Reservation_conflict owner ->
     "Keeper lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner

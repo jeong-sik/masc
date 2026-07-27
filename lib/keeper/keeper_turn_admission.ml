@@ -80,6 +80,56 @@ let lane_to_string = function
   | Chat -> "chat"
 ;;
 
+let autonomous_block_kind = function
+  | Turn_busy _ -> "turn_busy"
+  | Chat_backlog _ -> "chat_backlog"
+  | Shutdown_requested _ -> "shutdown_requested"
+;;
+
+let autonomous_block_to_string = function
+  | Turn_busy None -> "reason=turn_busy holder=unpublished"
+  | Turn_busy (Some { lane; started_at }) ->
+    Printf.sprintf
+      "reason=turn_busy holder_lane=%s holder_started_at=%.17g"
+      (lane_to_string lane)
+      started_at
+  | Chat_backlog { pending_count; inflight_count } ->
+    Printf.sprintf
+      "reason=chat_backlog pending_count=%d inflight_count=%d"
+      pending_count
+      inflight_count
+  | Shutdown_requested operation_id ->
+    Printf.sprintf
+      "reason=shutdown_requested operation_id=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+;;
+
+let autonomous_block_to_yojson = function
+  | Turn_busy holder ->
+    let holder_json =
+      match holder with
+      | None -> `Null
+      | Some { lane; started_at } ->
+        `Assoc
+          [ "lane", `String (lane_to_string lane)
+          ; "started_at", `Float started_at
+          ]
+    in
+    `Assoc [ "kind", `String "turn_busy"; "holder", holder_json ]
+  | Chat_backlog { pending_count; inflight_count } ->
+    `Assoc
+      [ "kind", `String "chat_backlog"
+      ; "pending_count", `Int pending_count
+      ; "inflight_count", `Int inflight_count
+      ]
+  | Shutdown_requested operation_id ->
+    `Assoc
+      [ "kind", `String "shutdown_requested"
+      ; ( "operation_id"
+        , `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
+      ]
+;;
+
 type slot =
   { base_path : string
   ; keeper_name : string

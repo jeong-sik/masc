@@ -3322,6 +3322,76 @@ let test_update_runtime_meta_crash_recovery_retries_durable_intent () =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let test_runtime_meta_identical_target_honors_forward_preference () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "runtime-meta-identical-forward" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let original =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name",
+                `String (Keeper_identity.keeper_agent_name keeper_name)
+              ; "trace_id", `String "trace-runtime-meta-identical-forward"
+              ; "generation", `Int 1
+              ])
+        with
+        | Ok meta -> meta
+        | Error detail -> Alcotest.fail detail
+      in
+      (match Masc_test_deps.write_current_keeper_meta config original with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let candidate =
+        { original with meta_version = original.meta_version + 1 }
+      in
+      let intent =
+        match
+          Keeper_runtime_meta_transaction.prepare
+            ~operation:Keeper_runtime_meta_journal.Update
+            ~config
+            ~keeper_name
+            ~previous_runtime:None
+            ~candidate_runtime:None
+            ~previous_meta:(Some original)
+            ~candidate_meta:candidate
+        with
+        | Ok intent -> intent
+        | Error error ->
+          Alcotest.fail
+            (Keeper_runtime_meta_transaction.recovery_failure_to_string error)
+      in
+      match
+        Durable_admission.with_recovery_lifecycle_admission
+          config
+          ~keeper_name
+          ~transaction_id:intent.transaction_id
+          (fun permit ->
+            Keeper_runtime_meta_transaction.complete_forward
+              permit
+              config
+              intent)
+      with
+      | Durable_admission.Admission_completed (Ok ())
+      | Durable_admission.Admission_completed_with_attention (Ok (), _) ->
+        ()
+      | Durable_admission.Admission_completed (Error error)
+      | Durable_admission.Admission_completed_with_attention
+          (Error error, _) ->
+        Alcotest.fail
+          (Keeper_runtime_meta_transaction.recovery_failure_to_string error)
+      | Durable_admission.Admission_blocked reason ->
+        Alcotest.fail (Durable_admission.blocked_reason_to_wire reason))
+;;
+
 let test_update_keeper_supersession_failure_rolls_back_and_restarts () =
   let keeper_name = "update-supersession-failure-rollback" in
   with_running_ordinary_update_fixture ~keeper_name
@@ -3376,31 +3446,7 @@ let test_update_keeper_cancellation_rolls_back_and_restarts () =
     ~keeper_name
 ;;
 
-let test_dead_revival_cancellation_preserves_typed_recovery_failure () =
-  let cancelled =
-    Keeper_dead_revival_transaction.For_testing
-    .cancellation_with_runtime_recovery_failure
-      ~detail:"injected cancellation recovery failure"
-      (Eio.Cancel.Cancelled (Failure "original cancellation"))
-  in
-  match cancelled with
-  | Eio.Cancel.Cancelled
-      (Keeper_dead_revival_transaction.Cancellation_recovery_failed
-         { recovery_errors =
-             [ Keeper_dead_revival_transaction
-               .Rollback_runtime_assignment_failed detail
-             ]
-         ; _
-         })
-    when String.equal detail "injected cancellation recovery failure" ->
-    ()
-  | _ ->
-    Alcotest.fail
-      "revival cancellation discarded typed runtime recovery evidence"
-;;
-
 type dead_revival_cancellation_boundary =
-  | After_nonce_allocation
   | After_journal_write
   | After_journal_write_ownership_swap
 
@@ -3412,7 +3458,6 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
   let base_dir = temp_dir () in
   let keeper_name =
     match boundary with
-    | After_nonce_allocation -> "dead-revival-cancel-after-nonce"
     | After_journal_write -> "dead-revival-cancel-after-journal"
     | After_journal_write_ownership_swap ->
       "dead-revival-cancel-ownership-swap"
@@ -3480,11 +3525,6 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
       in
       let invoke () =
         match boundary with
-        | After_nonce_allocation ->
-          Keeper_dead_revival_transaction.For_testing.with_boundary_hooks
-            ~after_nonce_allocation:cancel
-            (fun () ->
-              Keeper_dead_revival_transaction.revive ctx ~original ~candidate)
         | After_journal_write ->
           Keeper_dead_revival_transaction.For_testing.with_boundary_hooks
             ~after_journal_write:cancel
@@ -3538,8 +3578,7 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
         "cancellation preserves only the transaction it owns"
         true
         (match boundary, current_stage with
-         | After_nonce_allocation, `Missing -> true
-         | After_journal_write, `Cleared -> true
+         | After_journal_write, `Reserved -> true
          | After_journal_write_ownership_swap, `Reserved -> true
          | _ -> false);
       (match boundary with
@@ -3558,7 +3597,26 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
           | Error error ->
             Alcotest.fail
               (Keeper_dead_revival_transaction.error_to_string error))
-       | After_nonce_allocation | After_journal_write -> ()))
+       | After_journal_write ->
+         let recovery =
+           Keeper_dead_revival_transaction.recover_pending config
+         in
+         Alcotest.(check int)
+           "cancelled transaction recovers outside the cancellation handler"
+           0
+           (List.length recovery.unresolved);
+         (match
+            Keeper_dead_revival_transaction.For_testing.current_journal_stage
+              ~config
+              ~keeper_name
+          with
+          | Ok `Cleared -> ()
+          | Ok _ ->
+            Alcotest.fail
+              "normal recovery did not clear the cancelled transaction"
+          | Error error ->
+            Alcotest.fail
+              (Keeper_dead_revival_transaction.error_to_string error))))
 ;;
 
 let test_dead_revival_existing_reserved_journal_blocks () =
@@ -5035,6 +5093,10 @@ let () =
             `Quick
             test_update_runtime_meta_crash_recovery_retries_durable_intent;
           Alcotest.test_case
+            "identical runtime/meta target honors forward preference"
+            `Quick
+            test_runtime_meta_identical_target_honors_forward_preference;
+          Alcotest.test_case
             "keeper update supersession failure rolls back and restarts"
             `Quick
             test_update_keeper_supersession_failure_rolls_back_and_restarts;
@@ -5043,16 +5105,7 @@ let () =
             `Quick
             test_update_keeper_cancellation_rolls_back_and_restarts;
           Alcotest.test_case
-            "revival cancellation preserves typed recovery failure"
-            `Quick
-            test_dead_revival_cancellation_preserves_typed_recovery_failure;
-          Alcotest.test_case
-            "nonce-boundary cancellation releases revival reservation"
-            `Quick
-            (test_dead_revival_cancellation_releases_reservation
-               After_nonce_allocation);
-          Alcotest.test_case
-            "journal-boundary cancellation clears revival reservation"
+            "journal-boundary cancellation defers durable recovery"
             `Quick
             (test_dead_revival_cancellation_releases_reservation
                After_journal_write);

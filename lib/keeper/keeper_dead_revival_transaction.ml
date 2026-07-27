@@ -11,9 +11,7 @@ exception Injected_launch_publication_indeterminate
 exception Injected_reserved_post_publication_failure
 
 type boundary_hooks =
-  { after_nonce_allocation : unit -> unit
-  ; after_journal_write : unit -> unit
-  }
+  { after_journal_write : unit -> unit }
 
 let boundary_hooks_key : boundary_hooks Eio.Fiber.key =
   Eio.Fiber.create_key ()
@@ -71,12 +69,6 @@ let with_head_parent parent fn =
   | None -> fn parent
 ;;
 
-let invoke_after_nonce_allocation_hook () =
-  match Eio.Fiber.get boundary_hooks_key with
-  | None -> ()
-  | Some hooks -> hooks.after_nonce_allocation ()
-;;
-
 let invoke_after_journal_write_hook () =
   match Eio.Fiber.get boundary_hooks_key with
   | None -> ()
@@ -105,13 +97,12 @@ let invoke_before_recovery_claim_hook () =
 
 module Boundary_hooks_for_testing = struct
   let with_boundary_hooks
-        ?(after_nonce_allocation = fun () -> ())
         ?(after_journal_write = fun () -> ())
         fn
     =
     Eio.Fiber.with_binding
       boundary_hooks_key
-      { after_nonce_allocation; after_journal_write }
+      { after_journal_write }
       fn
   ;;
 
@@ -1274,43 +1265,8 @@ let verify_payload config (journal : journal) =
     ~expected_generation:journal.expected_generation
 ;;
 
-exception Cancellation_recovery_failed of
-  { original : exn
-  ; recovery_errors : rollback_error list
-  }
-
-let cancellation_with_recovery_errors cancelled recovery_errors =
-  if recovery_errors = []
-  then cancelled
-  else
-    match cancelled with
-    | Eio.Cancel.Cancelled
-        (Cancellation_recovery_failed
-           { original; recovery_errors = existing }) ->
-      Eio.Cancel.Cancelled
-        (Cancellation_recovery_failed
-           { original
-           ; recovery_errors = existing @ recovery_errors
-           })
-    | Eio.Cancel.Cancelled original ->
-      Eio.Cancel.Cancelled
-        (Cancellation_recovery_failed { original; recovery_errors })
-    | exception_ ->
-      Eio.Cancel.Cancelled
-        (Cancellation_recovery_failed
-           { original = exception_
-           ; recovery_errors
-           })
-;;
-
 module For_testing = struct
   include Boundary_hooks_for_testing
-
-  let cancellation_with_runtime_recovery_failure ~detail cancelled =
-    cancellation_with_recovery_errors
-      cancelled
-      [ Rollback_runtime_assignment_failed detail ]
-  ;;
 
   let reserved_journal_row ~owner_id ~original ~candidate =
     match
@@ -2165,35 +2121,28 @@ let runtime_transition_of_assignment = function
     Payload.Runtime_changed { before = previous; after = assigned }
 ;;
 
-let apply_runtime_assignment ~keeper_name = function
-  | None -> Ok Runtime_assignment_unchanged
+let plan_runtime_assignment ~keeper_name = function
+  | None -> Runtime_assignment_unchanged
   | Some runtime_id ->
     let previous = Runtime.runtime_id_for_keeper keeper_name in
     if Option.equal String.equal previous (Some runtime_id)
-    then Ok Runtime_assignment_unchanged
+    then Runtime_assignment_unchanged
     else
-      let assignment =
-        Runtime_assignment_changed { previous; assigned = runtime_id }
-      in
-      (match Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id () with
-       | Ok () -> Ok assignment
-       | Error detail ->
-         if
-           same_runtime_target
-             (Runtime.runtime_id_for_keeper keeper_name)
-             (Some runtime_id)
-         then Ok assignment
-         else
-           (match restore_runtime_assignment ~keeper_name assignment with
-            | Ok () -> Error (Runtime_assignment_failed detail)
-            | Error rollback_detail ->
-              Error
-                (Rollback_failed
-                   { cause =
-                       error_to_string (Runtime_assignment_failed detail)
-                   ; errors =
-                       [ Rollback_runtime_assignment_failed rollback_detail ]
-                   })))
+      Runtime_assignment_changed { previous; assigned = runtime_id }
+;;
+
+let apply_runtime_assignment ~keeper_name = function
+  | Runtime_assignment_unchanged -> Ok ()
+  | Runtime_assignment_changed { assigned = runtime_id; _ } ->
+    (match Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id () with
+     | Ok () -> Ok ()
+     | Error detail ->
+       if
+         same_runtime_target
+           (Runtime.runtime_id_for_keeper keeper_name)
+           (Some runtime_id)
+       then Ok ()
+       else Error (Runtime_assignment_failed detail))
 ;;
 
 let settle_runtime_assignment ~keeper_name assignment result =
@@ -2234,10 +2183,9 @@ let revive_locked
     observe "conflict" original.name (error_to_string error);
     Error error
   | Ok () ->
-    (match apply_runtime_assignment ~keeper_name:original.name runtime_id with
-     | Error error -> Error error
-     | Ok assignment ->
-       runtime_assignment := assignment;
+    let assignment =
+      plan_runtime_assignment ~keeper_name:original.name runtime_id
+    in
     (match
        Keeper_lifecycle_reservation.acquire
          ~base_path:ctx.config.base_path
@@ -2250,42 +2198,18 @@ let revive_locked
        Error (Reservation_conflict owner)
      | Ok token ->
     observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
-    let journal_for_cleanup = ref None in
-    let verified_payload_for_cleanup = ref None in
-    let journal_published = ref false in
-    let cleanup_pre_journal_cancellation () =
-      Eio.Cancel.protect (fun () ->
-        (match !journal_for_cleanup with
-         | None -> ()
-         | Some journal ->
-           (match !journal_published, !verified_payload_for_cleanup with
-            | false, _ ->
-              ignore
-                (cleanup_unreserved_payload
-                   ctx.config
-                   journal
-                   ~cause:
-                     (Journal_write_failed
-                        "cancelled before Reserved publication was confirmed"))
-            | true, Some payload ->
-              let errors = rollback token ctx.config journal payload None in
-              if errors <> []
-              then
-              Log.Keeper.error
-                "keeper lifecycle reserved cancellation rollback failed keeper=%s errors=%s"
-                original.name
-                (String.concat "; " (List.map rollback_error_to_string errors))
-            | true, None ->
-              Log.Keeper.error
-                "keeper lifecycle reserved cancellation lost verified payload keeper=%s"
-                original.name));
+    let reservation_released = ref false in
+    let release_token () =
+      if not !reservation_released
+      then (
+        reservation_released := true;
         release_observed token original.name)
     in
     let protect_pre_journal fn =
       try fn () with
       | Eio.Cancel.Cancelled _ as cancelled ->
         let backtrace = Printexc.get_raw_backtrace () in
-        cleanup_pre_journal_cancellation ();
+        release_token ();
         Printexc.raise_with_backtrace cancelled backtrace
     in
     let journal_result =
@@ -2309,8 +2233,7 @@ let revive_locked
              | Ok candidate ->
                (match
                   make_prepared_journal
-                    ~runtime_transition:
-                      (runtime_transition_of_assignment assignment)
+                    ~runtime_transition:(runtime_transition_of_assignment assignment)
                     ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
                     ~original
                     ~candidate
@@ -2325,11 +2248,8 @@ let revive_locked
                     (payload_failure Payload_prepare failure)
                     ()
                 | Ok (journal, prepared) ->
-                  journal_for_cleanup := Some journal;
                   (match Payload.create ctx.config prepared with
                    | Error failure ->
-                     journal_for_cleanup := None;
-                     verified_payload_for_cleanup := None;
                      abort_replacement_before_reserved
                        token
                        ctx.config
@@ -2342,8 +2262,6 @@ let revive_locked
                    | Ok (Payload.Created _ | Payload.Reconciled_created _) ->
                      (match verify_payload ctx.config journal with
                       | Error failure ->
-                        journal_for_cleanup := None;
-                        verified_payload_for_cleanup := None;
                         abort_replacement_before_reserved
                           token
                           ctx.config
@@ -2354,11 +2272,7 @@ let revive_locked
                           (payload_failure Payload_verify failure)
                           ()
                       | Ok payload ->
-                        verified_payload_for_cleanup := Some payload;
                         let finish_reserved current =
-                          journal_for_cleanup := Some current;
-                          verified_payload_for_cleanup := Some payload;
-                          journal_published := true;
                           (match publication_attention with
                            | None -> ()
                            | Some attention ->
@@ -2367,7 +2281,6 @@ let revive_locked
                                 nonce keeper=%s attention=%s"
                                original.name
                                (Keeper_lifecycle_nonce.error_to_string attention));
-                          invoke_after_nonce_allocation_hook ();
                           invoke_after_journal_write_hook ();
                           Ok (publication, current, payload, candidate)
                         in
@@ -2398,8 +2311,6 @@ let revive_locked
                               finish_reserved current
                             | Ok (_, _, None)
                             | Ok (_, _, Some (Cleared_tombstone _)) ->
-                              journal_for_cleanup := None;
-                              verified_payload_for_cleanup := None;
                               abort_replacement_before_reserved
                                 token
                                 ctx.config
@@ -2410,8 +2321,6 @@ let revive_locked
                                 publication_error
                                 ()
                             | Error attention ->
-                              journal_for_cleanup := None;
-                              verified_payload_for_cleanup := None;
                               abort_replacement_before_reserved
                                 token
                                 ctx.config
@@ -2421,8 +2330,6 @@ let revive_locked
                                 attention
                                 ()
                             | Ok (_, _, Some (Active_journal _)) ->
-                              journal_for_cleanup := None;
-                              verified_payload_for_cleanup := None;
                               abort_replacement_before_reserved
                                 token
                                 ctx.config
@@ -2434,17 +2341,19 @@ let revive_locked
                                     unexpected active transaction")
                                 ()))))))))
     in
+    let check_reserved_boundary () =
+      try Eio.Fiber.check () with
+      | Eio.Cancel.Cancelled _ as cancelled ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        release_token ();
+        Printexc.raise_with_backtrace cancelled backtrace
+    in
+    check_reserved_boundary ();
     (match journal_result with
      | Error error ->
-       release_observed token original.name;
+       release_token ();
        Error error
      | Ok (publication, journal, verified_payload, candidate) ->
-       (* The cancellation handler must restore the exact pre-transaction
-          registry lane after removal. This ref carries only that immutable
-          snapshot across the exception boundary; transaction ownership and
-          all shared state remain in Atomic/CAS structures. *)
-       let original_entry_for_rollback = ref None in
-       let rollback_journal = ref journal in
        let pending_launch_entry = ref None in
        let pending_launch_journal = ref None in
        let launch_publication_attempt =
@@ -2461,6 +2370,15 @@ let revive_locked
               lane matters here; its terminal payload has no authority. *)
            let _lane_exit = Keeper_lane.await_exit entry.lane in
            let _terminal = Eio.Promise.await entry.done_p in
+           pending_launch_entry := None
+       in
+       let abort_pending_launch_without_wait () =
+         match !pending_launch_entry with
+         | None -> Keeper_keepalive.abort_launch_gate launch_gate
+         | Some (entry : Keeper_registry.registry_entry) ->
+           Atomic.set entry.fiber_stop true;
+           Keeper_keepalive.abort_launch_gate launch_gate;
+           Keeper_keepalive.request_entry_stop entry;
            pending_launch_entry := None
        in
        let settle_pending_launch () =
@@ -2491,6 +2409,23 @@ let revive_locked
              launch_reconciliation_unresolved := false;
              Launch_reconciled_precommit)
        in
+       let run_after_reserved () =
+         match
+           apply_runtime_assignment
+             ~keeper_name:original.name
+             assignment
+         with
+         | Error error ->
+           fail_with_rollback
+             token
+             ctx.config
+             journal
+             verified_payload
+             None
+             (error_to_string error)
+             error
+         | Ok () ->
+           runtime_assignment := assignment;
        let run () =
          match Keeper_meta_store.read_meta ctx.config original.name with
          | Error detail ->
@@ -2534,7 +2469,6 @@ let revive_locked
                 (registry_conflict_to_string conflict)
                 (Registry_conflict conflict)
             | Ok original_entry ->
-              original_entry_for_rollback := original_entry;
               let removal =
                 match original_entry with
                 | None -> Ok ()
@@ -2634,8 +2568,6 @@ let revive_locked
                                committed_journal
                            with
                            | Durable_publication_rollback_from observed_stage ->
-                             rollback_journal :=
-                               { journal with stage = observed_stage };
                              fail_with_rollback
                                token
                                ctx.config
@@ -2651,10 +2583,9 @@ let revive_locked
                                committed.name
                                (error_to_string publication_error)
                                (error_to_string attention);
-                             release_observed token committed.name;
+                             release_token ();
                              Error attention)
                         | Ok () ->
-                          rollback_journal := committed_journal;
                           (match
                              Keeper_keepalive.start_keepalive
                                ~lifecycle_token:token
@@ -2669,7 +2600,7 @@ let revive_locked
                                { committed_journal with stage = Launch_committed }
                              in
                              let committed_with_attention cleanup_error =
-                               release_observed token committed.name;
+                               release_token ();
                                Error
                                  (Post_commit_cleanup_required
                                     { committed
@@ -2680,10 +2611,12 @@ let revive_locked
                              launch_publication_attempt :=
                                Launch_publication_in_progress;
                              let publication_result =
-                               save_launch_journal ctx.config launch_journal
+                               Eio.Cancel.protect (fun () ->
+                                 save_launch_journal ctx.config launch_journal)
                              in
                              launch_publication_attempt :=
                                Launch_publication_completed publication_result;
+                             Eio.Fiber.check ();
                              (match publication_result with
                               | Ok () ->
                                 Option.iter
@@ -2691,10 +2624,11 @@ let revive_locked
                                     after_launch_publication ())
                                   (Eio.Fiber.get after_launch_publication_key)
                               | Error _ -> ());
-                             (match
-                                settle_pending_launch (),
-                                publication_result
-                              with
+                             let launch_reconciliation =
+                               settle_pending_launch ()
+                             in
+                             Eio.Fiber.check ();
+                             (match launch_reconciliation, publication_result with
                               | Launch_reconciled_committed, Error publication_error ->
                                 committed_with_attention publication_error
                               | Launch_reconciled_committed, Ok () ->
@@ -2709,7 +2643,7 @@ let revive_locked
                                           ctx.config
                                           launch_journal
                                     in
-                                    release_observed token committed.name;
+                                    release_token ();
                                     result)
                                 in
                                 (match cleanup_result with
@@ -2759,7 +2693,7 @@ let revive_locked
                                   committed.name
                                   publication_detail
                                   (error_to_string attention);
-                                release_observed token committed.name;
+                                release_token ();
                                 Error attention)
                            | rejected ->
                              Keeper_keepalive.abort_launch_gate launch_gate;
@@ -2772,51 +2706,20 @@ let revive_locked
                                (Keeper_keepalive.start_keepalive_outcome_to_string rejected)
                                (Launch_failed rejected)))))))
        in
-       try run () with
+       run ()
+       in
+       try run_after_reserved () with
        | Eio.Cancel.Cancelled _ as cancelled ->
          let backtrace = Printexc.get_raw_backtrace () in
-         let cancellation_recovery_errors = ref [] in
          if not (Keeper_keepalive.launch_gate_is_committed launch_gate)
-         then
-           (match settle_pending_launch () with
-            | Launch_reconciled_committed ->
-              release_observed token original.name
-            | Launch_reconciled_precommit ->
-              Eio.Cancel.protect (fun () ->
-                let errors =
-                  rollback
-                    token
-                    ctx.config
-                    !rollback_journal
-                    verified_payload
-                    !original_entry_for_rollback
-                in
-                if errors <> []
-                then
-                  cancellation_recovery_errors :=
-                    errors @ !cancellation_recovery_errors;
-                if errors <> []
-                then
-                  Log.Keeper.error
-                    "keeper lifecycle cancellation rollback failed keeper=%s errors=%s"
-                    original.name
-                    (String.concat
-                       "; "
-                       (List.map rollback_error_to_string errors));
-                release_observed token original.name)
-            | Launch_reconciliation_unresolved attention ->
-              Log.Keeper.error
-                "keeper lifecycle cancellation left launch reconciliation \
-                 unresolved keeper=%s error=%s; gated lane was aborted and \
-                 durable journal remains for exact recovery"
-                original.name
-                (error_to_string attention);
-              release_observed token original.name);
-         Printexc.raise_with_backtrace
-           (cancellation_with_recovery_errors
-              cancelled
-              (List.rev !cancellation_recovery_errors))
-           backtrace)))
+         then (
+           if launch_attempt_proves_commit !launch_publication_attempt
+           then (
+             Keeper_keepalive.commit_launch_gate launch_gate;
+             pending_launch_entry := None)
+           else abort_pending_launch_without_wait ());
+         release_token ();
+         Printexc.raise_with_backtrace cancelled backtrace))
 ;;
 
 let revive ?runtime_id (ctx : _ context) ~original ~candidate =
@@ -2829,53 +2732,24 @@ let revive ?runtime_id (ctx : _ context) ~original ~candidate =
            let runtime_assignment = ref Runtime_assignment_unchanged in
            let launch_gate = Keeper_keepalive.create_launch_gate () in
            let launch_reconciliation_unresolved = ref false in
-           try
-             let result =
-               revive_locked
-                 permit
-                 ctx
-                 ~original
-                 ~candidate
-                 ~runtime_id
-                 ~runtime_assignment
-                 ~launch_gate
-                 ~launch_reconciliation_unresolved
-             in
-             if !launch_reconciliation_unresolved
-             then result
-             else
-               settle_runtime_assignment
-                 ~keeper_name:original.name
-                 !runtime_assignment
-                 result
-           with
-           | Eio.Cancel.Cancelled _ as cancelled ->
-             let backtrace = Printexc.get_raw_backtrace () in
-             let cancellation_recovery_errors = ref [] in
-             if
-               not (Keeper_keepalive.launch_gate_is_committed launch_gate)
-               && not !launch_reconciliation_unresolved
-             then
-               Eio.Cancel.protect (fun () ->
-                 match
-                   restore_runtime_assignment
-                     ~keeper_name:original.name
-                     !runtime_assignment
-                 with
-                 | Ok () -> ()
-                 | Error detail ->
-                   cancellation_recovery_errors :=
-                     [ Rollback_runtime_assignment_failed detail ];
-                   Log.Keeper.error
-                     "keeper revival cancellation could not restore runtime \
-                      assignment keeper=%s error=%s"
-                     original.name
-                     detail);
-             Printexc.raise_with_backtrace
-               (cancellation_with_recovery_errors
-                  cancelled
-                  !cancellation_recovery_errors)
-               backtrace)
+           let result =
+             revive_locked
+               permit
+               ctx
+               ~original
+               ~candidate
+               ~runtime_id
+               ~runtime_assignment
+               ~launch_gate
+               ~launch_reconciliation_unresolved
+           in
+           if !launch_reconciliation_unresolved
+           then result
+           else
+             settle_runtime_assignment
+               ~keeper_name:original.name
+               !runtime_assignment
+               result)
   with
   | Admission_completed value -> value
   | Admission_completed_with_attention

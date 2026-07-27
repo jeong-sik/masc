@@ -34,13 +34,18 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
        | [] ->
          (match meta_of_json json with
           | Ok meta -> Ok (Some meta)
-          | Error e ->
+         | Error e ->
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string MetaReadFailures)
               ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
               ();
             Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
-            Error e)))
+            Error
+              (Printf.sprintf
+                 "keeper meta invalid current schema at %s; runtime reset \
+                  required: %s"
+                 path
+                 e))))
 ;;
 
 let is_keeper_meta_file f =

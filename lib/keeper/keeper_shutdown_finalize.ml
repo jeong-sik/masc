@@ -820,109 +820,119 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
         (Finalization_draining
            (operation, "shutdown finalization lost durable lifecycle admission"))
   in
-  match begin_exact_retirement ~base_path:config.base_path operation entry with
-  | Error detail -> block ~config operation Registry_unregister detail
-  | Ok () ->
-    (match retire_summary_owner () with
-     | Error (`Draining detail) ->
-       Error (Finalization_draining (operation, detail))
-     | Error (`Failed detail) ->
-       block ~config operation Approval_summary_retirement detail
-     | Ok () ->
-       let finalize_with_permit permit =
-         match
-           Keeper_lifecycle_reservation.acquire
-             ~base_path:config.base_path
-             ~keeper_name:operation.keeper_name
-             ~expected_generation:operation.generation
-             ~purpose:Keeper_lifecycle_reservation.Shutdown_finalization
-         with
-         | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-           Error
-             (Finalization_draining
-                ( operation
-                , "shutdown finalization blocked by lifecycle reservation: "
-                  ^ Keeper_lifecycle_reservation.snapshot_to_string owner ))
-         | Ok lifecycle_token ->
-           let release_outcome = ref None in
-           let result =
-             Fun.protect
-               ~finally:(fun () ->
-                 release_outcome :=
-                   Some
-                     (Keeper_lifecycle_reservation.release
-                        lifecycle_token))
-               (fun () ->
-                 match
-                   unregister_retired_exact
-                     ~permit
-                     ~lifecycle_token
-                     ~base_path:config.base_path
-                     operation
-                     entry
-                 with
-                 | Error detail ->
-                   block ~config operation Registry_unregister detail
-                 | Ok registry_unregistered ->
-                   finish ~permit ~lifecycle_token registry_unregistered)
-           in
-           (match !release_outcome with
-            | Some Keeper_lifecycle_reservation.Released -> result
-            | Some release ->
-              let detail =
-                match release with
-                | Keeper_lifecycle_reservation.Release_missing ->
-                  "shutdown finalization lifecycle reservation disappeared"
-                | Keeper_lifecycle_reservation.Release_not_owner owner ->
-                  "shutdown finalization lifecycle reservation owner changed: "
-                  ^ Keeper_lifecycle_reservation.snapshot_to_string owner
-                | Keeper_lifecycle_reservation.Released -> assert false
-              in
-              Log.Keeper.error
-                "shutdown finalization lifecycle reservation release requires \
-                 attention keeper=%s detail=%s"
-                operation.keeper_name
-                detail;
-              result
-            | None -> assert false)
-       in
-       match
-         Keeper_lifecycle_admission.Durable_transaction
-         .with_durable_lifecycle_admission
-           config
-           ~keeper_name:operation.keeper_name
-           finalize_with_permit
-       with
-       | Admission_completed (Ok finalized) ->
-         deliver_finalized_completion ~config finalized
-       | Admission_completed (Error _ as error) -> error
-       | Admission_completed_with_attention (Ok finalized, failure) ->
+  let finalize_with_permit permit =
+    match
+      Keeper_lifecycle_reservation.acquire
+        ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name
+        ~expected_generation:operation.generation
+        ~purpose:Keeper_lifecycle_reservation.Shutdown_finalization
+    with
+    | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+      Error
+        (Finalization_draining
+           ( operation
+           , "shutdown finalization blocked by lifecycle reservation: "
+             ^ Keeper_lifecycle_reservation.snapshot_to_string owner ))
+    | Ok lifecycle_token ->
+      let release_outcome = ref None in
+      let result =
+        Fun.protect
+          ~finally:(fun () ->
+            release_outcome :=
+              Some (Keeper_lifecycle_reservation.release lifecycle_token))
+          (fun () ->
+            match
+              begin_exact_retirement
+                ~base_path:config.base_path
+                operation
+                entry
+            with
+            | Error detail ->
+              block ~config operation Registry_unregister detail
+            | Ok () ->
+              (match retire_summary_owner () with
+               | Error (`Draining detail) ->
+                 Error (Finalization_draining (operation, detail))
+               | Error (`Failed detail) ->
+                 block
+                   ~config
+                   operation
+                   Approval_summary_retirement
+                   detail
+               | Ok () ->
+                 (match
+                    unregister_retired_exact
+                      ~permit
+                      ~lifecycle_token
+                      ~base_path:config.base_path
+                      operation
+                      entry
+                  with
+                  | Error detail ->
+                    block ~config operation Registry_unregister detail
+                  | Ok registry_unregistered ->
+                    finish
+                      ~permit
+                      ~lifecycle_token
+                      registry_unregistered)))
+      in
+      (match !release_outcome with
+       | Some Keeper_lifecycle_reservation.Released -> result
+       | Some release ->
+         let detail =
+           match release with
+           | Keeper_lifecycle_reservation.Release_missing ->
+             "shutdown finalization lifecycle reservation disappeared"
+           | Keeper_lifecycle_reservation.Release_not_owner owner ->
+             "shutdown finalization lifecycle reservation owner changed: "
+             ^ Keeper_lifecycle_reservation.snapshot_to_string owner
+           | Keeper_lifecycle_reservation.Released -> assert false
+         in
          Log.Keeper.error
-           "shutdown finalization durable admission release requires attention \
-            keeper=%s failure=%s"
+           "shutdown finalization lifecycle reservation release requires \
+            attention keeper=%s detail=%s"
            operation.keeper_name
-           (Keeper_lifecycle_admission.Durable_transaction
-            .authority_failure_to_wire
-              failure);
-         deliver_finalized_completion ~config finalized
-       | Admission_completed_with_attention
-           ((Error _ as error), failure) ->
-         Log.Keeper.error
-           "shutdown finalization durable admission release requires attention \
-            keeper=%s failure=%s"
-           operation.keeper_name
-           (Keeper_lifecycle_admission.Durable_transaction
-            .authority_failure_to_wire
-              failure);
-         error
-       | Admission_blocked reason ->
-         Error
-           (Finalization_draining
-              ( operation
-              , "shutdown finalization blocked by lifecycle authority: "
-                ^ Keeper_lifecycle_admission.Durable_transaction
-                  .blocked_reason_to_wire
-                    reason )))
+           detail;
+         result
+       | None -> assert false)
+  in
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name:operation.keeper_name
+      finalize_with_permit
+  with
+  | Admission_completed (Ok finalized) ->
+    deliver_finalized_completion ~config finalized
+  | Admission_completed (Error _ as error) -> error
+  | Admission_completed_with_attention (Ok finalized, failure) ->
+    Log.Keeper.error
+      "shutdown finalization durable admission release requires attention \
+       keeper=%s failure=%s"
+      operation.keeper_name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .authority_failure_to_wire
+         failure);
+    deliver_finalized_completion ~config finalized
+  | Admission_completed_with_attention ((Error _ as error), failure) ->
+    Log.Keeper.error
+      "shutdown finalization durable admission release requires attention \
+       keeper=%s failure=%s"
+      operation.keeper_name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .authority_failure_to_wire
+         failure);
+    error
+  | Admission_blocked reason ->
+    Error
+      (Finalization_draining
+         ( operation
+         , "shutdown finalization blocked by lifecycle authority: "
+           ^ Keeper_lifecycle_admission.Durable_transaction
+             .blocked_reason_to_wire
+               reason ))
 ;;
 
 let run ~config ~entry operation =

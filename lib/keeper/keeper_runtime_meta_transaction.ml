@@ -92,6 +92,12 @@ let same_meta_payload left right =
   { left with meta_version = 0 } = { right with meta_version = 0 }
 ;;
 
+let meta_targets_indistinguishable (intent : Journal.intent) =
+  match intent.previous_meta with
+  | Some previous -> same_meta_payload previous intent.candidate_meta
+  | None -> false
+;;
+
 type observed_meta =
   | Meta_missing
   | Meta_previous of keeper_meta
@@ -220,6 +226,12 @@ let metadata_at_target config intent direction =
     Ok true
   | Ok (Meta_previous _), `Rollback -> Ok true
   | Ok (Meta_candidate _), `Forward -> Ok true
+  | Ok (Meta_previous _), `Forward
+    when meta_targets_indistinguishable intent ->
+    Ok true
+  | Ok (Meta_candidate _), `Rollback
+    when meta_targets_indistinguishable intent ->
+    Ok true
   | Ok _, _ -> Ok false
 ;;
 

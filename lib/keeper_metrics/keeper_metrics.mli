@@ -132,8 +132,10 @@ type t =
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
+  | MemoryLaneCoalesced
   | MemoryLanePending
   | MemoryLaneInFlight
+  | MemoryLaneLatestPending
   | MemoryLaneExecutionSlotBusy
   | MemoryBankCompactionFailures
   | WriteMetaCycleFailures

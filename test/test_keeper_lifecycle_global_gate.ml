@@ -68,7 +68,7 @@ let make_meta name =
   let json =
     `Assoc
       [ ("name", `String name)
-      ; ("agent_name", `String ("agent-" ^ name))
+      ; ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name))
       ; ("trace_id", `String ("trace-gate-" ^ name))
       ]
   in
@@ -279,6 +279,69 @@ let test_owner_execution_requires_live_fiber () =
          (Ok (ready_meta ()))
      with
      | Readiness.Executable -> true
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false)
+;;
+
+let test_durable_demand_does_not_require_proactive () =
+  without_overrides @@ fun () ->
+  let ready = ready_meta () in
+  let proactive_disabled =
+    { ready with proactive = { enabled = false } }
+  in
+  check bool "ordinary autonomous execution remains disabled" true
+    (match
+       Readiness.classify_owner_execution
+         ~shutdown_operation_id:None
+         ~runtime:(owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+         (Ok proactive_disabled)
+     with
+     | Readiness.Retained_disabled Readiness.Retained_proactive_disabled -> true
+     | Readiness.Executable
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false);
+  check bool "persisted reactive demand can wake the live owner" true
+    (match
+       Readiness.classify_durable_demand_execution
+         ~shutdown_operation_id:None
+         ~runtime:(owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+         (Ok proactive_disabled)
+     with
+     | Readiness.Executable -> true
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false);
+  check bool "persisted demand can recover an absent owner" true
+    (match
+       Readiness.classify_durable_demand_execution
+         ~shutdown_operation_id:None
+         ~runtime:Readiness.Owner_unregistered
+         (Ok proactive_disabled)
+     with
+     | Readiness.Recoverable -> true
+     | Readiness.Executable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false);
+  with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
+  check bool "persisted demand still respects the autoboot kill-switch" true
+    (match
+       Readiness.classify_durable_demand_execution
+         ~shutdown_operation_id:None
+         ~runtime:Readiness.Owner_unregistered
+         (Ok proactive_disabled)
+     with
+     | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
+     | Readiness.Executable
      | Readiness.Recoverable
      | Readiness.Retained_disabled _
      | Readiness.Paused_dead _
@@ -524,6 +587,8 @@ let () =
             test_global_autonomous_off_blocks_readiness
         ; test_case "execution requires live fiber" `Quick
             test_owner_execution_requires_live_fiber
+        ; test_case "durable demand bypasses proactive policy" `Quick
+            test_durable_demand_does_not_require_proactive
         ; test_case "shutdown fence blocks boot" `Quick
             test_owner_execution_shutdown_fence_blocks_boot
         ; test_case "unknown owner truth fails closed" `Quick

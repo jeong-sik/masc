@@ -225,7 +225,7 @@ let recover_projected_durable_demand_owner
            (Keeper_registry.get ~base_path keeper_name)
        in
        let truth =
-         Keeper_activation_readiness.classify_owner_execution
+         Keeper_activation_readiness.classify_durable_demand_execution
            ~shutdown_operation_id:
              admission.snapshot_shutdown_operation_id
            ~runtime

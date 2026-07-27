@@ -192,7 +192,12 @@ let owner_execution_truth_to_wire = function
   | Unknown _ -> "unknown"
 ;;
 
-let classify_owner_execution ~shutdown_operation_id ~runtime meta_result =
+let classify_owner_execution_with
+      ~require_proactive
+      ~shutdown_operation_id
+      ~runtime
+      meta_result
+  =
   match meta_result with
   | Error detail -> Unknown detail
   | Ok meta ->
@@ -205,8 +210,9 @@ let classify_owner_execution ~shutdown_operation_id ~runtime meta_result =
           Paused_dead (Persisted_lifecycle_denied denial)
         | Some Autoboot_disabled ->
           Retained_disabled Retained_autoboot_disabled
-        | Some Proactive_disabled ->
+        | Some Proactive_disabled when require_proactive ->
           Retained_disabled Retained_proactive_disabled
+        | Some Proactive_disabled
         | None ->
           (match runtime with
            | Owner_unregistered -> Recoverable
@@ -221,6 +227,14 @@ let classify_owner_execution ~shutdown_operation_id ~runtime meta_result =
                    | Owner_unregistered -> assert false))
            | Owner_registered { live_fiber = true; _ } -> Executable
            | Owner_registered { live_fiber = false; _ } -> Recoverable)))
+;;
+
+let classify_owner_execution =
+  classify_owner_execution_with ~require_proactive:true
+;;
+
+let classify_durable_demand_execution =
+  classify_owner_execution_with ~require_proactive:false
 ;;
 
 let of_meta meta =

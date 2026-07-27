@@ -371,6 +371,126 @@ let test_restart_recovery_never_requeues_bound_lease () =
    | Error detail -> Alcotest.failf "matching receipt replay failed: %s" detail)
 ;;
 
+let run_exact_wal_followup_replay_case ~label ~failure ~expected_stage =
+  with_temp_dir ("masc-exact-wal-" ^ label) @@ fun base_path ->
+  let keeper_name = "exact_wal_" ^ label in
+  let slot_id = "slot-wal-" ^ label in
+  let call_id = "call-wal-" ^ label in
+  let plan_fingerprint = "plan-wal-" ^ label in
+  let request_body_sha256 = String.make 64 '2' in
+  let lease, terminal =
+    bind_and_quarantine
+      ~base_path
+      ~keeper_name
+      ~cause:P.Exact_execution_failed
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  let disposition =
+    prepare_terminal_disposition
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~terminal
+      ~prepared_at:3.0
+  in
+  let precommit =
+    decode_raw_snapshot (label ^ " precommit") ~base_path ~keeper_name
+  in
+  (match
+     P.For_testing.finalize_exact_source_disposition_with_followup_failure_result
+       ~failure
+       ~base_path
+       ~keeper_name
+       ~settled_at:4.0
+       ~lease
+       ~disposition_id:disposition.disposition_id
+       ()
+   with
+   | Ok (P.Committed_followup_failed { stage; _ }) ->
+     Alcotest.(check bool)
+       (label ^ " reports the injected committed stage")
+       true
+       (stage = expected_stage)
+   | Ok _ -> Alcotest.failf "%s did not report a committed follow-up failure" label
+   | Error detail -> Alcotest.failf "%s lost the durable WAL commit: %s" label detail);
+  let wal_path = settlement_wal_path ~base_path ~keeper_name in
+  check_single_v2_wal_row label (read_file_or_fail label wal_path);
+  let before_replay =
+    decode_raw_snapshot (label ^ " before replay") ~base_path ~keeper_name
+  in
+  (match failure with
+   | P.For_testing.Fail_checkpoint _ ->
+     Alcotest.(check string)
+       (label ^ " checkpoint failure preserves precommit revision")
+       (Int64.to_string (State.revision precommit))
+       (Int64.to_string (State.revision before_replay));
+     check_same_state
+       (label ^ " checkpoint failure preserves the prepared snapshot")
+       precommit
+       before_replay;
+     (match State.exact_execution_binding before_replay with
+      | Some { status = P.Disposition_prepared prepared; _ }
+        when String.equal prepared.disposition_id disposition.disposition_id ->
+        ()
+      | Some _ ->
+        Alcotest.failf "%s checkpoint failure lost the prepared disposition" label
+      | None ->
+        Alcotest.failf "%s checkpoint failure removed the exact binding" label)
+   | P.For_testing.Fail_wal_compaction _ ->
+     Alcotest.(check string)
+       (label ^ " compaction failure retains the committed revision")
+       (Int64.to_string (Int64.succ (State.revision precommit)))
+       (Int64.to_string (State.revision before_replay));
+     check_no_active_lease (label ^ " committed snapshot") before_replay;
+     check_no_exact_binding (label ^ " committed snapshot") before_replay;
+     check_no_pending (label ^ " committed snapshot") before_replay;
+     ignore
+       (require_single_exact_outbox
+          ~disposition_id:disposition.disposition_id
+          (label ^ " committed snapshot")
+          before_replay));
+  let recovered = require_loaded_state (label ^ " first restart") ~base_path ~keeper_name in
+  check_no_active_lease (label ^ " first restart") recovered;
+  check_no_exact_binding (label ^ " first restart") recovered;
+  check_no_pending (label ^ " first restart") recovered;
+  let receipt =
+    require_single_exact_outbox
+      ~disposition_id:disposition.disposition_id
+      (label ^ " first restart")
+      recovered
+  in
+  Alcotest.(check string)
+    (label ^ " WAL compacted after replay")
+    ""
+    (read_file_or_fail label wal_path);
+  let loaded_again =
+    require_loaded_state (label ^ " second restart") ~base_path ~keeper_name
+  in
+  check_same_state (label ^ " second load is idempotent") recovered loaded_again;
+  (match
+     P.finalize_exact_source_disposition_result
+       ~base_path
+       ~keeper_name
+       ~settled_at:5.0
+       ~lease
+       ~disposition_id:disposition.disposition_id
+       ()
+   with
+   | Ok (P.Already_settled replayed) ->
+     Alcotest.(check bool)
+       (label ^ " old finalize returns the canonical receipt")
+       true
+       (State.transition_receipt_equal receipt replayed)
+   | Ok _ -> Alcotest.failf "%s old finalize was not idempotent" label
+   | Error detail -> Alcotest.failf "%s old finalize retry failed: %s" label detail);
+  let after_retry =
+    require_loaded_state (label ^ " post-retry load") ~base_path ~keeper_name
+  in
+  check_same_state (label ^ " old retry leaves state unchanged") loaded_again after_retry
+;;
 
 let test_exact_wal_followup_failures_replay_once () =
   run_exact_wal_followup_replay_case

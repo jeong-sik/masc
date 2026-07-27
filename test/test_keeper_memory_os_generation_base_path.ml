@@ -45,15 +45,18 @@ let test_explicit_base_paths_isolate_generation_counters () =
          check int
            "workspace A first reservation"
            0
-           (Io.next_generation_for_base_path ~base_path:workspace_a ~keeper_id ~trace_id);
+           (Io.next_generation_with_floor_for_base_path
+              ~base_path:workspace_a ~floor:0 ~keeper_id ~trace_id);
          check int
            "workspace A advances independently"
            1
-           (Io.next_generation_for_base_path ~base_path:workspace_a ~keeper_id ~trace_id);
+           (Io.next_generation_with_floor_for_base_path
+              ~base_path:workspace_a ~floor:0 ~keeper_id ~trace_id);
          check int
            "workspace B starts from its own counter"
            0
-           (Io.next_generation_for_base_path ~base_path:workspace_b ~keeper_id ~trace_id));
+           (Io.next_generation_with_floor_for_base_path
+              ~base_path:workspace_b ~floor:0 ~keeper_id ~trace_id));
        let episode_dir keepers_dir =
          Filename.concat keepers_dir (Filename.concat keeper_id "episodes")
        in

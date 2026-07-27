@@ -1089,7 +1089,7 @@ let test_failed_cycle_route_mapping () =
      ()
    | _ -> Alcotest.fail "context-compacted source stimulus was acknowledged");
   let quarantined_failure =
-    { judgment_failure with
+    { terminal_failure with
       source_lease_disposition =
         Masc.Keeper_unified_turn.Pause_after_transcript_corruption
           { detail = "fixture transcript corruption" }

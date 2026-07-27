@@ -359,7 +359,7 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
         ~base_path
         ~keeper_name:captured.name
         ~expected_generation:captured.meta.runtime.nonce
-        ~purpose:Reservation.Dead_revival
+        ~purpose:Reservation.Paused_work_disposition
     with
     | Ok token -> token
     | Error _ -> fail "exact wake test could not acquire lifecycle ownership"

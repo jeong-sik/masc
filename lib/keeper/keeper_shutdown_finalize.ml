@@ -723,7 +723,13 @@ let deliver_finalized_completion ~config operation =
   | Superseded _ -> Error Unsupported_phase
 ;;
 
-let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
+let complete_cleanup_admitted
+      ~(config : Workspace.config)
+      ~entry
+      ~permit
+      operation
+      cleanup
+  =
   let retire_summary_owner () =
     match operation.cleanup_intent.reason with
     | Operator_stop_retain_meta -> Ok ()
@@ -897,12 +903,16 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
          result
        | None -> assert false)
   in
+  finalize_with_permit permit
+;;
+
+let with_cleanup_admission ~(config : Workspace.config) operation fn =
   match
     Keeper_lifecycle_admission.Durable_transaction
     .with_durable_lifecycle_admission
       config
       ~keeper_name:operation.keeper_name
-      finalize_with_permit
+      fn
   with
   | Admission_completed (Ok finalized) ->
     deliver_finalized_completion ~config finalized
@@ -935,6 +945,27 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
                reason ))
 ;;
 
+let prepare_and_complete_cleanup
+      ~(config : Workspace.config)
+      ~entry
+      operation
+      settled_task_ids
+  =
+  with_cleanup_admission ~config operation (fun permit ->
+    match prepare_cleanup ~config ~entry operation settled_task_ids with
+    | Error _ as error -> error
+    | Ok ready ->
+      (match ready.phase with
+       | Cleanup_ready cleanup ->
+         complete_cleanup_admitted
+           ~config
+           ~entry
+           ~permit
+           ready
+           cleanup
+       | _ -> Error Unsupported_phase))
+;;
+
 let run ~config ~entry operation =
   match operation.phase with
   | Joined_idle ->
@@ -944,12 +975,11 @@ let run ~config ~entry operation =
        (match settle_tasks ~config ~meta operation [] with
         | Error _ as error -> error
         | Ok (settled_operation, settled_task_ids) ->
-          (match prepare_cleanup ~config ~entry settled_operation settled_task_ids with
-           | Error _ as error -> error
-           | Ok ready ->
-             (match ready.phase with
-              | Cleanup_ready cleanup -> complete_cleanup ~config ~entry ready cleanup
-              | _ -> Error Unsupported_phase))))
+          prepare_and_complete_cleanup
+            ~config
+            ~entry
+            settled_operation
+            settled_task_ids))
   | Finalizing_tasks settled_task_ids ->
     (match read_operation_meta ~config operation with
      | Error detail -> block ~config operation Meta_update detail
@@ -957,13 +987,19 @@ let run ~config ~entry operation =
        (match settle_tasks ~config ~meta operation settled_task_ids with
         | Error _ as error -> error
         | Ok (settled_operation, settled_task_ids) ->
-          (match prepare_cleanup ~config ~entry settled_operation settled_task_ids with
-           | Error _ as error -> error
-           | Ok ready ->
-             (match ready.phase with
-              | Cleanup_ready cleanup -> complete_cleanup ~config ~entry ready cleanup
-              | _ -> Error Unsupported_phase))))
-  | Cleanup_ready cleanup -> complete_cleanup ~config ~entry operation cleanup
+          prepare_and_complete_cleanup
+            ~config
+            ~entry
+            settled_operation
+            settled_task_ids))
+  | Cleanup_ready cleanup ->
+    with_cleanup_admission ~config operation (fun permit ->
+      complete_cleanup_admitted
+        ~config
+        ~entry
+        ~permit
+        operation
+        cleanup)
   | Finalized _ -> deliver_finalized_completion ~config operation
   | Prepared
   | Reconciliation_required _

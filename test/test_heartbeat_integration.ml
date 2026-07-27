@@ -2472,6 +2472,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
 let test_keeper_shutdown_finalizes_idle_operation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-finalize" in
   Fun.protect
     ~finally:(fun () ->
@@ -2501,8 +2502,46 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
+      let module Durable =
+        Masc.Keeper_lifecycle_admission.Durable_transaction
+      in
+      let competing_cleanup_entered = Atomic.make false in
+      let competing_cleanup_started, resolve_competing_cleanup_started =
+        Eio.Promise.create ()
+      in
+      let competing_cleanup_done, resolve_competing_cleanup_done =
+        Eio.Promise.create ()
+      in
       Shutdown_finalize.register_remove_pending_confirms_by_target
-        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+        (fun callback_config ~target_type:_ ~target_id:_ ->
+           Eio.Fiber.fork ~sw (fun () ->
+             Eio.Promise.resolve resolve_competing_cleanup_started ();
+             let outcome =
+               Masc.Keeper_lifecycle_admission_permit
+               .without_inherited_permit_scope
+                 (fun () ->
+                    Durable.with_durable_lifecycle_admission
+                      callback_config
+                      ~keeper_name:meta.name
+                      (fun _permit ->
+                         Atomic.set competing_cleanup_entered true))
+             in
+             (match outcome with
+              | Durable.Admission_completed ()
+              | Durable.Admission_completed_with_attention ((), _) -> ()
+              | Durable.Admission_blocked reason ->
+                fail
+                  ("competing cleanup admission remained blocked: "
+                   ^ Durable.blocked_reason_to_wire reason));
+             Eio.Promise.resolve resolve_competing_cleanup_done ());
+           Eio.Promise.await competing_cleanup_started;
+           Eio.Fiber.yield ();
+           check
+             bool
+             "pending-confirm retirement retains lifecycle admission"
+             false
+             (Atomic.get competing_cleanup_entered);
+           Ok 0);
       let operation_id = Shutdown_types.Operation_id.generate () in
       let operation : Shutdown_types.t =
         { schema_version = Shutdown_types.schema_version
@@ -2541,6 +2580,12 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         | Ok finalized -> finalized
         | Error error -> fail (Shutdown_finalize.error_to_string error)
       in
+      Eio.Promise.await competing_cleanup_done;
+      check
+        bool
+        "competing lifecycle enters after shutdown cleanup"
+        true
+        (Atomic.get competing_cleanup_entered);
       (match finalized.phase with
        | Shutdown_types.Finalized evidence ->
          check int "no pending confirms" 0 evidence.cleanup.pending_confirms_removed

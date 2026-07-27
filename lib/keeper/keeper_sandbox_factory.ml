@@ -33,11 +33,6 @@ let normalize p =
   Keeper_alerting_path.normalize_path_for_check p
   |> strip_trailing_slashes
 
-let current_meta (t : t) =
-  match Keeper_registry.get ~base_path:t.config.base_path t.meta.name with
-  | Some entry -> entry.meta
-  | None -> t.meta
-
 let runtime_image (meta : Keeper_meta_contract.keeper_meta) =
   match meta.sandbox_image with
   | Some img when String.trim img <> "" -> img
@@ -54,7 +49,7 @@ let in_playground_of_cwd (t : t) ~meta ~cwd =
 
 let resolve (t : t) ~cwd =
   with_lock t (fun () ->
-    let meta = current_meta t in
+    let meta = t.meta in
     let in_playground = in_playground_of_cwd t ~meta ~cwd in
     let (effective_profile, effective_network) =
       Keeper_sandbox_runner.effective_sandbox_profile ~meta
@@ -96,7 +91,7 @@ let resolve_opt t_opt ~cwd =
   | Some t -> resolve t ~cwd
 
 let container_cwd_of_host t ~host_cwd =
-  let meta = current_meta t in
+  let meta = t.meta in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
     |> normalize

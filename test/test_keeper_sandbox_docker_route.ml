@@ -19,6 +19,7 @@ module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
+module Keeper_identity = Masc.Keeper_identity
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Fs_compat = Fs_compat
@@ -188,7 +189,7 @@ let make_meta ~name ~sandbox () =
   let fields =
     [
       ("name", `String name);
-      ("agent_name", `String ("agent-" ^ name));
+      ("agent_name", `String (Keeper_identity.keeper_agent_name name));
       ("trace_id", `String ("trace-" ^ name));
     ]
   in
@@ -270,30 +271,34 @@ let with_turn_sandbox_factory ~config ~meta f =
   Fun.protect ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory) @@ fun () ->
   f factory
 
-let test_turn_sandbox_factory_uses_refreshed_registry_meta () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+let test_turn_sandbox_factory_ignores_mid_turn_registry_profile_drift () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground:_ ->
-  let docker_meta =
+  let local_meta =
     { meta with
-      Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Docker
+      Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Local
     }
   in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
-  ignore (Keeper_registry.For_testing.register ~base_path:config.Workspace.base_path meta.name docker_meta);
+  ignore
+    (Keeper_registry.For_testing.register
+       ~base_path:config.Workspace.base_path
+       meta.name
+       local_meta);
   Fun.protect
     ~finally:(fun () ->
       Keeper_sandbox_factory.cleanup factory;
       Keeper_registry.For_testing.unregister ~base_path:config.Workspace.base_path meta.name)
   @@ fun () ->
-  let docker_playground = Keeper_sandbox.host_root_abs_of_meta ~config docker_meta in
+  let docker_playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   match Keeper_sandbox_factory.resolve factory ~cwd:docker_playground with
   | Runtime runtime ->
     Alcotest.(check string)
-      "runtime host root follows refreshed Docker meta"
+      "runtime host root stays on the turn's Docker profile"
       (Keeper_alerting_path.normalize_path_for_check_stripped docker_playground)
       (Keeper_turn_sandbox_runtime.host_root runtime)
   | No_factory | Local_profile ->
-    Alcotest.fail "expected refreshed registry Docker meta to resolve a turn runtime"
+    Alcotest.fail "mid-turn registry drift must not change Docker dispatch to Local"
 
 let with_fake_docker script f =
   let dir = temp_dir () in
@@ -2038,8 +2043,8 @@ let () =
           Alcotest.test_case "unknown workspace op is unsupported before docker" `Quick
             test_unknown_workspace_op_is_unsupported_before_docker;
           Alcotest.test_case
-            "turn sandbox factory uses refreshed registry meta"
-            `Quick test_turn_sandbox_factory_uses_refreshed_registry_meta;
+            "turn sandbox factory ignores mid-turn registry profile drift"
+            `Quick test_turn_sandbox_factory_ignores_mid_turn_registry_profile_drift;
           Alcotest.test_case
             "docker command skips empty PATH segment"
             `Quick test_docker_command_skips_empty_path_segment;

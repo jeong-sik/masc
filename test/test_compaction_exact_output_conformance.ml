@@ -481,7 +481,7 @@ let test_bind_failure_prevents_post () =
        ~exact_execution_guard:guard
        prepared
    with
-   | Error (C.Exact_execution_guard_absent | C.Exact_execution_bind_failed) -> ()
+   | Error C.Exact_execution_bind_failed -> ()
    | Error _ -> Alcotest.fail "bind failure returned the wrong typed failure"
    | Ok _ -> Alcotest.fail "bind failure unexpectedly executed");
   Alcotest.(check int) "bind failure prevents POST" 0 (F.post_count server)
@@ -506,9 +506,19 @@ let test_missing_dispatch_guard_prevents_post () =
        ~clock
        prepared
    with
-   | Error (C.Exact_execution_guard_absent | C.Exact_execution_bind_failed) -> ()
+   | Error C.Exact_execution_guard_absent -> ()
    | Error _ -> Alcotest.fail "missing guard returned the wrong typed failure"
    | Ok _ -> Alcotest.fail "missing guard unexpectedly executed");
+  (match
+     C.execute_prepared_lane
+       ~keeper_name:"keeper-missing-guard"
+       ~net
+       ~clock
+       prepared
+   with
+   | Error C.Exact_flow_already_started -> ()
+   | Error _ -> Alcotest.fail "consumed missing-guard flow hid affine replay"
+   | Ok _ -> Alcotest.fail "consumed missing-guard flow executed twice");
   Alcotest.(check int) "missing guard prevents POST" 0 (F.post_count server)
 ;;
 

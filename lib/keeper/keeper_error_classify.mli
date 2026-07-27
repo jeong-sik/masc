@@ -44,10 +44,8 @@ val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
     provider refused the request body itself (malformed payload, orphan
-    tool-call residues), so same-turn retry is futile.  Also matches legacy
-    string-rendered ["Invalid request"] / ["Bad Request"] messages.  The
-    typed arm is authoritative; the string arms are pinned against the SDK
-    rendering shape by a drift test (see the .ml doc comment). *)
+    tool-call residues), so same-turn retry is futile. Rendered provider text
+    carries no recovery authority. *)
 val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for a 0-byte empty completion: the provider ended the turn with a
@@ -72,7 +70,8 @@ val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
     severity only; it grants no retry, admission, pause, or blocker authority. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] when a structured error indicates context overflow. *)
+(** [true] for typed API context overflow or the exact structured
+    [model_context_window_exceeded] agent stop reason. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the error is an OAS [InputRequired] — the agent paused

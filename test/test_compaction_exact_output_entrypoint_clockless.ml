@@ -192,6 +192,64 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
         (Exact_fixture.post_count before_dispatch_server))
 ;;
 
+let test_absent_guard_is_typed_at_before_dispatch () =
+  (* The existing before-dispatch callback already prevented POST when the guard
+     was absent. This test proves only that the current optional boundary reports
+     that absence separately from a supplied guard's persistence failure. It makes
+     no provider-cost claim. *)
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_clockless_eio_context env sw @@ fun () ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      init_runtime_fixture ();
+      let meta = make_meta () in
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore
+        (Masc.Keeper_registry.register_offline
+           ~base_path:exact_flow_base_path
+           meta.name
+           meta);
+      let context =
+        Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
+      in
+      let server =
+        Exact_fixture.start_server
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          (Exact_fixture.Reply (summarize_response "would have summarized"))
+      in
+      publish_exact_fixture ~source:"absent guard" server;
+      let preparation =
+        (* No ~exact_execution_guard: the current optional boundary must fail
+           closed with its own typed reason. *)
+        Compact_policy.compact_for_request_typed
+          ~base_path:exact_flow_base_path
+          ~meta
+          ~trigger:Compaction_trigger.Manual
+          context
+      in
+      check int
+        "no provider request is made when the guard is absent"
+        0
+        (Exact_fixture.post_count server);
+      (match preparation.Compact_policy.decision with
+       | Compact_policy.Rejected (Manual, Exact_execution_guard_absent) -> ()
+       | _ ->
+         fail
+           "an absent exact-execution guard did not reject as \
+            Exact_execution_guard_absent");
+      check bool
+        "the original context is preserved"
+        true
+        (Masc.Keeper_context_core.message_count preparation.Compact_policy.context
+         = Masc.Keeper_context_core.message_count context))
+;;
+
 let () =
   run
     "compaction exact-output clockless entrypoint"
@@ -200,6 +258,10 @@ let () =
             "domain invalid and clockless flow failure are terminal"
             `Quick
             test_domain_invalid_and_clockless_flow_failure_are_terminal
+        ; test_case
+            "an absent guard is typed at before-dispatch"
+            `Quick
+            test_absent_guard_is_typed_at_before_dispatch
         ] )
     ]
 ;;

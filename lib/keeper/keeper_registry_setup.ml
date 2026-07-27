@@ -14,6 +14,25 @@ let running_count_atomic = Atomic.make 0
 module Orphan_drops = Keeper_registry_orphan_drops
 module Error_tracking = Keeper_registry_error_tracking
 
+type 'a lifecycle_mutation_result =
+  | Lifecycle_mutation_completed of 'a
+  | Lifecycle_mutation_admission_denied
+
+let with_lifecycle_mutation_admission permit ~base_path ~keeper_name fn =
+  match
+    Keeper_lifecycle_admission_durable_transaction
+    .with_registry_permit_lease
+      permit
+      ~base_path
+      keeper_name
+      fn
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed result ->
+    Lifecycle_mutation_completed result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Lifecycle_mutation_admission_denied
+;;
+
 let registry_entry_validation_error_label = function
   | Healthy -> "healthy"
   | Lifecycle_transaction_reserved _ -> "lifecycle_transaction_reserved"
@@ -78,7 +97,7 @@ let validate_string_list field names =
 let validate_runtime_fields (runtime : agent_runtime_state) =
   if String.equal (Trace_id.to_string runtime.trace_id) ""
   then Error (Required_field_missing { field = "trace_id" })
-  else if runtime.nonce < 0
+  else if runtime.nonce <= 0
   then Error (Required_field_missing { field = "generation" })
   else if runtime.usage.total_turns < 0
   then Error (Required_field_missing { field = "usage.total_turns" })
@@ -334,8 +353,12 @@ let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
 
 let update_entry_exact expected f = update_entry_exact_internal expected f
 
-let update_entry_exact_for_lifecycle token expected f =
-  update_entry_exact_internal ~lifecycle_token:token expected f
+let update_entry_exact_for_lifecycle permit token expected f =
+  with_lifecycle_mutation_admission
+    permit
+    ~base_path:expected.base_path
+    ~keeper_name:expected.name
+    (fun () -> update_entry_exact_internal ~lifecycle_token:token expected f)
 ;;
 
 type install_entry_result =
@@ -637,21 +660,22 @@ let register_offline_if_admitted ~base_path name meta =
     ~conditions
 ;;
 
-let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
-  let conditions =
-    { Keeper_state_machine.default_conditions with
-      launch_pending = true
-    }
-  in
-  let phase = Keeper_state_machine.derive_phase conditions in
-  register_with_state_result
-    ~lifecycle_token:token
-    ~respect_shutdown_fence:true
-    ~base_path
-    name
-    meta
-    ~phase
-    ~conditions
+let register_offline_if_admitted_for_lifecycle permit token ~base_path name meta =
+  with_lifecycle_mutation_admission permit ~base_path ~keeper_name:name (fun () ->
+    let conditions =
+      { Keeper_state_machine.default_conditions with
+        launch_pending = true
+      }
+    in
+    let phase = Keeper_state_machine.derive_phase conditions in
+    register_with_state_result
+      ~lifecycle_token:token
+      ~respect_shutdown_fence:true
+      ~base_path
+      name
+      meta
+      ~phase
+      ~conditions)
 ;;
 
 type register_restarting_error =
@@ -885,8 +909,12 @@ let unregister_exact_internal ?lifecycle_token entry =
 
 let unregister_exact entry = unregister_exact_internal entry
 
-let unregister_exact_for_lifecycle token entry =
-  unregister_exact_internal ~lifecycle_token:token entry
+let unregister_exact_for_lifecycle permit token entry =
+  with_lifecycle_mutation_admission
+    permit
+    ~base_path:entry.base_path
+    ~keeper_name:entry.name
+    (fun () -> unregister_exact_internal ~lifecycle_token:token entry)
 ;;
 
 type restore_entry_result =
@@ -895,11 +923,16 @@ type restore_entry_result =
   | Entry_restore_invalid of registry_entry_validation_error
   | Entry_restore_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
 
-let restore_entry_if_absent_for_lifecycle token (entry : registry_entry) =
-  Keeper_lifecycle_reservation.with_key_lock
+let restore_entry_if_absent_for_lifecycle permit token (entry : registry_entry) =
+  with_lifecycle_mutation_admission
+    permit
     ~base_path:entry.base_path
     ~keeper_name:entry.name
     (fun () ->
+      Keeper_lifecycle_reservation.with_key_lock
+        ~base_path:entry.base_path
+        ~keeper_name:entry.name
+        (fun () ->
   match
     Keeper_lifecycle_reservation.authorize
       ~token
@@ -923,7 +956,7 @@ let restore_entry_if_absent_for_lifecycle token (entry : registry_entry) =
            then Entry_restored
            else loop ()
        in
-       loop ()))
+       loop ())))
 ;;
 
 let health_of_entry ~base_path name entry =
@@ -1012,8 +1045,37 @@ let reload_meta_from_disk ~base_path name =
 
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
-let sync_meta_if_registered ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
+let registry_meta_matches_identity
+      (meta : Keeper_meta_contract.keeper_meta)
+      ~(trace_id : Keeper_id.Trace_id.t)
+      ~nonce
+  =
+  Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id
+  && Int.equal meta.runtime.nonce nonce
+;;
+
+let registry_meta_matches_nonce_identity
+      (meta : Keeper_meta_contract.keeper_meta)
+      identity
+  =
+  String.equal
+    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    (Keeper_lifecycle_nonce.identity_owner_id identity)
+  &&
+  match
+    Keeper_lifecycle_nonce.runtime_int_of_nonce
+      (Keeper_lifecycle_nonce.identity_nonce identity)
+  with
+  | Ok nonce -> Int.equal meta.runtime.nonce nonce
+  | Error _ -> false
+;;
+
+let sync_meta_if_registered
+      (event : Keeper_meta_runtime_sync_internal.event)
+  =
+  let base_path = canonical_base_path_exn event.base_path in
+  let name = event.keeper_name in
+  let meta = event.persisted in
   match validate_registry_meta ~base_path name meta with
   | Error reason ->
       record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
@@ -1024,17 +1086,53 @@ let sync_meta_if_registered ~base_path name meta =
         match StringMap.find_opt key current with
         | None -> ()
         | Some entry ->
-            let updated =
-              StringMap.add key { entry with base_path; name; meta } current
+            let transition_matches =
+              match event.transition with
+              | Keeper_meta_runtime_sync_internal.Ordinary { trace_id; nonce } ->
+                registry_meta_matches_identity entry.meta ~trace_id ~nonce
+                && registry_meta_matches_identity meta ~trace_id ~nonce
+              | Created _ -> false
+              | Replaced witness ->
+                (match Keeper_lifecycle_nonce.witness_source witness with
+                 | None -> false
+                 | Some source ->
+                   registry_meta_matches_nonce_identity entry.meta source
+                   && registry_meta_matches_nonce_identity
+                        meta
+                        (Keeper_lifecycle_nonce.witness_target witness))
+              | Recovered witness ->
+                (match Keeper_lifecycle_nonce.witness_source witness with
+                 | None -> false
+                 | Some source ->
+                   registry_meta_matches_nonce_identity entry.meta source
+                   && registry_meta_matches_nonce_identity
+                        meta
+                        (Keeper_lifecycle_nonce.witness_target witness))
             in
-            if not (Atomic.compare_and_set registry current updated) then loop ()
+            if transition_matches
+            then (
+              let updated =
+                StringMap.add key { entry with base_path; name; meta } current
+              in
+              if not (Atomic.compare_and_set registry current updated) then loop ())
+            else
+              Log.Keeper.warn
+                "runtime metadata sync retained registry lane after identity \
+                 mismatch keeper=%s"
+                name
       in
       loop ()
 ;;
 
+exception Runtime_meta_sync_installation_failed of string
+
 let () =
-  register_runtime_meta_write_sync (fun config meta ->
-    sync_meta_if_registered ~base_path:config.base_path meta.name meta)
+  match
+    Keeper_meta_runtime_sync_internal.install_once
+      sync_meta_if_registered
+  with
+  | Ok () -> ()
+  | Error detail -> raise (Runtime_meta_sync_installation_failed detail)
 ;;
 
 let mark_dead ~base_path name ~at =

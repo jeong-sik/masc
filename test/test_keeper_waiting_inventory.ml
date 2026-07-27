@@ -72,7 +72,7 @@ let keeper_meta_fixture keeper_name =
 ;;
 
 let ensure_keeper config keeper_name =
-  match Result.bind (keeper_meta_fixture keeper_name) (Keeper_meta_store.write_meta config) with
+  match Result.bind (keeper_meta_fixture keeper_name) (Masc_test_deps.write_current_keeper_meta config) with
   | Ok _ -> ()
   | Error err -> fail ("write keeper meta failed: " ^ err)
 ;;

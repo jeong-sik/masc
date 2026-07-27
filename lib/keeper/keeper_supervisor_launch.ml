@@ -597,7 +597,7 @@ let launch_supervised_fiber_body
     fiber is forked. Returns [Error _] when the launch was refused; in that
     case nothing was forked, no [Started]/[Running] event may be published
     by the caller, and [done_p] has been resolved through the crash path. *)
-let launch_supervised_fiber
+let launch_supervised_fiber_admitted
       ~proactive_warmup_sec
       ctx
       (meta : keeper_meta)
@@ -655,6 +655,38 @@ let launch_supervised_fiber
     launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
 ;;
 
+type supervised_launch_error =
+  | Supervised_launch_permit_mismatch
+  | Supervised_launch_rejected of Keeper_state_machine.transition_error
+
+let launch_supervised_fiber_under_admission
+      permit
+      ~proactive_warmup_sec
+      ctx
+      (meta : keeper_meta)
+      reg
+  =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ctx.config
+      meta.name
+      (fun () ->
+         launch_supervised_fiber_admitted
+           ~proactive_warmup_sec
+           ctx
+           meta
+           reg
+         |> Result.map_error (fun error ->
+           Supervised_launch_rejected error))
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Error Supervised_launch_permit_mismatch
+;;
+
 (* #10993: persona drift visibility.
 
    [Keeper_identity.normalize_all_names ~check_persona:true] runs on
@@ -687,12 +719,46 @@ let persona_profile_path_for_drift_check =
 let log_persona_drift_if_missing = Startup_helpers.log_persona_drift_if_missing
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
-  Keeper_supervisor_supervise_keepalive.supervise_keepalive
-    ~publish_lifecycle
-    ~launch_supervised_fiber
-    ~proactive_warmup_sec
-    ctx
-    meta
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      ctx.config
+      ~keeper_name:meta.name
+      (fun permit ->
+         Keeper_supervisor_supervise_keepalive.supervise_keepalive
+           ~publish_lifecycle
+           ~launch_supervised_fiber:
+             (launch_supervised_fiber_under_admission permit)
+           ~proactive_warmup_sec
+           ctx
+           meta)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed () ->
+    ()
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention ((), failure) ->
+    Log.Keeper.error
+      "supervisor lifecycle admission release requires attention keeper=%s \
+       failure=%s"
+      meta.name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .authority_failure_to_wire
+         failure)
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+    let detail =
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+        reason
+    in
+    Keeper_supervisor_supervise_keepalive.record_admission_denied
+      ~publish_lifecycle
+      ~keeper_name:meta.name
+      ~event:"supervisor_keepalive_start"
+      detail;
+    Log.Keeper.error
+      "supervisor launch denied before mutation by durable lifecycle authority \
+       keeper=%s reason=%s"
+      meta.name
+      detail
 ;;
 
 (* ── Sweep and recover ───────────────────────────────────── *)

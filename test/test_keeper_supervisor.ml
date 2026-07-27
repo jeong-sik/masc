@@ -289,7 +289,7 @@ let make_meta name =
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
   ] in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
@@ -362,7 +362,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
       let clear = make_meta "hitl-clear" in
       List.iter
         (fun meta ->
-          match Keeper_meta_store.write_meta config meta with
+          match Masc_test_deps.write_current_keeper_meta config meta with
           | Ok () -> ()
           | Error err -> fail err)
         [ blocked; clear ];
@@ -626,7 +626,7 @@ let test_declarative_boot_does_not_materialize_incompatible_meta () =
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
   let meta_path = Keeper_types_profile.keeper_meta_path config name in
-  (match Keeper_meta_store.write_meta config (make_meta name) with
+  (match Masc_test_deps.write_current_keeper_meta config (make_meta name) with
    | Ok () -> ()
    | Error err -> fail err);
   let incompatible_json =
@@ -797,7 +797,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
     | Error err -> fail err
   in
   let meta = { base_meta with paused = true; current_task_id = Some task_id } in
-  (match Keeper_meta_store.write_meta config meta with
+  (match Masc_test_deps.write_current_keeper_meta config meta with
    | Ok () -> ()
    | Error err -> fail err);
   let publish_lifecycle ~event:_ _name _detail () = () in
@@ -1040,7 +1040,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let ctx : _ Keeper_types_profile.context =
@@ -1108,7 +1108,7 @@ let test_sweep_reports_pending_hitl_approval () =
       let _workspace = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       ignore (install_exn ~base_path:config.base_path);
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let id =
@@ -1178,7 +1178,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       write_keeper_toml config_dir ~name;
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -1311,7 +1311,7 @@ let test_restart_denies_persisted_dead_tombstone () =
         ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
         }
       in
-      (match Keeper_meta_store.write_meta config dead_meta with
+      (match Masc_test_deps.write_current_keeper_meta config dead_meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name active_meta in
@@ -1392,7 +1392,7 @@ let with_reap_ready_dead_keeper name f =
       let config = Masc.Workspace.default_config base_dir in
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       ignore (Reg.For_testing.register ~base_path:config.base_path name meta);
@@ -1499,7 +1499,7 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "launch-reject-terminal" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -1519,11 +1519,34 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
       in
       Sup.with_restart_launch_noop_for_test (fun () ->
         match
-          Masc.Keeper_supervisor_launch.launch_supervised_fiber
-            ~proactive_warmup_sec:0 ctx meta reg
+          Masc.Keeper_lifecycle_admission.Durable_transaction
+          .with_durable_lifecycle_admission
+            config
+            ~keeper_name:name
+            (fun permit ->
+               Masc.Keeper_supervisor_launch
+               .launch_supervised_fiber_under_admission
+                 permit
+                 ~proactive_warmup_sec:0
+                 ctx
+                 meta
+                 reg)
         with
-        | Ok () -> fail "expected Fiber_started to be rejected in terminal state"
-        | Error _ -> ());
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_completed (Error _) ->
+          ()
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_completed (Ok ()) ->
+          fail "expected Fiber_started to be rejected in terminal state"
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_completed_with_attention (Error _, _) ->
+          ()
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_completed_with_attention (Ok (), _) ->
+          fail "expected Fiber_started to be rejected in terminal state"
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_blocked _ ->
+          fail "fixture durable admission was unexpectedly blocked");
       (match Reg.get_phase ~base_path:config.base_path name with
        | Some Keeper_state_machine.Dead -> ()
        | Some phase ->
@@ -1562,7 +1585,7 @@ let test_launch_fork_rejection_does_not_announce_running () =
       in
       let name = "launch-fork-reject" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -1585,11 +1608,34 @@ let test_launch_fork_rejection_does_not_announce_running () =
         }
       in
       (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber
-           ~proactive_warmup_sec:0 ctx meta reg
+         Masc.Keeper_lifecycle_admission.Durable_transaction
+         .with_durable_lifecycle_admission
+           config
+           ~keeper_name:name
+           (fun permit ->
+              Masc.Keeper_supervisor_launch
+              .launch_supervised_fiber_under_admission
+                permit
+                ~proactive_warmup_sec:0
+                ctx
+                meta
+                reg)
        with
-       | Ok () -> fail "expected lane fork rejection to propagate as Error"
-       | Error _ -> ());
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_completed (Error _) ->
+         ()
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_completed (Ok ()) ->
+         fail "expected lane fork rejection to propagate as Error"
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_completed_with_attention (Error _, _) ->
+         ()
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_completed_with_attention (Ok (), _) ->
+         fail "expected lane fork rejection to propagate as Error"
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_blocked _ ->
+         fail "fixture durable admission was unexpectedly blocked");
       check bool
         "fork-rejected launch resolves done through the crash path"
         true
@@ -1778,7 +1824,7 @@ let test_idle_duration_never_stops_keeper () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -1842,7 +1888,7 @@ let test_non_storm_crashed_restarts_normally () =
       let name = "non-storm-keeper" in
       write_keeper_toml config_dir ~name;
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -1912,7 +1958,7 @@ let test_persisted_blocker_survives_unregister () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in

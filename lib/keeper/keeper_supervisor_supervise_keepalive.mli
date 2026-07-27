@@ -1,5 +1,19 @@
 (** Keepalive supervision entry point for the keeper supervisor. *)
 
+val record_admission_denied :
+  publish_lifecycle:
+    (event:Keeper_lifecycle_events.lifecycle_event ->
+     string ->
+     string ->
+     unit ->
+     unit) ->
+  keeper_name:string ->
+  event:string ->
+  string ->
+  unit
+(** Publish the shared metric and lifecycle event for a retained supervisor
+    launch denial. *)
+
 val supervise_keepalive :
   publish_lifecycle:
     (event:Keeper_lifecycle_events.lifecycle_event ->
@@ -12,7 +26,7 @@ val supervise_keepalive :
      'a Keeper_types_profile.context ->
      Keeper_meta_contract.keeper_meta ->
      Keeper_registry.registry_entry ->
-     (unit, Keeper_state_machine.transition_error) result) ->
+     (unit, 'launch_error) result) ->
   proactive_warmup_sec:int ->
   'a Keeper_types_profile.context ->
   Keeper_meta_contract.keeper_meta ->

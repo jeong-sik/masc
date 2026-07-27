@@ -108,7 +108,7 @@ let test_parse_request () =
 let test_target_resolution_explicit_registered () =
   with_workspace (fun config ->
     (* Register keeper "sangsu" *)
-    (match Keeper_meta_store.write_meta config (make_meta "sangsu") with
+    (match Masc_test_deps.write_current_keeper_meta config (make_meta "sangsu") with
      | Ok _ -> ()
      | Error msg -> fail ("write_meta failed: " ^ msg));
 
@@ -131,7 +131,7 @@ let test_target_resolution_explicit_unregistered () =
 let test_target_resolution_implicit_registered_author () =
   with_workspace (fun config ->
     (* Register keeper "sangsu" *)
-    (match Keeper_meta_store.write_meta config (make_meta "sangsu") with
+    (match Masc_test_deps.write_current_keeper_meta config (make_meta "sangsu") with
      | Ok _ -> ()
      | Error msg -> fail ("write_meta failed: " ^ msg));
 

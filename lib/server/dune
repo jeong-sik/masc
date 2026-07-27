@@ -6,6 +6,7 @@
  (wrapped false)
  (private_modules
   keeper_grpc_heartbeat
+  server_grpc_tool_dispatch
   server_dashboard_http_schedule_actions
   server_schedule_runner_policy)
  (flags :standard -open Masc)

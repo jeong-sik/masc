@@ -97,7 +97,7 @@ Keeper는 OAS의 Persistent Agent를 MASC Workspace 위에서 운용하는 단�
 
 ### 1.6 Generation (세대)
 
-Generation은 keeper의 context handoff 횟수를 나타내는 정수다. keeper가 처음 생성되면 `generation=0`이며, post-turn handoff rollover가 성공적으로 커밋될 때마다 1씩 증가한다.
+Generation은 keeper lifecycle identity를 구분하는 양의 정수다. current schema에서 keeper가 처음 생성되면 `generation=1`이며, identity replacement가 성공적으로 커밋될 때마다 단조 증가한다. `0`은 유효한 persisted generation이 아니다.
 
 같은 keeper 이름이라도 generation이 다르면 다른 "세대"의 실행이다. 다만 이것은 별도 child runtime이 아니라, **같은 keeper가 새 `trace_id`와 새 session 디렉터리로 옮겨간 versioned self**를 뜻한다. `trace_id`가 현재 세대를 고유하게 식별하고, `trace_history`에는 이전 세대의 `trace_id`가 append-only로 누적된다.
 
@@ -390,7 +390,7 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 | 필드 | 출처 레이어 | 계산 방법 | `-`/0일 때 의미 |
 |------|-----------|----------|----------------|
 | `status` | MASC | agent_status + health_state 결합 (surface_status) | keepalive 미실행 |
-| `generation` | OAS+MASC | handoff 마다 +1, 초기값 0 | 아직 handoff 없음 |
+| `generation` | MASC lifecycle authority | identity replacement마다 단조 증가, 초기값 1 | `0`은 current schema에서 유효하지 않음 |
 | `turn_count` (`total_turns`) | MASC | JSONL 메트릭에서 `channel="turn"` 카운트 | 아직 대화 없음 |
 | `context_ratio` | OAS | `token_count / max_tokens` | context 미로드 또는 checkpoint 없음 |
 | `context_tokens` | OAS | `sum(msg_tokens)` 근사 합산 | context 미로드 |

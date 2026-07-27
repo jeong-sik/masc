@@ -1,6 +1,15 @@
 module Queue = Keeper_event_queue
 module State = Keeper_event_queue_state
-module Persistence = Keeper_event_queue_persistence
+module Persistence_source = Keeper_event_queue_persistence
+module Persistence = struct
+  include Persistence_source
+
+  let load_pending ~base_path ~keeper_name =
+    match load_pending_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
 
 let require_ok label = function
   | Ok value -> value
@@ -2038,7 +2047,7 @@ let test_compaction_failure_advances_streak_without_lease () =
   let config = Masc.Workspace.default_config base_path in
   ignore (Masc.Workspace.init config ~agent_name:None : string);
   let meta = cycle_meta () in
-  Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+  Result.get_ok (Masc_test_deps.write_current_keeper_meta config meta);
   (match
      Masc.Keeper_meta_store.persist_compaction_outcome
        config

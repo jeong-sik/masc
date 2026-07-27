@@ -215,28 +215,14 @@ val active_lease_result :
 val exact_execution_binding_result :
   base_path:string -> keeper_name:string -> (exact_execution_binding option, string) result
 
-val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
-(** Compatibility replay projection: pending followed by active lease stimuli.
-    New live registry code should use {!load_pending} after explicitly
-    recovering abandoned leases at registration. Raises [Failure] when the
-    durable state is unavailable; it never substitutes an empty queue. *)
-
 val load_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
-(** Result-returning replay projection for callers that can propagate a durable
-    read failure. *)
-
-val load_pending : base_path:string -> keeper_name:string -> Keeper_event_queue.t
-(** Compatibility pending projection. Raises [Failure] on a durable read
-    failure; use {!load_pending_result} in production control flow. *)
+(** Strict replay projection: pending followed by active lease stimuli.
+    Durable read failures remain explicit. *)
 
 val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
-
-type snapshot_pair =
-  { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
-  }
+(** Strict pending projection. Durable read failures remain explicit. *)
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -262,7 +248,6 @@ type snapshot_discovery =
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
 val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
-val load_snapshot_pair : base_path:string -> keeper_name:string -> snapshot_pair
 val load_snapshot_pair_with_errors :
   base_path:string -> keeper_name:string -> snapshot_pair_with_errors
 

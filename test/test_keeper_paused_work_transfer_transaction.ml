@@ -52,7 +52,7 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
     ; runtime = { meta.runtime with nonce = meta.runtime.nonce }
     }
   in
-  Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
+  Masc_test_deps.write_current_keeper_meta config meta |> require_ok "persist Keeper metadata";
   meta
 ;;
 

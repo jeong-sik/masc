@@ -104,6 +104,40 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let test_grpc_tool_arguments_fail_closed_before_dispatch () =
+  let dispatch_calls = ref 0 in
+  let dispatch _arguments =
+    incr dispatch_calls;
+    Ok "{}"
+  in
+  [ "malformed", "{"; "non-object", "[]" ]
+  |> List.iter (fun (label, arguments_json) ->
+    match
+          Masc_test_deps.Server_grpc_tool_dispatch.dispatch ~dispatch arguments_json
+    with
+    | Error error ->
+      Alcotest.(check string)
+        (label ^ " typed error")
+        "Invalid params: expected object"
+        (Masc_test_deps.Server_grpc_tool_dispatch.error_message error);
+      Alcotest.(check int)
+        (label ^ " invalid-params code")
+        (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
+        (Masc_test_deps.Server_grpc_tool_dispatch.error_code error
+         |> Masc.Mcp_error_code.to_wire_code)
+    | Ok _ -> Alcotest.failf "%s arguments reached the dispatcher" label);
+  Alcotest.(check int) "rejected dispatcher calls" 0 !dispatch_calls;
+  (match
+     Masc_test_deps.Server_grpc_tool_dispatch.dispatch ~dispatch ""
+   with
+   | Ok "{}" -> ()
+   | Ok result -> Alcotest.failf "unexpected omitted-arguments result: %s" result
+   | Error error ->
+     Alcotest.fail
+       (Masc_test_deps.Server_grpc_tool_dispatch.error_message error));
+  Alcotest.(check int) "omitted arguments dispatch once" 1 !dispatch_calls
+;;
+
 let canonical_path path =
   try Unix.realpath path with Unix.Unix_error _ -> path
 
@@ -1209,7 +1243,7 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
 let terminal_fixture_epoch = 0.0
 
 let write_keeper_meta_exn config meta =
-  match Keeper_meta_store.write_meta config meta with
+  match Masc_test_deps.write_current_keeper_meta config meta with
   | Ok () -> ()
   | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
 
@@ -4798,6 +4832,10 @@ let () =
             "transition projection cursor commits before isolated owner recovery"
             `Quick
             test_transition_projection_cursor_commits_before_isolated_owner_recovery;
+          Alcotest.test_case
+            "gRPC tool arguments fail closed before dispatch"
+            `Quick
+            test_grpc_tool_arguments_fail_closed_before_dispatch;
           Alcotest.test_case
             "model catalog installs explicit env override"
             `Quick test_model_catalog_configuration_installs_explicit_env_override;

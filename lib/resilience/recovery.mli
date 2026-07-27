@@ -19,9 +19,8 @@
       (Retry, Fallback, Handoff, Abort). [Degrade] and [Speculate]
       remain {b deferred} until Tier A11 lands the corresponding
       [Degradation.level] / [Speculative.budget_policy] types.
-    - {!classify_string}: heuristic classifier for arbitrary
-      exception or error strings; the primary fallback path when no
-      structured error is available.
+    - {!classify_string}: fail-closed adapter for arbitrary exception
+      or error strings that carry no typed recovery authority.
     - {!default_strategy}: pick the canonical strategy for an
       [error_mode]. Callers may override with a custom strategy.
     - {!execute_strategy}: consume a selected strategy through
@@ -137,15 +136,12 @@ val strategy_to_tla_symbol : 'a strategy -> string
 (** Complete TLA+ [Strategies] mirror for {!strategy}. *)
 val all_strategy_tla_symbols : string list
 
-(** {1 Heuristic classification} *)
+(** {1 Untyped classification} *)
 
 val classify_string : string -> error_mode
-(** Best-effort classification of a free-form exception or error
-    string. Returns [ResourceExhausted] with unknown measurement for
-    resource phrases, including hard-quota/resource wording that may also
-    mention rate limits. Otherwise returns [TransientError] for known
-    retryable phrases (timeout, rate limit, connection reset, temporary),
-    and [PermanentError { fallback_strategy = HumanHandoff _ }] otherwise. *)
+(** Fail closed for a free-form exception or error string. Untyped text
+    always returns [PermanentError { fallback_strategy = HumanHandoff _ }];
+    callers need typed evidence to construct retry or resource modes. *)
 
 (** {1 Default strategy selection} *)
 

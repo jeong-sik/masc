@@ -73,6 +73,7 @@ val parse_keeper_state :
   trace_history:string list ->
   keeper_name:string ->
   max_context_override:int option ->
+  nonce:int ->
   parsed_keeper_state
 
 (** Top-level parser: project a persisted JSON document to a

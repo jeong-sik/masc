@@ -12,16 +12,54 @@ open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_up_args
 
+let after_runtime_assignment_hook_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let invoke_after_runtime_assignment_hook () =
+  Option.iter
+    (fun hook -> hook ())
+    (Eio.Fiber.get after_runtime_assignment_hook_key)
+;;
+
+module For_testing = struct
+  let with_after_runtime_assignment ~after_runtime_assignment fn =
+    Eio.Fiber.with_binding
+      after_runtime_assignment_hook_key
+      after_runtime_assignment
+      fn
+  ;;
+end
+
 
 (* #9749: bootstrap can race a heartbeat/supervisor meta write after
    crash recovery. Retry on CAS conflict while keeping heartbeat-owned
    cursors from disk. *)
-let write_initial_meta config meta =
-  write_meta_with_merge
-    ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-    config meta
+let write_initial_meta permit witness config meta =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      config
+      meta.Keeper_meta_contract.name
+      (fun () ->
+         Keeper_meta_store.create_meta permit witness config meta)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Error "keeper initial metadata write lost durable lifecycle admission"
 
-let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+let create_keeper_admitted_body
+      (permit : Keeper_lifecycle_admission.Durable_transaction.permit)
+      (ctx : _ context)
+      (p : parsed_args)
+  : tool_result
+  =
+  match Keeper_meta_store.read_meta ctx.config p.name with
+  | Error detail -> tool_result_error detail
+  | Ok (Some _) -> tool_result_error ("keeper already exists: " ^ p.name)
+  | Ok None ->
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
@@ -201,17 +239,37 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       let ctx0 =
         Keeper_context_runtime.create ~eio:true ~system_prompt
       in
-      (* next_generation keys the per-(keeper, trace) counter by the trace_id
-         string; episodes live under that same string dir (ensure_dir/of
-         session_id above), so pass the raw [trace_id] string, not the typed
-         [trace_id_t]. Reuse the reservation for metadata and checkpoint
-         creation so they cannot diverge. *)
-      let nonce =
-        Keeper_memory_os_io.next_generation_for_base_path
-          ~base_path:ctx.config.base_path
-          ~keeper_id:p.name
-          ~trace_id
+      (* Lifecycle identity has its own durable authority. Reuse the exact
+         reservation for metadata and checkpoint creation so they cannot
+         diverge. *)
+      let nonce_result =
+        Result.bind
+          (Keeper_lifecycle_nonce.create
+             permit
+             ctx.config
+             ~keeper_id:p.name
+             ~owner_id:trace_id
+             ())
+          (fun witness ->
+             Keeper_lifecycle_nonce.runtime_int_of_nonce
+               (Keeper_lifecycle_nonce.identity_nonce
+                  (Keeper_lifecycle_nonce.witness_target witness))
+             |> Result.map (fun nonce -> witness, nonce))
       in
+      match nonce_result with
+      | Error error ->
+        let detail = Keeper_lifecycle_nonce.error_to_string error in
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[ "keeper", p.name; "event", "create_lifecycle_nonce" ]
+          ();
+        Log.Keeper.error
+          "create_keeper failed lifecycle nonce allocation name=%s: %s"
+          p.name
+          detail;
+        Progress.stop_tracking task_id;
+        tool_result_error detail
+      | Ok (nonce_witness, nonce) ->
       let meta = {
         id = None;
         name = p.name;
@@ -327,18 +385,105 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name detail;
         Progress.stop_tracking task_id;
         tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" detail)
-      | Ok _ ->
+        | Ok _ ->
+        Eio.Cancel.protect (fun () ->
+        let previous_runtime = Runtime.runtime_id_for_keeper p.name in
+        let candidate_runtime =
+          match p.runtime_id_opt with
+          | None -> previous_runtime
+          | Some runtime_id -> Some runtime_id
+        in
+        match
+          Keeper_runtime_meta_transaction.prepare
+            ~operation:Keeper_runtime_meta_journal.Create
+            ~shutdown_supersession:None
+            ~config:ctx.config
+            ~keeper_name:p.name
+            ~previous_runtime
+            ~candidate_runtime
+            ~previous_meta:None
+            ~candidate_meta:meta
+        with
+        | Error failure ->
+          Progress.stop_tracking task_id;
+          tool_result_error
+            (Keeper_runtime_meta_transaction.recovery_failure_to_string
+               failure)
+        | Ok runtime_meta_intent ->
+        let runtime_assignment_changed = ref false in
+      let same_runtime_target target =
+        Option.equal
+          String.equal
+          (Runtime.runtime_id_for_keeper p.name)
+          target
+      in
+      let converge_runtime_assignment target =
+        if same_runtime_target target
+        then Ok ()
+        else
+          let result =
+            match target with
+            | Some runtime_id ->
+              Runtime.set_runtime_id_for_keeper
+                ~keeper_name:p.name
+                ~runtime_id
+                ()
+            | None ->
+              Runtime.clear_runtime_id_for_keeper ~keeper_name:p.name ()
+          in
+          match result with
+          | Ok () -> Ok ()
+          | Error detail ->
+            if same_runtime_target target then Ok () else Error detail
+      in
+      let restore_runtime_assignment () =
+        if not !runtime_assignment_changed
+        then Ok ()
+        else converge_runtime_assignment previous_runtime
+      in
       let runtime_assignment_result =
         match p.runtime_id_opt with
         | None -> Ok ()
+        | Some runtime_id
+          when Option.equal String.equal previous_runtime (Some runtime_id) ->
+          Ok ()
         | Some runtime_id ->
-          Runtime.set_runtime_id_for_keeper
-            ~keeper_name:p.name
-            ~runtime_id
-            ()
+          runtime_assignment_changed := true;
+          (match
+             Runtime.set_runtime_id_for_keeper
+               ~keeper_name:p.name
+               ~runtime_id
+               ()
+           with
+           | Ok () -> Ok ()
+           | Error detail ->
+             if same_runtime_target (Some runtime_id)
+             then Ok ()
+             else
+               (match restore_runtime_assignment () with
+                | Ok () -> Error detail
+                | Error rollback_detail ->
+                  Error
+                    (detail
+                     ^ "; runtime assignment rollback failed: "
+                     ^ rollback_detail)))
       in
       (match runtime_assignment_result with
        | Error e ->
+         let recovery_detail =
+           match
+             Keeper_runtime_meta_transaction.recover
+               permit
+               ctx.config
+               runtime_meta_intent
+               ~prefer:`Rollback
+           with
+           | Ok _ -> ""
+           | Error failure ->
+             "; recovery failed: "
+             ^ Keeper_runtime_meta_transaction.recovery_failure_to_string
+                 failure
+         in
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string LifecycleDispatchRejections)
            ~labels:[("keeper", p.name); ("event", "create_runtime_assignment")]
@@ -348,46 +493,222 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            p.name
            e;
          Progress.stop_tracking task_id;
-         tool_result_error e
-       | Ok () ->
-      Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      match write_initial_meta ctx.config meta with
-      | Error e ->
+         tool_result_error (e ^ recovery_detail)
+        | Ok () ->
+        invoke_after_runtime_assignment_hook ();
+        Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
+        let committed_meta = { meta with meta_version = 1 } in
+      let same_committed_meta current =
+        String.equal
+          (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json current))
+            (Yojson.Safe.to_string
+               (Keeper_meta_json.meta_to_json committed_meta))
+        in
+        let settle_create_state () =
+          match
+            Keeper_runtime_meta_transaction.recover
+              permit
+              ctx.config
+              runtime_meta_intent
+              ~prefer:`Rollback
+          with
+          | Ok Keeper_runtime_meta_transaction.Rolled_back ->
+            Ok `Rolled_back
+          | Ok Keeper_runtime_meta_transaction.Forward_committed ->
+            Ok `Forward
+          | Error failure ->
+            Error
+              (Keeper_runtime_meta_transaction.recovery_failure_to_string
+                 failure)
+        in
+        let write_result =
+        match write_initial_meta permit nonce_witness ctx.config meta with
+        | Ok () -> Ok ()
+        | Error initial_error ->
+          (match Keeper_meta_store.read_meta ctx.config p.name with
+           | Ok (Some current) when same_committed_meta current ->
+             Log.Keeper.warn
+               "create_keeper: metadata write returned error after exact \
+                candidate publication name=%s error=%s"
+               p.name
+               initial_error;
+             Ok ()
+           | Ok None -> Error initial_error
+           | Ok (Some _) ->
+             Error
+               (initial_error
+                ^ "; metadata authority differs after failed write")
+           | Error reread_error ->
+             Error
+               (initial_error
+                ^ "; metadata publication could not be reconciled: "
+                ^ reread_error))
+      in
+      match write_result with
+        | Error e ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
+          let detail =
+            match settle_create_state () with
+            | Ok `Rolled_back -> e
+            | Ok `Forward ->
+              e ^ "; exact candidate create state retained"
+            | Error recovery ->
+              Log.Keeper.error
+                "create_keeper exact recovery failed name=%s detail=%s"
+                p.name
+                recovery;
+              e ^ "; " ^ recovery
+        in
         Progress.stop_tracking task_id;
-        tool_result_error e
+        tool_result_error detail
       | Ok () ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
-        let launch_outcome = start_keepalive ctx meta in
+        let launch_gate = create_launch_gate () in
+        let launch_outcome =
+          start_keepalive_under_admission
+            ~launch_gate
+            ~durable_meta_bootstrap:Durable_meta_already_committed
+            permit
+            ctx
+            committed_meta
+        in
         (match launch_outcome with
          | Keepalive_started _ ->
-        Progress.Tracker.complete tracker ~message:"Keeper created" ();
-        Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-        let json = `Assoc [
-          ("name", `String meta.name);
-          ("agent_name", `String meta.agent_name);
-          ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-          ("generation", `Int meta.runtime.nonce);
-          ("instructions", `String meta.instructions);
-          ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
-          ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
-        ] in
-        tool_result_ok_data json
+        commit_launch_gate launch_gate;
+        (match
+           Keeper_runtime_meta_transaction.complete_forward
+             permit
+             ctx.config
+             runtime_meta_intent
+         with
+         | Error failure ->
+           Progress.stop_tracking task_id;
+           tool_result_error
+             ("keeper creation committed but runtime/meta authority cleanup \
+               failed: "
+              ^ Keeper_runtime_meta_transaction.recovery_failure_to_string
+                  failure)
+         | Ok () ->
+           Progress.Tracker.complete tracker ~message:"Keeper created" ();
+           Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+           let json = `Assoc [
+             ("name", `String meta.name);
+             ("agent_name", `String meta.agent_name);
+             ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+             ("generation", `Int meta.runtime.nonce);
+             ("instructions", `String meta.instructions);
+             ("proactive_enabled", `Bool meta.proactive.enabled);
+             ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
+             ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
+           ] in
+           tool_result_ok_data json)
          | ( Keepalive_already_registered _
            | Keepalive_lifecycle_denied _
+           | Keepalive_transaction_admission_denied _
            | Keepalive_identity_unrepairable
            | Keepalive_registration_rejected _
            | Keepalive_fiber_start_rejected _
            | Keepalive_lane_ownership_lost
            | Keepalive_fork_rejected _ ) as rejected ->
+           abort_launch_gate launch_gate;
+           let cleanup_errors = ref [] in
+           (match Keeper_registry.get ~base_path:ctx.config.base_path p.name with
+            | Some entry
+              when Keeper_id.Trace_id.equal
+                     entry.meta.runtime.trace_id
+                     meta.runtime.trace_id
+                   && Int.equal entry.meta.runtime.nonce meta.runtime.nonce ->
+              request_entry_stop entry;
+              let _lane_exit = Keeper_lane.await_exit entry.lane in
+              let _terminal = Eio.Promise.await entry.done_p in
+              (match Keeper_registry.unregister_exact entry with
+               | Keeper_registry.Exact_unregistered
+               | Keeper_registry.Exact_entry_missing -> ()
+               | Keeper_registry.Exact_entry_replaced ->
+                 cleanup_errors :=
+                   "candidate registry entry was replaced during rollback"
+                   :: !cleanup_errors
+               | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+                 cleanup_errors :=
+                   ("candidate registry rollback was reserved: "
+                    ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+                   :: !cleanup_errors)
+             | Some _ | None -> ());
+             (match settle_create_state () with
+              | Ok `Rolled_back -> ()
+              | Ok `Forward ->
+                cleanup_errors :=
+                  "launch failed; exact candidate create state retained"
+                  :: !cleanup_errors
+              | Error detail ->
+                Log.Keeper.error
+                  "create_keeper launch recovery failed name=%s detail=%s"
+                  p.name
+                  detail;
+                cleanup_errors := detail :: !cleanup_errors);
            Progress.stop_tracking task_id;
+           let cleanup_detail =
+             match List.rev !cleanup_errors with
+             | [] -> ""
+             | errors ->
+               "; recovery failed: " ^ String.concat "; " errors
+           in
            tool_result_error
              (Printf.sprintf
-                "keeper metadata was created but lane launch failed: %s"
-                (start_keepalive_outcome_to_string rejected))))
+                "keeper creation lane launch failed: %s%s"
+                (start_keepalive_outcome_to_string rejected)
+                cleanup_detail))))
+;;
+
+let create_keeper_admitted permit ctx p =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ctx.config
+      p.name
+      (fun () -> create_keeper_admitted_body permit ctx p)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    tool_result_error "keeper creation lost durable lifecycle admission"
+;;
+
+let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      ctx.config
+      ~keeper_name:p.name
+      (fun permit -> create_keeper_admitted permit ctx p)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention (result, failure) ->
+    Log.Keeper.error
+      "keeper creation lifecycle admission release requires attention \
+       keeper=%s failure=%s"
+      p.name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .authority_failure_to_wire
+         failure);
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+    let detail =
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+        reason
+    in
+    Log.Keeper.warn
+      "keeper creation blocked by durable lifecycle authority keeper=%s \
+       reason=%s"
+      p.name
+      detail;
+    tool_result_error detail
+;;

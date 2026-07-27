@@ -728,68 +728,22 @@ let degraded_rotation_after_recoverable_error
             a fresh attempt; this boundary never invents a timed retry cycle. *)
          None)
 
-(** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
-    provider refused the request body itself (malformed payload, orphan
-    tool-call residues), so same-turn retry is futile.  Also matches legacy
-    string-rendered ["Invalid request"] / ["Bad Request"] messages.
-
-    Drift boundary: the typed arm is authoritative.  The string arms exist
-    for string-rendered shapes of the same condition; the only rendering the
-    pinned SDK produces with one of these prefixes is
-    [Llm_provider.Retry.error_message (InvalidRequest _)] =
-    ["Invalid request (%s): %s"] (oas lib/llm_provider/retry.ml), whose
-    classification shape is produced by [Llm_provider.Retry.classify_error]
-    for HTTP 400/422.  At the pin no [sdk_error] rendering starts with
-    ["Bad Request"] — that arm is a defensive legacy shape.
-    [test_keeper_invalid_request_auto_recover.ml] pins the SDK
-    classification+rendering shape so an SDK drift fails the test instead of
-    silently deadening the matcher.
-
-    A third arm matched ["oas-ollama_cloud"] with [String.contains msg '4'].
-    Removed: it named a provider inside role code, which the
-    runtime-indifference spec forbids, and it matched nothing — that string
-    occurs nowhere in the pinned SDK's lib, and both this docstring and the
-    drift-guard test already recorded it as having no producer.  The digit
-    test was also far looser than the "4xx" it read as, since it accepted a 4
-    anywhere in the message.  ["Bad Request"] is kept: the same sentence calls
-    it producerless, but it is a generic HTTP status phrase rather than a
-    provider identity, so removing it would be a separate judgment about
-    defensive code on weaker evidence than this one. *)
-let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
+(** [true] only for the typed API-side 400 rejection. Rendered provider text
+    carries no recovery authority. *)
+let is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool = function
   | Agent_sdk.Error.Api (InvalidRequest _) -> true
-  | _ ->
-    let msg = Agent_sdk.Error.to_string err in
-    let has_prefix str prefix =
-      let len_p = String.length prefix in
-      String.length str >= len_p && String.sub str 0 len_p = prefix
-    in
-    has_prefix msg "Invalid request" || has_prefix msg "Bad Request"
+  | _ -> false
 
 (** [true] when a structured error indicates context overflow. *)
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
   | Agent_sdk.Error.Api (InputCapacity _) -> false
-  | Agent_sdk.Error.Agent (UnrecognizedStopReason { reason = "model_context_window_exceeded"; _ }) -> true
-  | _ ->
-    let msg = Agent_sdk.Error.to_string err in
-    (match String.split_on_char ':' msg with
-     | "Context overflow" :: _ -> true
-     | _ ->
-       let contains_substring str sub =
-         let len_s = String.length str in
-         let len_sub = String.length sub in
-         if len_sub > len_s then false
-         else
-           let found = ref false in
-           for i = 0 to len_s - len_sub do
-             if not !found && String.sub str i len_sub = sub then found := true
-           done;
-           !found
-       in
-       contains_substring msg "model_context_window_exceeded"
-       || contains_substring msg "Context overflow")
+  | Agent_sdk.Error.Agent
+      (UnrecognizedStopReason
+         { reason = "model_context_window_exceeded"; _ }) ->
+      true
+  | _ -> false
 
 (* Invariant for this predicate: the exemption gate is
    [Keeper_unified_turn_failure.account_failure_counting].  When it returns

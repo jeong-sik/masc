@@ -4,7 +4,22 @@
     There are no timing thresholds: a participant either reaches the protected
     transition or remains blocked until the owning Keeper lane releases it. *)
 
-module Persistence = Keeper_event_queue_persistence
+module Persistence_source = Keeper_event_queue_persistence
+module Persistence = struct
+  include Persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+
+  let load_pending ~base_path ~keeper_name =
+    match load_pending_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
 module Queue = Keeper_event_queue
 
 let rec rm_rf path =

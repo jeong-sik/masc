@@ -97,18 +97,23 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Runtime_exhausted _ ->
       Keeper_turn_disposition.Provider_error
         (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
-  | Keeper_meta_contract.Capacity_backpressure
-  | Keeper_meta_contract.Fiber_unresolved
+  | Keeper_meta_contract.Capacity_backpressure ->
+      Keeper_turn_disposition.Provider_error
+        (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
+  | Keeper_meta_contract.Fiber_unresolved ->
+      Keeper_turn_disposition.Provider_error
+        Keeper_turn_terminal_code.Fiber_unresolved
   | Keeper_meta_contract.Sdk_context_window_exceeded
   | Keeper_meta_contract.Sdk_unrecognized_stop_reason
   | Keeper_meta_contract.Sdk_guardrail_violation
   | Keeper_meta_contract.Sdk_tripwire_violation ->
-    Keeper_turn_disposition.Unknown { raw_error = "" }
+    Keeper_turn_disposition.Provider_error
+      (Keeper_turn_terminal_code.Sdk_error raw_blocker_class)
 
 let disposition_of_runtime_blocker_class raw_blocker_class =
   match Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class with
   | Some blocker_class -> disposition_of_typed_runtime_blocker_class blocker_class
-  | None -> Keeper_turn_disposition.Unknown { raw_error = "" }
+  | None -> Keeper_turn_disposition.Unknown { raw_error = "unknown_error" }
 
 let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with

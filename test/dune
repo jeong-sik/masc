@@ -1247,7 +1247,10 @@
   test_board_render_discord
   test_board_render_slack
   test_board_moderation)
- (libraries masc_test_deps masc.embedded_config bigstringaf)
+ (libraries
+  masc_test_deps
+  masc.embedded_config
+  bigstringaf)
  (deps ../bin/main_eio.exe))
 
 (test
@@ -1301,6 +1304,33 @@
  (name test_keeper_memory_os_store)
  (modules test_keeper_memory_os_store)
  (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
+
+; Independent current-schema Keeper lifecycle nonce authority.
+(test
+ (name test_keeper_lifecycle_nonce)
+ (modules
+  test_keeper_lifecycle_nonce
+  test_keeper_lifecycle_nonce_admission
+  test_keeper_lifecycle_nonce_support)
+ (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
+
+; Exact current-schema Keeper-keyed shutdown generation floor.
+(test
+ (name test_keeper_shutdown_generation_floor)
+ (modules test_keeper_shutdown_generation_floor)
+ (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
+
+; Immutable binding-complete dead-Keeper revival payload proof.
+(test
+ (name test_keeper_dead_revival_payload)
+ (modules
+  test_keeper_dead_revival_payload
+  test_keeper_dead_revival_payload_codec
+  test_keeper_dead_revival_payload_inventory
+  test_keeper_dead_revival_payload_storage_create
+  test_keeper_dead_revival_payload_storage_read
+  test_keeper_dead_revival_payload_support)
+ (libraries alcotest digestif fs_compat masc_test_deps eio_main unix yojson))
 
 ; Provider-neutral Memory OS Librarian exact-output composition proof.
 (test

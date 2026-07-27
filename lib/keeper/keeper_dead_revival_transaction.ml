@@ -1,6 +1,228 @@
 open Keeper_meta_contract
 open Keeper_types_profile
 
+module Head = Fs_compat.Capability_head
+module Payload = Keeper_dead_revival_payload
+
+exception Injected_durable_publication_settlement_warning
+exception Injected_launch_publication_settlement_warning
+exception Injected_launch_publication_unchanged
+exception Injected_launch_publication_indeterminate
+exception Injected_reserved_post_publication_failure
+
+type boundary_hooks =
+  { after_journal_write : unit -> unit }
+
+let boundary_hooks_key : boundary_hooks Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let reserved_publication_failure_key : unit Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+type cleanup_direction =
+  [ `Forward
+  | `Rollback
+  ]
+
+type cleanup_boundary_hooks =
+  { after_cleanup_pending : cleanup_direction -> string option
+  ; after_payload_delete : cleanup_direction -> string option
+  }
+
+let cleanup_boundary_hooks_key : cleanup_boundary_hooks Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let final_clear_failure_hook : (unit -> string option) Atomic.t =
+  Atomic.make (fun () -> None)
+;;
+
+let before_recovery_claim_hook : (unit -> unit) Atomic.t =
+  Atomic.make (fun () -> ())
+;;
+
+let durable_compare_and_swap_hook =
+  Atomic.make Head.compare_and_swap
+;;
+
+let launch_compare_and_swap_hook =
+  Atomic.make Head.compare_and_swap
+;;
+
+let launch_publication_reread_attention_key : string Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let after_launch_publication_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let fd_backed_parent_opening_key : unit Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let with_head_parent parent fn =
+  match Eio.Fiber.get fd_backed_parent_opening_key with
+  | Some () -> Eio.Path.with_open_dir parent fn
+  | None -> fn parent
+;;
+
+let invoke_after_journal_write_hook () =
+  match Eio.Fiber.get boundary_hooks_key with
+  | None -> ()
+  | Some hooks -> hooks.after_journal_write ()
+;;
+
+let invoke_after_cleanup_pending_hook direction =
+  match Eio.Fiber.get cleanup_boundary_hooks_key with
+  | None -> None
+  | Some hooks -> hooks.after_cleanup_pending direction
+;;
+
+let invoke_after_payload_delete_hook direction =
+  match Eio.Fiber.get cleanup_boundary_hooks_key with
+  | None -> None
+  | Some hooks -> hooks.after_payload_delete direction
+;;
+
+let invoke_final_clear_failure_hook () =
+  (Atomic.get final_clear_failure_hook) ()
+;;
+
+let invoke_before_recovery_claim_hook () =
+  (Atomic.get before_recovery_claim_hook) ()
+;;
+
+module Boundary_hooks_for_testing = struct
+  let with_boundary_hooks
+        ?(after_journal_write = fun () -> ())
+        fn
+    =
+    Eio.Fiber.with_binding
+      boundary_hooks_key
+      { after_journal_write }
+      fn
+  ;;
+
+  let with_reserved_publication_failure fn =
+    Eio.Fiber.with_binding reserved_publication_failure_key () fn
+  ;;
+
+  let with_cleanup_boundary_hooks
+        ?(after_cleanup_pending = fun _ -> None)
+        ?(after_payload_delete = fun _ -> None)
+        fn
+    =
+    Eio.Fiber.with_binding
+      cleanup_boundary_hooks_key
+      { after_cleanup_pending; after_payload_delete }
+      fn
+  ;;
+
+  let with_final_clear_failure ~detail fn =
+    let previous =
+      Atomic.exchange final_clear_failure_hook (fun () -> Some detail)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set final_clear_failure_hook previous)
+      fn
+  ;;
+
+  let with_recovery_claim_hook ~before_recovery_claim fn =
+    let previous =
+      Atomic.exchange before_recovery_claim_hook before_recovery_claim
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set before_recovery_claim_hook previous)
+      fn
+  ;;
+
+  let with_durable_publication_settlement_warning fn =
+    let hooks =
+      Head.For_testing.hooks
+        ~on_resource_settlement:(fun () ->
+          raise Injected_durable_publication_settlement_warning)
+        ()
+    in
+    let previous =
+      Atomic.exchange
+        durable_compare_and_swap_hook
+        (Head.For_testing.compare_and_swap hooks)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set durable_compare_and_swap_hook previous)
+      fn
+  ;;
+
+  let with_launch_publication_settlement_warning fn =
+    let hooks =
+      Head.For_testing.hooks
+        ~on_resource_settlement:(fun () ->
+          raise Injected_launch_publication_settlement_warning)
+        ()
+    in
+    let previous =
+      Atomic.exchange
+        launch_compare_and_swap_hook
+        (Head.For_testing.compare_and_swap hooks)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set launch_compare_and_swap_hook previous)
+      fn
+  ;;
+
+  let with_launch_publication_unchanged fn =
+    let hooks =
+      Head.For_testing.hooks
+        ~before_rename:(fun () ->
+          raise Injected_launch_publication_unchanged)
+        ()
+    in
+    let previous =
+      Atomic.exchange
+        launch_compare_and_swap_hook
+        (Head.For_testing.compare_and_swap hooks)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set launch_compare_and_swap_hook previous)
+      fn
+  ;;
+
+  let with_launch_publication_indeterminate fn =
+    let hooks =
+      Head.For_testing.hooks
+        ~after_rename:(fun () ->
+          raise Injected_launch_publication_indeterminate)
+        ()
+    in
+    let previous =
+      Atomic.exchange
+        launch_compare_and_swap_hook
+        (Head.For_testing.compare_and_swap hooks)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set launch_compare_and_swap_hook previous)
+      fn
+  ;;
+
+  let with_launch_publication_reread_attention ~detail fn =
+    Eio.Fiber.with_binding launch_publication_reread_attention_key detail fn
+  ;;
+
+  let with_after_launch_publication ~after_launch_publication fn =
+    Eio.Fiber.with_binding
+      after_launch_publication_key
+      after_launch_publication
+      fn
+  ;;
+
+  let with_fd_backed_parent_opening fn =
+    Eio.Fiber.with_binding fd_backed_parent_opening_key () fn
+  ;;
+end
+
 type registry_conflict =
   | Registry_phase_conflict of Keeper_state_machine.phase
   | Registry_identity_conflict of
@@ -19,13 +241,42 @@ type rollback_error =
   | Rollback_meta_payload_changed
   | Rollback_meta_write_failed of string
   | Rollback_registry_occupied of Keeper_registry.registry_entry
-  | Rollback_registry_invalid of Keeper_registry.registry_entry_validation_error
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
-  | Rollback_journal_delete_failed of string
+  | Rollback_registry_admission_denied
+  | Rollback_payload_delete_failed of Payload.error
+  | Rollback_journal_clear_failed of string
+  | Rollback_runtime_assignment_failed of string
+
+type payload_operation =
+  | Payload_prepare
+  | Payload_create
+  | Payload_verify
+  | Payload_delete
 
 type error =
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
+  | Nonce_allocation_failed of Keeper_lifecycle_nonce.error
+  | Journal_conflict of string
+  | Journal_ownership_changed of string
+  | Journal_publication_indeterminate of Head.failure
+  | Journal_published_with_failure of Head.failure
+  | Journal_published_with_warnings of
+      { evidence : Head.publication_evidence
+      ; warnings : Head.settlement_warning list
+      }
+  | Journal_read_settlement_failed of Head.settlement_warning list
   | Journal_write_failed of string
+  | Runtime_assignment_failed of string
+  | Payload_operation_failed of
+      { operation : payload_operation
+      ; failure : Payload.error
+      }
+  | Transaction_lock_failed of File_lock_eio.durable_lock_error
+  | Post_commit_cleanup_required of
+      { committed : keeper_meta
+      ; entry : Keeper_registry.registry_entry
+      ; cleanup_error : error
+      }
   | Durable_snapshot_missing
   | Durable_snapshot_changed
   | Registry_conflict of registry_conflict
@@ -40,23 +291,46 @@ type error =
 type success =
   { meta : keeper_meta
   ; entry : Keeper_registry.registry_entry
-  ; journal_cleanup_pending : string option
   }
+
+type replacement_publication =
+  | Replacement_allocated of
+      Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness
+  | Replacement_recovered of
+      Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness
+
+type rollback_origin =
+  | Rollback_from_reserved
+  | Rollback_from_durable_committed
 
 type journal_stage =
   | Reserved
   | Durable_committed
   | Launch_committed
+  | Rollback_reserved
+  | Rollback_durable_committed
+  | Forward_cleanup_pending
+  | Rollback_cleanup_pending of rollback_origin
+  | Cleared
 
 type journal =
-  { owner_id : string
+  { transaction_id : string
+  ; owner_id : string
   ; keeper_name : string
   ; expected_trace_id : Keeper_id.Trace_id.t
   ; expected_generation : int
-  ; original : keeper_meta
-  ; candidate : keeper_meta
+  ; payload_ref : Payload.immutable_ref
   ; stage : journal_stage
   }
+
+type cleared_journal =
+  { transaction_id : string
+  ; keeper_name : string
+  }
+
+type journal_row =
+  | Active_journal of journal
+  | Cleared_tombstone of cleared_journal
 
 type recovery_summary =
   { recovered : int
@@ -68,26 +342,144 @@ let journal_dir config =
   Filename.concat (Workspace.masc_root_dir config) "keeper-lifecycle-transactions"
 ;;
 
-let journal_path config keeper_name =
-  Filename.concat (journal_dir config) (keeper_name ^ ".json")
+let journal_schema = "masc.keeper-dead-revival-journal.v3"
+let head_entropy_bytes = 32 * 33
+
+let sha256 value =
+  Digestif.SHA256.(to_hex (digest_string value))
+;;
+
+let length_delimited value =
+  Printf.sprintf "%d:%s" (String.length value) value
+;;
+
+let journal_leaf keeper_name =
+  "revival-"
+  ^ sha256
+      ("keeper-dead-revival-journal-leaf-v1\000"
+       ^ length_delimited keeper_name)
+  ^ ".json"
+;;
+
+let journal_transaction_id
+      ~owner_id
+      ~keeper_name
+      ~expected_trace_id
+      ~expected_generation
+      ~candidate_nonce
+  =
+  [ "keeper-dead-revival-transaction-v1"
+  ; length_delimited owner_id
+  ; length_delimited keeper_name
+  ; length_delimited
+      (Keeper_id.Trace_id.to_string expected_trace_id)
+  ; string_of_int expected_generation
+  ; string_of_int candidate_nonce
+  ]
+  |> String.concat "\000"
+  |> sha256
+;;
+
+let journal_stage_to_json = function
+  | Reserved -> `Assoc [ "reserved", `Bool true ]
+  | Durable_committed -> `Assoc [ "durable_committed", `Bool true ]
+  | Launch_committed -> `Assoc [ "launch_committed", `Bool true ]
+  | Rollback_reserved -> `Assoc [ "rollback_reserved", `Bool true ]
+  | Rollback_durable_committed ->
+    `Assoc [ "rollback_durable_committed", `Bool true ]
+  | Forward_cleanup_pending ->
+    `Assoc [ "forward_cleanup_pending", `Bool true ]
+  | Rollback_cleanup_pending Rollback_from_reserved ->
+    `Assoc
+      [ ( "rollback_cleanup_pending"
+        , `Assoc [ "from_reserved", `Bool true ] )
+      ]
+  | Rollback_cleanup_pending Rollback_from_durable_committed ->
+    `Assoc
+      [ ( "rollback_cleanup_pending"
+        , `Assoc [ "from_durable_committed", `Bool true ] )
+      ]
+  | Cleared -> `Assoc [ "cleared", `Bool true ]
 ;;
 
 let journal_to_json journal =
   let stage =
     match journal.stage with
-    | Reserved -> `Assoc [ "reserved", `Bool true ]
-    | Durable_committed -> `Assoc [ "durable_committed", `Bool true ]
-    | Launch_committed -> `Assoc [ "launch_committed", `Bool true ]
+    | Cleared ->
+      invalid_arg "active keeper revival journal cannot have Cleared stage"
+    | stage -> journal_stage_to_json stage
   in
   `Assoc
-    [ "owner_id", `String journal.owner_id
+    [ "schema", `String journal_schema
+    ; "transaction_id", `String journal.transaction_id
+    ; "owner_id", `String journal.owner_id
     ; "keeper_name", `String journal.keeper_name
     ; "expected_trace_id", `String (Keeper_id.Trace_id.to_string journal.expected_trace_id)
     ; "expected_generation", `Int journal.expected_generation
-    ; "original", Keeper_meta_json.meta_to_json journal.original
-    ; "candidate", Keeper_meta_json.meta_to_json journal.candidate
+    ; "payload_ref", Payload.immutable_ref_to_json journal.payload_ref
     ; "stage", stage
     ]
+;;
+
+let cleared_journal_to_json tombstone =
+  `Assoc
+    [ "schema", `String journal_schema
+    ; "transaction_id", `String tombstone.transaction_id
+    ; "keeper_name", `String tombstone.keeper_name
+    ; "stage", journal_stage_to_json Cleared
+    ]
+;;
+
+let journal_row_to_json = function
+  | Active_journal journal -> journal_to_json journal
+  | Cleared_tombstone tombstone -> cleared_journal_to_json tombstone
+;;
+
+let journal_to_bytes journal =
+  Yojson.Safe.to_string (journal_to_json journal)
+;;
+
+let journal_row_to_bytes row =
+  Yojson.Safe.to_string (journal_row_to_json row)
+;;
+
+let exact_fields ~kind expected fields =
+  let expected = List.sort String.compare expected in
+  let observed =
+    List.map fst fields
+    |> List.sort String.compare
+  in
+  if List.equal String.equal expected observed
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "%s fields differ expected=[%s] observed=[%s]"
+         kind
+         (String.concat "," expected)
+         (String.concat "," observed))
+;;
+
+let exact_active_journal_fields fields =
+  exact_fields
+    ~kind:"active journal"
+    [ "schema"
+    ; "transaction_id"
+    ; "owner_id"
+    ; "keeper_name"
+    ; "expected_trace_id"
+    ; "expected_generation"
+    ; "payload_ref"
+    ; "stage"
+    ]
+    fields
+;;
+
+let exact_cleared_journal_fields fields =
+  exact_fields
+    ~kind:"cleared journal"
+    [ "schema"; "transaction_id"; "keeper_name"; "stage" ]
+    fields
 ;;
 
 let required_string key fields =
@@ -95,6 +487,20 @@ let required_string key fields =
   | Some (`String value) when not (String.equal (String.trim value) "") -> Ok value
   | Some _ -> Error (Printf.sprintf "journal field %s must be a non-empty string" key)
   | None -> Error (Printf.sprintf "journal field %s is missing" key)
+;;
+
+let required_sha256 key fields =
+  let ( let* ) = Result.bind in
+  let* value = required_string key fields in
+  match Digestif.SHA256.consistent_of_hex_opt value with
+  | Some digest
+    when String.equal value (Digestif.SHA256.to_hex digest) ->
+    Ok value
+  | Some _ | None ->
+    Error
+      (Printf.sprintf
+         "journal field %s must be a lowercase SHA-256"
+         key)
 ;;
 
 let required_int key fields =
@@ -109,57 +515,819 @@ let required_stage fields =
   | Some (`Assoc [ ("reserved", `Bool true) ]) -> Ok Reserved
   | Some (`Assoc [ ("durable_committed", `Bool true) ]) -> Ok Durable_committed
   | Some (`Assoc [ ("launch_committed", `Bool true) ]) -> Ok Launch_committed
+  | Some (`Assoc [ ("rollback_reserved", `Bool true) ]) ->
+    Ok Rollback_reserved
+  | Some (`Assoc [ ("rollback_durable_committed", `Bool true) ]) ->
+    Ok Rollback_durable_committed
+  | Some (`Assoc [ ("forward_cleanup_pending", `Bool true) ]) ->
+    Ok Forward_cleanup_pending
+  | Some
+      (`Assoc
+        [ ( "rollback_cleanup_pending"
+          , `Assoc [ ("from_reserved", `Bool true) ] )
+        ]) ->
+    Ok (Rollback_cleanup_pending Rollback_from_reserved)
+  | Some
+      (`Assoc
+        [ ( "rollback_cleanup_pending"
+          , `Assoc [ ("from_durable_committed", `Bool true) ] )
+        ]) ->
+    Ok
+      (Rollback_cleanup_pending
+         Rollback_from_durable_committed)
+  | Some (`Assoc [ ("cleared", `Bool true) ]) -> Ok Cleared
   | Some _ -> Error "journal stage must contain exactly one known constructor"
   | None -> Error "journal field stage is missing"
 ;;
 
-let required_meta key fields =
+let required_payload_ref key fields =
   match List.assoc_opt key fields with
   | None -> Error (Printf.sprintf "journal field %s is missing" key)
-  | Some json -> Keeper_meta_json.meta_of_json json
+  | Some json ->
+    Payload.immutable_ref_of_json json
+    |> Result.map_error Payload.error_to_string
 ;;
 
 let journal_of_json = function
   | `Assoc fields ->
     let ( let* ) = Result.bind in
-    let* owner_id = required_string "owner_id" fields in
-    let* keeper_name = required_string "keeper_name" fields in
-    let* trace_id_raw = required_string "expected_trace_id" fields in
-    let* expected_trace_id = Keeper_id.Trace_id.of_string trace_id_raw in
-    let* expected_generation = required_int "expected_generation" fields in
-    let* original = required_meta "original" fields in
-    let* candidate = required_meta "candidate" fields in
+    let* schema = required_string "schema" fields in
     let* stage = required_stage fields in
-    Ok
-      { owner_id
-      ; keeper_name
-      ; expected_trace_id
-      ; expected_generation
-      ; original
-      ; candidate
-      ; stage
-      }
+    if not (String.equal schema journal_schema)
+    then Error ("unsupported keeper lifecycle journal schema: " ^ schema)
+    else (
+      match stage with
+      | Cleared ->
+        let* () = exact_cleared_journal_fields fields in
+        let* transaction_id = required_sha256 "transaction_id" fields in
+        let* keeper_name = required_string "keeper_name" fields in
+        Ok (Cleared_tombstone { transaction_id; keeper_name })
+      | ( Reserved
+        | Durable_committed
+        | Launch_committed
+        | Rollback_reserved
+        | Rollback_durable_committed
+        | Forward_cleanup_pending
+        | Rollback_cleanup_pending _ ) as stage ->
+        let* () = exact_active_journal_fields fields in
+        let* transaction_id = required_sha256 "transaction_id" fields in
+        let* owner_id = required_string "owner_id" fields in
+        let* keeper_name = required_string "keeper_name" fields in
+        let* trace_id_raw = required_string "expected_trace_id" fields in
+        let* expected_trace_id = Keeper_id.Trace_id.of_string trace_id_raw in
+        let* expected_generation = required_int "expected_generation" fields in
+        let* () =
+          if expected_generation > 0
+          then Ok ()
+          else Error "journal field expected_generation must be positive"
+        in
+        let* payload_ref = required_payload_ref "payload_ref" fields in
+        let* shard =
+          Payload.authority_shard_for_keeper ~keeper_name
+          |> Result.map_error Payload.error_to_string
+        in
+        let* transaction_leaf =
+          Payload.transaction_leaf_for_id ~transaction_id
+          |> Result.map_error Payload.error_to_string
+        in
+        if
+          not
+            (String.equal
+               (Payload.immutable_ref_authority_leaf payload_ref)
+               (Payload.authority_shard_leaf shard))
+        then Error "journal payload authority differs from its keeper binding"
+        else if
+          not
+            (String.equal
+               (Payload.immutable_ref_transaction_leaf payload_ref)
+               transaction_leaf)
+        then Error "journal payload slot differs from its transaction binding"
+        else
+          Ok
+            (Active_journal
+               { transaction_id
+               ; owner_id
+               ; keeper_name
+               ; expected_trace_id
+               ; expected_generation
+               ; payload_ref
+               ; stage
+               }))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "keeper lifecycle journal must be a JSON object"
 ;;
 
-let save_journal config journal =
-  let dir = journal_dir config in
-  let ensured_dir = Keeper_fs.ensure_dir dir in
-  let path = Filename.concat ensured_dir (journal.keeper_name ^ ".json") in
-  Keeper_fs.save_json_atomic path (journal_to_json journal)
+let journal_of_bytes raw =
+  try
+    Result.bind
+      (journal_of_json (Yojson.Safe.from_string raw))
+      (fun row ->
+         if String.equal raw (journal_row_to_bytes row)
+         then Ok row
+         else Error "journal row is not exact canonical JSON")
+  with
+  | Yojson.Json_error detail -> Error detail
 ;;
 
-let delete_journal config keeper_name =
-  let path = journal_path config keeper_name in
-  if not (Fs_compat.file_exists path)
-  then Ok ()
+let reraise_fatal exception_ backtrace =
+  match exception_ with
+  | Out_of_memory | Stack_overflow | Sys.Break ->
+    Printexc.raise_with_backtrace exception_ backtrace
+  | _ -> ()
+;;
+
+let revival_authority_lock_path config authority_leaf =
+  try
+    let dir = Keeper_fs.ensure_dir (journal_dir config) in
+    let lock_leaf =
+      "authority-"
+      ^ sha256
+          ("keeper-dead-revival-authority-lock-v1\000"
+           ^ length_delimited authority_leaf)
+      ^ ".lock"
+    in
+    Ok (Filename.concat dir lock_leaf)
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal exception_ backtrace;
+    Error
+      (Journal_write_failed
+         ("transaction lock directory preparation failed: "
+          ^ Printexc.to_string exception_))
+;;
+
+let journal_parent config =
+  try
+    let dir = Keeper_fs.ensure_dir (journal_dir config) in
+    match Fs_compat.get_fs_opt () with
+    | None -> Error (Journal_write_failed "filesystem capability is unavailable")
+    | Some fs -> Ok Eio.Path.(fs / dir)
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal exception_ backtrace;
+    Error
+      (Journal_write_failed
+         ("journal directory preparation failed: "
+          ^ Printexc.to_string exception_))
+;;
+
+let journal_entropy () =
+  try
+    Ok (Eio.Flow.string_source (Crypto_rng.generate head_entropy_bytes))
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal exception_ backtrace;
+    Error
+      (Journal_write_failed
+         ("journal entropy source failed: " ^ Printexc.to_string exception_))
+;;
+
+let head_failure_to_string (failure : Head.failure) =
+  match failure.error with
+  | Head.Invalid_leaf detail -> "invalid journal leaf: " ^ detail
+  | Invalid_row detail -> "invalid journal row: " ^ detail
+  | Busy -> "journal authority is busy"
+  | Conflict _ -> "journal authority changed concurrently"
+  | Corrupt_lock detail -> "corrupt journal lock: " ^ detail
+  | Corrupt_head detail -> "corrupt journal HEAD: " ^ detail
+  | Unsupported detail -> "unsupported journal filesystem operation: " ^ detail
+  | Io_error diagnostic -> "journal I/O failed: " ^ diagnostic.detail
+;;
+
+let settlement_warning_detail count =
+  Printf.sprintf "journal authority settled with %d warning(s)" count
+;;
+
+let journal_row_keeper_name = function
+  | Active_journal journal -> journal.keeper_name
+  | Cleared_tombstone tombstone -> tombstone.keeper_name
+;;
+
+let journal_row_transaction_id = function
+  | Active_journal journal -> journal.transaction_id
+  | Cleared_tombstone tombstone -> tombstone.transaction_id
+;;
+
+let read_journal_leaf ~invalid config ~leaf ~expected_keeper_name =
+  match journal_parent config with
+  | Error error -> Error error
+  | Ok parent ->
+    (match journal_entropy () with
+     | Error error -> Error error
+     | Ok secure_random ->
+       (match
+          with_head_parent parent (fun parent ->
+            Head.read
+              ~secure_random
+              ~parent
+              ~leaf)
+        with
+        | Error failure ->
+          Error (Journal_write_failed (head_failure_to_string failure))
+        | Ok snapshot ->
+          let warnings = Head.snapshot_settlement_warnings snapshot in
+          if warnings <> []
+          then
+            Error (Journal_read_settlement_failed warnings)
+          else
+            (match Head.snapshot_row snapshot with
+             | None -> Ok (parent, snapshot, None)
+             | Some raw ->
+               (match journal_of_bytes raw with
+                | Error detail -> Error (invalid detail)
+                | Ok row
+                  when not
+                         (String.equal
+                            (journal_leaf (journal_row_keeper_name row))
+                            leaf) ->
+                  Error (invalid "journal keeper binding differs from its hashed leaf")
+                | Ok row ->
+                  (match expected_keeper_name with
+                   | Some keeper_name
+                     when not
+                            (String.equal
+                               (journal_row_keeper_name row)
+                               keeper_name) ->
+                     Error (invalid "journal keeper binding differs from request")
+                   | Some _ | None -> Ok (parent, snapshot, Some row))))))
+;;
+
+let read_current_journal ~invalid config keeper_name =
+  read_journal_leaf
+    ~invalid
+    config
+    ~leaf:(journal_leaf keeper_name)
+    ~expected_keeper_name:(Some keeper_name)
+;;
+
+let publication_error ~conflict (failure : Head.failure) =
+  let detail = head_failure_to_string failure in
+  match failure.target_effect with
+  | Head.Unchanged ->
+    (match failure.error with
+     | Head.Conflict _ -> conflict detail
+     | _ -> Journal_write_failed detail)
+  | Published _ -> Journal_published_with_failure failure
+  | Publication_indeterminate _ ->
+    Journal_publication_indeterminate failure
+;;
+
+let publish_row
+      ?(compare_and_swap = Head.compare_and_swap)
+      ~conflict
+      ~parent
+      ~snapshot
+      ~row
+      ()
+  =
+  let keeper_name = journal_row_keeper_name row in
+  match journal_entropy () with
+  | Error error -> Error error
+  | Ok secure_random ->
+    (match
+       with_head_parent parent (fun parent ->
+         compare_and_swap
+           ~secure_random
+           ~parent
+           ~leaf:(journal_leaf keeper_name)
+           ~expected:(Head.snapshot_cursor snapshot)
+           ~row:(journal_row_to_bytes row))
+     with
+     | Error failure -> Error (publication_error ~conflict failure)
+     | Ok publication ->
+       let warnings = Head.publication_settlement_warnings publication in
+       if warnings = []
+       then Ok ()
+       else
+         Error
+           (Journal_published_with_warnings
+              { evidence = Head.publication_evidence publication
+              ; warnings
+              }))
+;;
+
+let same_transaction (left : journal) (right : journal) =
+  String.equal left.transaction_id right.transaction_id
+  && String.equal left.owner_id right.owner_id
+  && String.equal left.keeper_name right.keeper_name
+  && Keeper_id.Trace_id.equal
+       left.expected_trace_id
+       right.expected_trace_id
+  && Int.equal left.expected_generation right.expected_generation
+  && String.equal
+       (Payload.immutable_ref_to_bytes left.payload_ref)
+       (Payload.immutable_ref_to_bytes right.payload_ref)
+;;
+
+type durable_publication_observation =
+  | Durable_publication_rollback_from of journal_stage
+  | Durable_publication_attention of error
+
+let observe_durable_publication config (expected : journal) =
+  match
+    read_current_journal
+      ~invalid:(fun detail -> Journal_ownership_changed detail)
+      config
+      expected.keeper_name
+  with
+  | Error error -> Durable_publication_attention error
+  | Ok (_, _, None) ->
+    Durable_publication_attention
+      (Journal_ownership_changed
+         "durable publication journal authority disappeared")
+  | Ok (_, _, Some (Cleared_tombstone _)) ->
+    Durable_publication_attention
+      (Journal_ownership_changed
+         "durable publication settled to a cleared transaction")
+  | Ok (_, _, Some (Active_journal (current : journal)))
+    when not (same_transaction current expected) ->
+    Durable_publication_attention
+      (Journal_ownership_changed
+         "durable publication settled to another active transaction")
+  | Ok (_, _, Some (Active_journal (current : journal))) ->
+    (match current.stage with
+     | Reserved
+     | Durable_committed ->
+       Durable_publication_rollback_from current.stage
+     | Launch_committed
+     | Forward_cleanup_pending
+     | Rollback_reserved
+     | Rollback_durable_committed
+     | Rollback_cleanup_pending _
+     | Cleared ->
+       Durable_publication_attention
+         (Journal_ownership_changed
+            ("durable publication settled to conflicting stage "
+             ^ Yojson.Safe.to_string (journal_stage_to_json current.stage))))
+;;
+
+type launch_publication_observation =
+  | Launch_publication_committed
+  | Launch_publication_not_committed
+  | Launch_publication_attention of error
+
+let observe_launch_publication config (expected : journal) =
+  match Eio.Fiber.get launch_publication_reread_attention_key with
+  | Some detail ->
+    Launch_publication_attention (Journal_write_failed detail)
+  | None ->
+    (match
+       read_current_journal
+         ~invalid:(fun detail -> Journal_ownership_changed detail)
+         config
+         expected.keeper_name
+     with
+     | Error error -> Launch_publication_attention error
+     | Ok (_, _, None) ->
+       Launch_publication_attention
+         (Journal_ownership_changed
+            "launch publication journal authority disappeared")
+     | Ok (_, _, Some (Cleared_tombstone tombstone))
+       when String.equal tombstone.transaction_id expected.transaction_id
+            && String.equal tombstone.keeper_name expected.keeper_name ->
+       Launch_publication_committed
+     | Ok (_, _, Some (Cleared_tombstone _)) ->
+       Launch_publication_attention
+         (Journal_ownership_changed
+            "launch publication settled to another cleared transaction")
+     | Ok (_, _, Some (Active_journal (current : journal)))
+       when not (same_transaction current expected) ->
+       Launch_publication_attention
+         (Journal_ownership_changed
+            "launch publication settled to another active transaction")
+     | Ok (_, _, Some (Active_journal (current : journal))) ->
+       (match current.stage with
+        | Launch_committed
+        | Forward_cleanup_pending -> Launch_publication_committed
+        | Durable_committed -> Launch_publication_not_committed
+        | Reserved
+        | Rollback_reserved
+        | Rollback_durable_committed
+        | Rollback_cleanup_pending _
+        | Cleared ->
+          Launch_publication_attention
+            (Journal_ownership_changed
+               ("launch publication settled to conflicting stage "
+                ^ Yojson.Safe.to_string
+                    (journal_stage_to_json current.stage)))))
+;;
+
+type launch_publication_attempt =
+  | Launch_publication_not_attempted
+  | Launch_publication_in_progress
+  | Launch_publication_completed of (unit, error) result
+
+type launch_publication_reconciliation =
+  | Launch_reconciled_committed
+  | Launch_reconciled_precommit
+  | Launch_reconciliation_unresolved of error
+
+let launch_attempt_proves_commit = function
+  | Launch_publication_completed (Ok ())
+  | Launch_publication_completed
+      (Error
+        ( Journal_published_with_failure _
+        | Journal_published_with_warnings _ )) ->
+    true
+  | Launch_publication_not_attempted
+  | Launch_publication_in_progress
+  | Launch_publication_completed
+      (Error
+        ( Reservation_conflict _
+        | Nonce_allocation_failed _
+        | Journal_conflict _
+        | Journal_ownership_changed _
+        | Journal_publication_indeterminate _
+        | Journal_read_settlement_failed _
+        | Journal_write_failed _
+        | Runtime_assignment_failed _
+        | Payload_operation_failed _
+        | Transaction_lock_failed _
+        | Post_commit_cleanup_required _
+        | Durable_snapshot_missing
+        | Durable_snapshot_changed
+        | Registry_conflict _
+        | Durable_commit_failed _
+        | Durable_commit_unreadable _
+        | Launch_failed _
+        | Rollback_failed _ )) ->
+    false
+;;
+
+let reconcile_launch_publication config expected attempt =
+  let commit_proved = launch_attempt_proves_commit attempt in
+  match observe_launch_publication config expected with
+  | Launch_publication_committed -> Launch_reconciled_committed
+  | Launch_publication_not_committed when not commit_proved ->
+    Launch_reconciled_precommit
+  | Launch_publication_not_committed ->
+    Launch_reconciliation_unresolved
+      (Journal_ownership_changed
+         "launch publication evidence conflicts with durable pre-commit authority")
+  | Launch_publication_attention _ when commit_proved ->
+    Launch_reconciled_committed
+  | Launch_publication_attention error ->
+    Launch_reconciliation_unresolved error
+;;
+
+let reserve_journal config (journal : journal) =
+  match
+    read_current_journal
+      ~invalid:(fun detail -> Journal_conflict detail)
+      config
+      journal.keeper_name
+  with
+  | Error error -> Error error
+  | Ok (_, _, Some (Active_journal existing)) ->
+    Error
+      (Journal_conflict
+         (Printf.sprintf
+            "unresolved journal transaction=%s remains stage=%s"
+            existing.transaction_id
+            (Yojson.Safe.to_string (journal_stage_to_json existing.stage))))
+  | Ok (parent, snapshot, None)
+  | Ok (parent, snapshot, Some (Cleared_tombstone _)) ->
+    let compare_and_swap =
+      match Eio.Fiber.get reserved_publication_failure_key with
+      | None -> Head.compare_and_swap
+      | Some () ->
+        let hooks =
+          Head.For_testing.hooks
+            ~after_verified:(fun () ->
+              raise Injected_reserved_post_publication_failure)
+            ()
+        in
+        Head.For_testing.compare_and_swap hooks
+    in
+    publish_row
+      ~compare_and_swap
+      ~conflict:(fun detail -> Journal_conflict detail)
+      ~parent
+      ~snapshot
+      ~row:(Active_journal journal)
+      ()
+;;
+
+let transition_journal ?compare_and_swap config ~expected_stage (journal : journal) =
+  match
+    read_current_journal
+      ~invalid:(fun detail -> Journal_ownership_changed detail)
+      config
+      journal.keeper_name
+  with
+  | Error error -> Error error
+  | Ok (_, _, None) ->
+    Error (Journal_ownership_changed "journal authority is missing")
+  | Ok (_, _, Some (Cleared_tombstone _)) ->
+    Error (Journal_ownership_changed "journal authority is already cleared")
+  | Ok (_, _, Some (Active_journal current))
+    when current.stage <> expected_stage
+         || not (same_transaction current journal) ->
+    Error
+      (Journal_ownership_changed
+         "journal authority is not the expected transaction stage")
+  | Ok (parent, snapshot, Some (Active_journal _)) ->
+    publish_row
+      ?compare_and_swap
+      ~conflict:(fun detail -> Journal_ownership_changed detail)
+      ~parent
+      ~snapshot
+      ~row:(Active_journal journal)
+      ()
+;;
+
+let save_journal config (journal : journal) =
+  match journal.stage with
+  | Reserved -> reserve_journal config journal
+  | Durable_committed ->
+    transition_journal
+      ~compare_and_swap:(Atomic.get durable_compare_and_swap_hook)
+      config
+      ~expected_stage:Reserved
+      journal
+  | Launch_committed ->
+    transition_journal config ~expected_stage:Durable_committed journal
+  | Rollback_reserved | Rollback_durable_committed ->
+    Error
+      (Journal_write_failed
+         "rollback claim stages are owned by startup recovery")
+  | Forward_cleanup_pending | Rollback_cleanup_pending _ ->
+    Error
+      (Journal_write_failed
+         "cleanup claim stages require an exact predecessor")
+  | Cleared ->
+    Error (Journal_write_failed "Cleared is not a publishable revival stage")
+;;
+
+let save_launch_journal config journal =
+  transition_journal
+    ~compare_and_swap:(Atomic.get launch_compare_and_swap_hook)
+    config
+    ~expected_stage:Durable_committed
+    journal
+;;
+
+let clear_journal config ~expected_stage (journal : journal) =
+  match
+    read_current_journal
+      ~invalid:(fun detail -> Journal_ownership_changed detail)
+      config
+      journal.keeper_name
+  with
+  | Error error -> Error error
+  | Ok (_, _, None) ->
+    Error (Journal_ownership_changed "journal authority disappeared before clear")
+  | Ok (_, _, Some (Cleared_tombstone tombstone))
+    when String.equal tombstone.transaction_id journal.transaction_id
+         && String.equal tombstone.keeper_name journal.keeper_name ->
+    Ok ()
+  | Ok (_, _, Some (Cleared_tombstone _)) ->
+    Error
+      (Journal_ownership_changed
+         "cleared journal authority belongs to a different transaction")
+  | Ok (_, _, Some (Active_journal current))
+    when not (same_transaction current journal) ->
+    Error
+      (Journal_ownership_changed
+         "journal authority belongs to a different transaction")
+  | Ok (_, _, Some (Active_journal current))
+    when current.stage <> expected_stage ->
+    Error
+      (Journal_ownership_changed
+         "journal authority advanced beyond the expected clear stage")
+  | Ok (parent, snapshot, Some (Active_journal current)) ->
+    publish_row
+      ~conflict:(fun detail -> Journal_ownership_changed detail)
+      ~parent
+      ~snapshot
+      ~row:
+        (Cleared_tombstone
+           { transaction_id = current.transaction_id
+           ; keeper_name = current.keeper_name
+           })
+      ()
+;;
+
+type recovery_claim =
+  | Recovery_rollback_claimed of journal_stage * bool
+  | Recovery_forward_complete of journal_stage
+  | Recovery_already_cleared
+
+let rec claim_recovery_rollback config (journal : journal) attempts =
+  if attempts <= 0
+  then
+    Error
+      (Journal_ownership_changed
+         "journal authority did not settle while recovery claimed rollback")
   else
-    try
-      Sys.remove path;
-      Ok ()
+    match
+      read_current_journal
+        ~invalid:(fun detail -> Journal_ownership_changed detail)
+        config
+        journal.keeper_name
     with
-    | Sys_error detail -> Error detail
+    | Error error -> Error error
+    | Ok (_, _, None) ->
+      Error (Journal_ownership_changed "journal authority disappeared before claim")
+    | Ok (_, _, Some (Cleared_tombstone tombstone))
+      when String.equal tombstone.transaction_id journal.transaction_id ->
+      Ok Recovery_already_cleared
+    | Ok (_, _, Some (Cleared_tombstone _)) ->
+      Error
+        (Journal_ownership_changed
+           "journal authority belongs to a different cleared transaction")
+    | Ok (_, _, Some (Active_journal current))
+      when not (same_transaction current journal) ->
+      Error
+        (Journal_ownership_changed
+           "journal authority belongs to a different transaction")
+    | Ok (_, _, Some (Active_journal current))
+      when current.stage = Launch_committed
+           || current.stage = Forward_cleanup_pending ->
+      Ok (Recovery_forward_complete current.stage)
+    | Ok (_, _, Some (Active_journal current))
+      when current.stage = Rollback_reserved ->
+      Ok (Recovery_rollback_claimed (current.stage, false))
+    | Ok (_, _, Some (Active_journal current))
+      when current.stage = Rollback_durable_committed ->
+      Ok (Recovery_rollback_claimed (current.stage, true))
+    | Ok
+        ( _,
+          _,
+          Some
+            (Active_journal
+               ({ stage = Rollback_cleanup_pending origin; _ } as current)) ) ->
+      Ok
+        (Recovery_rollback_claimed
+           ( current.stage
+           , match origin with
+             | Rollback_from_reserved -> false
+             | Rollback_from_durable_committed -> true ))
+    | Ok (parent, snapshot, Some (Active_journal current)) ->
+      let claimed_stage, durable_committed =
+        match current.stage with
+        | Reserved -> Rollback_reserved, false
+        | Durable_committed -> Rollback_durable_committed, true
+        | Launch_committed
+        | Forward_cleanup_pending
+        | Rollback_reserved
+        | Rollback_durable_committed
+        | Rollback_cleanup_pending _
+        | Cleared ->
+          assert false
+      in
+      let claimed = { current with stage = claimed_stage } in
+      (match
+         publish_row
+           ~conflict:(fun detail -> Journal_ownership_changed detail)
+           ~parent
+           ~snapshot
+           ~row:(Active_journal claimed)
+           ()
+       with
+       | Ok () -> Ok (Recovery_rollback_claimed (claimed.stage, durable_committed))
+       | Error (Journal_ownership_changed _) ->
+         claim_recovery_rollback config journal (attempts - 1)
+       | Error error -> Error error)
+;;
+
+let make_reserved_journal ~owner_id ~original ~candidate ~payload_ref =
+  let transaction_id =
+    journal_transaction_id
+      ~owner_id
+      ~keeper_name:original.name
+      ~expected_trace_id:original.runtime.trace_id
+      ~expected_generation:original.runtime.nonce
+      ~candidate_nonce:candidate.runtime.nonce
+  in
+  { transaction_id
+  ; owner_id
+  ; keeper_name = original.name
+  ; expected_trace_id = original.runtime.trace_id
+  ; expected_generation = original.runtime.nonce
+  ; payload_ref
+  ; stage = Reserved
+  }
+;;
+
+let make_prepared_journal
+      ~runtime_transition
+      ~owner_id
+      ~original
+      ~candidate
+  =
+  let transaction_id =
+    journal_transaction_id
+      ~owner_id
+      ~keeper_name:original.name
+      ~expected_trace_id:original.runtime.trace_id
+      ~expected_generation:original.runtime.nonce
+      ~candidate_nonce:candidate.runtime.nonce
+  in
+  let ( let* ) = Result.bind in
+  let* payload =
+    Payload.make_payload
+      ~transaction_id
+      ~owner_id
+      ~keeper_name:original.name
+      ~expected_trace_id:original.runtime.trace_id
+      ~expected_generation:original.runtime.nonce
+      ~runtime_transition
+      ~original
+      ~candidate
+  in
+  let* prepared = Payload.prepare payload in
+  Ok
+    ( make_reserved_journal
+        ~owner_id
+        ~original
+        ~candidate
+        ~payload_ref:(Payload.prepared_ref prepared)
+    , prepared )
+;;
+
+let verify_payload config (journal : journal) =
+  Payload.read
+    config
+    ~expected_ref:journal.payload_ref
+    ~expected_authority_leaf:
+      (Payload.immutable_ref_authority_leaf journal.payload_ref)
+    ~transaction_id:journal.transaction_id
+    ~owner_id:journal.owner_id
+    ~keeper_name:journal.keeper_name
+    ~expected_trace_id:journal.expected_trace_id
+    ~expected_generation:journal.expected_generation
+;;
+
+module For_testing = struct
+  include Boundary_hooks_for_testing
+
+  let reserved_journal_row ~owner_id ~original ~candidate =
+    match
+      make_prepared_journal
+        ~runtime_transition:Payload.Runtime_unchanged
+        ~owner_id
+        ~original
+        ~candidate
+    with
+    | Ok (journal, _) -> journal_to_bytes journal
+    | Error failure -> invalid_arg (Payload.error_to_string failure)
+  ;;
+
+  let current_journal_row ~config ~keeper_name =
+    match
+      read_current_journal
+        ~invalid:(fun detail -> Journal_ownership_changed detail)
+        config
+        keeper_name
+    with
+    | Error error -> Error error
+    | Ok (_, _, None) -> Ok None
+    | Ok (_, _, Some row) -> Ok (Some (journal_row_to_bytes row))
+  ;;
+
+  let current_journal_stage ~config ~keeper_name =
+    match
+      read_current_journal
+        ~invalid:(fun detail -> Journal_ownership_changed detail)
+        config
+        keeper_name
+    with
+    | Error error -> Error error
+    | Ok (_, _, None) -> Ok `Missing
+    | Ok (_, _, Some (Active_journal { stage = Reserved; _ })) -> Ok `Reserved
+    | Ok (_, _, Some (Active_journal { stage = Durable_committed; _ })) ->
+      Ok `Durable_committed
+    | Ok (_, _, Some (Active_journal { stage = Launch_committed; _ })) ->
+      Ok `Launch_committed
+    | Ok (_, _, Some (Active_journal { stage = Rollback_reserved; _ })) ->
+      Ok `Rollback_reserved
+    | Ok
+        (_, _, Some (Active_journal { stage = Rollback_durable_committed; _ })) ->
+      Ok `Rollback_durable_committed
+    | Ok (_, _, Some (Active_journal { stage = Forward_cleanup_pending; _ })) ->
+      Ok `Forward_cleanup_pending
+    | Ok
+        ( _,
+          _,
+          Some
+            (Active_journal
+               { stage = Rollback_cleanup_pending _; _ }) ) ->
+      Ok `Rollback_cleanup_pending
+    | Ok (_, _, Some (Active_journal { stage = Cleared; _ })) ->
+      Error
+        (Journal_ownership_changed
+           "active journal unexpectedly carries Cleared stage")
+    | Ok (_, _, Some (Cleared_tombstone _)) -> Ok `Cleared
+  ;;
+
+end
 ;;
 
 let same_identity (a : keeper_meta) (b : keeper_meta) =
@@ -202,19 +1370,65 @@ let rollback_error_to_string = function
       "registry rollback preserved occupied lane phase=%s lane=%s"
       (Keeper_state_machine.phase_to_string entry.phase)
       (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
-  | Rollback_registry_invalid error ->
-    "registry rollback rejected original entry: "
-    ^ Keeper_registry.registry_entry_validation_error_to_string error
   | Rollback_registry_reservation_changed owner ->
     "registry rollback lost reservation ownership: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
-  | Rollback_journal_delete_failed detail -> "journal delete failed: " ^ detail
+  | Rollback_registry_admission_denied ->
+    "registry rollback lost durable lifecycle admission"
+  | Rollback_payload_delete_failed failure ->
+    "revival payload cleanup failed: " ^ Payload.error_to_string failure
+  | Rollback_journal_clear_failed detail -> "journal clear failed: " ^ detail
+  | Rollback_runtime_assignment_failed detail ->
+    "runtime assignment rollback failed: " ^ detail
 ;;
 
-let error_to_string = function
+let payload_operation_to_string = function
+  | Payload_prepare -> "prepare"
+  | Payload_create -> "create"
+  | Payload_verify -> "verify"
+  | Payload_delete -> "delete"
+;;
+
+let rec error_to_string = function
   | Reservation_conflict owner ->
     "keeper revival already owned: " ^ Keeper_lifecycle_reservation.snapshot_to_string owner
+  | Nonce_allocation_failed error ->
+    "keeper revival lifecycle nonce allocation failed: "
+    ^ Keeper_lifecycle_nonce.error_to_string error
+  | Journal_conflict detail ->
+    "keeper revival journal is already unresolved: " ^ detail
+  | Journal_ownership_changed detail ->
+    "keeper revival journal ownership changed: " ^ detail
+  | Journal_publication_indeterminate failure ->
+    "keeper revival journal publication is indeterminate: "
+    ^ head_failure_to_string failure
+  | Journal_published_with_failure failure ->
+    "keeper revival journal was published with a later failure: "
+    ^ head_failure_to_string failure
+  | Journal_published_with_warnings { warnings; _ } ->
+    "keeper revival journal was published with settlement warnings: "
+    ^ settlement_warning_detail (List.length warnings)
+  | Journal_read_settlement_failed warnings ->
+    "keeper revival journal read settled with warnings: "
+    ^ settlement_warning_detail (List.length warnings)
   | Journal_write_failed detail -> "keeper revival journal write failed: " ^ detail
+  | Runtime_assignment_failed detail ->
+    "keeper revival runtime assignment failed: " ^ detail
+  | Payload_operation_failed { operation; failure } ->
+    Printf.sprintf
+      "keeper revival payload %s failed: %s"
+      (payload_operation_to_string operation)
+      (Payload.error_to_string failure)
+  | Transaction_lock_failed failure ->
+    "keeper revival transaction lock failed: "
+    ^ File_lock_eio.durable_lock_error_to_string failure
+  | Post_commit_cleanup_required { committed; cleanup_error; _ } ->
+    Printf.sprintf
+      "keeper %s launch committed at lifecycle nonce %d but transaction cleanup \
+       requires attention: %s"
+      committed.name
+      committed.runtime.nonce
+      (error_to_string cleanup_error)
   | Durable_snapshot_missing -> "keeper durable metadata disappeared before revival commit"
   | Durable_snapshot_changed -> "keeper durable metadata changed before revival commit"
   | Registry_conflict conflict -> registry_conflict_to_string conflict
@@ -254,82 +1468,372 @@ let release_observed token keeper =
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
-let clear_candidate_registry token config journal =
+let replacement_target = function
+  | Replacement_allocated witness ->
+    Keeper_lifecycle_nonce.witness_target witness
+  | Replacement_recovered witness ->
+    Keeper_lifecycle_nonce.witness_target witness
+;;
+
+let allocate_or_recover_replacement
+      permit
+      config
+      (original : keeper_meta)
+      (candidate : keeper_meta)
+  =
+  match
+    Keeper_lifecycle_nonce.identity
+      ~owner_id:
+        (Keeper_id.Trace_id.to_string original.runtime.trace_id)
+      ~nonce:(Int64.of_int original.runtime.nonce)
+  with
+  | Error error -> Error error
+  | Ok source ->
+    let owner_id =
+      Keeper_id.Trace_id.to_string candidate.runtime.trace_id
+    in
+    (match
+       Keeper_lifecycle_nonce.replace_settled
+         permit
+         config
+         ~keeper_id:original.name
+         ~source
+         ~owner_id
+         ()
+     with
+     | Ok (Keeper_lifecycle_nonce.Settled_allocated witness) ->
+       Ok (Replacement_allocated witness, None)
+     | Ok
+         (Keeper_lifecycle_nonce.Settled_recovered
+            (witness, attention)) ->
+       Ok (Replacement_recovered witness, attention)
+     | Error error -> Error error)
+;;
+
+let candidate_for_replacement publication (candidate : keeper_meta) =
+  let target = replacement_target publication in
+  let owner_id = Keeper_lifecycle_nonce.identity_owner_id target in
+  match Keeper_id.Trace_id.of_string owner_id with
+  | Error detail ->
+    Error
+      (Journal_ownership_changed
+         (Printf.sprintf
+            "replacement authority contains invalid trace identity: %s"
+            detail))
+  | Ok trace_id ->
+    (match
+       Keeper_lifecycle_nonce.runtime_int_of_nonce
+         (Keeper_lifecycle_nonce.identity_nonce target)
+     with
+     | Error error -> Error (Nonce_allocation_failed error)
+     | Ok nonce ->
+       Ok
+         { candidate with
+           runtime =
+             { candidate.runtime with
+               trace_id
+             ; nonce
+             }
+         })
+;;
+
+let write_replacement_meta
+      permit
+      token
+      publication
+      config
+      (meta : keeper_meta)
+  =
+  match publication with
+  | Replacement_allocated witness ->
+    Keeper_meta_store.replace_meta
+      ~lifecycle_token:token
+      permit
+      witness
+      config
+      meta
+  | Replacement_recovered witness ->
+    Keeper_meta_store.recover_meta_exact
+      ~lifecycle_token:token
+      permit
+      witness
+      config
+      meta
+;;
+
+let clear_rollback_registry
+      permit
+      token
+      config
+      (journal : journal)
+      original
+      candidate
+  =
   match
     Keeper_registry.get
       ~base_path:config.Workspace.base_path
       journal.keeper_name
   with
   | None -> []
-  | Some entry when same_identity entry.meta journal.candidate ->
+  | Some entry when same_identity entry.meta candidate ->
     Keeper_keepalive.request_entry_stop entry;
     (* Cancellation-safe rollback joins both terminal signals before exact
        unregister, so the replacement cannot inherit a live predecessor. *)
     let _lane_exit = Keeper_lane.await_exit entry.lane in
     let _done_resolution = Eio.Promise.await entry.done_p in
-    (match Keeper_registry.unregister_exact_for_lifecycle token entry with
-     | Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing -> []
-     | Keeper_registry.Exact_entry_replaced -> [ Rollback_registry_occupied entry ]
-     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+    (match Keeper_registry.unregister_exact_for_lifecycle permit token entry with
+     | Keeper_registry.Lifecycle_mutation_admission_denied ->
+       [ Rollback_registry_admission_denied ]
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing) ->
+       []
+     | Keeper_registry.Lifecycle_mutation_completed
+         Keeper_registry.Exact_entry_replaced ->
+       [ Rollback_registry_occupied entry ]
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
        [ Rollback_registry_reservation_changed owner ])
-  | Some _ -> []
+  | Some entry
+    when same_identity entry.meta original
+         && entry.phase = Keeper_state_machine.Dead
+         && Option.is_some (Eio.Promise.peek entry.done_p)
+         && Keeper_registry.lane_has_exited entry ->
+    (match Keeper_registry.unregister_exact_for_lifecycle permit token entry with
+     | Keeper_registry.Lifecycle_mutation_admission_denied ->
+       [ Rollback_registry_admission_denied ]
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing) ->
+       []
+     | Keeper_registry.Lifecycle_mutation_completed
+         Keeper_registry.Exact_entry_replaced ->
+       [ Rollback_registry_occupied entry ]
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
+       [ Rollback_registry_reservation_changed owner ])
+  | Some entry -> [ Rollback_registry_occupied entry ]
 ;;
 
-let restore_registry
-      token
-      (original_entry : Keeper_registry.registry_entry option)
+let transition_cleanup_pending
+      config
+      ~expected_stage
+      ~cleanup_stage
+      (journal : journal)
   =
-  match original_entry with
-  | None -> []
-  | Some entry ->
-    (match Keeper_registry.get ~base_path:entry.base_path entry.name with
-     | Some occupied
-       when Keeper_lane.Id.equal
-              (Keeper_lane.id occupied.lane)
-              (Keeper_lane.id entry.lane) -> []
-     | Some occupied -> [ Rollback_registry_occupied occupied ]
-     | None ->
-       (match Keeper_registry.restore_entry_if_absent_for_lifecycle token entry with
-        | Keeper_registry.Entry_restored -> []
-        | Keeper_registry.Entry_restore_occupied occupied ->
-          [ Rollback_registry_occupied occupied ]
-        | Keeper_registry.Entry_restore_invalid error -> [ Rollback_registry_invalid error ]
-        | Keeper_registry.Entry_restore_lifecycle_reserved owner ->
-          [ Rollback_registry_reservation_changed owner ]))
+  let cleanup = { journal with stage = cleanup_stage } in
+  match transition_journal config ~expected_stage cleanup with
+  | Ok () -> Ok cleanup
+  | Error publication_error ->
+    (match
+       read_current_journal
+         ~invalid:(fun detail -> Journal_ownership_changed detail)
+         config
+         journal.keeper_name
+     with
+     | Ok (_, _, Some (Active_journal current))
+       when same_transaction current journal
+            && current.stage = cleanup_stage ->
+       Ok cleanup
+     | Ok (_, _, Some (Active_journal current))
+       when same_transaction current journal
+            && current.stage = expected_stage ->
+       Error publication_error
+     | Error error -> Error error
+     | Ok _ ->
+       Error
+         (Journal_ownership_changed
+            "cleanup publication settled to an unexpected transaction stage"))
 ;;
 
-let rollback token config journal original_entry =
+let delete_payload config (journal : journal) =
+  Payload.delete
+    config
+    ~keeper_name:journal.keeper_name
+    ~expected_authority_leaf:
+      (Payload.immutable_ref_authority_leaf journal.payload_ref)
+    ~transaction_id:journal.transaction_id
+    journal.payload_ref
+;;
+
+let same_runtime_target left right =
+  Option.equal String.equal left right
+;;
+
+let converge_runtime_target ~keeper_name target =
+  if same_runtime_target (Runtime.runtime_id_for_keeper keeper_name) target
+  then Ok ()
+  else
+    let mutation =
+      match target with
+      | Some runtime_id ->
+        Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id ()
+      | None -> Runtime.clear_runtime_id_for_keeper ~keeper_name ()
+    in
+    match mutation with
+    | Ok () -> Ok ()
+    | Error detail ->
+      if same_runtime_target (Runtime.runtime_id_for_keeper keeper_name) target
+      then Ok ()
+      else Error detail
+;;
+
+let converge_payload_runtime ~keeper_name ~forward payload =
+  match Payload.payload_runtime_transition payload with
+  | Payload.Runtime_unchanged -> Ok ()
+  | Payload.Runtime_changed { before; after } ->
+    converge_runtime_target
+      ~keeper_name
+      (if forward then Some after else before)
+;;
+
+let rollback_cleanup_stage = function
+  | Reserved | Rollback_reserved ->
+    Ok (Rollback_cleanup_pending Rollback_from_reserved)
+  | Durable_committed | Rollback_durable_committed ->
+    Ok
+      (Rollback_cleanup_pending
+         Rollback_from_durable_committed)
+  | Launch_committed
+  | Forward_cleanup_pending
+  | Rollback_cleanup_pending _
+  | Cleared ->
+    Error
+      (Rollback_journal_clear_failed
+         "rollback cleanup has no rollback-capable origin")
+;;
+
+let rollback permit token config (journal : journal) payload _original_entry =
+  match
+    converge_payload_runtime
+      ~keeper_name:journal.keeper_name
+      ~forward:false
+      payload
+  with
+  | Error detail -> [ Rollback_runtime_assignment_failed detail ]
+  | Ok () ->
+  let original = Payload.payload_original payload in
+  let candidate = Payload.payload_candidate payload in
   let meta_errors =
     match Keeper_meta_store.read_meta config journal.keeper_name with
     | Error detail -> [ Rollback_meta_write_failed detail ]
     | Ok None -> [ Rollback_meta_missing ]
-    | Ok (Some current)
-      when same_persisted_payload current journal.original -> []
-    | Ok (Some current) when not (same_identity current journal.candidate) ->
-      [ Rollback_meta_identity_changed ]
-    | Ok (Some current)
-      when not (same_persisted_payload current journal.candidate) ->
-      [ Rollback_meta_payload_changed ]
     | Ok (Some current) ->
-      let restored = { journal.original with meta_version = current.meta_version } in
-      (match Keeper_meta_store.write_meta_for_lifecycle token config restored with
+      let restored =
+        { original with
+          meta_version = current.meta_version
+        ; runtime =
+            { original.runtime with
+              trace_id = candidate.runtime.trace_id
+            ; trace_history = candidate.runtime.trace_history
+            ; nonce = candidate.runtime.nonce
+            }
+        }
+      in
+      if same_persisted_payload current restored
+      then []
+      else if
+        (not (same_persisted_payload current original))
+        && not (same_persisted_payload current candidate)
+      then
+        if same_identity current candidate
+        then [ Rollback_meta_payload_changed ]
+        else [ Rollback_meta_identity_changed ]
+      else
+      let nonce_error result =
+        Result.map_error Keeper_lifecycle_nonce.error_to_string result
+      in
+      let restored_result =
+        Result.bind
+          (nonce_error
+             (Keeper_lifecycle_nonce.identity
+                ~owner_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
+                ~nonce:(Int64.of_int original.runtime.nonce)))
+          (fun source ->
+            Result.bind
+              (nonce_error
+                 (Keeper_lifecycle_nonce.identity
+                    ~owner_id:
+                      (Keeper_id.Trace_id.to_string candidate.runtime.trace_id)
+                    ~nonce:(Int64.of_int candidate.runtime.nonce)))
+              (fun target ->
+                Result.bind
+                  (nonce_error
+                     (Keeper_lifecycle_nonce.recover_exact
+                        permit
+                        config
+                        ~keeper_id:restored.name
+                        ~source:(Some source)
+                        ~target
+                        ()))
+                  (fun witness ->
+                    if same_persisted_payload current original
+                    then
+                      Keeper_meta_store.recover_meta_exact
+                        ~lifecycle_token:token
+                        permit
+                        witness
+                        config
+                        restored
+                    else
+                      Keeper_meta_store.write_meta_for_lifecycle
+                        permit
+                        token
+                        config
+                        restored)))
+      in
+      (match restored_result with
        | Ok () -> []
        | Error detail -> [ Rollback_meta_write_failed detail ])
   in
   let registry_errors =
-    clear_candidate_registry token config journal @ restore_registry token original_entry
+    clear_rollback_registry
+      permit
+      token
+      config
+      journal
+      original
+      candidate
   in
   let errors = meta_errors @ registry_errors in
   if errors <> []
   then errors
   else
-    match delete_journal config journal.keeper_name with
-    | Ok () -> []
-    | Error detail -> [ Rollback_journal_delete_failed detail ]
+    match rollback_cleanup_stage journal.stage with
+    | Error error -> [ error ]
+    | Ok cleanup_stage ->
+      (match
+         transition_cleanup_pending
+           config
+           ~expected_stage:journal.stage
+           ~cleanup_stage
+           journal
+       with
+       | Error error ->
+         [ Rollback_journal_clear_failed (error_to_string error) ]
+       | Ok cleanup ->
+         (match invoke_after_cleanup_pending_hook `Rollback with
+          | Some detail -> [ Rollback_journal_clear_failed detail ]
+          | None ->
+            (match delete_payload config cleanup with
+             | Error failure -> [ Rollback_payload_delete_failed failure ]
+             | Ok () ->
+               (match invoke_after_payload_delete_hook `Rollback with
+                | Some detail -> [ Rollback_journal_clear_failed detail ]
+                | None ->
+                  (match
+                     clear_journal
+                       config
+                       ~expected_stage:cleanup.stage
+                       cleanup
+                   with
+                   | Ok () -> []
+                   | Error error ->
+                     [ Rollback_journal_clear_failed
+                         (error_to_string error)
+                     ])))))
 ;;
 
-let fail_with_rollback token config journal original_entry cause error =
-  let errors = rollback token config journal original_entry in
+let fail_with_rollback permit token config journal payload original_entry cause error =
+  let errors = rollback permit token config journal payload original_entry in
   observe
     (if errors = [] then "rollback" else "rollback_failed")
     journal.keeper_name
@@ -360,51 +1864,567 @@ let validate_registry_snapshot config original =
   | Some entry -> Ok (Some entry)
 ;;
 
-let revive (ctx : _ context) ~original ~candidate =
+let settle_replacement_before_reserved
+      permit
+      token
+      config
+      publication
+      (original : keeper_meta)
+      (candidate : keeper_meta)
+  =
+  let registry_errors =
+    match
+      Keeper_registry.get
+        ~base_path:config.Workspace.base_path
+        original.name
+    with
+    | None -> []
+    | Some entry
+      when same_identity entry.meta original
+           && entry.phase = Keeper_state_machine.Dead
+           && Option.is_some (Eio.Promise.peek entry.done_p)
+           && Keeper_registry.lane_has_exited entry ->
+      (match Keeper_registry.unregister_exact_for_lifecycle permit token entry with
+       | Keeper_registry.Lifecycle_mutation_admission_denied ->
+         [ Rollback_registry_admission_denied ]
+       | Keeper_registry.Lifecycle_mutation_completed
+           (Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing) ->
+         []
+       | Keeper_registry.Lifecycle_mutation_completed
+           Keeper_registry.Exact_entry_replaced ->
+         [ Rollback_registry_occupied entry ]
+       | Keeper_registry.Lifecycle_mutation_completed
+           (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
+         [ Rollback_registry_reservation_changed owner ])
+    | Some entry -> [ Rollback_registry_occupied entry ]
+  in
+  if registry_errors <> []
+  then registry_errors
+  else
+    match Keeper_meta_store.read_meta config original.name with
+    | Error detail -> [ Rollback_meta_write_failed detail ]
+    | Ok None -> [ Rollback_meta_missing ]
+    | Ok (Some current) ->
+      let restored =
+        { original with
+          meta_version = current.meta_version
+        ; runtime =
+            { original.runtime with
+              trace_id = candidate.runtime.trace_id
+            ; trace_history = candidate.runtime.trace_history
+            ; nonce = candidate.runtime.nonce
+            }
+        }
+      in
+      if same_persisted_payload current restored
+      then []
+      else if not (same_persisted_payload current original)
+      then
+        if same_identity current candidate
+        then [ Rollback_meta_payload_changed ]
+        else [ Rollback_meta_identity_changed ]
+      else
+        (match
+           write_replacement_meta
+             permit
+             token
+             publication
+             config
+             restored
+         with
+         | Ok () -> []
+         | Error detail -> [ Rollback_meta_write_failed detail ])
+;;
+
+let reserve_validated_journal config ~original journal =
+  match Keeper_meta_store.read_meta config original.name with
+  | Error _ -> Error Durable_snapshot_changed
+  | Ok None -> Error Durable_snapshot_missing
+  | Ok (Some latest)
+    when latest.meta_version <> original.meta_version
+         || not (same_persisted_payload latest original) ->
+    Error Durable_snapshot_changed
+  | Ok (Some _) ->
+    (match validate_registry_snapshot config original with
+     | Error conflict -> Error (Registry_conflict conflict)
+     | Ok _ -> save_journal config journal)
+;;
+
+let payload_failure operation failure =
+  Payload_operation_failed { operation; failure }
+;;
+
+let cleanup_unreserved_payload config (journal : journal) ~cause =
+  let delete_proven_unpublished () =
+    match delete_payload config journal with
+    | Ok () -> cause
+    | Error failure ->
+      Log.Keeper.error
+        "keeper revival unreserved payload cleanup failed keeper=%s cause=%s cleanup=%s"
+        journal.keeper_name
+        (error_to_string cause)
+        (Payload.error_to_string failure);
+      payload_failure Payload_delete failure
+  in
+  Eio.Cancel.protect (fun () ->
+    match
+      read_current_journal
+        ~invalid:(fun detail -> Journal_ownership_changed detail)
+        config
+        journal.keeper_name
+    with
+    | Ok (_, _, None) -> delete_proven_unpublished ()
+    | Ok
+        ( _,
+          _,
+          Some
+            (Cleared_tombstone
+               { transaction_id; keeper_name }) )
+      when String.equal transaction_id journal.transaction_id
+           && String.equal keeper_name journal.keeper_name ->
+      delete_proven_unpublished ()
+    | Ok (_, _, Some (Active_journal current))
+      when same_transaction current journal
+           && current.stage = Reserved ->
+      Log.Keeper.error
+        "keeper revival retains payload for published Reserved recovery keeper=%s transaction=%s"
+        journal.keeper_name
+        journal.transaction_id;
+      cause
+    | Error observation_error ->
+      Log.Keeper.error
+        "keeper revival retains payload after inconclusive HEAD observation keeper=%s transaction=%s observation=%s"
+        journal.keeper_name
+        journal.transaction_id
+        (error_to_string observation_error);
+      observation_error
+    | Ok _ ->
+      Log.Keeper.error
+        "keeper revival retains payload after conflicting HEAD observation keeper=%s transaction=%s"
+        journal.keeper_name
+        journal.transaction_id;
+      Journal_ownership_changed
+        "pre-Reserved payload cleanup was blocked by conflicting journal authority")
+;;
+
+let abort_replacement_before_reserved
+      permit
+      token
+      config
+      publication
+      original
+      candidate
+      ?journal
+      cause
+      ()
+  =
+  let errors =
+    settle_replacement_before_reserved
+      permit
+      token
+      config
+      publication
+      original
+      candidate
+  in
+  let cause =
+    match journal with
+    | None -> cause
+    | Some journal ->
+      cleanup_unreserved_payload config journal ~cause
+  in
+  match errors with
+  | [] -> Error cause
+  | _ ->
+    Error
+      (Rollback_failed
+         { cause = error_to_string cause
+         ; errors
+         })
+;;
+
+let forward_cleanup config (journal : journal) =
+  let cleanup_result =
+    match journal.stage with
+    | Launch_committed ->
+      transition_cleanup_pending
+        config
+        ~expected_stage:Launch_committed
+        ~cleanup_stage:Forward_cleanup_pending
+        journal
+      |> Result.map (fun cleanup -> cleanup, true)
+    | Forward_cleanup_pending -> Ok (journal, false)
+    | _ ->
+      Error
+        (Journal_ownership_changed
+           "forward cleanup requires launch-committed authority")
+  in
+  match cleanup_result with
+  | Error _ as error -> error
+  | Ok (cleanup, cleanup_published) ->
+    let pending_failure =
+      if cleanup_published
+      then invoke_after_cleanup_pending_hook `Forward
+      else None
+    in
+    (match pending_failure with
+     | Some detail -> Error (Journal_write_failed detail)
+     | None ->
+       (match delete_payload config cleanup with
+        | Error failure -> Error (payload_failure Payload_delete failure)
+        | Ok () ->
+          (match invoke_after_payload_delete_hook `Forward with
+           | Some detail -> Error (Journal_write_failed detail)
+           | None ->
+             clear_journal
+               config
+               ~expected_stage:Forward_cleanup_pending
+               cleanup)))
+;;
+
+let preflight_journal_authority config keeper_name =
   match
-    Keeper_lifecycle_reservation.acquire
-      ~base_path:ctx.config.base_path
-      ~keeper_name:original.name
-      ~expected_generation:original.runtime.nonce
-      ~purpose:Keeper_lifecycle_reservation.Dead_revival
+    read_current_journal
+      ~invalid:(fun detail -> Journal_conflict detail)
+      config
+      keeper_name
   with
-  | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-    observe "conflict" original.name (Keeper_lifecycle_reservation.snapshot_to_string owner);
-    Error (Reservation_conflict owner)
-  | Ok token ->
-    observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
-    let nonce =
-      Keeper_memory_os_io.next_generation_with_floor_for_base_path
-        ~base_path:ctx.config.base_path
-        ~floor:(original.runtime.nonce + 1)
-        ~keeper_id:original.name
-        ~trace_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
-    in
-    let candidate =
-      { candidate with
-        runtime = { candidate.runtime with nonce }
+  | Error error -> Error error
+  | Ok (_, _, None)
+  | Ok (_, _, Some (Cleared_tombstone _)) -> Ok ()
+  | Ok (_, _, Some (Active_journal existing)) ->
+    Error
+      (Journal_conflict
+         (Printf.sprintf
+            "unresolved journal transaction=%s remains stage=%s"
+            existing.transaction_id
+            (Yojson.Safe.to_string
+               (journal_stage_to_json existing.stage))))
+;;
+
+type runtime_assignment =
+  | Runtime_assignment_unchanged
+  | Runtime_assignment_changed of
+      { previous : string option
+      ; assigned : string
       }
-    in
-    let journal =
-      { owner_id = Keeper_lifecycle_reservation.owner_id token
-      ; keeper_name = original.name
-      ; expected_trace_id = original.runtime.trace_id
-      ; expected_generation = original.runtime.nonce
-      ; original
-      ; candidate
-      ; stage = Reserved
-      }
-    in
-    (match save_journal ctx.config journal with
+
+let restore_runtime_assignment ~keeper_name = function
+  | Runtime_assignment_unchanged -> Ok ()
+  | Runtime_assignment_changed { previous; _ } ->
+    converge_runtime_target ~keeper_name previous
+;;
+
+let runtime_transition_of_assignment = function
+  | Runtime_assignment_unchanged -> Payload.Runtime_unchanged
+  | Runtime_assignment_changed { previous; assigned } ->
+    Payload.Runtime_changed { before = previous; after = assigned }
+;;
+
+let plan_runtime_assignment ~keeper_name = function
+  | None -> Runtime_assignment_unchanged
+  | Some runtime_id ->
+    let previous = Runtime.runtime_id_for_keeper keeper_name in
+    if Option.equal String.equal previous (Some runtime_id)
+    then Runtime_assignment_unchanged
+    else
+      Runtime_assignment_changed { previous; assigned = runtime_id }
+;;
+
+let apply_runtime_assignment ~keeper_name = function
+  | Runtime_assignment_unchanged -> Ok ()
+  | Runtime_assignment_changed { assigned = runtime_id; _ } ->
+    (match Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id () with
+     | Ok () -> Ok ()
      | Error detail ->
-       release_observed token original.name;
-       Error (Journal_write_failed detail)
-     | Ok () ->
-       (* The cancellation handler must restore the exact pre-transaction
-          registry lane after removal. This ref carries only that immutable
-          snapshot across the exception boundary; transaction ownership and
-          all shared state remain in Atomic/CAS structures. *)
-       let original_entry_for_rollback = ref None in
+       if
+         same_runtime_target
+           (Runtime.runtime_id_for_keeper keeper_name)
+           (Some runtime_id)
+       then Ok ()
+       else Error (Runtime_assignment_failed detail))
+;;
+
+let settle_runtime_assignment ~keeper_name assignment result =
+  match result with
+  | Ok _ | Error (Post_commit_cleanup_required _) -> result
+  | Error error ->
+    (match restore_runtime_assignment ~keeper_name assignment with
+     | Ok () -> Error error
+     | Error rollback_detail ->
+       Error
+         (Rollback_failed
+            { cause = error_to_string error
+            ; errors = [ Rollback_runtime_assignment_failed rollback_detail ]
+            }))
+;;
+
+let revive_locked
+      permit
+      (ctx : _ context)
+      ~original
+      ~candidate
+      ~runtime_id
+      ~runtime_assignment
+      ~launch_gate
+      ~launch_reconciliation_unresolved
+  =
+  let allocate_or_recover_replacement =
+    allocate_or_recover_replacement permit
+  in
+  let abort_replacement_before_reserved =
+    abort_replacement_before_reserved permit
+  in
+  let fail_with_rollback = fail_with_rollback permit in
+  let write_replacement_meta = write_replacement_meta permit in
+  match preflight_journal_authority ctx.config original.name with
+  | Error error ->
+    observe "conflict" original.name (error_to_string error);
+    Error error
+  | Ok () ->
+    let assignment =
+      plan_runtime_assignment ~keeper_name:original.name runtime_id
+    in
+    (match
+       Keeper_lifecycle_reservation.acquire
+         ~base_path:ctx.config.base_path
+         ~keeper_name:original.name
+         ~expected_generation:original.runtime.nonce
+         ~purpose:Keeper_lifecycle_reservation.Dead_revival
+     with
+     | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+       observe "conflict" original.name (Keeper_lifecycle_reservation.snapshot_to_string owner);
+       Error (Reservation_conflict owner)
+     | Ok token ->
+    observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
+    let reservation_released = ref false in
+    let release_token () =
+      if not !reservation_released
+      then (
+        reservation_released := true;
+        release_observed token original.name)
+    in
+    let protect_pre_journal fn =
+      try fn () with
+      | Eio.Cancel.Cancelled _ as cancelled ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        release_token ();
+        Printexc.raise_with_backtrace cancelled backtrace
+    in
+    let journal_result =
+      protect_pre_journal (fun () ->
+        Eio.Cancel.protect (fun () ->
+          match
+            allocate_or_recover_replacement
+              ctx.config
+              original
+              candidate
+          with
+          | Error error ->
+            observe
+              "nonce_allocation_failed"
+              original.name
+              (Keeper_lifecycle_nonce.error_to_string error);
+            Error (Nonce_allocation_failed error)
+          | Ok (publication, publication_attention) ->
+            (match candidate_for_replacement publication candidate with
+             | Error error -> Error error
+             | Ok candidate ->
+               (match
+                  make_prepared_journal
+                    ~runtime_transition:(runtime_transition_of_assignment assignment)
+                    ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
+                    ~original
+                    ~candidate
+                with
+                | Error failure ->
+                  abort_replacement_before_reserved
+                    token
+                    ctx.config
+                    publication
+                    original
+                    candidate
+                    (payload_failure Payload_prepare failure)
+                    ()
+                | Ok (journal, prepared) ->
+                  (match Payload.create ctx.config prepared with
+                   | Error failure ->
+                     abort_replacement_before_reserved
+                       token
+                       ctx.config
+                       publication
+                       original
+                       candidate
+                       ~journal
+                       (payload_failure Payload_create failure)
+                       ()
+                   | Ok (Payload.Created _ | Payload.Reconciled_created _) ->
+                     (match verify_payload ctx.config journal with
+                      | Error failure ->
+                        abort_replacement_before_reserved
+                          token
+                          ctx.config
+                          publication
+                          original
+                          candidate
+                          ~journal
+                          (payload_failure Payload_verify failure)
+                          ()
+                      | Ok payload ->
+                        let finish_reserved current =
+                          (match publication_attention with
+                           | None -> ()
+                           | Some attention ->
+                             Log.Keeper.warn
+                               "keeper revival reconciled published lifecycle \
+                                nonce keeper=%s attention=%s"
+                               original.name
+                               (Keeper_lifecycle_nonce.error_to_string attention));
+                          invoke_after_journal_write_hook ();
+                          Ok (publication, current, payload, candidate)
+                        in
+                        (match
+                           reserve_validated_journal
+                             ctx.config
+                             ~original
+                             journal
+                         with
+                         | Ok () -> finish_reserved journal
+                         | Error publication_error ->
+                           (match
+                              read_current_journal
+                                ~invalid:(fun detail ->
+                                  Journal_ownership_changed detail)
+                                ctx.config
+                                journal.keeper_name
+                            with
+                            | Ok
+                                (_, _, Some (Active_journal current))
+                              when same_transaction current journal
+                                   && current.stage = Reserved ->
+                              Log.Keeper.warn
+                                "keeper revival reconciled Reserved journal \
+                                 publication keeper=%s attention=%s"
+                                original.name
+                                (error_to_string publication_error);
+                              finish_reserved current
+                            | Ok (_, _, None)
+                            | Ok (_, _, Some (Cleared_tombstone _)) ->
+                              abort_replacement_before_reserved
+                                token
+                                ctx.config
+                                publication
+                                original
+                                candidate
+                                ~journal
+                                publication_error
+                                ()
+                            | Error attention ->
+                              abort_replacement_before_reserved
+                                token
+                                ctx.config
+                                publication
+                                original
+                                candidate
+                                attention
+                                ()
+                            | Ok (_, _, Some (Active_journal _)) ->
+                              abort_replacement_before_reserved
+                                token
+                                ctx.config
+                                publication
+                                original
+                                candidate
+                                (Journal_ownership_changed
+                                   "reservation publication settled to an \
+                                    unexpected active transaction")
+                                ()))))))))
+    in
+    let check_reserved_boundary () =
+      try Eio.Fiber.check () with
+      | Eio.Cancel.Cancelled _ as cancelled ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        release_token ();
+        Printexc.raise_with_backtrace cancelled backtrace
+    in
+    check_reserved_boundary ();
+    (match journal_result with
+     | Error error ->
+       release_token ();
+       Error error
+     | Ok (publication, journal, verified_payload, candidate) ->
+       let pending_launch_entry = ref None in
+       let pending_launch_journal = ref None in
+       let launch_publication_attempt =
+         ref Launch_publication_not_attempted
+       in
+       let abort_pending_launch () =
+         match !pending_launch_entry with
+         | None -> Keeper_keepalive.abort_launch_gate launch_gate
+         | Some (entry : Keeper_registry.registry_entry) ->
+           Atomic.set entry.fiber_stop true;
+           Keeper_keepalive.abort_launch_gate launch_gate;
+           Keeper_keepalive.request_entry_stop entry;
+           (* See the launch gate above: only completion of the already-aborted
+              lane matters here; its terminal payload has no authority. *)
+           let _lane_exit = Keeper_lane.await_exit entry.lane in
+           let _terminal = Eio.Promise.await entry.done_p in
+           pending_launch_entry := None
+       in
+       let abort_pending_launch_without_wait () =
+         match !pending_launch_entry with
+         | None -> Keeper_keepalive.abort_launch_gate launch_gate
+         | Some (entry : Keeper_registry.registry_entry) ->
+           Atomic.set entry.fiber_stop true;
+           Keeper_keepalive.abort_launch_gate launch_gate;
+           Keeper_keepalive.request_entry_stop entry;
+           pending_launch_entry := None
+       in
+       let settle_pending_launch () =
+         Eio.Cancel.protect (fun () ->
+           match !pending_launch_entry, !pending_launch_journal with
+           | Some _, Some committed_journal ->
+             let reconciliation =
+               reconcile_launch_publication
+                 ctx.config
+                 committed_journal
+                 !launch_publication_attempt
+             in
+             (match reconciliation with
+              | Launch_reconciled_committed ->
+                Keeper_keepalive.commit_launch_gate launch_gate;
+                pending_launch_entry := None;
+                launch_reconciliation_unresolved := false
+              | Launch_reconciled_precommit ->
+                abort_pending_launch ();
+                launch_reconciliation_unresolved := false
+              | Launch_reconciliation_unresolved _ ->
+                abort_pending_launch ();
+                launch_reconciliation_unresolved := true);
+             reconciliation
+           | None, _
+           | _, None ->
+             abort_pending_launch ();
+             launch_reconciliation_unresolved := false;
+             Launch_reconciled_precommit)
+       in
+       let run_after_reserved () =
+         match
+           apply_runtime_assignment
+             ~keeper_name:original.name
+             assignment
+         with
+         | Error error ->
+           fail_with_rollback
+             token
+             ctx.config
+             journal
+             verified_payload
+             None
+             (error_to_string error)
+             error
+         | Ok () ->
+           runtime_assignment := assignment;
        let run () =
          match Keeper_meta_store.read_meta ctx.config original.name with
          | Error detail ->
@@ -412,6 +2432,7 @@ let revive (ctx : _ context) ~original ~candidate =
              token
              ctx.config
              journal
+             verified_payload
              None
              detail
              Durable_snapshot_changed
@@ -420,6 +2441,7 @@ let revive (ctx : _ context) ~original ~candidate =
              token
              ctx.config
              journal
+             verified_payload
              None
              "durable metadata missing"
              Durable_snapshot_missing
@@ -430,6 +2452,7 @@ let revive (ctx : _ context) ~original ~candidate =
              token
              ctx.config
              journal
+             verified_payload
              None
              "durable snapshot changed"
              Durable_snapshot_changed
@@ -440,20 +2463,29 @@ let revive (ctx : _ context) ~original ~candidate =
                 token
                 ctx.config
                 journal
+                verified_payload
                 None
                 (registry_conflict_to_string conflict)
                 (Registry_conflict conflict)
             | Ok original_entry ->
-              original_entry_for_rollback := original_entry;
               let removal =
                 match original_entry with
                 | None -> Ok ()
                 | Some entry ->
-                  (match Keeper_registry.unregister_exact_for_lifecycle token entry with
-                   | Keeper_registry.Exact_unregistered -> Ok ()
-                   | Keeper_registry.Exact_entry_missing -> Error Registry_remove_missing
-                   | Keeper_registry.Exact_entry_replaced -> Error Registry_remove_replaced
-                   | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+                  (match Keeper_registry.unregister_exact_for_lifecycle permit token entry with
+                   | Keeper_registry.Lifecycle_mutation_admission_denied ->
+                     Error Registry_remove_replaced
+                   | Keeper_registry.Lifecycle_mutation_completed
+                       Keeper_registry.Exact_unregistered ->
+                     Ok ()
+                   | Keeper_registry.Lifecycle_mutation_completed
+                       Keeper_registry.Exact_entry_missing ->
+                     Error Registry_remove_missing
+                   | Keeper_registry.Lifecycle_mutation_completed
+                       Keeper_registry.Exact_entry_replaced ->
+                     Error Registry_remove_replaced
+                   | Keeper_registry.Lifecycle_mutation_completed
+                       (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
                      Error
                        (Registry_identity_conflict
                           { expected_trace_id = original.runtime.trace_id
@@ -468,18 +2500,24 @@ let revive (ctx : _ context) ~original ~candidate =
                    token
                    ctx.config
                    journal
+                   verified_payload
                    original_entry
                    (registry_conflict_to_string conflict)
                    (Registry_conflict conflict)
                | Ok () ->
                  (match
-                    Keeper_meta_store.write_meta_for_lifecycle token ctx.config candidate
+                    write_replacement_meta
+                      token
+                      publication
+                      ctx.config
+                      candidate
                   with
                   | Error detail ->
                     fail_with_rollback
                       token
                       ctx.config
                       journal
+                      verified_payload
                       original_entry
                       detail
                       (Durable_commit_failed detail)
@@ -490,6 +2528,7 @@ let revive (ctx : _ context) ~original ~candidate =
                          token
                          ctx.config
                          journal
+                         verified_payload
                          original_entry
                          detail
                          (Durable_commit_unreadable detail)
@@ -498,141 +2537,614 @@ let revive (ctx : _ context) ~original ~candidate =
                          token
                          ctx.config
                          journal
+                         verified_payload
                          original_entry
                          "committed metadata missing"
                          Durable_snapshot_missing
                      | Ok (Some committed) ->
+                       let expected_candidate =
+                         Payload.payload_candidate verified_payload
+                       in
+                       if not (same_persisted_payload committed expected_candidate)
+                       then
+                         fail_with_rollback
+                           token
+                           ctx.config
+                           journal
+                           verified_payload
+                           original_entry
+                           "committed metadata differs from verified revival payload"
+                           Durable_snapshot_changed
+                       else
                        let committed_journal =
-                         { journal with candidate = committed; stage = Durable_committed }
+                         { journal with stage = Durable_committed }
                        in
                        (match save_journal ctx.config committed_journal with
-                        | Error detail ->
-                          fail_with_rollback
-                            token
-                            ctx.config
-                            journal
-                            original_entry
-                            detail
-                            (Journal_write_failed detail)
+                        | Error publication_error ->
+                          (match
+                             observe_durable_publication
+                               ctx.config
+                               committed_journal
+                           with
+                           | Durable_publication_rollback_from observed_stage ->
+                             fail_with_rollback
+                               token
+                               ctx.config
+                               { journal with stage = observed_stage }
+                               verified_payload
+                               original_entry
+                               (error_to_string publication_error)
+                               publication_error
+                           | Durable_publication_attention attention ->
+                             Log.Keeper.error
+                               "keeper revival durable publication requires \
+                                attention keeper=%s publication=%s observation=%s"
+                               committed.name
+                               (error_to_string publication_error)
+                               (error_to_string attention);
+                             release_token ();
+                             Error attention)
                         | Ok () ->
                           (match
                              Keeper_keepalive.start_keepalive
                                ~lifecycle_token:token
+                               ~launch_gate
                                ctx
                                committed
                            with
                            | Keeper_keepalive.Keepalive_started entry ->
+                             pending_launch_entry := Some entry;
+                             pending_launch_journal := Some committed_journal;
                              let launch_journal =
                                { committed_journal with stage = Launch_committed }
                              in
-                             (match save_journal ctx.config launch_journal with
-                              | Error detail ->
+                             let committed_with_attention cleanup_error =
+                               release_token ();
+                               Error
+                                 (Post_commit_cleanup_required
+                                    { committed
+                                    ; entry
+                                    ; cleanup_error
+                                    })
+                             in
+                             launch_publication_attempt :=
+                               Launch_publication_in_progress;
+                             let publication_result =
+                               Eio.Cancel.protect (fun () ->
+                                 save_launch_journal ctx.config launch_journal)
+                             in
+                             launch_publication_attempt :=
+                               Launch_publication_completed publication_result;
+                             Eio.Fiber.check ();
+                             (match publication_result with
+                              | Ok () ->
+                                Option.iter
+                                  (fun after_launch_publication ->
+                                    after_launch_publication ())
+                                  (Eio.Fiber.get after_launch_publication_key)
+                              | Error _ -> ());
+                             let launch_reconciliation =
+                               settle_pending_launch ()
+                             in
+                             Eio.Fiber.check ();
+                             (match launch_reconciliation, publication_result with
+                              | Launch_reconciled_committed, Error publication_error ->
+                                committed_with_attention publication_error
+                              | Launch_reconciled_committed, Ok () ->
+                                let cleanup_result =
+                                  Eio.Cancel.protect (fun () ->
+                                    let result =
+                                      match invoke_final_clear_failure_hook () with
+                                      | Some detail ->
+                                        Error (Journal_write_failed detail)
+                                      | None ->
+                                        forward_cleanup
+                                          ctx.config
+                                          launch_journal
+                                    in
+                                    release_token ();
+                                    result)
+                                in
+                                (match cleanup_result with
+                                 | Error cleanup_error ->
+                                   Error
+                                     (Post_commit_cleanup_required
+                                        { committed; entry; cleanup_error })
+                                 | Ok () ->
+                                   Eio.Fiber.check ();
+                                   observe "commit" committed.name "lane started";
+                                   Ok { meta = committed; entry })
+                              | Launch_reconciled_precommit, Error publication_error ->
                                 fail_with_rollback
                                   token
                                   ctx.config
                                   committed_journal
+                                  verified_payload
                                   original_entry
-                                  detail
-                                  (Journal_write_failed detail)
-                              | Ok () ->
-                                let journal_cleanup_pending =
-                                  match delete_journal ctx.config committed.name with
-                                  | Ok () -> None
-                                  | Error detail -> Some detail
+                                  (error_to_string publication_error)
+                                  publication_error
+                              | Launch_reconciled_precommit, Ok () ->
+                                let contradiction =
+                                  Journal_ownership_changed
+                                    "successful launch publication reconciled to pre-commit authority"
                                 in
-                                observe
-                                  (match journal_cleanup_pending with
-                                   | None -> "commit"
-                                   | Some _ -> "commit_journal_cleanup_pending")
+                                fail_with_rollback
+                                  token
+                                  ctx.config
+                                  committed_journal
+                                  verified_payload
+                                  original_entry
+                                  (error_to_string contradiction)
+                                  contradiction
+                              | ( Launch_reconciliation_unresolved attention,
+                                  publication_result ) ->
+                                let publication_detail =
+                                  match publication_result with
+                                  | Ok () -> "publication returned success"
+                                  | Error publication_error ->
+                                    error_to_string publication_error
+                                in
+                                Log.Keeper.error
+                                  "keeper revival launch reconciliation remains \
+                                   unresolved keeper=%s publication=%s \
+                                   observation=%s; aborted gated lane and \
+                                   retained durable journal for exact recovery"
                                   committed.name
-                                  "lane started";
-                                release_observed token committed.name;
-                                Ok { meta = committed; entry; journal_cleanup_pending })
+                                  publication_detail
+                                  (error_to_string attention);
+                                release_token ();
+                                Error attention)
                            | rejected ->
+                             Keeper_keepalive.abort_launch_gate launch_gate;
                              fail_with_rollback
                                token
                                ctx.config
                                committed_journal
+                               verified_payload
                                original_entry
                                (Keeper_keepalive.start_keepalive_outcome_to_string rejected)
                                (Launch_failed rejected)))))))
        in
-       try run () with
+       run ()
+       in
+       try run_after_reserved () with
        | Eio.Cancel.Cancelled _ as cancelled ->
-         Eio.Cancel.protect (fun () ->
-           let errors =
-             rollback token ctx.config journal !original_entry_for_rollback
-           in
-           if errors <> []
-           then
-             Log.Keeper.error
-               "keeper lifecycle cancellation rollback failed keeper=%s errors=%s"
-               original.name
-               (String.concat "; " (List.map rollback_error_to_string errors));
-           release_observed token original.name);
-         raise cancelled)
+         let backtrace = Printexc.get_raw_backtrace () in
+         if not (Keeper_keepalive.launch_gate_is_committed launch_gate)
+         then (
+           if launch_attempt_proves_commit !launch_publication_attempt
+           then (
+             Keeper_keepalive.commit_launch_gate launch_gate;
+             pending_launch_entry := None)
+           else abort_pending_launch_without_wait ());
+         release_token ();
+         Printexc.raise_with_backtrace cancelled backtrace))
 ;;
 
-let recover_one config path =
-  match Safe_ops.read_json_file_safe path with
-  | Error detail -> Error detail
-  | Ok json ->
-    Result.bind (journal_of_json json) (fun journal ->
-      let rollback_recovery ~durable_committed =
-        match
-          Keeper_lifecycle_reservation.acquire
-            ~base_path:config.Workspace.base_path
-            ~keeper_name:journal.keeper_name
-            ~expected_generation:journal.expected_generation
-            ~purpose:Keeper_lifecycle_reservation.Dead_revival
+let revive ?runtime_id (ctx : _ context) ~original ~candidate =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      ctx.config
+      ~keeper_name:original.name
+      (fun permit ->
+           let runtime_assignment = ref Runtime_assignment_unchanged in
+           let launch_gate = Keeper_keepalive.create_launch_gate () in
+           let launch_reconciliation_unresolved = ref false in
+           let result =
+             revive_locked
+               permit
+               ctx
+               ~original
+               ~candidate
+               ~runtime_id
+               ~runtime_assignment
+               ~launch_gate
+               ~launch_reconciliation_unresolved
+           in
+           if !launch_reconciliation_unresolved
+           then result
+           else
+             settle_runtime_assignment
+               ~keeper_name:original.name
+               !runtime_assignment
+               result)
+  with
+  | Admission_completed value -> value
+  | Admission_completed_with_attention
+      (Ok { meta = committed; entry }, failure) ->
+    let cleanup_error =
+      Journal_write_failed
+        ("keeper revival durable admission release requires attention: "
+         ^ Keeper_lifecycle_admission.Durable_transaction
+           .authority_failure_to_wire
+             failure)
+    in
+       Error
+         (Post_commit_cleanup_required
+            { committed
+            ; entry
+            ; cleanup_error
+            })
+  | Admission_completed_with_attention (Error error, failure) ->
+    Log.Keeper.error
+      "keeper revival durable admission release requires attention after body \
+       error keeper=%s failure=%s"
+      original.name
+      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
+         failure);
+    Error error
+  | Admission_blocked reason ->
+    Error
+      (Journal_conflict
+         ("keeper revival blocked by lifecycle authority: "
+          ^ Keeper_lifecycle_admission.Durable_transaction
+            .blocked_reason_to_wire
+              reason))
+;;
+
+let recovery_payload_error failure =
+  "recovery payload verification failed: " ^ Payload.error_to_string failure
+;;
+
+let finish_rollback_cleanup config journal origin =
+  match delete_payload config journal with
+  | Error failure ->
+    Error
+      (rollback_error_to_string
+       (Rollback_payload_delete_failed failure))
+  | Ok () ->
+    (match invoke_after_payload_delete_hook `Rollback with
+     | Some detail -> Error detail
+     | None ->
+       (match
+          clear_journal
+            config
+            ~expected_stage:journal.stage
+            journal
         with
-        | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-          observe
-            "recovery_conflict"
-            journal.keeper_name
-            (Keeper_lifecycle_reservation.snapshot_to_string owner);
-          Error
-            ("recovery reservation conflict: "
-             ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
-        | Ok token ->
-          let errors = rollback token config journal None in
-          observe
-            (match errors with
-             | [] -> "recovery"
-             | _ -> "recovery_failed")
-            journal.keeper_name
-            (String.concat "; " (List.map rollback_error_to_string errors));
-          release_observed token journal.keeper_name;
-          (match errors with
-           | [] -> Ok durable_committed
-           | _ -> Error (String.concat "; " (List.map rollback_error_to_string errors)))
-      in
-      match journal.stage with
-      | Launch_committed ->
-        (match delete_journal config journal.keeper_name with
-         | Ok () ->
-           observe "recovery_forward_commit" journal.keeper_name "journal cleared";
-           Ok false
-         | Error detail -> Error ("forward-commit journal cleanup failed: " ^ detail))
-      | Reserved -> rollback_recovery ~durable_committed:false
-      | Durable_committed -> rollback_recovery ~durable_committed:true)
+        | Ok () ->
+          Ok
+            (match origin with
+             | Rollback_from_reserved -> false
+             | Rollback_from_durable_committed -> true)
+        | Error error -> Error (error_to_string error)))
+;;
+
+let recover_one_locked permit config leaf =
+  let rollback = rollback permit in
+  match
+    read_journal_leaf
+      ~invalid:(fun detail -> Journal_ownership_changed detail)
+      config
+      ~leaf
+      ~expected_keeper_name:None
+  with
+  | Error error -> Error (error_to_string error)
+  | Ok (_, _, None) -> Error "journal authority disappeared during recovery"
+  | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
+  | Ok (_, _, Some (Active_journal journal)) ->
+    let complete_forward_cleanup (journal : journal) =
+      match forward_cleanup config journal with
+      | Ok () ->
+        observe
+          "recovery_forward_commit"
+          journal.keeper_name
+          "runtime assignment, payload, and journal converged";
+        Ok false
+      | Error error ->
+        Error
+          ("forward-commit journal cleanup failed: "
+           ^ error_to_string error)
+    in
+    let recover_forward (journal : journal) =
+      match verify_payload config journal with
+      | Error failure -> Error (recovery_payload_error failure)
+      | Ok payload ->
+        (match
+           converge_payload_runtime
+             ~keeper_name:journal.keeper_name
+             ~forward:true
+             payload
+         with
+         | Error detail ->
+           Error ("forward runtime assignment recovery failed: " ^ detail)
+         | Ok () -> complete_forward_cleanup journal)
+    in
+    let without_live_reservation recover (journal : journal) =
+      match
+        Keeper_lifecycle_reservation.current
+          ~base_path:config.Workspace.base_path
+          ~keeper_name:journal.keeper_name
+      with
+      | None -> recover journal
+      | Some owner ->
+        Error
+          ("forward recovery reservation conflict: "
+           ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+    in
+    (match journal.stage with
+     | Launch_committed ->
+       without_live_reservation recover_forward journal
+     | Forward_cleanup_pending ->
+       without_live_reservation complete_forward_cleanup journal
+     | Rollback_cleanup_pending origin ->
+       finish_rollback_cleanup config journal origin
+     | Reserved
+     | Durable_committed
+     | Rollback_reserved
+     | Rollback_durable_committed ->
+       (match verify_payload config journal with
+        | Error failure -> Error (recovery_payload_error failure)
+        | Ok verified_payload ->
+          (match journal.stage with
+           | Reserved
+           | Durable_committed
+           | Rollback_reserved
+           | Rollback_durable_committed ->
+             (match
+                Keeper_lifecycle_reservation.acquire
+                  ~base_path:config.Workspace.base_path
+                  ~keeper_name:journal.keeper_name
+                  ~expected_generation:journal.expected_generation
+                  ~purpose:Keeper_lifecycle_reservation.Dead_revival
+              with
+              | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+                observe
+                  "recovery_conflict"
+                  journal.keeper_name
+                  (Keeper_lifecycle_reservation.snapshot_to_string owner);
+                Error
+                  ("recovery reservation conflict: "
+                   ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+              | Ok token ->
+                invoke_before_recovery_claim_hook ();
+                let result =
+                  match claim_recovery_rollback config journal 8 with
+                  | Error error -> Error (error_to_string error)
+                  | Ok Recovery_already_cleared -> Ok false
+                  | Ok (Recovery_forward_complete stage) ->
+                    recover_forward { journal with stage }
+                  | Ok
+                      (Recovery_rollback_claimed
+                         (Rollback_cleanup_pending origin, durable_committed)) ->
+                    let origin_is_durable =
+                      match origin with
+                      | Rollback_from_reserved -> false
+                      | Rollback_from_durable_committed -> true
+                    in
+                    if not (Bool.equal origin_is_durable durable_committed)
+                    then
+                      Error
+                        "rollback cleanup origin differs from claimed durability"
+                    else
+                    finish_rollback_cleanup
+                      config
+                      { journal with
+                        stage = Rollback_cleanup_pending origin
+                      }
+                      origin
+                  | Ok
+                      (Recovery_rollback_claimed
+                         (stage, durable_committed)) ->
+                    let claimed = { journal with stage } in
+                    let errors =
+                      rollback
+                        token
+                        config
+                        claimed
+                        verified_payload
+                        None
+                    in
+                    observe
+                      (if errors = [] then "recovery" else "recovery_failed")
+                      claimed.keeper_name
+                      (String.concat
+                         "; "
+                         (List.map rollback_error_to_string errors));
+                    if errors = []
+                    then Ok durable_committed
+                    else
+                      Error
+                        (String.concat
+                           "; "
+                           (List.map rollback_error_to_string errors))
+                in
+                release_observed token journal.keeper_name;
+                result)
+           | Launch_committed
+           | Forward_cleanup_pending
+           | Rollback_cleanup_pending _
+           | Cleared -> assert false))
+     | Cleared ->
+       Error "active journal unexpectedly carries Cleared stage")
+;;
+
+let recover_one config leaf =
+  match
+    read_journal_leaf
+      ~invalid:(fun detail -> Journal_ownership_changed detail)
+      config
+      ~leaf
+      ~expected_keeper_name:None
+  with
+  | Error error -> Error (error_to_string error)
+  | Ok (_, _, None) ->
+    Error "journal authority disappeared during recovery discovery"
+  | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
+  | Ok (_, _, Some (Active_journal discovered)) ->
+    (match
+       Keeper_lifecycle_admission_durable_transaction
+       .with_recovery_lifecycle_admission
+         config
+         ~keeper_name:discovered.keeper_name
+         ~transaction_id:discovered.transaction_id
+         (fun permit -> recover_one_locked permit config leaf)
+     with
+     | Admission_completed value -> value
+     | Admission_completed_with_attention (value, failure) ->
+       Log.Keeper.error
+         "keeper recovery durable admission release requires attention \
+          keeper=%s failure=%s"
+         discovered.keeper_name
+         (Keeper_lifecycle_admission.Durable_transaction
+          .authority_failure_to_wire
+            failure);
+       value
+     | Admission_blocked reason ->
+       Error
+         ("recovery transaction admission blocked: "
+          ^ Keeper_lifecycle_admission.Durable_transaction
+            .blocked_reason_to_wire
+              reason))
+;;
+
+let protect_shard_from_orphan_cleanup_locked config shard =
+  let dir = journal_dir config in
+  match Safe_ops.list_dir_safe dir with
+  | Error _ when not (Fs_compat.file_exists dir) -> Ok false
+  | Error detail -> Error detail
+  | Ok files ->
+    List.fold_left
+      (fun result leaf ->
+         let ( let* ) = Result.bind in
+         let* protect_shard = result in
+         if
+           not
+             (Filename.check_suffix leaf ".json"
+              && String.length leaf >= 8
+              && String.equal (String.sub leaf 0 8) "revival-")
+         then Ok protect_shard
+         else
+           match
+             read_journal_leaf
+               ~invalid:(fun detail -> Journal_ownership_changed detail)
+               config
+               ~leaf
+               ~expected_keeper_name:None
+           with
+           | Error error -> Error (error_to_string error)
+           | Ok (_, _, None)
+           | Ok (_, _, Some (Cleared_tombstone _)) -> Ok protect_shard
+           | Ok (_, _, Some (Active_journal journal)) ->
+             if
+               String.equal
+                 (Payload.immutable_ref_authority_leaf journal.payload_ref)
+                 (Payload.authority_shard_leaf shard)
+             then
+               let transaction_leaf =
+                 Payload.immutable_ref_transaction_leaf journal.payload_ref
+               in
+               let* expected_transaction_leaf =
+                 Payload.transaction_leaf_for_id
+                   ~transaction_id:journal.transaction_id
+                 |> Result.map_error Payload.error_to_string
+               in
+               if String.equal transaction_leaf expected_transaction_leaf
+               then
+                 Ok true
+               else
+                 Error
+                   "active journal payload slot differs from transaction binding"
+             else Ok protect_shard)
+      (Ok false)
+      files
+;;
+
+let clean_orphan_shard config shard =
+  match
+    revival_authority_lock_path
+      config
+      (Payload.authority_shard_leaf shard)
+  with
+  | Error error -> Error (error_to_string error)
+  | Ok lock_path ->
+    (match
+       File_lock_eio.with_durable_lock_observed
+         ~lock_path
+         (fun () ->
+            let ( let* ) = Result.bind in
+            let* inventory =
+              Payload.inventory_transactions config shard
+              |> Result.map_error Payload.error_to_string
+            in
+            let* protect_shard =
+              protect_shard_from_orphan_cleanup_locked config shard
+            in
+            if protect_shard
+            then Ok 0
+            else
+              List.fold_left
+                (fun result entry ->
+                   let* cleared = result in
+                   Payload.delete_inventory_transaction
+                     config
+                     ~authority_shard:shard
+                     entry
+                   |> Result.map (fun () -> cleared + 1)
+                   |> Result.map_error Payload.error_to_string)
+                (Ok 0)
+                inventory)
+     with
+     | File_lock_eio.Lock_not_acquired failure ->
+       Error (File_lock_eio.durable_lock_error_to_string failure)
+     | File_lock_eio.Body_completed
+         { value; release_error = None } -> value
+     | File_lock_eio.Body_completed
+         { value = _; release_error = Some failure } ->
+       Error (File_lock_eio.durable_lock_error_to_string failure))
 ;;
 
 let recover_pending config =
   let dir = journal_dir config in
-  match Safe_ops.list_dir_safe dir with
-  | Error _ when not (Fs_compat.file_exists dir) -> { recovered = 0; cleared = 0; unresolved = [] }
-  | Error detail -> { recovered = 0; cleared = 0; unresolved = [ dir, detail ] }
-  | Ok files ->
-    files
-    |> List.filter (fun file -> Filename.check_suffix file ".json")
-    |> List.fold_left
-         (fun summary file ->
-            let path = Filename.concat dir file in
-            match recover_one config path with
-            | Ok true -> { summary with recovered = summary.recovered + 1 }
-            | Ok false -> { summary with cleared = summary.cleared + 1 }
-            | Error detail ->
-              { summary with unresolved = (path, detail) :: summary.unresolved })
-         { recovered = 0; cleared = 0; unresolved = [] }
+  let summary =
+    match Safe_ops.list_dir_safe dir with
+    | Error _ when not (Fs_compat.file_exists dir) ->
+      { recovered = 0; cleared = 0; unresolved = [] }
+    | Error detail ->
+      { recovered = 0; cleared = 0; unresolved = [ dir, detail ] }
+    | Ok files ->
+      List.fold_left
+        (fun summary file ->
+           if
+             not
+               (Filename.check_suffix file ".json"
+                && String.length file >= 8
+                && String.equal (String.sub file 0 8) "revival-")
+           then summary
+           else
+             let path = Filename.concat dir file in
+             match recover_one config file with
+             | Ok true ->
+               { summary with recovered = summary.recovered + 1 }
+             | Ok false ->
+               { summary with cleared = summary.cleared + 1 }
+             | Error detail ->
+               { summary with
+                 unresolved = (path, detail) :: summary.unresolved
+               })
+        { recovered = 0; cleared = 0; unresolved = [] }
+        files
+  in
+  match Payload.inventory_authority_shards config with
+  | Error failure ->
+    { summary with
+      unresolved =
+        ("revival-payload-inventory", Payload.error_to_string failure)
+        :: summary.unresolved
+    }
+  | Ok shards ->
+    List.fold_left
+      (fun summary shard ->
+         match clean_orphan_shard config shard with
+         | Ok cleared ->
+           { summary with cleared = summary.cleared + cleared }
+         | Error detail ->
+           { summary with
+             unresolved =
+               (Payload.authority_shard_leaf shard, detail)
+               :: summary.unresolved
+           })
+      summary
+      shards
 ;;

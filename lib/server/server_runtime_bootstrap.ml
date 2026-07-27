@@ -1377,26 +1377,23 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
          unrelated Keeper lanes. *)
       (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
       let tool_dispatcher tool_name args_json =
-        let arguments =
-          try Yojson.Safe.from_string args_json
-          with Yojson.Json_error _ -> `Assoc []
-        in
-        let workspace_scope = Mcp_server.workspace_scope state in
-        let result =
-          Mcp_server_eio_execute.execute_tool_eio
-            ~sw
-            ~clock
-            ~workspace_scope
-            state
-            ~name:tool_name ~arguments
-        in
-        let success = not (Tool_result.is_failed result)
-        and result_str = Tool_result.message result
-        in
-        if not success then
-          Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
-            tool_name (String.length result_str);
-        if success then Ok result_str else Error result_str
+      Server_grpc_tool_dispatch.dispatch args_json ~dispatch:(fun arguments ->
+          let workspace_scope = Mcp_server.workspace_scope state in
+          let result =
+            Mcp_server_eio_execute.execute_tool_eio
+              ~sw
+              ~clock
+              ~workspace_scope
+              state
+              ~name:tool_name ~arguments
+          in
+          let success = not (Tool_result.is_failed result)
+          and result_str = Tool_result.message result
+          in
+          if not success then
+            Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
+              tool_name (String.length result_str);
+          if success then Ok result_str else Error result_str)
       in
       Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
         ~tool_dispatcher;

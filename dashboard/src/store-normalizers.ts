@@ -720,6 +720,7 @@ function currentKeeperFleetFactInvalid(): DashboardBlockedKeeperFact {
     task_status: null,
     reason: 'current_fact_invalid',
     action: 'inspect_current_keeper_fact',
+    lifecycle_admission_reason: null,
     operator_action_type: null,
     operator_tool_name: null,
     operator_action_confirm_required: null,
@@ -759,6 +760,10 @@ function normalizeDashboardBlockedKeeperFact(raw: unknown): DashboardBlockedKeep
     task_status: taskStatus,
     reason,
     action,
+    lifecycle_admission_reason:
+      raw.lifecycle_admission_reason == null
+        ? null
+        : nonEmptyString(raw.lifecycle_admission_reason),
     operator_action_type:
       raw.operator_action_type == null ? null : nonEmptyString(raw.operator_action_type),
     operator_tool_name:

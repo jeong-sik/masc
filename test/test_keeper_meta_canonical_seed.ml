@@ -11,8 +11,9 @@ open Masc
    shared_memory_scope and all related logic"). Drop from the drift gate so
    it does not pin a key the JSON serialisation no longer emits. *)
 let target_keys =
-  [ "trace_history"
-  ; "instructions"
+   [ "trace_history"
+   ; "generation"
+   ; "instructions"
   ; "last_runtime_attempt"
   ; "current_task_id"
   ; "keeper_id"
@@ -35,11 +36,12 @@ let test_canonical_includes_runtime_keys () =
 let test_meta_to_json_redacts_last_model_used () =
   let json =
     `Assoc
-      [ "name", `String "meta-redaction"
-      ; "agent_name", `String "meta-redaction"
-      ; "trace_id", `String "trace-meta-redaction"
-      ; "last_model_used", `String "openai:gpt-5.4"
-      ]
+       [ "name", `String "meta-redaction"
+       ; "agent_name", `String "meta-redaction"
+       ; "trace_id", `String "trace-meta-redaction"
+       ; "generation", `Int 1
+       ; "last_model_used", `String "openai:gpt-5.4"
+       ]
   in
   match Keeper_meta_json.meta_of_json json with
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
@@ -53,14 +55,8 @@ let test_meta_to_json_redacts_last_model_used () =
     Alcotest.(check bool) "legacy last_model_used key is redacted on write" false
       has_last_model_used
 
-(* Regression: the persisted identity-counter JSON key stays ["generation"]
-   even though the OCaml field is [nonce] (every other JSON surface — keeper
-   status, dashboard — already keeps this key while reading [rt.nonce]).
-   Renaming the wire key would load every pre-rename on-disk meta file as
-   [nonce = 0] and silently reset the fencing counter. The round-trip pins both
-   sides: a [generation:7] input must load its counter (not default to 0 when a
-   ["nonce"] key is absent) and re-serialise under ["generation"] (not
-   ["nonce"]). *)
+(* Current persisted identity uses the required positive ["generation"] key.
+   The round-trip pins the exact reader and writer contract. *)
 let test_persisted_identity_counter_key_is_generation () =
   let input =
     `Assoc
@@ -87,8 +83,8 @@ let test_persisted_identity_counter_key_is_generation () =
        (List.mem_assoc "nonce" fields);
      (match List.assoc "generation" fields with
       | `Int n ->
-        Alcotest.(check int)
-          "generation:7 round-trips (reader did not default the absent nonce key to 0)"
+          Alcotest.(check int)
+            "generation:7 round-trips exactly"
           7
           n
       | _ -> Alcotest.fail "generation value must be a JSON integer")

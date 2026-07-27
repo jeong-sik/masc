@@ -42,7 +42,6 @@ type judgment_provenance =
   | Oas_internal_error
   | Masc_internal_error
   | Completion_contract
-  | Legacy_unattributed
 
 type error_boundary =
   | Masc_execution
@@ -312,7 +311,6 @@ let judgment_provenance_label = function
   | Oas_internal_error -> "oas_internal_error"
   | Masc_internal_error -> "masc_internal_error"
   | Completion_contract -> "completion_contract"
-  | Legacy_unattributed -> "legacy_unattributed"
 
 type judgment_provenance_boundary =
   | Boundary_oas_api
@@ -326,7 +324,6 @@ type judgment_provenance_boundary =
   | Boundary_oas_internal
   | Boundary_masc_internal
   | Boundary_completion_contract
-  | Boundary_legacy_unattributed
 
 let judgment_provenance_boundary = function
   | Oas_api_error -> Boundary_oas_api
@@ -340,7 +337,6 @@ let judgment_provenance_boundary = function
   | Oas_internal_error -> Boundary_oas_internal
   | Masc_internal_error -> Boundary_masc_internal
   | Completion_contract -> Boundary_completion_contract
-  | Legacy_unattributed -> Boundary_legacy_unattributed
 ;;
 
 let judgment_provenance_same_boundary left right =
@@ -360,8 +356,7 @@ let judgment_provenance_to_yojson provenance =
   | Oas_orchestration_error
   | Oas_internal_error
   | Masc_internal_error
-  | Completion_contract
-  | Legacy_unattributed ->
+  | Completion_contract ->
     `Assoc [ kind ]
 
 let require_exact_provenance_fields expected fields =
@@ -408,8 +403,6 @@ let judgment_provenance_of_yojson = function
        provenance_without_payload fields Masc_internal_error
      | Some (`String "completion_contract") ->
        provenance_without_payload fields Completion_contract
-     | Some (`String "legacy_unattributed") ->
-       provenance_without_payload fields Legacy_unattributed
      | Some (`String kind) ->
        Error (Printf.sprintf "unknown failure judgment provenance: %s" kind)
      | Some _ | None ->

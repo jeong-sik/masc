@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CirclePause } from 'lucide-preact'
+import { CirclePause, ShieldAlert } from 'lucide-preact'
 import type { DashboardBlockedKeeperFact } from '../types'
 import {
   CURRENT_KEEPER_FLEET_FACT_INVALID,
@@ -33,6 +33,29 @@ describe('keeper fleet operator fact presentation', () => {
     expect(presentation.Icon).toBe(CirclePause)
     expect(presentation.action).toContain('resume selected paused keepers')
     expect(presentation.reason).toBe('durable_paused_autoboot_enabled')
+    expect(presentation.detail).toBeNull()
+  })
+
+  it('keeps lifecycle action, icon, and exact durable detail on one presentation surface', () => {
+    const presentation = keeperFleetOperatorFactPresentation(
+      fact({
+        reason: 'runtime_meta_authority',
+        action: 'inspect_lifecycle_transaction',
+        lifecycle_admission_reason:
+          'runtime_meta_authority:keeper=sangsu,transaction=tx-current,stage=durable_committed',
+      }),
+      'blocked',
+    )
+
+    expect(presentation).toMatchObject({
+      label: 'Keeper lifecycle transaction blocked',
+      tone: 'bad',
+      Icon: ShieldAlert,
+      reason: 'runtime_meta_authority',
+      detail:
+        'runtime_meta_authority:keeper=sangsu,transaction=tx-current,stage=durable_committed',
+    })
+    expect(presentation.action).toContain('settle its current authority')
   })
 
   it('fails a missing current fleet fact closed', () => {

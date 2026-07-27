@@ -236,4 +236,9 @@ module For_testing : sig
     unit ->
     transcript_corruption_commit
 
+  val selection_is_settled :
+    Keeper_heartbeat_loop_cycle.cycle_outcome option -> bool
+  (** Whether the cycle finished with its selected stimulus. [false] leaves the
+      selection pending, which re-selects the same stimulus next cycle, so
+      [false] asserts that running it again can produce a different outcome. *)
 end

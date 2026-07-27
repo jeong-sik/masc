@@ -74,6 +74,42 @@ let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat
 let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
+(* Whether this cycle finished with its selected stimulus, so the selection can
+   leave pending. A selection that stays pending is re-selected next cycle, so
+   every arm answering [false] is a claim that running the same stimulus again
+   can produce a different outcome. *)
+let selection_is_settled cycle_outcome =
+  match cycle_outcome with
+  | Some
+      ( Cycle.Completed _
+      | Cycle.Manual_compaction_applied _
+      | Cycle.Manual_compaction_not_applied _ ) ->
+    true
+  | Some (Cycle.Failed { failure; _ }) ->
+    (match failure.Keeper_unified_turn.source_lease_disposition with
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling
+     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> true
+     | Keeper_unified_turn.Follow_failure_route
+     | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
+       (* Following the route means honouring what the route says.
+          [Exhausted_visible_alive] is the deterministic class: "mechanical
+          retry or rotation cannot change the outcome"
+          (keeper_runtime_failure_route.mli). Re-selecting it spends a provider
+          turn that cannot progress. *)
+       (match failure.Keeper_unified_turn.route with
+        | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> true
+        | Keeper_runtime_failure_route.Retry_after_observed _
+        | Keeper_runtime_failure_route.Rotate_now _ -> false)
+     | Keeper_unified_turn.Requeue_after_context_compaction _
+     | Keeper_unified_turn.Pause_after_transcript_corruption _ -> false)
+  | Some
+      ( Cycle.Cancelled _
+      | Cycle.Skipped _
+      | Cycle.Busy _
+      | Cycle.Manual_compaction_failed _ )
+  | None -> false
+;;
+
 (* Keepalive scheduling decision (record + decide function) extracted to
    [Keeper_heartbeat_loop_scheduling] (godfile decomp). *)
 type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
@@ -309,7 +345,7 @@ module For_testing = struct
     | Transcript_pause_settlement_failed of string
 
   let commit_transcript_corruption = commit_transcript_corruption
-
+  let selection_is_settled = selection_is_settled
 end
 
 (* Pure: post-turn status event derived from the registry turn-failure
@@ -706,31 +742,7 @@ let run_keepalive_unified_turn
          match !pending_selection with
        | None -> ()
        | Some selection ->
-         let should_ack =
-           match !cycle_outcome_ref with
-           | Some
-               ( Cycle.Completed _
-               | Cycle.Manual_compaction_applied _
-               | Cycle.Manual_compaction_not_applied _ ) ->
-             true
-           | Some (Cycle.Failed { failure; _ }) ->
-             (match failure.Keeper_unified_turn.source_lease_disposition with
-              | Keeper_unified_turn.Acknowledge_after_in_turn_handling
-              | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
-                true
-              | Keeper_unified_turn.Follow_failure_route
-              | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
-              | Keeper_unified_turn.Requeue_after_context_compaction _
-              | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
-                false)
-           | Some
-               ( Cycle.Cancelled _
-               | Cycle.Skipped _
-               | Cycle.Busy _
-               | Cycle.Manual_compaction_failed _ )
-           | None ->
-             false
-         in
+         let should_ack = selection_is_settled !cycle_outcome_ref in
          if should_ack
          then
            match

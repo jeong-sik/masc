@@ -3915,14 +3915,16 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
     let decision =
       Runtime_manifest.with_clock_refs
         ~clock_refs
-        (Runtime_manifest.with_payload_role
-           ~payload_role:Runtime_manifest.Checkpoint
-           (`Assoc
-              [ "trigger", `String "provider_overflow"
-              ; "before_tokens", `Int 210_000
-              ; "after_tokens", `Int 120_000
-              ; "exact_evidence", exact_evidence
-              ]))
+        (Runtime_manifest.with_compaction_outcome
+           ~compaction_outcome:Runtime_manifest.Checkpoint_committed
+           (Runtime_manifest.with_payload_role
+              ~payload_role:Runtime_manifest.Checkpoint
+              (`Assoc
+                 [ "trigger", `String "provider_overflow"
+                 ; "before_tokens", `Int 210_000
+                 ; "after_tokens", `Int 120_000
+                 ; "exact_evidence", exact_evidence
+                 ])))
     in
     let row =
       Runtime_manifest.make
@@ -3941,6 +3943,39 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       Result.get_ok (Runtime_manifest.append config row)
     in
     append row;
+    let append_failure ~ts ~status ~compaction_outcome ~error =
+      Runtime_manifest.make
+        ~ts
+        ~keeper_name:keeper_id
+        ~trace_id
+        ~keeper_turn_id:12
+        ~event:Runtime_manifest.Context_compacted
+        ~runtime_id:"oas-seoul-1"
+        ~status
+        ~decision:
+          (Runtime_manifest.with_clock_refs
+             ~clock_refs
+             (Runtime_manifest.with_compaction_outcome
+                ~compaction_outcome
+                (Runtime_manifest.with_payload_role
+                   ~payload_role:Runtime_manifest.Checkpoint
+                   (`Assoc
+                      [ "trigger", `String "provider_overflow"
+                      ; "error", `String error
+                      ]))))
+        ()
+      |> append
+    in
+    append_failure
+      ~ts:"2026-06-26T03:03:10Z"
+      ~status:"retryable_failure"
+      ~compaction_outcome:Runtime_manifest.Retry_without_checkpoint
+      ~error:"compaction dispatch failed";
+    append_failure
+      ~ts:"2026-06-26T03:03:20Z"
+      ~status:"lifecycle_cleanup_failed"
+      ~compaction_outcome:Runtime_manifest.Lifecycle_cleanup_failed_without_checkpoint
+      ~error:"lifecycle cleanup failed";
     let receipt event decision =
       Runtime_manifest.make
         ~ts:"2026-06-26T03:04:00Z"
@@ -3968,7 +4003,7 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       "schema"
       "keeper.compaction_snapshots.v1"
       (json_string_field "compaction_snapshots" top "schema");
-    Alcotest.(check int) "count" 1 (json_int_field "compaction_snapshots" top "count");
+    Alcotest.(check int) "count" 3 (json_int_field "compaction_snapshots" top "count");
     Alcotest.(check int)
       "read errors"
       0
@@ -3981,11 +4016,23 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       "scan truncated"
       false
       (json_bool_field "compaction_snapshots" top "scan_truncated");
-    let item =
-      match json_item_list "compaction_snapshots" top "items" with
-      | [ item ] -> json_assoc "compaction_snapshots.items[0]" item
-      | items -> Alcotest.failf "expected one compaction item, got %d" (List.length items)
+    let items =
+      json_item_list "compaction_snapshots" top "items"
+      |> List.map (json_assoc "compaction_snapshots.items")
     in
+    let find_outcome expected =
+      match
+        List.find_opt
+          (fun item ->
+             String.equal
+               expected
+               (json_string_field "item" item "compaction_outcome"))
+          items
+      with
+      | Some item -> item
+      | None -> Alcotest.failf "missing compaction outcome %s" expected
+    in
+    let item = find_outcome "checkpoint_committed" in
     Alcotest.(check string)
       "source"
       "runtime_manifest"
@@ -4010,6 +4057,22 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       "canonical exact evidence"
       exact_evidence
       (List.assoc "exact_evidence" item);
+    List.iter
+      (fun (outcome, cause) ->
+         let failed = find_outcome outcome in
+         Alcotest.(check string)
+           (outcome ^ " failure cause")
+           cause
+           (json_string_field "item" failed "failure_cause");
+         Alcotest.check
+           (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal)
+           (outcome ^ " has no exact evidence")
+           `Null
+           (List.assoc "exact_evidence" failed))
+      [ "retry_without_checkpoint", "compaction dispatch failed"
+      ; ( "lifecycle_cleanup_failed_without_checkpoint"
+        , "lifecycle cleanup failed" )
+      ];
     Alcotest.(check string)
       "compaction id"
       "cmp-42"

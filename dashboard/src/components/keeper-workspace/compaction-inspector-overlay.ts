@@ -63,6 +63,26 @@ function fmtBytes(n: number): string {
   return `${n}B`
 }
 
+function compactionOutcomePresentation(outcome: CompactionSnapshot['outcome']): {
+  readonly label: string
+  readonly color: string
+} | null {
+  switch (outcome) {
+    case 'checkpoint_committed':
+      return { label: '체크포인트 커밋 완료', color: 'var(--status-ok)' }
+    case 'retry_without_checkpoint':
+      return { label: '체크포인트 없이 재시도', color: 'var(--status-warn)' }
+    case 'lifecycle_cleanup_failed_without_checkpoint':
+      return {
+        label: '체크포인트 없이 lifecycle 정리 실패',
+        color: 'var(--color-status-err)',
+      }
+    case null:
+    case undefined:
+      return null
+  }
+}
+
 function shortDigest(digest: string): string {
   return digest.length > 12 ? digest.slice(0, 12) : digest
 }
@@ -438,6 +458,7 @@ export function CompactionInspectorOverlay({
 
   const safeIdx = Math.max(0, Math.min(idx, events.length - 1))
   const ev = events[safeIdx]!
+  const outcomePresentation = compactionOutcomePresentation(ev.outcome)
   const hasTokenPair = isFiniteNumber(ev.before.tok) && isFiniteNumber(ev.after.tok)
   const reduction = hasTokenPair && ev.before.tok > 0
     ? Math.round((1 - ev.after.tok / ev.before.tok) * 100)
@@ -476,6 +497,12 @@ export function CompactionInspectorOverlay({
           <div class="cmp-trigger"><span class="sub-k">트리거</span>${ev.trigger}</div>
           <div class="cmp-trigger"><span class="sub-k">수행 런타임</span><span class="mono">${ev.runtime}</span></div>
           <div class="cmp-trigger"><span class="sub-k">소스</span><span class="mono">${ev.detailSource ?? ev.source}${ev.status ? ` · ${ev.status}` : ''}</span></div>
+          ${outcomePresentation
+            ? html`<div class="cmp-trigger"><span class="sub-k">결과</span><strong style=${{ color: outcomePresentation.color }}>${outcomePresentation.label}</strong></div>`
+            : null}
+          ${ev.failureCause
+            ? html`<div class="cmp-trigger"><span class="sub-k">실패 원인</span><span class="mono" style=${{ color: 'var(--color-status-err)' }}>${ev.failureCause}</span></div>`
+            : null}
           ${ev.reinjection
             ? html`<div class="cmp-trigger"><span class="sub-k">재주입 관측</span><span class="mono">${ev.reinjection.state} · load=${ev.reinjection.checkpoint_loaded_receipts} · inject=${ev.reinjection.context_injected_receipts}</span></div>`
             : null}

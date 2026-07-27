@@ -107,6 +107,8 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
           saved_tokens: 90000,
           compaction_id: 'cmp-42',
           compaction_source: 'event_bus',
+          compaction_outcome: 'checkpoint_committed',
+          failure_cause: null,
           status: 'observed',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
           exact_evidence: {
@@ -914,6 +916,60 @@ describe('KeeperWorkspaceRail', () => {
     expect(promptContext.textContent).toContain('raw prompt text는 이 화면/API에서 노출하지 않습니다')
   })
 
+  it('renders no-checkpoint compaction outcome and cause without success wording', async () => {
+    vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
+      schema: 'keeper.compaction_snapshots.v1',
+      keeper: 'masc-improver',
+      source: 'runtime_manifest|keeper_meta',
+      producer: 'keeper_runtime_manifest|keeper_meta_store',
+      limit: 25,
+      count: 1,
+      read_error_count: 0,
+      read_errors: [],
+      scan_truncated: false,
+      items: [
+        {
+          id: 'manifest:trace-failed:context_compacted:2026-06-03T11:02:00Z',
+          keeper: 'masc-improver',
+          ts_iso: '2026-06-03T11:02:00Z',
+          ts_unix: 1_780_464_120,
+          trace_id: 'trace-failed',
+          keeper_turn_id: 13,
+          source: 'runtime_manifest',
+          trigger: 'provider_overflow',
+          runtime_id: 'oas-seoul-1',
+          display_runtime: 'oas-seoul-1',
+          before_tokens: null,
+          after_tokens: null,
+          saved_tokens: null,
+          compaction_id: 'cmp-failed',
+          compaction_source: 'provider_overflow',
+          compaction_outcome: 'retry_without_checkpoint',
+          failure_cause: 'compaction dispatch failed',
+          status: 'retryable_failure',
+          links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+          exact_evidence: null,
+          reinjection_observation: {
+            state: 'not_linked',
+            keeper_turn_id: null,
+            checkpoint_loaded_receipts: 0,
+            context_injected_receipts: 0,
+          },
+        },
+      ],
+    })
+
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
+      el => el.textContent?.includes('before/after'),
+    ) as HTMLElement | undefined
+    fireEvent.click(btn as HTMLElement)
+
+    await waitFor(() => expect(container.textContent).toContain('체크포인트 없이 재시도'))
+    expect(container.textContent).toContain('compaction dispatch failed')
+    expect(container.textContent).not.toContain('체크포인트 커밋 완료')
+  })
+
   it('renders live durable compaction snapshots even when token counts are missing', async () => {
     vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
       schema: 'keeper.compaction_snapshots.v1',
@@ -944,6 +1000,8 @@ describe('KeeperWorkspaceRail', () => {
           saved_tokens: null,
           compaction_id: null,
           compaction_source: 'pre_dispatch_hygiene',
+          compaction_outcome: null,
+          failure_cause: null,
           status: 'compacted',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
           exact_evidence: null,
@@ -1060,6 +1118,8 @@ describe('KeeperWorkspaceRail', () => {
         saved_tokens: 90000,
         compaction_id: 'cmp-old',
         compaction_source: 'event_bus',
+        compaction_outcome: null,
+        failure_cause: null,
         status: 'observed',
         links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
         exact_evidence: null,

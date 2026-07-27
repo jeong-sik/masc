@@ -259,6 +259,11 @@ export type KeeperCompactionReinjectionObservation = {
   readonly context_injected_receipts: number
 }
 
+export type KeeperCompactionOutcome =
+  | 'checkpoint_committed'
+  | 'retry_without_checkpoint'
+  | 'lifecycle_cleanup_failed_without_checkpoint'
+
 export type KeeperCompactionSnapshot = {
   readonly id: string
   readonly keeper: string
@@ -275,6 +280,8 @@ export type KeeperCompactionSnapshot = {
   readonly saved_tokens: number | null
   readonly compaction_id: string | null
   readonly compaction_source: string | null
+  readonly compaction_outcome: KeeperCompactionOutcome | null
+  readonly failure_cause: string | null
   readonly status: string
   readonly links: KeeperCompactionSnapshotLinks
   readonly exact_evidence: KeeperCompactionExactEvidence | null
@@ -642,9 +649,23 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
   const runtimeId = asNullableString(raw.runtime_id)
   const compactionSource = asNullableString(raw.compaction_source)
   const exactEvidence = decodeCompactionExactEvidence(raw.exact_evidence)
+  const compactionOutcome = asNullableString(raw.compaction_outcome)
+  const failureCause = asNullableString(raw.failure_cause)
   const reinjectionObservation =
     decodeCompactionReinjectionObservation(raw.reinjection_observation)
   if (exactEvidence === undefined || reinjectionObservation === undefined) return null
+  if (
+    compactionOutcome !== null
+    && compactionOutcome !== 'checkpoint_committed'
+    && compactionOutcome !== 'retry_without_checkpoint'
+    && compactionOutcome !== 'lifecycle_cleanup_failed_without_checkpoint'
+  ) return null
+  if (compactionOutcome === 'checkpoint_committed' && exactEvidence === null) return null
+  if (
+    (compactionOutcome === 'retry_without_checkpoint'
+      || compactionOutcome === 'lifecycle_cleanup_failed_without_checkpoint')
+    && !failureCause?.trim()
+  ) return null
   return {
     id,
     keeper,
@@ -661,6 +682,8 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
     saved_tokens: nullableNumber(raw.saved_tokens),
     compaction_id: asNullableString(raw.compaction_id),
     compaction_source: compactionSource,
+    compaction_outcome: compactionOutcome,
+    failure_cause: failureCause,
     status,
     links: decodeKeeperCompactionSnapshotLinks(raw.links),
     exact_evidence: exactEvidence,

@@ -73,6 +73,11 @@ type status =
   | Skipped
   | Other of string
 
+type compaction_outcome =
+  | Checkpoint_committed
+  | Retry_without_checkpoint
+  | Lifecycle_cleanup_failed_without_checkpoint
+
 (** {1 Own-module vals} *)
 
 val payload_role_to_string : payload_role -> string
@@ -89,6 +94,9 @@ val safe_segment : string -> string
 val status_of_string : string -> status
 val status_to_string : status -> string
 val status_is_skipped : t -> bool
+val compaction_outcome_key : string
+val compaction_outcome_to_string : compaction_outcome -> string
+val compaction_outcome_of_string : string -> compaction_outcome option
 
 val clock_refs :
   ?edge_id:string ->
@@ -128,6 +136,9 @@ val clock_refs_for_context :
 val with_clock_refs : clock_refs:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 
 val with_payload_role : payload_role:payload_role -> Yojson.Safe.t -> Yojson.Safe.t
+
+val with_compaction_outcome :
+  compaction_outcome:compaction_outcome -> Yojson.Safe.t -> Yojson.Safe.t
 
 val make :
   ?ts:string ->

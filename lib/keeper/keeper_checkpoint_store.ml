@@ -294,7 +294,11 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
 type save_oas_relation = [ `Cold | `Forward | `Equal ]
 
 type save_oas_outcome =
-  | Saved of { relation : save_oas_relation; turn_count : int }
+  | Saved of
+      { relation : save_oas_relation
+      ; turn_count : int
+      ; installed_ref : Keeper_checkpoint_ref.t
+      }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
 let save_relation ~known ~incoming =
@@ -322,6 +326,7 @@ type save_oas_error =
   | Session_directory_unavailable of directory_failure
   | Existing_checkpoint_unreadable of checkpoint_load_error
   | Canonical_write_failed of Keeper_fs.durable_write_error
+  | Canonical_identity_invalid of string
   | Transaction_lock_failed of File_lock_eio.durable_lock_error
 
 let checkpoint_load_error_to_string = function
@@ -348,6 +353,8 @@ let save_oas_error_to_string = function
   | Canonical_write_failed error ->
     "canonical checkpoint write failed: "
     ^ Keeper_fs.durable_write_error_to_string error
+  | Canonical_identity_invalid detail ->
+    "canonical checkpoint identity invalid: " ^ detail
   | Transaction_lock_failed error ->
     "checkpoint transaction lock failed: "
     ^ File_lock_eio.durable_lock_error_to_string error
@@ -959,21 +966,47 @@ let save_oas_classified_typed
       | Ok existing ->
         let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
         let ownership_root = Filename.dirname session_dir in
-        (match
-           Keeper_fs.save_json_durable_atomic_from
-             ~ownership_root
-             ~pretty:false
-             canonical_path
-             (fun () -> Agent_sdk.Checkpoint.to_json ckpt)
-         with
-         | Error error -> Error (Canonical_write_failed error)
-         | Ok () ->
-           archive_oas_history_best_effort ~session_dir ckpt;
-           Ok
-             (Saved
-                { relation = save_relation ~known ~incoming:ckpt.turn_count
-                ; turn_count = ckpt.turn_count
-                })))
+        let canonical_bytes = Agent_sdk.Checkpoint.to_string ckpt in
+        let generation =
+          match
+            Agent_sdk.Context.get_scoped ckpt.context Agent_sdk.Context.Session
+              keeper_generation_context_key
+          with
+          | Some (`Int value) -> Ok value
+          | Some (`Intlit raw) ->
+            Option.to_result
+              ~none:"generation is not an integer"
+              (int_of_string_opt raw)
+          | Some _ | None -> Error "generation is missing or not an integer"
+        in
+        (match generation with
+         | Error detail -> Error (Canonical_identity_invalid detail)
+         | Ok generation ->
+           (match
+              Keeper_checkpoint_ref.create
+                ~trace_id
+                ~generation
+                ~turn_count:ckpt.turn_count
+                ~canonical_checkpoint_bytes:canonical_bytes
+            with
+            | Error _ ->
+              Error (Canonical_identity_invalid "checkpoint ref rejected")
+            | Ok installed_ref ->
+              (match
+                 Keeper_fs.save_bytes_durable_atomic
+                   ~ownership_root
+                   canonical_path
+                   canonical_bytes
+               with
+               | Error error -> Error (Canonical_write_failed error)
+               | Ok () ->
+                 archive_oas_history_best_effort ~session_dir ckpt;
+                 Ok
+                   (Saved
+                      { relation = save_relation ~known ~incoming:ckpt.turn_count
+                      ; turn_count = ckpt.turn_count
+                      ; installed_ref
+                      })))))
 
 let save_oas_classified ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (save_oas_outcome, string) result =

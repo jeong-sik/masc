@@ -216,7 +216,7 @@ module For_testing = struct
 end
 
 let finalize
-    ~config
+    ~(config : Workspace.config)
     ~meta
     ~generation
     ~manifest_keeper_turn_id
@@ -231,6 +231,7 @@ let finalize
     ~post_turn_t0
     ~runtime_id_string
     ~history_messages
+    ~context_correction_start
     ~pre_turn_working_context
     ~prompt_metrics
     ~ctx_composition
@@ -306,12 +307,17 @@ let finalize
               ~keeper_name:meta.name
               ~detail)
        | Ok (patched, replay_suffix_pruned) ->
+         let patched =
+           Keeper_context_correction.prepare_raw_checkpoint
+             ~start:context_correction_start
+             patched
+         in
          (match
             Keeper_checkpoint_store.save_oas_classified
               ~session_dir:session.session_dir
               patched
           with
-       | Ok (Keeper_checkpoint_store.Saved _) ->
+       | Ok (Keeper_checkpoint_store.Saved { installed_ref; _ }) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
            ~oas_turn_count:result.turns
@@ -339,7 +345,7 @@ let finalize
                         completion_contract_result) );
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
-         Ok (Some patched)
+         Ok (Some (patched, installed_ref, true))
        | Ok (Keeper_checkpoint_store.Stale_noop
                 { incoming_turn_count; known_turn_count }) ->
          Log.Keeper.warn ~keeper_name:meta.name
@@ -350,7 +356,18 @@ let finalize
            "masc_keeper_checkpoint_stale_noop_total"
            ~labels:[ "keeper", meta.name; "site", "finalize" ]
            ();
-         Ok None
+         (match
+            Keeper_checkpoint_store.load_oas_exact_snapshot
+              ~session_dir:session.session_dir
+              ~session_id:patched.session_id
+          with
+          | Ok snapshot ->
+            Ok
+              (Some
+                 ( Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot
+                 , Keeper_checkpoint_store.exact_snapshot_reference snapshot
+                 , false ))
+          | Error _ -> Ok None)
        | Error e ->
          Log.Keeper.error ~keeper_name:meta.name
            "runtime=%s OAS checkpoint save failed: %s"
@@ -379,7 +396,40 @@ let finalize
   in
   match saved_checkpoint_result with
   | Error e -> Error e
-  | Ok saved_checkpoint ->
+  | Ok saved_raw_checkpoint ->
+    let saved_checkpoint =
+      Option.map (fun (checkpoint, _, _) -> checkpoint) saved_raw_checkpoint
+    in
+    (match saved_raw_checkpoint, result.stop_reason with
+     | Some (raw_checkpoint, raw_ref, true), Runtime_agent.Completed ->
+       let submission =
+         Keeper_context_correction.submit
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           (fun () ->
+              let outcome =
+                Keeper_context_correction.run
+                  ~timeout_s:90.0
+                  ~keeper_name:meta.name
+                  ~session_dir:session.session_dir
+                  ~start:context_correction_start
+                  ~history_messages
+                  ~raw_checkpoint
+                  ~raw_ref
+              in
+              Log.Keeper.info
+                ~keeper_name:meta.name
+                "context correction terminal %s"
+                (Yojson.Safe.to_string
+                   (Keeper_context_correction.outcome_to_json outcome)))
+       in
+       append_manifest
+         ~site:"context_correction_scheduled"
+         ~keeper_turn_id:manifest_keeper_turn_id
+         ~oas_turn_count:result.turns
+         ~decision:(Keeper_context_correction.submission_to_json submission)
+         Keeper_runtime_manifest.Checkpoint_saved
+     | _ -> ());
     (* Retired proof-ledger evaluation is absent. Task completion judgment is
        owned by the configured LLM reviewer at the Task boundary. *)
     let librarian_messages =

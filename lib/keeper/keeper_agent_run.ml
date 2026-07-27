@@ -367,6 +367,14 @@ let run_turn
       ~generation
       ()
   in
+  let context_correction_start =
+    Keeper_context_correction.capture_start
+      ~session_dir:ctx.session_dir
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+  in
+  Keeper_context_correction.bind_start_context
+    context_correction_start
+    ctx.shared_context;
   let meta = ctx.meta in
   let temperature = ctx.temperature in
   let context_injector = ctx.context_injector in
@@ -780,6 +788,7 @@ let run_turn
                           ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ~runtime_id_string
                           ~history_messages
+                          ~context_correction_start
                           ~pre_turn_working_context:
                             ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context
                           ~prompt_metrics ~ctx_composition ~usage

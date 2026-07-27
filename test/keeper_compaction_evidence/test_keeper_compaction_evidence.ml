@@ -184,7 +184,9 @@ let test_rejections () =
           { before_message_count = 12
           ; after_message_count = 11
           ; summarized_message_count = 999
+          ; summarized_unit_count = 6
           ; dropped_message_count = 1
+          ; normalized_message_count = 0
           }
       , impossible_accounting )
     ; ( "inexact after count"
@@ -192,9 +194,31 @@ let test_rejections () =
           { before_message_count = 12
           ; after_message_count = 10
           ; summarized_message_count = 6
+          ; summarized_unit_count = 6
           ; dropped_message_count = 1
+          ; normalized_message_count = 0
           }
       , inexact_after )
+    ; ( "summarized units cannot disappear"
+      , Invalid_message_accounting
+          { before_message_count = 12
+          ; after_message_count = 11
+          ; summarized_message_count = 6
+          ; summarized_unit_count = 0
+          ; dropped_message_count = 1
+          ; normalized_message_count = 0
+          }
+      , replace "summarized_unit_count" (`Int 0) canonical )
+    ; ( "normalization count stays within untouched sources"
+      , Invalid_message_accounting
+          { before_message_count = 12
+          ; after_message_count = 11
+          ; summarized_message_count = 6
+          ; summarized_unit_count = 6
+          ; dropped_message_count = 1
+          ; normalized_message_count = 6
+          }
+      , replace "normalized_message_count" (`Int 6) canonical )
     ]
 ;;
 

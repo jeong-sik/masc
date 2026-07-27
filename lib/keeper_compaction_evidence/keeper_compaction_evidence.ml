@@ -74,7 +74,9 @@ type decode_error =
       { before_message_count : int
       ; after_message_count : int
       ; summarized_message_count : int
+      ; summarized_unit_count : int
       ; dropped_message_count : int
+      ; normalized_message_count : int
       }
   | Invalid_tool_protocol_accounting of
       { before_tool_use_count : int
@@ -185,14 +187,19 @@ let decode_error_to_string = function
       { before_message_count
       ; after_message_count
       ; summarized_message_count
+      ; summarized_unit_count
       ; dropped_message_count
+      ; normalized_message_count
       } ->
     Printf.sprintf
-      "invalid_message_accounting:before=%d:after=%d:summarized=%d:dropped=%d"
+      "invalid_message_accounting:before=%d:after=%d:summarized=%d:\
+       summarized_units=%d:dropped=%d:normalized=%d"
       before_message_count
       after_message_count
       summarized_message_count
+      summarized_unit_count
       dropped_message_count
+      normalized_message_count
   | Invalid_tool_protocol_accounting
       { before_tool_use_count
       ; after_tool_use_count
@@ -216,10 +223,16 @@ let message_accounting_is_exact
       ~summarized_message_count
       ~summarized_unit_count
       ~dropped_message_count
+      ~normalized_message_count
   =
   summarized_message_count <= before_message_count
   && summarized_unit_count <= summarized_message_count
+  && Bool.equal
+       (summarized_message_count = 0)
+       (summarized_unit_count = 0)
   && dropped_message_count <= before_message_count - summarized_message_count
+  && normalized_message_count
+     <= before_message_count - summarized_message_count - dropped_message_count
   && after_message_count
      = before_message_count
        - dropped_message_count
@@ -373,14 +386,17 @@ let create
               ~after_message_count
               ~summarized_message_count
               ~summarized_unit_count
-              ~dropped_message_count)
+              ~dropped_message_count
+              ~normalized_message_count)
        then
          Error
            (Invalid_message_accounting
               { before_message_count
               ; after_message_count
               ; summarized_message_count
+              ; summarized_unit_count
               ; dropped_message_count
+              ; normalized_message_count
               })
        else
          Ok

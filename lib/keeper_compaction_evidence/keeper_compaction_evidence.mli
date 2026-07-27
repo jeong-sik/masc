@@ -76,7 +76,9 @@ type decode_error =
       { before_message_count : int
       ; after_message_count : int
       ; summarized_message_count : int
+      ; summarized_unit_count : int
       ; dropped_message_count : int
+      ; normalized_message_count : int
       }
   | Invalid_tool_protocol_accounting of
       { before_tool_use_count : int

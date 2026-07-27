@@ -300,6 +300,22 @@ let exact_identity_of_candidate
   }
 ;;
 
+let exact_identity_of_snapshot
+      (candidate : Exact_output.flow_attempt_snapshot)
+  =
+  let receipt = candidate.receipt in
+  { slot_id = candidate.visit.identity.candidate_id
+  ; call_id =
+      receipt
+      |> Exact_output.generation_receipt_snapshot_call_id
+      |> Exact_output.call_id_to_string
+  ; plan_fingerprint =
+      Exact_output.generation_receipt_snapshot_plan_fingerprint receipt
+  ; request_body_sha256 =
+      Exact_output.generation_receipt_snapshot_request_body_sha256 receipt
+  }
+;;
+
 let exact_identity_of_binding (binding : exact_attempt_binding) =
   { slot_id = binding.slot_id
   ; call_id = binding.call_id
@@ -787,9 +803,9 @@ let handle_flow_error (prepared : prepared_flow) = function
     record_outcome "exact_success_ordinal_exhausted";
     (match List.rev evidence.attempts with
      | candidate :: _ ->
-       quarantine_candidate
+       quarantine_identity
          prepared.entry
-         candidate
+         (exact_identity_of_snapshot candidate)
          Exact_flow_execution_failed
      | [] ->
        settle_current_or_signal

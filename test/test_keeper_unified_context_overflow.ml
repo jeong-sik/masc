@@ -111,6 +111,14 @@ let request_body_too_large ~actual_bytes ~limit_bytes =
        })
 ;;
 
+let request_body_refused_by_provider ~status =
+  Agent_sdk.Error.Api
+    (InvalidRequest
+       { message = "provider refused the serialized request body"
+       ; reason = Agent_sdk.Retry.Request_body_refused_by_provider { status }
+       })
+;;
+
 (* The byte axis used to fall through [| _ -> None] and produce no compaction
    request at all, so these two assertions are the ones that failed before. *)
 let test_byte_axis_is_a_capacity_refusal () =
@@ -123,9 +131,21 @@ let test_byte_axis_is_a_capacity_refusal () =
           { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }) -> ()
    | Some (Budget.Serialized_request_body _) ->
      fail "the measured byte pair was not carried through"
+   | Some (Budget.Provider_request_body_refusal _) ->
+     fail "a measured local refusal became an unmeasured provider refusal"
    | Some (Budget.Provider_context_window _) ->
      fail "a byte refusal was classified on the token axis"
    | None -> fail "a declared-byte refusal was not classified as a capacity refusal");
+  (match
+     Budget.capacity_refusal_of_error
+       (request_body_refused_by_provider ~status:413)
+   with
+   | Some (Budget.Provider_request_body_refusal { status = 413 }) -> ()
+   | Some (Budget.Provider_request_body_refusal _) ->
+     fail "the provider refusal lost its HTTP status"
+   | Some (Budget.Provider_context_window _ | Budget.Serialized_request_body _) ->
+     fail "an unmeasured provider refusal was assigned a measured capacity"
+   | None -> fail "a provider request-body refusal was not typed as capacity");
   match
     Budget.capacity_refusal_of_error
       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 }))
@@ -144,6 +164,13 @@ let test_event_projection_admits_only_the_token_axis () =
    with
    | None -> ()
    | Some _ -> fail "a byte refusal was projected as a context-overflow event");
+  (match
+     Budget.context_overflow_event_of_error
+       (request_body_refused_by_provider ~status:413)
+   with
+   | None -> ()
+   | Some _ ->
+     fail "a provider request-body refusal was projected on the token axis");
   match
     Budget.context_overflow_event_of_error
       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None }))

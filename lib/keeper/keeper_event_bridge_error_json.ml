@@ -48,6 +48,8 @@ let network_error_kind_to_wire = function
 let invalid_request_reason_to_wire = function
   | Agent_sdk.Retry.Json_parse_error -> "json_parse_error"
   | Agent_sdk.Retry.Request_body_too_large _ -> "request_body_too_large"
+  | Agent_sdk.Retry.Request_body_refused_by_provider _ ->
+    "request_body_refused_by_provider"
   | Agent_sdk.Retry.Unknown_invalid_request -> "unknown_invalid_request"
 ;;
 
@@ -178,6 +180,8 @@ let sdk_api_error_fields = function
          [ "actual_bytes", `Int actual_bytes
          ; "limit_bytes", `Int limit_bytes
          ]
+       | Agent_sdk.Retry.Request_body_refused_by_provider { status } ->
+         [ "status", `Int status ]
        | Agent_sdk.Retry.Json_parse_error
        | Agent_sdk.Retry.Unknown_invalid_request -> [])
   | Agent_sdk.Retry.NotFound { message } ->

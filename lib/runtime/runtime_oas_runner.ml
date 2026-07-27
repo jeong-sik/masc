@@ -73,7 +73,7 @@ let resolve_runtime_providers ~runtime_id () =
   (* Audit F8: honor the *requested* runtime id (RFC-0207 catalog lookup).
      The previous RFC-0206 single-binding stub discarded [runtime_id] and
      always returned the default runtime, silently substituting an
-     operator-overridable id (e.g. MASC_KEEPER_LLM_RERANK_RUNTIME) — an
+     operator-selected runtime id — an
      Unknown→Permissive fallback. An empty id means the default runtime; a
      non-empty id that is not a configured runtime is an [Error] (no silent
      substitution — RFC-0206 §2.1). The former [?provider_filter] parameter

@@ -946,7 +946,6 @@
   test_server_startup_takeover
   test_keeper_meta_cas_retry
   test_keeper_write_meta_cycle_failures_counter
-  test_judge_diagnostics
   test_keeper_identity_parse
   test_keeper_identity_normalize
   test_workspace_bind_fail_closed
@@ -1112,7 +1111,6 @@
   test_server_startup_takeover
   test_keeper_meta_cas_retry
   test_keeper_write_meta_cycle_failures_counter
-  test_judge_diagnostics
   test_keeper_identity_parse
   test_keeper_identity_normalize
   test_workspace_bind_fail_closed

@@ -83,7 +83,7 @@ type post_success_terminalizer =
   ; keeper_name : string
   ; flow_scope : Keeper_exact_flow_scope.t
   ; flow_success : Exact_output.flow_success
-  ; exact_execution_guard : exact_execution_guard
+  ; exact_execution_guard : exact_execution_guard option
   ; attempt_observation : attempt_observation
   ; disposition_mutex : Eio.Mutex.t
   ; mutable phase : post_success_phase
@@ -149,7 +149,6 @@ type summarization_failure =
   | Exact_attempt_start_failed
   | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_absent
   | Exact_execution_bind_failed
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
@@ -626,27 +625,30 @@ let finish_rejection
         ("post-success reject claimant could not settle OAS domain: " ^ detail)
     | Ok () ->
       let quarantine_result =
-        try
-          match
-            quarantine_exact_execution
-              ~keeper_name:terminalizer.keeper_name
-              ~exact_execution_guard:(Some terminalizer.exact_execution_guard)
-              ~cause:terminal.cause
-              terminalizer.attempt_observation
-          with
-          | Ok Fsync_completed -> Ok ()
-          | Ok (Visible_sync_unconfirmed detail) ->
-            Error
-              ("post-success exact-execution quarantine sync is unconfirmed: "
-               ^ detail)
-          | Error detail ->
-            Error
-              ("post-success exact-execution quarantine failed: " ^ detail)
-        with
-        | exn ->
-          Error
-            ("post-success exact-execution quarantine raised: "
-             ^ Printexc.to_string exn)
+        match terminalizer.exact_execution_guard with
+        | None -> Ok ()
+        | Some _ ->
+          (try
+             match
+               quarantine_exact_execution
+                 ~keeper_name:terminalizer.keeper_name
+                 ~exact_execution_guard:terminalizer.exact_execution_guard
+                 ~cause:terminal.cause
+                 terminalizer.attempt_observation
+             with
+             | Ok Fsync_completed -> Ok ()
+             | Ok (Visible_sync_unconfirmed detail) ->
+               Error
+                 ("post-success exact-execution quarantine sync is unconfirmed: "
+                  ^ detail)
+             | Error detail ->
+               Error
+                 ("post-success exact-execution quarantine failed: " ^ detail)
+           with
+           | exn ->
+             Error
+               ("post-success exact-execution quarantine raised: "
+                ^ Printexc.to_string exn))
       in
       (match quarantine_result with
        | Ok () -> ()
@@ -1061,7 +1063,6 @@ let prepare_lane ~base_path ~keeper_name ~registry ~lane_id ~units =
 
 type exact_flow_callback_failure =
   | Owner_unregistered_deferred
-  | Guard_absent
   | Bind_failed
   | Bind_sync_unconfirmed of Keeper_event_queue_state.exact_execution_terminal
   | Release_failed of Keeper_event_queue_state.exact_execution_terminal
@@ -1073,13 +1074,7 @@ let bind_exact_execution
       observation
   =
   match exact_execution_guard with
-  | None ->
-    Log.Keeper.error
-      ~keeper_name
-      "compaction exact durable execution guard is unavailable slot=%s call_id=%s"
-      observation.slot_id
-      observation.call_id;
-    Error Guard_absent
+  | None -> Ok ()
   | Some guard ->
     (match guard.before_dispatch observation with
      | Ok Fsync_completed -> Ok ()
@@ -1116,13 +1111,7 @@ let release_exact_execution
       observation
   in
   match exact_execution_guard with
-  | None ->
-    Log.Keeper.error
-      ~keeper_name
-      "compaction exact durable release guard is unavailable slot=%s call_id=%s"
-      observation.slot_id
-      observation.call_id;
-    Error (Release_failed (terminal ()))
+  | None -> Ok ()
   | Some guard ->
     (match guard.release_before_dispatch observation with
      | Ok Fsync_completed -> Ok ()
@@ -1146,7 +1135,6 @@ let release_exact_execution
 
 let summarization_failure_of_callback = function
   | Owner_unregistered_deferred -> Exact_owner_unregistered_deferred
-  | Guard_absent -> Exact_execution_guard_absent
   | Bind_failed -> Exact_execution_bind_failed
   | Bind_sync_unconfirmed terminal
   | Release_failed terminal
@@ -1187,7 +1175,8 @@ let execute_prepared_lane_current
         match bind_exact_execution ~keeper_name ~exact_execution_guard observation with
         | Error _ as error -> error
         | Ok () ->
-          bound_observation := Some observation;
+          if Option.is_some exact_execution_guard
+          then bound_observation := Some observation;
           Ok ())
     with
     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
@@ -1328,25 +1317,22 @@ let execute_prepared_lane_current
                ~cause:Keeper_event_queue_state.Domain_invalid_output
                observation))
      | Ok plan ->
-       (match exact_execution_guard with
-        | None -> Error Exact_execution_guard_absent
-        | Some exact_execution_guard ->
-          Ok
-            { plan
-            ; exact_execution_evidence = exact_execution_evidence flow_success
-            ; post_success_terminalizer =
-                { base_path = prepared_lane.base_path
-                ; keeper_name
-                ; flow_scope = prepared_lane.flow_scope
-                ; flow_success
-                ; exact_execution_guard
-                ; attempt_observation = observation
-                ; disposition_mutex = Eio.Mutex.create ()
-                ; phase = Open
-                ; domain_valid_attempts = 0
-                ; domain_rejected_attempts = 0
-                }
-            }))
+       Ok
+         { plan
+         ; exact_execution_evidence = exact_execution_evidence flow_success
+         ; post_success_terminalizer =
+             { base_path = prepared_lane.base_path
+             ; keeper_name
+             ; flow_scope = prepared_lane.flow_scope
+             ; flow_success
+             ; exact_execution_guard
+             ; attempt_observation = observation
+             ; disposition_mutex = Eio.Mutex.create ()
+             ; phase = Open
+             ; domain_valid_attempts = 0
+             ; domain_rejected_attempts = 0
+             }
+         })
   in
   let settle () =
     match with_settlement settle_execution with

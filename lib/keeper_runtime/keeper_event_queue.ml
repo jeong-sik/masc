@@ -178,61 +178,6 @@ and goal_assignment = {
      repeat assignments of the same goal dedup regardless of actor. *)
 }
 
-type capacity_compaction_request = {
-  ccr_trigger : Compaction_trigger.t;
-}
-
-let capacity_compaction_request_schema =
-  "keeper.capacity_compaction_request.v1"
-
-let capacity_compaction_request_to_yojson request =
-  `Assoc
-    [ "schema", `String capacity_compaction_request_schema
-    ; "trigger", Compaction_trigger.to_detail_json request.ccr_trigger
-    ]
-
-let capacity_compaction_request_of_yojson = function
-  | `Assoc
-      [ ("schema", `String schema)
-      ; ("trigger", trigger_json)
-      ]
-    when String.equal schema capacity_compaction_request_schema ->
-    (match Compaction_trigger.of_detail_json trigger_json with
-     | Ok ccr_trigger -> Ok { ccr_trigger }
-     | Error error ->
-       Error (Compaction_trigger.decode_error_to_string error))
-  | `Assoc
-      [ ("trigger", trigger_json)
-      ; ("schema", `String schema)
-      ]
-    when String.equal schema capacity_compaction_request_schema ->
-    (match Compaction_trigger.of_detail_json trigger_json with
-     | Ok ccr_trigger -> Ok { ccr_trigger }
-     | Error error ->
-       Error (Compaction_trigger.decode_error_to_string error))
-  | `Assoc _ ->
-    Error
-      "capacity compaction request fields must be exactly [schema,trigger] with the current schema"
-  | _ -> Error "capacity compaction request must be a JSON object"
-
-let capacity_compaction_request_identity_equal left right =
-  left.ccr_trigger = right.ccr_trigger
-
-let capacity_compaction_request_identity_bytes request =
-  "keeper.capacity_compaction_request.identity.v1\000"
-  ^ (request
-     |> capacity_compaction_request_to_yojson
-     |> Yojson.Safe.to_string)
-
-let capacity_compaction_request_post_id request =
-  let digest =
-    request
-    |> capacity_compaction_request_identity_bytes
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
-  in
-  "capacity-compaction-request:" ^ digest
-
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
 let bg_job_completion_post_id (c : bg_job_completion) =

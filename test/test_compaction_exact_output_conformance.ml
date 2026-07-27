@@ -487,7 +487,7 @@ let test_bind_failure_prevents_post () =
   Alcotest.(check int) "bind failure prevents POST" 0 (F.post_count server)
 ;;
 
-let test_missing_dispatch_guard_prevents_post () =
+let test_missing_dispatch_guard_uses_keeper_lifecycle () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
@@ -506,9 +506,8 @@ let test_missing_dispatch_guard_prevents_post () =
        ~clock
        prepared
    with
-   | Error C.Exact_execution_guard_absent -> ()
-   | Error _ -> Alcotest.fail "missing guard returned the wrong typed failure"
-   | Ok _ -> Alcotest.fail "missing guard unexpectedly executed");
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "keeper-lifecycle execution did not dispatch");
   (match
      C.execute_prepared_lane
        ~keeper_name:"keeper-missing-guard"
@@ -517,9 +516,9 @@ let test_missing_dispatch_guard_prevents_post () =
        prepared
    with
    | Error C.Exact_flow_already_started -> ()
-   | Error _ -> Alcotest.fail "consumed missing-guard flow hid affine replay"
+   | Error _ -> Alcotest.fail "consumed lifecycle-owned flow hid affine replay"
    | Ok _ -> Alcotest.fail "consumed missing-guard flow executed twice");
-  Alcotest.(check int) "missing guard prevents POST" 0 (F.post_count server)
+  Alcotest.(check int) "keeper lifecycle permits one POST" 1 (F.post_count server)
 ;;
 
 let test_release_failure_blocks_successor () =
@@ -2114,7 +2113,7 @@ let () =
         ; Alcotest.test_case
             "missing guard prevents POST"
             `Quick
-            test_missing_dispatch_guard_prevents_post
+            test_missing_dispatch_guard_uses_keeper_lifecycle
         ; Alcotest.test_case
             "release failure blocks successor"
             `Quick

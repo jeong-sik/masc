@@ -225,8 +225,6 @@ let test_absent_guard_is_typed_at_before_dispatch () =
       in
       publish_exact_fixture ~source:"absent guard" server;
       let preparation =
-        (* No ~exact_execution_guard: the current optional boundary must fail
-           closed with its own typed reason. *)
         Compact_policy.compact_for_request_typed
           ~base_path:exact_flow_base_path
           ~meta
@@ -234,20 +232,12 @@ let test_absent_guard_is_typed_at_before_dispatch () =
           context
       in
       check int
-        "no provider request is made when the guard is absent"
-        0
+        "the keeper lifecycle permits one provider request"
+        1
         (Exact_fixture.post_count server);
       (match preparation.Compact_policy.decision with
-       | Compact_policy.Rejected (Manual, Exact_execution_guard_absent) -> ()
-       | _ ->
-         fail
-           "an absent exact-execution guard did not reject as \
-            Exact_execution_guard_absent");
-      check bool
-        "the original context is preserved"
-        true
-        (Masc.Keeper_context_core.message_count preparation.Compact_policy.context
-         = Masc.Keeper_context_core.message_count context))
+       | Compact_policy.Prepared Manual -> ()
+       | _ -> fail "the lifecycle-owned compaction was not prepared"))
 ;;
 
 let () =

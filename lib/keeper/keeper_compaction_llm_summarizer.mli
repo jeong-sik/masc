@@ -96,11 +96,6 @@ type summarization_failure =
   | Exact_attempt_start_failed
   | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_absent
-        (** No exact-execution guard was supplied. The current optional boundary
-            reports this from OAS's before-dispatch callback, after affine replay
-            detection and before POST. It does not diagnose why the caller lacked
-            a guard. *)
   | Exact_execution_bind_failed
         (** A guard was supplied and its before-dispatch bind did not reach
             Fsync_completed. A persistence fault, unrelated to lease ownership. *)

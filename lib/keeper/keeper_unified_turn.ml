@@ -212,34 +212,28 @@ let recover_provider_context_overflow_in_lane
       ~(meta : keeper_meta)
       error
   =
-  match capacity_refusal_of_error error with
-  | None -> Not_provider_overflow
-  | Some refusal ->
+  match capacity_transition_of_error error with
+  | Not_capacity
+  | Capacity_non_compacting _
+  | Compact_next_cycle Compaction_trigger.Manual ->
+    Not_provider_overflow
+  | Compact_next_cycle trigger ->
     let origin = Keeper_registry.Post_turn_lifecycle in
-    let trigger =
-      match refusal with
-      | Keeper_turn_runtime_budget.Provider_context_window { limit_tokens } ->
-        Compaction_trigger.Provider_overflow { limit_tokens }
-      | Keeper_turn_runtime_budget.Serialized_request_body { actual_bytes; limit_bytes }
-        -> Compaction_trigger.Request_body_over_capacity { actual_bytes; limit_bytes }
-    in
     (* [Context_overflow_detected] is the only event that latches
        [context_overflow] (keeper_state_machine.ml:214), the flag the lane needs
        before it will admit a compaction, and that flag is axis-agnostic. Its
-       payload is read only for the "overflowed" lifecycle log line
-       (keeper_state_machine.ml:287-291), so a byte refusal carries no token limit
-       and that one line reads limit=unknown. The measured bytes are not lost:
-       they travel on [trigger] into the durable compaction record. Reshaping the
-       event payload into a closed capacity-evidence sum is the follow-up — it
-       touches keeper_state_machine_json.ml, a durable codec, so it needs a schema
-       migration rather than riding along here. *)
+       token-only payload is read for the lifecycle log line. The canonical
+       [trigger] retains the complete token, byte, or serving-boundary evidence
+       through checkpoint commit. *)
     let overflow_event =
       Keeper_state_machine.Context_overflow_detected
         { limit_tokens =
-            (match refusal with
-             | Keeper_turn_runtime_budget.Provider_context_window { limit_tokens } ->
-               limit_tokens
-             | Keeper_turn_runtime_budget.Serialized_request_body _ -> None)
+            (match trigger with
+             | Compaction_trigger.Provider_overflow { limit_tokens } -> limit_tokens
+             | Compaction_trigger.Request_body_over_capacity _
+             | Compaction_trigger.Serving_input_capacity _
+             | Compaction_trigger.Manual ->
+               None)
         }
     in
     let dispatch stage event =

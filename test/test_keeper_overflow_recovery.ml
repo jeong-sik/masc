@@ -106,72 +106,6 @@ let test_provider_overflow_trigger_roundtrip () =
     fail "input_rejected admitted a boundary above the measured input"
 ;;
 
-let test_capacity_request_codec_and_identity () =
-  let request : Keeper_event_queue.capacity_compaction_request =
-    { ccr_trigger =
-        Compaction_trigger.Serving_input_capacity
-          (Compaction_trigger.Input_rejected
-             { input_tokens = 524_300
-             ; accepted_through = 524_298
-             ; rejected_from = 524_299
-             })
-    }
-  in
-  let encoded = Keeper_event_queue.capacity_compaction_request_to_yojson request in
-  let decoded =
-    match Keeper_event_queue.capacity_compaction_request_of_yojson encoded with
-    | Ok decoded -> decoded
-    | Error detail -> failf "capacity compaction request did not decode: %s" detail
-  in
-  check
-    bool
-    "request identity round-trips"
-    true
-    (Keeper_event_queue.capacity_compaction_request_identity_equal
-       request
-       decoded);
-  let post_id = Keeper_event_queue.capacity_compaction_request_post_id request in
-  check
-    string
-    "stable domain-separated SHA-256 identity"
-    "capacity-compaction-request:549502733377aae755e8255b5c5c33870983c5123e8d50aeb51552de17573824"
-    post_id;
-  check
-    int
-    "post id retains the full SHA-256 hex"
-    (String.length "capacity-compaction-request:" + 64)
-    (String.length post_id);
-  check
-    string
-    "stable post id round-trips"
-    post_id
-    (Keeper_event_queue.capacity_compaction_request_post_id decoded);
-  let different =
-    { Keeper_event_queue.ccr_trigger =
-        Compaction_trigger.Serving_input_capacity
-          (Compaction_trigger.Boundary_unknown
-           { input_tokens = 524_300
-           ; accepted_through = 524_298
-           ; rejected_from = Some 524_301
-           })
-    }
-  in
-  check
-    bool
-    "different typed evidence has different identity"
-    false
-    (Keeper_event_queue.capacity_compaction_request_identity_equal
-       request
-       different);
-  check
-    bool
-    "different typed evidence has different post id"
-    false
-    (String.equal
-       post_id
-       (Keeper_event_queue.capacity_compaction_request_post_id different))
-;;
-
 let test_request_body_over_capacity_rejects_non_refusals () =
   let decode fields =
     Compaction_trigger.of_detail_json
@@ -408,8 +342,6 @@ let () =
     "overflow-lifecycle",
     [ test_case "provider overflow trigger codec" `Quick
         test_provider_overflow_trigger_roundtrip;
-      test_case "capacity request codec and identity" `Quick
-        test_capacity_request_codec_and_identity;
       test_case "retired trigger kinds rejected" `Quick
         test_retired_trigger_kinds_are_rejected;
       test_case "request body over capacity rejects non-refusals" `Quick

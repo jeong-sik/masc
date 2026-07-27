@@ -518,7 +518,6 @@ let rejection_disposition = function
   | Exact_admission_failed
   | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_absent
   | Exact_execution_bind_failed
   | Exact_flow_already_started ->
     Nonterminal_rejection

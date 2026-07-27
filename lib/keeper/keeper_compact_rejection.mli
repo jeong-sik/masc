@@ -5,7 +5,6 @@ type compaction_rejection =
   | Exact_attempt_start_failed
   | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_absent
   | Exact_execution_bind_failed
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal

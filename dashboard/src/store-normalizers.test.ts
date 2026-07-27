@@ -598,39 +598,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
     })
   })
 
-  it('preserves a typed durable lifecycle-admission blocker', () => {
-    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      keeper_fleet_safety: {
-        schema: 'masc.keeper_fleet_operator.v1',
-        status: 'degraded',
-        blocker: 'keeper_lifecycle_admission_blocked',
-        blocked_keeper_count: 1,
-        blocked_keepers: [{
-          keeper_name: 'sangsu',
-          reason: 'runtime_meta_authority',
-          action: 'inspect_lifecycle_transaction',
-          lifecycle_admission_reason:
-            'runtime_meta_authority:keeper=sangsu,transaction=tx-1,stage=reserved',
-        }],
-        operator_action_required: true,
-      },
-    }))
-
-    expect(result?.fleet_safety?.keeper_fleet_safety).toMatchObject({
-      status: 'degraded',
-      blocker: 'keeper_lifecycle_admission_blocked',
-      blocked_keeper_count: 1,
-      operator_action_required: true,
-      blocked_keepers: [{
-        keeper_name: 'sangsu',
-        reason: 'runtime_meta_authority',
-        action: 'inspect_lifecycle_transaction',
-        lifecycle_admission_reason:
-          'runtime_meta_authority:keeper=sangsu,transaction=tx-1,stage=reserved',
-      }],
-    })
-  })
-
   it('keeps reaction-ledger health even when other fleet safety fields are absent', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
       keeper_reaction_ledger: {

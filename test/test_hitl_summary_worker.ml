@@ -1834,7 +1834,7 @@ let test_shutdown_drains_inflight_worker_then_retires () =
          | Some owner -> owner
          | None -> fail "HITL shutdown owner was not registered"
        in
-       (match Masc_test_deps.write_current_keeper_meta config owner.meta with
+       (match Masc.Keeper_meta_store.write_meta config owner.meta with
         | Ok () -> ()
         | Error detail -> fail detail);
        let release_response, resolve_release_response = Eio.Promise.create () in

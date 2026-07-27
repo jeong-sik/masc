@@ -121,7 +121,7 @@ let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
     Some "resume keeper before expecting autonomous keepalive or PR fan-out"
   | Some
       (Lifecycle_denied Keeper_lifecycle_admission.Autonomous_dead_tombstone) ->
-    Some "transition the dead keeper lifecycle before starting a new lane"
+    Some "delete the dead tombstone and create a fresh Keeper before starting a new lane"
   | Some Autoboot_disabled ->
     if meta.autoboot_enabled
     then

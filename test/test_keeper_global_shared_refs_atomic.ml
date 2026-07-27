@@ -68,6 +68,16 @@ let test_compact_policy_callback () =
     -> None)
 ;;
 
+let test_meta_store_hook () =
+  let open Masc in
+  let called = ref false in
+  Keeper_meta_store.register_runtime_meta_write_sync
+    (fun _config _meta -> called := true);
+  Keeper_meta_store.runtime_meta_write_sync_hook (Obj.magic ()) (Obj.magic ());
+  check bool "sync hook was invoked" true !called;
+  Keeper_meta_store.register_runtime_meta_write_sync (fun _config _meta -> ())
+;;
+
 let test_keepalive_signal_callbacks () =
   let open Masc in
   let started = ref false in
@@ -225,6 +235,9 @@ let () =
             "record_pre_compact callback registration"
             `Quick
             test_compact_policy_callback
+        ] )
+    ; ( "meta-store"
+      , [ test_case "runtime_meta_write_sync_hook registration" `Quick test_meta_store_hook
         ] )
     ; ( "keepalive-signal"
       , [ test_case

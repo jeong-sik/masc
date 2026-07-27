@@ -12,8 +12,6 @@ type projection_stage =
 
 type failure =
   | Invalid_request of string
-  | Durable_lifecycle_admission_blocked of
-      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string

@@ -59,11 +59,13 @@ let test_no_conflict_writes_first_attempt () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"alpha" in
-    (* Seed through the current identity-creation contract; the merge under
-       test then executes against the exact persisted version. *)
-    (match Masc_test_deps.write_current_keeper_meta config m0 with
+    (* Initial write — no existing file. *)
+    (match
+       Keeper_meta_store.write_meta_with_merge
+         ~merge:Keeper_meta_merge.caller_wins config m0
+     with
      | Ok () -> ()
-     | Error e -> fail ("current seed write failed: " ^ e));
+     | Error e -> fail ("first write failed: " ^ e));
     (* Read what landed on disk and bump caller's version to match. *)
     let disk = match Keeper_meta_store.read_meta config "alpha" with
       | Ok (Some m) -> m
@@ -94,7 +96,7 @@ let test_retry_succeeds_after_concurrent_bump () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"beta" in
-    (match Masc_test_deps.write_current_keeper_meta config m0 with
+    (match Keeper_meta_store.write_meta config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let caller_view = match Keeper_meta_store.read_meta config "beta" with
@@ -104,7 +106,7 @@ let test_retry_succeeds_after_concurrent_bump () =
     (* Simulate a concurrent writer bumping the disk version while
        [caller_view] is held by the cycle-completion fiber. *)
     let racing = { caller_view with active_goal_ids = [ "goal-racing" ] } in
-    (match Masc_test_deps.write_current_keeper_meta config racing with
+    (match Keeper_meta_store.write_meta config racing with
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     (* Now the cycle attempts to write its own payload. CAS would fail
@@ -154,7 +156,7 @@ let test_monotonic_usage_counters_on_cas_retry () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"gamma" in
-    (match Masc_test_deps.write_current_keeper_meta config m0 with
+    (match Keeper_meta_store.write_meta config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let caller_view = match Keeper_meta_store.read_meta config "gamma" with
@@ -170,7 +172,7 @@ let test_monotonic_usage_counters_on_cas_retry () =
         { caller_view.runtime.usage with
           total_turns = 10; total_tokens = 1000 }
     in
-    (match Masc_test_deps.write_current_keeper_meta config racing with
+    (match Keeper_meta_store.write_meta config racing with
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     (* Stale cycle write computed from the pre-race snapshot. *)
@@ -205,7 +207,7 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"operator-pause-cas" in
-    (match Masc_test_deps.write_current_keeper_meta config m0 with
+    (match Keeper_meta_store.write_meta config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let stale_turn_view = match Keeper_meta_store.read_meta config "operator-pause-cas" with
@@ -223,7 +225,7 @@ let test_operator_pause_survives_stale_heartbeat_retry () =
         updated_at = Keeper_meta_contract.now_iso ();
       }
     in
-    (match Masc_test_deps.write_current_keeper_meta config operator_pause with
+    (match Keeper_meta_store.write_meta config operator_pause with
      | Ok () -> ()
      | Error e -> fail ("operator pause write failed: " ^ e));
     let stale_completion =
@@ -271,7 +273,7 @@ let test_stale_write_conflicts_without_force () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"delta" in
-    (match Masc_test_deps.write_current_keeper_meta config m0 with
+    (match Keeper_meta_store.write_meta config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let caller_view = match Keeper_meta_store.read_meta config "delta" with
@@ -286,7 +288,7 @@ let test_stale_write_conflicts_without_force () =
       with_usage caller_view
         { caller_view.runtime.usage with total_turns = 42 }
     in
-    (match Masc_test_deps.write_current_keeper_meta config racing with
+    (match Keeper_meta_store.write_meta config racing with
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     (* A stale snapshot write (the shape the old force path clobbered with)
@@ -296,7 +298,7 @@ let test_stale_write_conflicts_without_force () =
       with_usage caller_view
         { caller_view.runtime.usage with total_turns = 5 }
     in
-    (match Masc_test_deps.write_current_keeper_meta config stale with
+    (match Keeper_meta_store.write_meta config stale with
      | Ok () -> fail "stale write unexpectedly succeeded (CAS bypass present?)"
      | Error msg ->
        check bool "stale write is rejected as a version conflict" true
@@ -340,14 +342,14 @@ let test_store_rejects_unpaused_dead_tombstone () =
         latched_reason = Some Keeper_latched_reason.Dead_tombstone;
       }
     in
-    (match Masc_test_deps.write_current_keeper_meta config seed with
+    (match Keeper_meta_store.write_meta config seed with
      | Ok () -> ()
      | Error e -> fail ("canonical paused+dead write should succeed: " ^ e));
     let disk = match Keeper_meta_store.read_meta config "dead-invariant" with
       | Ok (Some m) -> m | _ -> fail "seed read failed" in
     (* The illegal split — clear paused, keep the latch — is rejected. *)
     let split = { disk with paused = false } in
-    (match Masc_test_deps.write_current_keeper_meta config split with
+    (match Keeper_meta_store.write_meta config split with
      | Ok () ->
        fail "store accepted paused=false + Dead_tombstone (invariant not enforced)"
      | Error _ -> ());
@@ -371,7 +373,7 @@ let test_mark_resumed_clears_dead_tombstone_and_persists () =
         latched_reason = Some Keeper_latched_reason.Dead_tombstone;
       }
     in
-    (match Masc_test_deps.write_current_keeper_meta config seed with
+    (match Keeper_meta_store.write_meta config seed with
      | Ok () -> () | Error e -> fail ("seed write failed: " ^ e));
     let disk = match Keeper_meta_store.read_meta config "resume-dead" with
       | Ok (Some m) -> m | _ -> fail "seed read failed" in
@@ -381,7 +383,7 @@ let test_mark_resumed_clears_dead_tombstone_and_persists () =
     in
     check (option string) "mark_resumed leaves no invariant violation"
       None (Keeper_meta_contract.terminal_latch_pause_violation resumed);
-    (match Masc_test_deps.write_current_keeper_meta config resumed with
+    (match Keeper_meta_store.write_meta config resumed with
      | Ok () -> () | Error e -> fail ("resumed write should succeed: " ^ e));
     let after = match Keeper_meta_store.read_meta config "resume-dead" with
       | Ok (Some m) -> m | _ -> fail "read after resume failed" in

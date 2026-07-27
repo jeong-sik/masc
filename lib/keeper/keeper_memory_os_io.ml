@@ -300,14 +300,6 @@ let next_generation_with_floor_for_base_path ~base_path ~floor ~keeper_id ~trace
     ~trace_id
 ;;
 
-let next_generation_for_base_path ~base_path ~keeper_id ~trace_id =
-  next_generation_with_floor_for_base_path
-    ~base_path
-    ~floor:0
-    ~keeper_id
-    ~trace_id
-;;
-
 let unique_episode_path ~keeper_id episode =
   let created_ms =
     episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float

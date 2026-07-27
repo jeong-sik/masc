@@ -1097,7 +1097,6 @@ let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
   | Invalid_request _ -> `Bad_request
   | Durable_meta_missing -> `Not_found
   | Reservation_conflict _
-  | Durable_lifecycle_admission_blocked _
   | Receipt_conflict _
   | Durable_owner_nonce_changed _
   | Durable_owner_identity_changed
@@ -1287,7 +1286,6 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
             | None, None -> Keeper_identity.keeper_agent_name name
           in
           Keeper_keepalive.process_directive
-            ~config
             ~agent_name:resolved_agent_name
             directive;
           (match plain_directive with
@@ -1439,7 +1437,6 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
                    | None, None -> Keeper_identity.keeper_agent_name name
                  in
                  Keeper_keepalive.process_directive
-                   ~config
                    ~agent_name:resolved_agent_name
                    directive;
                  `Assoc [ "name", `String name; "ok", `Bool true ])

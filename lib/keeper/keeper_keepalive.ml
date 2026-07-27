@@ -63,75 +63,63 @@ let with_keeper_entry_by_identity ~identity ~on_missing f =
 ;;
 
 let persist_directive_meta_update
-      ~(config : Workspace.config)
       (entry : Keeper_registry.registry_entry)
-      ~(update : keeper_meta -> keeper_meta)
-  : (keeper_meta, string) result
+      ~(updated_meta : keeper_meta)
+  : (unit, string) result
   =
-  if not (String.equal config.Workspace.base_path entry.base_path)
-  then Error "directive metadata config does not match the registry scope"
-  else
-  let persist_admitted () =
-    match
-        Keeper_meta_store.update_meta_if_identity
-          config
-          ~name:entry.name
-          ~trace_id:entry.meta.runtime.trace_id
-          ~generation:entry.meta.runtime.nonce
-          update
-      with
-      | Error error ->
-        Error (Keeper_meta_store.identity_update_error_to_string error)
-      | Ok persisted ->
-        let installed =
-          Keeper_registry.update_entry_exact entry (fun current ->
-            { current with meta = persisted })
-          |> Keeper_registry.exact_update_succeeded
-               entry
-               ~site:"directive_meta_update"
-        in
-        if installed
-        then Ok persisted
-        else Error "directive metadata registry identity changed"
-  in
-  let persist permit =
-    match
-      Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
-        permit
-        config
-        entry.name
-        persist_admitted
-    with
-    | Keeper_lifecycle_admission.Durable_transaction
-      .Permit_lease_completed result ->
-      result
-    | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
-      Error "directive metadata admission scope is invalid"
-  in
-  match
-    Keeper_lifecycle_admission.Durable_transaction
-    .with_durable_lifecycle_admission
-      config
+  let keeper_filename =
+    Keeper_runtime_root_entry.keeper_basename
       ~keeper_name:entry.name
-      persist
-  with
-  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed result ->
-    result
-  | Keeper_lifecycle_admission.Durable_transaction
-    .Admission_completed_with_attention (result, failure) ->
-    Log.Keeper.error
-      "directive metadata durable admission lock release requires attention \
-       keeper=%s failure=%s"
-      entry.name
-      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
-         failure);
-    result
-  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
-    Error
-      ("directive metadata blocked by lifecycle authority: "
-       ^ Keeper_lifecycle_admission.Durable_transaction
-         .blocked_reason_to_wire
-           reason)
+      Keeper_runtime_root_entry.Metadata
+  in
+  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
+  let default_path =
+    Filename.concat (Filename.concat masc_root "keepers") keeper_filename
+  in
+  let persisted_path =
+    if Fs_compat.file_exists default_path
+    then default_path
+    else (
+      let clusters_dir = Filename.concat masc_root "clusters" in
+      let cluster_paths =
+        match Safe_ops.list_dir_safe clusters_dir with
+        | Ok names ->
+          names
+          |> List.map (fun cluster_name ->
+            Filename.concat
+              (Filename.concat (Filename.concat clusters_dir cluster_name) "keepers")
+              keeper_filename)
+          |> List.filter Fs_compat.file_exists
+        | Error _ -> []
+      in
+      match cluster_paths with
+      | [] -> default_path
+      | [ path ] -> path
+      | paths ->
+        let by_mtime_desc a b =
+          let a_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime a) in
+          let b_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime b) in
+          Float.compare b_mtime a_mtime
+        in
+        (match List.sort by_mtime_desc paths with
+         | latest_path :: _ -> latest_path
+         | [] -> default_path))
+  in
+  match Keeper_fs.save_json_atomic persisted_path (Keeper_meta_json.meta_to_json updated_meta) with
+  | Ok () ->
+    Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta;
+    Ok ()
+  | Error msg ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WriteMetaFailures)
+      ~labels:[ "keeper", entry.name; "site", "directive_persist" ]
+      ();
+    Log.Keeper.emit
+      Log.Warn
+      ~category:Log.Heartbeat
+      ~details:(`Assoc [ "keeper", `String entry.name; "error", `String msg ])
+      (Printf.sprintf "directive meta persist failed for %s: %s" entry.name msg);
+    Error msg
 ;;
 
 let directive_paused_meta (meta : keeper_meta) paused =
@@ -282,7 +270,7 @@ let log_directive_agent_not_in_registry ~agent_name ~action =
   )
 ;;
 
-let set_keeper_paused_state ~config ~agent_name paused =
+let set_keeper_paused_state ~agent_name paused =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
@@ -306,12 +294,8 @@ let set_keeper_paused_state ~config ~agent_name paused =
             entry.name)
        else (
          let previous_failure_reason = entry.last_failure_reason in
-         match
-           persist_directive_meta_update
-             ~config
-             entry
-             ~update:(fun latest -> directive_paused_meta latest paused)
-         with
+         let updated_meta = directive_paused_meta entry.meta paused in
+         match persist_directive_meta_update entry ~updated_meta with
          | Error err ->
            Keeper_registry.set_failure_reason
              ~base_path:entry.base_path
@@ -327,7 +311,7 @@ let set_keeper_paused_state ~config ~agent_name paused =
              (if paused then "pause" else "resume")
              entry.name
              err
-         | Ok _ ->
+         | Ok () ->
            Keeper_registry.dispatch_event_unit
              ~base_path:entry.base_path
              entry.name
@@ -356,7 +340,7 @@ let wakeup_keeper_by_agent_name ~agent_name =
     (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
-let assign_keeper_task_from_directive ~config ~agent_name ~task_id =
+let assign_keeper_task_from_directive ~agent_name ~task_id =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
@@ -367,13 +351,10 @@ let assign_keeper_task_from_directive ~config ~agent_name ~task_id =
       log_directive_agent_not_in_registry ~agent_name ~action:"claim")
     (fun entry ->
        let task_id_string = Keeper_id.Task_id.to_string task_id in
-       match
-         persist_directive_meta_update
-           ~config
-           entry
-           ~update:(fun latest ->
-             { latest with current_task_id = Some task_id; updated_at = now_iso () })
-       with
+       let updated_meta =
+         { entry.meta with current_task_id = Some task_id; updated_at = now_iso () }
+       in
+       match persist_directive_meta_update entry ~updated_meta with
        | Error err ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string DirectiveFailures)
@@ -384,19 +365,19 @@ let assign_keeper_task_from_directive ~config ~agent_name ~task_id =
            entry.name
            task_id_string
            err
-       | Ok persisted ->
+       | Ok () ->
          (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action
             guard pins that the directive successfully attached the
             [task_id] to the keeper's meta. The [@@fsm_guard] PPX
             routes the assertion through [wrap_unit ~stage:"guard"]
             automatically. *)
-         post_submit_task ~meta:persisted ~task_id;
+         post_submit_task ~meta:updated_meta ~task_id;
          wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
 (** Apply one typed control-plane directive.  Parsing belongs to the transport
     boundary; this domain path cannot receive an unknown command. *)
-let process_directive ~config ~agent_name directive =
+let process_directive ~agent_name directive =
   match directive with
   | Keeper_directive.Pause ->
     Log.Keeper.emit
@@ -404,7 +385,7 @@ let process_directive ~config ~agent_name directive =
       ~category:Log.Directive
       ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "pause" ])
       (Printf.sprintf "directive: pausing keeper %s" agent_name);
-    set_keeper_paused_state ~config ~agent_name true
+    set_keeper_paused_state ~agent_name true
   | Keeper_directive.Wakeup ->
     (* Wakeup is only a scheduling signal. It must never clear an operator
        pause: paused-work disposition belongs to the receipt-first
@@ -431,7 +412,7 @@ let process_directive ~config ~agent_name directive =
          "directive: server assigned task %s to %s"
          task_id_string
          agent_name);
-    assign_keeper_task_from_directive ~config ~agent_name ~task_id
+    assign_keeper_task_from_directive ~agent_name ~task_id
 ;;
 
 (* ── gRPC heartbeat stream ── *)
@@ -487,15 +468,7 @@ let start_keeper_grpc_heartbeat
 
 (* ── Lifecycle bootstrap / publish helpers ── *)
 
-type durable_meta_bootstrap =
-  | Bootstrap_required
-  | Durable_meta_already_committed
-
-let bootstrap_live_keeper_meta
-      ?lifecycle_token
-      ~durable_meta_bootstrap
-      ~(ctx : _ context)
-      (m : keeper_meta)
+let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_meta)
   : keeper_meta
   =
   try
@@ -528,14 +501,13 @@ let bootstrap_live_keeper_meta
           }
       }
     in
-    (match lifecycle_token, durable_meta_bootstrap with
-     | Some _, _
-     | None, Durable_meta_already_committed ->
-       (* The lifecycle coordinator already committed the durable candidate.
+    (match lifecycle_token with
+     | Some _ ->
+       (* The revival coordinator already committed the durable candidate.
           Keep this fresh presence timestamp in the new registry lane; the
           heartbeat persists it after the transaction releases ownership. *)
        ()
-     | None, Bootstrap_required ->
+     | None ->
        (match
           write_meta_with_merge
             ~merge:Keeper_meta_merge.monotonic_usage_counters
@@ -605,20 +577,11 @@ let publish_keeper_started ~(live_meta : keeper_meta) : unit =
 (** Launch gate: dispatch [Fiber_started] before forking the keepalive
     fiber. Returns [Error _] when the registry FSM rejects the launch —
     the caller must not fork and must not announce [Started]/[Running]. *)
-let dispatch_fiber_started ~permit ?lifecycle_token ?entry ~base_path keeper_name =
+let dispatch_fiber_started ?lifecycle_token ?entry ~base_path keeper_name =
   let transition =
     match lifecycle_token, entry with
     | Some token, Some entry ->
-      (match
-         Keeper_registry.prepare_fiber_launch_for_lifecycle permit token entry
-       with
-       | Keeper_registry.Lifecycle_mutation_completed result -> result
-       | Keeper_registry.Lifecycle_mutation_admission_denied ->
-         Error
-           (Keeper_state_machine.Precondition_violation
-              { event = "fiber_started"
-              ; reason = "durable lifecycle admission was lost before launch"
-              }))
+      Keeper_registry.prepare_fiber_launch_for_lifecycle token entry
     | None, None -> Keeper_registry.prepare_fiber_launch ~base_path keeper_name
     | Some _, None | None, Some _ ->
       invalid_arg "dispatch_fiber_started lifecycle token and entry must be paired"
@@ -740,48 +703,11 @@ type start_keepalive_outcome =
   | Keepalive_started of Keeper_registry.registry_entry
   | Keepalive_already_registered of Keeper_registry.registry_entry
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
-  | Keepalive_transaction_admission_denied of
-      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
   | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
-
-type launch_gate_outcome =
-  | Launch_gate_committed
-  | Launch_gate_aborted
-
-type launch_gate =
-  { outcome : launch_gate_outcome Eio.Promise.t
-  ; resolve_outcome : launch_gate_outcome Eio.Promise.u
-  }
-
-let create_launch_gate () =
-  let outcome, resolve_outcome = Eio.Promise.create () in
-  { outcome; resolve_outcome }
-;;
-
-let commit_launch_gate gate =
-  if not (Eio.Promise.try_resolve gate.resolve_outcome Launch_gate_committed)
-  then
-    match Eio.Promise.peek gate.outcome with
-    | Some Launch_gate_committed -> ()
-    | Some Launch_gate_aborted ->
-      invalid_arg "cannot commit an aborted Keeper launch gate"
-    | None -> failwith "Keeper launch gate settlement disappeared"
-;;
-
-let abort_launch_gate gate =
-  ignore
-    (Eio.Promise.try_resolve gate.resolve_outcome Launch_gate_aborted : bool)
-;;
-
-let launch_gate_is_committed gate =
-  match Eio.Promise.peek gate.outcome with
-  | Some Launch_gate_committed -> true
-  | Some Launch_gate_aborted | None -> false
-;;
 
 let start_keepalive_outcome_to_string = function
   | Keepalive_started entry ->
@@ -793,9 +719,6 @@ let start_keepalive_outcome_to_string = function
       (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
   | Keepalive_lifecycle_denied denial ->
     Keeper_lifecycle_admission.autonomous_denial_to_wire denial
-  | Keepalive_transaction_admission_denied reason ->
-    Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
-      reason
   | Keepalive_identity_unrepairable -> "keeper identity drift could not be repaired"
   | Keepalive_registration_rejected
       (Keeper_registry.Registration_shutdown_reserved operation_id) ->
@@ -862,12 +785,9 @@ let record_lifecycle_start_denial
        reason)
 ;;
 
-let start_keepalive_admitted
+let start_keepalive
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
-      ?launch_gate
-      ?(durable_meta_bootstrap = Bootstrap_required)
-      ~permit
       (ctx : _ context)
   (m : keeper_meta)
   : start_keepalive_outcome
@@ -931,41 +851,22 @@ let start_keepalive_admitted
             "start_keepalive: reclaiming stale registered entry %s phase=%s"
             m.name
             (Keeper_state_machine.phase_to_string entry.phase));
-       (match lifecycle_token with
-        | Some token ->
-          (match
-             Keeper_registry.unregister_exact_for_lifecycle permit token entry
-           with
-           | Keeper_registry.Lifecycle_mutation_admission_denied ->
-             Log.Keeper.warn
-               "start_keepalive: stale entry reclaim lost durable lifecycle admission for %s"
-               m.name
-           | Keeper_registry.Lifecycle_mutation_completed result ->
-             (match result with
-              | Keeper_registry.Exact_unregistered
-              | Keeper_registry.Exact_entry_missing -> ()
-              | Keeper_registry.Exact_entry_replaced ->
-                Log.Keeper.info
-                  "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
-                  m.name
-              | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
-                Log.Keeper.warn
-                  "start_keepalive: stale entry reclaim rejected by lifecycle reservation for %s: %s"
-                  m.name
-                  (Keeper_lifecycle_reservation.snapshot_to_string owner)))
-        | None ->
-          (match Keeper_registry.unregister_exact entry with
-           | Keeper_registry.Exact_unregistered
-           | Keeper_registry.Exact_entry_missing -> ()
-           | Keeper_registry.Exact_entry_replaced ->
-             Log.Keeper.info
-               "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
-               m.name
-           | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
-             Log.Keeper.warn
-               "start_keepalive: stale entry reclaim rejected by lifecycle reservation for %s: %s"
-               m.name
-               (Keeper_lifecycle_reservation.snapshot_to_string owner)))
+       (match
+          match lifecycle_token with
+          | None -> Keeper_registry.unregister_exact entry
+          | Some token -> Keeper_registry.unregister_exact_for_lifecycle token entry
+        with
+        | Keeper_registry.Exact_unregistered
+        | Keeper_registry.Exact_entry_missing -> ()
+        | Keeper_registry.Exact_entry_replaced ->
+          Log.Keeper.info
+            "start_keepalive: stale entry for %s was already replaced; keeping the newer lane"
+            m.name
+        | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+          Log.Keeper.warn
+            "start_keepalive: stale entry reclaim rejected by lifecycle reservation for %s: %s"
+            m.name
+            (Keeper_lifecycle_reservation.snapshot_to_string owner))
      | _ -> ());
     match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
     | Some registered ->
@@ -978,65 +879,41 @@ let start_keepalive_admitted
     | None ->
       (* Register in Keeper_registry first — single source of truth. *)
       (match
-         (match lifecycle_token with
+         match lifecycle_token with
          | None ->
-           `Completed
-             (Keeper_registry.register_offline_if_admitted
-                ~base_path:ctx.config.base_path
-                m.name
-                m)
+           Keeper_registry.register_offline_if_admitted
+             ~base_path:ctx.config.base_path
+             m.name
+             m
          | Some token ->
-           (match
-              Keeper_registry.register_offline_if_admitted_for_lifecycle
-                permit
-                token
-                ~base_path:ctx.config.base_path
-                m.name
-                m
-            with
-            | Keeper_registry.Lifecycle_mutation_completed result ->
-              `Completed result
-            | Keeper_registry.Lifecycle_mutation_admission_denied ->
-              `Admission_denied))
+           Keeper_registry.register_offline_if_admitted_for_lifecycle
+             token
+             ~base_path:ctx.config.base_path
+             m.name
+             m
        with
-       | `Admission_denied ->
-         Log.Keeper.warn
-           "start_keepalive: lifecycle registration lost durable admission for %s"
-           m.name;
-         Keepalive_transaction_admission_denied
-           (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
-              { keeper_name = m.name
-              ; failure =
-                  Keeper_lifecycle_admission.Durable_transaction
-                  .Invalid_current_schema
-              })
-       | `Completed
-           (Error (Keeper_registry.Registration_shutdown_reserved operation_id)) ->
+       | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
          Log.Keeper.warn
            "start_keepalive: skipped %s because shutdown operation %s owns admission"
            m.name
            (Keeper_shutdown_types.Operation_id.to_string operation_id);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_shutdown_reserved operation_id)
-       | `Completed
-           (Error (Keeper_registry.Registration_lifecycle_reserved owner)) ->
+       | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
          Log.Keeper.warn
            "start_keepalive: lifecycle reservation rejected %s: %s"
            m.name
            (Keeper_lifecycle_reservation.snapshot_to_string owner);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_lifecycle_reserved owner)
-       | `Completed (Error (Keeper_registry.Registration_invalid validation_error)) ->
+       | Error (Keeper_registry.Registration_invalid validation_error) ->
          Log.Keeper.error
            "start_keepalive: registry validation rejected %s: %s"
            m.name
            (Keeper_registry.registry_entry_validation_error_to_string validation_error);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_invalid validation_error)
-       | `Completed
-           (Error
-              (Keeper_registry.Registration_event_queue_unavailable
-                 { keeper_name; detail })) ->
+       | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
          Log.Keeper.error
            "start_keepalive: registry event queue unavailable keeper=%s: %s"
            keeper_name
@@ -1044,7 +921,7 @@ let start_keepalive_admitted
          Keepalive_registration_rejected
            (Keeper_registry.Registration_event_queue_unavailable
               { keeper_name; detail })
-       | `Completed (Ok reg) ->
+       | Ok reg ->
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
       (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,
@@ -1056,10 +933,9 @@ let start_keepalive_admitted
       match
         match lifecycle_token with
         | None ->
-          dispatch_fiber_started ~permit ~base_path:ctx.config.base_path m.name
+          dispatch_fiber_started ~base_path:ctx.config.base_path m.name
         | Some token ->
           dispatch_fiber_started
-            ~permit
             ~lifecycle_token:token
             ~entry:reg
             ~base_path:ctx.config.base_path
@@ -1107,35 +983,16 @@ let start_keepalive_admitted
       | Ok () ->
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
-        let live_meta =
-          bootstrap_live_keeper_meta
-            ?lifecycle_token
-            ~durable_meta_bootstrap
-            ~ctx
-            m
-        in
+        let live_meta = bootstrap_live_keeper_meta ?lifecycle_token ~ctx m in
         let live_meta_installed =
-          match lifecycle_token with
-          | None ->
-            Keeper_registry.update_entry_exact reg (fun current ->
-              { current with meta = live_meta })
-            |> Keeper_registry.exact_update_succeeded
-                 reg
-                 ~site:"start_keepalive.live_meta"
-          | Some token ->
-            (match
-               Keeper_registry.update_entry_exact_for_lifecycle
-                 permit
-                 token
-                 reg
-                 (fun current -> { current with meta = live_meta })
-             with
-             | Keeper_registry.Lifecycle_mutation_admission_denied -> false
-             | Keeper_registry.Lifecycle_mutation_completed result ->
-               Keeper_registry.exact_update_succeeded
-                 reg
-                 ~site:"start_keepalive.live_meta"
-                 result)
+          (match lifecycle_token with
+           | None ->
+             Keeper_registry.update_entry_exact reg (fun current ->
+               { current with meta = live_meta })
+           | Some token ->
+             Keeper_registry.update_entry_exact_for_lifecycle token reg (fun current ->
+               { current with meta = live_meta }))
+          |> Keeper_registry.exact_update_succeeded reg ~site:"start_keepalive.live_meta"
         in
         if not live_meta_installed
         then (
@@ -1292,41 +1149,21 @@ let start_keepalive_admitted
                  terminal_detail
                  tracking_detail)
         in
-        (match launch_gate with
-         | None -> publish_keeper_started ~live_meta
-         | Some _ -> ());
+        publish_keeper_started ~live_meta;
         (match
            Keeper_lane.fork
              ~sw:ctx.sw
              reg.lane
              ~run:(fun lane_sw ->
-        Keeper_lifecycle_admission_permit.without_inherited_permit_scope
-          (fun () ->
-             let launch_outcome =
-               match launch_gate with
-               | None -> Launch_gate_committed
-               | Some gate -> Eio.Promise.await gate.outcome
-             in
-             match launch_outcome with
-             | Launch_gate_aborted -> ()
-             | Launch_gate_committed ->
-               let ctx = { ctx with sw = lane_sw } in
-               Option.iter
-                 (fun _ -> publish_keeper_started ~live_meta)
-                 launch_gate;
-               (* The sidecar is part of this Keeper lane. It cannot outlive
-                  the lane's structured-concurrency scope. *)
-               let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
-               (match grpc_close with
-                | Some _ ->
-                  Atomic.set reg.grpc_close grpc_close
-                | None -> ());
-               run_heartbeat_loop
-                 ~proactive_warmup_sec
-                 ctx
-                 live_meta
-                 stop
-                 ~wakeup))
+        let ctx = { ctx with sw = lane_sw } in
+        (* The sidecar is part of this Keeper lane. It cannot outlive the
+           lane's structured-concurrency scope. *)
+        let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
+        (match grpc_close with
+         | Some _ ->
+           Atomic.set reg.grpc_close grpc_close
+         | None -> ());
+        run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
              ~cleanup:cleanup_tracking
          with
          | Ok () -> Keepalive_started reg
@@ -1349,113 +1186,6 @@ type joined_stop =
 type joined_stop_result =
   | Keeper_not_registered
   | Keeper_joined of joined_stop
-
-let start_keepalive_under_admission
-      ?(proactive_warmup_sec = 0)
-      ?lifecycle_token
-      ?launch_gate
-      ?(durable_meta_bootstrap = Bootstrap_required)
-      permit
-      (ctx : _ context)
-      (meta : keeper_meta)
-  =
-  match
-    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
-      permit
-      ctx.config
-      meta.name
-      (fun () ->
-         start_keepalive_admitted
-           ~proactive_warmup_sec
-           ?lifecycle_token
-           ?launch_gate
-           ~durable_meta_bootstrap
-           ~permit
-           ctx
-           meta)
-  with
-  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
-      outcome ->
-    outcome
-  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
-    Keepalive_transaction_admission_denied
-      (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
-         { keeper_name = meta.name
-         ; failure =
-             Keeper_lifecycle_admission.Durable_transaction
-             .Invalid_current_schema
-         })
-;;
-
-let start_keepalive
-      ?(proactive_warmup_sec = 0)
-      ?lifecycle_token
-      ?launch_gate
-      ?(durable_meta_bootstrap = Bootstrap_required)
-      (ctx : _ context)
-      (meta : keeper_meta)
-  =
-  let denied reason =
-    Log.Keeper.error
-      "start_keepalive denied by durable lifecycle authority keeper=%s reason=%s"
-      meta.name
-      (Keeper_lifecycle_admission.Durable_transaction
-       .blocked_reason_to_wire
-         reason);
-    Keepalive_transaction_admission_denied reason
-  in
-  match lifecycle_token with
-  | Some token ->
-    (match
-       Keeper_lifecycle_admission_durable_transaction
-       .with_revival_launch_admission_under_lock
-         ctx.config
-         ~keeper_name:meta.name
-         ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
-         (fun permit ->
-            start_keepalive_under_admission
-              ~proactive_warmup_sec
-              ~lifecycle_token:token
-              ?launch_gate
-              ~durable_meta_bootstrap
-              permit
-              ctx
-              meta)
-     with
-     | Ok outcome -> outcome
-     | Error reason -> denied reason)
-  | None ->
-    (match
-       Keeper_lifecycle_admission.Durable_transaction
-       .with_durable_lifecycle_admission
-         ctx.config
-         ~keeper_name:meta.name
-         (fun permit ->
-            start_keepalive_under_admission
-              ~proactive_warmup_sec
-              ?launch_gate
-              ~durable_meta_bootstrap
-              permit
-              ctx
-              meta)
-     with
-     | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
-         outcome ->
-       outcome
-     | Keeper_lifecycle_admission.Durable_transaction
-       .Admission_completed_with_attention (outcome, failure) ->
-       Log.Keeper.error
-         "start_keepalive durable admission lock release requires attention \
-          keeper=%s failure=%s"
-         meta.name
-         (Keeper_lifecycle_admission.Durable_transaction
-          .authority_failure_to_wire
-            failure);
-       outcome
-     | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked
-         reason ->
-       denied reason)
-;;
 
 let request_entry_stop (entry : Keeper_registry.registry_entry) =
        (* tla-lint: allow-mutation: fiber signal — stop+wakeup pair triggers cooperative shutdown *)

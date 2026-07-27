@@ -416,17 +416,16 @@ let mark_transcript_corruption_reset_required (m : keeper_meta) : keeper_meta =
   }
 ;;
 
-(* Sanctioned generic unpause transform. The reset-required transcript latch
-   is deliberately immutable here: only checkpoint reset/replacement may
-   remove it. Other latches are cleared together with the pause bit and last
-   blocker. Terminal dead-tombstone revival additionally runs the
-   crash-recoverable [Keeper_dead_revival_transaction] at its call site. *)
+(* Sanctioned generic unpause transform. Reset-required transcript and terminal
+   dead-tombstone latches are deliberately immutable here. A dead identity is
+   deleted and recreated rather than revived. *)
 let mark_resumed (m : keeper_meta) : keeper_meta =
   match m.latched_reason with
-  | Some Keeper_latched_reason.Transcript_corruption_reset_required -> m
   | Some
-      ( Keeper_latched_reason.Operator_paused _
-      | Keeper_latched_reason.Dead_tombstone )
+      ( Keeper_latched_reason.Transcript_corruption_reset_required
+      | Keeper_latched_reason.Dead_tombstone ) ->
+    m
+  | Some (Keeper_latched_reason.Operator_paused _)
   | None ->
     { m with
       paused = false
@@ -578,10 +577,6 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
    default runtime (the designed fallback; RFC-0206 §2.1 fail-fast still applies
    to the default itself). The id is opaque here; only the OAS adapter parses
    it. *)
-let runtime_trace_id (meta : keeper_meta) =
-  Keeper_id.Trace_id.to_string meta.runtime.trace_id
-;;
-
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id

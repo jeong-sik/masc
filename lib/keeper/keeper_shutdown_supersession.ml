@@ -10,42 +10,6 @@ type committed =
   | No_shutdown_admission
   | Shutdown_superseded of Keeper_shutdown_types.t
 
-let to_json = function
-  | No_shutdown_admission_token ->
-    `Assoc [ "kind", `String "no_shutdown_admission" ]
-  | Operator_supersession_token token ->
-    `Assoc
-      [ "kind", `String "operator_metadata_supersession"
-      ; ( "token"
-        , Keeper_shutdown_store
-          .operator_metadata_supersession_token_to_json
-            token )
-      ]
-;;
-
-let of_json = function
-  | `Assoc [ "kind", `String "no_shutdown_admission" ] ->
-    Ok No_shutdown_admission_token
-  | `Assoc
-      [ "kind", `String "operator_metadata_supersession"
-      ; "token", token_json
-      ] ->
-    Keeper_shutdown_store.operator_metadata_supersession_token_of_json
-      token_json
-    |> Result.map (fun token -> Operator_supersession_token token)
-    |> Result.map_error Keeper_shutdown_store.error_to_string
-  | _ -> Error "shutdown supersession obligation is not exact current JSON"
-;;
-
-let matches ~config ~keeper_name = function
-  | No_shutdown_admission_token -> true
-  | Operator_supersession_token token ->
-    Keeper_shutdown_store.operator_metadata_supersession_token_matches
-      ~config
-      ~keeper_name
-      token
-;;
-
 type error =
   | Preflight_failed of Keeper_shutdown_store.error
   | Multiple_durable_shutdown_operations of

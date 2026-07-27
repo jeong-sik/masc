@@ -70,7 +70,7 @@ let write_keeper_meta_exn ~config ~keeper_name =
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
-    (match Masc_test_deps.write_current_keeper_meta config meta with
+    (match Keeper_meta_store.write_meta config meta with
      | Ok () -> ()
      | Error detail -> failf "write_meta failed: %s" detail)
   | Error detail -> failf "meta fixture rejected: %s" detail

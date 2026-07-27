@@ -61,6 +61,3 @@ let autonomous_denial_to_wire = function
   | Autonomous_paused _ -> "paused"
   | Autonomous_dead_tombstone -> "dead_tombstone"
 ;;
-
-module Durable_transaction =
-  Keeper_lifecycle_admission_durable_transaction

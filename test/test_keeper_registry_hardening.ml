@@ -383,10 +383,15 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
            (Atomic.get captured.fiber_wakeup);
          let replacement_meta = make_meta captured.name in
          let replacement =
-           KR.For_testing.register
-             ~base_path
-             replacement_meta.name
-             replacement_meta
+           match
+             KR.register_offline_if_admitted_for_lifecycle
+               token
+               ~base_path
+               captured.name
+               replacement_meta
+           with
+           | Ok replacement -> replacement
+           | Error _ -> fail "lifecycle owner could not install replacement lane"
          in
          Atomic.set replacement.fiber_wakeup false;
          (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with

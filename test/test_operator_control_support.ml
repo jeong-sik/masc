@@ -23,12 +23,6 @@ let ensure_fs env =
      capability would leak a dead scheduler resource into later cases. *)
   Fs_compat.set_fs (Eio.Stdenv.fs env)
 
-let with_fd_backed_lifecycle_head_parents fn =
-  Keeper_lifecycle_nonce.For_testing.with_fd_backed_parent_opening
-  @@ fun () ->
-  Keeper_dead_revival_transaction.For_testing.with_fd_backed_parent_opening fn
-;;
-
 let publication_recovery_registry env sw config =
   let registry_root =
     Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)

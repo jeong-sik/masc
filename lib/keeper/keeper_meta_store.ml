@@ -9,6 +9,18 @@ open Keeper_types_profile
 open Keeper_meta_contract
 open Keeper_meta_json
 
+let runtime_meta_write_sync_hook_atomic
+    : (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) Atomic.t
+  =
+  Atomic.make (fun _ _ -> ())
+;;
+
+let runtime_meta_write_sync_hook config meta =
+  Atomic.get runtime_meta_write_sync_hook_atomic config meta
+
+let register_runtime_meta_write_sync f =
+  Atomic.set runtime_meta_write_sync_hook_atomic f
+
 let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
 
 let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
@@ -264,18 +276,22 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
 ;;
 
 type runtime_sync =
-  | Sync_runtime of Keeper_meta_runtime_sync_internal.event
+  | Sync_runtime
   | Defer_runtime_sync
 
-let persist_meta_internal ~runtime_sync path persisted =
+let persist_meta_internal ~runtime_sync config path persisted =
   let json = meta_to_json persisted in
   match Keeper_fs.save_json_atomic path json with
   | Ok () ->
     (match runtime_sync with
-     | Sync_runtime event -> Keeper_meta_runtime_sync_internal.emit event
+     | Sync_runtime -> Atomic.get runtime_meta_write_sync_hook_atomic config persisted
      | Defer_runtime_sync -> ());
     Ok ()
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
+;;
+
+let persist_meta config path persisted =
+  persist_meta_internal ~runtime_sync:Sync_runtime config path persisted
 ;;
 
 type write_meta_error =
@@ -287,9 +303,6 @@ type write_meta_error =
   | Lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Read_failed of string
   | Persist_failed of string
-  | Identity_creation_requires_witness of string
-  | Identity_change_requires_witness of string
-  | Identity_witness_mismatch of string
   | Invariant_violation of
       { keeper_name : string
       ; detail : string
@@ -308,123 +321,14 @@ let write_meta_error_to_string = function
     Printf.sprintf
       "keeper lifecycle transaction reserved metadata mutation: %s"
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
-  | Identity_creation_requires_witness keeper_name ->
-    Printf.sprintf
-      "keeper metadata identity creation requires a lifecycle nonce witness: %s"
-      keeper_name
-  | Identity_change_requires_witness keeper_name ->
-    Printf.sprintf
-      "keeper metadata identity change requires a lifecycle nonce witness: %s"
-      keeper_name
-  | Identity_witness_mismatch detail ->
-    "keeper metadata lifecycle nonce witness mismatch: " ^ detail
   | Read_failed detail | Persist_failed detail -> detail
-;;
-
-type identity_write_authority =
-  | Ordinary
-  | Create_witness of Keeper_lifecycle_nonce.create Keeper_lifecycle_nonce.witness
-  | Replace_witness of Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness
-  | Recover_exact_witness of
-      Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness
-
-let meta_identity_matches identity (meta : Keeper_meta_contract.keeper_meta) =
-  String.equal
-    (Keeper_lifecycle_nonce.identity_owner_id identity)
-    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-  &&
-  match
-    Keeper_lifecycle_nonce.runtime_int_of_nonce
-      (Keeper_lifecycle_nonce.identity_nonce identity)
-  with
-  | Ok nonce -> Int.equal nonce meta.runtime.nonce
-  | Error _ -> false
-;;
-
-let witness_binding_matches config m witness =
-  String.equal
-    (Workspace.masc_root_dir config)
-    (Keeper_lifecycle_nonce.witness_masc_root witness)
-  && String.equal m.Keeper_meta_contract.name
-       (Keeper_lifecycle_nonce.witness_keeper_id witness)
-  && meta_identity_matches (Keeper_lifecycle_nonce.witness_target witness) m
-;;
-
-let authorize_identity_write config authority existing m =
-  let mismatch detail = Error (Identity_witness_mismatch detail) in
-  match authority, existing with
-  | Ordinary, None -> Error (Identity_creation_requires_witness m.Keeper_meta_contract.name)
-  | Ordinary, Some persisted ->
-    if
-      String.equal persisted.name m.name
-      && Keeper_id.Trace_id.equal persisted.runtime.trace_id m.runtime.trace_id
-      && Int.equal persisted.runtime.nonce m.runtime.nonce
-    then Ok ()
-    else Error (Identity_change_requires_witness m.name)
-  | Create_witness witness, None ->
-    if witness_binding_matches config m witness
-       && Option.is_none (Keeper_lifecycle_nonce.witness_source witness)
-    then Ok ()
-    else mismatch "create witness does not bind the requested target"
-  | Create_witness _, Some _ ->
-    mismatch "create witness requires absent metadata"
-  | Replace_witness witness, Some persisted ->
-    if
-      witness_binding_matches config m witness
-      &&
-      match Keeper_lifecycle_nonce.witness_source witness with
-      | Some source -> meta_identity_matches source persisted
-      | None -> false
-    then Ok ()
-    else mismatch "replace witness does not bind persisted source and requested target"
-  | Replace_witness _, None ->
-    mismatch "replace witness requires existing metadata"
-  | Recover_exact_witness witness, existing ->
-    let source_matches =
-      match Keeper_lifecycle_nonce.witness_source witness, existing with
-      | None, None -> true
-      | Some source, Some persisted -> meta_identity_matches source persisted
-      | None, Some _ | Some _, None -> false
-    in
-    if witness_binding_matches config m witness && source_matches
-    then Ok ()
-    else mismatch "exact recovery witness does not bind current source and requested target"
-;;
-
-let runtime_sync_event config authority existing persisted =
-  let transition =
-    match authority, existing with
-    | Ordinary, Some source ->
-      Keeper_meta_runtime_sync_internal.Ordinary
-        { trace_id = source.runtime.trace_id; nonce = source.runtime.nonce }
-    | Create_witness witness, None ->
-      Keeper_meta_runtime_sync_internal.Created witness
-    | Replace_witness witness, Some _ ->
-      Keeper_meta_runtime_sync_internal.Replaced witness
-    | Recover_exact_witness witness, _ ->
-      Keeper_meta_runtime_sync_internal.Recovered witness
-    | Ordinary, None
-    | Create_witness _, Some _
-    | Replace_witness _, None ->
-      invalid_arg "runtime sync event constructed before identity authorization"
-  in
-  { Keeper_meta_runtime_sync_internal.base_path = config.Workspace.base_path
-  ; keeper_name = persisted.name
-  ; transition
-  ; persisted
-  }
 ;;
 
 (* Version CAS only — there is no force/bypass path. Cumulative usage
    counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
    lost the race must resolve the conflict through [write_meta_with_merge],
    never overwrite the disk snapshot. *)
-let write_meta_typed
-      ?lifecycle_token
-      ?(identity_authority = Ordinary)
-      config
-      (m : Keeper_meta_contract.keeper_meta)
-  =
+let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config m.name in
   (* Write-boundary invariant (fail-closed): never persist [paused=false] with
      a terminal or reset-required latch. *)
@@ -445,29 +349,21 @@ let write_meta_typed
        | Error owner -> Error (Lifecycle_reserved owner)
        | Ok () ->
          File_lock_eio.with_mutex path (fun () ->
-           let persist existing persisted =
+           let persist persisted =
              let runtime_sync =
                match lifecycle_token with
-               | None ->
-                 Sync_runtime
-                   (runtime_sync_event
-                      config
-                      identity_authority
-                      existing
-                      persisted)
+               | None -> Sync_runtime
                | Some _ -> Defer_runtime_sync
              in
              persist_meta_internal
                ~runtime_sync
+               config
                path
                persisted
              |> Result.map_error (fun error -> Persist_failed error)
            in
            match read_meta_file_path path with
            | Ok (Some existing) ->
-             (match authorize_identity_write config identity_authority (Some existing) m with
-              | Error _ as error -> error
-              | Ok () ->
              if existing.meta_version <> m.meta_version
              then
                Error
@@ -476,11 +372,8 @@ let write_meta_typed
                     ; expected = m.meta_version
                     ; actual = existing.meta_version
                     })
-             else persist (Some existing) { m with meta_version = m.meta_version + 1 })
-           | Ok None ->
-             (match authorize_identity_write config identity_authority None m with
-              | Error _ as error -> error
-              | Ok () -> persist None { m with meta_version = 1 })
+             else persist { m with meta_version = m.meta_version + 1 }
+           | Ok None -> persist { m with meta_version = 1 }
            | Error msg ->
              Error
                (Read_failed
@@ -490,137 +383,13 @@ let write_meta_typed
                      msg))))
 ;;
 
-let durable_admission_error prefix reason =
-  prefix
-  ^ ": "
-  ^ Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
-      reason
-;;
-
-let durable_admission_attention prefix failure =
-  prefix
-  ^ ": "
-  ^ Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
-      failure
-;;
-
-let with_ordinary_write_admission config ~keeper_name fn =
-  match
-    Keeper_lifecycle_admission.Durable_transaction
-    .with_durable_lifecycle_admission
-      config
-      ~keeper_name
-      fn
-  with
-  | Admission_completed result -> result
-  | Admission_completed_with_attention (result, failure) ->
-    Log.Keeper.error
-      "Keeper metadata durable admission lock release requires attention \
-       keeper=%s failure=%s"
-      keeper_name
-      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
-         failure);
-    result
-  | Admission_blocked reason ->
-    Error
-      (durable_admission_error
-         "Keeper metadata mutation blocked by lifecycle authority"
-         reason)
-;;
-
 let write_meta config m =
-  with_ordinary_write_admission config ~keeper_name:m.name (fun _permit ->
-    write_meta_typed config m |> Result.map_error write_meta_error_to_string)
+  write_meta_typed config m |> Result.map_error write_meta_error_to_string
 ;;
 
-let with_lifecycle_mutation_admission permit config ~keeper_name ~denied fn =
-  match
-    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
-      permit
-      config
-      keeper_name
-      fn
-  with
-  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed result ->
-    result
-  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
-    denied
-;;
-
-let write_meta_for_lifecycle permit token config m =
-  with_lifecycle_mutation_admission
-    permit
-    config
-    ~keeper_name:m.name
-    ~denied:
-      (Error
-         "Keeper lifecycle metadata write requires the matching active durable admission permit")
-    (fun () ->
-    write_meta_typed ~lifecycle_token:token config m
-    |> Result.map_error write_meta_error_to_string)
-;;
-
-let with_identity_write_admission permit config m ~denied fn =
-  match
-    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
-      permit
-      config
-      m.Keeper_meta_contract.name
-      fn
-  with
-  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
-      result ->
-    result
-  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
-    Error denied
-;;
-
-let create_meta ?lifecycle_token permit witness config m =
-  with_identity_write_admission
-    permit
-    config
-    m
-    ~denied:
-      "Keeper identity creation requires the active durable lifecycle admission"
-    (fun () ->
-    write_meta_typed
-      ?lifecycle_token
-      ~identity_authority:(Create_witness witness)
-      config
-      m
-    |> Result.map_error write_meta_error_to_string)
-;;
-
-let replace_meta ?lifecycle_token permit witness config m =
-  with_identity_write_admission
-    permit
-    config
-    m
-    ~denied:
-      "Keeper identity replacement requires the active durable lifecycle admission"
-    (fun () ->
-    write_meta_typed
-      ?lifecycle_token
-      ~identity_authority:(Replace_witness witness)
-      config
-      m
-    |> Result.map_error write_meta_error_to_string)
-;;
-
-let recover_meta_exact ?lifecycle_token permit witness config m =
-  with_identity_write_admission
-    permit
-    config
-    m
-    ~denied:
-      "Keeper identity recovery requires the active durable lifecycle admission"
-    (fun () ->
-    write_meta_typed
-      ?lifecycle_token
-      ~identity_authority:(Recover_exact_witness witness)
-      config
-      m
-    |> Result.map_error write_meta_error_to_string)
+let write_meta_for_lifecycle token config m =
+  write_meta_typed ~lifecycle_token:token config m
+  |> Result.map_error write_meta_error_to_string
 ;;
 
 let is_version_conflict_error msg =
@@ -647,14 +416,7 @@ let write_meta_with_merge_internal
     match write_meta_typed ?lifecycle_token config caller with
     | Ok () -> Ok ()
     | Error error when n >= max_retries -> Error (write_meta_error_to_string error)
-    | Error
-        (( Lifecycle_reserved _
-         | Read_failed _
-         | Persist_failed _
-         | Invariant_violation _
-         | Identity_creation_requires_witness _
-         | Identity_change_requires_witness _
-         | Identity_witness_mismatch _ ) as error) ->
+    | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _ | Invariant_violation _) as error) ->
       Error (write_meta_error_to_string error)
     | Error (Version_conflict _) ->
       (match read_meta_file_path path with
@@ -681,25 +443,16 @@ let write_meta_with_merge_internal
 ;;
 
 let write_meta_with_merge ?max_retries ~merge config m =
-  with_ordinary_write_admission config ~keeper_name:m.name (fun _permit ->
-    write_meta_with_merge_internal ?max_retries ~merge config m)
+  write_meta_with_merge_internal ?max_retries ~merge config m
 ;;
 
-let write_meta_with_merge_for_lifecycle permit token ?max_retries ~merge config m =
-  with_lifecycle_mutation_admission
-    permit
+let write_meta_with_merge_for_lifecycle token ?max_retries ~merge config m =
+  write_meta_with_merge_internal
+    ~lifecycle_token:token
+    ?max_retries
+    ~merge
     config
-    ~keeper_name:m.name
-    ~denied:
-      (Error
-         "Keeper lifecycle metadata merge requires the matching active durable admission permit")
-    (fun () ->
-    write_meta_with_merge_internal
-      ~lifecycle_token:token
-      ?max_retries
-      ~merge
-      config
-      m)
+    m
 ;;
 
 (* Durable write-through of [compaction_rt.last_decision].
@@ -818,10 +571,6 @@ type identity_update_error =
   | Identity_missing
   | Identity_changed
   | Identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
-  | Identity_lifecycle_admission_blocked of
-      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
-  | Identity_lifecycle_admission_release_failed of
-      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Identity_read_failed of string
   | Identity_write_failed of string
 
@@ -832,19 +581,11 @@ let identity_update_error_to_string = function
     Printf.sprintf
       "Keeper metadata lifecycle reservation conflict: %s"
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
-  | Identity_lifecycle_admission_blocked reason ->
-    durable_admission_error
-      "Keeper metadata identity update blocked by lifecycle authority"
-      reason
-  | Identity_lifecycle_admission_release_failed failure ->
-    durable_admission_attention
-      "Keeper metadata identity update admission release failed"
-      failure
   | Identity_read_failed detail -> detail
   | Identity_write_failed detail -> detail
 ;;
 
-let update_meta_if_identity_under_admission
+let update_meta_if_identity
       config
       ~name
       ~trace_id
@@ -875,78 +616,16 @@ let update_meta_if_identity_under_admission
              then Error Identity_changed
              else
                let caller = update latest in
-               (match
-                  authorize_identity_write
-                    config
-                    Ordinary
-                    (Some latest)
-                    caller
-                with
-                | Error _ -> Error Identity_changed
-                | Ok () ->
-                  (match Keeper_meta_contract.terminal_latch_pause_violation caller with
-                   | Some detail -> Error (Identity_write_failed detail)
-                   | None ->
-                     let persisted =
-                       { caller with meta_version = latest.meta_version + 1 }
-                     in
-                     let event =
-                       { Keeper_meta_runtime_sync_internal.base_path =
-                           config.Workspace.base_path
-                       ; keeper_name = persisted.name
-                       ; transition =
-                           Keeper_meta_runtime_sync_internal.Ordinary
-                             { trace_id = latest.runtime.trace_id
-                             ; nonce = latest.runtime.nonce
-                             }
-                       ; persisted
-                       }
-                     in
-                     (match
-                        persist_meta_internal
-                          ~runtime_sync:(Sync_runtime event)
-                          path
-                          persisted
-                      with
-                      | Ok () -> Ok persisted
-                      | Error detail -> Error (Identity_write_failed detail))))))
-;;
-
-let update_meta_if_identity config ~name ~trace_id ~generation update =
-  match
-    Keeper_lifecycle_admission.Durable_transaction
-    .with_durable_lifecycle_admission
-      config
-      ~keeper_name:name
-      (fun _permit ->
-        update_meta_if_identity_under_admission
-          config
-          ~name
-          ~trace_id
-          ~generation
-          update)
-  with
-  | Admission_completed result -> result
-  | Admission_completed_with_attention (result, failure) ->
-    Log.Keeper.error
-      "Keeper identity metadata update admission release requires attention \
-       keeper=%s failure=%s"
-      name
-      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
-         failure);
-    result
-  | Admission_blocked reason ->
-    Error (Identity_lifecycle_admission_blocked reason)
+               let persisted = { caller with meta_version = latest.meta_version + 1 } in
+               (match persist_meta config path persisted with
+                | Ok () -> Ok persisted
+                | Error detail -> Error (Identity_write_failed detail))))
 ;;
 
 type identity_remove_error =
   | Remove_identity_missing
   | Remove_identity_changed
   | Remove_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
-  | Remove_identity_lifecycle_admission_blocked of
-      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
-  | Remove_identity_lifecycle_admission_release_failed of
-      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Remove_identity_read_failed of string
   | Remove_identity_unlink_failed of string
 
@@ -957,24 +636,10 @@ let identity_remove_error_to_string = function
     Printf.sprintf
       "Keeper metadata lifecycle reservation conflict: %s"
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
-  | Remove_identity_lifecycle_admission_blocked reason ->
-    durable_admission_error
-      "Keeper metadata removal blocked by lifecycle authority"
-      reason
-  | Remove_identity_lifecycle_admission_release_failed failure ->
-    durable_admission_attention
-      "Keeper metadata removal admission release failed"
-      failure
   | Remove_identity_read_failed detail | Remove_identity_unlink_failed detail -> detail
 ;;
 
-let remove_meta_if_identity_internal
-      ?lifecycle_token
-      config
-      ~name
-      ~trace_id
-      ~generation
-  =
+let remove_meta_if_identity config ~name ~trace_id ~generation =
   let path = keeper_meta_path config name in
   Keeper_lifecycle_reservation.with_key_lock
     ~base_path:config.Workspace.base_path
@@ -982,7 +647,6 @@ let remove_meta_if_identity_internal
     (fun () ->
        match
          Keeper_lifecycle_reservation.authorize
-           ?token:lifecycle_token
            ~base_path:config.Workspace.base_path
            ~keeper_name:name
            ()
@@ -1007,62 +671,6 @@ let remove_meta_if_identity_internal
                | exn -> Error (Remove_identity_unlink_failed (Printexc.to_string exn))))
 ;;
 
-let remove_meta_if_identity config ~name ~trace_id ~generation =
-  match
-    Keeper_lifecycle_admission.Durable_transaction
-    .with_durable_lifecycle_admission
-      config
-      ~keeper_name:name
-      (fun _permit ->
-        remove_meta_if_identity_internal
-          config
-          ~name
-          ~trace_id
-          ~generation)
-  with
-  | Admission_completed result -> result
-  | Admission_completed_with_attention (result, failure) ->
-    Log.Keeper.error
-      "Keeper identity metadata removal admission release requires attention \
-       keeper=%s failure=%s"
-      name
-      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
-         failure);
-    result
-  | Admission_blocked reason ->
-    Error (Remove_identity_lifecycle_admission_blocked reason)
-;;
-
-let remove_meta_if_identity_for_lifecycle
-      permit
-      token
-      config
-      ~name
-      ~trace_id
-      ~generation
-  =
-  with_lifecycle_mutation_admission
-    permit
-    config
-    ~keeper_name:name
-    ~denied:
-      (Error
-         (Remove_identity_lifecycle_admission_blocked
-            (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
-               { keeper_name = name
-               ; failure =
-                   Keeper_lifecycle_admission.Durable_transaction
-                   .Invalid_current_schema
-               })))
-    (fun () ->
-    remove_meta_if_identity_internal
-      ~lifecycle_token:token
-      config
-      ~name
-      ~trace_id
-      ~generation)
-;;
-
 type exact_identity_error =
   | Exact_identity_missing
   | Exact_identity_changed
@@ -1070,11 +678,6 @@ type exact_identity_error =
       { expected : int
       ; actual : int
       }
-  | Exact_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
-  | Exact_identity_lifecycle_admission_blocked of
-      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
-  | Exact_identity_lifecycle_admission_release_failed of
-      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Exact_identity_read_failed of string
   | Exact_identity_unlink_failed of string
 
@@ -1086,18 +689,6 @@ let exact_identity_error_to_string = function
       "Keeper metadata version changed: expected %d, actual %d"
       expected
       actual
-  | Exact_identity_lifecycle_reserved owner ->
-    Printf.sprintf
-      "Keeper metadata lifecycle reservation conflict: %s"
-      (Keeper_lifecycle_reservation.snapshot_to_string owner)
-  | Exact_identity_lifecycle_admission_blocked reason ->
-    durable_admission_error
-      "Exact Keeper metadata removal blocked by lifecycle authority"
-      reason
-  | Exact_identity_lifecycle_admission_release_failed failure ->
-    durable_admission_attention
-      "Exact Keeper metadata removal admission release failed"
-      failure
   | Exact_identity_read_failed detail
   | Exact_identity_unlink_failed detail -> detail
 ;;
@@ -1131,8 +722,7 @@ let read_meta_if_exact_identity
       validate_exact_identity ~trace_id ~generation ~meta_version latest)
 ;;
 
-let remove_meta_if_exact_identity_internal
-    ?lifecycle_token
+let remove_meta_if_exact_identity
     config
     ~name
     ~trace_id
@@ -1140,99 +730,19 @@ let remove_meta_if_exact_identity_internal
     ~meta_version
   =
   let path = keeper_meta_path config name in
-  Keeper_lifecycle_reservation.with_key_lock
-    ~base_path:config.Workspace.base_path
-    ~keeper_name:name
-    (fun () ->
-      match
-        Keeper_lifecycle_reservation.authorize
-          ?token:lifecycle_token
-          ~base_path:config.Workspace.base_path
-          ~keeper_name:name
-          ()
-      with
-      | Error owner -> Error (Exact_identity_lifecycle_reserved owner)
-      | Ok () ->
-        File_lock_eio.with_mutex path (fun () ->
-          match read_meta_file_path path with
-          | Error detail -> Error (Exact_identity_read_failed detail)
-          | Ok None -> Error Exact_identity_missing
-          | Ok (Some latest) ->
-            (match
-               validate_exact_identity
-                 ~trace_id
-                 ~generation
-                 ~meta_version
-                 latest
-             with
-             | Error _ as error -> error
-             | Ok _ ->
-               try
-                 Unix.unlink path;
-                 Ok ()
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn ->
-                 Error
-                   (Exact_identity_unlink_failed
-                      (Printexc.to_string exn)))))
-;;
-
-let remove_meta_if_exact_identity config ~name ~trace_id ~generation ~meta_version =
-  match
-    Keeper_lifecycle_admission.Durable_transaction
-    .with_durable_lifecycle_admission
-      config
-      ~keeper_name:name
-      (fun _permit ->
-        remove_meta_if_exact_identity_internal
-          config
-          ~name
-          ~trace_id
-          ~generation
-          ~meta_version)
-  with
-  | Admission_completed result -> result
-  | Admission_completed_with_attention (result, failure) ->
-    Log.Keeper.error
-      "Keeper exact identity metadata removal admission release requires \
-       attention keeper=%s failure=%s"
-      name
-      (Keeper_lifecycle_admission.Durable_transaction.authority_failure_to_wire
-         failure);
-    result
-  | Admission_blocked reason ->
-    Error (Exact_identity_lifecycle_admission_blocked reason)
-;;
-
-let remove_meta_if_exact_identity_for_lifecycle
-      permit
-      token
-      config
-      ~name
-      ~trace_id
-      ~generation
-      ~meta_version
-  =
-  with_lifecycle_mutation_admission
-    permit
-    config
-    ~keeper_name:name
-    ~denied:
-      (Error
-         (Exact_identity_lifecycle_admission_blocked
-            (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
-               { keeper_name = name
-               ; failure =
-                   Keeper_lifecycle_admission.Durable_transaction
-                   .Invalid_current_schema
-               })))
-    (fun () ->
-    remove_meta_if_exact_identity_internal
-      ~lifecycle_token:token
-      config
-      ~name
-      ~trace_id
-      ~generation
-      ~meta_version)
+  File_lock_eio.with_mutex path (fun () ->
+    match read_meta_file_path path with
+    | Error detail -> Error (Exact_identity_read_failed detail)
+    | Ok None -> Error Exact_identity_missing
+    | Ok (Some latest) ->
+      (match validate_exact_identity ~trace_id ~generation ~meta_version latest with
+       | Error _ as error -> error
+       | Ok _ ->
+         try
+           Unix.unlink path;
+           Ok ()
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           Error (Exact_identity_unlink_failed (Printexc.to_string exn))))
 ;;

@@ -7,6 +7,7 @@ module V = Masc.Verification
 module P = Masc.Otel_metric_store
 module VS = Workspace_verification_store
 module CU = Workspace_utils
+module W = Workspace_core
 
 let persistence_surface = "verification"
 
@@ -35,6 +36,16 @@ let rec rm_rf path =
 let with_temp_dir f =
   let dir = Filename.temp_dir "masc_verify_test" "" in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop offset =
+    if offset + needle_len > text_len then false
+    else if String.sub text offset needle_len = needle then true
+    else loop (offset + 1)
+  in
+  needle_len = 0 || loop 0
 
 (* --- Criterion tests --- *)
 
@@ -288,6 +299,196 @@ let test_list_requests_ignores_legacy_root_entries () =
       before
       (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error))
 
+let create_evidence_request ~base_path ~request_id ~artifact_path =
+  match
+    V.create_request
+      ~base_path
+      ~request_id
+      ~task_id:"task-001"
+      ~output:
+        (`Assoc
+            [ ( "submitted_evidence"
+              , `List
+                  [ `String artifact_path
+                  ; `String "executor summary"
+                  ] )
+            ])
+      ~criteria:[ V.Custom "inspect artifact" ]
+      ~worker:"keeper-executor-agent"
+      ~verifier:"keeper-verifier-agent"
+      ()
+  with
+  | Ok request -> request
+  | Error detail -> Alcotest.fail detail
+
+let test_submitted_evidence_inspection_is_assigned_and_contained () =
+  with_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat
+        base_path
+        ".masc/playground/docker/executor"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "artifact-task-001.txt" in
+    Fs_compat.save_file artifact_path "verified artifact\nsecond line";
+    let request_id = "vrf-evidence-inspection" in
+    ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
+    (match
+       VS.inspect_submitted_evidence
+         ~base_path
+         ~request_id
+         ~viewer:"keeper-verifier-agent"
+     with
+     | VS.Evidence_available
+         { items =
+             VS.Evidence_artifact { content; truncated = false; _ }
+             :: VS.Evidence_note "executor summary"
+             :: []
+         ; _
+         } ->
+       Alcotest.(check string)
+         "assigned verifier reads producer artifact"
+         "verified artifact\nsecond line"
+         content
+     | _ -> Alcotest.fail "expected assigned verifier evidence projection");
+    match
+      VS.inspect_submitted_evidence
+        ~base_path
+        ~request_id
+        ~viewer:"keeper-sangsu-agent"
+    with
+    | VS.Evidence_metadata_only _ -> ()
+    | _ -> Alcotest.fail "non-assigned keeper must receive metadata only")
+
+let test_submitted_evidence_inspection_rejects_cross_playground_path () =
+  with_temp_dir (fun base_path ->
+    let other_dir =
+      Filename.concat
+        base_path
+        ".masc/playground/docker/other"
+    in
+    Fs_compat.mkdir_p other_dir;
+    let artifact_path = Filename.concat other_dir "secret.txt" in
+    Fs_compat.save_file artifact_path "must not leak";
+    let request_id = "vrf-cross-playground" in
+    ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
+    match
+      VS.inspect_submitted_evidence
+        ~base_path
+        ~request_id
+        ~viewer:"keeper-verifier-agent"
+    with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact_unreadable
+              { reason = VS.Evidence_outside_worker_playground; _ }
+            :: _
+        ; _
+        } ->
+      ()
+    | _ -> Alcotest.fail "cross-playground artifact must remain unreadable")
+
+let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
+  with_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat
+        base_path
+        ".masc/playground/docker/executor"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "large-artifact.txt" in
+    let ascii_prefix = String.make 19_999 'a' in
+    Fs_compat.save_file artifact_path (ascii_prefix ^ "한글");
+    let request_id = "vrf-bounded-evidence" in
+    ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
+    match
+      VS.inspect_submitted_evidence
+        ~base_path
+        ~request_id
+        ~viewer:"keeper-verifier-agent"
+    with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact
+              { content; bytes; truncated = true; _ }
+            :: _
+        ; _
+        } ->
+      Alcotest.(check int) "full artifact byte count preserved" 20_005 bytes;
+      Alcotest.(check int) "UTF-8 boundary stays below 20KB cap" 19_999
+        (String.length content);
+      Alcotest.(check string) "incomplete UTF-8 codepoint removed"
+        ascii_prefix content
+    | _ -> Alcotest.fail "expected bounded UTF-8-safe artifact projection")
+
+let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
+  with_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    ignore (W.init config ~agent_name:None);
+    ignore
+      (W.add_task
+         config
+         ~title:"Produce one verifiable artifact"
+         ~priority:1
+         ~description:"");
+    let artifact_dir =
+      Filename.concat
+        base_path
+        ".masc/playground/docker/executor"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "artifact-task-001.txt" in
+    Fs_compat.save_file artifact_path "full-cycle-evidence";
+    let request_id = "vrf-task-list-projection" in
+    ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
+    let backlog = W.read_backlog config in
+    let tasks =
+      List.map
+        (fun (task : Masc_domain.task) ->
+           { task with
+             task_status =
+               Masc_domain.AwaitingVerification
+                 { assignee = "keeper-executor-agent"
+                 ; submitted_at = "2026-07-28T00:00:00Z"
+                 ; verification_id = request_id
+                 ; phase =
+                     Masc_domain.Verifier_assigned
+                       { verifier = "keeper-verifier-agent" }
+                 }
+           })
+        backlog.tasks
+    in
+    W.write_backlog
+      config
+      { backlog with tasks; version = backlog.version + 1 };
+    let assigned =
+      W.list_tasks
+        config
+        ~verification_viewer:"keeper-verifier-agent"
+    in
+    Alcotest.(check bool)
+      "assigned verifier receives content"
+      true
+      (contains_substring assigned "full-cycle-evidence");
+    let other =
+      W.list_tasks
+        config
+        ~verification_viewer:"keeper-sangsu-agent"
+    in
+    Alcotest.(check bool)
+      "other keeper receives no content"
+      false
+      (contains_substring other "full-cycle-evidence");
+    Alcotest.(check bool)
+      "other keeper keeps request metadata"
+      true
+      (contains_substring other request_id);
+    let external_projection = W.list_tasks config in
+    Alcotest.(check bool)
+      "external task list receives no content"
+      false
+      (contains_substring external_projection "full-cycle-evidence"))
+
 let test_assign_verifier () =
   with_temp_dir (fun base_path ->
     match V.create_request ~base_path ~task_id:"t1"
@@ -511,6 +712,14 @@ let () =
         test_list_requests_ignores_legacy_only_stale_entries;
       Alcotest.test_case "list requests ignores legacy root entries" `Quick
         test_list_requests_ignores_legacy_root_entries;
+      Alcotest.test_case "submitted evidence assigned and contained" `Quick
+        test_submitted_evidence_inspection_is_assigned_and_contained;
+      Alcotest.test_case "submitted evidence rejects cross playground" `Quick
+        test_submitted_evidence_inspection_rejects_cross_playground_path;
+      Alcotest.test_case "submitted evidence bounded UTF-8" `Quick
+        test_submitted_evidence_inspection_is_bounded_and_utf8_safe;
+      Alcotest.test_case "keeper task projection assigned verifier only" `Quick
+        test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier;
       Alcotest.test_case "assign verifier" `Quick test_assign_verifier;
       Alcotest.test_case "cross-agent assign fail" `Quick test_assign_verifier_cross_agent_fail;
       Alcotest.test_case "submit verdict" `Quick test_submit_verdict;

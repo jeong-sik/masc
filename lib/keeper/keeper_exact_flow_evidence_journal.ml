@@ -3,6 +3,11 @@ module Exact_output = Agent_sdk.Exact_output
 type evidence_kind =
   | Domain_settlement
   | Scope_retirement
+  | Measurement_receipt
+
+type measurement_boundary =
+  | Before_measurement_dispatch
+  | Measurement_terminal
 
 type recovery_origin =
   | Fresh_start
@@ -16,6 +21,15 @@ type evidence_decode_error =
   | Invalid_scope_retirement_intent of
       { index : int
       ; cause : Exact_output.flow_preference_retirement_intent_decode_error
+      }
+  | Invalid_measurement_receipt of
+      { index : int
+      ; cause : Exact_output.measurement_receipt_snapshot_decode_error
+      }
+  | Invalid_measurement_transition of
+      { index : int
+      ; operation_id : string
+      ; cause : Exact_output.measurement_receipt_transition_conflict
       }
 
 type journal_decode_error =
@@ -54,6 +68,11 @@ type commit_error =
       ; evidence_id : string
       }
   | Evidence_write_failed of Keeper_fs.durable_write_error
+  | Measurement_transition_rejected of
+      { boundary : measurement_boundary
+      ; operation_id : string
+      ; cause : Exact_output.measurement_receipt_transition_conflict
+      }
 
 type identity =
   { keeper_name : string
@@ -68,6 +87,10 @@ type evidence =
       }
   | Scope_retirement_evidence of
       { intent : Exact_output.flow_preference_retirement_intent
+      ; encoded : string
+      }
+  | Measurement_receipt_evidence of
+      { snapshot : Exact_output.measurement_receipt_snapshot
       ; encoded : string
       }
 
@@ -89,22 +112,25 @@ type t =
 
 let ( let* ) = Result.bind
 let journal_format = "masc.keeper-exact-flow-preference-evidence-journal"
-let journal_version = 1
+let journal_version = 2
 let sha256 value = Digestif.SHA256.(to_hex (digest_string value))
 
 let evidence_kind_to_string = function
   | Domain_settlement -> "domain_settlement"
   | Scope_retirement -> "scope_retirement"
+  | Measurement_receipt -> "measurement_receipt"
 ;;
 
 let evidence_kind = function
   | Domain_settlement_evidence _ -> Domain_settlement
   | Scope_retirement_evidence _ -> Scope_retirement
+  | Measurement_receipt_evidence _ -> Measurement_receipt
 ;;
 
 let evidence_encoded = function
   | Domain_settlement_evidence { encoded; _ }
-  | Scope_retirement_evidence { encoded; _ } -> encoded
+  | Scope_retirement_evidence { encoded; _ }
+  | Measurement_receipt_evidence { encoded; _ } -> encoded
 ;;
 
 let evidence_id = function
@@ -114,19 +140,24 @@ let evidence_id = function
   | Scope_retirement_evidence { intent; _ } ->
     Exact_output.flow_preference_retirement_intent_id intent
     |> Exact_output.flow_preference_retirement_id_to_string
+  | Measurement_receipt_evidence { snapshot; _ } ->
+    snapshot
+    |> Exact_output.measurement_receipt_operation_id
+    |> Exact_output.measurement_operation_id_to_string
 ;;
 
 let recovery_evidence = function
   | Domain_settlement_evidence { intent; _ } ->
-    Exact_output.Domain_settlement_evidence intent
+    Some (Exact_output.Domain_settlement_evidence intent)
   | Scope_retirement_evidence { intent; _ } ->
-    Exact_output.Scope_retirement_evidence intent
+    Some (Exact_output.Scope_retirement_evidence intent)
+  | Measurement_receipt_evidence _ -> None
 ;;
 
 let evidence_to_json evidence =
   `Assoc
     [ "kind", `String (evidence_kind evidence |> evidence_kind_to_string)
-    ; "intent", `String (evidence_encoded evidence)
+    ; "encoded", `String (evidence_encoded evidence)
     ]
 ;;
 
@@ -177,9 +208,9 @@ let string_field fields name =
 ;;
 
 let decode_evidence index = function
-  | `Assoc fields when exact_fields [ "kind"; "intent" ] fields ->
+  | `Assoc fields when exact_fields [ "kind"; "encoded" ] fields ->
     let* kind = string_field fields "kind" in
-    let* encoded = string_field fields "intent" in
+    let* encoded = string_field fields "encoded" in
     (match kind with
      | "domain_settlement" ->
        (match Exact_output.domain_settlement_intent_of_string encoded with
@@ -195,9 +226,55 @@ let decode_evidence index = function
           Error
             (Journal_invalid_evidence
                (Invalid_scope_retirement_intent { index; cause })))
+     | "measurement_receipt" ->
+       (match Exact_output.measurement_receipt_snapshot_of_string encoded with
+        | Ok snapshot ->
+          Ok (Measurement_receipt_evidence { snapshot; encoded })
+        | Error cause ->
+          Error
+            (Journal_invalid_evidence
+               (Invalid_measurement_receipt { index; cause })))
      | kind -> Error (Journal_unknown_evidence_kind { index; kind }))
   | `Assoc _
   | _ -> Error (Journal_invalid_field (Printf.sprintf "evidence[%d]" index))
+;;
+
+let validate_measurement_history evidence =
+  let latest = Hashtbl.create 16 in
+  let rec loop index = function
+    | [] -> Ok ()
+    | (Domain_settlement_evidence _ | Scope_retirement_evidence _) :: rest ->
+      loop (index + 1) rest
+    | Measurement_receipt_evidence { snapshot; _ } :: rest ->
+      let operation_id =
+        snapshot
+        |> Exact_output.measurement_receipt_operation_id
+        |> Exact_output.measurement_operation_id_to_string
+      in
+      let previous = Hashtbl.find_opt latest operation_id in
+      (match
+         Exact_output.classify_measurement_receipt_transition
+           ~previous
+           ~incoming:snapshot
+       with
+       | Exact_output.Measurement_dispatch_intent
+       | Exact_output.Measurement_terminal_advance ->
+         Hashtbl.replace latest operation_id snapshot;
+         loop (index + 1) rest
+       | Exact_output.Measurement_idempotent_replay ->
+         Error
+           (Journal_invalid_evidence
+              (Invalid_measurement_transition
+                 { index
+                 ; operation_id
+                 ; cause = Exact_output.Measurement_evidence_conflict
+                 }))
+       | Exact_output.Measurement_transition_conflict cause ->
+         Error
+           (Journal_invalid_evidence
+              (Invalid_measurement_transition { index; operation_id; cause })))
+  in
+  loop 0 evidence
 ;;
 
 let decode_document identity encoded =
@@ -255,9 +332,13 @@ let decode_document identity encoded =
         |> Yojson.Safe.to_string
         |> sha256
       in
-      if String.equal integrity_sha256 expected_integrity
-      then Ok evidence
-      else Error Journal_integrity_mismatch
+      let* () =
+        if String.equal integrity_sha256 expected_integrity
+        then Ok ()
+        else Error Journal_integrity_mismatch
+      in
+      let* () = validate_measurement_history evidence in
+      Ok evidence
     | `Assoc _ | _ -> Error Journal_invalid_fields
   with
   | Yojson.Json_error detail -> Error (Journal_malformed_json detail)
@@ -333,6 +414,90 @@ let commit_scope_retirement journal intent =
        { intent
        ; encoded = Exact_output.flow_preference_retirement_intent_to_string intent
        })
+;;
+
+let measurement_phase snapshot =
+  Exact_output.measurement_receipt_phase snapshot
+;;
+
+let latest_measurement journal operation_id =
+  List.rev journal.evidence
+  |> List.find_map (function
+    | Measurement_receipt_evidence { snapshot; _ }
+      when String.equal (evidence_id (Measurement_receipt_evidence
+                                      { snapshot; encoded = "" }))
+             operation_id ->
+      Some snapshot
+    | Domain_settlement_evidence _
+    | Scope_retirement_evidence _
+    | Measurement_receipt_evidence _ ->
+      None)
+;;
+
+let reject_measurement boundary operation_id cause =
+  Error (Measurement_transition_rejected { boundary; operation_id; cause })
+;;
+
+let commit_measurement boundary journal snapshot =
+  Eio_guard.with_mutex journal.mutex (fun () ->
+    let operation_id =
+      snapshot
+      |> Exact_output.measurement_receipt_operation_id
+      |> Exact_output.measurement_operation_id_to_string
+    in
+    let previous = latest_measurement journal operation_id in
+    let transition =
+      Exact_output.classify_measurement_receipt_transition
+        ~previous
+        ~incoming:snapshot
+    in
+    let phase = measurement_phase snapshot in
+    match boundary, transition with
+    | Before_measurement_dispatch, Exact_output.Measurement_dispatch_intent
+      when phase = Exact_output.Measurement_fence_committed ->
+      write_document
+        journal
+        (journal.evidence
+         @ [ Measurement_receipt_evidence
+               { snapshot
+               ; encoded =
+                   Exact_output.measurement_receipt_snapshot_to_string snapshot
+               }
+           ])
+    | Measurement_terminal, Exact_output.Measurement_terminal_advance
+      when phase = Exact_output.Measurement_terminal ->
+      write_document
+        journal
+        (journal.evidence
+         @ [ Measurement_receipt_evidence
+               { snapshot
+               ; encoded =
+                   Exact_output.measurement_receipt_snapshot_to_string snapshot
+               }
+           ])
+    | Before_measurement_dispatch, Exact_output.Measurement_idempotent_replay
+      when phase = Exact_output.Measurement_fence_committed ->
+      Ok ()
+    | Measurement_terminal, Exact_output.Measurement_idempotent_replay
+      when phase = Exact_output.Measurement_terminal ->
+      Ok ()
+    | _, Exact_output.Measurement_transition_conflict cause ->
+      reject_measurement boundary operation_id cause
+    | _, (Exact_output.Measurement_dispatch_intent
+         | Exact_output.Measurement_terminal_advance
+         | Exact_output.Measurement_idempotent_replay) ->
+      reject_measurement
+        boundary
+        operation_id
+        (Exact_output.Measurement_invalid_commit_phase phase))
+;;
+
+let commit_measurement_dispatch_intent journal snapshot =
+  commit_measurement Before_measurement_dispatch journal snapshot
+;;
+
+let commit_measurement_terminal journal snapshot =
+  commit_measurement Measurement_terminal journal snapshot
 ;;
 
 let read_file path =
@@ -424,7 +589,7 @@ let recover_with
     let* preference_store =
       Exact_output.recover_flow_preferences
         ~concurrent_scope_budget
-        ~evidence:(List.map recovery_evidence journal.evidence)
+        ~evidence:(List.filter_map recovery_evidence journal.evidence)
       |> Result.map_error (fun cause -> Preference_recovery_failed cause)
     in
     Ok (journal, preference_store, origin)
@@ -465,6 +630,16 @@ let retirement_decode_error_to_string = function
     "integrity mismatch"
 ;;
 
+let measurement_transition_conflict_to_string = function
+  | Exact_output.Measurement_operation_mismatch -> "operation mismatch"
+  | Exact_output.Measurement_operation_binding_mismatch ->
+    "operation binding mismatch"
+  | Exact_output.Measurement_invalid_commit_phase _ ->
+    "invalid callback commit phase"
+  | Exact_output.Measurement_phase_regression _ -> "phase regression"
+  | Exact_output.Measurement_evidence_conflict -> "evidence conflict"
+;;
+
 let journal_decode_error_to_string = function
   | Journal_malformed_json detail -> "malformed journal JSON: " ^ detail
   | Journal_invalid_fields -> "journal has invalid fields"
@@ -487,6 +662,19 @@ let journal_decode_error_to_string = function
       "journal evidence[%d] scope retirement is invalid: %s"
       index
       (retirement_decode_error_to_string cause)
+  | Journal_invalid_evidence
+      (Invalid_measurement_receipt { index; cause }) ->
+    Printf.sprintf
+      "journal evidence[%d] measurement receipt is invalid: %s"
+      index
+      (Exact_output.measurement_receipt_snapshot_decode_error_to_string cause)
+  | Journal_invalid_evidence
+      (Invalid_measurement_transition { index; operation_id; cause }) ->
+    Printf.sprintf
+      "journal evidence[%d] measurement transition is invalid: operation=%s cause=%s"
+      index
+      operation_id
+      (measurement_transition_conflict_to_string cause)
   | Journal_integrity_mismatch -> "journal complete-evidence integrity mismatch"
 ;;
 
@@ -528,6 +716,17 @@ let commit_error_to_string = function
   | Evidence_write_failed cause ->
     "exact-flow evidence durable write failed: "
     ^ Keeper_fs.durable_write_error_to_string cause
+  | Measurement_transition_rejected { boundary; operation_id; cause } ->
+    let boundary =
+      match boundary with
+      | Before_measurement_dispatch -> "before_measurement_dispatch"
+      | Measurement_terminal -> "measurement_terminal"
+    in
+    Printf.sprintf
+      "measurement evidence transition rejected boundary=%s operation=%s cause=%s"
+      boundary
+      operation_id
+      (measurement_transition_conflict_to_string cause)
 ;;
 
 module For_testing = struct

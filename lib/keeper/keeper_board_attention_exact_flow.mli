@@ -85,6 +85,15 @@ type 'callback_error execution_error =
       }
   | Domain_settlement_in_progress of domain_terminal
   | Domain_settlement_conflict of domain_terminal
+  | Measurement_dispatch_persistence_failed of
+      { cause : Keeper_exact_flow_scope.measurement_commit_error
+      ; evidence : attempt_provenance list
+      }
+  | Measurement_terminal_persistence_failed of
+      { cause : Keeper_exact_flow_scope.measurement_commit_error
+      ; evidence : attempt_provenance list
+      }
+  | Callback_boundary_mismatch
 
 type prepared
 

@@ -9,6 +9,11 @@ module Exact_output = Agent_sdk.Exact_output
 type evidence_kind =
   | Domain_settlement
   | Scope_retirement
+  | Measurement_receipt
+
+type measurement_boundary =
+  | Before_measurement_dispatch
+  | Measurement_terminal
 
 type recovery_origin =
   | Fresh_start
@@ -22,6 +27,15 @@ type evidence_decode_error =
   | Invalid_scope_retirement_intent of
       { index : int
       ; cause : Exact_output.flow_preference_retirement_intent_decode_error
+      }
+  | Invalid_measurement_receipt of
+      { index : int
+      ; cause : Exact_output.measurement_receipt_snapshot_decode_error
+      }
+  | Invalid_measurement_transition of
+      { index : int
+      ; operation_id : string
+      ; cause : Exact_output.measurement_receipt_transition_conflict
       }
 
 type journal_decode_error =
@@ -60,6 +74,11 @@ type commit_error =
       ; evidence_id : string
       }
   | Evidence_write_failed of Keeper_fs.durable_write_error
+  | Measurement_transition_rejected of
+      { boundary : measurement_boundary
+      ; operation_id : string
+      ; cause : Exact_output.measurement_receipt_transition_conflict
+      }
 
 type t
 
@@ -82,6 +101,16 @@ val commit_domain_settlement
 val commit_scope_retirement
   :  t
   -> Exact_output.flow_preference_retirement_intent
+  -> (unit, commit_error) result
+
+val commit_measurement_dispatch_intent
+  :  t
+  -> Exact_output.measurement_receipt_snapshot
+  -> (unit, commit_error) result
+
+val commit_measurement_terminal
+  :  t
+  -> Exact_output.measurement_receipt_snapshot
   -> (unit, commit_error) result
 
 val load_error_to_string : load_error -> string

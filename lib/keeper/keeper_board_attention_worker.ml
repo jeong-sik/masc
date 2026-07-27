@@ -871,6 +871,15 @@ let execution_disposition partition = function
     Execution_blocked
       (Partition.Durable_partition_invariant
          "domain settlement conflicts with durable evidence")
+  | Exact_flow.Measurement_dispatch_persistence_failed { cause; _ }
+  | Exact_flow.Measurement_terminal_persistence_failed { cause; _ } ->
+    Execution_blocked
+      (Partition.Durable_partition_invariant
+         (Keeper_exact_flow_scope.measurement_commit_error_to_string cause))
+  | Exact_flow.Callback_boundary_mismatch ->
+    Execution_blocked
+      (Partition.Durable_partition_invariant
+         "exact-flow callback returned evidence for the wrong boundary")
 ;;
 
 let confirm_exact_transition latest_partition operation = function

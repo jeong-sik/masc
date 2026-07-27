@@ -9,6 +9,25 @@ type surface =
 
 type evidence_commit_error = Evidence_journal.commit_error
 
+type measurement_commit_stage =
+  | Before_measurement_dispatch
+  | Measurement_terminal
+
+type measurement_provenance =
+  { operation_id : string
+  ; flow_id : string
+  ; visit_ordinal : int
+  ; candidate_id : string
+  ; candidate_binding_sha256 : string
+  ; request_body_sha256 : string
+  }
+
+type measurement_commit_error =
+  { stage : measurement_commit_stage
+  ; provenance : measurement_provenance
+  ; cause : evidence_commit_error
+  }
+
 type setup_error =
   | Owner_not_registered of { keeper_name : string }
   | Owner_draining of { keeper_name : string }
@@ -98,6 +117,22 @@ let setup_error_to_string = function
 ;;
 
 let evidence_commit_error_to_string = Evidence_journal.commit_error_to_string
+
+let measurement_commit_error_to_string error =
+  let stage =
+    match error.stage with
+    | Before_measurement_dispatch -> "before_measurement_dispatch"
+    | Measurement_terminal -> "measurement_terminal"
+  in
+  Printf.sprintf
+    "measurement evidence commit failed stage=%s operation=%s flow=%s visit=%d candidate=%s cause=%s"
+    stage
+    error.provenance.operation_id
+    error.provenance.flow_id
+    error.provenance.visit_ordinal
+    error.provenance.candidate_id
+    (evidence_commit_error_to_string error.cause)
+;;
 
 let release_error_to_string = function
   | Retirement_deferred -> "exact-flow retirement is waiting for bound work"
@@ -207,6 +242,59 @@ let commit_domain_settlement_intent scope intent =
       (surface_label scope.surface)
       (evidence_commit_error_to_string cause);
     error
+;;
+
+let measurement_provenance snapshot =
+  { operation_id =
+      snapshot
+      |> Exact_output.measurement_receipt_operation_id
+      |> Exact_output.measurement_operation_id_to_string
+  ; flow_id =
+      snapshot
+      |> Exact_output.measurement_receipt_flow_id
+      |> Exact_output.flow_id_to_string
+  ; visit_ordinal =
+      snapshot
+      |> Exact_output.measurement_receipt_visit_ordinal
+      |> Exact_output.flow_visit_ordinal_to_int
+  ; candidate_id = Exact_output.measurement_receipt_candidate_id snapshot
+  ; candidate_binding_sha256 =
+      Exact_output.measurement_receipt_candidate_binding_sha256 snapshot
+  ; request_body_sha256 =
+      Exact_output.measurement_receipt_request_body_sha256 snapshot
+  }
+;;
+
+let commit_measurement stage commit scope receipt =
+  let snapshot = Exact_output.flow_measurement_receipt_snapshot receipt in
+  let provenance = measurement_provenance snapshot in
+  match commit scope.evidence_journal snapshot with
+  | Ok () -> Ok ()
+  | Error cause ->
+    let error = { stage; provenance; cause } in
+    Log.Keeper.error
+      "exact-flow measurement evidence commit blocked keeper=%s generation=%s surface=%s cause=%s"
+      scope.owner.keeper_name
+      (Keeper_lane.Id.to_string scope.owner.lane_id)
+      (surface_label scope.surface)
+      (measurement_commit_error_to_string error);
+    Error error
+;;
+
+let commit_measurement_dispatch_intent scope receipt =
+  commit_measurement
+    Before_measurement_dispatch
+    Evidence_journal.commit_measurement_dispatch_intent
+    scope
+    receipt
+;;
+
+let commit_measurement_terminal scope receipt =
+  commit_measurement
+    Measurement_terminal
+    Evidence_journal.commit_measurement_terminal
+    scope
+    receipt
 ;;
 
 let release_scope scope =

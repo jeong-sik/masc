@@ -72,6 +72,15 @@ type 'callback_error execution_error =
       }
   | Domain_settlement_in_progress of domain_terminal
   | Domain_settlement_conflict of domain_terminal
+  | Measurement_dispatch_persistence_failed of
+      { cause : Keeper_exact_flow_scope.measurement_commit_error
+      ; evidence : attempt_provenance list
+      }
+  | Measurement_terminal_persistence_failed of
+      { cause : Keeper_exact_flow_scope.measurement_commit_error
+      ; evidence : attempt_provenance list
+      }
+  | Callback_boundary_mismatch
 
 type 'callback_error commit_error =
   | Terminal_persistence_failed of 'callback_error
@@ -80,6 +89,8 @@ type 'callback_error commit_error =
 
 type 'callback_error guarded_callback_error =
   | Durable_callback_failed of 'callback_error
+  | Measurement_evidence_commit_failed of
+      Keeper_exact_flow_scope.measurement_commit_error
   | Owner_generation_unregistered
 
 type prepared =
@@ -393,6 +404,9 @@ type terminal_outcome =
   | Domain_settlement_intent_persistence_failure
   | Domain_settlement_in_progress_outcome
   | Domain_settlement_conflict_outcome
+  | Measurement_dispatch_persistence_failure
+  | Measurement_terminal_persistence_failure
+  | Callback_boundary_contract_mismatch
 
 let terminal_outcome_to_string = function
   | Owner_unregistered -> "owner_unregistered_deferred"
@@ -411,6 +425,12 @@ let terminal_outcome_to_string = function
     "domain_settlement_in_progress"
   | Domain_settlement_conflict_outcome ->
     "domain_settlement_conflict"
+  | Measurement_dispatch_persistence_failure ->
+    "measurement_dispatch_persistence_failure"
+  | Measurement_terminal_persistence_failure ->
+    "measurement_terminal_persistence_failure"
+  | Callback_boundary_contract_mismatch ->
+    "callback_boundary_contract_mismatch"
 ;;
 
 let terminal_outcome = function
@@ -432,6 +452,12 @@ let terminal_outcome = function
     Domain_settlement_in_progress_outcome
   | Error (Domain_settlement_conflict _) ->
     Domain_settlement_conflict_outcome
+  | Error (Measurement_dispatch_persistence_failed _) ->
+    Measurement_dispatch_persistence_failure
+  | Error (Measurement_terminal_persistence_failed _) ->
+    Measurement_terminal_persistence_failure
+  | Error Callback_boundary_mismatch ->
+    Callback_boundary_contract_mismatch
 ;;
 
 let observe_terminal prepared result =
@@ -513,11 +539,39 @@ let execute_current ?clock ~before_dispatch ~before_advance ~commit_domain prepa
         ~failed:(advance_source_of_failure failed)
         ~next:(candidate_visit next))
   in
+  let with_measurement_commit commit receipt =
+    match
+      Keeper_exact_flow_scope.with_current
+        prepared.flow_scope
+        ~registered_lane_id:
+          (registered_lane_id
+             ~base_path:prepared.base_path
+             ~keeper_name:prepared.keeper_name)
+        (fun () -> commit prepared.flow_scope receipt)
+    with
+    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+      Error Owner_generation_unregistered
+    | Keeper_exact_flow_scope.Current (Error cause) ->
+      Error (Measurement_evidence_commit_failed cause)
+    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
+  in
+  let oas_before_measurement_dispatch receipt =
+    with_measurement_commit
+      Keeper_exact_flow_scope.commit_measurement_dispatch_intent
+      receipt
+  in
+  let oas_on_measurement_terminal receipt =
+    with_measurement_commit
+      Keeper_exact_flow_scope.commit_measurement_terminal
+      receipt
+  in
   let result =
     match
       Exact_output.execute_flow_once
         ~net:prepared.net
         ?clock
+        ~before_measurement_dispatch:oas_before_measurement_dispatch
+        ~on_measurement_terminal:oas_on_measurement_terminal
         ~before_dispatch:oas_before_dispatch
         ~before_advance:oas_before_advance
         prepared.attempt
@@ -543,6 +597,34 @@ let execute_current ?clock ~before_dispatch ~before_advance ~commit_domain prepa
        | Keeper_exact_flow_scope.Current result -> result)
     | Error (Exact_output.Flow_attempt_already_started evidence) ->
       Error (Flow_already_started (evidence_provenance evidence))
+    | Error (Exact_output.Flow_measurement_start_failed { evidence; _ }) ->
+      Error (Exact_execution_failed (evidence_provenance evidence))
+    | Error
+        (Exact_output.Flow_before_measurement_dispatch_callback_failed
+           { cause = Owner_generation_unregistered; _ })
+    | Error
+        (Exact_output.Flow_measurement_terminal_callback_failed
+           { cause = Owner_generation_unregistered; _ }) ->
+      Error Owner_unregistered_deferred
+    | Error
+        (Exact_output.Flow_before_measurement_dispatch_callback_failed
+           { cause = Measurement_evidence_commit_failed cause; evidence; _ }) ->
+      Error
+        (Measurement_dispatch_persistence_failed
+           { cause; evidence = evidence_provenance evidence })
+    | Error
+        (Exact_output.Flow_measurement_terminal_callback_failed
+           { cause = Measurement_evidence_commit_failed cause; evidence; _ }) ->
+      Error
+        (Measurement_terminal_persistence_failed
+           { cause; evidence = evidence_provenance evidence })
+    | Error
+        (Exact_output.Flow_before_measurement_dispatch_callback_failed
+           { cause = Durable_callback_failed _; _ })
+    | Error
+        (Exact_output.Flow_measurement_terminal_callback_failed
+           { cause = Durable_callback_failed _; _ }) ->
+      Error Callback_boundary_mismatch
     | Error
         (Exact_output.Flow_before_dispatch_callback_failed
            { cause = Owner_generation_unregistered; _ }) ->
@@ -556,6 +638,10 @@ let execute_current ?clock ~before_dispatch ~before_advance ~commit_domain prepa
            ; current = attempt_provenance candidate
            ; evidence = evidence_provenance evidence
            })
+    | Error
+        (Exact_output.Flow_before_dispatch_callback_failed
+           { cause = Measurement_evidence_commit_failed _; _ }) ->
+      Error Callback_boundary_mismatch
     | Error
         (Exact_output.Flow_before_advance_callback_failed
            { cause = Owner_generation_unregistered; _ }) ->
@@ -574,6 +660,10 @@ let execute_current ?clock ~before_dispatch ~before_advance ~commit_domain prepa
            ; next = candidate_visit next
            ; evidence = evidence_provenance evidence
            })
+    | Error
+        (Exact_output.Flow_before_advance_callback_failed
+           { cause = Measurement_evidence_commit_failed _; _ }) ->
+      Error Callback_boundary_mismatch
     | Error (Exact_output.Flow_success_ordinal_exhausted evidence)
     | Error (Exact_output.Flow_attempt_start_failed { evidence; _ })
     | Error (Exact_output.Flow_candidates_exhausted { evidence; _ }) ->

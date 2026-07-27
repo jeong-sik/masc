@@ -35,9 +35,12 @@ val keeper_count : Workspace.config -> int
 (** Total keepers visible in [config.base_path] meta. *)
 
 val configured_keeper_count : Workspace.config -> int
-(** Total materializable declarative runtime keeper profiles discovered from
-    keeper TOML. Loader-level templates are excluded only when they do not opt
-    into runtime materialization, e.g. via [autoboot_enabled=true]. *)
+(** Number of distinct keeper names discovered from [*.toml] in the keepers
+    config dir. Every file counts, including ones that fail to load (their name
+    falls back to the filename stem); no filename or [autoboot_enabled]
+    filtering happens here. The materializability-filtered view is
+    [materializable_configured_keeper_names] in
+    [server_routes_http_runtime_fleet_scan]. *)
 
 val keeper_names : Workspace.config -> string list
 (** Keeper names visible in [config.base_path] meta. *)

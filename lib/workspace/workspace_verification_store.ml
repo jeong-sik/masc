@@ -335,10 +335,8 @@ let scan_utf8 bytes =
 let evidence_read_failure_of_owned_read_failure = function
   | Fs_compat.Ownership_boundary_rejected _ ->
     Evidence_outside_worker_playground
-  | Path_is_not_regular_file { kind = Unix.S_LNK; _ } ->
-    Evidence_symbolic_link
-  | Path_is_not_regular_file _ ->
-    Evidence_not_regular_file
+  | Path_is_not_regular_file { kind; _ } ->
+    if kind = Unix.S_LNK then Evidence_symbolic_link else Evidence_not_regular_file
   | Filesystem_identity_changed _ ->
     Evidence_changed_during_read
   | Owned_file_operation_failed { cause; _ } ->

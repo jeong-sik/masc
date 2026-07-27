@@ -44,9 +44,12 @@ type autonomous_block =
       { pending_count : int
       ; inflight_count : int
       }
-    (** The slot mutex itself is free, but active [Keeper_chat_queue]
-        receipts exist for this keeper; the standard autonomous lane yields
-        so the chat consumer can drain them. Distinct from [Turn_busy None]
+    (** The slot mutex itself is free and pending [Keeper_chat_queue] receipts
+        exist without a currently leased receipt; the standard autonomous lane
+        yields so the chat consumer can drain them. Inflight receipts are not
+        a second turn lock: an executing chat is fenced by the actual slot,
+        while a stranded/finalizing receipt must not halt unrelated progress.
+        Distinct from [Turn_busy None]
         (a held slot whose holder has not yet published its info): before
         this variant existed both cases logged as "holder info not yet
         published", which mis-directed the #24865 diagnosis toward a stale

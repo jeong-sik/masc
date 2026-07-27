@@ -387,7 +387,7 @@ let clear_exact config intent direction =
       |> Result.map_error (fun error -> Journal_failure error))
 ;;
 
-let recover ?lifecycle_token permit config intent ~prefer =
+let recover ?lifecycle_token permit config (intent : Journal.intent) ~prefer =
   if
     not
       (Option.for_all

@@ -306,19 +306,6 @@ let format_scheduled_automation_summary
     Some (Buffer.contents ubuf))
 ;;
 
-let is_scheduled_wake_observation
-    (event : Keeper_world_observation.pending_board_event) =
-  match event.event_kind with
-  | Keeper_world_observation.Schedule_due -> true
-  | Keeper_world_observation.Board_post_created
-  | Keeper_world_observation.Board_comment_added
-  | Keeper_world_observation.Board_reaction_changed _
-  | Keeper_world_observation.Fusion_completed
-  | Keeper_world_observation.Bg_completed
-  | Keeper_world_observation.External_attention
-  | Keeper_world_observation.Goal_assigned -> false
-;;
-
 let format_scheduled_wake_observations
     (events : Keeper_world_observation.pending_board_event list) =
   if events = []
@@ -827,7 +814,8 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
         [ format_scheduled_automation_summary observation.scheduled_automation
         ; format_scheduled_wake_observations
             (List.filter
-               is_scheduled_wake_observation
+               (fun event ->
+                  not (Keeper_world_observation.is_board_activity_event event))
                observation.pending_board_events)
         ]
     (* Pending lane rows are rendered once in exact source order. Mention and
@@ -862,7 +850,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     | Keeper_context_layers.Board_activity ->
       let board_events =
         List.filter
-          (fun event -> not (is_scheduled_wake_observation event))
+          Keeper_world_observation.is_board_activity_event
           observation.pending_board_events
       in
       if board_events <> [] then (

@@ -376,7 +376,22 @@ let test_scheduled_wake_is_not_rendered_as_board_activity () =
   check bool "real Board row remains present" true
     (contains_sub sample_board_event.post_id board_section);
   check bool "scheduled occurrence absent from Board section" false
-    (contains_sub sample_scheduled_wake.post_id board_section)
+    (contains_sub sample_scheduled_wake.post_id board_section);
+  let schedule_only_observation =
+    { base_observation with pending_board_events = [ sample_scheduled_wake ] }
+  in
+  check bool "scheduled work is not typed as Board activity" false
+    (WO.has_pending_board_activity schedule_only_observation);
+  let triggers = UM.observed_triggers_of_observation schedule_only_observation in
+  check bool "scheduled work emits no Board trigger" false
+    (List.mem "board_activity" triggers);
+  let affordances =
+    UM.observed_affordances_of_observation schedule_only_observation
+  in
+  check bool "scheduled work emits no Board response affordance" false
+    (List.mem "board_post_or_comment" affordances);
+  check bool "scheduled work emits no Board curation affordance" false
+    (List.mem "board_curation" affordances)
 ;;
 
 let test_scheduled_wake_preserves_complete_message () =

@@ -8,10 +8,25 @@ let () =
     ~backend:Server_startup_state.Filesystem_backend
   |> Result.get_ok
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let temp_base_path_scopes = Hashtbl.create 8
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> unsetenv name
+
 let temp_dir () =
   let dir = Filename.temp_file "test_operator_control_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
+  Hashtbl.replace
+    temp_base_path_scopes
+    dir
+    ( Sys.getenv_opt Env_config_core.base_path_env_key
+    , Sys.getenv_opt Env_config_core.base_path_input_env_key );
+  Unix.putenv Env_config_core.base_path_env_key dir;
+  Unix.putenv Env_config_core.base_path_input_env_key dir;
   dir
 
 (** Ensure Fs_compat has the Eio fs handle set.
@@ -53,7 +68,15 @@ let cleanup_dir dir =
       else
         Unix.unlink path
   in
-  try rm dir with _ -> ()
+  Fun.protect
+    ~finally:(fun () ->
+      match Hashtbl.find_opt temp_base_path_scopes dir with
+      | None -> ()
+      | Some (base_path, base_path_input) ->
+        Hashtbl.remove temp_base_path_scopes dir;
+        restore_env Env_config_core.base_path_env_key base_path;
+        restore_env Env_config_core.base_path_input_env_key base_path_input)
+    (fun () -> try rm dir with _ -> ())
 
 let parse_json_exn body =
   try Yojson.Safe.from_string body

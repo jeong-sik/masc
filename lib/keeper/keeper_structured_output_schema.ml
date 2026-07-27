@@ -20,11 +20,14 @@ let enum_schema values =
     ]
 ;;
 
+(* A string enum and the absent value are two separate branches, not one enum that
+   carries JSON [null] as if it were a domain token. MASC declares provider-neutral
+   content semantics; OAS owns provider and wire admission for the resulting
+   schema. The previous [type: [string, null]] plus [enum: [null, ...]] shape left
+   the null branch inside the token list, where a provider can accept the request
+   and ignore the union instead of rejecting an unsupported dialect. *)
 let nullable_enum_schema values =
-  `Assoc
-    [ "type", `List [ `String "string"; `String "null" ]
-    ; "enum", `List ((`Null) :: List.map (fun value -> `String value) values)
-    ]
+  `Assoc [ "anyOf", `List [ enum_schema values; `Assoc [ "type", `String "null" ] ] ]
 ;;
 
 let object_schema ~required properties =

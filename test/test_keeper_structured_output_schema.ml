@@ -114,6 +114,46 @@ let test_all_schemas_apply_as_oas_native_json_schema () =
     all_provider_native_schema_cases
 ;;
 
+let test_librarian_claim_kind_uses_nullable_enum_union () =
+  let claim_kind_schema =
+    Keeper_structured_output_schema.librarian_episode_output_schema
+    |> schema_property Keeper_librarian.wire_field_claims
+    |> schema_items
+    |> schema_property Keeper_librarian.wire_field_claim_kind
+  in
+  let claim_kind_values =
+    Keeper_memory_os_types.librarian_claim_kinds
+    |> List.map Keeper_memory_os_types.claim_kind_to_string
+  in
+  let string_enum =
+    `Assoc
+      [ "type", `String "string"
+      ; "enum", `List (List.map (fun value -> `String value) claim_kind_values)
+      ]
+  in
+  let expected =
+    `Assoc [ "anyOf", `List [ string_enum; `Assoc [ "type", `String "null" ] ] ]
+  in
+  check
+    bool
+    "claim_kind is exactly a nullable enum union"
+    true
+    (Yojson.Safe.equal expected claim_kind_schema);
+  (* The absent value must live in its own branch. If JSON null reappears inside the
+     token list, the union has collapsed back into a shape a provider can accept and
+     silently ignore. *)
+  let string_enum_contains_json_null =
+    match schema_member "enum" string_enum with
+    | Some (`List values) -> List.exists (Yojson.Safe.equal `Null) values
+    | _ -> true
+  in
+  check
+    bool
+    "claim_kind string enum excludes JSON null"
+    false
+    string_enum_contains_json_null
+;;
+
 let has_json_schema_response_format schema provider_cfg =
   match provider_cfg.Llm_provider.Provider_config.response_format with
   | Agent_sdk.Types.JsonSchema actual -> Yojson.Safe.equal schema actual
@@ -471,6 +511,10 @@ let () =
             "all schemas apply as OAS native JSON schema requests"
             `Quick
             test_all_schemas_apply_as_oas_native_json_schema
+        ; test_case
+            "librarian claim_kind uses a nullable enum union"
+            `Quick
+            test_librarian_claim_kind_uses_nullable_enum_union
         ; test_case
             "without_response_format clears a schema-capable provider too"
             `Quick

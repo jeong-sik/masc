@@ -740,9 +740,12 @@ let prevalidate_config_update
      with
      | Error _ as error -> error
      | Ok _ ->
-       Keeper_turn_up_args.validate_sandbox_settings
-         ~allowed_paths:
-           (Option.value ~default:old.allowed_paths parsed.allowed_paths_opt))
+       let allowed_paths =
+         match parsed.allowed_paths_opt with
+         | Some allowed_paths -> allowed_paths
+         | None -> old.allowed_paths
+       in
+       Keeper_turn_up_args.validate_sandbox_settings ~allowed_paths)
 
 let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event =
   Dashboard_cache.invalidate (keeper_config_cache_key config name);

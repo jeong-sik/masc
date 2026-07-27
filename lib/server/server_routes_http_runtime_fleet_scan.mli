@@ -106,6 +106,7 @@ type keeper_execution_owner = {
 and keeper_non_executable_cause =
   | Cause_owner_absent_from_snapshot
   | Cause_owner_unregistered
+  | Cause_no_keeper_binding
   | Cause_fiber_dead
   | Cause_lane_exited
   | Cause_completion_settled

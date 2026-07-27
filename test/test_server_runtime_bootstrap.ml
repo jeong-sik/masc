@@ -2093,6 +2093,15 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
            |> List.map (fun row ->
                 ( row |> member "agent_name" |> to_string
                 , row |> member "reason" |> to_string )));
+        let blocked_owner =
+          fleet_safety |> member "blocked_keepers" |> to_list |> List.hd
+        in
+        Alcotest.(check string) "health exposes missing binding execution truth"
+          "unknown"
+          (blocked_owner |> member "execution_truth" |> to_string);
+        Alcotest.(check string) "health exposes exact missing binding cause"
+          "no_keeper_binding"
+          (blocked_owner |> member "non_executable_cause" |> to_string);
         Alcotest.(check bool) "health asks operator action" true
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 

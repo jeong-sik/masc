@@ -118,12 +118,16 @@ describe('keeper fleet operator fact presentation', () => {
         task_id: 'task-7f3a',
         reason: 'no_keeper_binding',
         action: 'create_keeper_or_reassign_task',
+        execution_truth: 'unknown',
+        non_executable_cause: 'no_keeper_binding',
       }),
       'degraded',
     )
 
     expect(presentation.keeper).toBe('dreamer')
     expect(presentation.taskId).toBe('task-7f3a')
+    expect(presentation.executionTruth).toBe('unknown')
+    expect(presentation.nonExecutableCause).toBe('no_keeper_binding')
   })
 
   it('reports absent task identity as null rather than a placeholder', () => {

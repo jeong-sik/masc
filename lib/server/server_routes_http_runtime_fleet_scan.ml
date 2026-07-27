@@ -497,6 +497,7 @@ type keeper_execution_owner =
 and keeper_non_executable_cause =
   | Cause_owner_absent_from_snapshot
   | Cause_owner_unregistered
+  | Cause_no_keeper_binding
   | Cause_fiber_dead
   | Cause_lane_exited
   | Cause_completion_settled
@@ -511,6 +512,7 @@ and keeper_non_executable_cause =
 let keeper_non_executable_cause_to_wire = function
   | Cause_owner_absent_from_snapshot -> "owner_absent_from_snapshot"
   | Cause_owner_unregistered -> "owner_unregistered"
+  | Cause_no_keeper_binding -> "no_keeper_binding"
   | Cause_fiber_dead -> "fiber_dead"
   | Cause_lane_exited -> "lane_exited"
   | Cause_completion_settled -> "completion_settled"
@@ -584,7 +586,6 @@ let keeper_execution_snapshot config =
   let owners =
     List.map
       (fun keeper_name ->
-        let registry_entry = Keeper_registry.get ~base_path keeper_name in
         let meta_result =
           match Keeper_meta_store.read_effective_meta config keeper_name with
           | Ok (Some meta) -> Ok meta
@@ -594,6 +595,7 @@ let keeper_execution_snapshot config =
         let admission =
           Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
         in
+        let registry_entry = Keeper_registry.get ~base_path keeper_name in
         let runtime =
           Keeper_activation_readiness.owner_runtime_of_registry_entry
             registry_entry
@@ -1395,7 +1397,7 @@ let active_task_owner_blocked_detail_json ~execution_snapshot row =
     | Some keeper_name -> owner_execution_fact execution_snapshot ~keeper_name
     | None ->
       ( Keeper_activation_readiness.Unknown "task owner has no Keeper binding"
-      , Some Cause_owner_absent_from_snapshot )
+      , Some Cause_no_keeper_binding )
   in
   `Assoc
     ([

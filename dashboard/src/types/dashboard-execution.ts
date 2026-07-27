@@ -269,6 +269,7 @@ export const DASHBOARD_KEEPER_EXECUTION_TRUTHS = [
 export const DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES = [
   'owner_absent_from_snapshot',
   'owner_unregistered',
+  'no_keeper_binding',
   'fiber_dead',
   'lane_exited',
   'completion_settled',

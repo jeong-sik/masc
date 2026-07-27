@@ -81,6 +81,64 @@ let test_autonomous_admits_when_chat_persistence_is_not_configured () =
   | `Ran _ | `Busy _ -> check "independent autonomous lane remains open" false
 ;;
 
+let test_selected_authority_rejection_has_zero_provider_dispatch () =
+  reset ();
+  Printf.printf
+    "Test 0b: selected-source authority rejection has zero provider dispatch\n%!";
+  let dispatch_count = ref 0 in
+  let captured_token = ref None in
+  (match
+     Keeper_turn_admission.run_if_free_with_token
+       ~base_path
+       ~keeper_name
+       (fun token ->
+          captured_token := Some token;
+          (match
+             Keeper_turn_admission.install_before_dispatch_authority
+               token
+               (fun () -> Error "selected pending source changed")
+           with
+           | Ok () -> ()
+           | Error _ -> check "dispatch authority installs once" false);
+          Keeper_unified_turn_execution.run_provider_dispatch_if_authorized
+            ~before_dispatch_authority:
+              (fun () -> Keeper_turn_admission.validate_before_dispatch token)
+            (fun () ->
+               incr dispatch_count;
+               Ok ()))
+   with
+   | `Ran (Error _) ->
+     check "authority failure is typed" true
+   | `Ran (Ok ()) | `Busy _ -> check "authority failure is typed" false);
+  check "provider dispatch closure was not called" (!dispatch_count = 0);
+  (match !captured_token with
+   | None -> check "released token was captured" false
+   | Some token ->
+     check
+       "released token cannot dispatch"
+       (Result.is_error
+          (Keeper_turn_admission.validate_before_dispatch token)))
+;;
+
+let test_admin_mutation_is_busy_during_admitted_turn () =
+  reset ();
+  Printf.printf "Test 0c: admin mutation shares the admitted turn slot\n%!";
+  match
+    Keeper_turn_admission.run_if_free_with_token
+      ~base_path
+      ~keeper_name
+      (fun _token ->
+         Keeper_turn_admission.run_admin_if_free
+           ~base_path
+           ~keeper_name
+           (fun () -> ()))
+  with
+  | `Ran (`Busy (Keeper_turn_admission.Turn_busy _)) ->
+    check "admin mutation is deferred before its body" true
+  | `Ran (`Busy _) | `Ran (`Ran ()) | `Busy _ ->
+    check "admin mutation is deferred before its body" false
+;;
+
 let test_global_chat_load_error_does_not_close_autonomous_admission () =
   let error_base_path = temp_dir "masc_test_turn_admission_load_error_" in
   Fun.protect
@@ -801,6 +859,8 @@ let test_compaction_lane_bypasses_chat_backlog () =
 let () =
   Eio_main.run @@ fun _env ->
   test_autonomous_admits_when_chat_persistence_is_not_configured ();
+  test_selected_authority_rejection_has_zero_provider_dispatch ();
+  test_admin_mutation_is_busy_during_admitted_turn ();
   test_global_chat_load_error_does_not_close_autonomous_admission ();
   test_free_slot_admits ();
   test_dispatchability_transitions_are_observed ();

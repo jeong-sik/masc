@@ -216,6 +216,7 @@ type provider_overflow_recovery =
 
 let recover_provider_context_overflow_in_lane
       ?exact_execution_guard
+      ~before_dispatch_authority
       ~(config : Workspace.config)
       ~base_dir
       ~(meta : keeper_meta)
@@ -425,12 +426,17 @@ let recover_provider_context_overflow_in_lane
           in
           (match lifecycle_authority with
            | Error reason -> retry_after_started reason
-           | Ok before_dispatch_authority ->
+           | Ok lifecycle_before_dispatch_authority ->
+             let before_compaction_dispatch observation =
+               match before_dispatch_authority () with
+               | Error _ as error -> error
+               | Ok () -> lifecycle_before_dispatch_authority observation
+             in
              (try
                 commit_outcome
                   (
                   recover_latest_checkpoint_for_compaction
-                    ~before_dispatch_authority
+                    ~before_dispatch_authority:before_compaction_dispatch
                     ?exact_execution_guard
                     ~base_path:config.base_path
                     ~base_dir
@@ -600,6 +606,7 @@ let append_provider_overflow_manifest
 
 let run_keeper_cycle
       ?exact_execution_guard
+      ~(before_dispatch_authority : unit -> (unit, string) result)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ~(config : Workspace.config)
@@ -1112,9 +1119,10 @@ let run_keeper_cycle
                            ; turn_id = keeper_turn_id
                            ; deferred_runtime_lane
                            ; on_deferred_runtime_consumed
-                           }
+                         }
                            ~initial_execution
                            ~turn_state
+                           ~before_dispatch_authority
                            ~current_turn_phase_elapsed_ms
                            ~user_message
                            ~registry_base_path
@@ -1395,6 +1403,7 @@ dominant source of the observed CAS race exhaustion after
                       let overflow_recovery =
                         recover_provider_context_overflow_in_lane
                           ?exact_execution_guard
+                          ~before_dispatch_authority
                           ~config
                           ~base_dir
                           ~meta

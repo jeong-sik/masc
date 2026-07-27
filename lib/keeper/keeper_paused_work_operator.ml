@@ -293,6 +293,9 @@ let error_class = function
           | Resume.Projection_failed _ )
       ; _
       }
+  | Cancellation_rejected (Cancellation.Admission_busy _)
+  | Transfer_rejected { cause = Transfer.Admission_busy _; _ }
+  | Source_terminal_rejected { cause = Source_terminal.Admission_busy _; _ }
   | Cancellation_rejected
       (Cancellation.Failed
         { cause =

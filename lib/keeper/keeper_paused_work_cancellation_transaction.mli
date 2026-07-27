@@ -47,6 +47,7 @@ type success =
   }
 
 type error =
+  | Admission_busy of Keeper_turn_admission.autonomous_block
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Failed of
       { cause : failure

@@ -303,6 +303,13 @@ val peek_when :
   t ->
   pending_selection option
 
+val validate_pending_selection :
+  selection:pending_selection ->
+  t ->
+  (unit, string) result
+(** Read-only exact immutable selection validation. Unrelated pending entries
+    and queue revisions do not invalidate the selected source. *)
+
 val ack_pending :
   selection:pending_selection ->
   t ->

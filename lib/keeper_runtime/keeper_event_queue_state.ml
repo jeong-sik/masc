@@ -2,6 +2,12 @@ type lease_kind =
   | Single
   | Board_batch
 
+type pending_selection =
+  { source_revision : int64
+  ; kind : lease_kind
+  ; stimuli : Keeper_event_queue.stimulus list
+  }
+
 type requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
@@ -239,7 +245,7 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v5"
+let schema = "keeper.event_queue.state.v6"
 
 let empty =
   { revision = 0L
@@ -402,6 +408,63 @@ let rec dequeue_first_ready ~ready skipped pending =
     Some (stimulus, Keeper_event_queue.prepend_list (List.rev skipped) rest)
   | Some (stimulus, rest) ->
     dequeue_first_ready ~ready (stimulus :: skipped) rest
+;;
+
+let peek_when ~ready state =
+  if state.transition_outbox <> []
+  then None
+  else
+    match
+      dequeue_first_ready
+        ~ready
+        []
+        state.pending
+    with
+    | None -> None
+    | Some (stimulus, _) ->
+      Some
+        { source_revision = state.revision
+        ; kind = Single
+        ; stimuli = [ stimulus ]
+        }
+;;
+
+let ack_pending ~(selection : pending_selection) state =
+  match selection.stimuli with
+    | [] -> Error "event queue pending selection must not be empty"
+    | _ :: _ :: _ when selection.kind = Single ->
+      Error "single event queue pending selection must contain exactly one stimulus"
+    | stimuli ->
+      let selected candidate =
+        List.exists
+          (fun expected ->
+             Keeper_event_queue.stimulus_identity_equal expected candidate)
+          stimuli
+      in
+      let matching, retained =
+        Keeper_event_queue.to_list state.pending |> List.partition selected
+      in
+      if List.length matching <> List.length stimuli
+      then Error "event queue pending selection is no longer present exactly once"
+      else if
+        not
+          (List.for_all
+             (fun expected ->
+                List.exists
+                  (fun actual ->
+                     actual = expected
+                     && Keeper_event_queue.stimulus_identity_equal expected actual)
+                  matching)
+             stimuli)
+      then Error "event queue pending selection typed snapshot changed"
+      else
+        let pending =
+          List.fold_left
+            Keeper_event_queue.enqueue
+            Keeper_event_queue.empty
+            retained
+        in
+        Ok { state with pending }
 ;;
 
 let claim_when ~claimed_at ~ready state =

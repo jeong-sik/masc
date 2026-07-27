@@ -24,6 +24,13 @@ type lease_kind = State.lease_kind =
   | Single
   | Board_batch
 
+type pending_selection = State.pending_selection =
+  { source_revision : int64
+  ; kind : lease_kind
+  ; stimuli : Keeper_event_queue.stimulus list
+  }
+
+
 type requeue_reason = State.requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
@@ -897,6 +904,25 @@ let persist ~base_path ~keeper_name queue =
 
 let persist_snapshot ~base_path ~keeper_name snapshot =
   update ~base_path ~keeper_name (fun _ -> snapshot ())
+;;
+
+let peek_when_result ~base_path ~keeper_name ~ready =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> Ok (State.peek_when ~ready state)
+;;
+
+let ack_pending_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    match State.ack_pending ~selection state with
+    | Error _ as error -> error
+    | Ok state -> Ok (state, ()))
 ;;
 
 let claim_when_result

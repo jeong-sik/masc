@@ -28,6 +28,13 @@ type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
   | Board_batch
 
+type pending_selection = Keeper_event_queue_state.pending_selection =
+  { source_revision : int64
+  ; kind : lease_kind
+  ; stimuli : Keeper_event_queue.stimulus list
+  }
+
+
 type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
@@ -217,6 +224,20 @@ val load_result :
 val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
 (** Strict pending projection. Durable read failures remain explicit. *)
+
+val peek_when_result :
+  base_path:string ->
+  keeper_name:string ->
+  ready:(Keeper_event_queue.stimulus -> bool) ->
+  (pending_selection option, string) result
+
+val ack_pending_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  selection:pending_selection ->
+  unit ->
+  (unit, string) result
 
 type snapshot_read_error_kind =
   | Invalid_path

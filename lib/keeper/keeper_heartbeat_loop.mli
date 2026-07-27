@@ -58,7 +58,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  claimed_lease : Keeper_registry_event_queue.lease option;
+  pending_selection : Keeper_registry_event_queue.pending_selection option;
   event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -125,34 +125,6 @@ type keepalive_turn_outcome = {
 val record_crashed_cycle_failure :
   base_path:string -> keeper_name:string -> exn -> unit
 
-val settlement_of_failure :
-  settled_at:float ->
-  compaction_consecutive_failures:int ->
-  Keeper_unified_turn.turn_failure ->
-  Keeper_registry_event_queue.settlement
-(** Pure queue disposition for a failed cycle. Retry/rotation requeue.
-    A typed exhausted failure closes the source lease after the existing
-    turn-failure observation is recorded; it never dispatches a second LLM call.
-
-    [compaction_consecutive_failures] is the keeper's persisted failure streak
-    from [keeper_meta.runtime.compaction_rt]. When the disposition carries an
-    in-lane provider-overflow compaction outcome that made no durable progress
-    ([Compaction_attempt_failed] or a terminal no-compaction), the settlement
-    escalates as [Compaction_retry_exhausted] once this failure would reach
-    [Keeper_meta_contract.compaction_retry_escalation_threshold] — without the
-    ceiling this lane requeues forever, one summarizer LLM call per heartbeat
-    cycle (RFC-0351 S0, #25461; 2026-07-21 storm: 284 provider-overflow
-    rejections over ~10h, ended only by operator keeper_down). A
-    [Compaction_committed] disposition requeues below the threshold so the retry
-    reloads a durably smaller checkpoint; at the threshold it escalates as
-    [Compaction_floor_exceeded]. [Escalate_after_exact_output_terminal] ignores
-    the ordinary route and immediately settles as a typed escalation with no
-    successor.
-
-    [Pause_after_transcript_corruption] never follows the ordinary route: the
-    first structural rejection pauses the Keeper and settles as
-    [Transcript_corruption_requires_reset] with no retry successor. *)
-
 val compaction_outcome_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
   [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
@@ -167,25 +139,6 @@ val compaction_outcome_of_cycle_outcome :
     operator's manual commit maps to [`Committed] (count + reset).
     Outcomes with no compaction involvement return [None]. *)
 
-val settlement_of_cycle_outcome :
-  base_path:string ->
-  settled_at:float ->
-  stop_requested:bool ->
-  compaction_consecutive_failures:int ->
-  lease:Keeper_registry_event_queue.lease ->
-  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
-  Keeper_registry_event_queue.settlement
-(** Pure lease settlement boundary. Completed work acknowledges; typed
-    cancellation and non-executable-phase skips requeue.
-
-    [compaction_consecutive_failures] is the keeper's current failure streak
-    from [keeper_meta.runtime.compaction_rt]. A manual-compaction failure — or
-    a failed cycle whose disposition carries a no-progress in-lane compaction
-    outcome (via {!settlement_of_failure}) — settles as
-    [Escalate Compaction_retry_exhausted] once this failure would reach
-    [Keeper_meta_contract.compaction_retry_escalation_threshold], and retries
-    below it — a requeue is not an ack, so without the ceiling the same
-    stimulus re-enters every cycle (RFC-0351 S0, #25461). *)
 
 val project_transition_outbox :
   base_path:string ->
@@ -305,22 +258,4 @@ module For_testing : sig
       Projection runs only after durable pause and settlement return, outside
       the cancellation-protected commit region. *)
 
-  val exact_execution_guard :
-    base_path:string ->
-    keeper_name:string ->
-    lease:Keeper_registry_event_queue.lease ->
-    Keeper_compaction_llm_summarizer.exact_execution_guard
-
-  val settle_claimed_lease_exact :
-    after_exact_disposition_prepare:(unit -> unit) ->
-    base_path:string ->
-    keeper_name:string ->
-    settled_at:float ->
-    lease:Keeper_registry_event_queue.lease ->
-    settlement:Keeper_registry_event_queue.settlement ->
-    unit ->
-    (Keeper_registry_event_queue.settle_result, string) result
-
-  val check_cancellation_after_exact_terminal_settlement :
-    Keeper_registry_event_queue.settlement -> unit
 end

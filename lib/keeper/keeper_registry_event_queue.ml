@@ -9,6 +9,13 @@
 
 type lease = Keeper_event_queue_persistence.lease
 
+type pending_selection = Keeper_event_queue_persistence.pending_selection =
+  { source_revision : int64
+  ; kind : Keeper_event_queue_persistence.lease_kind
+  ; stimuli : Keeper_event_queue.stimulus list
+  }
+
+
 type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
@@ -366,6 +373,25 @@ let snapshot_result ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:name
   | Some entry -> Ok (Atomic.get entry.event_queue)
+;;
+
+let peek_when_result ~base_path name ~ready =
+  match Keeper_registry.get ~base_path name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.peek_when_result
+      ~base_path
+      ~keeper_name:name
+      ~ready
+;;
+
+let ack_pending_result ~base_path name ~selection =
+  Keeper_event_queue_persistence.ack_pending_result
+    ~base_path
+    ~keeper_name:name
+    ~selection
+    ~after_commit:(publish_pending ~base_path name)
+    ()
 ;;
 
 let claim_when_result ~base_path name ~claimed_at ~ready =

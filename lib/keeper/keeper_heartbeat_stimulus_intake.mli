@@ -1,6 +1,6 @@
 (** Event-Layer stimulus intake for the keeper heartbeat loop.
 
-    Leases the earliest ready Event Layer stimulus per turn following
+    Selects the earliest ready Event Layer stimulus per turn following
     RFC-0020 §3 Rule 4. Payload families share one order; an unready input
     remains queued without blocking later ready work in the same Keeper lane. *)
 
@@ -53,7 +53,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  claimed_lease : Keeper_registry_event_queue.lease option;
+  pending_selection : Keeper_registry_event_queue.pending_selection option;
   event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }

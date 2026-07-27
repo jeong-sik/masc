@@ -174,7 +174,7 @@ cycle. Any death in that window leaves the open tail on disk.
 
 This is not hypothetical. On 2026-07-27 the live fleet restarted three
 times (`11:10:35Z`, `14:42:06Z`, `15:25:41Z`; server log
-`~/.masc/logs/system_log_2026-07-27.jsonl` **(verified 07-28)**). **Two
+`<base-path>/.masc/logs/system_log_2026-07-27.jsonl` **(verified 07-28)**). **Two
 different death modes both produced it**, which is why neither a
 shutdown hook nor producer discipline is sufficient:
 
@@ -536,7 +536,7 @@ state, which is what a human operator does after an interrupted command.
 **Why the content states uncertainty rather than consulting a record.**
 masc has no per-tool-call settlement authority to consult **(verified
 07-28)**. Execution receipts are turn-level and carry no `tool_use_id`
-(`~/.masc/keepers/<name>/execution-receipts/`, schema
+(`<base-path>/.masc/keepers/<name>/execution-receipts/`, schema
 `keeper.execution_receipt.v1`). The decision log does carry
 `tool_use_id` with a `disposition`, but `tool_exec` is emitted *after*
 execution with `duration_ms`/`result_bytes`
@@ -800,8 +800,8 @@ New anchors introduced by this amendment, all **(verified 07-28)**:
   (`masc_keeper_reset` zeroes usage only), `:423-427` and `:432`
   (`mark_resumed` no-op for this latch / sole non-create `None` write),
   `lib/keeper/keeper_turn_up_update.ml:118-119` (latch copied forward).
-- Live incident: `~/.masc/logs/system_log_2026-07-27.jsonl`,
-  `~/.masc/keepers/{executor,kinobot-frontend,sangsu,rondo}.json`.
+- Live incident: `<base-path>/.masc/logs/system_log_2026-07-27.jsonl`,
+  `<base-path>/.masc/keepers/{executor,kinobot-frontend,sangsu,rondo}.json`.
   Ungraceful-kill signature: last `"ts"`-anchored record `14:41:26Z`,
   next `14:42:06Z`, zero in between; `"seq":37496` absent while `37495`
   and `37497` are present.

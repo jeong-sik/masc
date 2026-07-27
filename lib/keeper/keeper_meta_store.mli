@@ -247,9 +247,12 @@ val persist_compaction_outcome :
 
     [`Committed] increments [count] and resets [consecutive_failures] to 0;
     [`Failed] increments [consecutive_failures]. The streak is what
-    {!settlement_of_cycle_outcome} reads to escalate instead of requeuing a
-    failing compaction (RFC-0351 S0, #25461); [count] had no writer before this
-    despite being serialized and rendered. *)
+    {!Keeper_meta_contract.compaction_retry_suspended} reads to refuse a
+    failing compaction instead of retrying it without bound (RFC-0351 S0,
+    #25461); [count] had no writer before this despite being serialized and
+    rendered. Before #25969 the same ceiling was applied one layer lower, by
+    [Keeper_heartbeat_loop.settlement_of_cycle_outcome] escalating the lease
+    settlement; that function went with the claim/settle model. *)
 
 val persist_transcript_corruption_pause :
   Workspace.config ->

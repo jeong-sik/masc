@@ -3099,26 +3099,13 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Keeper_runtime_failure_route.Retry_after_observed _ ->
                fail "unknown transient terminal effect was requeued"
              | _ -> fail "unknown transient terminal effect lost its exact route");
-            let failure : Masc.Keeper_unified_turn.turn_failure =
-              { error = runtime_error
-              ; runtime_id = "surface-post-failure-runtime"
-              ; route = exact_route
-              ; source_lease_disposition =
-                  Masc.Keeper_unified_turn.Follow_failure_route
-                (* Settlement is asserted off the exact route; this case has no
-                   successor runtime, so the failover lane is absent. *)
-              ; deferred_runtime_lane = None
-              }
-            in
-            match
-              Masc.Keeper_heartbeat_loop.settlement_of_failure
-                ~settled_at:0.
-                ~compaction_consecutive_failures:0
-                failure
-            with
-            | Masc.Keeper_registry_event_queue.Ack ->
-              fail "failed terminal delivery produced a source success Ack"
-            | _ -> ()))
+            (* A settlement assertion used to close this case: a failed
+               terminal delivery must not Ack the source lease. #25969 replaced
+               claim/settle with peek/ack, so nothing computes a settlement and
+               "do not acknowledge" is expressed by not calling [ack_pending].
+               The exact-route assertions above still cover the classification
+               this case exists for. See #25980. *)
+            ()))
 ;;
 
 let () =

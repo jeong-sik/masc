@@ -903,6 +903,42 @@ jobs:
             echo "::notice::main_eio.exe not found, skipping config-diagnostic"
           fi
 
+      # Bound the dune cache before the post-step uploads it.
+      #
+      # A repository gets 10 GB of Actions cache; past that GitHub evicts by
+      # least-recently-used. This entry had grown to 8853 MB, so a single save
+      # left ~1.1 GB for everything else and pushed the repo to 10.32 GB total.
+      # Measured on 2026-07-27: every cache in the repository had been created
+      # within the preceding 31 minutes — opam-linux (934 MB), the ocamlformat
+      # switch (29 MB) and the pnpm store (80 MB) were all being evicted and
+      # rebuilt continuously, because main merges (30 in the preceding 21 h)
+      # write a fresh run-id-keyed copy of this cache every time.
+      #
+      # The cost landed on the jobs that lost their opam switch: successful
+      # `Build and Test` runs spent 428 s in `Setup OCaml toolchain` and a
+      # further 165 s re-saving the switch it should have restored.
+      #
+      # The ceiling is the eviction budget, not a dune tuning parameter:
+      # ~1.7 GB of non-dune caches were live at the sample, and PR-scoped
+      # copies multiply with open PR count, so this leaves room for roughly
+      # double that. dune trims least-recently-used entries, so the working
+      # set for an incremental rebuild survives.
+      - name: Trim dune cache to the eviction budget
+        if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          DUNE_CACHE_CEILING: 6GiB
+        run: |
+          set -euo pipefail
+          if [ ! -d ~/.cache/dune ]; then
+            echo "::notice::no dune cache to trim"
+            exit 0
+          fi
+          # `dune cache trim` reports what it freed. Do not measure the
+          # directory with `du`: the cache is hundreds of thousands of small
+          # files and the walk costs minutes, which is the latency this
+          # change exists to remove.
+          opam exec -- dune cache trim --size="${DUNE_CACHE_CEILING}"
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

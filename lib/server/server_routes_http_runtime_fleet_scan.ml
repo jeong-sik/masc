@@ -675,6 +675,8 @@ let json_string_list_field field = function
 
 type blocked_keeper_reason =
   | Durable_paused_autoboot_enabled
+  | Lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
   | Meta_read_error
   | Not_bootable
   | Boot_failure of Keeper_runtime.boot_meta_failure_cause
@@ -687,6 +689,24 @@ type blocked_keeper_reason =
 
 let blocked_keeper_reason_label = function
   | Durable_paused_autoboot_enabled -> "durable_paused_autoboot_enabled"
+  | Lifecycle_admission_blocked
+      (Keeper_lifecycle_admission.Durable_transaction.Authority_unreadable _) ->
+    "lifecycle_authority_unreadable"
+  | Lifecycle_admission_blocked
+      (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid _) ->
+    "lifecycle_authority_invalid"
+  | Lifecycle_admission_blocked
+      (Keeper_lifecycle_admission.Durable_transaction.Rollback_capable_authority _) ->
+    "lifecycle_rollback_capable_authority"
+  | Lifecycle_admission_blocked
+      (Keeper_lifecycle_admission.Durable_transaction.Forward_cleanup_authority _) ->
+    "lifecycle_forward_cleanup_authority"
+  | Lifecycle_admission_blocked
+      (Keeper_lifecycle_admission.Durable_transaction.Runtime_meta_authority _) ->
+    "runtime_meta_authority"
+  | Lifecycle_admission_blocked
+      (Keeper_lifecycle_admission.Durable_transaction.Revival_transaction_mismatch _) ->
+    "lifecycle_revival_transaction_mismatch"
   | Meta_read_error -> "meta_read_error"
   | Not_bootable -> "not_bootable"
   | Boot_failure cause -> Keeper_runtime.boot_meta_failure_cause_label cause
@@ -699,6 +719,7 @@ let blocked_keeper_reason_label = function
 
 type blocked_keeper_operator_action =
   | Resume_or_leave_paused
+  | Inspect_lifecycle_transaction
   | Repair_keeper_meta_file
   | Add_keeper_toml_or_disable_stale_autoboot_meta
   | Run_keeper_up_or_recreate_meta
@@ -722,6 +743,7 @@ type blocked_keeper_operator_action =
 
 let blocked_keeper_operator_action_to_string = function
   | Resume_or_leave_paused -> "resume_or_leave_paused"
+  | Inspect_lifecycle_transaction -> "inspect_lifecycle_transaction"
   | Repair_keeper_meta_file -> "repair_keeper_meta_file"
   | Add_keeper_toml_or_disable_stale_autoboot_meta ->
       "add_keeper_toml_or_disable_stale_autoboot_meta"
@@ -747,6 +769,7 @@ let blocked_keeper_operator_action_to_string = function
 
 let blocked_keeper_action = function
   | Durable_paused_autoboot_enabled -> Resume_or_leave_paused
+  | Lifecycle_admission_blocked _ -> Inspect_lifecycle_transaction
   | Meta_read_error -> Repair_keeper_meta_file
   | Not_bootable -> Add_keeper_toml_or_disable_stale_autoboot_meta
   | Boot_failure Keeper_runtime.Missing_meta -> Run_keeper_up_or_recreate_meta
@@ -789,6 +812,7 @@ let blocked_keeper_operator_action = function
           String.equal action.action_type Operator_action_constants.keeper_recover)
         Operator_pending_confirm.available_actions
   | Durable_paused_autoboot_enabled
+  | Lifecycle_admission_blocked _
   | Meta_read_error
   | Not_bootable
   | Boot_failure _
@@ -916,6 +940,7 @@ let blocked_keeper_detail_json
     ?base_path
     ?(last_blocker = `Null)
     ?phase_detail
+    ?lifecycle_admission_block
     ~keeper_bootstrap_enabled
     ~bootable_set
     ~capacity_set
@@ -974,20 +999,35 @@ let blocked_keeper_detail_json
     Option.map diagnostic_preview raw
   in
   let reason =
-    if is_paused then Durable_paused_autoboot_enabled
-    else if has_read_error then Meta_read_error
-    else
-      match last_failure with
-      | Some failure -> Boot_failure failure.Keeper_runtime.cause
-      | None ->
+    match lifecycle_admission_block with
+    | Some blocked_reason -> Lifecycle_admission_blocked blocked_reason
+    | None ->
+      if is_paused then Durable_paused_autoboot_enabled
+      else if has_read_error then Meta_read_error
+      else
+        match last_failure with
+        | Some failure -> Boot_failure failure.Keeper_runtime.cause
+        | None ->
           if not is_bootable then Not_bootable
-          else if not is_capacity then
-            (match phase with
-             | Some phase -> Phase phase
-             | None ->
-               if keeper_bootstrap_enabled then Not_registered
-               else Bootstrap_disabled)
+          else if not is_capacity
+          then (
+            match phase with
+            | Some phase -> Phase phase
+            | None ->
+              if keeper_bootstrap_enabled then Not_registered
+              else Bootstrap_disabled)
           else Current_fact_invalid
+  in
+  let lifecycle_admission_fields =
+    match lifecycle_admission_block with
+    | None -> [ "lifecycle_admission_reason", `Null ]
+    | Some blocked_reason ->
+      [ ( "lifecycle_admission_reason"
+        , `String
+            (Keeper_lifecycle_admission.Durable_transaction
+             .blocked_reason_to_wire
+               blocked_reason) )
+      ]
   in
   let terminal_phase_field =
     match phase with
@@ -1073,6 +1113,7 @@ let blocked_keeper_detail_json
      ]
      @ terminal_phase_field
      @ blocked_keeper_operator_action_fields reason
+     @ lifecycle_admission_fields
      @ last_failure_fields
      @ phase_detail_fields)
 
@@ -1408,6 +1449,28 @@ let keeper_fleet_safety_health_json
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
   in
+  let lifecycle_admission_blocks =
+    match current_server_state_opt () with
+    | None -> []
+    | Some state ->
+      let config = Mcp_server.workspace_config state in
+      autoboot_scan.autoboot_names
+      |> List.filter_map (fun keeper_name ->
+        match
+          Keeper_runtime_meta_journal.admission_decision
+            config
+            keeper_name
+        with
+        | Keeper_lifecycle_admission.Durable_transaction.Admitted _ -> None
+        | Keeper_lifecycle_admission.Durable_transaction.Blocked reason ->
+          Some (keeper_name, reason))
+  in
+  let lifecycle_admission_block name =
+    List.assoc_opt name lifecycle_admission_blocks
+  in
+  let lifecycle_admission_blocked =
+    lifecycle_admission_blocks <> []
+  in
   let keeper_bootstrap_blocked =
     (not keeper_bootstrap_enabled)
     && (no_executable_keeper_fibers || reaction_capacity_below_target)
@@ -1417,7 +1480,8 @@ let keeper_fleet_safety_health_json
     && not
          (no_executable_keeper_fibers
           || reaction_capacity_below_target
-          || keeper_bootstrap_blocked)
+          || keeper_bootstrap_blocked
+          || lifecycle_admission_blocked)
   in
   let paused_total_count =
     match paused_keepers_json with
@@ -1443,15 +1507,21 @@ let keeper_fleet_safety_health_json
   in
   let status =
     if no_executable_keeper_fibers then "blocked"
-    else if reaction_capacity_below_target then "degraded"
+    else if reaction_capacity_below_target || lifecycle_admission_blocked
+    then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
     else "ok"
   in
   let blocked_keeper_names =
-    if no_executable_keeper_fibers || reaction_capacity_below_target
-    then names_not_in executable_names
-    else if active_task_owner_is_selected_blocker then active_task_owner_blocked_names
-    else []
+    let capacity_blocked =
+      if no_executable_keeper_fibers || reaction_capacity_below_target
+      then names_not_in executable_names
+      else if active_task_owner_is_selected_blocker
+      then active_task_owner_blocked_names
+      else []
+    in
+    sorted_unique_strings
+      (capacity_blocked @ List.map fst lifecycle_admission_blocks)
   in
   (* Counts unique blocked keeper NAMES, not capacity shortfall. This
      intentionally differs from pre-#22388 behavior, which reported
@@ -1481,6 +1551,7 @@ let keeper_fleet_safety_health_json
                ?base_path:runtime_base_path
                ~last_blocker:(paused_keeper_last_blocker_json paused_keepers_json name)
                ?phase_detail:(phase_detail name)
+               ?lifecycle_admission_block:(lifecycle_admission_block name)
                ~keeper_bootstrap_enabled
                ~bootable_set
                ~capacity_set
@@ -1495,6 +1566,8 @@ let keeper_fleet_safety_health_json
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
     else if active_task_owner_without_executable_fiber
     then Some "active_task_owner_without_executable_fiber"
+    else if lifecycle_admission_blocked
+    then Some "keeper_lifecycle_admission_blocked"
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in
@@ -1577,5 +1650,6 @@ let keeper_fleet_safety_health_json
           (no_executable_keeper_fibers
            || reaction_capacity_below_target
            || keeper_bootstrap_blocked
-           || active_task_owner_without_executable_fiber) )
+           || active_task_owner_without_executable_fiber
+           || lifecycle_admission_blocked) )
     ]

@@ -130,7 +130,7 @@ let write_current_keeper_meta
                 config
                 ~keeper_id:meta.name
                 ~owner_id:
-                  (Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                  (Masc.Keeper_meta_contract.runtime_trace_id meta)
                 ()
             with
             | Error error ->

@@ -61,6 +61,12 @@ let claim_head state =
   |> require_ok "claim head"
 ;;
 
+let lease_for stimulus =
+  let state = State.with_pending (queue [ stimulus ]) State.empty in
+  let _state, lease = claim_head state in
+  require_some "fixture lease" lease
+;;
+
 let checkpoint_source ~turn_count =
   let trace_id =
     Keeper_id.Trace_id.of_string "trace-no-compaction-source"

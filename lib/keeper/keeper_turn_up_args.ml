@@ -104,11 +104,21 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     | Error e -> Error (tool_result_error e)
     | Ok () ->
     match
-      reject_removed_keeper_input_keys ~allow_sandbox_fields
+      reject_removed_keeper_input_keys ~allow_sandbox_fields:true
         ~tool_name:"masc_keeper_up" args
     with
     | Error e -> Error (tool_result_error e)
     | Ok () ->
+    if
+      (not allow_sandbox_fields)
+      && Option.is_some (Json_util.assoc_member_opt "network_mode" args)
+    then
+      Error
+        (tool_result_error
+           "removed keeper sandbox args for masc_keeper_up: network_mode. Configure \
+            network posture in keeper TOML/profile defaults; the public keeper-up \
+            contract accepts only the optional sandbox_profile isolation boundary.")
+    else
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
@@ -137,27 +147,21 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     | Error error ->
       Error (tool_result_error (keeper_toml_load_error_to_string error))
     | Ok profile_defaults ->
-    (* The caller's [sandbox_profile] satisfies this requirement as well as the TOML
-       does. It is required because the sandbox is an isolation boundary and must be
-       stated rather than defaulted — but it was only readable from a keeper TOML the
-       tool does not write, so [masc_keeper_up] could not create a keeper that did not
-       already exist on disk while describing itself as "Create or update" (masc#25767).
-       The argument was already parsed here and already honoured by the update path
-       (keeper_turn_up_update.ml:65-73); only this gate ignored it.
-
-       An invalid value is rejected here rather than passed through: the create path
-       resolves the profile from [profile_defaults], so a bad string would otherwise
-       satisfy the gate and then be silently dropped. *)
+    (* An explicit profile must be valid. When neither the call nor keeper TOML states
+       one, creation uses the local sandbox with playground-only writes. This is the
+       narrow safe bootstrap: a fresh keeper can start without a hand-authored TOML,
+       while docker remains an explicit opt-in. *)
     let sandbox_profile_error =
-      match profile_defaults.sandbox_profile, sandbox_profile_opt with
-      | Some _, _ -> None
-      | None, Some raw when Option.is_none (sandbox_profile_of_string raw) ->
+      match sandbox_profile_opt, profile_defaults.sandbox_profile,
+        profile_defaults.manifest_path
+      with
+      | Some raw, _, _ when Option.is_none (sandbox_profile_of_string raw) ->
         Some
           (Printf.sprintf
              "invalid sandbox_profile: %S (expected: local or docker)"
              raw)
-      | None, Some _ -> None
-      | None, None ->
+      | Some _, _, _ | None, Some _, _ | None, None, None -> None
+      | None, None, Some _ ->
         Some
           (missing_required_sandbox_profile_error
              ~keeper_name:name
@@ -207,17 +211,15 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
   in
   raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
 
-(* An explicit request wins over the TOML default. Without this the create gate would
-   accept a caller-supplied profile and then create the keeper with a different one —
-   accepting a value and dropping it is worse than refusing it, because the operator has
-   no signal that the isolation boundary is not what they asked for. Parsing already
-   succeeded at the gate (keeper_turn_up_args.ml, sandbox_profile_error), so an
-   unparseable value cannot reach here; it is treated as absent rather than silently
-   mapped to the default. *)
+(* An explicit request wins over the TOML default. Without either source, use the
+   canonical local sandbox; creation pairs it with playground-only writes. *)
 let resolve_sandbox_profile ?requested ~fallback () =
   match Option.bind requested sandbox_profile_of_string with
-  | Some _ as stated -> stated
-  | None -> fallback
+  | Some stated -> stated
+  | None ->
+    (match fallback with
+     | Some stated -> stated
+     | None -> default_sandbox_profile)
 
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback

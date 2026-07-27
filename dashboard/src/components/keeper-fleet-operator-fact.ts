@@ -32,6 +32,11 @@ export interface KeeperFleetOperatorFactPresentation
   keeper: string
   reason: DashboardBlockedKeeperFact['reason']
   detail: string | null
+  // The row collapses to keeper_name ?? agent_name, which is null for
+  // no_keeper_binding facts — so two unbound tasks of one agent rendered as
+  // indistinguishable rows while the instruction said to reassign "the task".
+  // Carried so the presentation names the identity its action refers to.
+  taskId: string | null
 }
 
 const ACTION_PRESENTATION = {
@@ -181,11 +186,27 @@ export const CURRENT_KEEPER_FLEET_FACT_INVALID: DashboardBlockedKeeperFact = {
   operator_action_confirm_required: null,
 }
 
+// Severity the action table already declares, not a new ranking invented here.
+// Exhaustive over the closed tone union, so adding a tone is a compile error
+// until it declares its rank.
+const TONE_RANK: Record<KeeperFleetOperatorTone, number> = { bad: 0, warn: 1 }
+
 export function keeperFleetOperatorFacts(
   fleet: DashboardFleetPressureHealth | null | undefined,
 ): DashboardBlockedKeeperFact[] {
   if (fleet?.status === 'ok') return []
-  if (fleet?.blocked_keepers?.length) return fleet.blocked_keepers
+  // The server orders blocked_keepers by keeper identity, and three of the four
+  // consumers take [0] to speak for the whole fleet — so a keeper that was only
+  // waiting could outrank, and hide, one that needed repair. Ordered here, at
+  // the single point every consumer goes through, rather than at each call site.
+  // Array.prototype.sort is stable, so equal-severity facts keep the server's
+  // order.
+  if (fleet?.blocked_keepers?.length)
+    return [...fleet.blocked_keepers].sort(
+      (a, b) =>
+        TONE_RANK[ACTION_PRESENTATION[a.action].tone] -
+        TONE_RANK[ACTION_PRESENTATION[b.action].tone],
+    )
   return [CURRENT_KEEPER_FLEET_FACT_INVALID]
 }
 
@@ -205,5 +226,6 @@ export function keeperFleetOperatorFactPresentation(
     keeper: fact.keeper_name ?? fact.agent_name ?? 'Keeper fleet',
     reason: fact.reason,
     detail: fact.lifecycle_admission_reason ?? null,
+    taskId: fact.task_id,
   }
 }

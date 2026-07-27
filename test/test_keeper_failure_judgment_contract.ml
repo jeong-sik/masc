@@ -199,10 +199,18 @@ let test_malformed_response_has_one_dispatch_surface () =
     "one opaque OAS execution is dispatched per failure-judgment stimulus"
     1
     dispatch_count;
-  check int
-    "a response-contract failure returns as the typed terminal result"
-    1
-    (count_occurrences ~needle:"| Error _ as error -> error" source);
+  (* No source-text count pins the response-contract propagation arm here.
+     #25769 added [check int ... 1 (count_occurrences ~needle:"| Error _ as
+     error -> error")], but that needle matches both propagation arms of [run]
+     — the [resolve_runtime_id] arm and the [parse_response] arm — so it read 2
+     and the case failed unconditionally from the moment it merged. Retuning
+     the needle or raising the expectation to 2 would keep a string classifier
+     over source text (CLAUDE.md workaround signature #2) that any refactor of
+     an unrelated arm breaks again. The property it claimed is already pinned
+     by type: [test_typed_judge_error_disposition] asserts
+     [Response_contract_error] disposes to [Escalate_judge_failure] through the
+     exposed .mli. The dispatch count above and the forbidden-token list below
+     are what this case actually owns. *)
   List.iter
     (fun forbidden ->
        check int

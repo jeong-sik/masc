@@ -87,10 +87,148 @@ do
 done
 
 full_compile_count="$(
-  grep -Ec \
-    '^[[:space:]]+(opam exec -- )?(scripts/dune-local\.sh|dune) build .*@(default|check|install)' \
-    "${workflow}" \
-    || true
+  python3 - "${workflow}" <<'PY'
+import json
+import shlex
+import sys
+
+
+def decode_inline_scalar(scalar: str) -> str:
+    if len(scalar) >= 2 and scalar[0] == scalar[-1] == '"':
+        return json.loads(scalar)
+    if len(scalar) >= 2 and scalar[0] == scalar[-1] == "'":
+        return scalar[1:-1].replace("''", "'")
+    return scalar
+
+
+def run_scripts(lines: list[str]) -> list[str]:
+    scripts: list[str] = []
+    index = 0
+    while index < len(lines):
+        raw = lines[index]
+        stripped = raw.lstrip()
+        entry = stripped[2:] if stripped.startswith("- ") else stripped
+        if not entry.startswith("run:"):
+            index += 1
+            continue
+
+        scalar = entry[len("run:") :].strip()
+        if not scalar.startswith(("|", ">")):
+            scripts.append(decode_inline_scalar(scalar))
+            index += 1
+            continue
+
+        folded = scalar.startswith(">")
+        parent_indent = len(raw) - len(stripped)
+        block: list[str] = []
+        index += 1
+        while index < len(lines):
+            candidate = lines[index]
+            if candidate.strip():
+                indent = len(candidate) - len(candidate.lstrip())
+                if indent <= parent_indent:
+                    break
+            block.append(candidate)
+            index += 1
+
+        content_indents = [
+            len(line) - len(line.lstrip()) for line in block if line.strip()
+        ]
+        content_indent = min(content_indents, default=parent_indent + 2)
+        content = [
+            line[content_indent:] if line.strip() else "" for line in block
+        ]
+        scripts.append(" ".join(part.strip() for part in content) if folded else "\n".join(content))
+    return scripts
+
+
+def logical_shell_lines(script: str) -> list[str]:
+    logical: list[str] = []
+    pending = ""
+    for physical in script.splitlines():
+        stripped = physical.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        pending = f"{pending}{stripped}"
+        if pending.endswith("\\"):
+            pending = f"{pending[:-1]} "
+            continue
+        logical.append(pending)
+        pending = ""
+    if pending:
+        logical.append(pending)
+    return logical
+
+
+def shell_tokens(line: str) -> list[str]:
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|()")
+    lexer.whitespace_split = True
+    lexer.commenters = "#"
+    return list(lexer)
+
+
+def command_segments(tokens: list[str]) -> list[list[str]]:
+    separators = {";", "&&", "||", "|", "&", "(", ")"}
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in separators:
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def count_full_compiles(lines: list[str]) -> int:
+    count = 0
+    for script in run_scripts(lines):
+        for line in logical_shell_lines(script):
+            try:
+                tokens = shell_tokens(line)
+            except ValueError:
+                continue
+            for segment in command_segments(tokens):
+                for index, token in enumerate(segment[:-1]):
+                    command = token.removeprefix("./")
+                    if command not in {"dune", "scripts/dune-local.sh"}:
+                        continue
+                    if segment[index + 1] != "build":
+                        continue
+                    targets = segment[index + 2 :]
+                    if any(
+                        target in {"@default", "@check", "@install"}
+                        for target in targets
+                    ):
+                        count += 1
+                        break
+    return count
+
+
+probes = {
+    "steps:\n  # run: dune build @check": 0,
+    "steps:\n  - run: 'echo \"dune build @check\"'": 0,
+    'steps:\n  - run: "dune build @check"': 1,
+    "steps:\n  - run: OCAMLPARAM=x opam exec -- dune build @install": 1,
+    "steps:\n  - run: ./scripts/dune-local.sh build @default": 1,
+    "steps:\n  - run: |\n      dune build \\\n        @check": 1,
+    "steps:\n  - run: dune build @default; dune build @check": 2,
+    "steps:\n  - run: dune build @foo; dune build @check": 1,
+}
+for probe, expected in probes.items():
+    actual = count_full_compiles(probe.splitlines())
+    if actual != expected:
+        raise SystemExit(
+            f"internal full-compile detector failure: {probe!r}: "
+            f"expected {expected}, got {actual}"
+        )
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(count_full_compiles(handle.readlines()))
+PY
 )"
 [ "${full_compile_count}" -eq 1 ] \
   || fail "ci.yml must contain exactly one full OCaml compile command, found ${full_compile_count}"

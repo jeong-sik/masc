@@ -395,6 +395,35 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     })
   })
 
+  it('preserves the exact durable pre-worker block code and detail', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      ...baseItem,
+      summary_attempt_disposition: {
+        code: 'pre_worker_unavailable',
+        reason_code: 'auto_judge_unavailable',
+        operator_detail: 'Auto Judge unavailable: server root switch is not installed',
+      },
+      summary_status: { status: 'pending' },
+    })
+
+    expect(result!.summary_attempt_disposition).toEqual({
+      code: 'pre_worker_unavailable',
+      reason_code: 'auto_judge_unavailable',
+      operator_detail: 'Auto Judge unavailable: server root switch is not installed',
+    })
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_attempt_disposition: {
+          code: 'pre_worker_unavailable',
+          reason_code: 'unknown',
+          operator_detail: 'lost authority',
+        },
+        summary_status: { status: 'pending' },
+      }),
+    ).toBeNull()
+  })
+
   it('rejects absent or malformed current queue state without fabricating defaults', () => {
     expect(normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: undefined })).toBeNull()
     expect(

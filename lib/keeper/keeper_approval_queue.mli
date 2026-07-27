@@ -450,6 +450,18 @@ val mark_summary_attempt_persistence_uncertain :
     summary or exact binding. The stored operator detail is fixed by the queue
     serializer and cannot contain runtime/provider exception text. *)
 
+val mark_summary_attempt_pre_worker_unavailable :
+  base_path:string ->
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  reason_code:summary_attempt_pre_worker_unavailable_code ->
+  operator_detail:string ->
+  (bool, exact_attempt_error) result
+(** Durably block an unbound current-schema row before provider dispatch. The
+    closed reason code and exact non-blank operator detail are persisted in the
+    same snapshot and are rearmable only through [rearm_summary_attempt]. *)
+
 val rearm_summary_attempt :
   base_path:string ->
   id:string ->
@@ -461,9 +473,9 @@ val rearm_summary_attempt :
   (bool, exact_attempt_error) result
 (** Explicit operator CAS for a blocked row. The caller-observed row identity,
     exact attempt, and disposition must still match atomically.
-    Identity-unbound work becomes ready; a restart-classified released binding
-    may return to unbound only after its complete identity matches. Terminal
-    exact quarantine is never rearmed. *)
+    Identity-unbound and pre-worker-unavailable work becomes ready; a
+    restart-classified released binding may return to unbound only after its
+    complete identity matches. Terminal exact quarantine is never rearmed. *)
 
 val pending_count_for_keeper_in_workspace :
   base_path:string -> keeper_name:string -> (int, storage_error) result

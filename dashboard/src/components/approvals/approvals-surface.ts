@@ -255,7 +255,23 @@ function summaryRearmExpectation(
 ): KeeperAutoJudgeRearmExpectation | null {
   const disposition = item.summary_attempt_disposition
   const exactAttempt = item.exact_attempt
-  if (item.summary_status.status !== 'pending') return null
+  const summaryRearmable =
+    item.summary_status.status === 'pending'
+    || (
+      disposition.code === 'pre_worker_unavailable'
+      && item.summary_status.status === 'not_requested'
+    )
+  if (!summaryRearmable) return null
+  if (disposition.code === 'pre_worker_unavailable') {
+    return exactAttempt.state === 'unbound'
+      ? {
+          input_hash: item.input_hash,
+          sequence: item.sequence,
+          exact_attempt: exactAttempt,
+          summary_attempt_disposition: disposition,
+        }
+      : null
+  }
   if (disposition.code === 'identity_unbound') {
     return exactAttempt.state === 'unbound'
       ? {
@@ -285,13 +301,17 @@ function blockedSummaryAttempt(
   disposition:
     Extract<
       KeeperSummaryAttemptDisposition,
-      { code: 'identity_unbound' | 'persistence_uncertain' }
+      { code: 'identity_unbound' | 'persistence_uncertain' | 'pre_worker_unavailable' }
     >,
   exactAttempt: KeeperExactAttemptState,
 ) {
   const label = disposition.code === 'identity_unbound'
     ? 'Auto Judge 중단 · exact identity 미결합'
-    : 'Auto Judge 중단 · durability 확인 필요'
+    : disposition.code === 'persistence_uncertain'
+      ? 'Auto Judge 중단 · durability 확인 필요'
+      : disposition.reason_code === 'mode_state_invalid'
+        ? 'Auto Judge 중단 · Gate mode 상태 불가'
+        : 'Auto Judge 중단 · 시작 불가'
   return html`
     <div
       class="ap-summary ap-summary-failed"
@@ -312,6 +332,7 @@ function approvalSummaryBlock(item: KeeperApprovalQueueItem) {
   if (
     disposition.code === 'identity_unbound'
     || disposition.code === 'persistence_uncertain'
+    || disposition.code === 'pre_worker_unavailable'
   ) {
     return blockedSummaryAttempt(disposition, exactAttempt)
   }

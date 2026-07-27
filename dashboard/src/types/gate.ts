@@ -97,10 +97,15 @@ export type KeeperSummaryAttemptDisposition =
   | { code: 'settled' }
   | { code: 'identity_unbound'; operator_detail: string }
   | { code: 'persistence_uncertain'; operator_detail: string }
+  | {
+      code: 'pre_worker_unavailable'
+      reason_code: 'auto_judge_unavailable' | 'mode_state_invalid'
+      operator_detail: string
+    }
 
 export type KeeperBlockedSummaryAttemptDisposition = Extract<
   KeeperSummaryAttemptDisposition,
-  { code: 'identity_unbound' | 'persistence_uncertain' }
+  { code: 'identity_unbound' | 'persistence_uncertain' | 'pre_worker_unavailable' }
 >
 
 export interface KeeperAutoJudgeRearmExpectation {

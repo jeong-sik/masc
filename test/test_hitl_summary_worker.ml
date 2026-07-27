@@ -1570,11 +1570,16 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
        | Some
            { exact_attempt = Q.Exact_unbound
            ; summary_status = Q.Summary_pending
-           ; summary_attempt_disposition = Q.Summary_attempt_ready
+           ; summary_attempt_disposition =
+               Q.Summary_attempt_pre_worker_unavailable
+                 { reason_code =
+                     Q.Summary_pre_worker_auto_judge_unavailable
+                 ; operator_detail = "no usable exact-output lane slots"
+                 }
            ; _
            } ->
          ()
-       | _ -> fail "pre-worker failure mutated identityless terminal state");
+       | _ -> fail "pre-worker failure lost its durable typed reason");
        check
          bool
          "pre-worker failure releases the owner claim"

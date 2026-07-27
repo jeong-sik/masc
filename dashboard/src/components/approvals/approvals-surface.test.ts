@@ -295,6 +295,16 @@ describe('ApprovalsSurface', () => {
         },
       }),
       queueItem({
+        id: 'appr-pre-worker',
+        summary_status: { status: 'not_requested' },
+        exact_attempt: { state: 'unbound' },
+        summary_attempt_disposition: {
+          code: 'pre_worker_unavailable',
+          reason_code: 'mode_state_invalid',
+          operator_detail: 'Gate mode state could not be read',
+        },
+      }),
+      queueItem({
         id: 'appr-recovery',
         summary_status: { status: 'pending' },
         exact_attempt: releasedRecoveryAttempt('appr-recovery'),
@@ -311,6 +321,8 @@ describe('ApprovalsSurface', () => {
     expect(retryGateAutoJudge).not.toHaveBeenCalled()
     expect(container.textContent).toContain('exact identity 미결합')
     expect(container.textContent).toContain('durability 확인 필요')
+    expect(container.textContent).toContain('Gate mode 상태 불가')
+    expect(container.textContent).toContain('Gate mode state could not be read')
     container
       .querySelector<HTMLButtonElement>('[data-approval-id="appr-retry"] .ap-act.retry')
       ?.click()
@@ -325,6 +337,23 @@ describe('ApprovalsSurface', () => {
           code: 'identity_unbound',
           operator_detail:
             'Exact-output terminalization stopped before an attempt identity was bound.',
+        },
+      },
+    )
+    container
+      .querySelector<HTMLButtonElement>('[data-approval-id="appr-pre-worker"] .ap-act.retry')
+      ?.click()
+    await flushUi()
+    expect(retryGateAutoJudge).toHaveBeenLastCalledWith(
+      'appr-pre-worker',
+      {
+        input_hash: 'a'.repeat(64),
+        sequence: 1,
+        exact_attempt: { state: 'unbound' },
+        summary_attempt_disposition: {
+          code: 'pre_worker_unavailable',
+          reason_code: 'mode_state_invalid',
+          operator_detail: 'Gate mode state could not be read',
         },
       },
     )

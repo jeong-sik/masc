@@ -181,6 +181,10 @@ let exact_attempt_error_to_string = function
       | Summary_attempt_in_flight -> "in_flight"
       | Summary_attempt_identity_unbound -> "identity_unbound"
       | Summary_attempt_persistence_uncertain -> "persistence_uncertain"
+      | Summary_attempt_pre_worker_unavailable blocked ->
+        "pre_worker_unavailable:"
+        ^ summary_attempt_pre_worker_unavailable_code_to_string
+            blocked.reason_code
       | Summary_attempt_settled -> "settled"
     in
     Printf.sprintf
@@ -631,6 +635,13 @@ let validate_entry_exact_attempt
   | Summary_attempt_identity_unbound, Exact_unbound, Summary_pending ->
     Ok ()
   | Summary_attempt_persistence_uncertain, Exact_unbound, Summary_pending ->
+    Ok ()
+  | Summary_attempt_pre_worker_unavailable blocked, Exact_unbound,
+    (Summary_not_requested | Summary_pending)
+    when
+      let detail = String.trim blocked.operator_detail in
+      not (String.equal detail "")
+      && String.equal detail blocked.operator_detail ->
     Ok ()
   | _, Exact_bound binding, _
     when not
@@ -2478,6 +2489,51 @@ let mark_summary_attempt_persistence_uncertain
            })
 ;;
 
+let mark_summary_attempt_pre_worker_unavailable
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+      ~reason_code
+      ~operator_detail
+  =
+  let trimmed_detail = String.trim operator_detail in
+  if
+    String.equal trimmed_detail ""
+    || not (String.equal trimmed_detail operator_detail)
+  then
+    Error
+      (Exact_attempt_rejected
+         (Exact_attempt_invalid_identity "operator_detail"))
+  else
+    let blocked =
+      Summary_attempt_pre_worker_unavailable
+        { reason_code; operator_detail }
+    in
+    transition_summary_attempt
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+      (fun (entry : pending_approval) ->
+         match
+           entry.summary_status,
+           entry.exact_attempt,
+           entry.summary_attempt_disposition
+         with
+         | (Summary_not_requested | Summary_pending), Exact_unbound,
+           Summary_attempt_ready ->
+           Some
+             { entry with
+               summary_attempt_disposition = blocked
+             }
+         | (Summary_not_requested | Summary_pending), Exact_unbound,
+           current
+           when current = blocked ->
+           Some entry
+         | _ -> None)
+;;
+
 let rearm_summary_attempt
       ~base_path
       ~id
@@ -2526,6 +2582,12 @@ let rearm_summary_attempt
              Summary_pending
            | Summary_attempt_persistence_uncertain, Exact_unbound,
              Summary_pending ->
+             Some
+               { entry with
+                 summary_attempt_disposition = Summary_attempt_ready
+               }
+           | Summary_attempt_pre_worker_unavailable _, Exact_unbound,
+             (Summary_not_requested | Summary_pending) ->
              Some
                { entry with
                  summary_attempt_disposition = Summary_attempt_ready

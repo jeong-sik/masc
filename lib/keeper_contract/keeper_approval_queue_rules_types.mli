@@ -74,11 +74,22 @@ type exact_attempt_state =
   | Exact_unbound
   | Exact_bound of exact_attempt_binding
 
+type summary_attempt_pre_worker_unavailable_code =
+  | Summary_pre_worker_auto_judge_unavailable
+  | Summary_pre_worker_mode_state_invalid
+
+type summary_attempt_pre_worker_unavailable =
+  { reason_code : summary_attempt_pre_worker_unavailable_code
+  ; operator_detail : string
+  }
+
 type summary_attempt_disposition =
   | Summary_attempt_ready
   | Summary_attempt_in_flight
   | Summary_attempt_identity_unbound
   | Summary_attempt_persistence_uncertain
+  | Summary_attempt_pre_worker_unavailable of
+      summary_attempt_pre_worker_unavailable
   | Summary_attempt_settled
 
 (** A pending request never owns or suspends a Keeper lane. [sequence] is the
@@ -176,6 +187,8 @@ val exact_attempt_quarantine_cause_to_string :
   exact_attempt_quarantine_cause -> string
 val is_lowercase_sha256 : string -> bool
 val exact_attempt_state_to_yojson : exact_attempt_state -> Yojson.Safe.t
+val summary_attempt_pre_worker_unavailable_code_to_string :
+  summary_attempt_pre_worker_unavailable_code -> string
 val summary_attempt_disposition_to_yojson :
   summary_attempt_disposition -> Yojson.Safe.t
 

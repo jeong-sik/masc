@@ -261,6 +261,24 @@ function normalizeKeeperSummaryAttemptDisposition(
         ? { code: raw.code, operator_detail: operatorDetail }
         : null
     }
+    case 'pre_worker_unavailable': {
+      const reasonCode = raw.reason_code
+      const operatorDetail = raw.operator_detail
+      return (
+        reasonCode === 'auto_judge_unavailable'
+        || reasonCode === 'mode_state_invalid'
+      )
+        && typeof operatorDetail === 'string'
+        && operatorDetail.length > 0
+        && operatorDetail.trim() === operatorDetail
+        && hasOnlyKeys(raw, ['code', 'reason_code', 'operator_detail'])
+        ? {
+            code: raw.code,
+            reason_code: reasonCode,
+            operator_detail: operatorDetail,
+          }
+        : null
+    }
     default:
       return null
   }
@@ -302,6 +320,12 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
       case 'identity_unbound':
         return exactAttempt.state === 'unbound'
           && summaryStatus.status === 'pending'
+      case 'pre_worker_unavailable':
+        return exactAttempt.state === 'unbound'
+          && (
+            summaryStatus.status === 'not_requested'
+            || summaryStatus.status === 'pending'
+          )
       case 'in_flight':
         return exactAttempt.state === 'bound'
           && summaryStatus.status === 'pending'

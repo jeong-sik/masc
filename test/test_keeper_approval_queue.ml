@@ -2684,12 +2684,25 @@ let test_default_auto_judge_defers_without_blocking () =
           | Some
               { summary_status = AQ.Summary_pending
               ; exact_attempt = AQ.Exact_unbound
-              ; summary_attempt_disposition = AQ.Summary_attempt_ready
+              ; summary_attempt_disposition =
+                  AQ.Summary_attempt_pre_worker_unavailable
+                    { reason_code =
+                        AQ.Summary_pre_worker_auto_judge_unavailable
+                    ; operator_detail
+                    }
               ; _
-              } ->
-            ()
+              } when String.equal operator_detail detail ->
+            let blocked =
+              match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
+              | Some entry -> entry
+              | None -> Alcotest.fail "durable blocked row disappeared"
+            in
+            check_rearm
+              "explicit operator rearm clears pre-worker block"
+              true
+              (rearm_exact ~base_path blocked)
           | Some _ ->
-            Alcotest.fail "Auto Judge pre-worker failure mutated the pending row"
+            Alcotest.fail "Auto Judge pre-worker failure lost its durable reason"
           | None -> Alcotest.fail "Auto Judge request was not durably queued");
          reject_and_cleanup ~base_path approval_id
        | Gate.Deferred { reason = Gate.Judge_requested; _ } ->

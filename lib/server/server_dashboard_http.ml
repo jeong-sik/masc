@@ -494,6 +494,8 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
     | Keeper_approval_queue.Summary_attempt_identity_unbound
     | Keeper_approval_queue.Summary_attempt_persistence_uncertain ->
       Ok ()
+    | Keeper_approval_queue.Summary_attempt_pre_worker_unavailable _ ->
+      Ok ()
     | _ -> Error "retry request disposition is not operator-rearmable"
   in
   match

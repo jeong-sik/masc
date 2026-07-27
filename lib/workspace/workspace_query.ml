@@ -383,11 +383,13 @@ let add_indented_evidence_content buf content =
   String.split_on_char '\n' content
   |> List.iter (fun line -> Printf.bprintf buf "         | %s\n" line)
 
-let add_verification_evidence_projection buf config ~viewer verification_id =
+let add_verification_evidence_projection
+    buf config ~viewer ~task_verifier verification_id =
   match
     Workspace_verification_store.inspect_submitted_evidence
       ~base_path:config.base_path
       ~request_id:verification_id
+      ~task_verifier
       ~viewer
   with
   | Workspace_verification_store.Evidence_metadata_only { request; viewer = _ } ->
@@ -468,15 +470,20 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status
       Printf.bprintf buf "%s [%d] %s: %s\n" status_icon task.priority task.id task.title;
       Printf.bprintf buf "   └─ %s | %s\n" status_str assignee;
       match task.task_status with
-      | Masc_domain.AwaitingVerification { verification_id; _ } ->
+      | Masc_domain.AwaitingVerification { verification_id; phase; _ } ->
         (match verification_viewer with
          | None ->
            Printf.bprintf buf
              "   └─ verification_request=%s evidence=metadata_only\n"
              verification_id
          | Some viewer ->
+           let task_verifier =
+             match phase with
+             | Masc_domain.Awaiting_verifier -> None
+             | Masc_domain.Verifier_assigned { verifier } -> Some verifier
+           in
            add_verification_evidence_projection
-             buf config ~viewer verification_id)
+             buf config ~viewer ~task_verifier verification_id)
       | Masc_domain.Todo
       | Masc_domain.Claimed _
       | Masc_domain.InProgress _

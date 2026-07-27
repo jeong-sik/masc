@@ -37,6 +37,13 @@ let with_temp_dir f =
   let dir = Filename.temp_dir "masc_verify_test" "" in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
+let with_eio_temp_dir f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect
+    ~finally:Fs_compat.clear_fs
+    (fun () -> with_temp_dir f)
+
 let contains_substring text needle =
   let text_len = String.length text in
   let needle_len = String.length needle in
@@ -318,11 +325,19 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
       ~verifier:"keeper-verifier-agent"
       ()
   with
-  | Ok request -> request
+  | Ok request ->
+    (match
+       V.assign_verifier
+         ~base_path
+         ~req_id:request.id
+         ~verifier:"keeper-verifier-agent"
+     with
+     | Ok assigned -> assigned
+     | Error detail -> Alcotest.fail detail)
   | Error detail -> Alcotest.fail detail
 
 let test_submitted_evidence_inspection_is_assigned_and_contained () =
-  with_temp_dir (fun base_path ->
+  with_eio_temp_dir (fun base_path ->
     let artifact_dir =
       Filename.concat
         base_path
@@ -337,6 +352,7 @@ let test_submitted_evidence_inspection_is_assigned_and_contained () =
        VS.inspect_submitted_evidence
          ~base_path
          ~request_id
+         ~task_verifier:(Some "keeper-verifier-agent")
          ~viewer:"keeper-verifier-agent"
      with
      | VS.Evidence_available
@@ -355,13 +371,14 @@ let test_submitted_evidence_inspection_is_assigned_and_contained () =
       VS.inspect_submitted_evidence
         ~base_path
         ~request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
         ~viewer:"keeper-sangsu-agent"
     with
     | VS.Evidence_metadata_only _ -> ()
     | _ -> Alcotest.fail "non-assigned keeper must receive metadata only")
 
 let test_submitted_evidence_inspection_rejects_cross_playground_path () =
-  with_temp_dir (fun base_path ->
+  with_eio_temp_dir (fun base_path ->
     let other_dir =
       Filename.concat
         base_path
@@ -376,6 +393,7 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
       VS.inspect_submitted_evidence
         ~base_path
         ~request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
         ~viewer:"keeper-verifier-agent"
     with
     | VS.Evidence_available
@@ -389,7 +407,7 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
     | _ -> Alcotest.fail "cross-playground artifact must remain unreadable")
 
 let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
-  with_temp_dir (fun base_path ->
+  with_eio_temp_dir (fun base_path ->
     let artifact_dir =
       Filename.concat
         base_path
@@ -405,6 +423,7 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
       VS.inspect_submitted_evidence
         ~base_path
         ~request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
         ~viewer:"keeper-verifier-agent"
     with
     | VS.Evidence_available
@@ -421,8 +440,170 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
         ascii_prefix content
     | _ -> Alcotest.fail "expected bounded UTF-8-safe artifact projection")
 
+let test_submitted_evidence_rejects_malformed_utf8 () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat
+        base_path
+        ".masc/playground/docker/executor"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "malformed.txt" in
+    Fs_compat.save_file artifact_path "\xC3\x28";
+    let request_id = "vrf-malformed-evidence" in
+    ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
+    match
+      VS.inspect_submitted_evidence
+        ~base_path
+        ~request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
+        ~viewer:"keeper-verifier-agent"
+    with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact_unreadable
+              { reason = VS.Evidence_invalid_utf8; _ }
+            :: _
+        ; _
+        } ->
+      ()
+    | _ -> Alcotest.fail "malformed UTF-8 must remain unreadable")
+
+let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat
+        base_path
+        ".masc/playground/docker/executor"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    let outside_path = Filename.concat base_path "outside-secret.txt" in
+    Fs_compat.save_file outside_path "outside-secret";
+    let symlink_path = Filename.concat artifact_dir "outside-link.txt" in
+    Unix.symlink outside_path symlink_path;
+    let symlink_request_id = "vrf-symlink-evidence" in
+    ignore
+      (create_evidence_request
+         ~base_path
+         ~request_id:symlink_request_id
+         ~artifact_path:symlink_path);
+    (match
+       VS.inspect_submitted_evidence
+         ~base_path
+         ~request_id:symlink_request_id
+         ~task_verifier:(Some "keeper-verifier-agent")
+         ~viewer:"keeper-verifier-agent"
+     with
+     | VS.Evidence_available
+         { items =
+             VS.Evidence_artifact_unreadable
+               { reason = VS.Evidence_outside_worker_playground; _ }
+             :: _
+         ; _
+         } ->
+       ()
+     | _ -> Alcotest.fail "symlink escape must remain unreadable");
+    let fifo_path = Filename.concat artifact_dir "evidence.fifo" in
+    Unix.mkfifo fifo_path 0o600;
+    let fifo_request_id = "vrf-fifo-evidence" in
+    ignore
+      (create_evidence_request
+         ~base_path
+         ~request_id:fifo_request_id
+         ~artifact_path:fifo_path);
+    match
+      VS.inspect_submitted_evidence
+        ~base_path
+        ~request_id:fifo_request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
+        ~viewer:"keeper-verifier-agent"
+    with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact_unreadable
+              { reason = VS.Evidence_not_regular_file; _ }
+            :: _
+        ; _
+        } ->
+      ()
+    | _ -> Alcotest.fail "FIFO evidence must remain unreadable")
+
+let test_changed_during_read_maps_to_typed_unreadable_reason () =
+  Alcotest.(check string)
+    "exact-read race remains typed"
+    "changed_during_read"
+    (VS.evidence_read_failure_of_exact_read_error
+       Fs_compat.Capability_exact_read.Changed_during_read
+     |> VS.evidence_read_failure_to_string)
+
+let test_submitted_evidence_requires_task_and_request_assignment () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat
+        base_path
+        ".masc/playground/docker/executor"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "assignment.txt" in
+    Fs_compat.save_file artifact_path "assignment-secret";
+    let request_id = "vrf-assignment-authority" in
+    let pending =
+      match
+        V.create_request
+          ~base_path
+          ~request_id
+          ~task_id:"task-001"
+          ~output:
+            (`Assoc
+                [ ( "submitted_evidence"
+                  , `List [ `String artifact_path ] )
+                ])
+          ~criteria:[ V.Custom "inspect artifact" ]
+          ~worker:"keeper-executor-agent"
+          ~verifier:"keeper-verifier-agent"
+          ()
+      with
+      | Ok request -> request
+      | Error detail -> Alcotest.fail detail
+    in
+    let check_metadata_only label = function
+      | VS.Evidence_metadata_only _ -> ()
+      | _ -> Alcotest.fail label
+    in
+    check_metadata_only
+      "Pending request must not expose bytes"
+      (VS.inspect_submitted_evidence
+         ~base_path
+         ~request_id:pending.id
+         ~task_verifier:(Some "keeper-verifier-agent")
+         ~viewer:"keeper-verifier-agent");
+    let assigned =
+      match
+        V.assign_verifier
+          ~base_path
+          ~req_id:pending.id
+          ~verifier:"keeper-verifier-agent"
+      with
+      | Ok request -> request
+      | Error detail -> Alcotest.fail detail
+    in
+    check_metadata_only
+      "task phase verifier mismatch must not expose bytes"
+      (VS.inspect_submitted_evidence
+         ~base_path
+         ~request_id:assigned.id
+         ~task_verifier:(Some "keeper-sangsu-agent")
+         ~viewer:"keeper-verifier-agent");
+    check_metadata_only
+      "unassigned task phase must not expose bytes"
+      (VS.inspect_submitted_evidence
+         ~base_path
+         ~request_id:assigned.id
+         ~task_verifier:None
+         ~viewer:"keeper-verifier-agent"))
+
 let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
-  with_temp_dir (fun base_path ->
+  with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
     ignore (W.init config ~agent_name:None);
     ignore
@@ -718,6 +899,14 @@ let () =
         test_submitted_evidence_inspection_rejects_cross_playground_path;
       Alcotest.test_case "submitted evidence bounded UTF-8" `Quick
         test_submitted_evidence_inspection_is_bounded_and_utf8_safe;
+      Alcotest.test_case "submitted evidence rejects malformed UTF-8" `Quick
+        test_submitted_evidence_rejects_malformed_utf8;
+      Alcotest.test_case "submitted evidence rejects symlink and FIFO" `Quick
+        test_submitted_evidence_rejects_symlink_escape_and_fifo;
+      Alcotest.test_case "submitted evidence race remains typed" `Quick
+        test_changed_during_read_maps_to_typed_unreadable_reason;
+      Alcotest.test_case "submitted evidence requires exact assignment" `Quick
+        test_submitted_evidence_requires_task_and_request_assignment;
       Alcotest.test_case "keeper task projection assigned verifier only" `Quick
         test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier;
       Alcotest.test_case "assign verifier" `Quick test_assign_verifier;

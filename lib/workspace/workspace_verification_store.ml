@@ -21,6 +21,10 @@ type evidence_read_failure =
   | Evidence_missing
   | Evidence_not_regular_file
   | Evidence_outside_worker_playground
+  | Evidence_invalid_utf8
+  | Evidence_symbolic_link
+  | Evidence_changed_during_read
+  | Evidence_too_large
   | Evidence_read_error of string
 
 type submitted_evidence_item =
@@ -54,6 +58,10 @@ let evidence_read_failure_to_string = function
   | Evidence_missing -> "missing"
   | Evidence_not_regular_file -> "not_regular_file"
   | Evidence_outside_worker_playground -> "outside_worker_playground"
+  | Evidence_invalid_utf8 -> "invalid_utf8"
+  | Evidence_symbolic_link -> "symbolic_link"
+  | Evidence_changed_during_read -> "changed_during_read"
+  | Evidence_too_large -> "too_large"
   | Evidence_read_error detail -> "read_error:" ^ detail
 
 let project_root_of_base_path base_path =
@@ -283,23 +291,129 @@ let load_request_for_evidence base_path req_id =
            (Printexc.to_string exn))
 
 let verification_evidence_max_bytes = 20_000
+let verification_evidence_max_exact_read_bytes = 200_000L
+
+type utf8_scan =
+  | Utf8_valid
+  | Utf8_incomplete_at of int
+  | Utf8_invalid
+
+let scan_utf8 bytes =
+  let length = String.length bytes in
+  let byte index = Char.code bytes.[index] in
+  let continuation index =
+    index < length && byte index land 0xC0 = 0x80
+  in
+  let rec loop index =
+    if index = length then Utf8_valid
+    else
+      let first = byte index in
+      if first <= 0x7F then loop (index + 1)
+      else
+        let required, second_min, second_max =
+          if first >= 0xC2 && first <= 0xDF then 2, 0x80, 0xBF
+          else if first = 0xE0 then 3, 0xA0, 0xBF
+          else if (first >= 0xE1 && first <= 0xEC) || (first >= 0xEE && first <= 0xEF)
+          then 3, 0x80, 0xBF
+          else if first = 0xED then 3, 0x80, 0x9F
+          else if first = 0xF0 then 4, 0x90, 0xBF
+          else if first >= 0xF1 && first <= 0xF3 then 4, 0x80, 0xBF
+          else if first = 0xF4 then 4, 0x80, 0x8F
+          else 0, 0, 0
+        in
+        if required = 0 then Utf8_invalid
+        else if index + required > length then Utf8_incomplete_at index
+        else
+          let second = byte (index + 1) in
+          if
+            second < second_min
+            || second > second_max
+            || (required >= 3 && not (continuation (index + 2)))
+            || (required = 4 && not (continuation (index + 3)))
+          then Utf8_invalid
+          else loop (index + required)
+  in
+  loop 0
+
+let exact_read_operation_to_string = function
+  | Fs_compat.Capability_exact_read.Pin_parent -> "pin_parent"
+  | Open_parent_descriptor -> "open_parent_descriptor"
+  | Open_leaf -> "open_leaf"
+  | Inspect_opened -> "inspect_opened"
+  | Allocate -> "allocate"
+  | Read_exact -> "read_exact"
+  | Inspect_after_read -> "inspect_after_read"
+  | Close_leaf -> "close_leaf"
+  | Settle_parent_resources -> "settle_parent_resources"
+  | Observe_parent_cancellation -> "observe_parent_cancellation"
+
+let exact_read_diagnostic_to_string
+    (diagnostic : Fs_compat.Capability_exact_read.diagnostic) =
+  Printf.sprintf
+    "%s:%s"
+    (exact_read_operation_to_string diagnostic.operation)
+    diagnostic.detail
+
+let evidence_read_failure_of_exact_read_error = function
+  | Fs_compat.Capability_exact_read.Missing -> Evidence_missing
+  | Symbolic_link -> Evidence_symbolic_link
+  | Not_regular _ -> Evidence_not_regular_file
+  | Changed_during_read -> Evidence_changed_during_read
+  | Length_exceeds_max _ -> Evidence_too_large
+  | Invalid_leaf detail -> Evidence_read_error ("invalid_leaf:" ^ detail)
+  | Invalid_length_bounds _ -> Evidence_read_error "invalid_length_bounds"
+  | Length_not_representable length ->
+    Evidence_read_error
+      (Printf.sprintf "length_not_representable:%Ld" length)
+  | Cancelled diagnostic ->
+    Evidence_read_error
+      ("cancelled:" ^ exact_read_diagnostic_to_string diagnostic)
+  | Parent_descriptor_unavailable ->
+    Evidence_read_error "parent_descriptor_unavailable"
+  | Unsafe_link_count count ->
+    Evidence_read_error (Printf.sprintf "unsafe_link_count:%d" count)
+  | Unsafe_mode mode ->
+    Evidence_read_error (Printf.sprintf "unsafe_mode:%o" mode)
+  | Length_mismatch { expected_length; observed_length } ->
+    Evidence_read_error
+      (Printf.sprintf
+         "length_mismatch:expected=%Ld:observed=%Ld"
+         expected_length
+         observed_length)
+  | Io_error diagnostic ->
+    Evidence_read_error
+      (exact_read_diagnostic_to_string diagnostic)
 
 let read_regular_file_prefix path stat =
-  try
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         let requested = min verification_evidence_max_bytes stat.Unix.st_size in
-         let raw = really_input_string ic requested in
-         let content = String_util.utf8_prefix ~max_bytes:requested raw in
-         Ok
-           ( content
-           , stat.Unix.st_size
-           , stat.Unix.st_size > String.length content ))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Evidence_read_error (Printexc.to_string exn))
+  match Fs_compat.get_fs_opt () with
+  | None -> Error (Evidence_read_error "eio_filesystem_unavailable")
+  | Some fs ->
+    let parent = Eio.Path.(fs / Filename.dirname path) in
+    let leaf = Filename.basename path in
+    let expected_length = Int64.of_int stat.Unix.st_size in
+    (match
+       Fs_compat.Capability_exact_read.read
+         ~parent
+         ~leaf
+         ~expected_length
+         ~max_length:verification_evidence_max_exact_read_bytes
+     with
+     | Error failure ->
+       Error (evidence_read_failure_of_exact_read_error failure.error)
+     | Ok observation ->
+       let exact_bytes =
+         Fs_compat.Capability_exact_read.observation_bytes observation
+       in
+       let exact_length = String.length exact_bytes in
+       let requested = min verification_evidence_max_bytes exact_length in
+       let raw = String.sub exact_bytes 0 requested in
+       let source_truncated = exact_length > requested in
+       match scan_utf8 raw with
+       | Utf8_valid -> Ok (raw, exact_length, source_truncated)
+       | Utf8_incomplete_at index when source_truncated ->
+         Ok (String.sub raw 0 index, exact_length, true)
+       | Utf8_incomplete_at _ | Utf8_invalid ->
+         Error Evidence_invalid_utf8)
 
 let inspect_artifact_reference ~base_path ~worker reference =
   let canonical_base =
@@ -327,15 +441,11 @@ let inspect_artifact_reference ~base_path ~worker reference =
               (Playground_paths.sanitize_keeper_name worker) ->
        (try
           let stat = Unix.stat canonical_target in
-          if stat.Unix.st_kind <> Unix.S_REG then
-            Evidence_artifact_unreadable
-              { reference; reason = Evidence_not_regular_file }
-          else
-            (match read_regular_file_prefix canonical_target stat with
-             | Error reason ->
-               Evidence_artifact_unreadable { reference; reason }
-             | Ok (content, bytes, truncated) ->
-               Evidence_artifact { reference; content; bytes; truncated })
+          match read_regular_file_prefix canonical_target stat with
+          | Error reason ->
+            Evidence_artifact_unreadable { reference; reason }
+          | Ok (content, bytes, truncated) ->
+            Evidence_artifact { reference; content; bytes; truncated }
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -347,7 +457,7 @@ let inspect_artifact_reference ~base_path ~worker reference =
        Evidence_artifact_unreadable
          { reference; reason = Evidence_outside_worker_playground })
 
-let inspect_submitted_evidence ~base_path ~request_id ~viewer =
+let inspect_submitted_evidence ~base_path ~request_id ~task_verifier ~viewer =
   match load_request_for_evidence base_path request_id with
   | Error reason -> Evidence_unavailable { request_id; reason }
   | Ok (request, evidence_refs) ->
@@ -358,8 +468,13 @@ let inspect_submitted_evidence ~base_path ~request_id ~viewer =
          ; reason = "verification request is already completed"
          }
      | `Pending | `Assigned _ ->
-       (match request.verifier with
-        | Some assigned_verifier when String.equal assigned_verifier viewer ->
+       (match request.status, request.verifier, task_verifier with
+        | ( `Assigned status_verifier
+          , Some request_verifier
+          , Some task_verifier )
+          when String.equal status_verifier viewer
+               && String.equal request_verifier viewer
+               && String.equal task_verifier viewer ->
           let items =
             List.map
               (fun reference ->
@@ -373,7 +488,7 @@ let inspect_submitted_evidence ~base_path ~request_id ~viewer =
               evidence_refs
           in
           Evidence_available { request; items }
-        | None | Some _ -> Evidence_metadata_only { request; viewer }))
+        | _ -> Evidence_metadata_only { request; viewer }))
 
 let list_request_headers base_path =
   let surface = "verification" in

@@ -3749,9 +3749,6 @@ let test_dead_revival_existing_reserved_journal_blocks () =
               ~keeper_name)))
 ;;
 
-module Durable_admission =
-  Keeper_lifecycle_admission.Durable_transaction
-
 let replace_revival_journal_stage raw stage =
   match Yojson.Safe.from_string raw with
   | `Assoc fields ->

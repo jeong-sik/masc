@@ -428,7 +428,7 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
         (Keeper_registry.get ~base_path keeper_name)
     in
     (match
-       Keeper_activation_readiness.classify_owner_execution
+       Keeper_activation_readiness.classify_durable_demand_execution
          ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
          ~runtime
          meta_result

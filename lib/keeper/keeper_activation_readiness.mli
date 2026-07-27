@@ -89,4 +89,14 @@ val classify_owner_execution :
     Policy permission without one is [Recoverable], never runnable.
     Missing/unreadable metadata fails closed as [Unknown]. *)
 
+val classify_durable_demand_execution :
+  shutdown_operation_id:Keeper_shutdown_types.Operation_id.t option ->
+  runtime:owner_runtime ->
+  (Keeper_meta_contract.keeper_meta, string) result ->
+  owner_execution_truth
+(** Classify activation for an already-persisted explicit demand such as a due
+    schedule or HITL continuation. Lifecycle, shutdown, and autoboot policy
+    still apply, but [proactive_enabled] does not: that flag controls
+    unsolicited scheduled-autonomous turns, not reactive durable work. *)
+
 val to_yojson : t -> Yojson.Safe.t

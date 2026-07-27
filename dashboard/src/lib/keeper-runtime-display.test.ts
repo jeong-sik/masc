@@ -39,9 +39,17 @@ describe('keeperDisplayStatus', () => {
     expect(keeperDisplayStatus(undefined)).toBe('unknown')
   })
 
-  it('passes through non-offline statuses', () => {
-    expect(keeperDisplayStatus(makeKeeper({ status: 'active' }))).toBe('active')
+  it('normalizes non-offline statuses onto the token union', () => {
+    // `active` is a wire synonym of `running` (KEEPER_STATUS_ALIASES), so it
+    // folds; `idle` is its own token, so it stays. The old behaviour passed
+    // the raw string through, which is how `idle` reached the roster as
+    // `확인 필요` — it was not a member of KeeperPhaseToken.
+    expect(keeperDisplayStatus(makeKeeper({ status: 'active' }))).toBe('running')
     expect(keeperDisplayStatus(makeKeeper({ status: 'idle' }))).toBe('idle')
+  })
+
+  it('collapses a status outside the union to unknown rather than leaking it', () => {
+    expect(keeperDisplayStatus(makeKeeper({ status: 'banana' }))).toBe('unknown')
   })
 
   describe('offline refinement into unbooted/stopped', () => {

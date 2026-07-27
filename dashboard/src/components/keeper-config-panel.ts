@@ -13,6 +13,47 @@ import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens } from '../lib/format-number'
+import {
+  PHASE_LABEL_KO,
+  PHASE_TONE,
+  type FleetTone,
+  type KeeperPhaseToken,
+} from '../lib/fleet-tone'
+
+/** The config overlay's phase pill reads three runtime booleans rather than
+ *  a `Keeper`, so it cannot call `keeperDisplayStatus`. It maps them onto
+ *  the same token union instead, so the word and the dot colour below come
+ *  from the shared tables like every other surface.
+ *
+ *  The pill used to compute its word and its dot from two separate ternary
+ *  chains with opposite precedence — the word tested `paused` first, the dot
+ *  tested `keepalive_running` first. In the window where both are true, which
+ *  is the normal state right after a pause (the pause button's own title says
+ *  "running → paused, 현재 turn 은 정상 종료"), it rendered `일시정지` beside a
+ *  green glowing dot. One token now feeds both.
+ *
+ *  `registered` without a running keepalive loop is `unbooted`, matching
+ *  `PHASE_DESCRIPTION_KO.unbooted` — "등록만 되어 있고 아직 부팅되지 않았습니다". */
+function configPhaseToken(runtime: {
+  paused?: boolean
+  keepalive_running?: boolean
+  registered?: boolean
+}): KeeperPhaseToken {
+  if (runtime.paused) return 'paused'
+  if (runtime.keepalive_running) return 'running'
+  if (runtime.registered) return 'unbooted'
+  return 'offline'
+}
+
+/** v2 skin colour names (`--status-*`, `styles/variables.css`) rather than
+ *  the `--color-status-*` role names, matching the rest of this overlay. */
+const PHASE_DOT_COLOR: Record<FleetTone, string> = {
+  ok: 'var(--status-ok)',
+  warn: 'var(--status-warn)',
+  bad: 'var(--status-bad)',
+  busy: 'var(--color-accent-fg)',
+  idle: 'var(--text-dim)',
+}
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import { relativeTime } from '../lib/format-time'
@@ -2207,20 +2248,23 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   }
   const activeTab = kcfTab.value
   const activeTabLabel = KCF_TABS.find((t) => t[0] === activeTab)?.[1] ?? ''
-  const phaseLabel = c.runtime.paused
-    ? '일시정지'
-    : c.runtime.keepalive_running
-      ? '실행'
-      : c.runtime.registered
-        ? '대기'
-        : '오프라인'
-  // Phase pill status dot (prototype .kcf-top-phase carries a StatusDot): green
-  // when running, amber when paused, dim otherwise.
-  const phaseDotColor = c.runtime.keepalive_running
-    ? 'var(--status-ok)'
-    : c.runtime.paused
-      ? 'var(--status-warn)'
-      : 'var(--text-dim)'
+  // One token drives both the word and the dot.
+  //
+  // These were two independent ternaries with *opposite* precedence: the
+  // label tested `paused` first, the dot tested `keepalive_running` first.
+  // A keeper in the window where both are true — which is the normal state
+  // right after a pause, since the directive is delivered to a still-running
+  // keepalive loop (see the pause button's own title: "running → paused,
+  // 현재 turn 은 정상 종료") — rendered the word `일시정지` next to a green
+  // glowing dot.
+  //
+  // The words also came from a 4-value vocabulary local to this pill
+  // (`실행` / `대기` / `오프라인`) that no other surface uses; they now come
+  // from `PHASE_LABEL_KO`, so this pill agrees with the roster, the phase
+  // badge and the agent detail header.
+  const phaseToken = configPhaseToken(c.runtime)
+  const phaseLabel = PHASE_LABEL_KO[phaseToken]
+  const phaseDotColor = PHASE_DOT_COLOR[PHASE_TONE[phaseToken]]
 
   return html`
     <div
@@ -2239,7 +2283,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
             <div class="kcf-top-sub mono">${c.execution.selected_runtime_id || c.sources.default_source_kind || MISSING_DATA_DASH}</div>
           </div>
           <span class="kcf-top-phase">
-            <span style=${`width:7px;height:7px;border-radius:50%;background:${phaseDotColor};display:inline-block;${c.runtime.keepalive_running ? 'box-shadow:0 0 6px ' + phaseDotColor + ';' : ''}`} aria-hidden="true"></span>
+            <span style=${`width:7px;height:7px;border-radius:50%;background:${phaseDotColor};display:inline-block;${phaseToken === 'running' ? 'box-shadow:0 0 6px ' + phaseDotColor + ';' : ''}`} aria-hidden="true"></span>
             ${phaseLabel}
           </span>
           <div class="kcf-top-spacer"></div>

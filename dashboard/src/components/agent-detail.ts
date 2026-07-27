@@ -7,7 +7,7 @@ import { formatPct } from '../lib/format-number'
 import { useMemo, useRef } from 'preact/hooks'
 import { SectionCard } from './common/card'
 import { EmptyState, ErrorState } from './common/feedback-state'
-import { StatusBadge } from './common/status-badge'
+import { StatusBadge, statusBadgeToneForKeeper } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { resolveUnifiedStatus } from '../lib/unified-status'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
@@ -257,7 +257,11 @@ export function AgentDetailOverlay() {
                   ${showSecondaryLabel ? html`<span class="font-mono text-xs text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] px-2 py-0.5 rounded-[var(--r-1)]">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
-                  <${StatusBadge} status=${unified.canonical} />
+                  <${StatusBadge}
+                    status=${unified.canonical}
+                    label=${unified.label}
+                    tone=${unified.token ? statusBadgeToneForKeeper(unified.token) : undefined}
+                  />
                   ${keeper ? html`<${KeeperPhaseBadge} phase=${keeper.phase} compact=${true} />` : null}
                   ${unified.description !== unified.label ? html`<span class="text-2xs font-medium py-1 px-2 border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)] whitespace-nowrap rounded-[var(--r-1)]" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}

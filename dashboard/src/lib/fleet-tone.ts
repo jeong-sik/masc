@@ -26,15 +26,26 @@ export const FL_TONE_LABEL: Readonly<Record<FleetTone, string>> = {
   idle: '정지',
 }
 
-/** Canonical lower-cased phase token emitted by `keeperDisplayStatus`
- *  (`lib/keeper-runtime-display.ts:180`). The labels in PHASE_LABEL_KO and
- *  the tones in PHASE_TONE key on these tokens, NOT on the PascalCase
- *  `KeeperPhase` enum. This union is closed: any new lowercase token added
- *  by `keeperLifecycleStatus` (or any future status surface) forces the
- *  compiler to flag a missing entry here.
+/** The complete codomain of `keeperDisplayStatus`
+ *  (`lib/keeper-runtime-display.ts`), as lower-cased tokens. The labels in
+ *  PHASE_LABEL_KO and the tones in PHASE_TONE key on these tokens, NOT on
+ *  the PascalCase `KeeperPhase` enum. `keeperDisplayStatus` declares this
+ *  as its return type, so a new emission that is not listed here is a
+ *  compile error rather than a runtime collapse to `'unknown'`.
  *
- *  Derivation: `KeeperPhase` collapses via `keeperLifecycleStatus`
- *  to lowercase tokens, plus `unknown` for the fallback path.
+ *  Two groups:
+ *   - Lifecycle phases: `KeeperPhase` collapses onto these via
+ *     `keeperLifecycleStatus`. `Offline` maps to `unbooted`, not `offline`.
+ *   - Non-phase display states: `idle` / `listening` come from the agent
+ *     status axis (a keeper that is alive between turns), and `offline` is
+ *     the residual `refineOfflineStatus` case (registered, agent record
+ *     exists, never ran a turn, heartbeat stale). These are not FSM phases,
+ *     which is why `KeeperPhase` has no counterpart for them.
+ *
+ *  Before 2026-07-27 the union covered only the lifecycle group. The three
+ *  non-phase tokens were emitted anyway and collapsed to `'unknown'` at
+ *  `phaseTokenFromKeeper`, which renders as `확인 필요` — an alarm word for
+ *  a healthy idle keeper. Measured: 5 distinct inputs hit that path.
  */
 export type KeeperPhaseToken =
   | 'running'
@@ -49,6 +60,9 @@ export type KeeperPhaseToken =
   | 'unbooted'
   | 'crashed'
   | 'dead'
+  | 'idle'
+  | 'listening'
+  | 'offline'
   | 'unknown'
 
 /** Closed tone map. Keys MUST match `KeeperPhaseToken` and MUST be kept in
@@ -91,6 +105,14 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
       unbooted: 'idle',
       crashed: 'bad',
       dead: 'bad',
+      // Alive between turns. `ROSTER_BAND_TONE.active = 'ok'`
+      // (`agent-roster.ts`) already routes this band to `ok`; matching it
+      // keeps the dot colour of an idle keeper the same on both surfaces.
+      idle: 'ok',
+      listening: 'ok',
+      // Residual offline case — same "not running, not an error" bucket as
+      // `stopped` / `unbooted`.
+      offline: 'idle',
       unknown: 'idle',
     }) as Record<KeeperPhaseToken, FleetTone>,
   )
@@ -118,9 +140,94 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
       unbooted: '미기동',
       crashed: '비정상 종료',
       dead: '종료됨',
+      // Words taken from the existing `statusLabel` SSOT
+      // (`lib/status-label.ts`) rather than coined here, so the generic
+      // status vocabulary and the keeper vocabulary agree on these keys.
+      idle: '대기',
+      listening: '수신 대기',
+      offline: '오프라인',
       unknown: UNKNOWN_STATUS_LABEL,
     }) as Record<KeeperPhaseToken, string>,
   )
+
+/** One-sentence operator explanation per token — the tooltip / secondary
+ *  line that sits under the label.
+ *
+ *  Lifted verbatim from `PHASE_LABELS` in `lib/monitoring-runtime.ts`,
+ *  which owned the only such table. It moved here so the label, the tone
+ *  and the explanation share one keyspace; `monitoring-runtime` now reads
+ *  from this map instead of holding a parallel copy.
+ *
+ *  One collapse during the move: `Stopped` and the lowercase `stopped`
+ *  entry carried different sentences ('정상 정지된 런타임입니다.' vs
+ *  '이전에 실행되었지만 현재는 정지 상태입니다.') for the same token. The
+ *  PascalCase one wins because it is the FSM phase; the lowercase entry
+ *  was the status-field alias for the same condition. */
+export const PHASE_DESCRIPTION_KO: Readonly<Record<KeeperPhaseToken, string>> =
+  Object.freeze(
+    Object.assign(Object.create(null), {
+      running: 'keeper_state_machine 기준으로 정상 실행 상태입니다.',
+      paused: 'keeper가 재개 대기 상태로 멈춰 있습니다.',
+      compacting: '컨텍스트를 정리하는 중입니다.',
+      handoff: '새 세대로 넘기는 중입니다.',
+      draining: '현재 작업을 마무리하는 중입니다.',
+      restarting: '복구를 시도하고 있습니다.',
+      failing: '최근 실행에서 오류를 감지했습니다.',
+      overflowed: '프롬프트가 runtime 컨텍스트 한도를 넘겨 자동 복구가 필요합니다.',
+      stopped: '정상 정지된 런타임입니다.',
+      unbooted: '등록만 되어 있고 아직 부팅되지 않았습니다.',
+      crashed: 'fiber가 비정상적으로 종료되었습니다.',
+      dead: '명시적인 tombstone으로 종료된 상태입니다.',
+      idle: '프로세스는 살아 있지만 현재 턴 작업은 없습니다.',
+      listening: '프로세스는 살아 있고 입력을 기다리고 있습니다.',
+      offline: '런타임 연결을 확인하지 못했습니다.',
+      unknown: 'phase 정보가 부족해 수동 확인이 필요합니다.',
+    }) as Record<KeeperPhaseToken, string>,
+  )
+
+/** Wire-status synonyms that mean an already-modelled token.
+ *
+ *  Sourced from the alias arms that `KEEPER_STATUS_LABEL_KO`
+ *  (`lib/keeper-operational-state.ts`) already carries — that table lists
+ *  `active` / `live` / `busy` / `executing` and maps all four to `실행 중`,
+ *  which is the evidence that the backend emits them as `keeper.status`.
+ *  They are folded here instead of being re-listed as separate tokens so
+ *  the tone and label tables stay one-entry-per-meaning.
+ *
+ *  Not an open extension point: anything absent from both this map and
+ *  `PHASE_TONE` parses to `null`, and the caller decides the fallback. */
+const KEEPER_STATUS_ALIASES: Readonly<Record<string, KeeperPhaseToken>> =
+  Object.freeze(
+    Object.assign(Object.create(null), {
+      active: 'running',
+      live: 'running',
+      busy: 'running',
+      executing: 'running',
+      inactive: 'offline',
+    }) as Record<string, KeeperPhaseToken>,
+  )
+
+/** Boundary parse for the token union — the only sanctioned way to turn an
+ *  arbitrary wire string into a `KeeperPhaseToken`. Returns `null` on an
+ *  unrecognized value rather than guessing, so callers state their own
+ *  fallback at the call site instead of inheriting a silent one.
+ *
+ *  `hasOwnProperty` rather than `in`: `PHASE_TONE` is null-prototype today,
+ *  but the guard must keep holding if it is ever rebuilt as a plain object
+ *  literal, where a wire token like `'constructor'` would otherwise pass. */
+export function toKeeperPhaseToken(
+  value: string | null | undefined,
+): KeeperPhaseToken | null {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (!normalized) return null
+  if (Object.prototype.hasOwnProperty.call(PHASE_TONE, normalized)) {
+    return normalized as KeeperPhaseToken
+  }
+  if (Object.prototype.hasOwnProperty.call(KEEPER_STATUS_ALIASES, normalized)) {
+    return KEEPER_STATUS_ALIASES[normalized] ?? null
+  }
+  return null
+}
 
 // The runtime helper `phaseTokenFromPhase` is defined in the workspace
 // surface (keeper-workspace-shared.ts) because it depends on

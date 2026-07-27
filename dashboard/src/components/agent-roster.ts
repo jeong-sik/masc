@@ -53,6 +53,7 @@ import {
 import {
   keeperActivityDisplay,
   keeperDisplayRuntime,
+  keeperDisplayStatus,
   keeperRuntimeBlockerHint,
   keeperRuntimeBlockerLabel,
   keeperWorkPreview,
@@ -70,7 +71,7 @@ import {
   KEEPER_TRANSIENT_LABEL_KO,
 } from '../lib/keeper-operational-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
-import { FL_TONE_LABEL, type FleetTone } from '../lib/fleet-tone'
+import { FL_TONE_LABEL, PHASE_LABEL_KO, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
@@ -360,10 +361,18 @@ export function rosterBlockerDisplay(
 // keeper-v2 Fleet skin (fleet.css .fl-*) helpers. The prototype keys every
 // chip / rail / aside-state on a 5-value tone vocabulary
 // (ok/warn/bad/busy/idle). RFC-0295 brings masc's RuntimeBand to the same 5
-// values via ROSTER_BAND_TONE (transient → busy); the Korean tone label
-// is the SSOT `FL_TONE_LABEL` from `lib/fleet-tone.ts` (shared with
-// `keeper-workspace-shared.ts`), used for the aside "selected runtime"
-// state line. Do not redeclare here — see fleet-tone.ts.
+// values via ROSTER_BAND_TONE (transient → busy). Do not redeclare the
+// tone vocabulary here — see fleet-tone.ts.
+//
+// `FL_TONE_LABEL` no longer names the aside "selected runtime" state line
+// when the selection is a keeper. It is a 5-word vocabulary over tones
+// (실행 / 대기 / 주의 / 전이 / 정지), and rendering it as a state word put it
+// next to the 16-word phase vocabulary every other keeper surface uses:
+// the same `Failing` keeper read `주의` here and `오류 발생` on the keepers
+// page, `Paused` read `대기` vs `일시정지`, `Stopped` read `정지` vs `중지`.
+// The tone still drives the dot colour; the word now comes from
+// `PHASE_LABEL_KO`. Workspace agents have no keeper phase, so they keep
+// the tone word.
 
 // CTX pressure threshold the prototype paints `hot` at (>=85%). Mirrors the
 // existing live threshold used in the aside CTX meter so both surfaces agree.
@@ -1370,7 +1379,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <span class="fl-as-ey">${selectedRow.isKeeper ? 'selected keeper runtime' : 'selected workspace agent'}</span>
               <span class="fl-as-state">
                 <span class="inline-block h-1.5 w-1.5 rounded-full" style="background:currentColor" aria-hidden="true"></span>
-                ${FL_TONE_LABEL[selectedTone]}
+                ${selectedRow.keeperRuntime
+                  ? PHASE_LABEL_KO[keeperDisplayStatus(selectedRow.keeperRuntime)]
+                  : FL_TONE_LABEL[selectedTone]}
               </span>
             </div>
 

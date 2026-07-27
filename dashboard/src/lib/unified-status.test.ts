@@ -28,7 +28,10 @@ describe('resolveUnifiedStatus', () => {
   it('resolves running status', () => {
     const r = resolveUnifiedStatus('running', null, null)
     expect(r.canonical).toBe('running')
-    expect(r.label).toBe('진행 중')
+    // `실행 중` (the keeper vocabulary), not `진행 중` (statusLabel's word
+    // for a task in progress). This function feeds the agent detail header,
+    // which sits next to a keeper phase badge saying `실행 중`.
+    expect(r.label).toBe('실행 중')
   })
 
   it('resolves active status with stale annotation', () => {

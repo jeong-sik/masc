@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { statusLabel } from '../../lib/status-label'
+import { PHASE_TONE, type FleetTone, type KeeperPhaseToken } from '../../lib/fleet-tone'
 
 type StatusBadgeTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
 
@@ -65,6 +66,30 @@ export function statusBadgeTone(status: string): StatusBadgeTone {
 
 export function statusDotColor(status: string): string {
   return DOT_CLASS[statusBadgeTone(status)]
+}
+
+/** Keeper tone → badge tone.
+ *
+ *  `statusBadgeTone` above answers for task-shaped statuses. Most keeper
+ *  phase tokens have no arm there and hit its `default: neutral`, so a
+ *  `crashed` or `dead` keeper rendered grey in this badge while the fleet
+ *  panel painted it red from `PHASE_TONE`; `running` rendered `warn`
+ *  (orange) here and `ok` (green) there. Keeper surfaces route their token
+ *  through this map instead of relying on the string switch.
+ *
+ *  `busy → info` rather than `warn`: a transitional phase (compacting /
+ *  handoff / restarting) is progress, not an operator warning. `idle` is
+ *  the fleet tone for stopped/unbooted, so it maps to `neutral`. */
+const FLEET_TONE_TO_BADGE_TONE: Readonly<Record<FleetTone, StatusBadgeTone>> = {
+  ok: 'ok',
+  warn: 'warn',
+  bad: 'bad',
+  busy: 'info',
+  idle: 'neutral',
+}
+
+export function statusBadgeToneForKeeper(token: KeeperPhaseToken): StatusBadgeTone {
+  return FLEET_TONE_TO_BADGE_TONE[PHASE_TONE[token]]
 }
 
 export function StatusBadge({ status, label, tone, children }: StatusBadgeProps) {

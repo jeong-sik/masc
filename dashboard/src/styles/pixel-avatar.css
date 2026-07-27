@@ -36,7 +36,17 @@
     0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
-/* State animations applied to the avatar container */
+/* State animations applied to the avatar container.
+ *
+ * `running` is the canonical keeper token; `active` / `busy` are wire
+ * synonyms that `toKeeperPhaseToken` (`src/lib/fleet-tone.ts`) now folds
+ * onto it, so a keeper whose backend status is `active` arrives here as
+ * `running`. Both spellings are kept: agents (not keepers) still reach
+ * this component with the raw `active` / `busy` status.
+ *
+ * `busy` keeps its own vibrate animation for the agent path even though
+ * the keeper path no longer emits it. */
+.pixel-avatar[data-status="running"],
 .pixel-avatar[data-status="active"],
 .pixel-avatar[data-status="working"] {
   animation: avatar-bounce 1.2s var(--ease-inout) infinite;
@@ -54,8 +64,17 @@
   animation: avatar-pulse-glow 2s var(--ease-inout) infinite;
 }
 
+/* Not running. `unbooted` / `stopped` / `dead` / `crashed` are what
+ * `keeperLifecycleStatus` actually emits for a down keeper — only the
+ * generic `offline` / `inactive` spellings were listed here, so a stopped
+ * or dead keeper kept a full-colour avatar while the roster chip painted
+ * it grey. */
 .pixel-avatar[data-status="offline"],
-.pixel-avatar[data-status="inactive"] {
+.pixel-avatar[data-status="inactive"],
+.pixel-avatar[data-status="unbooted"],
+.pixel-avatar[data-status="stopped"],
+.pixel-avatar[data-status="dead"],
+.pixel-avatar[data-status="crashed"] {
   filter: grayscale(0.85) brightness(0.6);
   opacity: 0.55;
 }

@@ -3202,7 +3202,34 @@ let complete_delivery delivery =
                (match remove_delivery_from_store delivery with
                 | Error storage_error ->
                   Error (Persistence_failed { approval_id = id; storage_error })
-                | Ok () -> finish ()))))
+               | Ok () -> finish ()))))
+;;
+
+let delivery_wake_was_observed delivery =
+  let resolution : Keeper_event_queue.hitl_resolution =
+    { approval_id = delivery.entry.id
+    ; decision =
+        hitl_resolution_decision_of_approval_decision delivery.decision
+    ; channel = delivery.entry.continuation_channel
+    }
+  in
+  let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
+  match
+    Keeper_reaction_ledger.event_queue_turn_started_seen_for_source_result
+      ~base_path:delivery.entry.audit_base_path
+      ~keeper_name:delivery.entry.keeper_name
+      ~post_id
+      ~stimulus_kind:Keeper_reaction_ledger.Hitl_resolved
+  with
+  | Ok observed -> observed
+  | Error error ->
+    Log.Keeper.warn
+      ~keeper_name:delivery.entry.keeper_name
+      "approval_queue: could not verify prior HITL wake delivery approval=%s; replaying safely: %s"
+      delivery.entry.id
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+         error);
+    false
 ;;
 
 let compare_pending_order left right =
@@ -3301,6 +3328,8 @@ let install_persistence_internal ~after_load ~base_path =
           }
       | delivery :: rest ->
         if delivery.grant_consumed
+        then replay count failures rest
+        else if delivery_wake_was_observed delivery
         then replay count failures rest
         else
           (match complete_delivery delivery with

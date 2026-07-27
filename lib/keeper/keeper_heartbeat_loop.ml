@@ -173,11 +173,12 @@ let connector_attention_event_ids_of_stimuli stimuli =
     stimuli
 ;;
 
-let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
+let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
   List.iter
     (fun (stimulus : Keeper_event_queue.stimulus) ->
        match stimulus.payload with
-       | Keeper_event_queue.Schedule_due _ ->
+       | ( Keeper_event_queue.Schedule_due _
+         | Keeper_event_queue.Hitl_resolved _ ) ->
          record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
        | Keeper_event_queue.Board_signal _
        | Keeper_event_queue.Board_attention _
@@ -185,7 +186,6 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Bg_completed _
        | Keeper_event_queue.Bootstrap
        | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Manual_compaction_requested
        | Keeper_event_queue.Goal_assigned _ -> ())
     stimuli
@@ -596,7 +596,7 @@ let run_keepalive_unified_turn
              admitted. The four prior inline pressure gates here were removed: they
              ran AFTER intake had already consumed the stimulus, forcing a
              consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
-          record_schedule_due_turn_started_reactions
+          record_replay_owned_turn_started_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name
             !consumed_stimuli;

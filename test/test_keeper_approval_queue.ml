@@ -18,6 +18,8 @@ let check_rearm label expected = function
 
 module Gate = Masc.Keeper_gate
 module Registry_queue = Masc.Keeper_registry_event_queue
+module Event_queue_persistence = Keeper_event_queue_persistence
+module Reaction_ledger = Masc.Keeper_reaction_ledger
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    reproduces its unit projection over [resolve_with_policy] so these
@@ -2732,6 +2734,122 @@ let test_persisted_delivery_replays_before_origin_wake () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
+let test_observed_delivery_preserves_grant_without_replaying_wake () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-acked-replay-origin" in
+  let input = `Assoc [ "target", `String "acked-replay" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id = submit ~base_path ~keeper_name ~input in
+       (match
+          aq_resolve
+            ~base_path
+            ~id
+            ~decision:AQ.Decision.Approve
+        with
+        | Ok () -> ()
+       | Error error ->
+          Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolution =
+         match
+           durable_resolution_opt
+             ~base_path
+             ~keeper_name
+             ~approval_id:id
+         with
+         | Some resolution -> resolution
+         | None -> Alcotest.fail "HITL wake was not durably queued"
+       in
+       let selection =
+         match
+           Event_queue_persistence.peek_when_result
+             ~base_path
+             ~keeper_name
+             ~ready:(fun _ -> true)
+         with
+       | Ok (Some selection) -> selection
+       | Ok None -> Alcotest.fail "HITL wake was not durably queued"
+       | Error detail -> Alcotest.fail detail
+       in
+       List.iter
+         (Reaction_ledger.record_event_queue_turn_started
+            ~base_path
+            ~keeper_name)
+         selection.stimuli;
+       (match
+          Event_queue_persistence.ack_pending_result
+            ~base_path
+            ~keeper_name
+            ~selection
+            ()
+        with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       let post_id =
+         Keeper_event_queue.hitl_resolution_post_id resolution
+       in
+       (match
+          Reaction_ledger.event_queue_turn_started_seen_for_source_result
+            ~base_path
+            ~keeper_name
+            ~post_id
+            ~stimulus_kind:Reaction_ledger.Hitl_resolved
+        with
+        | Ok true -> ()
+        | Ok false ->
+          Alcotest.failf
+            "turn-started delivery evidence was not found: %s"
+            (Reaction_ledger.summary_for_keeper
+               ~base_path
+               ~keeper_name
+               ~limit:10
+             |> Yojson.Safe.to_string)
+        | Error error ->
+          Alcotest.fail
+            (Reaction_ledger.event_queue_reaction_evidence_error_to_string
+               error));
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int)
+         "observed wake is not replayed"
+         0
+         report.replayed_deliveries;
+       Alcotest.(check bool)
+         "observed wake stays absent after ack"
+         true
+         (Option.is_none
+            (durable_resolution_opt
+               ~base_path
+               ~keeper_name
+               ~approval_id:id));
+       (match AQ.approved_resolution_state ~base_path ~id with
+        | Ok AQ.Resolution_unconsumed -> ()
+        | Ok AQ.Resolution_consumed ->
+          Alcotest.fail "wake acknowledgement consumed the exact grant"
+        | Error error ->
+          Alcotest.fail (AQ.grant_error_to_string error));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok AQ.Consumption_committed -> ()
+        | Ok
+            ( AQ.Consumption_already_committed
+            | AQ.Consumption_not_matching ) ->
+          Alcotest.fail "preserved exact grant was not consumable"
+        | Error error ->
+          Alcotest.fail (AQ.grant_error_to_string error)))
+;;
+
 let test_one_delivery_replay_failure_does_not_stop_others () =
   let base_path = temp_dir () in
   let keeper_name = "queue-independent-replay" in
@@ -3134,6 +3252,10 @@ let () =
             "delivery journal replays"
             `Quick
             test_persisted_delivery_replays_before_origin_wake
+        ; Alcotest.test_case
+            "observed delivery preserves grant without replaying wake"
+            `Quick
+            test_observed_delivery_preserves_grant_without_replaying_wake
         ; Alcotest.test_case
             "one replay failure does not stop others"
             `Quick

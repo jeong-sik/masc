@@ -254,7 +254,7 @@ describe('VerificationRequestsPanel', () => {
     })
   })
 
-  it('renders conflict-triage pending rows with summary and next action', async () => {
+  it('renders conflict-triage pending rows as read-only summary and next action', async () => {
     setData([
       makeRequest({
         request_id: 'req-conflict',
@@ -267,7 +267,9 @@ describe('VerificationRequestsPanel', () => {
     render(html`<${VerificationRequestsPanel} />`)
 
     expect(screen.getByText('충돌 triage')).toBeTruthy()
-    expect(screen.getByText('일반 merged-PR 승인 금지 · triage 우선')).toBeTruthy()
+    expect(screen.queryByRole('columnheader', { name: '액션' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '승인' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '반려' })).toBeNull()
 
     fireEvent.click(screen.getByText('자세히'))
     await waitFor(() => {

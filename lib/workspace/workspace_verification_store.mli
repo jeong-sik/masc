@@ -5,7 +5,6 @@ type verdict =
 
 type request_status =
   [ `Pending
-  | `Assigned of string
   | `Completed of verdict ]
 
 type request_header = {
@@ -59,6 +58,8 @@ val evidence_read_failure_of_owned_read_failure :
 val inspect_submitted_evidence :
   base_path:string ->
   request_id:string ->
+  task_id:string ->
+  task_worker:string ->
   task_verifier:string option ->
   viewer:string ->
   submitted_evidence_access

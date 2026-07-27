@@ -277,14 +277,14 @@ let all_task_actions =
     Submit_for_verification; Approve_verification; Reject_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
-(* RFC-0220: the verification sub-state (previously a separate request_status
-   store: `Pending / `Assigned) is folded into [task_status] so the illegal
-   "task Todo + request Pending" pair is unrepresentable. *)
+(* RFC-0220: verifier assignment lives only in [task_status]. The verification
+   request stores submitted evidence while Pending and a terminal verdict once
+   Completed; it does not duplicate assignment state. *)
 type verification_phase =
   | Awaiting_verifier
-      (** No verifier assigned yet (was verification request [`Pending]). *)
+      (** No verifier assigned yet. *)
   | Verifier_assigned of { verifier: string }
-      (** A verifier keeper is assigned (was [`Assigned verifier]). *)
+      (** The sole verifier-assignment authority. *)
 [@@deriving show]
 
 type task_status =
@@ -307,13 +307,11 @@ type task_status =
 
 (** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
     once [verifier] has claimed it as its satisfier. The obligation is preserved
-    (it stays in the verifier pool, and any non-submitter can still
-    approve/reject it — [decide]'s approval arms match the phase with [_]) and
-    the verifier is recorded in [phase]. Single construction site shared by the
-    FSM decider and both claim writers ([claim_task_r], [claim_next_r]) so the
-    bound-verifier shape never drifts across surfaces. The binding is advisory:
-    it records who is verifying, not who is permitted to — an abandoned
-    [Verifier_assigned] task is re-claimable by another verifier. *)
+    and the verifier is recorded in [phase]. Single construction site shared by
+    the FSM decider and both claim writers ([claim_task_r], [claim_next_r]) so
+    the bound-verifier shape never drifts across surfaces. The binding is
+    authoritative: only this verifier receives evidence and may issue the
+    terminal verdict. *)
 let bind_verifier ~verifier ~assignee ~submitted_at ~verification_id =
   AwaitingVerification
     { assignee; submitted_at; verification_id; phase = Verifier_assigned { verifier } }

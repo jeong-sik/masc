@@ -5,7 +5,6 @@ type verdict =
 
 type request_status =
   [ `Pending
-  | `Assigned of string
   | `Completed of verdict ]
 
 type request_header = {
@@ -124,20 +123,6 @@ let request_status_of_yojson = function
   | `Assoc fields ->
       (match List.assoc_opt "status" fields with
        | Some (`String "pending") -> Ok `Pending
-       | Some (`String "assigned") ->
-           (match List.assoc_opt "verifier" fields with
-            | Some (`String agent) -> Ok (`Assigned agent)
-            | other ->
-                let got =
-                  match other with
-                  | Some j -> Printf.sprintf "got %s" (Json_util.excerpt j)
-                  | None -> "field missing"
-                in
-                Error
-                  (Printf.sprintf
-                     "assigned status requires 'verifier' string field \
-                      (%s)"
-                     got))
        | Some (`String "completed") ->
            (match verdict_of_yojson (`Assoc fields) with
             | Ok verdict -> Ok (`Completed verdict)
@@ -150,8 +135,7 @@ let request_status_of_yojson = function
            in
            Error
              (Printf.sprintf
-                "unknown 'status' (expected one of: pending | assigned \
-                 | completed; %s)"
+                "unknown 'status' (expected one of: pending | completed; %s)"
                 got))
   | other ->
       Error
@@ -408,7 +392,8 @@ let inspect_artifact_reference ~base_path ~worker reference =
        Evidence_artifact_unreadable
          { reference; reason = Evidence_outside_worker_playground })
 
-let inspect_submitted_evidence ~base_path ~request_id ~task_verifier ~viewer =
+let inspect_submitted_evidence ~base_path ~request_id ~task_id ~task_worker
+    ~task_verifier ~viewer =
   match load_request_for_evidence base_path request_id with
   | Error reason -> Evidence_unavailable { request_id; reason }
   | Ok (request, evidence_refs) ->
@@ -418,13 +403,11 @@ let inspect_submitted_evidence ~base_path ~request_id ~task_verifier ~viewer =
          { request_id
          ; reason = "verification request is already completed"
          }
-     | `Pending | `Assigned _ ->
-       (match request.status, request.verifier, task_verifier with
-        | ( `Assigned status_verifier
-          , Some request_verifier
-          , Some task_verifier )
-          when String.equal status_verifier viewer
-               && String.equal request_verifier viewer
+     | `Pending ->
+       (match task_verifier with
+        | Some task_verifier
+          when String.equal request.task_id task_id
+               && String.equal request.worker task_worker
                && String.equal task_verifier viewer ->
           let items =
             List.map
@@ -439,7 +422,7 @@ let inspect_submitted_evidence ~base_path ~request_id ~task_verifier ~viewer =
               evidence_refs
           in
           Evidence_available { request; items }
-        | _ -> Evidence_metadata_only { request; viewer }))
+        | Some _ | None -> Evidence_metadata_only { request; viewer }))
 
 let list_request_headers base_path =
   let surface = "verification" in

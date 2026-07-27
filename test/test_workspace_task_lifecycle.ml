@@ -53,6 +53,15 @@ let awaiting =
     }
 ;;
 
+let assigned verifier =
+  D.AwaitingVerification
+    { assignee = owner
+    ; submitted_at = now
+    ; verification_id = "vrf-1"
+    ; phase = D.Verifier_assigned { verifier }
+    }
+;;
+
 let expect_error expected = function
   | Error actual when actual = expected -> ()
   | Error _ -> failwith "unexpected lifecycle error"
@@ -102,56 +111,86 @@ let test_claimed_can_complete_after_configured_llm_pass () =
   | Ok _ | Error _ -> failwith "configured LLM pass must complete an owned claimed task"
 ;;
 
-let test_actor_relationship_does_not_authorize_verdict () =
+let test_verdict_requires_assigned_winner () =
+  decide
+    ~configured_llm_verdict:pass
+    ~same_agent:false
+    ~task_status:awaiting
+    ~action:D.Approve_verification
+    ()
+  |> expect_error L.Verification_claim_required;
+  decide
+    ~configured_llm_verdict:pass
+    ~same_agent:false
+    ~task_status:(assigned "verifier")
+    ~action:D.Approve_verification
+    ()
+  |> expect_error (L.Verification_assigned_to "verifier");
   (match
-     decide
-       ~configured_llm_verdict:pass
-       ~same_agent:true
-       ~task_status:awaiting
-       ~action:D.Approve_verification
-       ()
+     decide ~configured_llm_verdict:pass ~same_agent:true
+       ~task_status:(assigned "verifier") ~action:D.Approve_verification ()
    with
    | Ok { new_status = D.Done _; _ } -> ()
-   | Ok _ | Error _ -> failwith "submitter may deliver a configured LLM pass");
-  (match
-     decide
-       ~configured_llm_verdict:(reject "fix failing test")
-       ~same_agent:false
-       ~task_status:awaiting
-       ~action:D.Reject_verification
-       ()
-   with
-   | Ok { new_status = D.InProgress { assignee; _ }; _ }
-     when String.equal assignee owner -> ()
-   | Ok _ | Error _ -> failwith "configured LLM reject must return task to owner")
+   | Ok _ | Error _ -> failwith "assigned winner must be able to approve");
+  match
+    decide ~configured_llm_verdict:(reject "fix failing test") ~same_agent:true
+      ~task_status:(assigned "verifier") ~action:D.Reject_verification ()
+  with
+  | Ok { new_status = D.InProgress { assignee; _ }; _ }
+    when String.equal assignee owner -> ()
+  | Ok _ | Error _ -> failwith "assigned winner reject must return task to producer"
 ;;
 
-let test_awaiting_claim_is_only_scheduling_binding () =
+let task_with_status task_status : D.task =
+  { id = "task-1"
+  ; title = "review"
+  ; description = ""
+  ; task_status
+  ; priority = 1
+  ; files = []
+  ; created_at = now
+  ; created_by = None
+  ; predecessor_task_id = None
+  ; contract = None
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  }
+;;
+
+let test_awaiting_claim_has_one_non_producer_winner () =
   let task : D.task =
-    { id = "task-1"
-    ; title = "review"
-    ; description = ""
-    ; task_status = awaiting
-    ; priority = 1
-    ; files = []
-    ; created_at = now
-    ; created_by = None
-    ; predecessor_task_id = None
-    ; contract = None
-    ; handoff_context = None
-    ; cycle_count = 0
-    ; reclaim_policy = None
-    ; do_not_reclaim_reason = None
-    }
+    task_with_status awaiting
   in
-  match L.resolve_claim ~same_actor:(fun _ -> true) ~agent_name:owner ~now task with
-  | L.Verifier_claim (D.AwaitingVerification { phase = D.Verifier_assigned _; _ }) -> ()
-  | _ -> failwith "same actor may bind awaiting verification for scheduling"
+  (match L.resolve_claim ~same_actor:(String.equal owner) ~agent_name:owner ~now task with
+   | L.Self_verification -> ()
+   | _ -> failwith "producer must not claim its own verification");
+  let won =
+    match L.resolve_claim ~same_actor:(String.equal "verifier") ~agent_name:"verifier" ~now task with
+    | L.Verifier_claim
+        (D.AwaitingVerification
+          ({ phase = D.Verifier_assigned { verifier = "verifier" }; _ } as status)) ->
+      D.AwaitingVerification status
+    | _ -> failwith "peer verifier must claim the awaiting obligation"
+  in
+  (match
+     L.resolve_claim ~same_actor:(String.equal "verifier") ~agent_name:"verifier" ~now
+       (task_with_status won)
+   with
+   | L.Self_owned -> ()
+   | _ -> failwith "winner must retain its assignment");
+  match
+    L.resolve_claim ~same_actor:(String.equal "other") ~agent_name:"other" ~now
+      (task_with_status won)
+  with
+  | L.Held_by_other "verifier" -> ()
+  | _ -> failwith "another verifier must not steal the assignment"
 ;;
 
 let () =
   test_done_requires_configured_llm_pass ();
   test_claimed_can_complete_after_configured_llm_pass ();
-  test_actor_relationship_does_not_authorize_verdict ();
-  test_awaiting_claim_is_only_scheduling_binding ();
+  test_verdict_requires_assigned_winner ();
+  test_awaiting_claim_has_one_non_producer_winner ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

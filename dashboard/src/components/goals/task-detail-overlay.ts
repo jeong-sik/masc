@@ -362,8 +362,8 @@ function ContractSection({ task }: { task: Task }) {
             <a
               href=${`#workspace?section=verification&task=${encodeURIComponent(task.id)}`}
               class="v2-mobile-operator-target inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-50)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg hover:bg-[var(--accent-20)]"
-              title="검증 패널에서 이 태스크를 직접 승인/반려"
-            >검증에 개입 →</a>
+              title="검증 패널에서 이 태스크의 요청과 결과 보기"
+            >검증 보기 →</a>
           </div>
           <div class="mt-1 text-2xs text-text-body">
             Submitter: <span class="font-mono">${verifierAssignee ?? '(unknown)'}</span>
@@ -371,8 +371,7 @@ function ContractSection({ task }: { task: Task }) {
           <div class="mt-0.5 text-2xs text-text-muted">
             다른 keeper가 completion_contract의 정량 기준을 독립 실측 중입니다.
             통과 시 approve_verification → done, 미충족 시 reject_verification → in_progress로 복귀.
-            인간 판단이 필요하면 우측 상단 버튼으로 검증 패널에서 직접 승인/반려할 수 있습니다
-            (operator: 접두어로 감사 로그에 기록).
+            판정 권한은 verifier phase를 claim한 Keeper에게만 있습니다.
           </div>
         </div>
       ` : null}

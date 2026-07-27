@@ -3,7 +3,7 @@
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
-import { get, post, type AbortableRequestOptions } from './core'
+import { get, type AbortableRequestOptions } from './core'
 
 // --- Memory Subsystems ---
 
@@ -284,32 +284,6 @@ export function fetchVerificationRequests(
     ? `/api/v1/verification/requests?${qs}`
     : '/api/v1/verification/requests'
   return get<VerificationRequestsResponse>(path, { signal: opts?.signal })
-}
-
-interface ResolveVerificationRequestOptions {
-  task_id: string
-  verification_id: string
-  decision: 'approve' | 'reject'
-  reason?: string
-}
-
-interface ResolveVerificationResponse {
-  ok: boolean
-  task_id: string
-  verification_id: string
-  decision: 'approve' | 'reject'
-  verifier: string
-}
-
-export function resolveVerificationRequest(
-  opts: ResolveVerificationRequestOptions,
-): Promise<ResolveVerificationResponse> {
-  return post<ResolveVerificationResponse>('/api/v1/verification/resolve', {
-    task_id: opts.task_id,
-    verification_id: opts.verification_id,
-    decision: opts.decision,
-    reason: opts.reason ?? '',
-  })
 }
 
 export type TlaSpecCategory = 'boundary' | 'bug-models' | 'other'

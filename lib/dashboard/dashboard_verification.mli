@@ -7,7 +7,7 @@
     network.
 
     Status mapping:
-    - [Pending] | [Assigned _] -> ["pending"]
+    - [Pending]                -> ["pending"]
     - [Completed Pass]         -> ["approved"]
     - [Completed (Fail _)]     -> ["rejected"]
     - [Completed (Partial _)]  -> ["rejected"] (non-Pass verdicts block the gate)

@@ -1324,27 +1324,6 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
     (json |> member "dashboard_surface_envelope" |> member "cache" |> member "key"
      |> to_string)
 
-let test_verifier_of_request_canonicalizes_token_owner () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let cfg =
-    { Masc_domain.default_auth_config with enabled = true; require_token = true }
-  in
-  Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
-  | Error e -> fail (Masc_domain.masc_error_to_string e)
-  | Ok (raw_token, _) ->
-      let verifier =
-        Server_routes_http_routes_verification.verifier_of_request
-          ~base_path:config.base_path
-          (request_with_headers "/api/v1/verification/resolve"
-             [
-               ("authorization", "Bearer " ^ raw_token);
-               ("x-masc-agent", "dashboard");
-             ])
-      in
-      check string "verification verifier canonicalized to token owner"
-        "operator:codex" verifier
-
 let test_dashboard_message_json_surfaces_temporal_decay_fields () =
   let message : Types.message =
     {
@@ -2325,8 +2304,6 @@ let () =
             test_dashboard_execution_force_refresh_bypasses_default_cache;
           test_case "execution trust default route uses cached surface" `Quick
             test_dashboard_execution_trust_default_route_uses_cached_surface;
-          test_case "verification verifier canonicalizes token owner" `Quick
-            test_verifier_of_request_canonicalizes_token_owner;
           test_case "message JSON exposes temporal decay fields" `Quick
             test_dashboard_message_json_surfaces_temporal_decay_fields;
           test_case "RFC-0138 shell wire returns snapshot when published" `Quick

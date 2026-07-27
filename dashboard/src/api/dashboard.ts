@@ -361,7 +361,6 @@ export {
   fetchKeeperMemoryHealth,
   fetchAuditIntegrity,
   fetchVerificationRequests,
-  resolveVerificationRequest,
   fetchTlaSpecs,
   fetchTlcResults,
   fetchAuditLedger,

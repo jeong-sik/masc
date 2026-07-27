@@ -82,8 +82,10 @@ val record_approve_verification :
   (unit, string) result
 (** [record_approve_verification ...] mutates the verification FSM
     to [Pending -> Completed Pass] and persists the verdict
-    journal entry.  Required: non-empty [verification_id]; an
-    empty value returns an error message about the missing id. *)
+    journal entry atomically. It is called by the post-commit Task transition
+    callback after the Task FSM admits the assigned verifier; it is not a
+    standalone authorization surface. Required: non-empty [verification_id];
+    an empty value returns an error message about the missing id. *)
 
 val notify_approve_verification :
   task_id:string ->
@@ -105,8 +107,9 @@ val record_reject_verification :
   reason:string ->
   (unit, string) result
 (** [record_reject_verification ...] mutates the FSM to
-    [Pending -> Completed Fail] and persists the verdict journal
-    entry.  Same [verification_id] requirement as approve. *)
+    [Pending -> Completed Fail] and atomically persists the verdict journal
+    entry through the same post-commit Task-winner boundary as approve.
+    Same [verification_id] requirement as approve. *)
 
 val notify_reject_verification :
   task_id:string ->

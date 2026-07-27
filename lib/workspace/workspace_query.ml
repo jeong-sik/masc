@@ -384,11 +384,13 @@ let add_indented_evidence_content buf content =
   |> List.iter (fun line -> Printf.bprintf buf "         | %s\n" line)
 
 let add_verification_evidence_projection
-    buf config ~viewer ~task_verifier verification_id =
+    buf config ~viewer ~task_id ~task_worker ~task_verifier verification_id =
   match
     Workspace_verification_store.inspect_submitted_evidence
       ~base_path:config.base_path
       ~request_id:verification_id
+      ~task_id
+      ~task_worker
       ~task_verifier
       ~viewer
   with
@@ -470,7 +472,8 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status
       Printf.bprintf buf "%s [%d] %s: %s\n" status_icon task.priority task.id task.title;
       Printf.bprintf buf "   └─ %s | %s\n" status_str assignee;
       match task.task_status with
-      | Masc_domain.AwaitingVerification { verification_id; phase; _ } ->
+      | Masc_domain.AwaitingVerification
+          { assignee = task_worker; verification_id; phase; _ } ->
         (match verification_viewer with
          | None ->
            Printf.bprintf buf
@@ -483,7 +486,20 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status
              | Masc_domain.Verifier_assigned { verifier } -> Some verifier
            in
            add_verification_evidence_projection
-             buf config ~viewer ~task_verifier verification_id)
+             buf config ~viewer ~task_id:task.id ~task_worker ~task_verifier verification_id;
+           (match phase with
+            | Masc_domain.Awaiting_verifier ->
+              Printf.bprintf buf
+                "   └─ ACTION: keeper_task_claim task_id=%s; do not Read producer \
+                 paths; claim first to receive the typed submitted_evidence snapshot\n"
+                task.id
+            | Masc_domain.Verifier_assigned { verifier }
+              when not
+                     (Workspace_task_classify.same_task_actor config verifier viewer) ->
+              Printf.bprintf buf
+                "   └─ assigned_verifier=%s ACTION: skip; do not Read producer paths\n"
+                verifier
+            | Masc_domain.Verifier_assigned _ -> ()))
       | Masc_domain.Todo
       | Masc_domain.Claimed _
       | Masc_domain.InProgress _

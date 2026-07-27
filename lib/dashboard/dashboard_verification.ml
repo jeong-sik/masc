@@ -106,7 +106,7 @@ type status_bucket =
 
 let status_bucket_of_request (req : V.verification_request) : status_bucket =
   match req.status with
-  | V.Pending | V.Assigned _ -> Pending
+  | V.Pending -> Pending
   | V.Completed V.Pass -> Approved
   | V.Completed (V.Fail _ | V.Partial _) -> Rejected
 
@@ -120,8 +120,6 @@ let derive_status_fields (req : V.verification_request)
   (* returns (status, verdict_opt, verdict_reason, approved_by_opt) *)
   match req.status with
   | V.Pending ->
-      status_bucket_to_string Pending, None, "", None
-  | V.Assigned _ ->
       status_bucket_to_string Pending, None, "", None
   | V.Completed V.Pass ->
       status_bucket_to_string Approved, Some "pass", "", req.verifier
@@ -266,7 +264,7 @@ let is_rejected (req : V.verification_request) : bool =
   match req.status with
   | V.Completed (V.Fail _) | V.Completed (V.Partial _) -> true
   | V.Completed V.Pass -> false
-  | V.Pending | V.Assigned _ -> false
+  | V.Pending -> false
 
 let bucket_of_status (req : V.verification_request) : string =
   req |> status_bucket_of_request |> status_bucket_to_string

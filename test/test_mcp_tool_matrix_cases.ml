@@ -481,7 +481,7 @@ let ensure_verification_request fixture =
           Masc.Verification.create_request ~base_path
             ~task_id:(ensure_task fixture) ~output:(`String "tool matrix output")
             ~criteria:[] ~worker:"tool-matrix-worker"
-            ~verifier:fixture.agent_name ()
+            ()
         with
         | Ok request -> request
         | Error err ->

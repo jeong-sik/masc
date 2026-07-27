@@ -6,6 +6,9 @@ type invalid =
   | Completion_rejected of string
   | Completion_verdict_unavailable of string
   | Completion_verdict_action_mismatch
+  | Verification_claim_required
+  | Verification_assigned_to of string
+  | Verification_self_claim
   | Invalid_transition
 
 type decision =
@@ -30,6 +33,7 @@ type claim_resolution =
   | Worker_claim of Masc_domain.task_status
   | Verifier_claim of Masc_domain.task_status
   | Self_owned
+  | Self_verification
   | Held_by_other of string
   | Held_terminal of Masc_domain.task_status
 
@@ -37,15 +41,20 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Todo ->
     Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
-  | Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ->
-    (* This binding is scheduling metadata only. It never authorizes the
-       completion verdict, so binding the submitting worker is valid. *)
-    Verifier_claim
-      (Masc_domain.bind_verifier
-         ~verifier:agent_name
-         ~assignee
-         ~submitted_at
-         ~verification_id)
+  | Masc_domain.AwaitingVerification
+      { assignee; submitted_at; verification_id; phase = Masc_domain.Awaiting_verifier } ->
+    if same_actor assignee
+    then Self_verification
+    else
+      Verifier_claim
+        (Masc_domain.bind_verifier
+           ~verifier:agent_name
+           ~assignee
+           ~submitted_at
+           ~verification_id)
+  | Masc_domain.AwaitingVerification
+      { phase = Masc_domain.Verifier_assigned { verifier }; _ } ->
+    if same_actor verifier then Self_owned else Held_by_other verifier
   | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
     if same_actor assignee then Self_owned else Held_by_other assignee
   | Masc_domain.Done _ -> Held_terminal task.task_status
@@ -83,14 +92,24 @@ let decide
     if same_agent assignee then ok task_status else Error Invalid_transition
   | Masc_domain.Claim, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Claim
-    , Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ) ->
-    ok
-      ~set_current:task_id
-      (Masc_domain.bind_verifier
-         ~verifier:agent_name
-         ~assignee
-         ~submitted_at
-         ~verification_id)
+    , Masc_domain.AwaitingVerification
+        { assignee; submitted_at; verification_id; phase = Masc_domain.Awaiting_verifier } ) ->
+    if same_agent assignee
+    then Error Verification_self_claim
+    else
+      ok
+        ~set_current:task_id
+        (Masc_domain.bind_verifier
+           ~verifier:agent_name
+           ~assignee
+           ~submitted_at
+           ~verification_id)
+  | ( Masc_domain.Claim
+    , Masc_domain.AwaitingVerification
+        { phase = Masc_domain.Verifier_assigned { verifier }; _ } ) ->
+    if same_agent verifier
+    then ok ~set_current:task_id task_status
+    else Error (Verification_assigned_to verifier)
   | Masc_domain.Claim, Masc_domain.Cancelled _ -> Error Invalid_transition
   | Masc_domain.Start, Masc_domain.Claimed { assignee; _ } ->
     if same_agent assignee
@@ -159,20 +178,32 @@ let decide
       | Masc_domain.Cancelled _ ) ) ->
     Error Invalid_transition
   | ( Masc_domain.Approve_verification
-    , Masc_domain.AwaitingVerification { assignee; verification_id; _ } ) ->
-    let open Result.Syntax in
-    let* () = completion_pass configured_llm_verdict in
-    ok
-      (Masc_domain.Done
-         { assignee
-         ; completed_at = now
-         ; notes =
-             Some
-               (Printf.sprintf
-                  "Configured LLM approved (vrf:%s)%s"
-                  verification_id
-                  (if String.equal notes "" then "" else " — " ^ notes))
-         })
+    , Masc_domain.AwaitingVerification
+        { phase = Masc_domain.Awaiting_verifier; _ } ) ->
+    Error Verification_claim_required
+  | ( Masc_domain.Approve_verification
+    , Masc_domain.AwaitingVerification
+        { assignee
+        ; verification_id
+        ; phase = Masc_domain.Verifier_assigned { verifier }
+        ; _
+        } ) ->
+    if not (same_agent verifier)
+    then Error (Verification_assigned_to verifier)
+    else
+      let open Result.Syntax in
+      let* () = completion_pass configured_llm_verdict in
+      ok
+        (Masc_domain.Done
+           { assignee
+           ; completed_at = now
+           ; notes =
+               Some
+                 (Printf.sprintf
+                    "Configured LLM approved (vrf:%s)%s"
+                    verification_id
+                    (if String.equal notes "" then "" else " — " ^ notes))
+           })
   | ( Masc_domain.Approve_verification
     , ( Masc_domain.Todo
       | Masc_domain.Claimed _
@@ -180,15 +211,24 @@ let decide
       | Masc_domain.Done _
       | Masc_domain.Cancelled _ ) ) ->
     Error Invalid_transition
-  | Masc_domain.Reject_verification, Masc_domain.AwaitingVerification { assignee; _ } ->
-    (match configured_llm_verdict with
-     | Some { decision = Masc_domain.Completion_reject _; _ } ->
-       ok (Masc_domain.InProgress { assignee; started_at = now })
-     | Some { decision = Masc_domain.Completion_pass; _ } ->
-       Error Completion_verdict_action_mismatch
-     | Some { decision = Masc_domain.Completion_verdict_unavailable reason; _ } ->
-       Error (Completion_verdict_unavailable reason)
-     | None -> Error Completion_verdict_required)
+  | ( Masc_domain.Reject_verification
+    , Masc_domain.AwaitingVerification
+        { phase = Masc_domain.Awaiting_verifier; _ } ) ->
+    Error Verification_claim_required
+  | ( Masc_domain.Reject_verification
+    , Masc_domain.AwaitingVerification
+        { assignee; phase = Masc_domain.Verifier_assigned { verifier }; _ } ) ->
+    if not (same_agent verifier)
+    then Error (Verification_assigned_to verifier)
+    else
+      (match configured_llm_verdict with
+       | Some { decision = Masc_domain.Completion_reject _; _ } ->
+         ok (Masc_domain.InProgress { assignee; started_at = now })
+       | Some { decision = Masc_domain.Completion_pass; _ } ->
+         Error Completion_verdict_action_mismatch
+       | Some { decision = Masc_domain.Completion_verdict_unavailable reason; _ } ->
+         Error (Completion_verdict_unavailable reason)
+       | None -> Error Completion_verdict_required)
   | ( Masc_domain.Reject_verification
     , ( Masc_domain.Todo
       | Masc_domain.Claimed _

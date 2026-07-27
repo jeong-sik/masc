@@ -137,6 +137,25 @@ let transition_task_outcome_r
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     "Requested verification transition does not match the configured LLM verdict"))
+          | Error Workspace_task_lifecycle.Verification_claim_required ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "Verification must be claimed before approve/reject; call \
+                     keeper_task_claim with this task_id"))
+          | Error (Workspace_task_lifecycle.Verification_assigned_to verifier) ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "Verification is assigned to %s; %s cannot issue its verdict"
+                       verifier
+                       agent_name)))
+          | Error Workspace_task_lifecycle.Verification_self_claim ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "Submitting worker cannot claim its own verification request"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with

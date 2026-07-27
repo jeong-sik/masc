@@ -221,12 +221,34 @@ export interface KeeperCheckpointSummary {
   } | null
 }
 
+export interface KeeperCheckpointCurrentError {
+  kind: 'store_error' | 'parse_error' | 'io_error' | 'sdk_other_error' | string
+  detail: string
+}
+
+export interface KeeperCheckpointHistoryError {
+  snapshot_id: string
+  source_kind: 'oas_history' | string
+  is_current: false
+  path: string
+  file_stat: {
+    size_bytes?: number
+    mtime?: number
+  } | null
+  status: 'missing' | 'unavailable'
+  error_kind: 'not_found' | 'store_error' | 'parse_error' | 'io_error' | 'sdk_other_error' | string
+  error_detail: string | null
+}
+
 export interface KeeperCheckpointInventory {
   keeper: string
   trace_id: string
   session_dir: string
   current: KeeperCheckpointSummary | null
+  current_status: 'available' | 'missing' | 'unavailable'
+  current_error: KeeperCheckpointCurrentError | null
   history: KeeperCheckpointSummary[]
+  history_errors: KeeperCheckpointHistoryError[]
 }
 
 interface KeeperCheckpointDeleteResponse {

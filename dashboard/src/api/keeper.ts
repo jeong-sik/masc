@@ -102,6 +102,8 @@ export {
 
 // --- Keeper lifecycle (split to keeper-lifecycle.ts) ---
 export type {
+  KeeperCheckpointCurrentError,
+  KeeperCheckpointHistoryError,
   KeeperCheckpointSummary,
   KeeperCheckpointInventory,
   BulkKeeperDirectiveAction,

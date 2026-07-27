@@ -2,6 +2,7 @@ open Alcotest
 open Masc
 module Trace = Server_dashboard_http_keeper_api_trace
 module Types = Server_dashboard_http_keeper_api_types
+module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
 module Runtime_lens_scan = Server_dashboard_http_keeper_runtime_manifest_scan
 module Runtime_lens_swimlane = Server_dashboard_http_keeper_runtime_lens_swimlane
 module T = Trajectory
@@ -365,6 +366,167 @@ let test_tool_runtime_zero_event_lane_is_not_observed () =
     (string_member "completeness" json)
 ;;
 
+let make_checkpoint_inventory_meta ~name ~trace_id =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
+        ; "trace_id", `String trace_id
+        ])
+  with
+  | Ok meta -> meta
+  | Error detail -> fail ("checkpoint inventory meta fixture failed: " ^ detail)
+;;
+
+let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
+  Agent_sdk.Checkpoint.
+    { version = checkpoint_version
+    ; session_id
+    ; agent_name = "checkpoint-inventory-test"
+    ; model = "opaque-runtime"
+    ; system_prompt = None
+    ; messages = []
+    ; usage = Agent_sdk.Types.empty_usage
+    ; turn_count
+    ; created_at
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_sdk.Types.Off
+    ; thinking_budget = None
+    ; cache_system_prompt = false
+    ; context = Agent_sdk.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+;;
+
+let check_checkpoint_error_projection error ~status ~kind ~detail =
+  let open Yojson.Safe.Util in
+  let json = Checkpoints.checkpoint_load_error_json error in
+  check string "checkpoint status" status (json |> member "status" |> to_string);
+  check string "checkpoint error kind" kind (json |> member "error_kind" |> to_string);
+  check (option string)
+    "checkpoint error detail"
+    detail
+    (json |> member "error_detail" |> to_string_option)
+;;
+
+let test_checkpoint_load_error_projection_is_total () =
+  let module Store = Keeper_checkpoint_store in
+  check_checkpoint_error_projection
+    Store.Not_found
+    ~status:"missing"
+    ~kind:"not_found"
+    ~detail:None;
+  check_checkpoint_error_projection
+    (Store.Store_error "store unavailable")
+    ~status:"unavailable"
+    ~kind:"store_error"
+    ~detail:(Some "store unavailable");
+  check_checkpoint_error_projection
+    (Store.Parse_error "invalid checkpoint")
+    ~status:"unavailable"
+    ~kind:"parse_error"
+    ~detail:(Some "invalid checkpoint");
+  check_checkpoint_error_projection
+    (Store.Io_error "permission denied")
+    ~status:"unavailable"
+    ~kind:"io_error"
+    ~detail:(Some "permission denied");
+  check_checkpoint_error_projection
+    (Store.Sdk_other_error "sdk failure")
+    ~status:"unavailable"
+    ~kind:"sdk_other_error"
+    ~detail:(Some "sdk failure")
+;;
+
+let test_checkpoint_inventory_preserves_partial_load_failures () =
+  with_temp_dir @@ fun dir ->
+  let config = Workspace.default_config dir in
+  let keeper_name = "checkpoint-inventory" in
+  let trace_id = "trace-checkpoint-inventory" in
+  Keeper_meta_store.write_meta
+    config
+    (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))
+  |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  let current = make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:2.0 in
+  (match Keeper_checkpoint_store.save_oas_classified ~session_dir current with
+   | Ok _ -> ()
+   | Error detail -> fail ("checkpoint inventory current save failed: " ^ detail));
+  let corrupt_history =
+    make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:1.0
+  in
+  let corrupt_snapshot_id =
+    Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint corrupt_history
+  in
+  let corrupt_path =
+    Keeper_checkpoint_store.oas_history_path
+      ~session_dir
+      ~snapshot_id:corrupt_snapshot_id
+  in
+  Fs_compat.mkdir_p (Filename.dirname corrupt_path);
+  Fs_compat.save_file corrupt_path "{not-a-checkpoint";
+  let status, json = Checkpoints.inventory_json config keeper_name in
+  check bool "partial checkpoint inventory remains HTTP 200" true (status = `OK);
+  let open Yojson.Safe.Util in
+  check string
+    "current checkpoint remains available"
+    "available"
+    (json |> member "current_status" |> to_string);
+  check bool "available current has no error" true
+    (json |> member "current_error" = `Null);
+  let history = json |> member "history" |> to_list in
+  check int "corrupt history is not mixed with summaries" 0 (List.length history);
+  let history_errors = json |> member "history_errors" |> to_list in
+  check int "corrupt history remains visible" 1 (List.length history_errors);
+  let failed = List.hd history_errors in
+  check string
+    "history failure is unavailable"
+    "unavailable"
+    (failed |> member "status" |> to_string);
+  check string
+    "history failure preserves typed parse kind"
+    "parse_error"
+    (failed |> member "error_kind" |> to_string);
+  check bool
+    "history failure preserves diagnostic detail"
+    true
+    (failed |> member "error_detail" |> to_string |> String.length > 0)
+;;
+
+let test_checkpoint_inventory_projects_missing_current () =
+  with_temp_dir @@ fun dir ->
+  let config = Workspace.default_config dir in
+  let keeper_name = "checkpoint-missing" in
+  let trace_id = "trace-checkpoint-missing" in
+  Keeper_meta_store.write_meta
+    config
+    (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))
+  |> Result.get_ok;
+  let status, json = Checkpoints.inventory_json config keeper_name in
+  check bool "missing current inventory remains HTTP 200" true (status = `OK);
+  let open Yojson.Safe.Util in
+  check bool "missing current remains null" true (json |> member "current" = `Null);
+  check string
+    "missing current is explicit"
+    "missing"
+    (json |> member "current_status" |> to_string);
+  check bool "normal missing current has no error" true
+    (json |> member "current_error" = `Null)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
@@ -406,6 +568,20 @@ let () =
             "surfaces retired and unsupported rows without repeated warnings"
             `Quick
             test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings
+        ] )
+    ; ( "checkpoint_inventory"
+      , [ test_case
+            "projects every typed checkpoint load error"
+            `Quick
+            test_checkpoint_load_error_projection_is_total
+        ; test_case
+            "preserves partial history failures with HTTP 200"
+            `Quick
+            test_checkpoint_inventory_preserves_partial_load_failures
+        ; test_case
+            "projects missing current without failing inventory"
+            `Quick
+            test_checkpoint_inventory_projects_missing_current
         ] )
     ]
 ;;

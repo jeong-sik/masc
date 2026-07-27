@@ -24,6 +24,7 @@ let oas_checkpoint_summary_json
     [ "snapshot_id", `String snapshot_id
     ; "source_kind", `String source_kind
     ; "is_current", `Bool is_current
+    ; "status", `String "available"
     ; "path", `String path
     ; "created_at", `Float checkpoint.created_at
     ; "generation", `Int generation
@@ -36,6 +37,60 @@ let oas_checkpoint_summary_json
     ; ( "latest_preview", Json_util.string_opt_to_json (latest_preview_of_messages messages) )
     ; "file_stat", stat_json_of_path path
     ]
+;;
+
+let checkpoint_load_error_json
+      (error : Keeper_checkpoint_store.checkpoint_load_error)
+  =
+  let status, kind, detail =
+    match error with
+    | Not_found -> "missing", "not_found", `Null
+    | Store_error detail -> "unavailable", "store_error", `String detail
+    | Parse_error detail -> "unavailable", "parse_error", `String detail
+    | Io_error detail -> "unavailable", "io_error", `String detail
+    | Sdk_other_error detail ->
+      "unavailable", "sdk_other_error", `String detail
+  in
+  `Assoc
+    [ "status", `String status
+    ; "error_kind", `String kind
+    ; "error_detail", detail
+    ]
+;;
+
+let current_checkpoint_error_json
+      (error : Keeper_checkpoint_store.checkpoint_load_error)
+  =
+  match error with
+  | Not_found -> `Null
+  | Store_error detail ->
+    `Assoc [ "kind", `String "store_error"; "detail", `String detail ]
+  | Parse_error detail ->
+    `Assoc [ "kind", `String "parse_error"; "detail", `String detail ]
+  | Io_error detail ->
+    `Assoc [ "kind", `String "io_error"; "detail", `String detail ]
+  | Sdk_other_error detail ->
+    `Assoc [ "kind", `String "sdk_other_error"; "detail", `String detail ]
+;;
+
+let checkpoint_load_failure_json
+      ~(source_kind : string)
+      ~(snapshot_id : string)
+      ~(path : string)
+      ~(is_current : bool)
+      (error : Keeper_checkpoint_store.checkpoint_load_error)
+  =
+  let identity_fields =
+    [ "snapshot_id", `String snapshot_id
+    ; "source_kind", `String source_kind
+    ; "is_current", `Bool is_current
+    ; "path", `String path
+    ; "file_stat", stat_json_of_path path
+    ]
+  in
+  match checkpoint_load_error_json error with
+  | `Assoc error_fields -> `Assoc (identity_fields @ error_fields)
+  | _ -> assert false
 ;;
 
 let inventory_json (config : Workspace.config) (name : string)
@@ -52,7 +107,7 @@ let inventory_json (config : Workspace.config) (name : string)
     let current_path =
       Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:trace_id
     in
-    let current_json =
+    let current_json, current_history_snapshot_id, current_status, current_error =
       match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:trace_id with
       | Ok checkpoint ->
         let current_history_snapshot_id =
@@ -65,30 +120,49 @@ let inventory_json (config : Workspace.config) (name : string)
           ~is_current:true
           ~fallback_generation:meta.runtime.nonce
           checkpoint
-        |> fun json -> Some (json, current_history_snapshot_id)
-      | Error _ -> None
+        |> fun json -> Some json, current_history_snapshot_id, "available", `Null
+      | Error error ->
+        let status =
+          match error with
+          | Keeper_checkpoint_store.Not_found -> "missing"
+          | Store_error _ | Parse_error _ | Io_error _ | Sdk_other_error _ ->
+            "unavailable"
+        in
+        None, "", status, current_checkpoint_error_json error
     in
-    let history_json =
+    let history_json, history_errors =
       Keeper_checkpoint_store.list_oas_history_files ~session_dir
       |> List.filter (fun snapshot_id ->
-        match current_json with
-        | Some (_json, current_history_snapshot_id) ->
-          snapshot_id <> current_history_snapshot_id
-        | None -> true)
-      |> List.filter_map (fun snapshot_id ->
-        match
-          Keeper_checkpoint_store.load_oas_history_file ~session_dir ~snapshot_id
-        with
-        | Ok checkpoint ->
-          Some
-            (oas_checkpoint_summary_json
-               ~source_kind:"oas_history"
-               ~snapshot_id
-               ~path:(Keeper_checkpoint_store.oas_history_path ~session_dir ~snapshot_id)
-               ~is_current:false
-               ~fallback_generation:meta.runtime.nonce
-               checkpoint)
-        | Error _ -> None)
+        snapshot_id <> current_history_snapshot_id)
+      |> List.fold_left
+           (fun (available, failures) snapshot_id ->
+             let path =
+               Keeper_checkpoint_store.oas_history_path ~session_dir ~snapshot_id
+             in
+             match
+               Keeper_checkpoint_store.load_oas_history_file ~session_dir ~snapshot_id
+             with
+             | Ok checkpoint ->
+               ( oas_checkpoint_summary_json
+                   ~source_kind:"oas_history"
+                   ~snapshot_id
+                   ~path
+                   ~is_current:false
+                   ~fallback_generation:meta.runtime.nonce
+                   checkpoint
+                 :: available
+               , failures )
+             | Error error ->
+               ( available
+               , checkpoint_load_failure_json
+                   ~source_kind:"oas_history"
+                   ~snapshot_id
+                   ~path
+                   ~is_current:false
+                   error
+                 :: failures ))
+           ([], [])
+      |> fun (available, failures) -> List.rev available, List.rev failures
     in
     ( `OK
     , `Assoc
@@ -97,9 +171,12 @@ let inventory_json (config : Workspace.config) (name : string)
         ; "session_dir", `String session_dir
         ; ( "current"
           , match current_json with
-            | Some (json, _snapshot_id) -> json
+            | Some json -> json
             | None -> `Null )
+        ; "current_status", `String current_status
+        ; "current_error", current_error
         ; "history", `List history_json
+        ; "history_errors", `List history_errors
         ] )
 ;;
 

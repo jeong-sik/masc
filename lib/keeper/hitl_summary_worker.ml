@@ -953,15 +953,17 @@ let execute_prepared_flow_with_queue_ops_current
       Executed
     | Error
         (Exact_output.Flow_execution_terminal
-           { cause = Exact_output.Flow_candidates_exhausted _; _ })
-      when Option.is_some !bound_candidate ->
-      let candidate = Option.get !bound_candidate in
-      record_outcome "exact_domain_invalid_output";
-      quarantine_candidate
-        ~queue_ops
-        prepared.entry
-        candidate
-        Exact_domain_invalid_output;
+           { cause = (Exact_output.Flow_candidates_exhausted _ as cause); _ }) ->
+      (match !bound_candidate with
+       | Some candidate ->
+         record_outcome "exact_domain_invalid_output";
+         quarantine_candidate
+           ~queue_ops
+           prepared.entry
+           candidate
+           Exact_domain_invalid_output
+       | None ->
+         handle_flow_error ~queue_ops prepared cause);
       Executed
     | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
       handle_flow_error ~queue_ops prepared cause;

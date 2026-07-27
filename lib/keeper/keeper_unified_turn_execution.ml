@@ -188,7 +188,7 @@ let run (ctx : ctx)
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
                  ~generation:run_generation
-                 ~history_user_source:"world_state_prompt"
+                 ~history_user_source:"autonomous_user"
                  (* RFC-0351 section 5 / #25462: on this lane the user turn is
                     the wake marker constant unless a HITL resolution was
                     appended to it. A bare marker carries nothing forward — the
@@ -197,7 +197,7 @@ let run (ctx : ctx)
                  ~user_turn_record:
                    (Keeper_run_prompt.user_turn_record_of_hitl_resolution
                       hitl_resolution)
-                 ~history_assistant_source:"internal_assistant"
+                 ~history_assistant_source:"autonomous_assistant"
                  ~degraded_retry_applied:
                    (Option.is_some turn_state.degraded_retry_info)
                  ?degraded_retry_runtime:

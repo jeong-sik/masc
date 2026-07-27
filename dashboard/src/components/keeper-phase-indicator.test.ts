@@ -60,16 +60,16 @@ describe('PHASE_STYLES', () => {
 // ================================================================
 
 describe('getPhaseStyle', () => {
-  it('returns Offline for null', () => {
-    expect(getPhaseStyle(null).label).toBe('오프라인')
+  it('returns the unknown style for null', () => {
+    expect(getPhaseStyle(null).label).toBe('확인 필요')
   })
 
-  it('returns Offline for undefined', () => {
-    expect(getPhaseStyle(undefined).label).toBe('오프라인')
+  it('returns the unknown style for undefined', () => {
+    expect(getPhaseStyle(undefined).label).toBe('확인 필요')
   })
 
-  it('returns Offline for empty string', () => {
-    expect(getPhaseStyle('').label).toBe('오프라인')
+  it('returns the unknown style for empty string', () => {
+    expect(getPhaseStyle('').label).toBe('확인 필요')
   })
 
   it('returns correct style for Running (ok group)', () => {
@@ -100,8 +100,8 @@ describe('getPhaseStyle', () => {
     expect(tones[0]).toBe('var(--color-accent-fg)')
   })
 
-  it('returns Offline for unknown phase string', () => {
-    expect(getPhaseStyle('UnknownPhase').label).toBe('오프라인')
+  it('returns the unknown style for an unrecognized phase string', () => {
+    expect(getPhaseStyle('UnknownPhase').label).toBe('확인 필요')
   })
 
   it('returns correct style for all phases', () => {

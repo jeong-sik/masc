@@ -2,6 +2,9 @@ import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import { relativeTime } from './format-time'
 import { firstNonEmptyString } from './format-string'
 import { isKeeperPaused } from './keeper-predicates'
+// `fleet-tone` is leaf-level (it imports only `format-string`), so this
+// direction introduces no cycle.
+import { toKeeperPhaseToken, type KeeperPhaseToken } from './fleet-tone'
 import { HEARTBEAT_STALE_MS } from '../config/constants'
 
 /** Max seconds since last heartbeat to consider the keeper process alive. */
@@ -252,7 +255,19 @@ export function keeperActivityDisplay(
   }
 }
 
-export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
+/** The keeper status token every display surface keys on.
+ *
+ *  Returns `KeeperPhaseToken`, not `string`. Until 2026-07-27 this returned
+ *  `string` and passed unmodelled values (`'idle'`, `'listening'`,
+ *  `'handingoff'`, `'offline'`, and any unrecognized `keeper.status`)
+ *  straight through; `phaseTokenFromKeeper` then collapsed them to
+ *  `'unknown'`, which the roster and chat header render as `확인 필요`.
+ *  Narrowing the return type moves that from a runtime collapse to a
+ *  compile error at whichever arm produces a new value. */
+export function keeperDisplayStatus(
+  keeper: Keeper | null | undefined,
+  fallbackStatus?: string | null,
+): KeeperPhaseToken {
   if (keeper && isKeeperPaused(keeper)) return 'paused'
   const lifecycleStatus = keeperLifecycleStatus(keeper?.lifecycle_phase)
   // Honor the FSM phase first: a Running keeper whose status field says
@@ -266,10 +281,12 @@ export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackS
     return refineOfflineStatus(keeper)
   }
 
-  return status && status.trim() !== '' ? status : 'unknown'
+  return toKeeperPhaseToken(status) ?? 'unknown'
 }
 
-function keeperLifecycleStatus(phase: Keeper['lifecycle_phase'] | string | null | undefined): string | null {
+function keeperLifecycleStatus(
+  phase: Keeper['lifecycle_phase'] | string | null | undefined,
+): KeeperPhaseToken | null {
   switch (phase) {
     case 'Offline':
       return 'unbooted'
@@ -398,7 +415,7 @@ export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
 /** Distinguish "never booted" from "was running but stopped" keepers.
  *  Reconciles heartbeat liveness with agent registration status:
  *  if heartbeat is recent but agent is offline, shows phase instead of "offline". */
-function refineOfflineStatus(keeper: Keeper | null | undefined): string {
+function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToken {
   if (!keeper) return 'offline'
 
   // Heartbeat alive but agent offline — keepalive fiber is running.
@@ -417,8 +434,17 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): string {
   // only the 13 PascalCase phases, none of which lowercase to
   // `'inactive'`), so the guard was dead defensive.
   if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {
-    const phase = (keeper.lifecycle_phase ?? keeper.phase)?.trim().toLowerCase()
-    if (phase && phase !== 'offline') return phase
+    // Route through `keeperLifecycleStatus`, not `.toLowerCase()`. The
+    // PascalCase phase names are not their own tokens: `'HandingOff'`
+    // lowercases to `'handingoff'`, but the token is `'handoff'`. It was
+    // the only multi-word phase, so it was the only one that broke — a
+    // handing-off keeper rendered as `확인 필요` while `Compacting` (one
+    // word, so `.toLowerCase()` happened to land on its token) rendered
+    // correctly. Unrecognized phases still fall through to `'idle'`.
+    const phase = (keeper.lifecycle_phase ?? keeper.phase)?.trim()
+    if (phase && phase.toLowerCase() !== 'offline') {
+      return keeperLifecycleStatus(phase) ?? toKeeperPhaseToken(phase) ?? 'idle'
+    }
     return 'idle'
   }
 

@@ -105,6 +105,18 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
            | None -> meta.telemetry_feedback_window_hours)
       }
 
+(** Current-schema [keeper_meta] JSON exactly as the production writer emits it.
+
+    Schema-conformance tests use this instead of a hand-written object so the
+    fixture cannot drift from the writer: the only caller-supplied value is the
+    name, and every other key comes from [meta_to_json]. A fixture that stopped
+    matching the schema would therefore be a writer change, not a stale literal. *)
+let current_meta_json_fixture ~name () =
+  match meta_of_json_fixture (`Assoc [ ("name", `String name) ]) with
+  | Ok meta -> Masc.Keeper_meta_json.meta_to_json meta
+  | Error detail ->
+    failwith ("current_meta_json_fixture could not build current meta: " ^ detail)
+
 (** Persist a current-schema fixture. An absent row is created only through a
     fresh, admission-scoped lifecycle nonce witness; an existing row uses the
     ordinary identity-preserving write path. *)

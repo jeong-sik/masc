@@ -1954,6 +1954,15 @@ let () =
        in
        if not (Tool_result.is_success submit_result) then
          failwith (Tool_result.message submit_result);
+       let claim_result =
+         Task.Tool.handle_claim
+           ~tool_name:"keeper_task_claim"
+           ~start_time:0.0
+           verifier_ctx
+           (`Assoc [ "task_id", `String "task-001" ])
+       in
+       if not (Tool_result.is_success claim_result) then
+         failwith (Tool_result.message claim_result);
        let result =
          keeper_transition
            verifier_ctx

@@ -196,12 +196,18 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
   // verdicts settled invisibly until the 120-180s periodic sweep. Full-surface
   // reverse parity remains the closed-sum keystone's job; this pins the one
   // class the HITL queue's liveness depends on.
-  const backendApprovalEvents = [
-    ...new Set(
-      readFileSync(resolve(process.cwd(), '../lib/keeper/keeper_approval_queue.ml'), 'utf8')
-        .matchAll(/"(approval:[a-z_]+)"/g),
-    ),
-  ].map(match => match[1])
+  const backendApprovalEvents = ((): string[] => {
+    const source = readFileSync(
+      resolve(process.cwd(), '../lib/keeper/keeper_approval_queue.ml'),
+      'utf8',
+    )
+    const found = new Set<string>()
+    for (const match of source.matchAll(/"(approval:[a-z_]+)"/g)) {
+      const eventType = match[1]
+      if (eventType !== undefined) found.add(eventType)
+    }
+    return [...found]
+  })()
 
   it('parses a non-empty backend approval:* inventory', () => {
     // Positive control: a rename or regex drift that matches nothing must fail

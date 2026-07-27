@@ -1,9 +1,6 @@
 (** Dashboard compute-runtime bindings extracted from
     {!Server_dashboard_http_core}. *)
 
-val set_executor_pool : Eio.Executor_pool.t -> unit
-(** Register the dashboard executor pool. *)
-
 val dashboard_runtime :
   ?net:Eio_context.eio_net ->
   ?mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->

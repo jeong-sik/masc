@@ -152,7 +152,10 @@ let handle_get_status (workspace_config : Workspace_utils_backend_setup.config) 
 
 (** ToolCall handler: dispatch an MCP tool call via gRPC. *)
 let handle_tool_call
-      (tool_dispatcher : string -> string -> (string, string) result)
+      (tool_dispatcher :
+         string ->
+         string ->
+         (string, Server_grpc_tool_dispatch.error) result)
       (bytes : string)
   : string
   =
@@ -164,9 +167,15 @@ let handle_tool_call
     | Ok result_json ->
       T.ToolCallResponse.
         { success = true; result_json; error_message = ""; error_code = 0 }
-    | Error msg ->
+    | Error error ->
       T.ToolCallResponse.
-        { success = false; result_json = ""; error_message = msg; error_code = Mcp_error_code.(to_wire_code Internal_error) }
+        { success = false
+        ; result_json = ""
+        ; error_message = Server_grpc_tool_dispatch.error_message error
+        ; error_code =
+            Server_grpc_tool_dispatch.error_code error
+            |> Mcp_error_code.to_wire_code
+        }
   in
   T.ToolCallResponse.to_bytes result
 ;;
@@ -559,13 +568,15 @@ let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (
 (** Create the gRPC service with all handlers wired to the given workspace config.
 
     @param workspace_config The MASC workspace configuration.
-    @param tool_dispatcher Function that dispatches tool calls:
-      [tool_name -> arguments_json -> (result_json, error_message) result].
+    @param tool_dispatcher Function that dispatches typed tool calls.
     @param lsp_dispatcher Function that forwards LSP JSON-RPC requests:
       [language_id -> jsonrpc_request_json -> workspace_root -> (response_json, error) result]. *)
 let create_service
       ~(workspace_config : Workspace_utils_backend_setup.config)
-      ~(tool_dispatcher : string -> string -> (string, string) result)
+      ~(tool_dispatcher :
+         string ->
+         string ->
+         (string, Server_grpc_tool_dispatch.error) result)
       ~(lsp_dispatcher :
           language_id:string
           -> jsonrpc_request_json:string

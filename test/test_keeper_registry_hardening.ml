@@ -15,6 +15,12 @@ module Lane = Masc.Keeper_lane
 
 let base_path = "/tmp/test_keeper_registry_hardening"
 
+let registry_snapshot ~base_path keeper_name =
+  match Masc.Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Ok queue -> queue
+  | Error detail -> fail detail
+;;
+
 let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -377,15 +383,10 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
            (Atomic.get captured.fiber_wakeup);
          let replacement_meta = make_meta captured.name in
          let replacement =
-           match
-             KR.register_offline_if_admitted_for_lifecycle
-               token
-               ~base_path
-               captured.name
-               replacement_meta
-           with
-           | Ok replacement -> replacement
-           | Error _ -> fail "lifecycle owner could not install replacement lane"
+           KR.For_testing.register
+             ~base_path
+             replacement_meta.name
+             replacement_meta
          in
          Atomic.set replacement.fiber_wakeup false;
          (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
@@ -497,7 +498,7 @@ let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
        check bool "offline reactive wake flag remains clear" false
          (Atomic.get entry.fiber_wakeup);
        match
-         Masc.Keeper_registry_event_queue.snapshot ~base_path:dir meta.name
+         registry_snapshot ~base_path:dir meta.name
          |> Keeper_event_queue.to_list
        with
        | [ { post_id; payload = Keeper_event_queue.Bootstrap; _ } ] ->
@@ -534,7 +535,7 @@ let test_goal_assignment_defers_offline_lane_after_queue_commit () =
        check bool "offline goal wake flag remains clear" false
          (Atomic.get entry.fiber_wakeup);
        match
-         Masc.Keeper_registry_event_queue.snapshot
+         registry_snapshot
            ~base_path:config.base_path
            meta.name
          |> Keeper_event_queue.to_list

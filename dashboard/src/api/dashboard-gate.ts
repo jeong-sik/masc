@@ -10,6 +10,8 @@ import type {
   DashboardGateResponse,
   KeeperApprovalQueueItem,
   KeeperResolvedApprovalItem,
+  KeeperApprovalQueueState,
+  KeeperAutoJudgeRearmExpectation,
   GateDecisionSource,
   GateMode,
   GateModeStatus,
@@ -18,6 +20,51 @@ import type { AbortableRequestOptions } from './core'
 
 export interface FetchDashboardGateOptions extends AbortableRequestOptions {
   force?: boolean
+}
+
+function gateSnapshotProtocolDrift(detail: string): never {
+  throw new ApiRequestError({
+    method: 'GET',
+    path: '/api/v1/dashboard/gate',
+    detail: `invalid Dashboard Gate response: ${detail}`,
+    errorCode: 'protocol_drift',
+  })
+}
+
+export function decodeKeeperApprovalQueueState(
+  raw: unknown,
+): Exclude<KeeperApprovalQueueState, { state: 'observation_error' }> | null {
+  if (!isRecord(raw)) return null
+  if (raw.state === 'ready' && Object.keys(raw).length === 1) {
+    return { state: 'ready' }
+  }
+  if (
+    raw.state === 'unavailable'
+    && raw.code === 'reset_required'
+    && typeof raw.title === 'string'
+    && raw.title.trim() !== ''
+    && typeof raw.operator_detail === 'string'
+    && raw.operator_detail.trim() !== ''
+    && raw.severity === 'bad'
+    && raw.icon === '!'
+    && Object.keys(raw).length === 6
+  ) {
+    return {
+      state: 'unavailable',
+      code: 'reset_required',
+      title: raw.title.trim(),
+      operator_detail: raw.operator_detail.trim(),
+      severity: 'bad',
+      icon: '!',
+    }
+  }
+  return null
+}
+
+function normalizeApprovalQueueState(raw: unknown): KeeperApprovalQueueState {
+  const state = decodeKeeperApprovalQueueState(raw)
+  if (state) return state
+  return gateSnapshotProtocolDrift('approval_queue_state is not a current closed variant')
 }
 
 function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
@@ -113,11 +160,23 @@ export function fetchDashboardGate(
     const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/gate${query}`, {
       signal: opts?.signal,
     })
-    const approvalQueue = Array.isArray(raw.approval_queue)
-      ? raw.approval_queue
-          .map(item => normalizeKeeperApprovalQueueItem(item))
-          .filter((item): item is KeeperApprovalQueueItem => item !== null)
-      : []
+    const approvalQueueState = normalizeApprovalQueueState(raw.approval_queue_state)
+    let approvalQueue: KeeperApprovalQueueItem[] | null
+    if (approvalQueueState.state === 'unavailable') {
+      if (raw.approval_queue !== null) {
+        return gateSnapshotProtocolDrift('unavailable approval_queue must be null')
+      }
+      approvalQueue = null
+    } else {
+      if (!Array.isArray(raw.approval_queue)) {
+        return gateSnapshotProtocolDrift('ready approval_queue must be an array')
+      }
+      const normalized = raw.approval_queue.map(item => normalizeKeeperApprovalQueueItem(item))
+      if (normalized.some(item => item === null)) {
+        return gateSnapshotProtocolDrift('approval_queue contains a contract-violating row')
+      }
+      approvalQueue = normalized as KeeperApprovalQueueItem[]
+    }
     const recentResolved = Array.isArray(raw.recent_resolved)
       ? raw.recent_resolved
           .map(item => normalizeKeeperResolvedApprovalItem(item))
@@ -132,6 +191,7 @@ export function fetchDashboardGate(
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
       note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
       approval_queue: approvalQueue,
+      approval_queue_state: approvalQueueState,
       recent_resolved: recentResolved,
       approval_rules: approvalRules,
       hitl: normalizeHitlStatus(raw.hitl),
@@ -157,8 +217,9 @@ export function resolveGateApproval(
 
 export function retryGateAutoJudge(
   id: string,
+  expected: KeeperAutoJudgeRearmExpectation,
 ): Promise<{ ok: boolean; id: string }> {
-  return post('/api/v1/dashboard/gate/retry', { id })
+  return post('/api/v1/dashboard/gate/retry', { id, ...expected })
 }
 
 export function deleteGateApprovalRule(
@@ -175,7 +236,6 @@ export interface SetGateModeResponse {
   changed_at: string
   recovery_status: 'completed' | 'failed' | 'not_requested'
   recovery_error: string | null
-  reopened: number
   started: number
   queued: number
   replaced_read_error?: string
@@ -189,7 +249,6 @@ const SET_GATE_MODE_RESPONSE_FIELDS = new Set([
   'changed_at',
   'recovery_status',
   'recovery_error',
-  'reopened',
   'started',
   'queued',
   'replaced_read_error',
@@ -244,7 +303,6 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
     : typeof raw.recovery_error === 'string' && raw.recovery_error.trim() !== ''
       ? raw.recovery_error
       : gateModeProtocolDrift('recovery_error must be null or a non-empty string')
-  const reopened = nonNegativeSafeInteger(raw.reopened, 'reopened')
   const started = nonNegativeSafeInteger(raw.started, 'started')
   const queued = nonNegativeSafeInteger(raw.queued, 'queued')
 
@@ -253,12 +311,12 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
   }
   if (status === 'failed'
       && (mode !== 'auto_judge' || recoveryError === null
-        || reopened !== 0 || started !== 0 || queued !== 0)) {
+        || started !== 0 || queued !== 0)) {
     return gateModeProtocolDrift('failed recovery requires auto_judge mode, an error, and zero counts')
   }
   if (status === 'not_requested'
       && (mode === 'auto_judge' || recoveryError !== null
-        || reopened !== 0 || started !== 0 || queued !== 0)) {
+        || started !== 0 || queued !== 0)) {
     return gateModeProtocolDrift('not_requested recovery requires a non-auto mode and zero outcome')
   }
 
@@ -276,7 +334,6 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
     changed_at: changedAt,
     recovery_status: status,
     recovery_error: recoveryError,
-    reopened,
     started,
     queued,
     ...(typeof replacedReadError === 'string'

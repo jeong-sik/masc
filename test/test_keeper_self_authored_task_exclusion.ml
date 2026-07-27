@@ -24,11 +24,11 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error message -> Alcotest.fail ("meta fixture rejected: " ^ message)
 ;;
 
-let task ?created_by id : Masc_domain.task =
+let task ?created_by ?(task_status = Masc_domain.Todo) id : Masc_domain.task =
   { id
   ; title = "Task " ^ id
   ; description = ""
-  ; task_status = Todo
+  ; task_status
   ; priority = 3
   ; files = []
   ; created_at = "2026-07-20T00:00:00Z"
@@ -44,12 +44,14 @@ let task ?created_by id : Masc_domain.task =
 
 (* [created_by] carries the keeper handle ([meta.name]), which is what the live
    backlog records ("taskmaster"), not the agent name. *)
-let test_own_task_is_self_authored () =
+let test_own_todo_is_self_authored () =
   let meta = make_meta "taskmaster" in
   Alcotest.(check bool)
     "a task authored by this keeper is self-authored"
     true
-    (WOI.task_is_self_authored ~meta (task ~created_by:"taskmaster" "task-1"))
+    (WOI.task_is_self_authored_todo
+       ~meta
+       (task ~created_by:"taskmaster" "task-1"))
 ;;
 
 let test_other_keeper_task_is_not_self_authored () =
@@ -57,7 +59,9 @@ let test_other_keeper_task_is_not_self_authored () =
   Alcotest.(check bool)
     "a task authored by another keeper is not self-authored"
     false
-    (WOI.task_is_self_authored ~meta (task ~created_by:"executor" "task-2"))
+    (WOI.task_is_self_authored_todo
+       ~meta
+       (task ~created_by:"executor" "task-2"))
 ;;
 
 (* An unattributed task has no known author, so it must stay claimable rather
@@ -67,7 +71,7 @@ let test_unattributed_task_is_not_self_authored () =
   Alcotest.(check bool)
     "a task with no created_by is never excluded"
     false
-    (WOI.task_is_self_authored ~meta (task "task-3"))
+    (WOI.task_is_self_authored_todo ~meta (task "task-3"))
 ;;
 
 (* The agent name must not be mistaken for the author key: the live backlog
@@ -78,16 +82,34 @@ let test_agent_name_is_not_the_author_key () =
   Alcotest.(check bool)
     "agent-name-shaped author does not match the keeper handle"
     false
-    (WOI.task_is_self_authored
+    (WOI.task_is_self_authored_todo
        ~meta
        (task ~created_by:"keeper-taskmaster-agent" "task-4"))
+;;
+
+let test_self_authored_verification_remains_eligible () =
+  let meta = make_meta "taskmaster" in
+  let task_status =
+    Masc_domain.AwaitingVerification
+      { assignee = "executor"
+      ; submitted_at = "2026-07-20T01:00:00Z"
+      ; verification_id = "verification-1"
+      ; phase = Masc_domain.Awaiting_verifier
+      }
+  in
+  Alcotest.(check bool)
+    "the task author may verify work submitted by another keeper"
+    false
+    (WOI.task_is_self_authored_todo
+       ~meta
+       (task ~created_by:"taskmaster" ~task_status "task-5"))
 ;;
 
 let () =
   Alcotest.run
     "keeper_self_authored_task_exclusion"
-    [ ( "task_is_self_authored"
-      , [ Alcotest.test_case "own task" `Quick test_own_task_is_self_authored
+    [ ( "task_is_self_authored_todo"
+      , [ Alcotest.test_case "own Todo" `Quick test_own_todo_is_self_authored
         ; Alcotest.test_case
             "other keeper task"
             `Quick
@@ -100,6 +122,10 @@ let () =
             "agent name is not the author key"
             `Quick
             test_agent_name_is_not_the_author_key
+        ; Alcotest.test_case
+            "self-authored verification remains eligible"
+            `Quick
+            test_self_authored_verification_remains_eligible
         ] )
     ]
 ;;

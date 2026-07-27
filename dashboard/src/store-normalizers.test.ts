@@ -442,8 +442,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       paused_keepers_health: {
         count: 3,
         names: ['analyst', 'base', 'sangsu'],
-        running_count: 0,
-        running_names: [],
         durable_count: 3,
         durable_names: ['analyst', 'base', 'sangsu'],
         autoboot_enabled_count: 3,
@@ -462,31 +460,42 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         read_error_count: 0,
         read_errors: [],
       },
-      keeper_fleet_no_fibers: false,
       keeper_fleet_safety: {
+        schema: 'masc.keeper_fleet_operator.v1',
         status: 'blocked',
-        blocker: 'no_running_fibers',
+        blocker: 'no_executable_keeper_fibers',
         bootable_keeper_count: 1,
         running_keeper_fiber_count: 0,
-        healthy_running_keeper_fiber_count: 0,
         failing_keeper_fiber_count: 0,
+        recovering_keeper_fiber_count: 2,
         executable_keeper_fiber_count: 0,
-        minimum_running_fibers: 1,
-        no_running_fibers: true,
         no_executable_keeper_fibers: true,
-        low_running_fiber_margin: false,
         reaction_capacity_below_target: true,
         reaction_capacity_shortfall_count: 14,
-        executable_reaction_capacity_below_target: true,
-        executable_reaction_capacity_shortfall_count: 14,
         paused_keeper_count: 13,
         autoboot_enabled_keeper_count: 14,
         paused_autoboot_enabled_keeper_count: 13,
-        effective_reaction_capacity_count: 0,
-        executable_reaction_capacity_count: 0,
         target_reaction_capacity_count: 14,
         operator_action_required: true,
-        blocked_keepers: 24,
+        blocked_keeper_count: 2,
+        blocked_keepers: [
+          {
+            keeper_name: 'analyst',
+            reason: 'durable_paused_autoboot_enabled',
+            action: 'resume_or_leave_paused',
+            operator_action_type: null,
+            operator_tool_name: null,
+            operator_action_confirm_required: null,
+          },
+          {
+            keeper_name: 'rondo',
+            reason: 'phase_restarting',
+            action: 'wait_for_keeper_restart',
+            operator_action_type: null,
+            operator_tool_name: null,
+            operator_action_confirm_required: null,
+          },
+        ],
       },
       keeper_reaction_ledger: {
         status: 'ok',
@@ -507,7 +516,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
     expect(result?.fleet_safety).toMatchObject({
       keeper_fibers: 1,
       paused_keepers: 3,
-      keeper_fleet_no_fibers: false,
       paused_keepers_health: {
         count: 3,
         names: ['analyst', 'base', 'sangsu'],
@@ -520,29 +528,35 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         }],
       },
       keeper_fleet_safety: {
+        schema: 'masc.keeper_fleet_operator.v1',
         status: 'blocked',
-        blocker: 'no_running_fibers',
+        blocker: 'no_executable_keeper_fibers',
         bootable_keeper_count: 1,
         running_keeper_fiber_count: 0,
-        healthy_running_keeper_fiber_count: 0,
         failing_keeper_fiber_count: 0,
+        recovering_keeper_fiber_count: 2,
         executable_keeper_fiber_count: 0,
-        minimum_running_fibers: 1,
-        no_running_fibers: true,
         no_executable_keeper_fibers: true,
-        low_running_fiber_margin: false,
         reaction_capacity_below_target: true,
         reaction_capacity_shortfall_count: 14,
-        executable_reaction_capacity_below_target: true,
-        executable_reaction_capacity_shortfall_count: 14,
         paused_keeper_count: 13,
         autoboot_enabled_keeper_count: 14,
         paused_autoboot_enabled_keeper_count: 13,
-        effective_reaction_capacity_count: 0,
-        executable_reaction_capacity_count: 0,
         target_reaction_capacity_count: 14,
         operator_action_required: true,
-        blocked_keepers: 24,
+        blocked_keeper_count: 2,
+        blocked_keepers: [
+          {
+            keeper_name: 'analyst',
+            reason: 'durable_paused_autoboot_enabled',
+            action: 'resume_or_leave_paused',
+          },
+          {
+            keeper_name: 'rondo',
+            reason: 'phase_restarting',
+            action: 'wait_for_keeper_restart',
+          },
+        ],
       },
       keeper_reaction_ledger: {
         status: 'ok',
@@ -552,6 +566,68 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         pending_stimulus_count: 0,
         read_error_count: 0,
       },
+    })
+  })
+
+  it('collapses a malformed Keeper operator item into one bad current fact', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_fleet_safety: {
+        schema: 'masc.keeper_fleet_operator.v1',
+        status: 'degraded',
+        blocker: 'reaction_capacity_below_target',
+        blocked_keeper_count: 1,
+        blocked_keepers: [{
+          keeper_name: 'sangsu',
+          reason: 'phase_failing',
+          action: 'unsupported_action',
+        }],
+        operator_action_required: true,
+      },
+    }))
+
+    expect(result?.fleet_safety?.keeper_fleet_safety).toMatchObject({
+      status: 'blocked',
+      blocker: 'current_fact_invalid',
+      blocked_keeper_count: 1,
+      operator_action_required: true,
+      blocked_keepers: [{
+        keeper_name: null,
+        reason: 'current_fact_invalid',
+        action: 'inspect_current_keeper_fact',
+      }],
+    })
+  })
+
+  it('preserves a typed durable lifecycle-admission blocker', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_fleet_safety: {
+        schema: 'masc.keeper_fleet_operator.v1',
+        status: 'degraded',
+        blocker: 'keeper_lifecycle_admission_blocked',
+        blocked_keeper_count: 1,
+        blocked_keepers: [{
+          keeper_name: 'sangsu',
+          reason: 'runtime_meta_authority',
+          action: 'inspect_lifecycle_transaction',
+          lifecycle_admission_reason:
+            'runtime_meta_authority:keeper=sangsu,transaction=tx-1,stage=reserved',
+        }],
+        operator_action_required: true,
+      },
+    }))
+
+    expect(result?.fleet_safety?.keeper_fleet_safety).toMatchObject({
+      status: 'degraded',
+      blocker: 'keeper_lifecycle_admission_blocked',
+      blocked_keeper_count: 1,
+      operator_action_required: true,
+      blocked_keepers: [{
+        keeper_name: 'sangsu',
+        reason: 'runtime_meta_authority',
+        action: 'inspect_lifecycle_transaction',
+        lifecycle_admission_reason:
+          'runtime_meta_authority:keeper=sangsu,transaction=tx-1,stage=reserved',
+      }],
     })
   })
 

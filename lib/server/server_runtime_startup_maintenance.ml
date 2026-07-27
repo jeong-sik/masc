@@ -202,6 +202,22 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
 let startup_recover_keeper_lifecycle_transactions
       (state : Mcp_server.server_state)
   =
+  let runtime_meta =
+    Keeper_runtime_meta_transaction.recover_pending
+      (Mcp_server.workspace_config state)
+  in
+  Log.Keeper.info
+    "startup keeper runtime/meta recovery recovered=%d cleared=%d unresolved=%d"
+    runtime_meta.recovered
+    runtime_meta.cleared
+    (List.length runtime_meta.unresolved);
+  List.iter
+    (fun (path, detail) ->
+       Log.Keeper.error
+         "startup keeper runtime/meta recovery unresolved journal=%s detail=%s"
+         path
+         detail)
+    runtime_meta.unresolved;
   let summary =
     Keeper_dead_revival_transaction.recover_pending
       (Mcp_server.workspace_config state)

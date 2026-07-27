@@ -45,7 +45,7 @@ let test_missing_checkpoint_still_queues_owner_lane_stimulus () =
       in
       Result.get_ok (Runtime.init_default ~config_path:runtime_path);
       let meta = make_meta keeper_name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
        | Ok () -> ()
        | Error detail -> failf "keeper meta write failed: %s" detail);
       let persisted_meta = persisted_meta_exn config keeper_name in

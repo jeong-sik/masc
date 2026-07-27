@@ -120,9 +120,9 @@ export function keeperRowLooksRunning(row: KeeperRuntimeCountRow | null | undefi
 }
 
 export interface RuntimeFleetSafetyCounts {
-  runningKeepers: number
+  executableKeepers: number
   pausedKeepers: number
-  hasRunningKeepers: boolean
+  hasExecutableKeepers: boolean
   hasPausedKeepers: boolean
 }
 
@@ -141,17 +141,17 @@ export function resolveRuntimeFleetSafetyCounts(
 ): RuntimeFleetSafetyCounts | null {
   if (!fleetSafety) return null
   const fleet = fleetSafety.keeper_fleet_safety
-  const runningKeepers = firstFiniteCount(fleet?.running_keeper_fiber_count)
+  const executableKeepers = firstFiniteCount(fleet?.executable_keeper_fiber_count)
   const pausedKeepers = firstFiniteCount(
     fleetSafety.paused_keepers_health?.count,
     fleet?.paused_keeper_count,
     fleetSafety.paused_keepers,
   )
-  if (runningKeepers === null && pausedKeepers === null) return null
+  if (executableKeepers === null) return null
   return {
-    runningKeepers: runningKeepers ?? 0,
+    executableKeepers,
     pausedKeepers: pausedKeepers ?? 0,
-    hasRunningKeepers: runningKeepers !== null,
+    hasExecutableKeepers: true,
     hasPausedKeepers: pausedKeepers !== null,
   }
 }
@@ -265,12 +265,12 @@ export function resolveRuntimeCounts({
   const liveAgents = normalizeCount(agentsCount)
   const runtimeHealthAvailable = runtimeHealthCounts !== null
   const liveKeepers = runtimeHealthAvailable
-    ? runtimeHealthCounts.runningKeepers
+    ? runtimeHealthCounts.executableKeepers
     : normalizeCount(keepersCount)
   const livePausedKeepers = runtimeHealthAvailable
     ? runtimeHealthCounts.pausedKeepers
     : normalizeCount(pausedKeepersCount)
-  // Runtime-health fleet_safety is authoritative for running/paused fibers,
+  // Runtime-health fleet_safety is authoritative for executable/paused keepers,
   // but it does not enumerate RFC-0295 transient detail rows. Preserve the
   // row-derived transient count so the live view remains reconcilable without
   // synthesizing offline rows from stale execution snapshots.

@@ -156,10 +156,11 @@ let persist_transition_outbox ~base_path ~keeper_name ~settlement stimuli =
       failf "settlement follow-up failed: %s" detail
   in
   (match
-     Keeper_event_queue_persistence.transition_outbox_result
+     Keeper_event_queue_persistence.load_state_result
        ~base_path
        ~keeper_name
      |> require_ok "read persisted transition outbox"
+     |> Keeper_event_queue_state.transition_outbox
    with
    | [ entry ] ->
      check bool "outbox retains the settled receipt" true

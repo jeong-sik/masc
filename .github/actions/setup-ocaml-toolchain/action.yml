@@ -40,6 +40,7 @@ runs:
         dune-cache: ${{ inputs.dune-cache }}
 
     - name: Cache OCaml toolchain (Linux)
+      id: opam-toolchain-cache
       if: runner.os == 'Linux'
       uses: actions/cache@v5
       with:
@@ -109,6 +110,7 @@ runs:
       shell: bash
       env:
         OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
+        OPAM_CACHE_EXACT_HIT: ${{ steps.opam-toolchain-cache.outputs.cache-hit }}
       run: |
         set -euo pipefail
 
@@ -165,6 +167,8 @@ runs:
         # cache miss when opam used the XDG layout).
         if opam switch list --short 2>/dev/null | grep -q "^${switch_name}$"; then
           echo "::notice::Cache hit — reusing opam switch ${switch_name}"
+          bash scripts/ci/opam-cache-freshness.sh \
+            --refresh "${OPAM_CACHE_EXACT_HIT:-}"
           switch_prefix="$(opam var prefix --switch="${switch_name}")"
           echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"
           echo "${switch_prefix}/bin" >> "${GITHUB_PATH}"

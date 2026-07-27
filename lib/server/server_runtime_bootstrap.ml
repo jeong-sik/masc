@@ -208,7 +208,7 @@ let load_exact_output_lane_declarations ?config_root () =
 ;;
 
 let mandatory_exact_output_lane_ids =
-  [ "hitl_auto_judge"; Keeper_board_attention_exact_flow.lane_id ]
+  [ Hitl_summary_worker.lane_id; Keeper_board_attention_exact_flow.lane_id ]
 ;;
 
 let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
@@ -346,9 +346,14 @@ let configure_exact_output_registry ?config_root () =
            "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with OAS target refs")
 ;;
 
+let install_domain_pool_references domain_pool =
+  Domain_pool_ref.set domain_pool;
+  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool)
+;;
 
 module For_testing = struct
   let configure_exact_output_registry = configure_exact_output_registry
+  let install_domain_pool_references = install_domain_pool_references
 end
 
 (* GC tuning for long-running server with bursty allocation.
@@ -943,7 +948,7 @@ let initialize_owner_state_blocking
       ?domain_count:(Env_config.Executor.domain_count_override ())
       domain_mgr
   in
-  Domain_pool_ref.set domain_pool;
+  install_domain_pool_references domain_pool;
   Log.Server.info
     "Domain_pool created (%d domains) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
@@ -1173,6 +1178,12 @@ let install_keeper_gate_persistence state =
            failure.reason)
       report.delivery_replay_failures;
     let resume_report = Keeper_gate.resume_persisted_auto_judges ~base_path in
+    (match resume_report.queue_error with
+     | Some error ->
+       Log.Server.error
+         "keeper_gate: Auto Judge recovery queue unavailable error=%s"
+         (Keeper_approval_queue.storage_error_to_string error)
+     | None -> ());
     Log.Server.info
       "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"
       resume_report.requested
@@ -1189,9 +1200,10 @@ let install_keeper_gate_persistence state =
     List.iter
       (fun (failure : Keeper_gate.auto_judge_resume_failure) ->
          Log.Server.error
-           "keeper_gate: recovered Auto Judge start failed approval=%s error=%s"
+           "keeper_gate: recovered Auto Judge failed approval=%s code=%s detail=%s"
            failure.approval_id
-           failure.reason)
+           (Keeper_gate.auto_judge_resume_failure_code_to_string failure.code)
+           failure.operator_detail)
       resume_report.failures
 ;;
 
@@ -1360,36 +1372,28 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Server_slack_in_process_gateway.start ~sw ~env ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
-      (* Dashboard owns only its executor projection; the shared pool itself
-         belongs to the transport-neutral owner bootstrap so stdio Keepers get
-         the same offload behavior. *)
-      Server_dashboard_http.set_executor_pool
-        (Domain_pool.executor_pool activated_owner.domain_pool);
       (* Auxiliary transports start after owner readiness and report their own
          availability. They must not gain lifecycle authority over HTTP or
          unrelated Keeper lanes. *)
       (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
       let tool_dispatcher tool_name args_json =
-        let arguments =
-          try Yojson.Safe.from_string args_json
-          with Yojson.Json_error _ -> `Assoc []
-        in
-        let workspace_scope = Mcp_server.workspace_scope state in
-        let result =
-          Mcp_server_eio_execute.execute_tool_eio
-            ~sw
-            ~clock
-            ~workspace_scope
-            state
-            ~name:tool_name ~arguments
-        in
-        let success = not (Tool_result.is_failed result)
-        and result_str = Tool_result.message result
-        in
-        if not success then
-          Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
-            tool_name (String.length result_str);
-        if success then Ok result_str else Error result_str
+      Server_grpc_tool_dispatch.dispatch args_json ~dispatch:(fun arguments ->
+          let workspace_scope = Mcp_server.workspace_scope state in
+          let result =
+            Mcp_server_eio_execute.execute_tool_eio
+              ~sw
+              ~clock
+              ~workspace_scope
+              state
+              ~name:tool_name ~arguments
+          in
+          let success = not (Tool_result.is_failed result)
+          and result_str = Tool_result.message result
+          in
+          if not success then
+            Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
+              tool_name (String.length result_str);
+          if success then Ok result_str else Error result_str)
       in
       Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
         ~tool_dispatcher;

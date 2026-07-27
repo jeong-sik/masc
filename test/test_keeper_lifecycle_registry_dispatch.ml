@@ -485,9 +485,8 @@ let test_manual_compaction_preserves_failed_failure_dispatch () =
          { event = "compaction_failed"; reason = "failure dispatch rejection" })
   in
   let failure =
-    KMC.Lifecycle_with_failure_dispatch
+    KMC.Lifecycle_before_install_with_failure_dispatch
       { stage = KMC.Compaction_started
-      ; checkpoint_applied = false
       ; error = primary
       ; failure_dispatch = Error failure_dispatch
       }

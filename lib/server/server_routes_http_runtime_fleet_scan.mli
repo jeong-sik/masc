@@ -29,11 +29,10 @@ val paused_keeper_detail_json :
   Keeper_meta_contract.keeper_meta ->
   [> `Assoc of (string * Yojson.Safe.t) list ]
 val registry_paused_keeper_names : unit -> String.t list
-val running_paused_keeper_names : unit -> String.t list
 val durable_paused_keeper_scan :
   ?include_details:bool -> Workspace.config -> paused_keeper_scan
 val paused_keepers_health_json_of_scan :
-  running_names:String.t list ->
+  registry_paused_names:String.t list ->
   paused_keeper_scan ->
   [> `Assoc of
        (string * [> `Int of int | `List of Yojson.Safe.t list | `String of string ])
@@ -80,7 +79,6 @@ type keeper_phase_counts = {
   running : int;
   failing : int;
   recovering : int;
-  executable : int;
 }
 type keeper_phase_detail = {
   phase : string;
@@ -95,17 +93,36 @@ type keeper_phase_snapshot = {
   counts : keeper_phase_counts;
   running_names : string list;
   recovering_names : string list;
-  executable_names : string list;
   phase_values : (string * Keeper_state_machine.phase) list;
   phase_details : (string * keeper_phase_detail) list;
 }
 val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
 val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
+type keeper_execution_owner = {
+  keeper_name : string;
+  truth : Keeper_activation_readiness.owner_execution_truth;
+}
+type keeper_execution_snapshot = {
+  owners : keeper_execution_owner list;
+  executable_names : string list;
+}
+val empty_keeper_execution_snapshot : keeper_execution_snapshot
+val keeper_execution_snapshot :
+  Workspace.config -> keeper_execution_snapshot
+(** Canonical per-owner execution projection for one route assembly. Every
+    owner is classified once from current effective durable metadata, registry
+    runtime facts, and shutdown admission. Metadata read failure is retained as
+    that owner's typed [Unknown]. *)
+val owner_execution_truth :
+  keeper_execution_snapshot ->
+  keeper_name:string ->
+  Keeper_activation_readiness.owner_execution_truth
 val active_task_owner_fiber_scan_semantics : string
 val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->
   ?phase_snapshot:keeper_phase_snapshot ->
+  execution_snapshot:keeper_execution_snapshot ->
   ?base_path:string ->
   ?reaction_capacity_names:string list ->
   ?keeper_bootstrap_enabled:bool ->

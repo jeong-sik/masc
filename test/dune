@@ -716,7 +716,13 @@
 (test
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
- (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
+ ; source_tree, not named files: the mandatory-lane check discovers every
+ ; scripts/fixtures/<name>/runtime.toml, so a fixture added later is covered
+ ; without editing this stanza.
+ (deps
+  ../config/oas-models-overlay.toml
+  ../config/runtime.toml
+  (source_tree ../scripts/fixtures))
  (libraries masc_test_deps compaction_exact_output_fixture))
 
 (test
@@ -1241,7 +1247,10 @@
   test_board_render_discord
   test_board_render_slack
   test_board_moderation)
- (libraries masc_test_deps masc.embedded_config bigstringaf)
+ (libraries
+  masc_test_deps
+  masc.embedded_config
+  bigstringaf)
  (deps ../bin/main_eio.exe))
 
 (test
@@ -1289,6 +1298,39 @@
   masc.keeper_checkpoint_ref
   eio_main
   unix))
+
+; Fresh-state canonical Memory OS authority and strict HEAD publication proof.
+(test
+ (name test_keeper_memory_os_store)
+ (modules test_keeper_memory_os_store)
+ (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
+
+; Independent current-schema Keeper lifecycle nonce authority.
+(test
+ (name test_keeper_lifecycle_nonce)
+ (modules
+  test_keeper_lifecycle_nonce
+  test_keeper_lifecycle_nonce_admission
+  test_keeper_lifecycle_nonce_support)
+ (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
+
+; Exact current-schema Keeper-keyed shutdown generation floor.
+(test
+ (name test_keeper_shutdown_generation_floor)
+ (modules test_keeper_shutdown_generation_floor)
+ (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
+
+; Immutable binding-complete dead-Keeper revival payload proof.
+(test
+ (name test_keeper_dead_revival_payload)
+ (modules
+  test_keeper_dead_revival_payload
+  test_keeper_dead_revival_payload_codec
+  test_keeper_dead_revival_payload_inventory
+  test_keeper_dead_revival_payload_storage_create
+  test_keeper_dead_revival_payload_storage_read
+  test_keeper_dead_revival_payload_support)
+ (libraries alcotest digestif fs_compat masc_test_deps eio_main unix yojson))
 
 ; Provider-neutral Memory OS Librarian exact-output composition proof.
 (test
@@ -2584,9 +2626,24 @@
  (deps
   (source_tree ../lib)
   (source_tree ../bin)))
+
+(test
+ (name test_fs_compat_capability_exact_read)
+ (modules test_fs_compat_capability_exact_read)
+ (libraries alcotest fs_compat fs_compat_test_support eio eio_main eio.unix unix)
+ (deps
+  ../lib/fs_compat/fs_compat.mli
+  ../lib/fs_compat/capability_exact_read_stubs.c))
+
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)
 (include stanzas/test_fs_compat_capability_write.inc)
+
+(test
+ (name test_fs_compat_capability_head)
+ (modules test_fs_compat_capability_head)
+ (libraries alcotest cstruct fs_compat eio eio_main unix))
+
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
 (include stanzas/test_eio_resource_scope.inc)

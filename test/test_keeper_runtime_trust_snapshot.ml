@@ -793,6 +793,96 @@ let test_model_observability_runtime_match_does_not_promote_model_hint () =
     (json |> member "runtime_contract" |> member "actual_model_id" = `Null)
 ;;
 
+let test_approval_queue_failure_remains_typed_unavailable () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let meta = make_meta "runtime-trust-approval-unavailable" in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store
+           config
+           meta.name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+            [ "ended_at", `String "2026-06-01T00:00:00Z"
+            ; "operator_disposition", `String "pass"
+            ; "operator_disposition_reason", `String "healthy"
+            ; "terminal_reason_code", `String "success"
+            ]);
+       let read_pending ~base_path =
+         let error : Masc.Keeper_approval_queue.storage_error =
+           {
+             path =
+               Filename.concat base_path
+                 ".masc/keeper_approval_queue.json";
+             reason = "injected queue read failure";
+           }
+         in
+         Error error
+       in
+       let snapshot =
+         K.For_testing.snapshot_json_inner_with_pending_reader
+           ~read_pending ~config ~meta
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "queue state remains unavailable"
+         "unavailable"
+         (snapshot
+          |> member "approval_queue_state"
+          |> member "state"
+          |> to_string);
+       Alcotest.(check string)
+         "queue state uses backend severity"
+         "bad"
+         (snapshot
+          |> member "approval_queue_state"
+          |> member "severity"
+          |> to_string);
+       Alcotest.(check bool)
+         "pending count is not synthesized"
+         true
+         (snapshot |> member "pending_approval_count" = `Null);
+       Alcotest.(check bool)
+         "pending entries are not synthesized"
+         true
+         (snapshot |> member "pending_approvals" = `Null);
+       Alcotest.(check string)
+         "unavailable queue blocks healthy disposition"
+         "Alert"
+         (snapshot |> member "disposition" |> to_string);
+       Alcotest.(check string)
+         "unavailable queue keeps typed reason"
+         "approval_queue_unavailable"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check string)
+         "unavailable queue overrides stale receipt disposition"
+         "unknown"
+         (snapshot |> member "operator_disposition" |> to_string);
+       Alcotest.(check bool)
+         "unavailable queue needs attention"
+         true
+         (snapshot |> member "needs_attention" |> to_bool);
+       Alcotest.(check string)
+         "approval substate is unavailable"
+         "unavailable"
+         (snapshot |> member "approval" |> member "state" |> to_string);
+       Alcotest.(check string)
+         "causal event records queue unavailability"
+         "approval_queue_unavailable"
+         (snapshot
+          |> member "latest_causal_event"
+          |> member "kind"
+          |> to_string))
+;;
+
 let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
@@ -869,6 +959,12 @@ let () =
             "status model observability keeps matched weak model hint non-actual"
             `Quick
             test_model_observability_runtime_match_does_not_promote_model_hint
+        ] )
+    ; ( "approval_queue_projection"
+      , [ Alcotest.test_case
+            "queue failure remains typed unavailable"
+            `Quick
+            test_approval_queue_failure_remains_typed_unavailable
         ] )
     ]
 ;;

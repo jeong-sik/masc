@@ -80,7 +80,6 @@ type t =
   | TraceEmitFailures
   | TransitionAuditFailures
   | ExecutionReceiptFailures
-  | OperatorBroadcastSuppressed
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures
@@ -136,7 +135,7 @@ type t =
   | MemoryLaneDropped
   | MemoryLanePending
   | MemoryLaneInFlight
-  | MemoryLaneProviderSlotBusy
+  | MemoryLaneExecutionSlotBusy
   | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
   | MetricsSseFailures

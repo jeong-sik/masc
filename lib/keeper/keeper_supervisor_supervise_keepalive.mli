@@ -1,5 +1,19 @@
 (** Keepalive supervision entry point for the keeper supervisor. *)
 
+val record_admission_denied :
+  publish_lifecycle:
+    (event:Keeper_lifecycle_events.lifecycle_event ->
+     string ->
+     string ->
+     unit ->
+     unit) ->
+  keeper_name:string ->
+  event:string ->
+  string ->
+  unit
+(** Publish the shared metric and lifecycle event for a retained supervisor
+    launch denial. *)
+
 val supervise_keepalive :
   publish_lifecycle:
     (event:Keeper_lifecycle_events.lifecycle_event ->
@@ -12,13 +26,16 @@ val supervise_keepalive :
      'a Keeper_types_profile.context ->
      Keeper_meta_contract.keeper_meta ->
      Keeper_registry.registry_entry ->
-     (unit, Keeper_state_machine.transition_error) result) ->
+     (unit, 'launch_error) result) ->
   proactive_warmup_sec:int ->
   'a Keeper_types_profile.context ->
   Keeper_meta_contract.keeper_meta ->
   unit
-(** Register and launch a supervised keepalive fiber when spawn admission
-    allows it. When the injected launch gate returns [Error _] (registry
-    FSM rejected [Fiber_started]), no [Started]/[Running] event is
-    published — the gate already resolved the entry through the crash
-    path. *)
+(** Register or relaunch a supervised keepalive fiber only when the shared
+    closed owner-execution verdict is [Recoverable]. [Executable] is a no-op;
+    lifecycle/policy blocks, unreadable owner truth, and a shutdown fence retain
+    durable work without booting. Registered but non-running owners enter the
+    same recovery path instead of being mistaken for executable owners.
+    When the injected launch gate returns [Error _] (registry FSM rejected
+    [Fiber_started]), no [Started]/[Running] event is published — the gate
+    already resolved the entry through the crash path. *)

@@ -459,7 +459,8 @@ let episode_to_json (e : episode) =
     ([ wire_field_trace_id, `String e.trace_id
      ; wire_field_generation, `Int e.generation
      ; wire_field_episode_summary, `String e.episode_summary
-     ; wire_field_claims, `List (List.map fact_to_json e.claims)
+     ; ( wire_field_claims
+       , `List (List.rev (List.rev_map fact_to_json e.claims)) )
      ; wire_field_open_items, `List (List.map (fun s -> `String s) e.open_items)
      ; wire_field_constraints, `List (List.map (fun s -> `String s) e.constraints)
      ; ( wire_field_preserved_tool_refs
@@ -474,12 +475,15 @@ let episode_to_json (e : episode) =
         | None -> []))
 ;;
 
-let rec facts_of_json = function
-  | [] -> Some []
-  | json :: rest ->
-    (match fact_of_json json, facts_of_json rest with
-     | Some fact, Some facts -> Some (fact :: facts)
-     | None, _ | _, None -> None)
+let facts_of_json values =
+  let rec loop facts = function
+    | [] -> Some (List.rev facts)
+    | json :: rest ->
+      (match fact_of_json json with
+       | Some fact -> loop (fact :: facts) rest
+       | None -> None)
+  in
+  loop [] values
 ;;
 
 let optional_float_json_field key fields =

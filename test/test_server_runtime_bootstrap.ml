@@ -104,6 +104,40 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let test_grpc_tool_arguments_fail_closed_before_dispatch () =
+  let dispatch_calls = ref 0 in
+  let dispatch _arguments =
+    incr dispatch_calls;
+    Ok "{}"
+  in
+  [ "malformed", "{"; "non-object", "[]" ]
+  |> List.iter (fun (label, arguments_json) ->
+    match
+          Masc_test_deps.Server_grpc_tool_dispatch.dispatch ~dispatch arguments_json
+    with
+    | Error error ->
+      Alcotest.(check string)
+        (label ^ " typed error")
+        "Invalid params: expected object"
+        (Masc_test_deps.Server_grpc_tool_dispatch.error_message error);
+      Alcotest.(check int)
+        (label ^ " invalid-params code")
+        (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
+        (Masc_test_deps.Server_grpc_tool_dispatch.error_code error
+         |> Masc.Mcp_error_code.to_wire_code)
+    | Ok _ -> Alcotest.failf "%s arguments reached the dispatcher" label);
+  Alcotest.(check int) "rejected dispatcher calls" 0 !dispatch_calls;
+  (match
+     Masc_test_deps.Server_grpc_tool_dispatch.dispatch ~dispatch ""
+   with
+   | Ok "{}" -> ()
+   | Ok result -> Alcotest.failf "unexpected omitted-arguments result: %s" result
+   | Error error ->
+     Alcotest.fail
+       (Masc_test_deps.Server_grpc_tool_dispatch.error_message error));
+  Alcotest.(check int) "omitted arguments dispatch once" 1 !dispatch_calls
+;;
+
 let canonical_path path =
   try Unix.realpath path with Unix.Unix_error _ -> path
 
@@ -1209,7 +1243,7 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
 let terminal_fixture_epoch = 0.0
 
 let write_keeper_meta_exn config meta =
-  match Keeper_meta_store.write_meta config meta with
+  match Masc_test_deps.write_current_keeper_meta config meta with
   | Ok () -> ()
   | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
 
@@ -1465,8 +1499,6 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "paused_autoboot_enabled_keeper_count" |> to_int);
           Alcotest.(check int) "health exposes target reaction capacity" 1
             (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
-          Alcotest.(check int) "health exposes minimum running fibers" 1
-            (fleet_safety |> member "minimum_running_fibers" |> to_int);
           Alcotest.(check string) "health marks fleet blocked" "blocked"
             (fleet_safety |> member "status" |> to_string);
           Alcotest.(check string) "health marks fleet blocker"
@@ -1920,7 +1952,7 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
           { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-          { running = 1; failing = 0; recovering = 0; executable = 1 }
+          { running = 1; failing = 0; recovering = 0 }
         in
         let phase_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
@@ -1928,7 +1960,6 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
             counts = phase_counts;
             running_names = [ executor.name ];
             recovering_names = [];
-            executable_names = [ executor.name ];
             phase_values = [ (executor.name, Keeper_state_machine.Running) ];
             phase_details =
               [
@@ -1945,12 +1976,17 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
               ];
           }
         in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { owners = []; executable_names = [ executor.name ] }
+        in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
             ~bootable_names:[]
             ~autoboot_scan:
               Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
             ~phase_snapshot
+            ~execution_snapshot
             ~phase_counts
             ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
             ()
@@ -1968,6 +2004,15 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
            |> to_int);
         Alcotest.(check bool) "health does not require operator action" false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
+
+let canonical_blocked_keeper_rows json =
+  let open Yojson.Safe.Util in
+  json |> member "blocked_keepers" |> to_list
+
+let canonical_blocked_keeper_names json =
+  let open Yojson.Safe.Util in
+  canonical_blocked_keeper_rows json
+  |> List.filter_map (fun row -> row |> member "keeper_name" |> to_string_option)
 
 let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
   with_temp_dir "health-active-task-owner-without-binding" (fun dir ->
@@ -2028,9 +2073,11 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Alcotest.(check int) "health exposes missing binding task row" 1
           (List.length active_owner_tasks);
         let active_owner_task = List.hd active_owner_tasks in
-        Alcotest.(check bool) "missing binding row keeper null" true
+        Alcotest.(check bool) "missing binding row keeper_name null" true
+          (active_owner_task |> member "keeper_name" = `Null);
+        Alcotest.(check bool) "missing binding row keeper alias absent" true
           (active_owner_task |> member "keeper" = `Null);
-        Alcotest.(check bool) "missing binding row name null" true
+        Alcotest.(check bool) "missing binding row name alias absent" true
           (active_owner_task |> member "name" = `Null);
         Alcotest.(check string) "missing binding row agent" assignee
           (active_owner_task |> member "agent_name" |> to_string);
@@ -2040,14 +2087,13 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Alcotest.(check string) "missing binding action"
           "create_keeper_or_reassign_task"
           (active_owner_task |> member "action" |> to_string);
-        Alcotest.(check (list string)) "health names missing binding assignee"
-          [ assignee ]
-          (fleet_safety |> member "blocked_keeper_names" |> to_list
-           |> List.map to_string);
+        Alcotest.(check (list string)) "health does not invent Keeper identity"
+          []
+          (canonical_blocked_keeper_names fleet_safety);
         Alcotest.(check (list (pair string string)))
           "health explains missing binding blocker"
           [ (assignee, "no_keeper_binding") ]
-          (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+          (fleet_safety |> member "blocked_keepers" |> to_list
            |> List.map (fun row ->
                 ( row |> member "agent_name" |> to_string
                 , row |> member "reason" |> to_string )));
@@ -2125,8 +2171,7 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
           (owner |> member "fleet_blocking" |> to_bool);
         Alcotest.(check (list string)) "health has no blocked keeper names"
           []
-          (fleet_safety |> member "blocked_keeper_names" |> to_list
-           |> List.map to_string);
+          (canonical_blocked_keeper_names fleet_safety);
         Alcotest.(check bool) "health does not ask operator action" false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
@@ -2162,7 +2207,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
           { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-          { running = 0; failing = 0; recovering = 0; executable = 0 }
+          { running = 0; failing = 0; recovering = 0 }
         in
         let phase_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
@@ -2170,10 +2215,13 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             counts = phase_counts;
             running_names = [];
             recovering_names = [];
-            executable_names = [];
             phase_values = [];
             phase_details = [];
           }
+        in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { owners = []; executable_names = [] }
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2181,6 +2229,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             ~autoboot_scan:
               Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
             ~phase_snapshot
+            ~execution_snapshot
             ~phase_counts
             ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
             ()
@@ -2208,7 +2257,124 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
           false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
-let test_health_json_effective_capacity_includes_recovering_lanes () =
+let test_health_json_reuses_canonical_owner_execution_snapshot () =
+  with_temp_dir "health-canonical-owner-execution-snapshot" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let cached_missing =
+          make_keeper_meta
+            ~name:"canonical-meta-missing"
+            ~trace_id:"trace-canonical-meta-missing"
+            ()
+        in
+        let cached_disabled =
+          make_keeper_meta
+            ~name:"canonical-meta-disabled"
+            ~trace_id:"trace-canonical-meta-disabled"
+            ()
+        in
+        let paused =
+          make_keeper_meta
+            ~paused:true
+            ~name:"canonical-meta-paused"
+            ~trace_id:"trace-canonical-meta-paused"
+            ()
+        in
+        let cached_owners = [ cached_missing; cached_disabled; paused ] in
+        List.iter
+          (fun (meta : Keeper_meta_contract.keeper_meta) ->
+            Keeper_registry.For_testing.unregister
+              ~base_path:config.Workspace.base_path
+              meta.name;
+            ignore
+              (Keeper_registry.register_offline
+                 ~base_path:config.Workspace.base_path
+                 meta.name
+                 meta);
+            Keeper_event_queue_persistence.persist
+              ~base_path:config.Workspace.base_path
+              ~keeper_name:meta.name
+              Keeper_event_queue.empty)
+          cached_owners;
+        Fun.protect
+          ~finally:(fun () ->
+            List.iter
+              (fun (meta : Keeper_meta_contract.keeper_meta) ->
+                Keeper_registry.For_testing.unregister
+                  ~base_path:config.Workspace.base_path
+                  meta.name)
+              cached_owners)
+          (fun () ->
+            write_keeper_meta_exn
+              config
+              { cached_disabled with autoboot_enabled = false };
+            write_keeper_meta_exn config paused;
+            let missing_meta_path =
+              Keeper_types_profile.keeper_meta_path config cached_missing.name
+            in
+            if Sys.file_exists missing_meta_path then Sys.remove missing_meta_path;
+            let request = Httpun.Request.create `GET "/health" in
+            let json = Server_routes_http_runtime.make_health_json request in
+            let open Yojson.Safe.Util in
+            let fleet_safety = json |> member "keeper_fleet_safety" in
+            Alcotest.(check int)
+              "offline cached registry owners are not running"
+              0
+              (fleet_safety |> member "running_keeper_fiber_count" |> to_int);
+            Alcotest.(check int)
+              "durable missing/disabled owners are not executable"
+              0
+              (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
+            Alcotest.(check (list string))
+              "canonical execution snapshot exposes no executable names"
+              []
+              (fleet_safety
+               |> member "executable_keeper_names"
+               |> to_list
+               |> List.map to_string);
+            let queue_owners =
+              json
+              |> member "keeper_event_queue"
+              |> member "keepers"
+              |> to_list
+            in
+            let owner name =
+              List.find
+                (fun row ->
+                  String.equal
+                    (row |> member "keeper_name" |> to_string)
+                    name)
+                queue_owners
+            in
+            Alcotest.(check string)
+              "missing durable meta stays owner-local unknown"
+              "unclassified"
+              (owner cached_missing.name
+               |> member "owner_lifecycle"
+               |> to_string);
+            Alcotest.(check string)
+              "durable disabled meta overrides cached enabled registry meta"
+              "retained_disabled"
+              (owner cached_disabled.name
+               |> member "owner_lifecycle"
+               |> to_string);
+            Alcotest.(check string)
+              "paused durable owner remains a distinct retained variant"
+              "paused_dead"
+              (owner paused.name |> member "owner_lifecycle" |> to_string))))
+;;
+
+let test_health_json_capacity_uses_execution_snapshot () =
   let previous_state = !Server_auth.server_state in
   Fun.protect
     ~finally:(fun () -> Server_auth.server_state := previous_state)
@@ -2221,17 +2387,20 @@ let test_health_json_effective_capacity_includes_recovering_lanes () =
       let target_names = running_names @ recovering_names in
       let phase_counts :
           Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-        { running = 3; failing = 4; recovering = 4; executable = 7 }
+        { running = 3; failing = 4; recovering = 4 }
       in
       let phase_snapshot :
           Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
         { counts = phase_counts
         ; running_names
         ; recovering_names
-        ; executable_names = target_names
         ; phase_values = []
         ; phase_details = []
         }
+      in
+      let execution_snapshot :
+          Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+        { owners = []; executable_names = [ "running-a" ] }
       in
       let fleet_safety =
         Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2239,34 +2408,35 @@ let test_health_json_effective_capacity_includes_recovering_lanes () =
           ~autoboot_scan:
             { autoboot_names = target_names; read_errors = [] }
           ~phase_snapshot
+          ~execution_snapshot
           ~phase_counts
           ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
           ()
       in
       let open Yojson.Safe.Util in
       Alcotest.(check int)
-        "healthy running count remains actual running lanes"
-        3
-        (fleet_safety |> member "healthy_running_keeper_fiber_count" |> to_int);
+        "canonical capacity comes only from the execution snapshot"
+        1
+        (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
       Alcotest.(check int)
-        "effective capacity includes actively recovering lanes"
-        7
-        (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
-      Alcotest.(check int)
-        "effective capacity has no target shortfall"
-        0
+        "phase counts do not conceal executable shortfall"
+        6
         (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
       Alcotest.(check bool)
-        "capacity verdict uses the advertised effective count"
-        false
+        "capacity verdict uses executable truth"
+        true
         (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
       Alcotest.(check string)
-        "active recovery does not request a stop/pause intervention"
-        "ok"
-        (fleet_safety |> member "status" |> to_string))
+        "partial executable capacity degrades the fleet"
+        "degraded"
+        (fleet_safety |> member "status" |> to_string);
+      Alcotest.(check bool)
+        "partial executable capacity requires operator action"
+        true
+        (fleet_safety |> member "operator_action_required" |> to_bool))
 ;;
 
-let test_health_json_degrades_when_reaction_capacity_below_target () =
+let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
   with_temp_dir "health-reaction-capacity-below-target" (fun dir ->
     let config_root = make_config_root dir in
     List.iter
@@ -2323,15 +2493,35 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
         with_running_keeper_metas config
           [ paused; running_a; running_b; runtime_only ]
           (fun () ->
+            List.iter
+              (fun (meta : Keeper_meta_contract.keeper_meta) ->
+                match
+                  Keeper_registry.get
+                    ~base_path:config.Workspace.base_path
+                    meta.name
+                with
+                | None -> Alcotest.fail ("missing registered keeper " ^ meta.name)
+                | Some entry ->
+                  Keeper_registry.For_testing.unsafe_put_entry
+                    ~base_path:config.Workspace.base_path
+                    meta.name
+                    { entry with
+                      conditions = { entry.conditions with fiber_alive = false }
+                    })
+              [ running_b; runtime_only ];
             let request = Httpun.Request.create `GET "/health" in
             let json = Server_routes_http_runtime.make_health_json request in
             let open Yojson.Safe.Util in
             let paused_keepers = json |> member "paused_keepers" in
             let fleet_safety = json |> member "keeper_fleet_safety" in
-            Alcotest.(check int) "health exposes running reaction capacity" 3
-              (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
-            Alcotest.(check int) "health exposes executable reaction capacity" 3
-              (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
+            Alcotest.(check int)
+              "phase snapshot still reports three Running lanes"
+              3
+              (fleet_safety |> member "running_keeper_fiber_count" |> to_int);
+            Alcotest.(check int)
+              "canonical execution snapshot reports only one live lane"
+              1
+              (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
             Alcotest.(check (list string))
               "health excludes paused registry entries from running capacity"
               [ "capacity-running-a"; "capacity-running-b"; "runtime-only" ]
@@ -2350,37 +2540,35 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
               [ "capacity-paused" ]
               (paused_keepers |> member "durable_names" |> to_list
                |> List.map to_string);
-          Alcotest.(check int) "health exposes minimum running fibers" 2
-            (fleet_safety |> member "minimum_running_fibers" |> to_int);
-          Alcotest.(check bool) "health is not below minimum margin" false
-            (fleet_safety |> member "low_running_fiber_margin" |> to_bool);
           Alcotest.(check bool) "health marks capacity below target" true
             (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
-          Alcotest.(check int) "health exposes capacity shortfall" 1
+          Alcotest.(check int) "health exposes canonical capacity shortfall" 3
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
-          Alcotest.(check int) "health exposes executable capacity shortfall" 1
-            (fleet_safety
-             |> member "executable_reaction_capacity_shortfall_count"
-             |> to_int);
-          Alcotest.(check int) "health exposes blocked keeper count" 2
-            (fleet_safety |> member "blocked_count" |> to_int);
+          Alcotest.(check int) "health exposes blocked keeper count" 3
+            (fleet_safety |> member "blocked_keeper_count" |> to_int);
           Alcotest.(check (list string)) "health exposes blocked keeper names"
-            [ "capacity-missing"; "example" ]
-            (fleet_safety |> member "blocked_keeper_names" |> to_list
-             |> List.map to_string);
+            [ "capacity-missing"; "capacity-running-b"; "example" ]
+            (canonical_blocked_keeper_names fleet_safety);
           Alcotest.(check (list (pair string string)))
             "health explains blocked keeper reasons"
-            [ ("capacity-missing", "not_registered"); ("example", "not_registered") ]
-            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            [ ("capacity-missing", "not_registered")
+            ; ("capacity-running-b", "phase_Running")
+            ; ("example", "not_registered")
+            ]
+            (fleet_safety |> member "blocked_keepers" |> to_list
              |> List.map (fun row ->
-                  (row |> member "keeper" |> to_string, row |> member "reason" |> to_string)));
+                  (row |> member "keeper_name" |> to_string, row |> member "reason" |> to_string)));
           let blocked_detail name =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
-            |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+            fleet_safety |> member "blocked_keepers" |> to_list
+            |> List.find (fun row -> row |> member "keeper_name" |> to_string = name)
           in
-          Alcotest.(check string) "health keeps typed row name alias"
+          Alcotest.(check string) "health keeps canonical keeper_name"
             "capacity-missing"
-            (blocked_detail "capacity-missing" |> member "name" |> to_string);
+            (blocked_detail "capacity-missing" |> member "keeper_name" |> to_string);
+          Alcotest.(check bool) "health omits keeper alias" true
+            (blocked_detail "capacity-missing" |> member "keeper" = `Null);
+          Alcotest.(check bool) "health omits name alias" true
+            (blocked_detail "capacity-missing" |> member "name" = `Null);
           Alcotest.(check string) "health suggests missing target action"
             "start_or_recover_keeper"
             (blocked_detail "capacity-missing" |> member "action" |> to_string);
@@ -2449,18 +2637,15 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
             let json = Server_routes_http_runtime.make_health_json request in
             let open Yojson.Safe.Util in
             let fleet_safety = json |> member "keeper_fleet_safety" in
-            Alcotest.(check int) "health counts all running capacity" 2
-              (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
+            Alcotest.(check int) "health counts all live executable capacity" 2
+              (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
             Alcotest.(check int) "capacity shortfall remains numeric capacity" 1
               (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
             Alcotest.(check (list string)) "health names blocked target keepers"
               [ "example"; "target-missing" ]
-              (fleet_safety |> member "blocked_keeper_names" |> to_list
-               |> List.map to_string);
+              (canonical_blocked_keeper_names fleet_safety);
             Alcotest.(check int) "blocked count matches blocked keeper names" 2
-              (fleet_safety |> member "blocked_count" |> to_int);
-            Alcotest.(check int) "blocked_keepers alias matches names" 2
-              (fleet_safety |> member "blocked_keepers" |> to_int))))
+              (fleet_safety |> member "blocked_keeper_count" |> to_int))))
 
 let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
   with_temp_dir "health-keeper-bootstrap-disabled" (fun dir ->
@@ -2479,7 +2664,7 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
         let config = (Mcp_server.workspace_config state) in
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-          { running = 0; failing = 0; recovering = 0; executable = 0 }
+          { running = 0; failing = 0; recovering = 0 }
         in
         let phase_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
@@ -2487,21 +2672,25 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
             counts = phase_counts;
             running_names = [];
             recovering_names = [];
-            executable_names = [];
             phase_values = [];
             phase_details = [];
           }
+        in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { owners = []; executable_names = [] }
         in
         let paused_keepers_json =
           Server_routes_http_runtime_fleet_scan.durable_paused_keeper_scan config
           |> Server_routes_http_runtime_fleet_scan
              .paused_keepers_health_json_of_scan
-               ~running_names:[]
+               ~registry_paused_names:[]
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
             ~keeper_bootstrap_enabled:false
             ~phase_snapshot
+            ~execution_snapshot
             ~phase_counts
             ~paused_keepers_json
             ()
@@ -2516,8 +2705,8 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
           "keeper_bootstrap_disabled"
           (fleet_safety |> member "keeper_bootstrap_blocker" |> to_string);
         let blocked_detail name =
-          fleet_safety |> member "blocked_keeper_reasons" |> to_list
-          |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+          fleet_safety |> member "blocked_keepers" |> to_list
+          |> List.find (fun row -> row |> member "keeper_name" |> to_string = name)
         in
         let detail = blocked_detail "boot-disabled" in
         Alcotest.(check string) "health explains disabled bootstrap row"
@@ -2562,14 +2751,13 @@ let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
         Alcotest.(check (list string))
           "health excludes persisted-only keepers from blocked target"
           [ "example" ]
-          (fleet_safety |> member "blocked_keeper_names" |> to_list
-           |> List.map to_string);
+          (canonical_blocked_keeper_names fleet_safety);
         Alcotest.(check (list (pair string string)))
           "health explains remaining configured blocked target"
           [ ("example", "not_registered") ]
-          (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+          (fleet_safety |> member "blocked_keepers" |> to_list
            |> List.map (fun row ->
-                ( row |> member "keeper" |> to_string
+                ( row |> member "keeper_name" |> to_string
                 , row |> member "reason" |> to_string )))))
 
 let test_health_json_explains_phase_paused_capacity_blocker () =
@@ -2608,14 +2796,13 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
           Alcotest.(check (list string))
             "health includes phase-paused keeper in blocked targets"
             [ "example"; "phase-paused" ]
-            (fleet_safety |> member "blocked_keeper_names" |> to_list
-             |> List.map to_string);
+            (canonical_blocked_keeper_names fleet_safety);
           Alcotest.(check (list (pair string string)))
             "health explains phase-paused blocked keeper"
             [ ("example", "not_registered"); ("phase-paused", "phase_paused") ]
-            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            (fleet_safety |> member "blocked_keepers" |> to_list
              |> List.map (fun row ->
-	                  ( row |> member "keeper" |> to_string
+	                  ( row |> member "keeper_name" |> to_string
 	                  , row |> member "reason" |> to_string ))))))
 
 let test_health_json_exposes_dead_keeper_registry_cause () =
@@ -2644,8 +2831,8 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let blocked_detail name =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
-            |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+            fleet_safety |> member "blocked_keepers" |> to_list
+            |> List.find (fun row -> row |> member "keeper_name" |> to_string = name)
           in
           let detail = blocked_detail "phase-dead" in
           Alcotest.(check string) "health explains dead keeper reason" "phase_dead"
@@ -2733,20 +2920,19 @@ let test_health_json_explains_terminal_capacity_blocker
           Alcotest.(check (list string))
             "health includes terminal keeper in blocked targets"
             (List.sort String.compare [ keeper_name; "example" ])
-            (fleet_safety |> member "blocked_keeper_names" |> to_list
-             |> List.map to_string);
+            (canonical_blocked_keeper_names fleet_safety);
           Alcotest.(check (list (pair string string)))
             "health explains terminal blocked keeper"
             (List.sort compare
                [ (keeper_name, "phase_" ^ expected_phase); ("example", "not_registered") ])
-            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            (fleet_safety |> member "blocked_keepers" |> to_list
              |> List.map (fun row ->
-                  ( row |> member "keeper" |> to_string
+                  ( row |> member "keeper_name" |> to_string
                   , row |> member "reason" |> to_string )));
           let terminal_detail =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            fleet_safety |> member "blocked_keepers" |> to_list
             |> List.find (fun row ->
-                 row |> member "keeper" |> to_string = keeper_name)
+                 row |> member "keeper_name" |> to_string = keeper_name)
           in
           Alcotest.(check string) "health reports typed terminal phase"
             expected_phase
@@ -2812,8 +2998,6 @@ let test_health_json_distinguishes_failing_executable_keepers () =
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
-          Alcotest.(check int) "health exposes no healthy running fibers" 0
-            (fleet_safety |> member "healthy_running_keeper_fiber_count" |> to_int);
           Alcotest.(check int) "health exposes failing keeper fibers" 1
             (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
           Alcotest.(check int) "health exposes executable keeper fibers" 1
@@ -2826,14 +3010,12 @@ let test_health_json_distinguishes_failing_executable_keepers () =
             [ "capacity-failing" ]
             (fleet_safety |> member "executable_keeper_names" |> to_list
              |> List.map to_string);
-          Alcotest.(check bool) "health marks no running fibers" true
-            (fleet_safety |> member "no_running_fibers" |> to_bool);
           Alcotest.(check bool) "health does not mark no executable fibers" false
             (fleet_safety |> member "no_executable_keeper_fibers" |> to_bool);
           Alcotest.(check string) "health marks degraded not blocked" "degraded"
             (fleet_safety |> member "status" |> to_string);
-          Alcotest.(check string) "health marks healthy-running blocker"
-            "no_healthy_running_keeper_fibers"
+          Alcotest.(check string) "health marks executable shortfall blocker"
+            "reaction_capacity_below_target"
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health still asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool))))
@@ -2875,21 +3057,20 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
           Alcotest.(check (list string))
             "health includes nonrecoverable failing keeper in blocked targets"
             [ "capacity-failing"; "example" ]
-            (fleet_safety |> member "blocked_keeper_names" |> to_list
-             |> List.map to_string);
+            (canonical_blocked_keeper_names fleet_safety);
           Alcotest.(check (list (pair string string)))
             "health explains nonrecoverable failing keeper"
             [ ("capacity-failing", "phase_dead"); ("example", "not_registered") ]
-            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            (fleet_safety |> member "blocked_keepers" |> to_list
              |> List.map (fun row ->
-                  ( row |> member "keeper" |> to_string
+                  ( row |> member "keeper_name" |> to_string
                   , row |> member "reason" |> to_string )));
           let capacity_row =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            fleet_safety |> member "blocked_keepers" |> to_list
             |> List.find_opt (fun row ->
                  String.equal
                    "capacity-failing"
-                   (row |> member "keeper" |> to_string))
+                   (row |> member "keeper_name" |> to_string))
           in
           match capacity_row with
           | None -> Alcotest.fail "missing capacity-failing blocked row"
@@ -2963,11 +3144,11 @@ let test_health_json_redacts_registry_failure_reason () =
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let failing_row =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            fleet_safety |> member "blocked_keepers" |> to_list
             |> List.find_opt (fun row ->
                  String.equal
                    "secret-failing"
-                   (row |> member "keeper" |> to_string))
+                   (row |> member "keeper_name" |> to_string))
           in
           match failing_row with
           | None -> Alcotest.fail "missing secret-failing blocked row"
@@ -3033,11 +3214,11 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let restored_row =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            fleet_safety |> member "blocked_keepers" |> to_list
             |> List.find_opt (fun row ->
                  String.equal
                    "restored-crash-log"
-                   (row |> member "keeper" |> to_string))
+                   (row |> member "keeper_name" |> to_string))
           in
           match restored_row with
           | None -> Alcotest.fail "missing restored-crash-log blocked row"
@@ -4619,6 +4800,26 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
                   contains_substring error "required default profile")
                rejection_errors)))
 
+let test_transition_projection_cursor_commits_before_isolated_owner_recovery () =
+  let cursor_committed = ref false in
+  let processed = ref [] in
+  Server_bootstrap_maintenance.Recovery_for_testing.consume_owner_projection_batch
+    ~commit_cursor:(fun () -> cursor_committed := true)
+    ~keeper_name:Fun.id
+    ~recover_owner:(fun owner ->
+      Alcotest.(check bool)
+        "cursor commits before owner activation"
+        true
+        !cursor_committed;
+      processed := owner :: !processed;
+      if String.equal owner "first" then failwith "injected owner activation failure")
+    [ "first"; "second" ];
+  Alcotest.(check (list string))
+    "ordinary first-owner failure does not starve the next owner"
+    [ "first"; "second" ]
+    (List.rev !processed)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4627,6 +4828,14 @@ let () =
     [
       ( "bootstrap",
         [
+          Alcotest.test_case
+            "transition projection cursor commits before isolated owner recovery"
+            `Quick
+            test_transition_projection_cursor_commits_before_isolated_owner_recovery;
+          Alcotest.test_case
+            "gRPC tool arguments fail closed before dispatch"
+            `Quick
+            test_grpc_tool_arguments_fail_closed_before_dispatch;
           Alcotest.test_case
             "model catalog installs explicit env override"
             `Quick test_model_catalog_configuration_installs_explicit_env_override;
@@ -4742,12 +4951,17 @@ let () =
             `Quick
             test_health_json_preserves_active_task_owner_meta_read_error;
           Alcotest.test_case
-            "health json effective capacity includes recovering lanes"
+            "health json reuses canonical owner execution snapshot"
             `Quick
-            test_health_json_effective_capacity_includes_recovering_lanes;
+            test_health_json_reuses_canonical_owner_execution_snapshot;
           Alcotest.test_case
-            "health json degrades when reaction capacity is below target"
-            `Quick test_health_json_degrades_when_reaction_capacity_below_target;
+            "health json capacity uses execution snapshot"
+            `Quick
+            test_health_json_capacity_uses_execution_snapshot;
+          Alcotest.test_case
+            "health json degrades when only one Running-phase lane is live"
+            `Quick
+            test_health_json_degrades_when_only_one_running_phase_lane_is_live;
           Alcotest.test_case
             "health json blocked count matches named target blockers"
             `Quick

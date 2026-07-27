@@ -6,6 +6,8 @@ module Make (Publish : sig
     | Exact_execution_failed
     | Exact_execution_cancelled
     | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
     | Invalid_structural_evidence
     | Invalid_structural_source_after_dispatch
     | Commit_admission_unavailable
@@ -105,16 +107,8 @@ module Make (Publish : sig
     string ->
     (Keeper_event_queue_persistence.lease option, string) result
 
-  val transition_outbox_result :
-    base_path:string ->
-    string ->
-    (Keeper_event_queue_persistence.outbox_entry list, string) result
-
   val exact_execution_binding_result :
     base_path:string -> string -> (exact_execution_binding option, string) result
-
-  val mark_transition_projected_result :
-    base_path:string -> string -> transition_id:string -> (unit, string) result
 
   val settle_bound_exact_nonterminal_result :
     base_path:string ->

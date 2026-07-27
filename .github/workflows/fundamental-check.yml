@@ -50,7 +50,7 @@ jobs:
           # ignore-justification, stale-base revert RFC-0235) need the
           # merge-base and intervening main commits reachable.
           fetch-depth: 0
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
       - name: Install lint dependencies

@@ -294,11 +294,7 @@ let require_transaction_lane label ~lane_id registry =
       "%s: %s"
       label
       (Registry.lane_resolution_error_to_string error)
-  | Ok { selected_slots; unavailable_slots } ->
-    Alcotest.(check int)
-      (label ^ " unavailable")
-      0
-      (List.length unavailable_slots);
+  | Ok { selected_slots } ->
     Alcotest.(check (list string))
       label
       [ replacement_target ]

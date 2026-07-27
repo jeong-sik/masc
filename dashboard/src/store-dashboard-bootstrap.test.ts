@@ -31,9 +31,13 @@ vi.mock('./api/dashboard-mission', () => ({
   fetchDashboardPlanning: apiMocks.fetchDashboardPlanning,
 }))
 
-vi.mock('./api/dashboard-goals', () => ({
-  fetchDashboardGoalsTree: apiMocks.fetchDashboardGoalsTree,
-}))
+vi.mock('./api/dashboard-goals', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./api/dashboard-goals')>()
+  return {
+    ...actual,
+    fetchDashboardGoalsTree: apiMocks.fetchDashboardGoalsTree,
+  }
+})
 
 vi.mock('./sse', () => ({
   journal: {
@@ -93,6 +97,7 @@ describe('refreshDashboard bootstrap', () => {
       },
       goals: {
         generated_at: '2026-05-14T06:00:03Z',
+        approval_queue_state: { state: 'ready' },
         tree: [],
         summary: { total_goals: 0 },
       },
@@ -183,6 +188,7 @@ describe('refreshDashboard bootstrap', () => {
     })
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',
+      approval_queue_state: { state: 'ready' },
       tree: [],
       summary: { total_goals: 7, total_tasks: 124 },
     })
@@ -206,7 +212,12 @@ describe('refreshDashboard bootstrap', () => {
       rollup: {},
       workspace_fsm: null,
     })
-    const treePayload = { generated_at: '2026-06-25T00:00:01Z', tree: [], summary: { total_goals: 1 } }
+    const treePayload = {
+      generated_at: '2026-06-25T00:00:01Z',
+      approval_queue_state: { state: 'ready' as const },
+      tree: [],
+      summary: { total_goals: 1 },
+    }
     let resolveTree: (value: unknown) => void = () => {}
     apiMocks.fetchDashboardGoalsTree.mockImplementation(() => new Promise(resolve => {
       resolveTree = resolve
@@ -252,6 +263,7 @@ describe('refreshDashboard bootstrap', () => {
     apiMocks.fetchDashboardPlanning.mockRejectedValue(new Error('planning offline'))
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',
+      approval_queue_state: { state: 'ready' },
       tree: [],
       summary: { total_goals: 1, active_goals: 1, total_tasks: 2 },
     })
@@ -281,6 +293,7 @@ describe('refreshDashboard bootstrap', () => {
     })
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',
+      approval_queue_state: { state: 'ready' },
       tree: null,
       summary: { total_goals: 1, active_goals: 1, total_tasks: 2 },
     })
@@ -292,7 +305,9 @@ describe('refreshDashboard bootstrap', () => {
 
     expect(goalTreeState.goalTreeData.value).toBeNull()
     expect(store.lastGoalsRefreshAt.value).toBeNull()
-    expect(goalTreeState.goalTreeError.value).toBe('Goal Store tree payload was malformed')
+    expect(goalTreeState.goalTreeError.value).toBe(
+      '! Gate observation unavailable: Goal Store tree payload was malformed',
+    )
     expect(goalTreeState.goalTreeLoading.value).toBe(false)
     expect(toastMocks.showToast).toHaveBeenCalledWith(
       '목표 데이터를 일부 불러오지 못했습니다',
@@ -396,7 +411,7 @@ describe('refreshKeeperRuntimeStatus', () => {
         keeper_fibers: 1,
         paused_keepers: 3,
         paused_keepers_health: { count: 3, names: ['a', 'b', 'c'] },
-        keeper_fleet_safety: { running_keeper_fiber_count: 1, paused_keeper_count: 3 },
+        keeper_fleet_safety: { executable_keeper_fiber_count: 1, paused_keeper_count: 3 },
       },
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({

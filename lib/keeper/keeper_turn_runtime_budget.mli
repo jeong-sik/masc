@@ -191,11 +191,31 @@ val turn_event_bus_evidence_detail :
 (** Compact forensic string for observed OAS events around a typed provider
     failure. *)
 
+type capacity_refusal =
+  | Provider_context_window of { limit_tokens : int option }
+  | Serialized_request_body of
+      { actual_bytes : int
+      ; limit_bytes : int
+      }
+(** Why a target refused to serve a request for its size. One closed set for both
+    measured axes: a provider-declared token window and a declared serialized-body
+    byte limit. The units are not interchangeable, so neither axis is expressed in
+    the other's field. *)
+
+val capacity_refusal_of_error :
+  Agent_sdk.Error.sdk_error ->
+  capacity_refusal option
+(** Classify a typed SDK error as a capacity refusal. Every SDK variant is
+    enumerated, so adding one forces a decision here instead of returning [None]
+    by default. *)
+
 val context_overflow_event_of_error :
   Agent_sdk.Error.sdk_error ->
   Keeper_state_machine.event option
-(** [Some] only for typed [Api (ContextOverflow _)]. Other errors return
-    [None]. *)
+(** The context-window axis of {!capacity_refusal_of_error} as a lifecycle event.
+    [Some] only for [Provider_context_window]; a byte refusal returns [None]
+    because this projection's call sites label the failure as a context-window
+    exceedance. *)
 
 val provider_overflow_decision : reason:string -> string
 (** The [compaction_rt.last_decision] value stamped by [record_overflow_failure]

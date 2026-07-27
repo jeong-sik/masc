@@ -10,8 +10,10 @@
 
     Issue: #4579 *)
 
-(** [dispatch ~config ~agent_name ~tag ~name ~args] routes [tag] to the
-    corresponding [Tool_*.dispatch] with a minimal keeper-shaped context.
+(** [dispatch ~config ~keeper_name ~agent_name ~tag ~name ~args] routes [tag]
+    to the corresponding [Tool_*.dispatch] with a minimal keeper-shaped
+    context. [keeper_name] is the stable task-author identity; [agent_name] is
+    the transition actor identity.
 
     Returns:
     - [Some (Ok _)] on successful dispatch.
@@ -27,6 +29,7 @@
     [Eio.Cancel.Cancelled] is re-raised. *)
 val dispatch :
   config:Workspace.config ->
+  keeper_name:string ->
   agent_name:string ->
   tag:Tool_dispatch.module_tag ->
   name:string ->

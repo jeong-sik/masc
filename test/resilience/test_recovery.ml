@@ -3,13 +3,19 @@
 module R = Resilience.Recovery
 
 let contains haystack needle =
-  let h = String.length haystack in
-  let n = String.length needle in
-  let rec loop i =
-    i + n <= h
-    && (String.sub haystack i n = needle || loop (i + 1))
+  let haystack_length = String.length haystack in
+  let needle_length = String.length needle in
+  let rec loop offset =
+    if needle_length = 0
+    then true
+    else if offset + needle_length > haystack_length
+    then false
+    else if String.sub haystack offset needle_length = needle
+    then true
+    else loop (offset + 1)
   in
-  n = 0 || loop 0
+  loop 0
+;;
 
 (* ─── Convenience constructors ────────────────────────────────── *)
 
@@ -81,50 +87,52 @@ let test_degradation_required_level () =
 
 (* ─── classify_string heuristic ───────────────────────────────── *)
 
-let test_classify_transient_timeout () =
+let test_untyped_timeout_fails_closed () =
   match R.classify_string "Connection timeout while fetching" with
-  | R.TransientError _ -> ()
-  | _ -> assert false
-
-let test_classify_transient_rate_limit () =
-  match R.classify_string "HTTP 429 rate limit exceeded" with
-  | R.TransientError _ -> ()
-  | _ -> assert false
-
-let test_classify_resource_token () =
-  match R.classify_string "token budget exhausted" with
-  | R.TransientError _ ->
-      (* "exhausted" is not in transient phrases; "token" would
-         match resource. But "budget" matches Cost first depending
-         on iteration order — accept either resource. *)
-      assert false
-  | R.ResourceExhausted { consumed; limit; detail; _ } ->
-      assert (consumed = None);
-      assert (limit = None);
-      assert (detail = Some "token budget exhausted")
-  | _ -> assert false
-
-let test_classify_resource_wins_over_transient_rate_limit () =
-  match R.classify_string "429 rate limit: token budget exhausted" with
-  | R.ResourceExhausted { resource; consumed; limit; detail } ->
-      assert (resource = `Tokens);
-      assert (consumed = None);
-      assert (limit = None);
-      assert (detail = Some "429 rate limit: token budget exhausted")
-  | _ -> assert false
-
-let test_classify_hard_quota_resource_exhausted () =
-  match R.classify_string "rate limit: resource exhausted, top up credits" with
-  | R.ResourceExhausted { resource; consumed; limit; _ } ->
-      assert (resource = `Cost);
-      assert (consumed = None);
-      assert (limit = None)
-  | _ -> assert false
-
-let test_classify_permanent_fallback () =
-  match R.classify_string "Some generic error" with
   | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
   | _ -> assert false
+
+let test_untyped_rate_limit_fails_closed () =
+  match R.classify_string "HTTP 429 rate limit exceeded" with
+  | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
+  | _ -> assert false
+
+let test_rendered_capacity_is_not_resource () =
+  [ "token capacity exhausted";
+    "context window exhausted";
+    "context length exceeded";
+  ]
+  |> List.iter (fun rendered ->
+    match R.classify_string rendered with
+    | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
+    | _ -> assert false)
+
+let test_untyped_mixed_resource_text_fails_closed () =
+  match R.classify_string "429 rate limit: memory exhausted" with
+  | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
+  | _ -> assert false
+
+let test_untyped_pricing_text_has_no_resource_authority () =
+  [ "token budget exhausted";
+    "429 rate limit: token budget exhausted";
+    "hard quota exhausted";
+    "credit balance depleted";
+    "cost ceiling exceeded";
+    "resource exhausted";
+  ]
+  |> List.iter (fun rendered ->
+    match R.classify_string rendered with
+    | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
+    | _ -> assert false)
+
+let test_classify_permanent_fallback () =
+  let require_permanent_handoff = function
+    | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
+    | _ -> assert false
+  in
+  require_permanent_handoff (R.classify_string "Some generic error");
+  require_permanent_handoff
+    (R.classify_string "Context overflow: arbitrary rendered diagnostic")
 
 (* ─── default_strategy mapping ────────────────────────────────── *)
 
@@ -164,13 +172,10 @@ let test_strategy_for_resource_is_abort () =
   | R.Abort _ -> ()
   | _ -> assert false
 
-let test_strategy_for_unknown_resource_does_not_fake_zeroes () =
-  let mode = R.classify_string "token budget exhausted" in
+let test_strategy_for_untyped_resource_diagnostic_is_handoff () =
+  let mode = R.classify_string "memory exhausted" in
   match R.default_strategy mode with
-  | R.Abort { reason; _ } ->
-      assert (contains reason "measurement=unknown");
-      assert (not (contains reason "consumed=0.00"));
-      assert (not (contains reason "limit=0.00"))
+  | R.Handoff _ -> ()
   | _ -> assert false
 
 let test_strategy_for_ambiguity_is_handoff () =
@@ -346,17 +351,17 @@ let () =
   test_ambiguity_branches ();
   test_consensus_failure_with_dissenters ();
   test_degradation_required_level ();
-  test_classify_transient_timeout ();
-  test_classify_transient_rate_limit ();
-  test_classify_resource_token ();
-  test_classify_resource_wins_over_transient_rate_limit ();
-  test_classify_hard_quota_resource_exhausted ();
+  test_untyped_timeout_fails_closed ();
+  test_untyped_rate_limit_fails_closed ();
+  test_rendered_capacity_is_not_resource ();
+  test_untyped_mixed_resource_text_fails_closed ();
+  test_untyped_pricing_text_has_no_resource_authority ();
   test_classify_permanent_fallback ();
   test_strategy_for_transient_is_retry ();
   test_strategy_for_permanent_default_string ();
   test_strategy_for_permanent_handoff ();
   test_strategy_for_resource_is_abort ();
-  test_strategy_for_unknown_resource_does_not_fake_zeroes ();
+  test_strategy_for_untyped_resource_diagnostic_is_handoff ();
   test_strategy_for_ambiguity_is_handoff ();
   test_strategy_for_consensus_is_handoff ();
   test_strategy_for_degradation_is_handoff ();

@@ -77,7 +77,9 @@ let test_submit_or_inline_preserves_mutex () =
       Fun.protect ~finally:Eio_guard.disable (fun () ->
         let dm = Eio.Stdenv.domain_mgr env in
         let pool = Domain_pool.create ~sw ~domain_count:1 dm in
-        Executor_pool_ref.set (Domain_pool.executor_pool pool);
+        Executor_pool_ref.For_testing.with_pool
+          (Domain_pool.executor_pool pool)
+        @@ fun () ->
         let mu = Eio.Mutex.create () in
         let v =
           Executor_pool_ref.submit_or_inline (fun () ->
@@ -99,7 +101,9 @@ let test_ready_raw_domain_uses_non_eio_path () =
         let pool =
           Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
         in
-        Executor_pool_ref.set (Domain_pool.executor_pool pool);
+        Executor_pool_ref.For_testing.with_pool
+          (Domain_pool.executor_pool pool)
+        @@ fun () ->
         check string "main caller has Eio handler" "eio_fiber"
           (context_label (Eio_guard.execution_context ()));
         let raw_mutex = Eio.Mutex.create () in
@@ -155,6 +159,150 @@ let test_ready_raw_domain_uses_non_eio_path () =
            fail ("raw Domain durable-directory operation failed: "
                  ^ Printexc.to_string exn)))))
 
+exception With_pool_probe
+
+let same_pool_option left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right -> left == right
+  | None, Some _ | Some _, None -> false
+
+let test_with_pool_restores_exact_previous_pool_after_exception () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let make_pool () =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+    |> Domain_pool.executor_pool
+  in
+  let outer = make_pool () in
+  let inner = make_pool () in
+  let initial = Executor_pool_ref.get () in
+  Executor_pool_ref.For_testing.with_pool outer (fun () ->
+    let raised =
+      try
+        Executor_pool_ref.For_testing.with_pool inner (fun () ->
+          check bool
+            "inner pool installed"
+            true
+            (same_pool_option (Some inner) (Executor_pool_ref.get ()));
+          raise With_pool_probe)
+      with
+      | With_pool_probe -> true
+    in
+    check bool "probe propagated" true raised;
+    check bool
+      "outer pool restored"
+      true
+      (same_pool_option (Some outer) (Executor_pool_ref.get ())));
+  check bool
+    "initial option restored"
+    true
+    (same_pool_option initial (Executor_pool_ref.get ()))
+;;
+
+let test_submit_strict_absent_pool_does_not_run () =
+  Executor_pool_ref.For_testing.with_pool_option None
+  @@ fun () ->
+  let calls = ref 0 in
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      incr calls;
+      7)
+  with
+  | Error Executor_pool_ref.Pool_unavailable ->
+    check int "absent pool does not execute the closure" 0 !calls
+  | Error error ->
+    fail
+      ("unexpected strict submission error: "
+       ^ Executor_pool_ref.strict_submit_error_to_string error)
+  | Ok _ -> fail "strict submission ran without an installed pool"
+;;
+
+exception Strict_worker_failure
+
+let test_submit_strict_worker_failure_is_not_replayed_inline () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio_guard.enable ();
+  Fun.protect
+    ~finally:Eio_guard.disable
+    (fun () ->
+       let pool =
+         Domain_pool.create
+           ~sw
+           ~domain_count:1
+           (Eio.Stdenv.domain_mgr env)
+       in
+       Executor_pool_ref.For_testing.with_pool
+         (Domain_pool.executor_pool pool)
+       @@ fun () ->
+       let caller_domain = Domain.self () in
+       let calls = Atomic.make 0 in
+       let ran_off_caller = Atomic.make false in
+       let result =
+         Executor_pool_ref.submit_strict (fun () ->
+           ignore (Atomic.fetch_and_add calls 1);
+           Atomic.set ran_off_caller (Domain.self () <> caller_domain);
+           raise Strict_worker_failure)
+       in
+       (match result with
+        | Error (Executor_pool_ref.Work_failed (Strict_worker_failure, _)) -> ()
+        | Error error ->
+          fail
+            ("unexpected strict submission error: "
+             ^ Executor_pool_ref.strict_submit_error_to_string error)
+        | Ok _ -> fail "worker failure was reported as success");
+       check int "failed worker closure executes once" 1 (Atomic.get calls);
+       check bool "failed worker closure never replays inline" true
+         (Atomic.get ran_off_caller))
+;;
+
+let test_startup_installs_pool_before_strict_read () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio_guard.enable ();
+  Fun.protect
+    ~finally:Eio_guard.disable
+    (fun () ->
+       let pool =
+         Domain_pool.create
+           ~sw
+           ~domain_count:1
+           (Eio.Stdenv.domain_mgr env)
+       in
+       let previous_domain_pool = Domain_pool_ref.get () in
+       Executor_pool_ref.For_testing.with_pool_option None
+       @@ fun () ->
+       Fun.protect
+         ~finally:(fun () ->
+           match previous_domain_pool with
+           | None -> Domain_pool_ref.clear_for_tests ()
+           | Some previous -> Domain_pool_ref.set previous)
+         (fun () ->
+            let caller_domain = Domain.self () in
+            Server_runtime_bootstrap.For_testing.install_domain_pool_references pool;
+            match
+              Executor_pool_ref.submit_strict (fun () ->
+                Domain.self () <> caller_domain)
+            with
+            | Ok ran_off_caller ->
+              check bool "startup-installed pool owns the first strict read" true
+                ran_off_caller
+            | Error error ->
+              fail
+                ("startup did not install the strict executor pool: "
+                 ^ Executor_pool_ref.strict_submit_error_to_string error)))
+;;
+
 let () =
   Alcotest.run "Executor_pool_ref Eio mutex safety"
     [ ( "offload"
@@ -166,5 +314,13 @@ let () =
             test_submit_or_inline_preserves_mutex
         ; test_case "ready raw Domain uses the non-Eio path" `Quick
             test_ready_raw_domain_uses_non_eio_path
+        ; test_case "with_pool restores after exception" `Quick
+            test_with_pool_restores_exact_previous_pool_after_exception
+        ; test_case "strict absent pool does not run" `Quick
+            test_submit_strict_absent_pool_does_not_run
+        ; test_case "strict worker failure is not replayed" `Quick
+            test_submit_strict_worker_failure_is_not_replayed_inline
+        ; test_case "startup installs pool before strict read" `Quick
+            test_startup_installs_pool_before_strict_read
         ] )
     ]

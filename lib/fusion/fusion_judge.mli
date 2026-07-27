@@ -1,14 +1,35 @@
 (** Fusion — 심판. 패널 답들을 judge 모델에 넘겨 구조화 종합({!Fusion_types.judge_synthesis})을 받는다.
 
-    Judge 출력 계약은 typed 2-tier다 (구현부 [apply_fusion_judge_output_contract]
-    주석 참조): OAS capability facts가 native structured output을 허용하면 JsonSchema를
-    provider config에 싣고(Native tier), 아니면 schema 없이 프롬프트의
-    {!Fusion_judge_parse.expected_json_doc} 지시에 의존한다(Prompt tier — 결정은
-    로그로 관측). 어느 tier든 응답은 {!Fusion_judge_parse.of_string}의 strict 파싱을
-    통과해야 하며 위반은 [Parse_error]로 fail-loud한다. [JsonMode]로의 silent
-    downgrade는 없다.
+    Judge 출력 계약은 **단일 tier**다. [apply_fusion_judge_output_contract]
+    (fusion_judge.ml:165-166)는 capability를 읽지 않고
+    [Keeper_structured_output_schema.without_response_format]를 무조건 적용한다 —
+    [response_format = Off], [output_schema = None]. 계약은 프롬프트의
+    {!Fusion_judge_parse.expected_json_doc} 지시로만 나가고, 응답은
+    {!Fusion_judge_parse.of_string}의 strict 파싱을 통과해야 하며 위반은
+    [Parse_error]로 fail-loud한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
+    2026-07-26까지 이 문서는 "OAS capability facts가 native structured output을
+    허용하면 JsonSchema를 싣는다(Native tier)"와 "tier 결정은 로그로 관측"을
+    적고 있었다. 구현에는 그 분기도 tier 로그도 없다.
+
+    실패 형태는 마크다운 펜스 자체가 아니다. {!Fusion_judge_parse.of_string}은
+    Yojson 에 넘기기 전에 [strip_fences] 로 선두 ``` / ```json 펜스와 후행 펜스를
+    벗기므로(fusion_judge_parse.ml:177-190), 응답 전체가 펜스 블록 하나면 파싱은
+    통과한다. 벗겨지지 않는 경우는 둘뿐이다 — 펜스 앞에 산문이 붙어 첫 3바이트가
+    ``` 이 아니거나, 펜스 뒤에 개행이 없어 [String.index_opt s '\n'] 이 [None]
+    이라 원문이 그대로 나가는 경우. 라이브 관측(keeper rondo, event-queue.json
+    last_settlement, 2026-07-25T10:44Z, ``Invalid token '```json``)은 Yojson 이
+    펜스를 봤다는 뜻이므로 이 둘 중 하나이며, 어느 쪽인지는 tier 기록이 없어
+    settlement 만으로는 가려지지 않는다.
+
+    설계 SSOT 와의 충돌은 미해결이 아니라 확인된 상태다:
+    docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 는 provider-native
+    JSON schema 강제([Structured.extract], 미지원 provider fail-fast)를 요구한다.
+    구현은 그 요구를 의도적으로 철회했고 근거는 fusion_judge.ml:157-164 에 있다 —
+    (1) capability 사실이 거짓일 수 있다(ollama.com cloud 는 declared 인데
+    json_schema 를 무시, 2026-07-02 probe), (2) #22768 "native schema or fail
+    before HTTP" 가 미지원 preset 의 fusion 을 영구 불능으로 만들어 되돌려졌다.
+    따라서 맞춰야 하는 쪽은 RFC 이며, §7.2 에 그 사실을 기재했다. *)
 
 (** 질문 + 패널 답들로 심판 프롬프트를 구성한다
     ({!Fusion_judge_parse.expected_json_doc} 지시 포함). 순수 — 테스트 가능. *)
@@ -17,7 +38,8 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
 (** 심판 모델을 실행해 구조화 종합을 받는다.
 
     [judge_model]: runtime_id("provider.model"). [question]/[panel]로 프롬프트를
-    구성해 실행하고, capability-aware output contract를 적용한 응답 텍스트를
+    구성해 실행하고, [apply_fusion_judge_output_contract](capability 를 읽지 않고
+    무조건 [response_format = Off] / [output_schema = None])를 적용한 응답 텍스트를
     {!Fusion_judge_parse.of_string}으로 파싱한다.
     [web_tools=true]면 심판 에이전트에 web_search/web_fetch를 주입한다.
     [max_tokens]는 출력 토큰 예산이다. 생략하면 Runtime_agent 기본값을 보존한다.

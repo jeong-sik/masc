@@ -318,7 +318,7 @@ let save_bytes_durable_atomic_core
         temp_dir
   in
   let result =
-    run_in_systhread_cancel_checked (fun () ->
+    Eio_guard.run_in_systhread (fun () ->
     let temp_path = ref None in
     let channel = ref None in
     let renamed = ref false in
@@ -390,7 +390,7 @@ let save_bytes_durable_atomic_core
           ?ownership_root
           dir
       in
-      run_in_systhread_cancel_checked (fun () ->
+      Eio_guard.run_in_systhread (fun () ->
         run_durable_write_stage
           ~renamed:true
           ~before_stage
@@ -413,7 +413,7 @@ let save_bytes_durable_atomic_core
           ?ownership_root
           temp_dir
       in
-      run_in_systhread_cancel_checked (fun () ->
+      Eio_guard.run_in_systhread (fun () ->
         run_durable_write_stage
           ~renamed:true
           ~before_stage
@@ -422,6 +422,53 @@ let save_bytes_durable_atomic_core
       confirm_temp_directory_lease lease)
   in
   confirm_temp_directory_lease temp_directory_lease
+;;
+
+type durable_commit_outcome =
+  | Committed
+  | Committed_but_observer_failed of Eio.Exn.with_bt
+
+let check_durable_write_completion result =
+  Eio_guard.check_if_ready ();
+  result
+;;
+
+let observe_durable_write_success ~on_durable_commit = function
+  | Error _ as error ->
+    Eio_guard.check_if_ready ();
+    error
+  | Ok () ->
+    (* The blocking transaction and both final directory-lease confirmations
+       are complete. This pure caller-fiber publication must precede the
+       cooperative cancellation check: a systhread cannot stop once running,
+       so cancellation may already be pending after a fully durable commit. *)
+    (match on_durable_commit () with
+     | () ->
+       Eio_guard.check_if_ready ();
+       Ok Committed
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Ok (Committed_but_observer_failed (exn, backtrace)))
+;;
+
+let save_bytes_durable_atomic_observed_with
+      ~on_durable_commit
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  =
+  protect_durable_write (fun () ->
+    save_bytes_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes)
+  |> observe_durable_write_success ~on_durable_commit
 ;;
 
 let save_bytes_durable_atomic_with
@@ -440,6 +487,7 @@ let save_bytes_durable_atomic_with
       ?temp_dir
       path
       bytes)
+  |> check_durable_write_completion
 ;;
 
 let save_json_durable_atomic_from_with
@@ -476,6 +524,7 @@ let save_json_durable_atomic_from_with
       ?temp_dir
       path
       bytes)
+  |> check_durable_write_completion
 ;;
 
 let save_json_durable_atomic_with
@@ -499,6 +548,22 @@ let save_json_durable_atomic_with
 
 let save_bytes_durable_atomic ?ownership_root ?temp_dir path bytes =
   save_bytes_durable_atomic_with
+    ~before_stage:(fun _ -> ())
+    ?ownership_root
+    ?temp_dir
+    path
+    bytes
+;;
+
+let save_bytes_durable_atomic_observed
+      ~on_durable_commit
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  =
+  save_bytes_durable_atomic_observed_with
+    ~on_durable_commit
     ~before_stage:(fun _ -> ())
     ?ownership_root
     ?temp_dir
@@ -603,6 +668,25 @@ let remove_file_durable ?ownership_root path =
 ;;
 
 module For_testing = struct
+  let save_bytes_durable_atomic_observed
+        ~on_durable_commit
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        path
+        bytes
+    =
+    save_bytes_durable_atomic_observed_with
+      ~on_durable_commit
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  ;;
+
   let save_bytes_durable_atomic
         ~before_stage
         ?before_directory_fsync

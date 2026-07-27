@@ -31,6 +31,13 @@ export type TurnRecordEntry = {
   enable_thinking?: boolean
   input_tokens?: number
   output_tokens?: number
+  // #25779 made the provider cache counts durable on the turn record
+  // (lib/types/turn_record.ml:79-82 writes them as optional fields). Same
+  // absent-means-absent contract as the neighbours: a legacy row that predates
+  // #25779, or a provider that reports no cache usage, leaves these undefined
+  // and the inspector renders absence rather than a fabricated zero.
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
   // RFC-0233 §8 — runtime model metadata. context_window is the keeper-resolved
   // effective token budget (the ctx-fill% denominator); the two prices are USD
   // per 1M tokens declared on the runtime binding. Absent (undefined) when the
@@ -331,6 +338,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,
     input_tokens: asNumber(raw.input_tokens),
     output_tokens: asNumber(raw.output_tokens),
+    cache_creation_input_tokens: asNumber(raw.cache_creation_input_tokens),
+    cache_read_input_tokens: asNumber(raw.cache_read_input_tokens),
     context_window: asNumber(raw.context_window),
     price_input_per_million: asNumber(raw.price_input_per_million),
     price_output_per_million: asNumber(raw.price_output_per_million),

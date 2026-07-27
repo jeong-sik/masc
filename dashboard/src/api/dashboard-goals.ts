@@ -5,6 +5,7 @@
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { get } from './core'
+import { decodeKeeperApprovalQueueState } from './dashboard-gate'
 import type {
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
@@ -20,7 +21,18 @@ import type {
   GoalTreeNode,
   GoalTreeSummary,
   GoalTreeTask,
+  KeeperApprovalQueueState,
 } from '../types'
+
+export class DashboardGoalsApprovalQueueUnavailableError extends Error {
+  readonly approval_queue_state: Extract<KeeperApprovalQueueState, { state: 'unavailable' }>
+
+  constructor(state: Extract<KeeperApprovalQueueState, { state: 'unavailable' }>) {
+    super(`${state.icon} ${state.title}: ${state.operator_detail}`)
+    this.name = 'DashboardGoalsApprovalQueueUnavailableError'
+    this.approval_queue_state = state
+  }
+}
 
 function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
   if (!isRecord(raw)) return null
@@ -307,17 +319,8 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   }
 }
 
-function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary {
-  if (!isRecord(raw)) {
-    return {
-      total_goals: 0,
-      active_goals: 0,
-      phase_counts: {},
-      total_tasks: 0,
-      done_tasks: 0,
-      pending_approvals: 0,
-    }
-  }
+function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary | null {
+  if (!isRecord(raw)) return null
   return {
     total_goals: asInt(raw.total_goals) ?? 0,
     active_goals: asInt(raw.active_goals) ?? 0,
@@ -326,6 +329,17 @@ function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary {
     done_tasks: asInt(raw.done_tasks) ?? 0,
     pending_approvals: asInt(raw.pending_approvals) ?? 0,
   }
+}
+
+function requireReadyApprovalQueue(raw: Record<string, unknown>) {
+  const state = decodeKeeperApprovalQueueState(raw.approval_queue_state)
+  if (!state) {
+    throw new Error('유효하지 않은 dashboard goals approval_queue_state payload')
+  }
+  if (state.state === 'unavailable') {
+    throw new DashboardGoalsApprovalQueueUnavailableError(state)
+  }
+  return state
 }
 
 function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
@@ -374,18 +388,22 @@ function decodeGoalDetailTimelineEvent(raw: unknown): GoalDetailTimelineEvent | 
 
 function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeResponse | null {
   if (!isRecord(raw)) return null
+  const approvalQueueState = requireReadyApprovalQueue(raw)
+  if (!Array.isArray(raw.tree)) return null
   const tree = asRecordArray(raw.tree)
     .map(decodeGoalTreeNode)
     .filter((node): node is GoalTreeNode => node !== null)
   const summary = decodeGoalTreeSummary(raw.summary)
+  if (!summary) return null
   const generatedAt = asString(raw.generated_at)
   return generatedAt
-    ? { generated_at: generatedAt, tree, summary }
-    : { tree, summary }
+    ? { generated_at: generatedAt, approval_queue_state: approvalQueueState, tree, summary }
+    : { approval_queue_state: approvalQueueState, tree, summary }
 }
 
 function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailResponse | null {
   if (!isRecord(raw)) return null
+  requireReadyApprovalQueue(raw)
   const goal = decodeGoalTreeNode(raw.goal)
   if (!goal) return null
   const generatedAt = asString(raw.generated_at)

@@ -22,6 +22,8 @@ type exact_execution_terminal_cause = Keeper_event_queue_persistence.exact_execu
   | Exact_execution_failed
   | Exact_execution_cancelled
   | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch
   | Commit_admission_unavailable
@@ -136,6 +138,10 @@ type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_t
 
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
+  | Manual_compaction_committed of
+      { commit : Keeper_event_queue_state.manual_compaction_commit
+      ; followup : Keeper_event_queue_state.manual_compaction_followup
+      }
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
@@ -165,14 +171,8 @@ val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
 val active_lease_result :
   base_path:string -> string -> (lease option, string) result
 
-val transition_outbox_result :
-  base_path:string -> string -> (outbox_entry list, string) result
-
 val exact_execution_binding_result :
   base_path:string -> string -> (exact_execution_binding option, string) result
-
-val mark_transition_projected_result :
-  base_path:string -> string -> transition_id:string -> (unit, string) result
 
 val claim_when_result :
   base_path:string ->
@@ -359,8 +359,10 @@ val enqueue_hitl_resolution_durable_result :
     function returns [Ok ()]. *)
 
 (** Read-only snapshot of the keeper's queue. If the keeper is not registered,
-    read the durable snapshot so diagnostics still expose pending replay. *)
-val snapshot : base_path:string -> string -> Keeper_event_queue.t
+    read the durable snapshot so diagnostics still expose pending replay.
+    Durable read failures remain explicit. *)
+val snapshot_result :
+  base_path:string -> string -> (Keeper_event_queue.t, string) result
 
 val drop_by_post_id :
   base_path:string

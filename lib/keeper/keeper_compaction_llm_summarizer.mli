@@ -10,6 +10,51 @@ type completed_plan
 
 type post_success_terminalizer
 
+type 'a post_success_boundary =
+  | Post_success_current of 'a
+  | Post_success_owner_unregistered_deferred
+
+type post_success_terminalization =
+  | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalization_persistence_failed of
+      Keeper_event_queue_state.exact_execution_terminal * string
+  | Terminalization_commit_in_progress of unit Eio.Promise.t
+  | Terminalization_already_committed
+  | Terminalization_invariant_failed of string
+  | Terminalization_owner_unregistered_deferred
+
+type post_success_commit_claim =
+  | Commit_claim_acquired
+  | Commit_claim_in_progress of unit Eio.Promise.t
+  | Commit_claim_already_committed
+  | Commit_claim_rejected of
+      Keeper_event_queue_state.exact_execution_terminal
+      * (unit, string) result
+  | Commit_claim_owner_unregistered_deferred
+
+type 'a post_success_commit_boundary =
+  | Post_success_commit_owner_result of 'a
+  | Post_success_commit_in_progress of unit Eio.Promise.t
+  | Post_success_commit_already_committed
+  | Post_success_commit_rejected of
+      Keeper_event_queue_state.exact_execution_terminal
+      * (unit, string) result
+  | Post_success_commit_owner_unregistered_deferred
+
+type post_success_phase_snapshot =
+  | Phase_open
+  | Phase_commit_claimed
+  | Phase_installed_pending_valid
+  | Phase_committed
+  | Phase_reject_claimed
+  | Phase_rejected
+
+type post_success_snapshot =
+  { phase : post_success_phase_snapshot
+  ; domain_valid_attempts : int
+  ; domain_rejected_attempts : int
+  }
+
 type prepared_lane
 
 type attempt_observation =
@@ -49,8 +94,16 @@ type summarization_failure =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
+  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_failed
+  | Exact_execution_guard_absent
+        (** No exact-execution guard was supplied. The current optional boundary
+            reports this from OAS's before-dispatch callback, after affine replay
+            detection and before POST. It does not diagnose why the caller lacked
+            a guard. *)
+  | Exact_execution_bind_failed
+        (** A guard was supplied and its before-dispatch bind did not reach
+            Fsync_completed. A persistence fault, unrelated to lease ownership. *)
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Invalid_plan
@@ -61,11 +114,12 @@ type summarizer =
 
 (** Pure lane lookup and construction of one immutable OAS exact flow against
     exactly one caller-supplied registry generation. MASC supplies only ordered
-    opaque slot identities and domain messages/schema. OAS performs candidate
-    admission and allocates every non-shared affine attempt before any network
-    effect. *)
+    opaque slot identities and domain messages/schema. OAS freezes candidate
+    visits and allocates one non-shared affine attempt only when that candidate
+    is reached, before any network effect. *)
 val prepare_lane
-  :  keeper_name:string
+  :  base_path:string
+  -> keeper_name:string
   -> registry:Runtime_exact_output_registry.t
   -> lane_id:string
   -> units:Keeper_compaction_unit.closed_unit list
@@ -93,7 +147,12 @@ val execute_prepared_lane
     its ordered opaque slots to one OAS exact flow. OAS owns admission,
     execute-once, advancement, and provenance. [plan_of_json] alone enforces the
     MASC-owned compaction schema and domain rules after success. *)
-val make : ?exact_execution_guard:exact_execution_guard -> keeper_name:string -> unit -> summarizer option
+val make
+  :  ?exact_execution_guard:exact_execution_guard
+  -> base_path:string
+  -> keeper_name:string
+  -> unit
+  -> summarizer option
 
 val has_eligible_units : Keeper_compaction_unit.closed_unit list -> bool
 
@@ -107,10 +166,28 @@ val completed_exact_execution_evidence : completed_plan -> exact_execution_evide
 val completed_attempt_observation : completed_plan -> attempt_observation
 val completed_post_success_terminalizer : completed_plan -> post_success_terminalizer
 
+val claim_post_success_commit :
+  post_success_terminalizer -> post_success_commit_claim
+
+(** Pin the exact-flow owner for the whole commit callback without holding the
+    lifecycle key lock. Only the [Open] claimant executes [commit]. *)
+val with_post_success_commit :
+  post_success_terminalizer ->
+  (unit -> 'a) ->
+  'a post_success_commit_boundary
+
+val mark_post_success_checkpoint_installed :
+  post_success_terminalizer -> (unit, string) result
+
+val terminalize_claimed_commit :
+  post_success_terminalizer ->
+  Keeper_event_queue_state.exact_execution_terminal_cause ->
+  post_success_terminalization
+
 val terminalize_post_success
   :  post_success_terminalizer
   -> Keeper_event_queue_state.exact_execution_terminal_cause
-  -> Keeper_event_queue_state.exact_execution_terminal
+  -> post_success_terminalization
 (** Durably quarantine the real retained attempt observation before returning
     its source-bound terminal identity. The first call atomically owns the
     canonical cause, performs the only quarantine attempt outside the mutex
@@ -120,6 +197,28 @@ val terminalize_post_success
     canonical terminal; the durable binding remains dispatch-uncertain and
     therefore fail-closed against restart replay. A cancelled waiter can retry
     and retrieve the same canonical terminal without repeating quarantine. *)
+
+val settle_post_success_domain_valid
+  :  post_success_terminalizer
+  -> (unit, string) result
+(** Install the OAS flow preference only after the validated compaction
+    checkpoint is durable. The caller must hold [with_current_post_success]. *)
+
+val finish_post_success_commit_failure
+  :  post_success_terminalizer
+  -> string
+  -> (unit, string) result
+(** After durable checkpoint installation, settle or conservatively finalize
+    the affine commit and always release its existing completion waiter. *)
+
+val with_current_post_success
+  :  post_success_terminalizer
+  -> (unit -> 'a)
+  -> 'a post_success_boundary
+(** Fence local checkpoint and projection commits against the exact Keeper
+    generation that produced the completed plan. Already-bound work may finish
+    while that exact generation is Draining; replacement and Retired
+    generations remain deferred. *)
 
 val exact_execution_evidence_slot_id : exact_execution_evidence -> string
 val exact_execution_evidence_call_id : exact_execution_evidence -> string
@@ -143,4 +242,24 @@ module For_testing : sig
   val registry_generation : prepared_lane -> int64
 
   val attempt_observations : prepared_lane -> attempt_observation list
+  val candidate_snapshot_slot_ids : prepared_lane -> string list
+
+  val post_success_snapshot :
+    post_success_terminalizer -> post_success_snapshot
+
+  val settle_post_success_domain_valid_with_error :
+    post_success_terminalizer -> string -> (unit, string) result
+
+  val settle_post_success_domain_valid_with_exception :
+    post_success_terminalizer -> exn -> (unit, string) result
+
+  val settle_post_success_domain_valid_with :
+    settle:(unit -> (unit, string) result) ->
+    post_success_terminalizer ->
+    (unit, string) result
+
+  val settle_post_success_domain_valid_with_wait_hook :
+    on_wait:(unit -> unit) ->
+    post_success_terminalizer ->
+    (unit, string) result
 end

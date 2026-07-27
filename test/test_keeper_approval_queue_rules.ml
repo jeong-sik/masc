@@ -381,7 +381,7 @@ type eligibility_exact_identity =
   }
 
 let approval_entry_exn id =
-  match AQ.get_pending_entry ~id with
+  match AQ.For_testing.get_pending_entry_unchecked ~id with
   | Some entry -> entry
   | None -> fail ("pending approval not found: " ^ id)
 ;;
@@ -447,14 +447,6 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
   in
   summary_update_exn "mark resumable summary pending" (AQ.mark_summary_pending ~id:pending.id);
   let pending = approval_entry_exn pending.id in
-  let available =
-    submit_eligibility_entry ~base_path ~keeper_name "available-unbound"
-  in
-  summary_update_exn "mark available summary pending" (AQ.mark_summary_pending ~id:available.id);
-  summary_update_exn
-    "attach available summary"
-    (AQ.attach_summary ~id:available.id eligibility_summary);
-  let available = approval_entry_exn available.id in
   let make_bound label after_bind =
     let entry = submit_eligibility_entry ~base_path ~keeper_name label in
     summary_update_exn
@@ -535,7 +527,6 @@ let with_exact_status (entry : AQ.pending_approval) status =
   in
   check_ready "new unbound judgment is startable" true not_requested;
   check_ready "pending unbound judgment is resumable" true pending;
-  check_ready "available judgment does not start a provider worker" false available;
   check_ready "dispatch-uncertain binding is not worker-ready" false dispatch_uncertain;
   check_ready
     "released-before-dispatch binding is not worker-ready"
@@ -569,7 +560,6 @@ let with_exact_status (entry : AQ.pending_approval) status =
       ~keeper_name
       (not_requested
        :: pending
-       :: available
        :: other_owner
        :: [ dispatch_uncertain
           ; released_before_dispatch
@@ -585,14 +575,9 @@ let with_exact_status (entry : AQ.pending_approval) status =
     (List.map (fun (entry : AQ.pending_approval) -> entry.id) ready)
 ;;
 
-let test_available_judgments_finalize_without_worker () =
+let test_completed_exact_judgment_finalizes_without_worker () =
   with_gate_fixture @@ fun base_path ->
   let keeper_name = "available-finalize" in
-  let unbound = submit_eligibility_entry ~base_path ~keeper_name "unbound" in
-  summary_update_exn "mark unbound summary pending" (AQ.mark_summary_pending ~id:unbound.id);
-  summary_update_exn
-    "attach unbound decisive summary"
-    (AQ.attach_summary ~id:unbound.id eligibility_summary);
   let completed = submit_eligibility_entry ~base_path ~keeper_name "completed" in
   summary_update_exn
     "mark completed summary pending"
@@ -625,17 +610,17 @@ let test_available_judgments_finalize_without_worker () =
   check bool "completed available judgment is finalize-only" false
     (Gate.For_testing.auto_judge_entry_ready completed);
   let report = Gate.resume_persisted_auto_judges ~base_path in
-  let expected_ids = List.sort String.compare [ unbound.id; completed.id ] in
-  check int "two available judgments considered" 2 report.requested;
-  check (list string) "available judgments finalized" expected_ids
+  let expected_ids = [ completed.id ] in
+  check int "one completed exact judgment considered" 1 report.requested;
+  check (list string) "completed exact judgment finalized" expected_ids
     (List.sort String.compare report.finalized_ids);
-  check (list string) "available judgments start no provider worker" [] report.started_ids;
-  check (list string) "available judgments are not skipped" [] report.skipped_ids;
-  check int "available judgments have no recovery failure" 0 (List.length report.failures);
+  check (list string) "completed exact judgment starts no provider worker" [] report.started_ids;
+  check (list string) "completed exact judgment is not skipped" [] report.skipped_ids;
+  check int "completed exact judgment has no recovery failure" 0 (List.length report.failures);
   List.iter
     (fun id ->
        check bool ("finalized judgment leaves no pending approval: " ^ id) true
-         (Option.is_none (AQ.get_pending_entry ~id)))
+         (Option.is_none (AQ.For_testing.get_pending_entry_unchecked ~id)))
     expected_ids
 ;;
 
@@ -799,9 +784,9 @@ let () =
             `Quick
             test_gate_auto_judge_worker_eligibility_ssot
         ; test_case
-            "available judgments finalize without worker"
+            "completed exact judgment finalizes without worker"
             `Quick
-            test_available_judgments_finalize_without_worker
+            test_completed_exact_judgment_finalizes_without_worker
         ] )
     ; ( "exact rules"
       , [ test_case

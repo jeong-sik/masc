@@ -269,7 +269,14 @@ jobs:
           # harness file — including non-.sh/.json ones and future extensions —
           # must force build=true. ci_core is intentionally NOT OR-ed here:
           # the ci_core block below already forces build=true.
-          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
+          # scripts/fixtures/ is a prefix for the same reason (#25726 moved the
+          # release-evidence fixtures out of heredocs into files): test/dune
+          # declares (source_tree ../scripts/fixtures) and
+          # test_runtime_config_validity.ml discovers scripts/fixtures/<name>/
+          # runtime.toml, so a fixture edit changes test input while matching
+          # none of the suffixes above (.toml is not .ml/.json/.sh) and the
+          # Build job would skip.
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
             build=true
           fi
 
@@ -383,6 +390,9 @@ jobs:
         run: |
           bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y -qq ripgrep
+
+      - name: Check single OCaml compile authority
+        run: bash scripts/ci/check-ocaml-compile-authority.sh
 
       - name: Guard pending release tag on main PRs
         if: github.event_name == 'pull_request' && github.base_ref == 'main'
@@ -520,22 +530,6 @@ jobs:
           bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y -qq ripgrep bc
 
-      - name: Setup OCaml toolchain
-        if: needs.changes.outputs.health_snapshot == 'true'
-        uses: ./.github/actions/setup-ocaml-toolchain
-
-      - name: Pin external OCaml dependencies
-        if: needs.changes.outputs.health_snapshot == 'true'
-        uses: ./.github/actions/pin-ocaml-deps
-        with:
-          pin-flags: --with-bisect
-
-      - name: Install system and OCaml dependencies
-        if: needs.changes.outputs.health_snapshot == 'true'
-        uses: ./.github/actions/install-ocaml-deps
-        with:
-          install-flags: --with-test
-
       - name: Fetch baseline for health ratchet
         if: needs.changes.outputs.health_snapshot == 'true'
         env:
@@ -571,12 +565,14 @@ jobs:
           fi
 
           if [ -n "${baseline_ref}" ]; then
-            opam exec -- bash scripts/health_snapshot.sh \
+            bash scripts/health_snapshot.sh \
+              --skip-build \
               --json-out .health/health-snapshot.json \
               --baseline-ref "${baseline_ref}" \
               --fail-on-lib-regression
           else
-            opam exec -- bash scripts/health_snapshot.sh \
+            bash scripts/health_snapshot.sh \
+              --skip-build \
               --json-out .health/health-snapshot.json \
               --baseline-file .ci/health-baseline.json
           fi
@@ -695,7 +691,11 @@ jobs:
           # runtest subset, so a PR that breaks test compilation can land
           # green (#23196/#23211/#23353 landed that way on 2026-07-04~06).
           # @check compiles every library/executable/test without running.
-          opam exec -- dune build --root . @default @check &
+          # @install adds the public package/install surface that Lint used to
+          # compile independently. The root dune env is the warning-as-error
+          # SSOT, so this one cacheable rule graph is authoritative for all
+          # three surfaces.
+          opam exec -- dune build --root . @default @check @install &
           build_pid=$!
 
           (
@@ -718,6 +718,13 @@ jobs:
           kill "${heartbeat_pid}" 2>/dev/null || true
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
+
+      - name: Check keeper event queue projection boundary
+        # This parser uses compiler-libs directly, so keep it beside the sole
+        # OCaml toolchain instead of bootstrapping another toolchain in Lint.
+        run: |
+          chmod +x scripts/check-keeper-event-queue-projection-boundary.sh
+          scripts/check-keeper-event-queue-projection-boundary.sh
 
       - name: Sublib boundary gate against real dune graph (RFC-0056 G1)
         # The self-test (in the Meta Guards job) only validates the checker
@@ -858,6 +865,23 @@ jobs:
           chmod +x scripts/harness/lib/server_bootstrap.sh
           scripts/ci-run-tests.sh "scripts/harness/contract/run_all.sh"
 
+      # This smoke is the only gate that boots the installed binary against the
+      # release-evidence config fixture. Running it solely on push-to-main made
+      # it structurally invisible to review: #25671 added a mandatory
+      # exact-output lane, every PR check was green, and main then failed on
+      # every push for ~29 hours (#25663). Running it on pull_request too moves
+      # that failure into the PR that causes it. It is a ~10s local boot against
+      # a dead-port fixture with keeper bootstrap disabled, so it issues no
+      # provider call and needs no credential.
+      - name: Boot release evidence smoke (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          chmod +x scripts/release-evidence.sh
+          mkdir -p .release-evidence
+          scripts/release-evidence.sh \
+            _build/default/bin/main_eio.exe \
+            .release-evidence/pr-release-evidence.md
+
       - name: Generate main release evidence bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -889,9 +913,9 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    # Dependency installation plus @install warn-error build regularly exceeds
-    # 20 minutes on cold runners; keep this above the install-only worst case.
-    timeout-minutes: 40
+    # Source ratchets and proto drift are shell/Python-only after the product
+    # compile authority moved to Build and Test.
+    timeout-minutes: 20
     needs: [pr-live-gate, changes]
     if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.lint == 'true' }}
 
@@ -900,6 +924,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Install lint dependencies
+        run: |
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y -qq ripgrep protobuf-compiler
 
       - name: Run #8605 family detector
         run: bash scripts/lint/no-unknown-permissive-default.sh
@@ -918,17 +947,6 @@ jobs:
 
       - name: Run dashboard agent-status SSOT lint (RFC-0139 §10)
         run: bash scripts/lint/dashboard-ssot-agent-status.sh
-
-      - name: Setup OCaml toolchain
-        uses: ./.github/actions/setup-ocaml-toolchain
-
-      - name: Pin external OCaml dependencies
-        uses: ./.github/actions/pin-ocaml-deps
-
-      - name: Install system and OCaml dependencies
-        uses: ./.github/actions/install-ocaml-deps
-        with:
-          os-packages: ripgrep
 
       - name: Check Eio conventions
         run: |
@@ -976,15 +994,8 @@ jobs:
           chmod +x scripts/check-ssot.sh
           scripts/check-ssot.sh
 
-      - name: Build with warnings as errors
-        run: |
-          opam exec -- dune build --root . @install --force
-        env:
-          OCAMLPARAM: "_,warn-error=+a"
-
       - name: Check gRPC proto descriptor drift
         run: |
-          sudo apt-get install -y -qq protobuf-compiler
           chmod +x scripts/gen-grpc-descriptors.sh
           scripts/gen-grpc-descriptors.sh --check
 
@@ -1081,6 +1092,10 @@ jobs:
       - name: Run silent-failure ratchet
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/silent-failure-ratchet.sh
+
+      - name: Run checkpoint installation legacy purge ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
+        run: scripts/check-checkpoint-installation-legacy-purge.sh
 
       - name: Run keeper cwd leak gate
         if: needs.changes.outputs.keeper_cwd == 'true'

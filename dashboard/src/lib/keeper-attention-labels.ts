@@ -48,6 +48,7 @@ export const ATTENTION_REASONS = [
   'stale_turn_timeout',
   'fiber_unresolved',
   'runtime_blocked',
+  'approval_queue_unavailable',
   'runtime_trust_snapshot_unavailable',
   'runtime_exhausted',
   'preflight_config_error',
@@ -68,6 +69,7 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   stale_turn_timeout: '응답 지연(stale) 타임아웃',
   fiber_unresolved: '미완료 작업(fiber) 정리 필요',
   runtime_blocked: '런타임 근거 확인 필요',
+  approval_queue_unavailable: '승인 큐 확인 불가',
   runtime_trust_snapshot_unavailable: '런타임 신뢰 스냅샷 없음',
   runtime_exhausted: '런타임 후보 소진',
   preflight_config_error: '실행 전 설정 오류',
@@ -133,6 +135,7 @@ export const NEXT_HUMAN_ACTIONS = [
   'inspect_turn_timeout',
   'inspect_latest_error',
   'inspect_keeper_runtime_trust',
+  'reset_runtime_state',
 ] as const
 export type NextHumanAction = typeof NEXT_HUMAN_ACTIONS[number]
 
@@ -150,15 +153,14 @@ const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
   inspect_turn_timeout: '턴 타임아웃 원인 확인',
   inspect_latest_error: '최근 오류 확인',
   inspect_keeper_runtime_trust: '런타임 신뢰 스냅샷 확인',
+  reset_runtime_state: '런타임 상태 초기화',
 }
 
 export function isNextHumanAction(s: string): s is NextHumanAction {
   return (NEXT_HUMAN_ACTIONS as readonly string[]).includes(s)
 }
 
-// Reserved seam for genuine legacy aliases (see canonicalAttentionReason).
-// Empty today: every action the backend emits has its own arm above, so no
-// distinct action is folded.
+// Every current action emitted by the backend has its own arm above.
 export function canonicalNextHumanAction(action: string | null): string | null {
   return action
 }

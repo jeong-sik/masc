@@ -235,74 +235,14 @@ val operator_disposition : t -> operator_disposition_kind * operator_disposition
 val needs_operator_broadcast : operator_disposition_kind -> bool
 
 (** Structured payload emitted for [keeper.operator_broadcast_required].
-    Exposed so tests can pin the diagnostic fields operators need when a
-    keeper turn pauses or stalls silently. *)
+    Exposed so tests can pin the diagnostic fields of a durable receipt whose
+    disposition requires operator attention. *)
 val operator_broadcast_payload
   :  t
   -> disposition:operator_disposition_kind
   -> reason:operator_disposition_reason
   -> Yojson.Safe.t
 
-(** Structured watchdog payload. Keeps the exact [stale_seconds] while
-    exposing low-cardinality failure/cohort fields for dashboards and issue
-    aggregation. *)
-val stale_broadcast_payload
-  :  keeper_name:string
-  -> agent_name:string
-  -> runtime_id:string
-  -> trace_id:string
-  -> generation:int
-  -> failure_reason:Keeper_registry.failure_reason option
-  -> stale_seconds:float
-  -> last_turn_ts:float
-  -> Yojson.Safe.t
-
 val append : Workspace.config -> t -> unit
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option
 val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.Safe.t) list
-
-type stale_broadcast_dedupe_key
-
-module For_testing : sig
-  val stale_broadcast_dedupe_key
-    :  keeper_name:string
-    -> agent_name:string
-    -> runtime_id:string
-    -> trace_id:string
-    -> generation:int
-    -> failure_reason:Keeper_registry.failure_reason option
-    -> stale_seconds:float
-    -> stale_broadcast_dedupe_key
-
-  val stale_turn_bucket : float -> string
-
-  val emit_stale_keeper_broadcast_dedupe_for_testing
-    :  keeper_name:string
-    -> agent_name:string
-    -> runtime_id:string
-    -> trace_id:string
-    -> generation:int
-    -> failure_reason:Keeper_registry.failure_reason option
-    -> stale_seconds:float
-    -> emit:(unit -> unit)
-    -> bool
-
-  val reset_stale_broadcast_dedupe : unit -> unit
-end
-
-(** Emit a watchdog-sourced operator_broadcast_required event for a keeper
-    that has been Running but not produced a turn within the stale
-    threshold. Used by the supervisor watchdog fiber (Step 3 of the
-    keeper-pause-broadcast-watchdog change) to convert silent stalls into
-    addressable events. *)
-val emit_stale_keeper_broadcast
-  :  Workspace.config
-  -> keeper_name:string
-  -> agent_name:string
-  -> runtime_id:string
-  -> trace_id:string
-  -> generation:int
-  -> failure_reason:Keeper_registry.failure_reason option
-  -> stale_seconds:float
-  -> last_turn_ts:float
-  -> unit

@@ -45,26 +45,15 @@ type ('not_committed, 'committed) replacement_effect =
 
 type selected_slot =
   { slot_id : string
-  ; target : Agent_sdk.Exact_output.selected_target
-  }
-
-type unavailable_slot =
-  { position : int
-  ; slot_id : string
-  ; cause : Agent_sdk.Exact_output.target_selection_error
+  ; admitted_target : Agent_sdk.Exact_output.admitted_target
   }
 
 type resolved_lane =
-  { selected_slots : selected_slot list
-  ; unavailable_slots : unavailable_slot list
-  }
+  { selected_slots : selected_slot list }
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
-  | No_usable_lane_slots of
-      { lane_id : string
-      ; unavailable_slots : unavailable_slot list
-      }
+  | No_admitted_lane_slots of { lane_id : string }
 
 val publish
   :  lanes:Runtime_schema.exact_output_lane_decl list
@@ -110,14 +99,12 @@ val current : unit -> (t, publication_error) result
 val generation : t -> int64
 
 val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error) result
-(** Resolve one lane exclusively from the immutable admitted handles retained
-    by the supplied registry generation. Credential-missing, invalid, and
-    read-failed slots are returned as typed unavailable diagnostics in
-    declaration order while usable slots retain their relative order. The lane
-    fails only when it is unconfigured or no admitted slot is usable. *)
+(** Acquire one lane exclusively from the immutable admitted handles retained
+    by the supplied registry generation. This does not resolve credentials or
+    select provider targets; OAS owns those operations while executing the
+    exact flow. Slot declaration order is preserved. *)
 
 val publication_error_to_string : publication_error -> string
-val unavailable_slot_to_string : unavailable_slot -> string
 val lane_resolution_error_to_string : lane_resolution_error -> string
 
 module For_testing : sig

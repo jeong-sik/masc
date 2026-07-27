@@ -37,6 +37,7 @@ import {
 } from '../config/navigation'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import type { LucideIcon } from 'lucide-preact'
 import { ExternalLink } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
 import { CopyIdButton } from './common/copy-id-button'
@@ -54,6 +55,11 @@ import {
   WidgetSoloBar,
   widgetSoloUrlForRoute,
 } from './widget-solo'
+import {
+  CURRENT_KEEPER_FLEET_FACT_INVALID,
+  keeperFleetOperatorFactPresentation,
+  keeperFleetOperatorFacts,
+} from './keeper-fleet-operator-fact'
 
 const buildIdentityOpen = signal(false)
 const shellRuntimeProviderProbe = signal<DashboardRuntimeProbePayload | null>(null)
@@ -211,6 +217,7 @@ interface DashboardHealthChip {
   label: string
   detail: string
   tone: DashboardHealthChipTone
+  Icon?: LucideIcon
   // Optional drill-down route. When set, DashboardHealthStrip renders this
   // chip as a RouteLink so operators can jump from "Source mismatch" /
   // "일시정지 keeper N" / "Reaction ledger pending N" straight to the page
@@ -256,94 +263,54 @@ interface DashboardHealthInput {
 
 function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): DashboardHealthChip | null {
   if (!fleetSafety) return null
-  const fibers = fleetSafety.keeper_fibers
-  const paused = fleetSafety.paused_keepers ?? 0
   const fleet = fleetSafety.keeper_fleet_safety
-  const fleetStatus = fleet?.status
-  const runningFibers = fleet?.running_keeper_fiber_count ?? fibers
-  const healthyRunningFibers = fleet?.healthy_running_keeper_fiber_count ?? runningFibers
-  const failingFibers = fleet?.failing_keeper_fiber_count ?? null
-  const executableFibers = fleet?.executable_keeper_fiber_count
-    ?? fleet?.executable_reaction_capacity_count
-    ?? runningFibers
-  const pausedKeepers = fleet?.paused_keeper_count ?? paused
-  const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
-  const targetCapacity = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count ?? null
-  const bootableKeepers = fleet?.bootable_keeper_count ?? null
-  const minimumRunning = fleet?.minimum_running_fibers ?? null
-  const noFibers = fleet?.no_running_fibers ?? fleetSafety.keeper_fleet_no_fibers
-  const requiresAction = fleet?.operator_action_required === true
-  const capacityBelowTarget = fleet?.reaction_capacity_below_target === true
-  const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? (
-    targetCapacity != null && runningFibers != null ? Math.max(0, targetCapacity - runningFibers) : null
-  )
-  const pausedOnlyNoExecutable =
-    executableFibers === 0
-    && pausedAutobootKeepers != null
-    && pausedAutobootKeepers > 0
-    && targetCapacity != null
-    && pausedAutobootKeepers >= targetCapacity
-  if (pausedOnlyNoExecutable) {
-    const capacityDetail = [
-      `status=${fleetStatus ?? 'paused'}`,
-      `running_keeper_fiber_count=${runningFibers ?? 0}`,
-      `executable_keeper_fiber_count=${executableFibers}`,
-      `paused_keeper_count=${pausedKeepers}`,
-      `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}`,
-      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
-      minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
-    ].filter((item): item is string => item != null).join(', ')
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet paused',
-      detail: `${capacityDetail}; paused is lifecycle state. Inspect row-level runtime blocker evidence before treating it as a blocker.`,
-      tone: 'warn',
-    }
-  }
-  if (fleetStatus === 'blocked' || (requiresAction && (runningFibers === 0 || noFibers === true))) {
-    const capacityDetail = [
-      `status=${fleetStatus ?? 'blocked'}`,
-      `running_keeper_fiber_count=${runningFibers ?? 0}`,
-      executableFibers != null ? `executable_keeper_fiber_count=${executableFibers}` : null,
-      `paused_keeper_count=${pausedKeepers}`,
-      pausedAutobootKeepers != null ? `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}` : null,
-      bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
-      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
-      minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
-    ].filter((item): item is string => item != null).join(', ')
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'P0 fleet blocked',
-      detail: `${capacityDetail}; resume selected paused keepers or confirm an intentional operator pause policy.`,
-      tone: 'bad',
-    }
-  }
-  if (fleetStatus === 'degraded' || (requiresAction && capacityBelowTarget)) {
-    const capacityDetail = [
-      `status=${fleetStatus ?? 'degraded'}`,
-      `healthy_running_keeper_fiber_count=${healthyRunningFibers ?? 0}`,
-      executableFibers != null ? `executable_keeper_fiber_count=${executableFibers}` : null,
-      failingFibers != null ? `failing_keeper_fiber_count=${failingFibers}` : null,
-      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
-      capacityShortfall != null ? `reaction_capacity_shortfall_count=${capacityShortfall}` : null,
+  if (fleet?.status === 'ok') return null
+  const facts = keeperFleetOperatorFacts(fleet)
+  const fact = facts[0] ?? CURRENT_KEEPER_FLEET_FACT_INVALID
+  const presentation = keeperFleetOperatorFactPresentation(fact, fleet?.status)
+  return {
+    key: 'fleet-liveness-risk',
+    label: presentation.label,
+    detail: [
+      `status=${fleet?.status ?? 'current_fact_invalid'}`,
+      fleet?.executable_keeper_fiber_count != null
+        ? `executable_keeper_fiber_count=${fleet.executable_keeper_fiber_count}`
+        : null,
+      fleet?.paused_keeper_count != null
+        ? `paused_keeper_count=${fleet.paused_keeper_count}`
+        : null,
+      fleet?.failing_keeper_fiber_count != null
+        ? `failing_keeper_fiber_count=${fleet.failing_keeper_fiber_count}`
+        : null,
+      fleet?.recovering_keeper_fiber_count != null
+        ? `recovering_keeper_fiber_count=${fleet.recovering_keeper_fiber_count}`
+        : null,
+      fleet?.paused_autoboot_enabled_keeper_count != null
+        ? `paused_autoboot_enabled_keeper_count=${fleet.paused_autoboot_enabled_keeper_count}`
+        : null,
+      fleet?.bootable_keeper_count != null
+        ? `bootable_keeper_count=${fleet.bootable_keeper_count}`
+        : null,
+      fleet?.target_reaction_capacity_count != null
+        ? `target_reaction_capacity_count=${fleet.target_reaction_capacity_count}`
+        : null,
+      fleet?.reaction_capacity_shortfall_count != null
+        ? `reaction_capacity_shortfall_count=${fleet.reaction_capacity_shortfall_count}`
+        : null,
       fleet?.blocker ? `blocker=${fleet.blocker}` : null,
-    ].filter((item): item is string => item != null).join(', ')
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet capacity degraded',
-      detail: `${capacityDetail}; restore missing keeper fibers or confirm a reduced target capacity.`,
-      tone: 'warn',
-    }
+      `keeper=${presentation.keeper}`,
+      presentation.taskId ? `task=${presentation.taskId}` : null,
+      `reason=${presentation.reason}`,
+      presentation.detail ? `detail=${presentation.detail}` : null,
+      // One chip speaks for the whole fleet, so it has to say when it is
+      // showing the most severe of several blocked keepers rather than the
+      // only one.
+      facts.length > 1 ? `blocked_keeper_fact_count=${facts.length}` : null,
+      `operator_action=${presentation.action}`,
+    ].filter((item): item is string => item != null).join(', '),
+    tone: presentation.tone,
+    Icon: presentation.Icon,
   }
-  if (fleetSafety.keeper_fleet_no_fibers === true || (fibers != null && fibers <= 1 && paused > 0)) {
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet liveness risk',
-      detail: `keeper_fibers=${fibers ?? 0}, paused_keepers=${paused}; keeper fleet may be stalled.`,
-      tone: 'bad',
-    }
-  }
-  return null
 }
 
 function ledgerCount(value: number | null | undefined): number {
@@ -732,18 +699,18 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
           key=${chip.key}
           tab=${chip.route.tab}
           params=${chip.route.params}
-          class=${`dashboard-health-chip inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium transition-opacity hover:opacity-80 ${healthChipClass(chip.tone)}`}
+          class=${`dashboard-health-chip inline-flex min-h-6 items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-0.5 font-medium transition-opacity hover:opacity-80 ${healthChipClass(chip.tone)}`}
           title=${chip.detail}
           data-testid=${`dashboard-health-chip-${chip.key}`}
-        >${chip.label}<//>
+        >${chip.Icon ? html`<${chip.Icon} size=${13} aria-hidden="true" />` : null}${chip.label}<//>
       ` : html`
         <span
           key=${chip.key}
-          class=${`dashboard-health-chip inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}
+          class=${`dashboard-health-chip inline-flex min-h-6 items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}
           title=${chip.detail}
           data-testid=${`dashboard-health-chip-${chip.key}`}
         >
-          ${chip.label}
+          ${chip.Icon ? html`<${chip.Icon} size=${13} aria-hidden="true" />` : null}${chip.label}
         </span>
       `)}
     </div>
@@ -1029,7 +996,15 @@ export function SideRail({
   const currentSection = currentSectionForRoute(route.value)
   // Open keeper-approval count for the Approvals nav badge. Same signal the
   // Approvals/Command surfaces read, so the badge tracks resolutions live.
-  const openApprovals = gateData.value?.approval_queue?.length ?? 0
+  const approvalQueueState = gateData.value?.approval_queue_state
+  const approvalQueueUnavailable =
+    approvalQueueState && approvalQueueState.state !== 'ready'
+      ? approvalQueueState
+      : null
+  const openApprovals =
+    approvalQueueState?.state === 'ready'
+      ? gateData.value?.approval_queue?.length ?? null
+      : null
   const settingsSurface = DASHBOARD_SURFACES.find(surface => surface.id === 'settings')
   const visibleSurfaces = primaryOnly
     ? PRIMARY_DASHBOARD_SURFACES.filter(surface => surface.id !== 'settings')
@@ -1080,11 +1055,23 @@ export function SideRail({
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
                 >
-                  <span class="nav-icon ${surface.id === 'approvals' && openApprovals > 0 ? 'relative' : ''}" aria-hidden="true">
+                  <span class="nav-icon ${surface.id === 'approvals' && (approvalQueueUnavailable || (openApprovals !== null && openApprovals > 0)) ? 'relative' : ''}" aria-hidden="true">
                     <${SurfaceIcon} icon=${surface.icon} size=${15} />
-                    ${surface.id === 'approvals' && openApprovals > 0 ? html`<span class="ap-nav-dot"></span>` : null}
+                    ${surface.id === 'approvals' && approvalQueueUnavailable
+                      ? html`<span
+                          class="ap-nav-badge"
+                          data-severity=${approvalQueueUnavailable.severity}
+                          title=${`${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail}`}
+                        >${approvalQueueUnavailable.icon}</span>`
+                      : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
+                        ? html`<span class="ap-nav-dot"></span>`
+                        : null}
                   </span>
-                  <span class="sr-only">${surface.label}${surface.id === 'approvals' && openApprovals > 0 ? ` (${openApprovals} 대기)` : ''}</span>
+                  <span class="sr-only">${surface.label}${surface.id === 'approvals' && approvalQueueUnavailable
+                    ? ` (${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail})`
+                    : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
+                      ? ` (${openApprovals} 대기)`
+                      : ''}</span>
                 <//>
               `
             }
@@ -1103,9 +1090,16 @@ export function SideRail({
                   <div class="nav-label flex-1 min-w-0">
                     <div class="truncate font-mono text-[var(--fs-11)] font-semibold uppercase leading-4 tracking-[var(--track-caps)] ${isSurfaceActive ? 'text-[var(--select)]' : ''}">${surface.label}</div>
                   </div>
-                  ${surface.id === 'approvals' && openApprovals > 0
-                    ? html`<span class="ap-nav-badge" data-testid="approvals-nav-badge" title=${`${openApprovals}건 승인 대기`}>${openApprovals}</span>`
-                    : null}
+                  ${surface.id === 'approvals' && approvalQueueUnavailable
+                    ? html`<span
+                        class="ap-nav-badge"
+                        data-testid="approvals-nav-unavailable"
+                        data-severity=${approvalQueueUnavailable.severity}
+                        title=${`${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail}`}
+                      >${approvalQueueUnavailable.icon}</span>`
+                    : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
+                      ? html`<span class="ap-nav-badge" data-testid="approvals-nav-badge" title=${`${openApprovals}건 승인 대기`}>${openApprovals}</span>`
+                      : null}
                 <//>
 
                 ${sections.length > 1 ? html`

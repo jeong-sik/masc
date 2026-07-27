@@ -3,8 +3,10 @@ type compaction_rejection =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
+  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_failed
+  | Exact_execution_guard_absent
+  | Exact_execution_bind_failed
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Invalid_compaction_plan
@@ -21,8 +23,11 @@ let compaction_rejection_to_tag = function
   | Exact_target_selection_failed -> "exact_target_selection_failed"
   | Exact_admission_failed -> "exact_admission_failed"
   | Exact_attempt_start_failed -> "exact_attempt_start_failed"
+  | Exact_owner_unregistered_deferred ->
+    "exact_owner_unregistered_deferred"
   | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
-  | Exact_execution_guard_failed -> "exact_execution_guard_failed"
+  | Exact_execution_guard_absent -> "exact_execution_guard_absent"
+  | Exact_execution_bind_failed -> "exact_execution_bind_failed"
   | Exact_flow_already_started -> "exact_flow_already_started"
   | Exact_execution_terminal terminal ->
     Keeper_event_queue_state.exact_execution_terminal_cause_label terminal.cause
@@ -54,10 +59,14 @@ let summarization_rejection = function
     Exact_target_selection_failed
   | Keeper_compaction_llm_summarizer.Exact_admission_failed -> Exact_admission_failed
   | Keeper_compaction_llm_summarizer.Exact_attempt_start_failed -> Exact_attempt_start_failed
+  | Keeper_compaction_llm_summarizer.Exact_owner_unregistered_deferred ->
+    Exact_owner_unregistered_deferred
   | Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable ->
     Exact_execution_context_unavailable
-  | Keeper_compaction_llm_summarizer.Exact_execution_guard_failed ->
-    Exact_execution_guard_failed
+  | Keeper_compaction_llm_summarizer.Exact_execution_guard_absent ->
+    Exact_execution_guard_absent
+  | Keeper_compaction_llm_summarizer.Exact_execution_bind_failed ->
+    Exact_execution_bind_failed
   | Keeper_compaction_llm_summarizer.Exact_flow_already_started ->
     Exact_flow_already_started
   | Keeper_compaction_llm_summarizer.Exact_execution_terminal terminal ->

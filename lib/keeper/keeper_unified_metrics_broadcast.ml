@@ -11,7 +11,7 @@ open Keeper_context_runtime
 
 let broadcast_compaction
       ~(name : string)
-      (recovery : Keeper_context_runtime.compaction_recovery)
+      (recovery : Keeper_post_turn.compaction_recovery)
   =
   try
     Sse.broadcast

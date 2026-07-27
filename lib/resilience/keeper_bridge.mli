@@ -14,9 +14,9 @@
       {!upsert_resilience_meta}) keep [Keeper_post_turn] independent
       from the full Resilience implementation.
     - {b Main pipeline} ({!apply_post_turn_resilience}): given an
-      optional error string surfaced by the just-completed turn,
-      classify it via {!Recovery.classify_string}, derive the
-      canonical strategy class via {!Recovery.default_strategy},
+      optional untyped error string surfaced by the just-completed turn,
+      fail closed via {!Recovery.classify_string}, derive the
+      canonical handoff strategy via {!Recovery.default_strategy},
       optionally execute it through caller-supplied concrete
       callbacks, append an audit envelope (when an audit store is
       supplied), and return a [`Assoc] meta sub-tree to be merged

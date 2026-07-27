@@ -7,8 +7,8 @@
         Tier A5 wirein would persist after Keeper Running tick.
      2. Multimodal: Workspace receives code (HTML) + image (hero PNG)
         artifacts; image's provenance edge references code.
-     3. Resilience: classify a streaming-timeout error string,
-        derive a Degradation L2 strategy.
+     3. Resilience: fail closed on untyped error text, then derive a
+        Degradation L2 strategy from typed transient evidence.
      4. Shared_audit: chain seven audit envelopes across all phases
         and verify Merkle integrity; tamper-detect the chain.
 
@@ -149,12 +149,13 @@ let test_phase_2_provenance_dag () =
 
 (* ── Phase 3: Resilience classifier ──────────────────────────── *)
 
-let test_phase_3_classify_transient () =
+let test_phase_3_untyped_error_fails_closed () =
   let mode =
     R.classify_string "image generation timed out after 30s"
   in
   match mode with
-  | TransientError _ -> check_bool "timeout → TransientError" true
+  | PermanentError { fallback_strategy = HumanHandoff _; _ } ->
+      check_bool "untyped timeout → PermanentError/Handoff" true
   | other ->
       let label =
         match other with
@@ -165,19 +166,19 @@ let test_phase_3_classify_transient () =
         | DegradationRequired _ -> "DegradationRequired"
         | TransientError _ -> "Transient"
       in
-      failwith (Printf.sprintf "expected TransientError, got %s" label)
+      failwith (Printf.sprintf "expected PermanentError/Handoff, got %s" label)
 
-let test_phase_3_default_strategy_retry () =
+let test_phase_3_default_strategy_handoff () =
   let mode = R.classify_string "connection reset by peer" in
   let strategy = R.default_strategy mode in
   match strategy with
-  | R.Retry _ -> check_bool "transient → Retry" true
-  | _ -> failwith "expected Retry strategy"
+  | R.Handoff _ -> check_bool "untyped error → Handoff" true
+  | _ -> failwith "expected Handoff strategy"
 
 (* ── Phase 4: Degradation L2 / L4 ────────────────────────────── *)
 
 let test_phase_4_degradation_l2_yields_tame_strategy () =
-  let mode = R.classify_string "image generation timed out" in
+  let mode = R.transient ~detail:"image generation timed out" () in
   let strategy = D.apply_level_to_strategy D.L2 mode in
   match strategy with
   | R.Fallback _ ->
@@ -204,8 +205,8 @@ let phase_5_build_chain () =
       "autonomous.phase_intending";
       "multimodal.code_artifact_created";
       "multimodal.image_artifact_created";
-      "resilience.classify_transient";
-      "resilience.degradation_l2_applied";
+      "resilience.untyped_fail_closed";
+      "resilience.typed_degradation_l2_applied";
       "resilience.outcome_partial_success";
     ]
   in
@@ -287,9 +288,10 @@ let () =
       ("phase_2_workspace_size", test_phase_2_workspace_size);
       ("phase_2_kind_partition", test_phase_2_kind_partition);
       ("phase_2_provenance_dag", test_phase_2_provenance_dag);
-      ("phase_3_classify_transient", test_phase_3_classify_transient);
-      ( "phase_3_default_strategy_retry",
-        test_phase_3_default_strategy_retry );
+      ( "phase_3_untyped_error_fails_closed",
+        test_phase_3_untyped_error_fails_closed );
+      ( "phase_3_default_strategy_handoff",
+        test_phase_3_default_strategy_handoff );
       ( "phase_4_degradation_l2_yields_tame_strategy",
         test_phase_4_degradation_l2_yields_tame_strategy );
       ( "phase_4_degradation_l4_no_retry",

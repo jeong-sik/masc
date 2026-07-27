@@ -26,11 +26,6 @@ type runtime = {
     captured so a future "pool-side network" use-case does not
     have to thread the resource separately. *)
 
-val set_executor_pool : Eio.Executor_pool.t -> unit
-(** Register the executor pool for [Offloaded_readonly] compute.
-    Last-writer-wins via {!Executor_pool_ref}.[set]; the slot is
-    intended to be filled exactly once at server startup. *)
-
 val run_dashboard_compute :
   ?mode:dashboard_compute_mode ->
   ?runtime:runtime ->

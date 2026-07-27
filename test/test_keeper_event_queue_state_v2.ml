@@ -1,6 +1,15 @@
 module Queue = Keeper_event_queue
 module State = Keeper_event_queue_state
-module Persistence = Keeper_event_queue_persistence
+module Persistence_source = Keeper_event_queue_persistence
+module Persistence = struct
+  include Persistence_source
+
+  let load_pending ~base_path ~keeper_name =
+    match load_pending_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
 
 let require_ok label = function
   | Ok value -> value
@@ -10,6 +19,22 @@ let require_ok label = function
 let require_some label = function
   | Some value -> value
   | None -> Alcotest.failf "%s: expected Some" label
+;;
+
+let with_strict_executor f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+    f
 ;;
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
@@ -51,6 +76,19 @@ let checkpoint_source ~turn_count =
 
 let no_compaction ~turn_count reason : State.no_compaction =
   { source = checkpoint_source ~turn_count; reason }
+;;
+
+let applied_compaction_receipt
+    ?(lifecycle = Masc.Keeper_manual_compaction.Completion_applied)
+    ?(manifest = Ok ())
+    () =
+  let installation : Masc.Keeper_checkpoint_store.installed_checkpoint =
+    { installed_ref = checkpoint_source ~turn_count:9; auxiliary = [] }
+  in
+  { Masc.Keeper_manual_compaction.installation = installation
+  ; lifecycle
+  ; manifest
+  }
 ;;
 
 let exact_terminal ?(slot_id = "slot-terminal") ?(call_id = "call-terminal") cause =
@@ -165,6 +203,11 @@ let test_exact_output_terminal_reasons_round_trip () =
     ; State.Lifecycle_transition_failed_after_dispatch
     ; State.Checkpoint_source_changed
     ; State.Checkpoint_persistence_failed
+      (* Both compaction outcomes reported Domain_invalid_output until they were named:
+         a context that could not shrink and a summarizer that returned a larger one are
+         repaired differently, and the second is the summarizer working against itself. *)
+    ; State.Compaction_produced_no_reduction
+    ; State.Compaction_increased_checkpoint
     ];
   (* Malformed structural evidence and planner invariant violations remain
      retryable/escalated and cannot be encoded as terminal no-compaction. *)
@@ -1360,7 +1403,7 @@ let test_applied_compaction_settles_followup_atomically () =
          1.0)
   in
   let meta = cycle_meta () in
-  let settlement failure =
+  let settlement ?(receipt = applied_compaction_receipt ()) failure =
     Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
       ~base_path:(Sys.getcwd ())
       ~settled_at:8.0
@@ -1369,7 +1412,10 @@ let test_applied_compaction_settles_followup_atomically () =
       ~lease
       (Some
          (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
-            (Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure })))
+            { receipt
+            ; followup =
+                Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure }
+            }))
   in
   let judgment_failure =
     turn_failure
@@ -1380,9 +1426,11 @@ let test_applied_compaction_settles_followup_atomically () =
          })
   in
   (match settlement judgment_failure with
-   | Masc.Keeper_registry_event_queue.Escalate
-       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
-       ; successor = Some { Queue.payload = Queue.Failure_judgment successor; _ }
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { followup =
+           Keeper_event_queue_state.Compaction_commit_failure_judgment
+             { Queue.payload = Queue.Failure_judgment successor; _ }
+       ; _
        } ->
      Alcotest.(check string)
        "atomic successor keeps exact final runtime"
@@ -1396,9 +1444,139 @@ let test_applied_compaction_settles_followup_atomically () =
          ; retry_after = None
          })
   in
-  match settlement retry_failure with
-  | Masc.Keeper_registry_event_queue.Ack -> ()
-  | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction"
+  (match settlement retry_failure with
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
+     ()
+   | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction");
+  let completion_error =
+    Masc.Keeper_context_runtime.Transition_rejected
+      (Keeper_state_machine.Precondition_violation
+         { event = "compaction_completed"; reason = "injected completion rejection" })
+  in
+  let failure_dispatch_error =
+    Masc.Keeper_context_runtime.Transition_rejected
+      (Keeper_state_machine.Precondition_violation
+         { event = "compaction_failed"; reason = "injected cleanup rejection" })
+  in
+  let receipt =
+    applied_compaction_receipt
+      ~lifecycle:
+        (Masc.Keeper_manual_compaction.Completion_rejected_failure_dispatch_failed
+           { completion_error; failure_dispatch_error })
+      ()
+  in
+  let committed =
+    Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
+      { receipt; followup = Masc.Keeper_heartbeat_loop_cycle.Completed meta }
+  in
+  (match
+     Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+       ~base_path:(Sys.getcwd ())
+       ~settled_at:8.0
+       ~stop_requested:false
+       ~compaction_consecutive_failures:0
+       ~lease
+       (Some committed)
+   with
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { commit
+       ; followup = Keeper_event_queue_state.Compaction_commit_ack
+       } ->
+     Alcotest.(check bool)
+       "post-install lifecycle receipt requires operator action"
+       true
+       (Keeper_event_queue_state.manual_compaction_commit_requires_operator_action
+          commit)
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+     Alcotest.fail "post-install lifecycle failure replayed provider compaction"
+   | _ -> Alcotest.fail "post-install lifecycle failure was not acknowledged");
+let manifest_error = "injected post-install manifest failure" in
+let manifest_settlement =
+  settlement
+    ~receipt:
+      (applied_compaction_receipt
+         ~manifest:(Error manifest_error)
+         ())
+    retry_failure
+in
+let manifest_commit =
+  match manifest_settlement with
+  | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+      { commit
+      ; followup = Keeper_event_queue_state.Compaction_commit_ack
+      } ->
+    Alcotest.(check (option string))
+      "committed receipt preserves manifest error"
+      (Some manifest_error)
+      commit.manifest_error;
+    Alcotest.(check bool)
+      "manifest error requires operator action"
+      true
+      (Keeper_event_queue_state.manual_compaction_commit_requires_operator_action
+         commit);
+    commit
+  | _ -> Alcotest.fail "manifest failure was not committed as an applied receipt"
+in
+let manifest_source =
+  stimulus
+    ~payload:Queue.Manual_compaction_requested
+    Queue.manual_compaction_post_id
+    1.0
+in
+let manifest_state =
+  State.with_pending (queue [ manifest_source ]) State.empty
+in
+let manifest_state, manifest_lease = claim_head manifest_state in
+let manifest_lease = require_some "manifest receipt lease" manifest_lease in
+let _, manifest_result =
+  State.settle
+    ~settled_at:9.0
+    ~lease:manifest_lease
+    ~settlement:manifest_settlement
+    manifest_state
+  |> require_ok "settle manifest failure receipt"
+in
+let manifest_receipt =
+  match manifest_result with
+  | State.Settled receipt -> receipt
+  | State.Already_settled _ ->
+    Alcotest.fail "manifest failure receipt unexpectedly replayed"
+in
+let public_manifest_receipt =
+  State.transition_receipt_to_yojson manifest_receipt
+  |> Yojson.Safe.Util.member "settlement"
+  |> Yojson.Safe.Util.member "receipt"
+in
+Alcotest.(check string)
+  "public receipt preserves manifest error"
+  manifest_error
+  Yojson.Safe.Util.(public_manifest_receipt |> member "manifest_error" |> to_string);
+Alcotest.(check bool)
+  "public receipt preserves operator action"
+  true
+  Yojson.Safe.Util.(
+    public_manifest_receipt |> member "operator_action_required" |> to_bool);
+let restored_manifest_receipt =
+  State.transition_receipt_to_yojson manifest_receipt
+  |> State.transition_receipt_of_yojson
+  |> require_ok "decode manifest failure receipt"
+in
+Alcotest.(check bool)
+  "manifest failure receipt round-trips"
+  true
+  (State.transition_receipt_equal manifest_receipt restored_manifest_receipt);
+Alcotest.(check (option string))
+  "round-tripped committed receipt preserves manifest error"
+  (Some manifest_error)
+  manifest_commit.manifest_error;
+  match
+    Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome
+      (Some committed)
+  with
+  | Some `Committed -> ()
+  | _ -> Alcotest.fail "post-install lifecycle failure was not stamped committed"
 ;;
 
 (* RFC-0351 S0 / #25461: a manual-compaction failure requeues while the streak
@@ -1855,6 +2033,38 @@ let with_temp_dir prefix f =
    path, the second unbounded loop, also follows the completed turn. A
    turn that did not complete keeps its ordinary typed settlement, so
    delivery is still retried. *)
+(* A compaction failure has to consume retry budget whether or not the cycle owned
+   an event-queue lease. keeper_heartbeat_loop.ml advances the streak after the
+   lease match rather than inside its [Some lease] branch, and
+   persist_compaction_outcome is the mechanism — which had no test.
+
+   Measured 2026-07-25: two keepers sat at 306 and 368 failed context_compacted
+   attempts with consecutive_failures = 0 and retried without bound, because the
+   advance was unreachable without a lease, while keepers that held one reached the
+   ceiling at 21 and 3 and settled. *)
+let test_compaction_failure_advances_streak_without_lease () =
+  with_temp_dir "compaction-streak-no-lease" @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  ignore (Masc.Workspace.init config ~agent_name:None : string);
+  let meta = cycle_meta () in
+  Result.get_ok (Masc_test_deps.write_current_keeper_meta config meta);
+  (match
+     Masc.Keeper_meta_store.persist_compaction_outcome
+       config
+       ~keeper_name:meta.name
+       ~outcome:`Failed
+   with
+   | Ok (`Persisted | `No_durable_meta) -> ()
+   | Error message -> Alcotest.failf "persist compaction outcome: %s" message);
+  match Masc.Keeper_meta_store.read_meta config meta.name with
+  | Error message -> Alcotest.failf "read meta back: %s" message
+  | Ok None -> Alcotest.fail "meta disappeared after persisting the outcome"
+  | Ok (Some stored) ->
+    Alcotest.(check int)
+      "a compaction failure advances the streak"
+      1
+      stored.runtime.compaction_rt.consecutive_failures
+
 let test_approved_wake_settles_on_delivery_not_consumption () =
   with_temp_dir "approval-delivery-ack" @@ fun base_path ->
   ignore (Masc.Keeper_approval_queue.install_persistence ~base_path);
@@ -2289,6 +2499,8 @@ let test_incompatible_settlement_wal_requires_reset_without_rewrite () =
 ;;
 
 let test_context_compaction_retry_is_durable_and_lane_local () =
+  with_strict_executor
+  @@ fun () ->
   with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
     let keeper_name = "retry_tail_keeper" in
     let peer_keeper_name = "independent_peer_keeper" in
@@ -2386,11 +2598,23 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
             (Queue.stimulus_to_yojson source)
             (Queue.stimulus_to_yojson retained))
      | _ -> Alcotest.fail "retryable transition changed the leased stimulus set");
-    Persistence.mark_transition_projected_result
-      ~base_path
-      ~keeper_name
-      ~transition_id:receipt.transition_id
-    |> require_ok "project retryable transition";
+    Alcotest.(check string)
+      "retryable outbox retains the settled transition identity"
+      receipt.transition_id
+      outbox_entry.receipt.transition_id;
+    (match
+       Masc.Keeper_event_queue_recovery.project_owner_result
+         ~base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
+     | Ok Masc.Keeper_event_queue_recovery.No_pending_transition ->
+       Alcotest.fail "retryable transition disappeared before projection"
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+       Alcotest.fail "retryable transition projection claim was busy"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
     let next_lease =
       Persistence.claim_when_result
         ~base_path
@@ -2502,6 +2726,8 @@ let test_current_state_fresh_write_read_restart () =
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
+  with_strict_executor
+  @@ fun () ->
   with_temp_dir "keeper-event-queue-v2-outbox" (fun base_path ->
     let keeper_name = "projection_keeper" in
     let source = stimulus "projected-source" 1.0 in
@@ -2545,8 +2771,61 @@ let test_transition_outbox_projects_with_stable_identity () =
      with
      | Persistence.Already_present -> ()
      | Persistence.Enqueued -> Alcotest.fail "outbox stimulus was duplicated");
-    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
-    |> require_ok "project transition outbox";
+    (match
+       Masc.Keeper_reaction_ledger.For_testing.with_after_ledger_append
+         ~after_ledger_append:(fun () ->
+           Error "injected failure after ledger append")
+         (fun () ->
+            Masc.Keeper_event_queue_recovery.project_owner_result
+              ~base_path
+              ~keeper_name)
+     with
+     | Error _ -> ()
+     | Ok _ ->
+       Alcotest.fail
+         "injected post-append failure unexpectedly retired the transition");
+  let retained_outbox_count =
+    match
+      Masc.Keeper_event_queue_recovery.For_testing
+      .pending_transition_count_result
+        ~base_path
+        ~keeper_name
+    with
+    | Ok count -> count
+    | Error error ->
+      Alcotest.fail
+        (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+  in
+  Alcotest.(check int)
+    "post-append failure retains one transition for retry"
+    1
+    retained_outbox_count;
+  let projection_budget =
+    match Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:1 with
+    | Ok budget -> budget
+    | Error error ->
+      Alcotest.fail
+        (Masc.Keeper_event_queue_recovery.owner_budget_error_to_string error)
+  in
+  let retry_report =
+    (Masc.Keeper_event_queue_recovery.project_discovered_bounded
+       ~base_path
+       ~budget:projection_budget
+       ~cursor:Masc.Keeper_event_queue_recovery.initial_sweep_cursor)
+      .report
+  in
+    Alcotest.(check int)
+      "recovery sweep finds durable owner"
+      1
+      retry_report.discovered;
+    Alcotest.(check int)
+      "recovery sweep converges pending outbox"
+      1
+      retry_report.converged;
+    Alcotest.(check int)
+      "recovery sweep retains no projection failures"
+      0
+      (List.length retry_report.failures);
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load projected state"
@@ -2555,8 +2834,50 @@ let test_transition_outbox_projects_with_stable_identity () =
       "projection retires outbox"
       0
       (List.length (State.transition_outbox state));
-    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
-    |> require_ok "empty outbox projection is idempotent";
+    (match
+       Masc.Keeper_event_queue_recovery.project_owner_result
+         ~base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.No_pending_transition -> ()
+     | Ok Masc.Keeper_event_queue_recovery.Transition_converged ->
+       Alcotest.fail "empty outbox unexpectedly required convergence"
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+       Alcotest.fail "owner claim remained busy after recovery sweep"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    (match
+       Masc.Keeper_heartbeat_loop.project_transition_outbox
+         ~base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.No_pending_transition -> ()
+     | Ok Masc.Keeper_event_queue_recovery.Transition_converged ->
+       Alcotest.fail "empty heartbeat projection unexpectedly converged work"
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+       Alcotest.fail "empty heartbeat projection retained an owner claim"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    (match
+       Masc.Keeper_heartbeat_loop.For_testing.classify_transition_projection
+         (Ok Masc.Keeper_event_queue_recovery.Claim_busy)
+     with
+     | Masc.Keeper_heartbeat_loop.For_testing.Projection_deferred_nonfailure -> ()
+     | Masc.Keeper_heartbeat_loop.For_testing.Projection_ready_for_cycle
+     | Masc.Keeper_heartbeat_loop.For_testing.Projection_failed_for_cycle _ ->
+       Alcotest.fail "owner claim contention was classified as a cycle failure");
+    (match
+       Masc.Keeper_heartbeat_loop.For_testing.classify_transition_projection
+         (Error
+            (Masc.Keeper_event_queue_recovery.Outbox_unavailable
+               "injected read failure"))
+     with
+     | Masc.Keeper_heartbeat_loop.For_testing.Projection_failed_for_cycle _ -> ()
+     | Masc.Keeper_heartbeat_loop.For_testing.Projection_ready_for_cycle
+     | Masc.Keeper_heartbeat_loop.For_testing.Projection_deferred_nonfailure ->
+       Alcotest.fail "real projection failure was not classified as a cycle failure");
     let summary =
       Masc.Keeper_reaction_ledger.summary_for_keeper
         ~base_path
@@ -2569,6 +2890,414 @@ let test_transition_outbox_projects_with_stable_identity () =
       1
       (summary |> member "event_queue_ack_count" |> to_int);
     ())
+;;
+
+let test_transition_outbox_bounded_sweep_continuation () =
+  with_strict_executor
+  @@ fun () ->
+  with_temp_dir "keeper-event-queue-v2-projection-budget" (fun base_path ->
+    let seed_pending keeper_name source_id =
+      Persistence.update_result ~base_path ~keeper_name (fun pending ->
+        Queue.enqueue pending (stimulus source_id 1.0))
+      |> require_ok "seed bounded projection owner"
+    in
+    seed_pending "projection_budget_a" "projection-budget-a";
+    seed_pending "projection_budget_b" "projection-budget-b";
+    let keeper_name = "projection_budget_c" in
+    seed_pending keeper_name "projection-budget-c";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim bounded projection source"
+      |> require_some "bounded projection lease"
+    in
+    (match
+       Persistence.settle_result
+         ~base_path
+         ~keeper_name
+         ~settled_at:3.0
+         ~lease
+         ~settlement:State.Ack
+         ()
+       |> require_ok "settle bounded projection source"
+     with
+     | Persistence.Settled _ -> ()
+     | Persistence.Already_settled _ ->
+       Alcotest.fail "bounded projection source was already settled"
+     | Persistence.Committed_followup_failed { detail; _ } ->
+       Alcotest.failf "bounded projection settlement follow-up failed: %s" detail);
+    let budget =
+      match Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:2 with
+      | Ok budget -> budget
+      | Error error ->
+        Alcotest.fail
+          (Masc.Keeper_event_queue_recovery.owner_budget_error_to_string error)
+    in
+    let first =
+      Masc.Keeper_event_queue_recovery.project_discovered_bounded
+        ~base_path
+        ~budget
+        ~cursor:Masc.Keeper_event_queue_recovery.initial_sweep_cursor
+    in
+    Alcotest.(check int) "bounded sweep discovers every owner" 3 first.report.discovered;
+    Alcotest.(check int) "bounded sweep processes one page" 2 first.report.processed;
+    Alcotest.(check int) "bounded sweep retains continuation" 1 first.report.deferred;
+    Alcotest.(check int) "first page does not reach the final owner" 0 first.report.converged;
+    let second =
+      Masc.Keeper_event_queue_recovery.project_discovered_bounded
+        ~base_path
+        ~budget
+        ~cursor:first.next_cursor
+    in
+    Alcotest.(check int)
+      "continuation reaches the previously deferred owner"
+      1
+      second.report.converged;
+    let pending_count =
+      Masc.Keeper_event_queue_recovery.For_testing
+      .pending_transition_count_result
+        ~base_path
+        ~keeper_name
+      |> Result.map_error
+           Masc.Keeper_event_queue_recovery.projection_error_to_string
+      |> require_ok "read bounded projection outbox"
+    in
+    Alcotest.(check int) "bounded continuation retires the outbox" 0 pending_count)
+;;
+
+exception Transition_projection_claim_cancelled
+exception Transition_projection_claim_failed
+
+let test_transition_outbox_claim_contention_and_release () =
+  with_strict_executor
+  @@ fun () ->
+  with_temp_dir "keeper-event-queue-v2-projection-claim" (fun base_path ->
+    let keeper_name = "projection_claim_keeper" in
+    let alias_base_path = Filename.concat base_path "." in
+    let source = stimulus "projection-claim-source" 1.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending source)
+    |> require_ok "seed current-schema projection claim owner";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim projection contention source"
+      |> require_some "projection contention lease"
+    in
+    (match
+       Persistence.settle_result
+         ~base_path
+         ~keeper_name
+         ~settled_at:3.0
+         ~lease
+         ~settlement:State.Ack
+         ()
+       |> require_ok "settle projection contention source"
+     with
+     | Persistence.Settled _ -> ()
+     | Persistence.Already_settled _ ->
+       Alcotest.fail "projection contention source was already settled"
+     | Persistence.Committed_followup_failed { detail; _ } ->
+       Alcotest.failf "projection contention settlement follow-up failed: %s" detail);
+    let entered, resolve_entered = Eio.Promise.create () in
+    let release, resolve_release = Eio.Promise.create () in
+    let holder, resolve_holder = Eio.Promise.create () in
+    Eio.Switch.run
+    @@ fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      let outcome =
+        Masc.Keeper_event_queue_recovery.For_testing.with_owner_claim
+          ~base_path
+          ~keeper_name
+          (fun () ->
+             Eio.Promise.resolve resolve_entered ();
+             Eio.Promise.await release)
+      in
+      Eio.Promise.resolve resolve_holder outcome);
+    Eio.Promise.await entered;
+    (match
+       Masc.Keeper_heartbeat_loop.project_transition_outbox
+         ~base_path:alias_base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy -> ()
+     | Ok
+         ( Masc.Keeper_event_queue_recovery.No_pending_transition
+         | Masc.Keeper_event_queue_recovery.Transition_converged ) ->
+       Alcotest.fail "heartbeat collapsed canonical owner contention into success"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    let projection_budget =
+      match Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:1 with
+      | Ok budget -> budget
+      | Error error ->
+        Alcotest.fail
+          (Masc.Keeper_event_queue_recovery.owner_budget_error_to_string error)
+    in
+    let maintenance_report =
+      (Masc.Keeper_event_queue_recovery.project_discovered_bounded
+         ~base_path
+         ~budget:projection_budget
+         ~cursor:Masc.Keeper_event_queue_recovery.initial_sweep_cursor)
+        .report
+    in
+    Alcotest.(check int)
+      "maintenance sweep preserves canonical owner contention"
+      1
+      maintenance_report.claim_busy;
+    Alcotest.(check int)
+      "contention sweep performs no projection"
+      0
+      maintenance_report.converged;
+    (match maintenance_report.projections with
+     | [ ({ keeper_name = actual
+          ; outcome = Ok Masc.Keeper_event_queue_recovery.Claim_busy
+          } : Masc.Keeper_event_queue_recovery.owner_projection) ] ->
+       Alcotest.(check string)
+         "maintenance sweep preserves the discovered owner identity"
+         keeper_name
+         actual
+     | _ ->
+       Alcotest.fail
+         "maintenance sweep did not retain the typed per-owner projection outcome");
+    let retained_count =
+      Masc.Keeper_event_queue_recovery.For_testing
+      .pending_transition_count_result
+        ~base_path:alias_base_path
+        ~keeper_name
+      |> Result.map_error
+           Masc.Keeper_event_queue_recovery.projection_error_to_string
+      |> require_ok "read transition retained during owner contention"
+    in
+    Alcotest.(check int)
+      "Claim_busy retains the durable transition without duplicate projection"
+      1
+      retained_count;
+    Eio.Promise.resolve resolve_release ();
+    (match Eio.Promise.await holder with
+     | Ok
+         (Masc.Keeper_event_queue_recovery.For_testing.Claim_acquired ()) ->
+       ()
+     | Ok Masc.Keeper_event_queue_recovery.For_testing.Claim_already_held ->
+       Alcotest.fail "first canonical owner claim was unexpectedly busy"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    (match
+       Masc.Keeper_event_queue_recovery.project_owner_result
+         ~base_path:alias_base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
+     | Ok Masc.Keeper_event_queue_recovery.No_pending_transition ->
+       Alcotest.fail "retained transition was lost while the owner claim was busy"
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+       Alcotest.fail "released owner claim remained busy"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    let retired_count =
+      Masc.Keeper_event_queue_recovery.For_testing
+      .pending_transition_count_result
+        ~base_path:alias_base_path
+        ~keeper_name
+      |> Result.map_error
+           Masc.Keeper_event_queue_recovery.projection_error_to_string
+      |> require_ok "read transition retired after contention"
+    in
+    Alcotest.(check int)
+      "released owner converges and retires the retained transition"
+      0
+      retired_count;
+    let require_reacquired label =
+      match
+        Masc.Keeper_event_queue_recovery.project_owner_result
+          ~base_path:alias_base_path
+          ~keeper_name
+      with
+      | Ok Masc.Keeper_event_queue_recovery.No_pending_transition -> ()
+      | Ok Masc.Keeper_event_queue_recovery.Transition_converged ->
+        Alcotest.failf "%s unexpectedly converged an outbox" label
+      | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+        Alcotest.failf "%s did not release the canonical owner claim" label
+      | Error error ->
+        Alcotest.fail
+          (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+    in
+    require_reacquired "normal completion";
+    let exception_observed =
+      try
+        match
+          Masc.Keeper_event_queue_recovery.For_testing.with_owner_claim
+            ~base_path
+            ~keeper_name
+            (fun () -> raise Transition_projection_claim_failed)
+        with
+        | Ok
+            (Masc.Keeper_event_queue_recovery.For_testing.Claim_acquired _) ->
+          false
+        | Ok Masc.Keeper_event_queue_recovery.For_testing.Claim_already_held ->
+          Alcotest.fail "exception test could not acquire canonical owner claim"
+        | Error error ->
+          Alcotest.fail
+            (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+      with
+      | Transition_projection_claim_failed -> true
+    in
+    Alcotest.(check bool)
+      "claim callback exception propagates"
+      true
+      exception_observed;
+    require_reacquired "exception completion";
+    let cancellation_observed =
+      try
+        Eio.Cancel.sub (fun cancel_context ->
+          match
+            Masc.Keeper_event_queue_recovery.For_testing.with_owner_claim
+              ~base_path
+              ~keeper_name
+              (fun () ->
+                 Eio.Cancel.cancel
+                   cancel_context
+                   Transition_projection_claim_cancelled;
+                 Eio.Fiber.yield ())
+          with
+          | Ok
+              (Masc.Keeper_event_queue_recovery.For_testing.Claim_acquired ())
+            ->
+            ()
+          | Ok Masc.Keeper_event_queue_recovery.For_testing.Claim_already_held ->
+            Alcotest.fail "cancellation test could not acquire canonical owner claim"
+          | Error error ->
+            Alcotest.fail
+              (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+        false
+      with
+      | Eio.Cancel.Cancelled _ -> true
+    in
+    Alcotest.(check bool)
+      "claim callback cancellation propagates"
+      true
+      cancellation_observed;
+    require_reacquired "cancellation completion")
+;;
+
+let test_transition_outbox_projection_keeps_scheduler_progress () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  with_temp_dir "keeper-event-queue-v2-projection-offload" (fun base_path ->
+    let keeper_name = "projection_offload_keeper" in
+    let source = stimulus "projection-offload-source" 1.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending source)
+    |> require_ok "seed offloaded projection source";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim offloaded projection source"
+      |> require_some "offloaded projection lease"
+    in
+    (match
+       Persistence.settle_result
+         ~base_path
+         ~keeper_name
+         ~settled_at:3.0
+         ~lease
+         ~settlement:State.Ack
+         ()
+       |> require_ok "settle offloaded projection source"
+     with
+     | Persistence.Settled _ -> ()
+     | Persistence.Already_settled _ ->
+       Alcotest.fail "offloaded projection source was already settled"
+     | Persistence.Committed_followup_failed { detail; _ } ->
+       Alcotest.failf "offloaded projection settlement follow-up failed: %s" detail);
+    let pool =
+      Domain_pool.create
+        ~sw
+        ~domain_count:1
+        (Eio.Stdenv.domain_mgr env)
+    in
+    let main_domain = Domain.self () in
+    let append_entered, resolve_append_entered = Eio.Promise.create () in
+    let projection_done, resolve_projection_done = Eio.Promise.create () in
+    let block_mutex = Stdlib.Mutex.create () in
+    let block_condition = Stdlib.Condition.create () in
+    let released = Atomic.make false in
+    let release_once () =
+      if Atomic.compare_and_set released false true
+      then (
+        Stdlib.Mutex.lock block_mutex;
+        Stdlib.Condition.broadcast block_condition;
+        Stdlib.Mutex.unlock block_mutex)
+    in
+    Executor_pool_ref.For_testing.with_pool
+      (Domain_pool.executor_pool pool)
+      (fun () ->
+         Fun.protect
+           ~finally:(fun () ->
+             release_once ();
+             Dated_jsonl.For_testing.reset_append_guard ())
+           (fun () ->
+              Dated_jsonl.set_append_guard (fun append ->
+                let off_main_domain = Domain.self () <> main_domain in
+                Eio.Promise.resolve resolve_append_entered off_main_domain;
+                if off_main_domain
+                then (
+                  Stdlib.Mutex.lock block_mutex;
+                  Fun.protect
+                    ~finally:(fun () -> Stdlib.Mutex.unlock block_mutex)
+                    (fun () ->
+                       while not (Atomic.get released) do
+                         Stdlib.Condition.wait block_condition block_mutex
+                       done));
+                append ());
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio.Promise.resolve
+                  resolve_projection_done
+                  (Masc.Keeper_event_queue_recovery.project_owner_result
+                     ~base_path
+                     ~keeper_name));
+              let append_off_main_domain = Eio.Promise.await append_entered in
+              Alcotest.(check bool)
+                "projector append executes on a worker Domain"
+                true
+                append_off_main_domain;
+              let heartbeat_progressed, resolve_heartbeat_progressed =
+                Eio.Promise.create ()
+              in
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio.Promise.resolve resolve_heartbeat_progressed ());
+              Eio.Promise.await heartbeat_progressed;
+              Alcotest.(check bool)
+                "main scheduler progresses while worker Domain is OS-blocked"
+                true
+                (not (Atomic.get released));
+              release_once ();
+              match Eio.Promise.await projection_done with
+              | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
+              | Ok Masc.Keeper_event_queue_recovery.No_pending_transition ->
+                Alcotest.fail "blocked projector lost its durable transition"
+              | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+                Alcotest.fail "blocked projector unexpectedly contended with itself"
+              | Error error ->
+                Alcotest.fail
+                  (Masc.Keeper_event_queue_recovery.projection_error_to_string error))))
 ;;
 
 let test_registration_preparation_is_atomic_and_fail_closed () =
@@ -2772,6 +3501,10 @@ let () =
             `Quick
             test_approved_wake_settles_on_delivery_not_consumption
         ; Alcotest.test_case
+            "a compaction failure advances the streak without a lease"
+            `Quick
+            test_compaction_failure_advances_streak_without_lease
+        ; Alcotest.test_case
             "current state codec reads its own output"
             `Quick
             test_current_state_codec_reads_its_own_output
@@ -2810,6 +3543,14 @@ let () =
             `Quick
             test_transition_outbox_projects_with_stable_identity
         ; Alcotest.test_case
+            "transition outbox projection claim contention"
+            `Quick
+            test_transition_outbox_claim_contention_and_release
+        ; Alcotest.test_case
+            "transition outbox bounded sweep continuation"
+            `Quick
+            test_transition_outbox_bounded_sweep_continuation
+        ; Alcotest.test_case
             "registration preparation"
             `Quick
             test_registration_preparation_is_atomic_and_fail_closed
@@ -2821,6 +3562,10 @@ let () =
             "no-compaction decode rejects mismatched stimulus"
             `Quick
             test_no_compaction_decode_rejects_mismatched_stimulus
+        ; Alcotest.test_case
+            "transition outbox projection keeps scheduler progress"
+            `Quick
+            test_transition_outbox_projection_keeps_scheduler_progress
         ] )
     ]
 ;;

@@ -17,7 +17,9 @@ type hitl_context_summary =
   ; rationale : string
   }
 
-and summary_status =
+let current_hitl_context_summary_version = 2
+
+type summary_status =
   | Summary_not_requested
   | Summary_pending
   | Summary_available of hitl_context_summary
@@ -76,6 +78,25 @@ type exact_attempt_state =
   | Exact_unbound
   | Exact_bound of exact_attempt_binding
 
+type summary_attempt_pre_worker_unavailable_code =
+  | Summary_pre_worker_auto_judge_unavailable
+  | Summary_pre_worker_mode_state_invalid
+  | Summary_pre_worker_start_reserved
+
+type summary_attempt_pre_worker_unavailable =
+  { reason_code : summary_attempt_pre_worker_unavailable_code
+  ; operator_detail : string
+  }
+
+type summary_attempt_disposition =
+  | Summary_attempt_ready
+  | Summary_attempt_in_flight
+  | Summary_attempt_identity_unbound
+  | Summary_attempt_persistence_uncertain
+  | Summary_attempt_pre_worker_unavailable of
+      summary_attempt_pre_worker_unavailable
+  | Summary_attempt_settled
+
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -93,6 +114,7 @@ type pending_approval =
   ; audit_base_path : string
   ; summary_status : summary_status
   ; exact_attempt : exact_attempt_state
+  ; summary_attempt_disposition : summary_attempt_disposition
   }
 
 module Decision = struct
@@ -285,6 +307,47 @@ let exact_attempt_state_to_yojson = function
       ]
 ;;
 
+let summary_attempt_pre_worker_unavailable_code_to_string = function
+  | Summary_pre_worker_auto_judge_unavailable ->
+    "auto_judge_unavailable"
+  | Summary_pre_worker_mode_state_invalid ->
+    "mode_state_invalid"
+  | Summary_pre_worker_start_reserved ->
+    "start_reserved"
+;;
+
+let summary_attempt_disposition_to_yojson = function
+  | Summary_attempt_ready ->
+    `Assoc [ "code", `String "ready" ]
+  | Summary_attempt_in_flight ->
+    `Assoc [ "code", `String "in_flight" ]
+  | Summary_attempt_identity_unbound ->
+    `Assoc
+      [ "code", `String "identity_unbound"
+      ; ( "operator_detail"
+        , `String
+            "Exact-output terminalization stopped before an attempt identity was bound." )
+      ]
+  | Summary_attempt_persistence_uncertain ->
+    `Assoc
+      [ "code", `String "persistence_uncertain"
+      ; ( "operator_detail"
+        , `String
+            "Exact-output terminalization durability is not confirmed." )
+      ]
+  | Summary_attempt_pre_worker_unavailable blocked ->
+    `Assoc
+      [ "code", `String "pre_worker_unavailable"
+      ; ( "reason_code"
+        , `String
+            (summary_attempt_pre_worker_unavailable_code_to_string
+               blocked.reason_code) )
+      ; "operator_detail", `String blocked.operator_detail
+      ]
+  | Summary_attempt_settled ->
+    `Assoc [ "code", `String "settled" ]
+;;
+
 let reject_unknown_fields ~surface ~allowed fields =
   let rec duplicate seen = function
     | [] -> None
@@ -337,6 +400,94 @@ let required_string_list ~surface field fields =
     parse 0 [] values
   | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface field)
   | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let summary_attempt_disposition_of_yojson_with_error json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "summary_attempt_disposition" in
+    let* code = required_string ~surface "code" fields in
+    (match code with
+     | "ready" ->
+       let* () = reject_unknown_fields ~surface ~allowed:[ "code" ] fields in
+       Ok Summary_attempt_ready
+     | "in_flight" ->
+       let* () = reject_unknown_fields ~surface ~allowed:[ "code" ] fields in
+       Ok Summary_attempt_in_flight
+     | "settled" ->
+       let* () = reject_unknown_fields ~surface ~allowed:[ "code" ] fields in
+       Ok Summary_attempt_settled
+     | "identity_unbound"
+     | "persistence_uncertain" as code ->
+       let* () =
+         reject_unknown_fields
+           ~surface
+           ~allowed:[ "code"; "operator_detail" ]
+           fields
+       in
+       let* operator_detail =
+         required_string ~surface "operator_detail" fields
+       in
+       let expected_detail, disposition =
+         if String.equal code "identity_unbound"
+         then
+           ( "Exact-output terminalization stopped before an attempt identity was bound."
+           , Summary_attempt_identity_unbound )
+         else
+           ( "Exact-output terminalization durability is not confirmed."
+           , Summary_attempt_persistence_uncertain )
+       in
+       if String.equal operator_detail expected_detail
+       then Ok disposition
+       else
+         Error
+           (Printf.sprintf
+              "%s.operator_detail does not match code %s"
+              surface
+              code)
+     | "pre_worker_unavailable" ->
+       let* () =
+         reject_unknown_fields
+           ~surface
+           ~allowed:[ "code"; "reason_code"; "operator_detail" ]
+           fields
+       in
+       let* reason_code = required_string ~surface "reason_code" fields in
+       let* reason_code =
+         match reason_code with
+         | "auto_judge_unavailable" ->
+           Ok Summary_pre_worker_auto_judge_unavailable
+         | "mode_state_invalid" ->
+           Ok Summary_pre_worker_mode_state_invalid
+         | "start_reserved" ->
+           Ok Summary_pre_worker_start_reserved
+         | reason_code ->
+           Error
+             (Printf.sprintf
+                "%s.reason_code %S is unknown"
+                surface
+                reason_code)
+       in
+       let* operator_detail =
+         required_string ~surface "operator_detail" fields
+       in
+       let trimmed_detail = String.trim operator_detail in
+       if
+         String.equal trimmed_detail ""
+         || not (String.equal trimmed_detail operator_detail)
+       then
+         Error
+           (Printf.sprintf
+              "%s.operator_detail must be a non-blank trimmed string"
+              surface)
+       else
+         Ok
+           (Summary_attempt_pre_worker_unavailable
+              { reason_code; operator_detail })
+     | code ->
+       Error (Printf.sprintf "%s.code %S is unknown" surface code))
+  | _ -> Error "summary_attempt_disposition must be a JSON object"
 ;;
 
 let exact_attempt_quarantine_cause_of_string = function
@@ -478,6 +629,16 @@ let hitl_context_summary_of_yojson_with_error json =
         fields
     in
     let* summary_version = required_positive_int ~surface "summary_version" fields in
+    let* () =
+      if summary_version = current_hitl_context_summary_version
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "%s.summary_version must be %d"
+             surface
+             current_hitl_context_summary_version)
+    in
     let* generated_at = required_float ~surface "generated_at" fields in
     let* model_run_id = required_string ~surface "model_run_id" fields in
     let* context_summary = required_string ~surface "context_summary" fields in

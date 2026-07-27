@@ -2,6 +2,22 @@ include Test_keeper_exact_execution_lease_guard_fixture
 
 module State = Keeper_event_queue_state
 
+let with_strict_executor f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+    f
+;;
+
 let settlement_wal_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
@@ -675,6 +691,8 @@ let test_visible_prepare_sync_failure_recovers_once () =
 ;;
 
 let test_stale_finalize_preserves_active_successor () =
+  with_strict_executor
+  @@ fun () ->
   with_temp_dir "masc-exact-stale-finalize" @@ fun base_path ->
   let keeper_name = "exact_stale_finalize" in
   let lease, terminal =
@@ -716,13 +734,19 @@ let test_stale_finalize_preserves_active_successor () =
       recovered
   in
   (match
-     P.mark_transition_projected_result
+     Masc.Keeper_event_queue_recovery.project_owner_result
        ~base_path
        ~keeper_name
-       ~transition_id:receipt.transition_id
    with
-   | Ok () -> ()
-  | Error detail -> Alcotest.failf "stale-owner outbox projection failed: %s" detail);
+   | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok Masc.Keeper_event_queue_recovery.No_pending_transition ->
+     Alcotest.fail "stale-owner outbox disappeared before projection"
+   | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+     Alcotest.fail "stale-owner outbox projection claim was busy"
+   | Error error ->
+     Alcotest.failf
+       "stale-owner outbox projection failed: %s"
+       (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
   let successor = claim_manual_lease ~base_path ~keeper_name in
   let before_retry =
     require_loaded_state "stale finalize before retry" ~base_path ~keeper_name

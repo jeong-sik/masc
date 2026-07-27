@@ -21,6 +21,8 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module Readiness = Masc.Keeper_activation_readiness
 module Admission = Masc.Keeper_lifecycle_admission
+module State_machine = Keeper_state_machine
+module Shutdown_types = Masc.Keeper_shutdown_types
 
 let contains haystack needle =
   let hl = String.length haystack
@@ -236,6 +238,88 @@ let test_global_autonomous_off_blocks_readiness () =
      | Some hint -> contains hint "MASC_KEEPER_AUTONOMOUS_ENABLED"
      | None -> false)
 
+let owner_runtime ~phase ~live_fiber =
+  Readiness.Owner_registered
+    { phase; live_fiber; lane_exited = false }
+;;
+
+let test_owner_execution_requires_live_fiber () =
+  without_overrides @@ fun () ->
+  check bool "policy permission without a registered owner is recoverable" true
+    (match
+       Readiness.classify_owner_execution
+         ~shutdown_operation_id:None
+         ~runtime:Readiness.Owner_unregistered
+         (Ok (ready_meta ()))
+     with
+     | Readiness.Recoverable -> true
+     | Readiness.Executable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false);
+  check bool "registered but non-running owner remains recoverable" true
+    (match
+       Readiness.classify_owner_execution
+         ~shutdown_operation_id:None
+         ~runtime:(owner_runtime ~phase:State_machine.Offline ~live_fiber:false)
+         (Ok (ready_meta ()))
+     with
+     | Readiness.Recoverable -> true
+     | Readiness.Executable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false);
+  check bool "only an observed live fiber is executable" true
+    (match
+       Readiness.classify_owner_execution
+         ~shutdown_operation_id:None
+         ~runtime:(owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+         (Ok (ready_meta ()))
+     with
+     | Readiness.Executable -> true
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false)
+;;
+
+let test_owner_execution_shutdown_fence_blocks_boot () =
+  without_overrides @@ fun () ->
+  let operation_id = Shutdown_types.Operation_id.generate () in
+  check bool "shutdown fence is a closed activation blocker" true
+    (match
+       Readiness.classify_owner_execution
+         ~shutdown_operation_id:(Some operation_id)
+         ~runtime:Readiness.Owner_unregistered
+         (Ok (ready_meta ()))
+     with
+     | Readiness.Shutdown_fenced actual ->
+       Shutdown_types.Operation_id.equal operation_id actual
+     | Readiness.Executable
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Unknown _ -> false)
+
+let test_owner_execution_unknown_fails_closed () =
+  check bool "unreadable owner truth cannot authorize activation" true
+    (match
+       Readiness.classify_owner_execution
+         ~shutdown_operation_id:None
+         ~runtime:Readiness.Owner_unregistered
+         (Error "meta unavailable")
+     with
+     | Readiness.Unknown "meta unavailable" -> true
+     | Readiness.Executable
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false)
+
 let operator_pause =
   Keeper_latched_reason.Operator_paused
     { operator_actor = Keeper_latched_reason.operator_actor_keeper_down }
@@ -438,6 +522,12 @@ let () =
       , [ test_case "default ready" `Quick test_default_autonomous_ready
         ; test_case "global off blocks readiness" `Quick
             test_global_autonomous_off_blocks_readiness
+        ; test_case "execution requires live fiber" `Quick
+            test_owner_execution_requires_live_fiber
+        ; test_case "shutdown fence blocks boot" `Quick
+            test_owner_execution_shutdown_fence_blocks_boot
+        ; test_case "unknown owner truth fails closed" `Quick
+            test_owner_execution_unknown_fails_closed
         ] )
     ; ( "typed lifecycle admission"
       , [ test_case "active" `Quick test_active_admission

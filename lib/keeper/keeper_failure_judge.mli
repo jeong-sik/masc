@@ -32,9 +32,9 @@ val error_disposition_label : error_disposition -> string
     to; process-local observations are not durable retry authority. *)
 
 val resolve_runtime_id : unit -> (string, run_error) result
-(** Resolve the configured structured-judge lane used by {!run}. Configuration
-    errors are returned explicitly when the durable stimulus executes; they do
-    not become pre-claim admission authority. *)
+(** Resolve the configured opaque structured-judge runtime identity used by
+    {!run}. Configuration errors are returned explicitly when the durable
+    stimulus executes; they do not become pre-claim admission authority. *)
 
 val build_prompt :
   keeper_name:string ->

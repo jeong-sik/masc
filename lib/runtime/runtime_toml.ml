@@ -799,6 +799,26 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               n))
     | Error _ as e -> e
   in
+  (* Paired with max-concurrent on purpose: OAS validates both in one admission
+     declaration and enforces this one before POST by serializing, measuring and
+     returning a typed Request_body_too_large. Only max-concurrent was declarable
+     here, so the byte ceiling could not be expressed at all and the OAS gate
+     passed every size. Same shape as its sibling, including the >= 1 rule OAS
+     already enforces on the declaration. *)
+  let max_request_body_bytes_result =
+    match typed_find "an integer" path tbl "max-request-body-bytes" Otoml.get_integer with
+    | Ok None -> Ok None
+    | Ok (Some n) when n > 0 -> Ok (Some n)
+    | Ok (Some n) ->
+      Error
+        (error
+           (path ^ ".max-request-body-bytes")
+           (Printf.sprintf
+              "max-request-body-bytes must be a positive integer or omitted for no \
+               declared ceiling; got %d"
+              n))
+    | Error _ as e -> e
+  in
   let price_input_result = typed_find "a float" path tbl "price-input" Otoml.get_float in
   let price_output_result = typed_find "a float" path tbl "price-output" Otoml.get_float in
   let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
@@ -812,6 +832,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     (* DET-OK: omitted means not selected for install wizard. *)
   in
   let* max_concurrent = max_concurrent_result in
+  let* max_request_body_bytes = max_request_body_bytes_result in
   let* price_input = price_input_result in
   let* price_output = price_output_result in
   let* keep_alive = keep_alive_result in
@@ -822,6 +843,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; is_default
     ; wizard_default
     ; max_concurrent
+    ; max_request_body_bytes
     ; price_input
     ; price_output
     ; keep_alive
@@ -957,7 +979,8 @@ let parse_runtime_media_failover ~path value =
      to [] (the repo's Unknown→Permissive anti-pattern). An explicit empty array
      [] is preserved as the intentional derive-from-declared-caps signal; id typos
      in a well-typed array are still caught loudly by
-     {!Runtime.validate_media_failover}. *)
+     {!Runtime.validate_runtime_references}, which now judges every [runtime]
+     field that names a routing target. *)
   try Ok (Otoml.get_array Otoml.get_string value) with
   | Otoml.Type_error msg ->
     Error

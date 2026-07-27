@@ -288,7 +288,6 @@ let test_judgment_provenance_codec () =
     ; KFR.Oas_internal_error
     ; KFR.Masc_internal_error
     ; KFR.Completion_contract
-    ; KFR.Legacy_unattributed
     ]
   in
   List.iter
@@ -348,7 +347,7 @@ let test_queue_stimulus_roundtrip () =
       "roundtrip preserves identity"
       true
       (Keeper_event_queue.stimulus_identity_equal stimulus parsed);
-    let legacy_json =
+    let missing_provenance_json =
       match Keeper_event_queue.stimulus_to_yojson stimulus with
       | `Assoc stimulus_fields ->
         let payload =
@@ -365,16 +364,9 @@ let test_queue_stimulus_roundtrip () =
            :: List.remove_assoc "payload" stimulus_fields)
       | _ -> Alcotest.fail "fixture stimulus is not an object"
     in
-    (match Keeper_event_queue.stimulus_of_yojson legacy_json with
-     | Ok
-         { payload =
-             Keeper_event_queue.Failure_judgment
-               { fj_provenance = KFR.Legacy_unattributed; _ }
-         ; _
-         } ->
-       ()
-     | Ok _ -> Alcotest.fail "legacy stimulus invented a provenance"
-     | Error detail -> Alcotest.failf "legacy stimulus did not decode: %s" detail)
+    (match Keeper_event_queue.stimulus_of_yojson missing_provenance_json with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "failure judgment without provenance decoded")
   | Error msg -> Alcotest.failf "roundtrip failed: %s" msg
 
 let failure_judgment_stimulus ~detail : Keeper_event_queue.stimulus =

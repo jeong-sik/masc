@@ -42,13 +42,13 @@ let with_workspace f =
 
 let dispatch config name =
   Keeper_tag_dispatch.dispatch
-    ~config ~agent_name:"test-keeper"
+    ~config ~keeper_name:"test-keeper" ~agent_name:"test-keeper"
     ~tag:Tool_dispatch.Mod_control
     ~name ~args:(`Assoc [])
 
 let dispatch_inline config name =
   Keeper_tag_dispatch.dispatch
-    ~config ~agent_name:"test-keeper"
+    ~config ~keeper_name:"test-keeper" ~agent_name:"test-keeper"
     ~tag:Tool_dispatch.Mod_inline
     ~name ~args:(`Assoc [])
 
@@ -92,6 +92,33 @@ let test_other_inline_blocked () =
     | None ->
         fail "masc_agents returned None")
 
+let test_task_author_uses_keeper_name () =
+  with_workspace (fun config ->
+    let result =
+      Keeper_tag_dispatch.dispatch
+        ~config
+        ~keeper_name:"keeper-handle"
+        ~agent_name:"keeper-actor"
+        ~tag:Tool_dispatch.Mod_task
+        ~name:"masc_add_task"
+        ~args:(`Assoc [ "title", `String "Keeper-authored fallback task" ])
+    in
+    (match result with
+     | Some tr when Tool_result.is_success tr -> ()
+     | Some tr ->
+       failf "masc_add_task should succeed: %s" (Tool_result.message tr)
+     | None -> fail "masc_add_task returned None");
+    match (Workspace.read_backlog config).tasks with
+    | [ task ] ->
+      check
+        (option string)
+        "fallback task author is the stable keeper handle"
+        (Some "keeper-handle")
+        task.created_by
+    | tasks ->
+      failf "expected one fallback-created task, got %d" (List.length tasks))
+;;
+
 let () =
   Alcotest.run "Keeper_tag_dispatch" [
     "Mod_control routing", [
@@ -101,5 +128,11 @@ let () =
     ];
     "Mod_inline gate", [
       test_case "inline tools blocked" `Quick test_other_inline_blocked;
+    ];
+    "Mod_task identity", [
+      test_case
+        "fallback task author uses keeper handle"
+        `Quick
+        test_task_author_uses_keeper_name;
     ];
   ]

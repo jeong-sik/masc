@@ -503,6 +503,10 @@ let hitl_rows keeper_name pending =
           [ "approval_id", `String entry.id
           ; "tool_name", `String entry.tool_name
           ; "summary_status", Keeper_approval_queue.summary_status_to_yojson entry.summary_status
+          ; "exact_attempt", Keeper_approval_queue.exact_attempt_state_to_yojson entry.exact_attempt
+          ; ( "summary_attempt_disposition"
+            , Keeper_approval_queue.summary_attempt_disposition_to_yojson
+                entry.summary_attempt_disposition )
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id
           ; "goal_id", Json_util.string_opt_to_json entry.goal_id
@@ -921,12 +925,33 @@ let global_rows_from rows =
     | Some _ -> false)
 ;;
 
-let dashboard_json config =
+let pending_approval_read_error error =
+  { keeper_name = None
+  ; source = Read_error
+  ; waiting_on = "keeper_gate_pending_store"
+  ; wake_producer = Read_model_reader
+  ; since = None
+  ; due_at = None
+  ; next_action = "reset_runtime_state"
+  ; detail =
+      Keeper_approval_queue.approval_queue_unavailable_state_json error
+  }
+;;
+
+let dashboard_json_with_pending_reader ~read_pending config =
   let now = Time_compat.now () in
   let keeper_names, keeper_name_read_error_rows =
     keeper_names_or_error_rows config
   in
-  let pending_approvals = Keeper_approval_queue.list_pending_entries () in
+  let pending_approvals, pending_approval_state, pending_approval_read_error_rows =
+    match read_pending ~base_path:config.Workspace.base_path with
+    | Ok entries ->
+      entries, Keeper_approval_queue.approval_queue_ready_state_json, []
+    | Error error ->
+      ( []
+      , Keeper_approval_queue.approval_queue_unavailable_state_json error
+      , [ pending_approval_read_error error ] )
+  in
   let fusion_runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
   let pending_confirms, pending_confirm_read_error_rows =
     pending_confirms_or_error_rows config
@@ -945,6 +970,7 @@ let dashboard_json config =
     @ global_pending_confirm_rows keeper_names pending_confirms
     @ keeper_name_read_error_rows
     @ pending_confirm_read_error_rows
+    @ pending_approval_read_error_rows
   in
   let keeper_json_rows =
     per_keeper
@@ -991,8 +1017,19 @@ let dashboard_json config =
     ; ( "global_pending_confirm_count_known"
       , `Bool (List.length pending_confirm_read_error_rows = 0) )
     ; "global_pending_confirm_count", `Int (global_pending_confirm_count keeper_names pending_confirms)
+    ; "pending_approval_state", pending_approval_state
     ; "source_counts", `Assoc (source_counts (all_keeper_rows @ global_rows))
     ; "keepers", `List keeper_json_rows
     ; "global_waiting_on", `List (List.map waiting_row_json global_rows)
     ]
 ;;
+
+let dashboard_json config =
+  dashboard_json_with_pending_reader
+    ~read_pending:Keeper_approval_queue.list_pending_entries_for_workspace
+    config
+;;
+
+module For_testing = struct
+  let dashboard_json_with_pending_reader = dashboard_json_with_pending_reader
+end

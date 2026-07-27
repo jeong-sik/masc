@@ -63,7 +63,6 @@ let to_wire = function
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
   | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
   | Provider_error code -> Code.to_wire code
-  | Unknown { raw_error = "" } -> "unknown_error"
   | Unknown { raw_error } -> raw_error
 ;;
 
@@ -71,17 +70,11 @@ let to_wire = function
 
    A runtime cause maps directly to a non-[Provider_error] arm only
    when the runtime classification fully determines the operator
-   action. Stale_turn_timeout_* are operator-equivalent to the
-   stale/no-progress timeout disposition.
-   All other runtime causes are wrapped so the typed cause is
+   action. All other runtime causes are wrapped so the typed cause is
    preserved for diagnostics. *)
 let of_termination_code (c : Code.t) : t =
   match c with
   | Code.Healthy -> Success
-  | Code.Stale_turn_timeout_idle
-  | Code.Stale_turn_timeout_in_turn
-  | Code.Stale_turn_timeout_no_progress
-  | Code.Stale_turn_timeout_noop -> Turn_wall_clock_timeout
   | Code.Heartbeat_failures
   | Code.Turn_failures
   | Code.Stale_termination_storm
@@ -95,16 +88,15 @@ let of_termination_code (c : Code.t) : t =
 
 let of_wire wire =
   match wire with
-     | "success" -> Success
-     | "input_required" -> Input_required
-     | "external_cancel" -> External_cancel
-     | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
-     | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
-     | "unknown_error" -> Unknown { raw_error = "" }
-     | other ->
-       (match Code.of_wire other with
-        | Some c -> of_termination_code c
-        | None -> Unknown { raw_error = other })
+  | "success" -> Success
+  | "input_required" -> Input_required
+  | "external_cancel" -> External_cancel
+  | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
+  | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
+  | other ->
+    (match Code.of_wire_exact other with
+     | Some c -> of_termination_code c
+     | None -> Unknown { raw_error = other })
 ;;
 
 let is_success = function

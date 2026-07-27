@@ -7,6 +7,23 @@
     fails closed and requires reset. [event-queue-inflight.json] is rejected
     explicitly rather than migrated or treated as a second authority. *)
 
+type owner_identity
+type owner_identity_error
+
+val resolve_owner_identity :
+  base_path:string ->
+  keeper_name:string ->
+  (owner_identity, owner_identity_error) result
+(** Resolve the canonical process-local owner identity shared by every durable
+    event-queue operation. The representation and owner-lock implementation
+    remain private to [masc.keeper_runtime]. *)
+
+val owner_identity_error_to_string : owner_identity_error -> string
+val owner_identity_equal : owner_identity -> owner_identity -> bool
+val owner_identity_hash : owner_identity -> int
+val owner_identity_base_path : owner_identity -> string
+val owner_identity_keeper_name : owner_identity -> string
+
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
   | Board_batch
@@ -25,6 +42,8 @@ type exact_execution_terminal_cause = Keeper_event_queue_state.exact_execution_t
   | Exact_execution_failed
   | Exact_execution_cancelled
   | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch
   | Commit_admission_unavailable
@@ -155,6 +174,10 @@ type accepted_source_terminal = Keeper_event_queue_state.accepted_source_termina
 
 type settlement = Keeper_event_queue_state.settlement =
   | Ack
+  | Manual_compaction_committed of
+      { commit : Keeper_event_queue_state.manual_compaction_commit
+      ; followup : Keeper_event_queue_state.manual_compaction_followup
+      }
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
@@ -189,36 +212,17 @@ val lease_kind : lease -> lease_kind
 val active_lease_result :
   base_path:string -> keeper_name:string -> (lease option, string) result
 
-val transition_outbox_result :
-  base_path:string -> keeper_name:string -> (outbox_entry list, string) result
-(** Read the single pending projection entry for this Keeper lane.  The state
-    machine blocks new claims until this list is drained. *)
-
 val exact_execution_binding_result :
   base_path:string -> keeper_name:string -> (exact_execution_binding option, string) result
 
-val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
-(** Compatibility replay projection: pending followed by active lease stimuli.
-    New live registry code should use {!load_pending} after explicitly
-    recovering abandoned leases at registration. Raises [Failure] when the
-    durable state is unavailable; it never substitutes an empty queue. *)
-
 val load_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
-(** Result-returning replay projection for callers that can propagate a durable
-    read failure. *)
-
-val load_pending : base_path:string -> keeper_name:string -> Keeper_event_queue.t
-(** Compatibility pending projection. Raises [Failure] on a durable read
-    failure; use {!load_pending_result} in production control flow. *)
+(** Strict replay projection: pending followed by active lease stimuli.
+    Durable read failures remain explicit. *)
 
 val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
-
-type snapshot_pair =
-  { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
-  }
+(** Strict pending projection. Durable read failures remain explicit. *)
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -244,7 +248,6 @@ type snapshot_discovery =
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
 val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
-val load_snapshot_pair : base_path:string -> keeper_name:string -> snapshot_pair
 val load_snapshot_pair_with_errors :
   base_path:string -> keeper_name:string -> snapshot_pair_with_errors
 
@@ -474,11 +477,15 @@ val prepare_registration_after_exact_recovery_result :
     registration recovery. Dispatch-uncertain bindings and source-less terminal
     quarantines remain fail-closed. *)
 
-val mark_transition_projected_result :
+val project_transition_outbox_result :
+  append_before_retire:(outbox_entry -> (unit, string) result) ->
   base_path:string ->
   keeper_name:string ->
-  transition_id:string ->
   (unit, string) result
+(** Read the single pending transition under the canonical lane identity,
+    invoke the supplied ledger append, and retire only after that append
+    succeeds. Raw outbox entries and the retirement primitive are not exported
+    independently. *)
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit
@@ -542,12 +549,18 @@ val drop_by_post_id :
 
 type owner_lifecycle =
   | Runnable
-  | Paused_retained
+  | Recoverable
+  | Retained_disabled
+  | Paused_dead
+  | Shutdown_fenced
   | Lifecycle_unknown of string
 
 (** Fleet projection split by the caller's canonical durable owner-lifecycle
-    read.  Queue persistence deliberately does not infer pause state from
-    registry presence, event contents, or elapsed time. *)
+    read. [Runnable] requires a live owner fiber; [Recoverable] is permitted
+    owner truth with durable demand but no live fiber. Disabled, paused/dead,
+    and shutdown-fenced owners remain distinct closed variants. Queue
+    persistence deliberately does not infer owner truth from event contents or
+    elapsed time. *)
 val fleet_summary_json :
   now:float ->
   base_path:string ->

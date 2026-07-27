@@ -296,7 +296,7 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
   let exec_pool =
     Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
   in
-  Server_dashboard_http_core.set_executor_pool exec_pool;
+  Executor_pool_ref.For_testing.with_pool exec_pool @@ fun () ->
   let caller_domain = Domain.self () in
   let result_domain =
     Server_dashboard_http_core.run_dashboard_compute
@@ -927,8 +927,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
   let completed =
     json
       (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
-         { Masc.Keeper_gate.reopened_ids = [ "approval-1"; "approval-2" ]
-         ; started_ids = [ "approval-1" ]
+         { Masc.Keeper_gate.started_ids = [ "approval-1" ]
          ; queued = 1
          })
   in
@@ -936,7 +935,6 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (completed |> member "recovery_status" |> to_string);
   check bool "completed error is null" true
     (completed |> member "recovery_error" = `Null);
-  check int "completed reopened" 2 (completed |> member "reopened" |> to_int);
   check int "completed started" 1 (completed |> member "started" |> to_int);
   check int "completed queued" 1 (completed |> member "queued" |> to_int);
   let failed =
@@ -948,7 +946,6 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (failed |> member "recovery_status" |> to_string);
   check string "failed detail" "judge worker unavailable"
     (failed |> member "recovery_error" |> to_string);
-  check int "failed reopened" 0 (failed |> member "reopened" |> to_int);
   check int "failed started" 0 (failed |> member "started" |> to_int);
   check int "failed queued" 0 (failed |> member "queued" |> to_int);
   let not_requested =
@@ -958,8 +955,6 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (not_requested |> member "recovery_status" |> to_string);
   check bool "not requested error is null" true
     (not_requested |> member "recovery_error" = `Null);
-  check int "not requested reopened" 0
-    (not_requested |> member "reopened" |> to_int);
   check int "not requested started" 0
     (not_requested |> member "started" |> to_int);
   check int "not requested queued" 0

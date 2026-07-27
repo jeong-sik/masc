@@ -160,6 +160,71 @@ let test_typed_judge_error_disposition () =
        { runtime_id = "structured-judge"; detail = "invalid JSON" })
 ;;
 
+let read_source path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+;;
+
+let count_occurrences ~needle haystack =
+  let needle_length = String.length needle in
+  let haystack_length = String.length haystack in
+  let rec loop offset count =
+    if offset + needle_length > haystack_length
+    then count
+    else if String.equal (String.sub haystack offset needle_length) needle
+    then loop (offset + needle_length) (count + 1)
+    else loop (offset + 1) count
+  in
+  loop 0 0
+;;
+
+let failure_judge_source () =
+  let relative = Filename.concat "lib/keeper" "keeper_failure_judge.ml" in
+  let candidates = [ relative; Filename.concat ".." relative ] in
+  match List.find_opt Sys.file_exists candidates with
+  | Some path -> read_source path
+  | None -> fail "keeper_failure_judge.ml source not found"
+;;
+
+let test_malformed_response_has_one_dispatch_surface () =
+  let source = failure_judge_source () in
+  let dispatch_count =
+    count_occurrences
+      ~needle:"Keeper_turn_driver_wrappers.run_named_with_masc_tools"
+      source
+  in
+  check int
+    "one opaque OAS execution is dispatched per failure-judgment stimulus"
+    1
+    dispatch_count;
+  (* No source-text count pins the response-contract propagation arm here.
+     #25769 added [check int ... 1 (count_occurrences ~needle:"| Error _ as
+     error -> error")], but that needle matches both propagation arms of [run]
+     — the [resolve_runtime_id] arm and the [parse_response] arm — so it read 2
+     and the case failed unconditionally from the moment it merged. Retuning
+     the needle or raising the expectation to 2 would keep a string classifier
+     over source text (CLAUDE.md workaround signature #2) that any refactor of
+     an unrelated arm breaks again. The property it claimed is already pinned
+     by type: [test_typed_judge_error_disposition] asserts
+     [Response_contract_error] disposes to [Escalate_judge_failure] through the
+     exposed .mli. The dispatch count above and the forbidden-token list below
+     are what this case actually owns. *)
+  List.iter
+    (fun forbidden ->
+       check int
+         ("MASC does not own " ^ forbidden)
+         0
+         (count_occurrences ~needle:forbidden source))
+    [ "resolve_candidates"
+    ; "Runtime.resolve_assignment"
+    ; "Runtime_lane.ordered_candidates"
+    ; "let rec walk"
+    ; "Runtime_agent.run"
+    ]
+;;
+
 let failure_event post_id : Keeper_world_observation.pending_board_event =
   { event_kind = Keeper_world_observation.Failure_judgment
   ; post_id
@@ -236,6 +301,10 @@ let () =
             "typed judge error disposition"
             `Quick
             test_typed_judge_error_disposition
+        ; test_case
+            "malformed response has one dispatch surface"
+            `Quick
+            test_malformed_response_has_one_dispatch_surface
         ; test_case
             "guidance binds exact observation"
             `Quick

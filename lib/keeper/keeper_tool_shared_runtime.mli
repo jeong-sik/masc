@@ -152,6 +152,7 @@ val keeper_text_fallback_json : agent_id:string -> message:string -> Yojson.Safe
     sub-handlers. Default is a no-op fallback. *)
 val tag_dispatch_fn
   : (config:Workspace.config
+     -> keeper_name:string
      -> agent_name:string
      -> tag:Tool_dispatch.module_tag
      -> name:string

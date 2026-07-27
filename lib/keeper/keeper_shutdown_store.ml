@@ -241,6 +241,29 @@ let active_turn_to_json turn =
     ]
 ;;
 
+let operator_metadata_supersession_token_to_json
+      (token : operator_metadata_supersession_token)
+  =
+  let superseded_admission =
+    match token.superseded_admission with
+    | Blocked_operator_stop ->
+      `Assoc [ "kind", `String "blocked_operator_stop" ]
+    | Unreconciled_turn turn ->
+      `Assoc
+        [ "kind", `String "unreconciled_turn"
+        ; "active_turn", active_turn_to_json turn
+        ]
+  in
+  `Assoc
+    [ "base_path", `String token.base_path
+    ; "keeper_name", `String token.keeper_name
+    ; "operation_id", `String (Operation_id.to_string token.operation_id)
+    ; "expected_revision", `Int token.expected_revision
+    ; "actor", `String token.actor
+    ; "superseded_admission", superseded_admission
+    ]
+;;
+
 let turn_disposition_to_json = function
   | No_inflight_turn -> `Assoc [ "kind", `String "no_inflight_turn" ]
   | Inflight_effect_unknown turn ->
@@ -513,6 +536,57 @@ let active_turn_of_json json =
   let* observed_turn_id = optional_int "observed_turn_id" json in
   let* observation_started_at = optional_float "observation_started_at" json in
   Ok { lane; admitted_at; observed_turn_id; observation_started_at }
+;;
+
+let operator_metadata_supersession_token_of_json json =
+  let* base_path = string "base_path" json in
+  let* keeper_name = string "keeper_name" json in
+  let* operation_id_raw = string "operation_id" json in
+  let* operation_id =
+    Operation_id.of_string operation_id_raw
+    |> Result.map_error (fun detail -> Decode_error detail)
+  in
+  let* expected_revision = int "expected_revision" json in
+  let* actor = string "actor" json in
+  let* superseded_admission_json = assoc "superseded_admission" json in
+  let* superseded_admission_kind =
+    string "kind" superseded_admission_json
+  in
+  let* superseded_admission =
+    match superseded_admission_kind with
+    | "blocked_operator_stop" -> Ok Blocked_operator_stop
+    | "unreconciled_turn" ->
+      let* active_turn_json =
+        assoc "active_turn" superseded_admission_json
+      in
+      Result.map
+        (fun turn -> Unreconciled_turn turn)
+        (active_turn_of_json active_turn_json)
+    | _ ->
+      Error
+        (Decode_error
+           "superseded_admission.kind is not current")
+  in
+  let* actor =
+    Workspace.validate_agent_name actor
+    |> Result.map_error (fun detail -> Decode_error detail)
+  in
+  if Filename.is_relative base_path
+  then Error (Decode_error "supersession token base_path must be absolute")
+  else if String.equal keeper_name ""
+          || not (String.equal keeper_name (String.trim keeper_name))
+  then Error (Decode_error "supersession token keeper_name is invalid")
+  else if expected_revision < 0
+  then Error (Decode_error "supersession token revision is invalid")
+  else
+    Ok
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; expected_revision
+      ; actor
+      ; superseded_admission
+      }
 ;;
 
 let turn_disposition_of_json json =
@@ -1239,6 +1313,17 @@ let prepare_operator_metadata_supersession
 
 let supersession_token_operation_id (token : operator_metadata_supersession_token) =
   token.operation_id
+
+let operator_metadata_supersession_token_matches
+      ~config
+      ~keeper_name
+      (token : operator_metadata_supersession_token)
+  =
+  String.equal
+    (Keeper_registry_types.canonical_base_path_exn config.Workspace.base_path)
+    token.base_path
+  && String.equal keeper_name token.keeper_name
+;;
 
 let supersede_blocked_operator_stop ~config ~token ~now =
   let config_base_path =

@@ -45,7 +45,7 @@ type revival_decision = {
     {!Keeper_tool_surface}'s in-process dispatch, and reachable from the
     dashboard HTTP handler and [masc_keeper_recover]'s automated down/up
     sequence ({!Operator_control}). What it widens is the set of
-    legacy-corrupted states that a call, once made, normalizes: previously
+    current-schema split states that a call, once made, normalizes: previously
     only the canonical [paused = true] + [Dead_tombstone] pairing reached
     the revival transaction; the stranded [paused = false] + [Dead_tombstone]
     split now does too.
@@ -71,3 +71,23 @@ val update_keeper :
   Keeper_turn_up_args.parsed_args ->
   Keeper_meta_contract.keeper_meta ->
   Keeper_types_profile.tool_result
+
+module For_testing : sig
+  val with_after_stop_join :
+    after_stop_join:(unit -> unit) -> (unit -> 'a) -> 'a
+
+  val with_after_candidate_write :
+    after_candidate_write:(unit -> unit) -> (unit -> 'a) -> 'a
+
+  val with_launch_failure : detail:string -> (unit -> 'a) -> 'a
+  val with_supersession_failure : detail:string -> (unit -> 'a) -> 'a
+  val with_phase_b_admission_failure : detail:string -> (unit -> 'a) -> 'a
+  val with_durable_revalidation_failure : detail:string -> (unit -> 'a) -> 'a
+  val with_runtime_rollback_failure : detail:string -> (unit -> 'a) -> 'a
+  val with_candidate_write_failure : detail:string -> (unit -> 'a) -> 'a
+
+  val with_after_runtime_assignment :
+    after_runtime_assignment:(unit -> unit) ->
+    (unit -> 'a) ->
+    'a
+end

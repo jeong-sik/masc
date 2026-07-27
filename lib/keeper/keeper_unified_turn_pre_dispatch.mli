@@ -1,10 +1,8 @@
 (** Pre-dispatch validation stage extracted from
     [Keeper_unified_turn.run_keeper_cycle] per RFC-0136 PR-3.
 
-    Owns the runtime-execution builder: runtime-name → keeper-meta
-    projection, model-label resolution, API-key + local-discovery
-    readiness checks, context-window resolution, and temperature inference.
-    Returns a
+    Owns the runtime-execution builder: runtime-id validation,
+    context-window resolution, and temperature inference. Returns a
     [Keeper_turn_runtime_budget.runtime_execution] record on success,
     or a typed [Agent_sdk.Error.sdk_error] on the first failed check.
 
@@ -37,8 +35,6 @@ val build_runtime_execution
     [meta]'s context.
 
     Failure modes (returned as [Error]):
-    - [Keeper_types_support.ensure_api_keys_for_labels] missing required keys.
-    - [ensure_local_discovery_ready] local-runtime discovery fail.
     - The exact [runtime_id] has no configured context window.
     - [meta.max_context_override] is not positive.
 

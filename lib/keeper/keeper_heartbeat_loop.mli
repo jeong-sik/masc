@@ -98,19 +98,24 @@ val provider_timeout_observation_reasons : string list
 val record_provider_timeout_observation :
   base_path:string -> keeper_name:string -> unit
 
+(** Closed accounting status for one keepalive cycle. A deferred projection
+    performs no turn accounting, crash accounting, or work-health refresh. *)
+type keepalive_cycle_status =
+  | Turn_cycle_completed
+  | Turn_cycle_crashed
+  | Deferred_projection_busy
+
 (** Outcome of one keepalive cycle evaluation.
 
-    [cycle_crashed = true] means the cycle's catch-all swallowed an
-    exception to keep the keeper fiber alive (T6 audit), or a durable
-    event-queue claim/settlement did not commit. The failure has
-    already been recorded via
-    [Keeper_registry.increment_turn_failures] — the same counter the
-    unified-turn failure path uses — so the caller dispatches
-    [Turn_failed]. Such a cycle must not refresh the
-    work-as-heartbeat lease. *)
+    [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to
+    keep the keeper fiber alive (T6 audit), or a durable event-queue
+    claim/settlement did not commit. The failure has already been recorded via
+    [Keeper_registry.increment_turn_failures], so the caller dispatches
+    [Turn_failed]. [Deferred_projection_busy] is a typed nonfailure and must
+    not dispatch either turn status or refresh the work-as-heartbeat lease. *)
 type keepalive_turn_outcome = {
   meta : keeper_meta;
-  cycle_crashed : bool;
+  cycle_status : keepalive_cycle_status;
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -185,7 +190,11 @@ val settlement_of_cycle_outcome :
     stimulus re-enters every cycle (RFC-0351 S0, #25461). *)
 
 val project_transition_outbox :
-  base_path:string -> keeper_name:string -> (unit, string) result
+  base_path:string ->
+  keeper_name:string ->
+  ( Keeper_event_queue_recovery.projection_outcome
+  , Keeper_event_queue_recovery.projection_error )
+  result
 (** Idempotently materialize the lane's single durable transition into the
     reaction ledger, then retire the outbox entry. New claims remain blocked
     while this projection is incomplete. *)
@@ -252,6 +261,17 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> unit
 
 module For_testing : sig
+  type transition_projection_gate =
+    | Projection_ready_for_cycle
+    | Projection_deferred_nonfailure
+    | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
+
+  val classify_transition_projection :
+    ( Keeper_event_queue_recovery.projection_outcome
+    , Keeper_event_queue_recovery.projection_error )
+    result ->
+    transition_projection_gate
+
   type transcript_corruption_commit =
     | Transcript_pause_persisted
     | Transcript_pause_and_settlement_persisted
@@ -265,6 +285,18 @@ module For_testing : sig
     ?settle:(unit -> (unit, string) result) ->
     unit ->
     transcript_corruption_commit
+
+  val commit_transcript_corruption_and_project :
+    stop:bool Atomic.t ->
+    persist_pause:
+      (unit -> ([ `Persisted | `No_durable_meta ], string) result) ->
+    ?settle:(unit -> (unit, string) result) ->
+    project_transition_outbox:(unit -> (unit, string) result) ->
+    unit ->
+    transcript_corruption_commit * (unit, string) result
+  (** Execute the production transcript-corruption commit/project sequence.
+      Projection runs only after durable pause and settlement return, outside
+      the cancellation-protected commit region. *)
 
   val exact_execution_guard :
     base_path:string ->

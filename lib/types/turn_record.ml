@@ -15,6 +15,8 @@ type sampling =
 type usage =
   { input_tokens : int option
   ; output_tokens : int option
+  ; cache_creation_input_tokens : int option
+  ; cache_read_input_tokens : int option
   }
 
 type t =
@@ -74,6 +76,10 @@ let to_json (r : t) : Yojson.Safe.t =
     @ opt_field "thinking_budget" (fun v -> `Int v) r.sampling.thinking_budget
     @ opt_field "enable_thinking" (fun v -> `Bool v) r.sampling.enable_thinking
     @ opt_field "input_tokens" (fun v -> `Int v) r.usage.input_tokens
+    @ opt_field "cache_creation_input_tokens" (fun v -> `Int v)
+        r.usage.cache_creation_input_tokens
+    @ opt_field "cache_read_input_tokens" (fun v -> `Int v)
+        r.usage.cache_read_input_tokens
     @ opt_field "output_tokens" (fun v -> `Int v) r.usage.output_tokens
     @ [ ("ts", `Float r.ts) ])
 
@@ -172,6 +178,12 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* thinking_budget = opt_member "thinking_budget" fields as_int in
       let* enable_thinking = opt_member "enable_thinking" fields as_bool in
       let* input_tokens = opt_member "input_tokens" fields as_int in
+      let* cache_creation_input_tokens =
+        opt_member "cache_creation_input_tokens" fields as_int
+      in
+      let* cache_read_input_tokens =
+        opt_member "cache_read_input_tokens" fields as_int
+      in
       let* output_tokens = opt_member "output_tokens" fields as_int in
       let* ts_json = require "ts" fields in
       let* ts = as_float "ts" ts_json in
@@ -191,7 +203,12 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; request_latency_ms
         ; ttfrc_ms
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
-        ; usage = { input_tokens; output_tokens }
+        ; usage =
+            { input_tokens
+            ; output_tokens
+            ; cache_creation_input_tokens
+            ; cache_read_input_tokens
+            }
         ; ts
         }
   | _ -> Error "turn_record: row is not an object"

@@ -5,6 +5,7 @@ module State = Keeper_event_queue_state
 module Persistence = Keeper_event_queue_persistence
 module Disposition = Keeper_paused_work_disposition_receipt
 module Operator = Keeper_paused_work_operator
+module Cancellation = Keeper_paused_work_cancellation_transaction
 
 let require_ok label = function
   | Ok value -> value
@@ -262,6 +263,62 @@ let test_inventory_exposes_exact_durable_fences () =
       | Error detail -> Alcotest.fail detail)
 ;;
 
+let admission_error_json block =
+  Operator.error_to_yojson
+    (Operator.Cancellation_rejected (Cancellation.Admission_busy block))
+;;
+
+let test_admission_busy_http_json_preserves_typed_detail () =
+  let open Yojson.Safe.Util in
+  let holder =
+    admission_error_json
+      (Keeper_turn_admission.Turn_busy
+         (Some { lane = Keeper_turn_admission.Chat; started_at = 42.5 }))
+  in
+  Alcotest.(check string)
+    "holder error code"
+    "keeper_turn_admission_busy"
+    (holder |> member "error_code" |> to_string);
+  Alcotest.(check string)
+    "holder kind"
+    "turn_busy"
+    (holder |> member "admission" |> member "kind" |> to_string);
+  Alcotest.(check string)
+    "holder lane"
+    "chat"
+    (holder |> member "admission" |> member "holder" |> member "lane" |> to_string);
+  Alcotest.(check (float 0.0))
+    "holder start"
+    42.5
+    (holder
+     |> member "admission"
+     |> member "holder"
+     |> member "started_at"
+     |> to_float);
+  let backlog =
+    admission_error_json
+      (Keeper_turn_admission.Chat_backlog
+         { pending_count = 3; inflight_count = 2 })
+  in
+  Alcotest.(check int)
+    "chat pending count"
+    3
+    (backlog |> member "admission" |> member "pending_count" |> to_int);
+  Alcotest.(check int)
+    "chat inflight count"
+    2
+    (backlog |> member "admission" |> member "inflight_count" |> to_int);
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  let shutdown =
+    admission_error_json
+      (Keeper_turn_admission.Shutdown_requested operation_id)
+  in
+  Alcotest.(check string)
+    "shutdown operation id"
+    (Keeper_shutdown_types.Operation_id.to_string operation_id)
+    (shutdown |> member "admission" |> member "operation_id" |> to_string)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -274,6 +331,12 @@ let () =
             "durable exact identity and revision"
             `Quick
             test_inventory_exposes_exact_durable_fences
+        ] )
+    ; ( "admission"
+      , [ Alcotest.test_case
+            "HTTP JSON preserves typed busy detail"
+            `Quick
+            test_admission_busy_http_json_preserves_typed_detail
         ] )
     ]
 ;;

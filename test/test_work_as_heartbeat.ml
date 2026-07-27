@@ -131,6 +131,21 @@ let test_freshness_disabled_flag () =
   let fresh = work_as_hb && (now -. last_hb < max_silence) in
   check bool "feature disabled → always stale" false fresh
 
+let test_busy_cycle_records_no_turn_status_or_work_heartbeat () =
+  let accounting =
+    Masc.Keeper_heartbeat_loop.keepalive_cycle_accounting
+      (Masc.Keeper_heartbeat_loop.Turn_cycle_busy
+         (Masc.Keeper_turn_admission.Chat_backlog
+            { pending_count = 2; inflight_count = 1 }))
+  in
+  check bool "busy cycle records no turn status" false accounting.record_turn_status;
+  check
+    bool
+    "busy cycle refreshes no work-heartbeat success"
+    false
+    accounting.refresh_work_heartbeat
+;;
+
 (* ── Percentile function (Phase 0 profiling) ────────────── *)
 
 let test_percentile_empty () =
@@ -199,6 +214,12 @@ let () =
       test_case "exact boundary → stale (strict <)" `Quick test_freshness_exact_boundary;
       test_case "never heartbeated → stale" `Quick test_freshness_never_heartbeated;
       test_case "feature disabled → always stale" `Quick test_freshness_disabled_flag;
+    ];
+    "cycle_accounting", [
+      test_case
+        "busy records no completion or work-heartbeat success"
+        `Quick
+        test_busy_cycle_records_no_turn_status_or_work_heartbeat;
     ];
     "config_invariants", [
       test_case "max_silence >= interval" `Quick test_config_invariant_silence_ge_interval;

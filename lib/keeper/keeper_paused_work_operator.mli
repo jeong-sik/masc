@@ -49,6 +49,8 @@ val error_to_string : error -> string
 val error_class : error -> error_class
 val admission_busy : error -> Keeper_turn_admission.autonomous_block option
 (** Typed unavailable detail for boundary adapters. *)
+val error_to_yojson : error -> Yojson.Safe.t
+(** Canonical HTTP error envelope, including typed admission detail. *)
 
 val inventory_json :
   Workspace.config -> keeper_name:string -> (Yojson.Safe.t, inventory_error) result

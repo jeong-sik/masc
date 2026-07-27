@@ -105,6 +105,16 @@ type keepalive_cycle_status =
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_turn_admission.autonomous_block
 
+type keepalive_cycle_accounting =
+  { record_turn_status : bool
+  ; refresh_work_heartbeat : bool
+  }
+
+val keepalive_cycle_accounting :
+  keepalive_cycle_status -> keepalive_cycle_accounting
+(** Closed accounting policy used by the heartbeat loop. Busy cycles record
+    neither turn completion nor work-heartbeat success. *)
+
 (** Outcome of one keepalive cycle evaluation.
 
     [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to

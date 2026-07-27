@@ -44,13 +44,6 @@ let with_in_turn_liveness_pulse =
    aliases so callers (incl. .mli consumers) stay byte-identical. *)
 module Stimulus_intake = Keeper_heartbeat_stimulus_intake
 
-(* #25978 removed this body while its interface declaration and two test
-   consumers remained, so the library stopped matching its own signature. The
-   recovery projection it delegates to is unchanged. *)
-let project_transition_outbox ~base_path ~keeper_name =
-  Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
-;;
-
 let stimulus_urgency_to_string = Stimulus_intake.stimulus_urgency_to_string
 let pending_board_event_of_stimulus = Stimulus_intake.pending_board_event_of_stimulus
 let record_event_queue_stimulus_turn_started =
@@ -125,6 +118,20 @@ type keepalive_cycle_status =
   | Turn_cycle_completed
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_turn_admission.autonomous_block
+
+type keepalive_cycle_accounting =
+  { record_turn_status : bool
+  ; refresh_work_heartbeat : bool
+  }
+
+let keepalive_cycle_accounting = function
+  | Turn_cycle_completed ->
+    { record_turn_status = true; refresh_work_heartbeat = true }
+  | Turn_cycle_crashed ->
+    { record_turn_status = true; refresh_work_heartbeat = false }
+  | Turn_cycle_busy _ ->
+    { record_turn_status = false; refresh_work_heartbeat = false }
+;;
 
 type keepalive_turn_outcome = {
   meta : keeper_meta;
@@ -1120,23 +1127,26 @@ let run_heartbeat_loop
             r)
         in
         let meta_after_proactive = turn_outcome.meta in
-        (match turn_outcome.cycle_status with
-         | Turn_cycle_busy block ->
-           Keeper_registry.record_skip_reasons
-             ~base_path:ctx.config.base_path
-             m.name
-             ~reasons:
-               [ "turn_admission_"
-                 ^ Keeper_turn_admission.autonomous_block_kind block
-               ];
-           Log.Keeper.info
-             ~keeper_name:m.name
-             "turn admission deferred autonomous work: %s; this keepalive cycle \
-              records no turn status, crash, or work-health refresh"
-             (Keeper_turn_admission.autonomous_block_to_string block)
-         | Turn_cycle_completed | Turn_cycle_crashed ->
-           if not lifecycle_blocked
-           then (
+        let accounting = keepalive_cycle_accounting turn_outcome.cycle_status in
+        if not accounting.record_turn_status
+        then (
+          match turn_outcome.cycle_status with
+          | Turn_cycle_busy block ->
+            Keeper_registry.record_skip_reasons
+              ~base_path:ctx.config.base_path
+              m.name
+              ~reasons:
+                [ "turn_admission_"
+                  ^ Keeper_turn_admission.autonomous_block_kind block
+                ];
+            Log.Keeper.info
+              ~keeper_name:m.name
+              "turn admission deferred autonomous work: %s; this keepalive cycle \
+               records no turn status, crash, or work-health refresh"
+              (Keeper_turn_admission.autonomous_block_to_string block)
+          | Turn_cycle_completed | Turn_cycle_crashed -> assert false)
+        else if not lifecycle_blocked
+        then (
              (* The registry tracks failure count as observation. A
                 lifecycle-blocked cycle did not run a turn and must not emit a
                 false [Turn_succeeded]. *)
@@ -1163,12 +1173,8 @@ let run_heartbeat_loop
                 On failure: leave timestamp unchanged → presence sync resumes next cycle.
                 T6 audit: a crashed cycle proves nothing about health — do not
                 refresh the lease or reset consecutive_failures for it. *)
-             match turn_outcome.cycle_status with
-             | Turn_cycle_crashed ->
-               Log.Keeper.info
-                 "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
-                 m.name
-             | Turn_cycle_completed ->
+             if accounting.refresh_work_heartbeat
+             then
                refresh_work_as_heartbeat
                  ~ctx
                  ~meta_after_proactive
@@ -1176,7 +1182,10 @@ let run_heartbeat_loop
                  ~work_as_hb
                  ~last_successful_heartbeat_ts
                  ~consecutive_failures
-             | Turn_cycle_busy _ -> assert false));
+             else
+               Log.Keeper.info
+                 "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
+                 m.name);
         let t_turn_end = Time_compat.now () in
         let interval =
           float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())

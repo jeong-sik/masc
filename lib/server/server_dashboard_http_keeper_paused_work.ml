@@ -9,16 +9,7 @@ let keeper_name req =
     suffix
 ;;
 
-let error_json ?admission_busy message =
-  let fields = [ "ok", `Bool false; "error", `String message ] in
-  match admission_busy with
-  | None -> `Assoc fields
-  | Some block ->
-    `Assoc
-      (fields
-       @ [ "error_code", `String "keeper_turn_admission_busy"
-         ; "admission", Keeper_turn_admission.autonomous_block_to_yojson block
-         ])
+let error_json message = `Assoc [ "ok", `Bool false; "error", `String message ]
 
 let handle_get state req reqd =
   let name = keeper_name req in
@@ -68,7 +59,7 @@ let handle_post state req reqd body =
       Http.Response.json_value
         ~status:(http_status (Operator.error_class error))
         ~request:req
-        (error_json (Operator.error_to_string error))
+        (Operator.error_to_yojson error)
         reqd
     | Ok request ->
       let config = Mcp_server.workspace_config state in
@@ -81,9 +72,7 @@ let handle_post state req reqd body =
          Http.Response.json_value
            ~status:(http_status (Operator.error_class error))
            ~request:req
-           (error_json
-              ?admission_busy:(Operator.admission_busy error)
-              (Operator.error_to_string error))
+           (Operator.error_to_yojson error)
            reqd
        | Ok outcome ->
          Log.Dashboard.info

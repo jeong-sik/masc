@@ -2843,7 +2843,14 @@ let schedule_request_dashboard_json
   (request : Schedule_domain.schedule_request)
   =
   let next_due_at =
-    if Schedule_domain.is_terminal request.status then None else Some request.due_at
+    match request.status with
+    | Schedule_domain.Scheduled | Schedule_domain.Due -> Some request.due_at
+    | Schedule_domain.Running
+    | Schedule_domain.Succeeded
+    | Schedule_domain.Failed
+    | Schedule_domain.Cancelled
+    | Schedule_domain.Expired ->
+      None
   in
   let payload_target, payload_summary =
     Schedule_payload_projection.target_summary request

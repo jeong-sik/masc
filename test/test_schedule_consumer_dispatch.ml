@@ -463,6 +463,8 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
   in
   let open Yojson.Safe.Util in
   let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
+    check bool "running one-shot has no next due occurrence" true
+      (row |> member "next_due_at" |> to_option to_float |> Option.is_none);
     let receipt = row |> member "dispatch_receipt" in
     check string "receipt recognized" "recognized"
       (receipt |> member "projection_status" |> to_string);

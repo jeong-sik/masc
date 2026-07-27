@@ -460,9 +460,12 @@ val mark_summary_attempt_pre_worker_unavailable :
   (bool, exact_attempt_error) result
 (** Durably block an unbound current-schema row before provider dispatch. The
     closed reason code and exact non-blank operator detail are persisted in the
-    same snapshot and are rearmable only through [rearm_summary_attempt]. *)
+    same snapshot and are retryable only through
+    [reserve_summary_attempt_retry]. *)
 
-val rearm_summary_attempt :
+val summary_attempt_start_reserved_operator_detail : string
+
+val reserve_summary_attempt_retry :
   base_path:string ->
   id:string ->
   input_hash:string ->
@@ -471,11 +474,11 @@ val rearm_summary_attempt :
   expected_disposition:summary_attempt_disposition ->
   requested_by:string ->
   (bool, exact_attempt_error) result
-(** Explicit operator CAS for a blocked row. The caller-observed row identity,
-    exact attempt, and disposition must still match atomically.
-    Identity-unbound and pre-worker-unavailable work becomes ready; a
-    restart-classified released binding may return to unbound only after its
-    complete identity matches. Terminal exact quarantine is never rearmed. *)
+(** Explicit operator CAS from a blocked row directly to the typed durable
+    start reservation. No intermediate ready row is persisted. The
+    caller-observed row identity, exact attempt, and disposition must still
+    match atomically. A restart-classified released binding returns to unbound
+    in the same write. Terminal exact quarantine is never retried. *)
 
 val pending_count_for_keeper_in_workspace :
   base_path:string -> keeper_name:string -> (int, storage_error) result

@@ -1,7 +1,7 @@
 module AQ = Masc.Keeper_approval_queue
 
-let rearm_exact ~base_path (entry : AQ.pending_approval) =
-  AQ.rearm_summary_attempt
+let reserve_retry_exact ~base_path (entry : AQ.pending_approval) =
+  AQ.reserve_summary_attempt_retry
     ~base_path
     ~id:entry.id
     ~input_hash:entry.input_hash
@@ -1293,7 +1293,7 @@ let test_exact_attempt_binding_release_and_conflicts () =
        check_rearm
          "bound restart is not rearmed"
          false
-         (rearm_exact ~base_path (pending_entry_exn id));
+         (reserve_retry_exact ~base_path (pending_entry_exn id));
        let quarantine_cause = AQ.Exact_domain_invalid_output in
        check_exact_update
          "quarantine replacement"
@@ -1379,7 +1379,7 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        check_rearm
          "live released pending work does not enter restart-only recovery"
          false
-         (rearm_exact ~base_path (pending_entry_exn released_id));
+         (reserve_retry_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { exact_attempt =
               AQ.Exact_bound
@@ -1450,7 +1450,7 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        check_rearm
          "explicit operator recovery clears restart-only released binding"
          true
-         (rearm_exact ~base_path (pending_entry_exn released_id));
+         (reserve_retry_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { summary_status = AQ.Summary_pending
           ; exact_attempt = AQ.Exact_unbound
@@ -1472,7 +1472,7 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        check_rearm
          "operator recovery rearms the selected restart-classified release"
          true
-         (rearm_exact ~base_path (pending_entry_exn bulk_id));
+         (reserve_retry_exact ~base_path (pending_entry_exn bulk_id));
        match pending_entry_exn bulk_id with
        | { summary_status = AQ.Summary_pending
          ; exact_attempt = AQ.Exact_unbound
@@ -2213,7 +2213,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
         | Ok _ ->
           Alcotest.fail "blocked disposition bound without operator rearm");
        (match
-          AQ.rearm_summary_attempt
+          AQ.reserve_summary_attempt_retry
             ~base_path
             ~id
             ~input_hash:entry.input_hash
@@ -2226,6 +2226,26 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
         | Ok false -> Alcotest.fail "operator rearm did not change blocked row"
         | Error error ->
           Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       (match AQ.For_testing.get_pending_entry_unchecked ~id with
+        | Some
+            { summary_status = AQ.Summary_pending
+            ; exact_attempt = AQ.Exact_unbound
+            ; summary_attempt_disposition =
+                AQ.Summary_attempt_pre_worker_unavailable
+                  { reason_code = AQ.Summary_pre_worker_start_reserved
+                  ; operator_detail
+                  }
+            ; _
+            }
+          when
+            String.equal
+              operator_detail
+              AQ.summary_attempt_start_reserved_operator_detail ->
+          ()
+        | Some _ ->
+          Alcotest.fail
+            "operator retry persisted an intermediate ready disposition"
+        | None -> Alcotest.fail "operator retry removed the pending row");
        check_exact_update
          "rearmed disposition permits one exact bind"
          true
@@ -2270,7 +2290,7 @@ let test_operator_recovery_skips_terminal_exact_failure () =
        check_rearm
          "explicit operator action cannot reopen exact quarantine"
          false
-         (rearm_exact ~base_path (pending_entry_exn quarantined_id));
+         (reserve_retry_exact ~base_path (pending_entry_exn quarantined_id));
        (match AQ.For_testing.get_pending_entry_unchecked ~id:quarantined_id with
         | Some
             { summary_status = AQ.Summary_failed { retryable = false; _ }
@@ -2698,9 +2718,9 @@ let test_default_auto_judge_defers_without_blocking () =
               | None -> Alcotest.fail "durable blocked row disappeared"
             in
             check_rearm
-              "explicit operator rearm clears pre-worker block"
+              "explicit operator retry reserves pre-worker start"
               true
-              (rearm_exact ~base_path blocked)
+              (reserve_retry_exact ~base_path blocked)
           | Some _ ->
             Alcotest.fail "Auto Judge pre-worker failure lost its durable reason"
           | None -> Alcotest.fail "Auto Judge request was not durably queued");

@@ -496,7 +496,35 @@ let earliest_auto_judge_for_owner ?exclude_id ~base_path ~keeper_name entries =
   | entry :: _ -> Some entry
 ;;
 
-let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
+let auto_judge_entry_has_start_reservation
+      reserved_id
+      (entry : Keeper_approval_queue.pending_approval)
+  =
+  String.equal entry.id reserved_id
+  &&
+  match
+    entry.summary_status,
+    entry.exact_attempt,
+    entry.summary_attempt_disposition
+  with
+  | Keeper_approval_queue.Summary_pending,
+    Keeper_approval_queue.Exact_unbound,
+    Keeper_approval_queue.Summary_attempt_pre_worker_unavailable
+      { reason_code =
+          Keeper_approval_queue.Summary_pre_worker_start_reserved
+      ; _
+      } ->
+    true
+  | _ -> false
+;;
+
+let ready_auto_judges_for_owner
+      ?exclude_id
+      ?reserved_id
+      ~base_path
+      ~keeper_name
+      entries
+  =
   match
     earliest_auto_judge_for_owner
       ?exclude_id
@@ -504,7 +532,15 @@ let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
       ~keeper_name
       entries
   with
-  | Some entry when auto_judge_entry_ready entry -> [ entry ]
+  | Some entry
+    when
+      auto_judge_entry_ready entry
+      ||
+      (match reserved_id with
+       | Some reserved_id ->
+         auto_judge_entry_has_start_reservation reserved_id entry
+       | None -> false) ->
+    [ entry ]
   | Some _ | None -> []
 ;;
 
@@ -545,10 +581,6 @@ let durable_pre_worker_unavailable_error reason = function
     ^ Keeper_approval_queue.exact_attempt_error_to_string error
 ;;
 
-let pre_worker_start_reserved_detail =
-  "Auto Judge worker start is durably reserved before exact attempt binding."
-;;
-
 let reserve_pre_worker_start
       (entry : Keeper_approval_queue.pending_approval)
   =
@@ -556,7 +588,8 @@ let reserve_pre_worker_start
     mark_pre_worker_unavailable
       entry
       ~reason_code:Keeper_approval_queue.Summary_pre_worker_start_reserved
-      ~operator_detail:pre_worker_start_reserved_detail
+      ~operator_detail:
+        Keeper_approval_queue.summary_attempt_start_reserved_operator_detail
   with
   | Ok true -> Ok ()
   | Ok false ->
@@ -662,12 +695,14 @@ let rec spawn_claimed_auto_judge_entry_with
        | Error reason -> fail_before_worker ~reason
      with
      | Eio.Cancel.Cancelled _ as exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
        let reason =
          "Auto Judge worker start was cancelled: " ^ Printexc.to_string exn
        in
-       (match fail_before_worker ~reason with
-        | Ok _ | Error _ -> ());
-       raise exn
+       Eio.Cancel.protect (fun () ->
+         match fail_before_worker ~reason with
+         | Ok _ | Error _ -> ());
+       Printexc.raise_with_backtrace exn backtrace
      | exn ->
        let reason =
          "Auto Judge worker start failed: " ^ Printexc.to_string exn
@@ -710,7 +745,7 @@ and retry_auto_judge_entry
       (entry : Keeper_approval_queue.pending_approval)
   =
   match
-    Keeper_approval_queue.rearm_summary_attempt
+    Keeper_approval_queue.reserve_summary_attempt_retry
       ~base_path:entry.audit_base_path
       ~id:entry.id
       ~input_hash:expected_input_hash
@@ -734,6 +769,7 @@ and retry_auto_judge_entry
     (try
        match
          drain_auto_judge_owner
+           ~reserved_id:entry.id
            ~base_path:entry.audit_base_path
            ~keeper_name:entry.keeper_name
            ()
@@ -746,12 +782,15 @@ and retry_auto_judge_entry
           | None, (Some _ | None) -> Ok Retry_queued)
      with
      | Eio.Cancel.Cancelled _ as exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
        let reason =
          "Auto Judge retry was cancelled before exact attempt binding: "
          ^ Printexc.to_string exn
        in
-       let _reblocked_reason = reblock reason in
-       raise exn
+       let _reblocked_reason =
+         Eio.Cancel.protect (fun () -> reblock reason)
+       in
+       Printexc.raise_with_backtrace exn backtrace
      | exn ->
        let reason =
          "Auto Judge retry failed before exact attempt binding: "
@@ -789,11 +828,24 @@ and start_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
      | Auto_judge_ineligible ->
        Ok Skipped)
 
-and drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name () =
+and drain_auto_judge_owner_queue
+      ?exclude_id
+      ?reserved_id
+      ~base_path
+      ~keeper_name
+      ()
+  =
   let rec loop failures = function
     | [] -> { started_id = None; failures = List.rev failures }
     | entry :: rest ->
-      (match start_auto_judge_entry entry with
+      let start_result =
+        match reserved_id with
+        | Some reserved_id
+          when auto_judge_entry_has_start_reservation reserved_id entry ->
+          spawn_auto_judge_entry entry
+        | Some _ | None -> start_auto_judge_entry entry
+      in
+      (match start_result with
        | Ok Started ->
          { started_id = Some entry.id; failures = List.rev failures }
        | Ok Skipped ->
@@ -811,13 +863,28 @@ and drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name () =
   Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
   |> Result.map (fun entries ->
     entries
-    |> ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name
+    |> ready_auto_judges_for_owner
+         ?exclude_id
+         ?reserved_id
+         ~base_path
+         ~keeper_name
     |> loop [])
 
-and drain_auto_judge_owner ?exclude_id ~base_path ~keeper_name () =
+and drain_auto_judge_owner
+      ?exclude_id
+      ?reserved_id
+      ~base_path
+      ~keeper_name
+      ()
+  =
   match Keeper_gate_mode.read ~base_path with
   | Ok Keeper_gate_mode.Auto_judge ->
-    drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name ()
+    drain_auto_judge_owner_queue
+      ?exclude_id
+      ?reserved_id
+      ~base_path
+      ~keeper_name
+      ()
     |> Result.map_error Keeper_approval_queue.storage_error_to_string
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
     Ok { started_id = None; failures = [] }

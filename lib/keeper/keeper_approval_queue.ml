@@ -112,6 +112,10 @@ let approval_queue_unavailable_severity = "bad"
 let approval_queue_unavailable_icon = "!"
 let approval_queue_ready_state_json = `Assoc [ "state", `String "ready" ]
 
+let summary_attempt_start_reserved_operator_detail =
+  "Auto Judge worker start is durably reserved before exact attempt binding."
+;;
+
 let approval_queue_unavailable_state_json error =
   `Assoc
     [ "state", `String "unavailable"
@@ -2565,7 +2569,7 @@ let mark_summary_attempt_pre_worker_unavailable
          | _ -> None)
 ;;
 
-let rearm_summary_attempt
+let reserve_summary_attempt_retry
       ~base_path
       ~id
       ~input_hash
@@ -2590,6 +2594,12 @@ let rearm_summary_attempt
       (Exact_attempt_rejected
          (Exact_attempt_invalid_identity "requested_by"))
   else
+    let reserved =
+      Summary_attempt_pre_worker_unavailable
+        { reason_code = Summary_pre_worker_start_reserved
+        ; operator_detail = summary_attempt_start_reserved_operator_detail
+        }
+    in
     transition_summary_attempt
       ~base_path
       ~id
@@ -2615,13 +2625,15 @@ let rearm_summary_attempt
              Summary_pending ->
              Some
                { entry with
-                 summary_attempt_disposition = Summary_attempt_ready
+                 summary_status = Summary_pending
+               ; summary_attempt_disposition = reserved
                }
            | Summary_attempt_pre_worker_unavailable _, Exact_unbound,
              (Summary_not_requested | Summary_pending) ->
              Some
                { entry with
-                 summary_attempt_disposition = Summary_attempt_ready
+                 summary_status = Summary_pending
+               ; summary_attempt_disposition = reserved
                }
            | Summary_attempt_persistence_uncertain,
              Exact_bound
@@ -2630,7 +2642,8 @@ let rearm_summary_attempt
              Some
                { entry with
                  exact_attempt = Exact_unbound
-               ; summary_attempt_disposition = Summary_attempt_ready
+               ; summary_status = Summary_pending
+               ; summary_attempt_disposition = reserved
                }
            | _ -> None)
 ;;

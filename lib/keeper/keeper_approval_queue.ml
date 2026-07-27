@@ -2478,7 +2478,10 @@ let mark_summary_attempt_identity_unbound
          entry.exact_attempt,
          entry.summary_attempt_disposition
        with
-       | Summary_pending, Exact_unbound, Summary_attempt_ready ->
+       | Summary_pending, Exact_unbound,
+         ( Summary_attempt_ready
+         | Summary_attempt_pre_worker_unavailable
+             { reason_code = Summary_pre_worker_start_reserved; _ } ) ->
          Some
            { entry with
              summary_attempt_disposition =

@@ -2235,6 +2235,24 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
          "in-flight start reservation cannot be reserved again"
          false
          (reserve_retry_exact ~base_path reserved_entry);
+       (match
+          AQ.mark_summary_attempt_identity_unbound
+            ~base_path
+            ~id
+            ~input_hash:reserved_entry.input_hash
+            ~sequence:reserved_entry.sequence
+        with
+        | Ok true -> ()
+        | Ok false ->
+          Alcotest.fail
+            "pre-bind start reservation did not settle identity-unbound"
+        | Error error ->
+          Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       let retryable_entry = pending_entry_exn id in
+       check_rearm
+         "pre-bind terminal failure restores explicit retryability"
+         true
+         (reserve_retry_exact ~base_path retryable_entry);
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
         | Some
             { summary_status = AQ.Summary_pending

@@ -438,7 +438,8 @@ val mark_summary_attempt_identity_unbound :
   (bool, exact_attempt_error) result
 (** Durably block an unbound pending summary with the stable
     [Summary_attempt_identity_unbound] fact. The row identity is an exact CAS;
-    no caller supplies diagnostic text. *)
+    no caller supplies diagnostic text. A current start reservation can settle
+    here when its worker terminates before binding an exact attempt. *)
 
 val mark_summary_attempt_persistence_uncertain :
   base_path:string ->

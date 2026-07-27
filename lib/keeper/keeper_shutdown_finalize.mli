@@ -53,4 +53,14 @@ module For_testing : sig
 
   val reset_remove_pending_confirms_by_target : unit -> unit
   val reset_completion_handler : unit -> unit
+
+  val update_registry_meta_exact :
+    Keeper_shutdown_types.t ->
+    Keeper_registry.registry_entry option ->
+    Keeper_meta_contract.keeper_meta ->
+    (unit, string) result
+  (** The registry projection step of cleanup preparation. Exposed so the
+      lane-disappeared verdict can be pinned: a lane that vanished mid-operation
+      and a lane that was already absent are the same end state, and both must
+      succeed. A lane that was *replaced* must still fail. *)
 end

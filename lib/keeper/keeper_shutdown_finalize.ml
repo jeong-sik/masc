@@ -374,7 +374,26 @@ let update_registry_meta_exact operation entry retained =
      with
      | Keeper_registry.Exact_updated -> Ok ()
      | Keeper_registry.Exact_update_missing ->
-       Error "Keeper registry entry disappeared before meta update"
+       (* The lane this shutdown owned is gone from the in-memory registry.
+          That is the state this shutdown is driving toward, and the durable
+          meta update has already committed above — the registry projection of
+          a lane that no longer exists is a no-op, not a conflict.
+
+          Reading [None] one line earlier (the [Registered_lane _, None] arm)
+          already returns [Ok ()] for the identical end state. Treating the
+          same fact as success or as a permanent block depending on whether a
+          concurrent unregister landed before or after the read is a TOCTOU
+          verdict split, and the losing side is expensive: [block] latches the
+          operation, and a blocked operation holds keeper admission
+          ([Registration_shutdown_reserved], keeper_keepalive.ml:723-726) with
+          no runtime release — recovery only runs at boot
+          (server_bootstrap_loops.ml:1197). One racing unregister therefore
+          costs every later boot of that keeper until the process restarts.
+
+          Lane *replacement* stays an error below: a different lane means
+          someone else owns the keeper now, and this operation must not write
+          its retained meta over theirs. Disappearance is not replacement. *)
+       Ok ()
      | Keeper_registry.Exact_update_replaced ->
        Error "Keeper registry lane changed during meta update"
      | Keeper_registry.Exact_update_invalid validation_error ->
@@ -814,4 +833,6 @@ module For_testing = struct
     Atomic.set completion_handler (fun _config _operation _action ->
       Error "shutdown completion handler is not registered")
   ;;
+
+  let update_registry_meta_exact = update_registry_meta_exact
 end

@@ -14,7 +14,7 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 212 unique knobs across 8 modules.
+**Total**: 211 unique knobs across 8 modules.
 
 **Typed getter classification**: 36/124 tagged (`operator`: 36, `algorithm`: 0, `unclassified`: 88).
 
@@ -224,14 +224,14 @@ the categorization roadmap. Newly-added typed getters in
 |---|---|---|---|---|---|
 | `MASC_SLACK_TRIGGER_POLICY` | string_literal | n/a | n/a | 20 |  |
 
-## Env_config_snapshot (41 knobs; typed classification 0/0)
+## Env_config_snapshot (40 knobs; typed classification 0/0)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 29 |  |
-| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 432 |  |
-| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 436 |  |
-| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 438 |  |
+| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 426 |  |
+| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 430 |  |
+| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 432 |  |
 | `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 150 |  |
 | `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 220 |  |
 | `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 222 |  |
@@ -239,29 +239,28 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` | string_literal | n/a | n/a | 160 |  |
 | `MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S` | string_literal | n/a | n/a | 192 |  |
 | `MASC_DECISION_AUDIT_RING_CAPACITY` | string_literal | n/a | n/a | 232 |  |
-| `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 398 |  |
-| `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 400 |  |
+| `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 392 |  |
+| `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 394 |  |
 | `MASC_DISCORD_STATUS_STALE_SEC` | string_literal | n/a | n/a | 224 |  |
 | `MASC_GRPC_STREAM_MAX_BUFFER` | string_literal | n/a | n/a | 81 |  |
 | `MASC_HTTP_HOST` | string_literal | n/a | n/a | 21 |  |
 | `MASC_HTTP_MAX_CONNECTIONS` | string_literal | n/a | n/a | 22 |  |
 | `MASC_IMESSAGE_STATUS_STALE_SEC` | string_literal | n/a | n/a | 226 |  |
 | `MASC_KEEPER_AUTONOMOUS_MAX_TOKENS` | string_literal | n/a | n/a | 136 |  |
-| `MASC_KEEPER_LLM_RERANK_RUNTIME` | string_literal | n/a | n/a | 341 |  |
 | `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 134 |  |
 | `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 133 |  |
-| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 484 |  |
-| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 510 |  |
-| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 518 |  |
-| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 458 |  |
-| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 460 |  |
-| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 462 |  |
-| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 464 |  |
-| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 470 |  |
+| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 478 |  |
+| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 504 |  |
+| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 512 |  |
+| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 452 |  |
+| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 454 |  |
+| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 456 |  |
+| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 458 |  |
+| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 464 |  |
 | `MASC_TELEMETRY_MAX_BYTES` | string_literal | n/a | n/a | 48 |  |
 | `MASC_TELEMETRY_RETENTION_DAYS` | string_literal | n/a | n/a | 45 |  |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 500 |  |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 502 |  |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 494 |  |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 496 |  |
 | `MASC_TLA_TRACE` | string_literal | n/a | n/a | 127 |  |
 | `MASC_WS_ACK_STALE_THRESHOLD_SEC` | string_literal | n/a | n/a | 91 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 88 |  |

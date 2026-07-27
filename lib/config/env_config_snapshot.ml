@@ -336,12 +336,6 @@ let keeper_supervisor_entries =
       "Supervisor sweep interval (seconds)";
   ]
 
-let keeper_tool_entries =
-  [
-    entry ~default:"(none)" "MASC_KEEPER_LLM_RERANK_RUNTIME"
-      "Named runtime profile for LLM reranker";
-  ]
-
 let local_runtime_entries =
   [
     entry ~default:"(none)" "MASC_URL"
@@ -562,9 +556,8 @@ let all_categories () =
        @ docker_playground_entries
        @ keeper_sandbox_entries);
     category "keeper_execution"
-      (keeper_execution_entries @ decision_entries
-       @ keeper_tool_entries
-       @ keeper_proactive_entries @ keeper_grpc_entries);
+      (keeper_execution_entries @ decision_entries @ keeper_proactive_entries
+       @ keeper_grpc_entries);
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
     category "dashboard" dashboard_entries;
     category "operations"

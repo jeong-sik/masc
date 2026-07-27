@@ -242,6 +242,67 @@ let start_task_001 ctx =
   in
   if not (Tool_result.is_success start) then failwith (Tool_result.message start)
 
+let create_executing_goal ctx ~goal_id =
+  match
+    Goal_store.upsert_goal
+      ctx.Task.Tool.config
+      ~id:goal_id
+      ~title:("Goal " ^ goal_id)
+      ~phase:Goal_phase.Executing
+      ()
+  with
+  | Ok goal -> goal
+  | Error message -> failwith message
+
+let add_goal_linked_task ctx ~goal_id ~title =
+  let result =
+    Task.Tool.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "title", `String title; "goal_id", `String goal_id ])
+  in
+  if not (Tool_result.is_success result) then
+    failwith (Tool_result.message result)
+
+let keeper_transition ctx args =
+  match
+    Task.Tool.dispatch_for_keeper
+      ~created_by:ctx.Task.Tool.agent_name
+      ctx
+      ~name:"masc_transition"
+      ~args
+  with
+  | Some result -> result
+  | None -> failwith "Keeper transition dispatch returned None"
+
+let assert_goal_completion_next_action result ~goal_id =
+  if not (Tool_result.is_success result) then
+    failwith (Tool_result.message result);
+  let next_action =
+    Tool_result.data result |> Yojson.Safe.Util.member "next_action"
+  in
+  assert
+    (Yojson.Safe.Util.(next_action |> member "tool" |> to_string)
+     = "masc_goal_transition");
+  assert
+    (Yojson.Safe.Util.(
+       next_action |> member "arguments" |> member "goal_id" |> to_string)
+     = goal_id);
+  assert
+    (Yojson.Safe.Util.(
+       next_action |> member "arguments" |> member "action" |> to_string)
+     = "request_complete");
+  assert
+    (Yojson.Safe.Util.(next_action |> member "reason" |> to_string)
+     = "all_linked_tasks_terminal")
+
+let assert_goal_still_executing ctx ~goal_id =
+  match Goal_store.get_goal ctx.Task.Tool.config ~goal_id with
+  | Some { phase = Goal_phase.Executing; _ } -> ()
+  | Some _ -> failwith "task completion must not mutate the linked Goal"
+  | None -> failwith "linked Goal disappeared"
+
 let register_test_keeper ctx ~keeper_name ~agent_name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -1832,6 +1893,186 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
     match (only_task worker_ctx).Masc_domain.task_status with
     | Masc_domain.Done _ -> ()
     | _ -> failwith "expected verifier approval to complete task"))
+
+let () =
+  test "keeper direct done cues request_complete for the sole executing Goal"
+    (fun () ->
+       let ctx = make_test_ctx () in
+       let goal_id = "goal-direct-done" in
+       ignore (create_executing_goal ctx ~goal_id);
+       add_goal_linked_task ctx ~goal_id ~title:"Complete the sole linked task";
+       start_task_001 ctx;
+       let result =
+         keeper_transition
+           ctx
+           (`Assoc
+              [ "task_id", `String "task-001"
+              ; "action", `String "done"
+              ; "notes", `String "The sole linked task is complete."
+              ; ( "handoff_context"
+                , `Assoc
+                    [ "summary", `String "The sole linked task is complete."
+                    ; "evidence_refs", `List [ `String "commit:abc123" ]
+                    ] )
+              ])
+       in
+       assert_goal_completion_next_action result ~goal_id;
+       assert_goal_still_executing ctx ~goal_id)
+
+let () =
+  test "keeper approved verification cues request_complete after persisted Done"
+    (fun () ->
+       let worker_ctx = make_test_ctx_with_agent "worker" in
+       let verifier_ctx =
+         { worker_ctx with Task.Tool.agent_name = "verifier" }
+       in
+       let goal_id = "goal-approved-verification" in
+       ignore (create_executing_goal worker_ctx ~goal_id);
+       add_goal_linked_task
+         worker_ctx
+         ~goal_id
+         ~title:"Complete through verification";
+       ignore
+         (Workspace.claim_task
+            worker_ctx.config
+            ~agent_name:"worker"
+            ~task_id:"task-001");
+       let submit_result =
+         Task.Tool.handle_transition
+           ~tool_name:"test_tool"
+           ~start_time:0.0
+           worker_ctx
+           (`Assoc
+              [ "task_id", `String "task-001"
+              ; "action", `String "submit_for_verification"
+              ; ( "notes"
+                , `String
+                    "completion_notes: implementation complete. \
+                     reviewable_evidence_ref: artifact:goal-cue.json"
+                )
+              ])
+       in
+       if not (Tool_result.is_success submit_result) then
+         failwith (Tool_result.message submit_result);
+       let claim_result =
+         Task.Tool.handle_claim
+           ~tool_name:"keeper_task_claim"
+           ~start_time:0.0
+           verifier_ctx
+           (`Assoc [ "task_id", `String "task-001" ])
+       in
+       if not (Tool_result.is_success claim_result) then
+         failwith (Tool_result.message claim_result);
+       let result =
+         keeper_transition
+           verifier_ctx
+           (`Assoc
+              [ "task_id", `String "task-001"
+              ; "action", `String "approve"
+              ; "notes", `String "evidence verified"
+              ])
+       in
+       assert_goal_completion_next_action result ~goal_id;
+       assert_goal_still_executing worker_ctx ~goal_id)
+
+let () =
+  test "keeper done suppresses Goal cue while another linked task is open"
+    (fun () ->
+       let ctx = make_test_ctx () in
+       let goal_id = "goal-open-task" in
+       ignore (create_executing_goal ctx ~goal_id);
+       add_goal_linked_task ctx ~goal_id ~title:"First linked task";
+       add_goal_linked_task ctx ~goal_id ~title:"Second linked task";
+       start_task_001 ctx;
+       let result =
+         keeper_transition
+           ctx
+           (`Assoc
+              [ "task_id", `String "task-001"
+              ; "action", `String "done"
+              ; "notes", `String "Only the first linked task is complete."
+              ; ( "handoff_context"
+                , `Assoc
+                    [ ( "summary"
+                      , `String "Only the first linked task is complete." )
+                    ; "evidence_refs", `List [ `String "commit:abc123" ]
+                    ] )
+              ])
+       in
+       if not (Tool_result.is_success result) then
+         failwith (Tool_result.message result);
+       assert
+         (Json_util.assoc_member_opt "next_action" (Tool_result.data result)
+          = None);
+       assert_goal_still_executing ctx ~goal_id)
+
+let () =
+  test "external done suppresses Keeper-only Goal completion cue" (fun () ->
+    let ctx = make_test_ctx () in
+    let goal_id = "goal-external-done" in
+    ignore (create_executing_goal ctx ~goal_id);
+    add_goal_linked_task ctx ~goal_id ~title:"External completion";
+    start_task_001 ctx;
+    let result =
+      Task.Tool.handle_done
+        ~tool_name:"test_tool"
+        ~start_time:0.0
+        ctx
+        (`Assoc
+           [ "task_id", `String "task-001"
+           ; "notes", `String "External caller completes the task."
+           ; "evidence_refs", `List [ `String "commit:abc123" ]
+           ])
+    in
+    if not (Tool_result.is_success result) then
+      failwith (Tool_result.message result);
+    assert
+      (Json_util.assoc_member_opt "next_action" (Tool_result.data result) = None);
+    assert_goal_still_executing ctx ~goal_id)
+
+let () =
+  test "keeper stale verification no-op suppresses Goal completion cue"
+    (fun () ->
+       let ctx = make_test_ctx () in
+       let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
+       let goal_id = "goal-stale-verification" in
+       ignore (create_executing_goal ctx ~goal_id);
+       add_goal_linked_task ctx ~goal_id ~title:"Already completed task";
+       start_task_001 ctx;
+       let done_result =
+         Task.Tool.handle_done
+           ~tool_name:"test_tool"
+           ~start_time:0.0
+           ctx
+           (`Assoc
+              [ "task_id", `String "task-001"
+              ; "notes", `String "The linked task is already complete."
+              ; "evidence_refs", `List [ `String "commit:abc123" ]
+              ])
+       in
+       if not (Tool_result.is_success done_result) then
+         failwith (Tool_result.message done_result);
+       let stale_result =
+         keeper_transition
+           verifier_ctx
+           (`Assoc
+              [ "task_id", `String "task-001"
+              ; "action", `String "approve"
+              ; "notes", `String "stale verifier delivery"
+              ])
+       in
+       if not (Tool_result.is_success stale_result) then
+         failwith (Tool_result.message stale_result);
+       assert
+         (str_contains
+            (Tool_result.message stale_result)
+            "Stale verification verdict ignored");
+       assert
+         (Json_util.assoc_member_opt
+            "next_action"
+            (Tool_result.data stale_result)
+          = None);
+       assert_goal_still_executing ctx ~goal_id)
 
 let () = test "handle_transition_submitter_may_deliver_llm_verdict" (fun () ->
   (

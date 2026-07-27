@@ -506,22 +506,13 @@ let replay_settlement_wal_unlocked owner state =
                ~surface:"settlement WAL"
                detail)
         | Ok replayed ->
-         (match bump_revision replayed with
-          | Error _ as error -> error
-          | Ok replayed ->
-            (match save_state_unlocked owner replayed with
-             | Ok () ->
-               (match compact_settlement_wal_unlocked owner with
-                | Ok () -> Ok replayed
-                | Error detail ->
-                  Error
-                    ("settlement WAL checkpoint recovered but compaction failed: "
-                     ^ detail))
-             | Error detail ->
-               Error
-                 (Printf.sprintf
-                    "settlement WAL is committed but checkpoint replay failed: %s"
-                    detail))))
+          (* [State.to_yojson] intentionally persists only the pending queue.
+             Leases and transition outboxes are no longer snapshot fields, so
+             checkpointing [replayed] and compacting this WAL here would erase
+             the only durable copy of the settlement before its reaction-ledger
+             projector can observe it. Keep the source-bearing WAL authoritative
+             until [project_transition_outbox_result] appends and retires it. *)
+          Ok replayed)
   in
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
   | Private_file_failed error ->
@@ -1170,8 +1161,14 @@ let commit_settlement_transition_unlocked_with
 
 let commit_settlement_transition_unlocked =
   commit_settlement_transition_unlocked_with
-    ~save_checkpoint:save_state_unlocked
-    ~compact_wal:compact_settlement_wal_unlocked
+    (* The settlement WAL is the commit record.  The current pending-only
+       snapshot cannot retain its lease or transition outbox, so replacing the
+       pre-commit snapshot here would make this WAL impossible to replay (and
+       would erase its only durable outbox if it were then compacted).  The
+       projector checkpoints the post-transition pending state only after its
+       reaction-ledger append succeeds. *)
+    ~save_checkpoint:(fun _owner _state -> Ok ())
+    ~compact_wal:(fun _owner -> Ok ())
 ;;
 
 let settle_result
@@ -1611,38 +1608,42 @@ let prepare_registration_result
     ()
 ;;
 
-let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
-  commit_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       match State.mark_transition_projected ~transition_id state with
-       | Error _ as error -> error
-       | Ok state -> Ok (state, ()))
-;;
-
 let project_transition_outbox_result
       ~append_before_retire
       ~base_path
       ~keeper_name
   =
   let ( let* ) = Result.bind in
-  let* state = load_state_result ~base_path ~keeper_name in
-  match State.transition_outbox state with
-  | [] -> Ok ()
-  | [ entry ] ->
-    let* () = append_before_retire entry in
-    mark_transition_projected_result
-      ~base_path
-      ~keeper_name
-      ~transition_id:entry.receipt.transition_id
-  | entries ->
+  let* owner = resolve_owner ~base_path ~keeper_name in
+  try
+    Owner_lock.with_durable_lock owner (fun () ->
+      let* state = load_state_unlocked owner in
+      match State.transition_outbox state with
+      | [] -> Ok ()
+      | [ entry ] ->
+        let* () = append_before_retire entry in
+        let* projected =
+          State.mark_transition_projected
+            ~transition_id:entry.receipt.transition_id
+            state
+        in
+        let* projected = bump_revision projected in
+        let* () = save_state_unlocked owner projected in
+        compact_settlement_wal_unlocked owner
+      | entries ->
+        Error
+          (Printf.sprintf
+             "event queue transition outbox cardinality invalid keeper=%s count=%d"
+             keeper_name
+             (List.length entries)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
     Error
       (Printf.sprintf
-         "event queue transition outbox cardinality invalid keeper=%s count=%d"
+         "event queue transition projection raised keeper=%s: %s"
          keeper_name
-         (List.length entries))
+         (Printexc.to_string exn))
 ;;
 
 let remove_post_ids stimuli state =

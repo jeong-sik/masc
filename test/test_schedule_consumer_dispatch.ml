@@ -54,6 +54,13 @@ let write_file path content =
     (fun () -> output_string output content)
 ;;
 
+let read_file path =
+  let input = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr input)
+    (fun () -> really_input_string input (in_channel_length input))
+;;
+
 let reaction_ledger_dir ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat
@@ -644,6 +651,16 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
        | Ok (Keeper_registry_event_queue.Committed_followup_failed _) ->
          fail "schedule cancellation follow-up failed"
        | Error detail -> fail detail);
+      let settlement_wal_path =
+        Filename.concat
+          (Filename.concat
+             (Common.keepers_runtime_dir_of_base ~base_path)
+             keeper_name)
+          "event-queue-settlements.jsonl"
+      in
+      check bool "cancellation WAL survives until projection" true
+        (Sys.file_exists settlement_wal_path
+         && String.trim (read_file settlement_wal_path) <> "");
       (match
          Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
        with
@@ -655,6 +672,8 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
          fail "scheduled cancellation projection was deferred by a busy owner claim"
        | Error error ->
          fail (Keeper_event_queue_recovery.projection_error_to_string error));
+      check string "projected cancellation retires WAL" ""
+        (read_file settlement_wal_path);
       (match Schedule_store.recover_running_on_startup config ~now:204.0 with
        | Ok (_, 1) -> ()
        | Ok (_, recovered) -> failf "expected one recovered schedule, got %d" recovered

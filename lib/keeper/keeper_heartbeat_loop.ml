@@ -135,14 +135,6 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
 
 exception Event_queue_settlement_failed of string
 
-type transition_projection_gate =
-  | Projection_ready_for_cycle
-  | Projection_deferred_nonfailure
-  | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
-
-exception Event_queue_projection_deferred
-exception Event_queue_projection_failed of Keeper_event_queue_recovery.projection_error
-
 type board_attention_settlement_outcome =
   | Board_attention_settled of
       Keeper_board_attention_worker.settlement
@@ -264,21 +256,6 @@ let compaction_outcome_of_cycle_outcome = function
   | None -> None
 ;;
 
-let project_transition_outbox ~base_path ~keeper_name =
-  Keeper_event_queue_recovery.project_owner_result
-    ~base_path
-    ~keeper_name
-;;
-
-let classify_transition_projection = function
-  | Ok
-      ( Keeper_event_queue_recovery.No_pending_transition
-      | Keeper_event_queue_recovery.Transition_converged ) ->
-    Projection_ready_for_cycle
-  | Ok Keeper_event_queue_recovery.Claim_busy -> Projection_deferred_nonfailure
-  | Error error -> Projection_failed_for_cycle error
-;;
-
 type transcript_corruption_commit =
   | Transcript_pause_persisted
   | Transcript_pause_and_settlement_persisted
@@ -307,25 +284,6 @@ let commit_transcript_corruption ~stop ~persist_pause ?settle () =
           | Error detail -> Transcript_pause_settlement_failed detail)))
 ;;
 
-let commit_transcript_corruption_and_project
-      ~stop
-      ~persist_pause
-      ?settle
-      ~project_transition_outbox
-      ()
-  =
-  let committed = commit_transcript_corruption ~stop ~persist_pause ?settle () in
-  let projection =
-    match committed with
-    | Transcript_pause_and_settlement_persisted -> project_transition_outbox ()
-    | Transcript_pause_persisted
-    | Transcript_pause_persistence_failed _
-    | Transcript_pause_settlement_failed _ ->
-      Ok ()
-  in
-  committed, projection
-;;
-
 module For_testing = struct
   let consume_deferred_runtime_lane_hint =
     consume_deferred_runtime_lane_hint
@@ -336,16 +294,7 @@ module For_testing = struct
     | Transcript_pause_persistence_failed of string
     | Transcript_pause_settlement_failed of string
 
-  type nonrec transition_projection_gate = transition_projection_gate =
-    | Projection_ready_for_cycle
-    | Projection_deferred_nonfailure
-    | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
-
-  let classify_transition_projection = classify_transition_projection
   let commit_transcript_corruption = commit_transcript_corruption
-  let commit_transcript_corruption_and_project =
-    commit_transcript_corruption_and_project
-  ;;
 
 end
 
@@ -389,7 +338,12 @@ let run_keepalive_unified_turn
   =
   if not proactive_warmup_elapsed
   then { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
-  else (
+  else
+    match
+      Keeper_turn_admission.run_if_free_with_token
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name
+        (fun admission_token ->
     let consumed_stimuli = ref [] in
     let pending_selection
       : Keeper_registry_event_queue.pending_selection option ref
@@ -425,60 +379,21 @@ let run_keepalive_unified_turn
     let settle_exact_terminal_after_cancellation () = false in
     try
       (match
-         classify_transition_projection
-           (project_transition_outbox
-              ~base_path:ctx.config.base_path
-              ~keeper_name:meta_after_triage.name)
-       with
-       | Projection_ready_for_cycle -> ()
-       | Projection_deferred_nonfailure ->
-         raise Event_queue_projection_deferred
-       | Projection_failed_for_cycle error ->
-         raise (Event_queue_projection_failed error));
-      (match
-         settle_board_attention_on_owner_lane
+         Keeper_board_attention_worker.settle_one_completed
            ~base_path:ctx.config.base_path
            ~keeper_name:meta_after_triage.name
        with
        | Error detail ->
          raise (Keeper_board_attention_candidate.Candidate_unavailable detail)
-       | Ok (Board_attention_settled Keeper_board_attention_worker.No_completed_partition) ->
+       | Ok Keeper_board_attention_worker.No_completed_partition ->
          ()
        | Ok
-           (Board_attention_settled
-              (Keeper_board_attention_worker.Partition_settled
-                 { candidate_id; continuation_wake = _ })) ->
+           (Keeper_board_attention_worker.Partition_settled
+              { candidate_id; continuation_wake = _ }) ->
          Log.Keeper.info
            "Board attention completed judgment settled on owner lane keeper=%s candidate=%s"
            meta_after_triage.name
-           candidate_id
-       | Ok
-           (Board_attention_settlement_deferred
-              (Keeper_turn_admission.Turn_busy in_flight)) ->
-         Log.Keeper.debug
-           "Board attention owner-lane settlement deferred keeper=%s holder=%s"
-           meta_after_triage.name
-           (match in_flight with
-            | None -> "admission_in_progress"
-            | Some { lane; _ } -> Keeper_turn_admission.lane_to_string lane)
-       | Ok
-           (Board_attention_settlement_deferred
-              (Keeper_turn_admission.Chat_backlog
-                 { pending_count; inflight_count })) ->
-         Log.Keeper.info
-           "Board attention owner-lane settlement deferred to chat backlog \
-            keeper=%s pending=%d inflight=%d"
-           meta_after_triage.name
-           pending_count
-           inflight_count
-       | Ok
-           (Board_attention_settlement_deferred
-              (Keeper_turn_admission.Shutdown_requested operation_id)) ->
-         Log.Keeper.info
-           "Board attention owner-lane settlement deferred by shutdown \
-            keeper=%s operation=%s"
-           meta_after_triage.name
-           (Keeper_shutdown_types.Operation_id.to_string operation_id));
+           candidate_id);
       let event_intake =
         heartbeat_event_intake
           ~ctx
@@ -487,6 +402,33 @@ let run_keepalive_unified_turn
       in
       consumed_stimuli := event_intake.consumed_stimuli;
       pending_selection := event_intake.pending_selection;
+      let selected_source_authority () =
+        match
+          Keeper_meta_store.read_effective_meta
+            ctx.config
+            meta_after_triage.name
+        with
+        | Error message ->
+          Error ("keeper meta read failed before dispatch: " ^ message)
+        | Ok None -> Error "keeper meta disappeared before dispatch"
+        | Ok (Some current) when current.paused ->
+          Error "keeper paused before dispatch"
+        | Ok (Some _) ->
+          (match !pending_selection with
+           | None -> Ok ()
+           | Some selection ->
+             Keeper_registry_event_queue.validate_pending_selection_result
+               ~base_path:ctx.config.base_path
+               meta_after_triage.name
+               ~selection)
+      in
+      (match
+         Keeper_turn_admission.install_before_dispatch_authority
+           admission_token
+           selected_source_authority
+       with
+       | Ok () -> ()
+       | Error message -> failwith message);
       let manual_compaction_requested =
         manual_compaction_requested_of_stimuli event_intake.consumed_stimuli
       in
@@ -689,6 +631,7 @@ let run_keepalive_unified_turn
           in
           let run_cycle () =
             run_keeper_cycle
+              ~admission_token
               ?deferred_runtime_lane
               ~on_deferred_runtime_consumed
               ?event_bus
@@ -833,16 +776,6 @@ let run_keepalive_unified_turn
           if !settlement_failed then Turn_cycle_crashed else Turn_cycle_completed
       }
     with
-    | Event_queue_projection_deferred ->
-      { meta = meta_after_triage; cycle_status = Deferred_projection_busy }
-    | Event_queue_projection_failed error ->
-      if not !transcript_corruption_detected
-      then retain_unacked_pending Keeper_registry_event_queue.Cycle_crashed;
-      record_crashed_cycle_failure
-        ~base_path:ctx.config.base_path
-        ~keeper_name:meta_after_triage.name
-        (Failure (Keeper_event_queue_recovery.projection_error_to_string error));
-      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
       if
@@ -866,6 +799,17 @@ let run_keepalive_unified_turn
         ~keeper_name:meta_after_triage.name
         exn;
       { meta = meta_after_triage; cycle_status = Turn_cycle_crashed })
+  with
+  | `Ran outcome -> outcome
+  | `Busy block ->
+    Log.Keeper.info
+      ~keeper_name:meta_after_triage.name
+      "keeper turn admission busy before stimulus intake: %s"
+      (match block with
+       | Keeper_turn_admission.Turn_busy _ -> "turn_busy"
+       | Keeper_turn_admission.Chat_backlog _ -> "chat_backlog"
+       | Keeper_turn_admission.Shutdown_requested _ -> "shutdown_requested");
+    { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat

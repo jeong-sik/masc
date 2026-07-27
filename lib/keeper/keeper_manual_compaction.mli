@@ -56,6 +56,8 @@ type admitted_operation =
 
 val run_admitted
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> ?before_dispatch_authority:
+       Keeper_compaction_llm_summarizer.before_dispatch_authority
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> unit
@@ -77,6 +79,17 @@ val run_admitted
     [status=degraded] and [operator_action_required=true] for every post-install
     anomaly. Pre-install lifecycle failures use separate constructors whose
     stages cannot represent completion. *)
+
+val run_under_admission
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> ?before_dispatch_authority:
+       Keeper_compaction_llm_summarizer.before_dispatch_authority
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> unit
+  -> admitted_operation
+(** Manual compaction while the caller already owns the Keeper turn token.
+    No nested admission or release occurs. *)
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit

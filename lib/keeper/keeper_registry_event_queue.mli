@@ -178,6 +178,12 @@ val peek_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (pending_selection option, string) result
 
+val validate_pending_selection_result :
+  base_path:string ->
+  string ->
+  selection:pending_selection ->
+  (unit, string) result
+
 val ack_pending_result :
   base_path:string ->
   string ->

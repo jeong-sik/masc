@@ -101,6 +101,13 @@ let test_current_schema_round_trip_and_old_schema_rejection () =
   let state = State.with_pending (queue [ stimulus "fresh" 1.0 ]) State.empty in
   let json = State.to_yojson state in
   let decoded = State.of_yojson json |> require_ok "current schema round trip" in
+  (match json with
+   | `Assoc fields ->
+     Alcotest.(check (list string))
+       "pending-only durable fields"
+       [ "pending"; "revision"; "schema" ]
+       (List.map fst fields |> List.sort String.compare)
+   | _ -> Alcotest.fail "state codec did not emit an object");
   Alcotest.(check (list string))
     "fresh pending survives"
     [ "fresh" ]
@@ -125,7 +132,7 @@ let with_temp_dir prefix f =
 ;;
 
 let test_durable_peek_ack_restart () =
-  with_temp_dir "keeper-pending-v6" (fun base_path ->
+  with_temp_dir "keeper-pending-v7" (fun base_path ->
     let keeper_name = "fresh-keeper" in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
       let pending = Queue.enqueue pending (stimulus "one" 1.0) in
@@ -152,7 +159,7 @@ let test_durable_peek_ack_restart () =
 
 let () =
   Alcotest.run
-    "keeper pending queue v6"
+    "keeper pending queue v7"
     [ ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity

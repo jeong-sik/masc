@@ -103,7 +103,30 @@ type fleet_snapshot =
   ; fleet_slots : slot_snapshot list
   }
 
+type token
+(** Opaque authority for one currently admitted Keeper turn. The token is
+    invalidated before the underlying slot is released and cannot be
+    constructed outside this module. *)
+
 val lane_to_string : lane -> string
+
+val run_if_free_with_token
+  :  base_path:string
+  -> keeper_name:string
+  -> (token -> 'a)
+  -> [ `Ran of 'a | `Busy of autonomous_block ]
+(** [run_if_free], additionally exposing the authority token owned by the
+    admitted closure. Intake side effects and provider dispatch must stay
+    inside this closure. *)
+
+val install_before_dispatch_authority
+  : token -> (unit -> (unit, string) result) -> (unit, string) result
+(** Install the immutable selected-source/lifecycle validator for this turn.
+    Installation is single-assignment and fails after token release. *)
+
+val validate_before_dispatch : token -> (unit, string) result
+(** Revalidate that the admission is still active and invoke its installed
+    authority immediately before a provider dispatch. *)
 
 val run_if_free
   :  base_path:string
@@ -167,6 +190,14 @@ val run_compaction_if_free
     and a genuinely held slot still returns [`Busy (Turn_busy _)] — this
     lane never interleaves with an in-flight turn, it only stops queueing
     behind work that cannot progress. *)
+
+val run_admin_if_free
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> [ `Ran of 'a | `Busy of autonomous_block ]
+(** Serialize paused-owner durable mutation against this same turn slot.
+    Busy is returned before any durable mutation. *)
 
 val chat_waiting : base_path:string -> keeper_name:string -> bool
 (** [true] when at least one chat request is parked on this keeper's slot

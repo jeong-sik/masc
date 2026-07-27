@@ -98,6 +98,32 @@ type slot =
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
+type token =
+  { slot : slot
+  ; mutable active : bool
+  ; mutable before_dispatch_authority : (unit -> (unit, string) result) option
+  }
+
+let install_before_dispatch_authority token authority =
+  if not token.active
+  then Error "keeper turn admission token is no longer active"
+  else
+    match token.before_dispatch_authority with
+    | Some _ -> Error "keeper turn dispatch authority is already installed"
+    | None ->
+      token.before_dispatch_authority <- Some authority;
+      Ok ()
+;;
+
+let validate_before_dispatch token =
+  if not token.active
+  then Error "keeper turn admission token is no longer active"
+  else
+    match token.before_dispatch_authority with
+    | None -> Error "keeper turn dispatch authority is not installed"
+    | Some authority -> authority ()
+;;
+
 let slot_transition_observer : slot_transition_observer option Atomic.t =
   Atomic.make None
 
@@ -159,7 +185,8 @@ let peek_shutdown slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.shut
    suspension point between acquiring the mutex and entering [f], so
    cancellation cannot leak the slot; the exception arm releases on every
    raise out of [f], including [Eio.Cancel.Cancelled]. *)
-let run_locked slot ~lane f =
+let run_locked_with_token slot ~lane f =
+  let token = { slot; active = true; before_dispatch_authority = None } in
   let admission =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
       match slot.shutdown_operation_id with
@@ -171,21 +198,27 @@ let run_locked slot ~lane f =
   in
   match admission with
   | Error operation_id ->
+    token.active <- false;
     Eio.Mutex.unlock slot.turn_mu;
     `Shutdown_requested operation_id
   | Ok () ->
     let release () =
+      token.active <- false;
       set_info slot None;
       Eio.Mutex.unlock slot.turn_mu;
       notify_slot_transition slot Turn_released
     in
-    (match f () with
+    (match f token with
      | v ->
        release ();
        `Ran v
      | exception exn ->
        release ();
        raise exn)
+;;
+
+let run_locked slot ~lane f =
+  run_locked_with_token slot ~lane (fun _token -> f ())
 ;;
 
 let waiting_count slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting)
@@ -219,7 +252,7 @@ let shutdown_rejection_snapshot slot operation_id =
     })
 ;;
 
-let admit_autonomous ~yield_to_chat_backlog ~base_path ~keeper_name f =
+let admit_autonomous_with_token ~yield_to_chat_backlog ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   (* Yield to deferred work before touching the lock. [waiting > 0] implies
      the slot is held (a waiter only parks because a turn is in flight), so
@@ -266,10 +299,26 @@ let admit_autonomous ~yield_to_chat_backlog ~base_path ~keeper_name f =
      | None ->
        if Eio.Mutex.try_lock slot.turn_mu
        then (
-         match run_locked slot ~lane:Autonomous f with
+         match run_locked_with_token slot ~lane:Autonomous f with
          | `Ran value -> `Ran value
          | `Shutdown_requested operation_id -> `Busy (Shutdown_requested operation_id))
        else `Busy (Turn_busy (peek_info slot)))
+;;
+
+let admit_autonomous ~yield_to_chat_backlog ~base_path ~keeper_name f =
+  admit_autonomous_with_token
+    ~yield_to_chat_backlog
+    ~base_path
+    ~keeper_name
+    (fun _token -> f ())
+;;
+
+let run_if_free_with_token ~base_path ~keeper_name f =
+  admit_autonomous_with_token
+    ~yield_to_chat_backlog:true
+    ~base_path
+    ~keeper_name
+    f
 ;;
 
 let run_if_free ~base_path ~keeper_name f =
@@ -277,6 +326,10 @@ let run_if_free ~base_path ~keeper_name f =
 ;;
 
 let run_compaction_if_free ~base_path ~keeper_name f =
+  admit_autonomous ~yield_to_chat_backlog:false ~base_path ~keeper_name f
+;;
+
+let run_admin_if_free ~base_path ~keeper_name f =
   admit_autonomous ~yield_to_chat_backlog:false ~base_path ~keeper_name f
 ;;
 

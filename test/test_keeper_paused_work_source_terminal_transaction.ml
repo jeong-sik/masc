@@ -41,7 +41,6 @@ let with_source_terminal_lane f =
               [ "name", `String keeper_name
               ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
               ; "trace_id", `String "trace-paused-source-terminal-owner"
-              ; "runtime_id", `String "runtime.primary"
               ; "autoboot_enabled", `Bool false
               ])
          |> require_ok "parse Keeper metadata fixture"
@@ -109,8 +108,8 @@ let check_applied = function
          { cause = failure; reservation_release = None })
 ;;
 
-let test_exact_terminal_receipt_settles_once () =
-  with_source_terminal_lane (fun config keeper_name meta request ->
+let test_exact_terminal_receipt_settles_pending () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
     let first =
       Transaction.settle_pending config ~keeper_name request
       |> Result.map_error Transaction.error_to_string
@@ -126,32 +125,30 @@ let test_exact_terminal_receipt_settles_once () =
         ~keeper_name
       |> require_ok "load source-terminal settlement"
     in
-    Alcotest.(check int) "source removed" 0 (Queue.length (State.pending state));
-    (match State.transition_outbox state with
-     | [ { receipt = { settlement = State.Settle_from_source_terminal exact; _ }
-         ; stimuli = [ source ]
-         } ] ->
-       Alcotest.(check bool) "outbox retains exact source" true (source = request.source);
-       Alcotest.(check bool)
-         "outbox retains exact terminal receipt"
-         true
-         (exact.source_receipt = request.source_receipt)
-     | _ -> Alcotest.fail "source-terminal settlement outbox is not exact");
-    let replacement =
-      let resumed = Keeper_meta_contract.mark_resumed meta in
-      { resumed with runtime = { resumed.runtime with nonce = 52 } }
+    Alcotest.(check int) "source removed" 0 (Queue.length (State.pending state)))
+;;
+
+let test_source_terminal_busy_has_zero_mutation () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
+    let base_path = config.Workspace.base_path in
+    (match
+       Keeper_turn_admission.run_admin_if_free
+         ~base_path
+         ~keeper_name
+         (fun () -> Transaction.settle_pending config ~keeper_name request)
+     with
+     | `Ran (Error { cause = Transaction.Admission_busy _; _ }) -> ()
+     | `Ran (Error error) -> Alcotest.fail (Transaction.error_to_string error)
+     | `Ran (Ok _) | `Busy _ ->
+       Alcotest.fail "source-terminal settlement was not deferred by turn admission");
+    let state =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load admission-busy source-terminal lane"
     in
-    Keeper_meta_store.write_meta config replacement
-    |> require_ok "persist replacement owner after settlement";
-    let replay =
-      Transaction.settle_pending config ~keeper_name request
-      |> Result.map_error Transaction.error_to_string
-      |> require_ok "replay Settle_from_source_terminal"
-    in
-    (match replay.commit_status with
-     | Transaction.Already_committed -> ()
-     | Transaction.Committed -> Alcotest.fail "replay created another receipt");
-    check_applied replay.projection)
+    Alcotest.(check int)
+      "admission busy retains source"
+      1
+      (Queue.length (State.pending state)))
 ;;
 
 let test_mismatched_terminal_receipt_is_rejected_before_commit () =
@@ -209,9 +206,13 @@ let () =
     "keeper paused-work source-terminal transaction"
     [ ( "Settle_from_source_terminal"
       , [ Alcotest.test_case
-            "exact receipt settles once"
+            "exact receipt settles pending"
             `Quick
-            test_exact_terminal_receipt_settles_once
+            test_exact_terminal_receipt_settles_pending
+        ; Alcotest.test_case
+            "admission busy has zero mutation"
+            `Quick
+            test_source_terminal_busy_has_zero_mutation
         ; Alcotest.test_case
             "mismatched receipt is rejected"
             `Quick

@@ -32,6 +32,15 @@ let declared_lane_failure_of_error err =
   | Some event -> Provider_context_overflow event
   | None -> Declared_runtime_lane_exhausted
 
+let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
+  match before_dispatch_authority () with
+  | Error reason ->
+    Error
+      (Agent_sdk.Error.Internal
+         ("keeper provider dispatch authority rejected: " ^ reason))
+  | Ok () -> dispatch ()
+;;
+
 let autonomous_yield_request ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
@@ -98,6 +107,7 @@ type ctx =
 let run (ctx : ctx)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
+      ~(before_dispatch_authority : unit -> (unit, string) result)
       ~(current_turn_phase_elapsed_ms : float option -> int * int option)
       ~(user_message : string)
       ~(registry_base_path : string)
@@ -174,10 +184,13 @@ let run (ctx : ctx)
              Keeper_id.Task_id.to_string
              run_meta.current_task_id)
         (fun trace_link ->
-           Keeper_registry.mark_turn_provider_attempt_started
-             ~base_path:config.base_path
-             meta.name;
-           try
+           run_provider_dispatch_if_authorized
+             ~before_dispatch_authority
+             (fun () ->
+            Keeper_registry.mark_turn_provider_attempt_started
+              ~base_path:config.base_path
+              meta.name;
+            try
                (* Emit before the provider/tool run so operator forensics can see
                   that the keeper entered Streaming. The surrounding [try]
                   records external cancellation without imposing a wall-clock
@@ -253,16 +266,16 @@ let run (ctx : ctx)
                      ~base_path:config.base_path
                      ~keeper_name:meta.name)
                  ()
-           with
-           | Eio.Cancel.Cancelled _ as exn ->
-             record_streaming_cancelled_observation
-               ~config
-               ~run_meta
-               ~run_generation
-               ~runtime_id:execution.runtime_id
-               ~keeper_turn_id
-               ();
-             raise exn)
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+              record_streaming_cancelled_observation
+                ~config
+                ~run_meta
+                ~run_generation
+                ~runtime_id:execution.runtime_id
+                ~keeper_turn_id
+                ();
+              raise exn))
     in
     result, turn_state
   in

@@ -231,6 +231,119 @@ let test_recovery_still_settles_prepared_without_turn () =
       (requires_admission_fence recovered))
 ;;
 
+(* A shutdown whose lane is unregistered by a concurrent fiber (supervisor,
+   keepalive, or a sibling shutdown) must not block. Reading the registry one
+   step earlier already returns [Ok ()] for an absent lane, so blocking when
+   the same absence is observed one step later is a TOCTOU verdict split — and
+   the losing side is permanent: a blocked operation fences keeper admission
+   with no runtime release, so every later boot of that keeper fails until the
+   process restarts. Observed live on 2026-07-27 (sangsu).
+
+   Lane *replacement* is a different fact and must still fail: someone else
+   owns the keeper, and this operation must not write its retained meta over
+   theirs. *)
+
+let meta_fixture_exn ~keeper_name =
+  let json =
+    `Assoc
+      [ "name", `String keeper_name
+      ; "agent_name", `String (Printf.sprintf "keeper-%s-agent" keeper_name)
+      ; "trace_id", `String "trace-reconciliation-settlement-test"
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error detail -> failf "meta fixture rejected: %s" detail
+;;
+
+let registry_projection ~keeper_name ~lane_ownership ~entry =
+  let operation =
+    { (make_operation
+         ~keeper_name
+         ~phase:Prepared
+         ~turn_disposition:No_inflight_turn)
+      with
+      lane_ownership
+    }
+  in
+  Keeper_shutdown_finalize.For_testing.update_registry_meta_exact
+    operation
+    entry
+    (meta_fixture_exn ~keeper_name)
+;;
+
+let test_vanished_lane_matches_absent_lane () =
+  let base_path = temp_dir "shutdown_lane_vanish_" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let keeper_name = "vanished-lane" in
+       let entry =
+         Keeper_registry.register_offline
+           ~base_path
+           keeper_name
+           (meta_fixture_exn ~keeper_name)
+       in
+       let lane_ownership = Registered_lane (Keeper_lane.id entry.lane) in
+       (* Baseline: the lane was already gone when the entry was read. The
+          [Registered_lane _, None] arm returns Ok. *)
+       (match registry_projection ~keeper_name ~lane_ownership ~entry:None with
+        | Ok () -> ()
+        | Error detail -> failf "absent lane must succeed, got: %s" detail);
+       (* The race: the entry was read, then a concurrent fiber unregistered
+          the lane before the projection ran, so [update_entry_exact] reports
+          [Exact_update_missing]. Identical end state, so identical verdict. *)
+       Keeper_registry.For_testing.unregister ~base_path keeper_name;
+       check
+         bool
+         "precondition: the lane is gone from the registry"
+         true
+         (Option.is_none (Keeper_registry.get ~base_path keeper_name));
+       match registry_projection ~keeper_name ~lane_ownership ~entry:(Some entry) with
+       | Ok () -> ()
+       | Error detail ->
+         failf
+           "a lane that vanished mid-operation must succeed like an absent \
+            lane, got: %s"
+           detail)
+;;
+
+let test_replaced_lane_still_fails () =
+  let base_path = temp_dir "shutdown_lane_replaced_" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let keeper_name = "replaced-lane" in
+       let meta = meta_fixture_exn ~keeper_name in
+       let original = Keeper_registry.register_offline ~base_path keeper_name meta in
+       (* A different lane now owns the keeper. The operation still names the
+          lane it owned, so its retained meta must not overwrite the new one. *)
+       Keeper_registry.For_testing.unregister ~base_path keeper_name;
+       let replacement =
+         Keeper_registry.register_offline ~base_path keeper_name meta
+       in
+       check
+         bool
+         "precondition: the replacement lane differs from the original"
+         false
+         (Keeper_lane.Id.equal
+            (Keeper_lane.id original.lane)
+            (Keeper_lane.id replacement.lane));
+       match
+         registry_projection
+           ~keeper_name
+           ~lane_ownership:(Registered_lane (Keeper_lane.id original.lane))
+           ~entry:(Some replacement)
+       with
+       | Ok () ->
+         fail "a replaced lane must not be projected over: another owner holds it"
+       | Error _ -> ())
+;;
+
 let () =
   run
     "keeper-shutdown-reconciliation-settlement"
@@ -247,6 +360,16 @@ let () =
             "still settles a prepared operation without a turn"
             `Quick
             test_recovery_still_settles_prepared_without_turn
+        ] )
+    ; ( "registry projection"
+      , [ test_case
+            "a lane that vanished mid-operation settles like an absent lane"
+            `Quick
+            test_vanished_lane_matches_absent_lane
+        ; test_case
+            "a replaced lane is still rejected"
+            `Quick
+            test_replaced_lane_still_fails
         ] )
     ]
 ;;

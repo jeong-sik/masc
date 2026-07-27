@@ -339,12 +339,7 @@ let context_test_meta ~name ~last_input_tokens =
   let base =
     match
       Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [ "name", `String name
-          ; "agent_name", `String (name ^ "-agent")
-          ; "trace_id", `String ("trace-" ^ name)
-          ; "runtime_id", `String "primary"
-          ])
+        (`Assoc [ "name", `String name ])
     with
     | Ok meta -> meta
     | Error error -> Alcotest.fail error

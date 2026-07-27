@@ -743,13 +743,18 @@ let prepare_compaction_with
     Keeper_meta_contract.compaction_retry_suspended meta.runtime.compaction_rt
   in
   match trigger with
-  (* The suspension guard follows the trigger's origin, not its axis. Both
-     capacity triggers are raised by the turn path itself, so a suspended retry
-     must refuse them or a keeper whose compactions keep failing would keep
+  (* The suspension guard follows the trigger's origin, not its axis. The
+     provider token window, serialized byte limit, and serving-admission token
+     evidence are all raised by the turn path itself, so a suspended retry must
+     refuse them or a keeper whose compactions keep failing would keep
      re-entering compaction on every turn. [Manual] stays exempt: an operator
      asked for this one, and refusing it would leave no way to intervene. *)
   | Compaction_trigger.Provider_overflow _
   | Compaction_trigger.Request_body_over_capacity _
+  | Compaction_trigger.Serving_input_capacity
+      (Compaction_trigger.Boundary_unknown _)
+  | Compaction_trigger.Serving_input_capacity
+      (Compaction_trigger.Input_rejected _)
     when suspended ->
     Error
       (Retry_suspended
@@ -758,6 +763,10 @@ let prepare_compaction_with
          })
   | Compaction_trigger.Provider_overflow _
   | Compaction_trigger.Request_body_over_capacity _
+  | Compaction_trigger.Serving_input_capacity
+      (Compaction_trigger.Boundary_unknown _)
+  | Compaction_trigger.Serving_input_capacity
+      (Compaction_trigger.Input_rejected _)
   | Compaction_trigger.Manual ->
     prepare_compaction_admitted
       ~compact_for_request

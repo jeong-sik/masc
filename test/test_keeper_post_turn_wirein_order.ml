@@ -1715,17 +1715,62 @@ let test_suspended_streak_refuses_reactive_prepare () =
        "suspended byte-axis prepare reached I/O instead of the admission gate: %s"
        (Post_turn.compaction_recovery_error_to_string error)
    | Ok _ -> fail "suspended byte-axis prepare produced a prepared compaction");
-  match prepare ~streak:2 ~trigger:byte_over_capacity with
-  | Error
-      (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
-    ->
-    (* Below the threshold the byte axis is admitted exactly as the token axis is. *)
-    ()
-  | Error error ->
-    failf
-      "below-threshold byte-axis prepare did not reach the checkpoint load: %s"
-      (Post_turn.compaction_recovery_error_to_string error)
-  | Ok _ -> fail "byte-axis prepare on an empty store produced a compaction"
+  (match prepare ~streak:2 ~trigger:byte_over_capacity with
+   | Error
+       (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
+     ->
+     (* Below the threshold the byte axis is admitted exactly as the token axis is. *)
+     ()
+   | Error error ->
+     failf
+       "below-threshold byte-axis prepare did not reach the checkpoint load: %s"
+       (Post_turn.compaction_recovery_error_to_string error)
+   | Ok _ -> fail "byte-axis prepare on an empty store produced a compaction");
+  List.iter
+    (fun (reason, trigger) ->
+       (match prepare ~streak:3 ~trigger with
+        | Error (Post_turn.Retry_suspended { consecutive_failures }) ->
+          check
+            int
+            ("suspended serving-axis " ^ reason ^ " reports the streak")
+            3
+            consecutive_failures
+        | Error error ->
+          failf
+            "suspended serving-axis %s reached I/O instead of the admission gate: %s"
+            reason
+            (Post_turn.compaction_recovery_error_to_string error)
+        | Ok _ ->
+          failf "suspended serving-axis %s produced a prepared compaction" reason);
+       match prepare ~streak:2 ~trigger with
+       | Error
+           (Post_turn.Checkpoint_ref_load_failed
+              Masc.Keeper_checkpoint_store.Ref_not_found) ->
+         ()
+       | Error error ->
+         failf
+           "below-threshold serving-axis %s did not reach the checkpoint load: %s"
+           reason
+           (Post_turn.compaction_recovery_error_to_string error)
+       | Ok _ ->
+         failf
+           "serving-axis %s prepare on an empty store produced a compaction"
+           reason)
+    [ ( "boundary_unknown"
+      , Compaction_trigger.Serving_input_capacity
+          (Compaction_trigger.Boundary_unknown
+             { input_tokens = 524_299
+             ; accepted_through = 524_298
+             ; rejected_from = Some 524_300
+             }) )
+    ; ( "input_rejected"
+      , Compaction_trigger.Serving_input_capacity
+          (Compaction_trigger.Input_rejected
+             { input_tokens = 524_300
+             ; accepted_through = 524_298
+             ; rejected_from = 524_299
+             }) )
+    ]
 ;;
 
 let test_exact_scope_release_defers_until_settlement_pin_leaves () =

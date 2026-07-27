@@ -518,6 +518,7 @@ let capacity_refusal_of_error
     ->
     Some (Serialized_request_body { actual_bytes; limit_bytes })
   | Compact_next_cycle (Compaction_trigger.Serving_input_capacity _)
+  | Compact_next_cycle Compaction_trigger.Manual
   | Capacity_non_compacting _
   | Not_capacity ->
     None

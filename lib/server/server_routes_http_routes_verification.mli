@@ -7,16 +7,8 @@
     - [GET /api/v1/verification/specs] — TLA+ spec index.
     - [GET /api/v1/verification/tlc-results] — latest observed TLC
       log projection.
-    - [POST /api/v1/verification/resolve] — dashboard-initiated
-      approve/reject (bearer token required). *)
+
+    Async Task verification is a read-only dashboard surface. *)
 
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
-
-val verifier_of_request :
-  base_path:string -> Httpun.Request.t -> string
-(** Derive the ["operator:<actor>"] verifier identity for a resolve
-    request. Falls back to ["operator:dashboard"] when no
-    sanitizable actor hint is present. Tested directly by
-    [test_dashboard_http_core] for the token-owner canonicalization
-    path. *)

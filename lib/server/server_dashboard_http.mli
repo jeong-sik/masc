@@ -116,12 +116,6 @@ val dashboard_schedule_prune_http_json :
 
 (** {1 Verification + planning + goals} *)
 
-val dashboard_verification_resolve_http_json :
-  config:Workspace.config ->
-  verifier:string ->
-  args:Yojson.Safe.t ->
-  (Yojson.Safe.t, string) result
-
 val dashboard_planning_http_json :
   config:Workspace.config -> Yojson.Safe.t
 

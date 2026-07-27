@@ -200,13 +200,16 @@ let on_submit_for_verification ~(config : Workspace.config)
 let record_approve_verification ~(config : Workspace.config)
     ~task_id ~verifier ~verification_id ~notes =
   let base_path = config.Workspace.base_path in
-  (* Update Verification.ml state machine: Pending -> Completed Pass.
-     Issue #7544. *)
+  (* This low-level receipt write is intentionally not an authorization
+     boundary. The production caller is the post-commit callback installed by
+     [Tool_task]: [Workspace_task_lifecycle] has already admitted [verifier] as
+     the Task phase winner before committing the task transition. The request
+     file lock makes the terminal receipt first-writer-wins. *)
   if verification_id = "" then
     Error "verification_id is required for approval verdict persistence"
   else
     match
-      Verification.submit_verdict
+      Verification.Internal.submit_verdict
         ~base_path
         ~req_id:verification_id
         ~verifier
@@ -272,13 +275,12 @@ let on_approve_verification ~(config : Workspace.config)
 let record_reject_verification ~(config : Workspace.config)
     ~task_id ~verifier ~verification_id ~reason =
   let base_path = config.Workspace.base_path in
-  (* Update Verification.ml state machine: Pending -> Completed (Fail reason).
-     Issue #7544. *)
+  (* Same Task-winner and post-commit boundary as approval above. *)
   if verification_id = "" then
     Error "verification_id is required for rejection verdict persistence"
   else
     match
-      Verification.submit_verdict
+      Verification.Internal.submit_verdict
         ~base_path
         ~req_id:verification_id
         ~verifier

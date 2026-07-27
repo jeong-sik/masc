@@ -79,12 +79,17 @@ val create_request :
   unit ->
   (verification_request, string) result
 
-val submit_verdict :
-  base_path:string ->
-  req_id:string ->
-  verifier:string ->
-  verdict:verdict ->
-  (verification_request, string) result
+module Internal : sig
+  val submit_verdict :
+    base_path:string ->
+    req_id:string ->
+    verifier:string ->
+    verdict:verdict ->
+    (verification_request, string) result
+  (** Low-level atomic receipt writer. This is not an authorization boundary:
+      the sole production caller is [Verification_protocol], after the Task FSM
+      has admitted the assigned verifier and committed the task transition. *)
+end
 
 val auto_verify :
   base_path:string ->

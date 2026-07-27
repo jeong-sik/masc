@@ -986,13 +986,14 @@ let test_claim_next_allows_failed_verification_repair () =
       | Error msg -> Alcotest.fail ("create verification failed: " ^ msg)
     in
     (match
-       Verification.submit_verdict
-         ~base_path:config.Workspace.base_path
-         ~req_id:req.id
+       Verification_protocol.record_reject_verification
+         ~config
+         ~task_id:req.task_id
          ~verifier:"verifier-agent"
-         ~verdict:(Verification.Fail "missing evidence")
+         ~verification_id:req.id
+         ~reason:"missing evidence"
      with
-     | Ok _ -> ()
+     | Ok () -> ()
      | Error msg -> Alcotest.fail ("submit verdict failed: " ^ msg));
     match Workspace.claim_next_r config ~agent_name:claude () with
     | Workspace.Claim_next_claimed { task_id; _ } ->

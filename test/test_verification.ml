@@ -8,6 +8,35 @@ module P = Masc.Otel_metric_store
 module VS = Workspace_verification_store
 module CU = Workspace_utils
 module W = Workspace_core
+module VP = Masc.Verification_protocol
+
+let submit_verdict_via_protocol ~base_path ~req_id ~verifier ~verdict =
+  match V.load_request base_path req_id with
+  | Error _ as error -> error
+  | Ok request ->
+    let config = W.default_config base_path in
+    let recorded =
+      match verdict with
+      | V.Pass ->
+        VP.record_approve_verification
+          ~config
+          ~task_id:request.task_id
+          ~verifier
+          ~verification_id:req_id
+          ~notes:"verified"
+      | V.Fail reason ->
+        VP.record_reject_verification
+          ~config
+          ~task_id:request.task_id
+          ~verifier
+          ~verification_id:req_id
+          ~reason
+      | V.Partial _ ->
+        Error "Partial verdict is not a Task verification protocol outcome"
+    in
+    (match recorded with
+     | Error _ as error -> error
+     | Ok () -> V.load_request base_path req_id)
 
 let persistence_surface = "verification"
 
@@ -739,7 +768,7 @@ let test_submit_verdict () =
         ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
     | Error e -> Alcotest.fail e
     | Ok req ->
-        match V.submit_verdict ~base_path ~req_id:req.id ~verifier:"codex"
+        match submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"codex"
             ~verdict:V.Pass with
         | Error e -> Alcotest.fail e
         | Ok updated ->
@@ -757,7 +786,7 @@ let test_submit_verdict_persists_verifier () =
     | Error e -> Alcotest.fail e
     | Ok req ->
         Alcotest.(check (option string)) "starts unassigned" None req.verifier;
-        match V.submit_verdict ~base_path ~req_id:req.id
+        match submit_verdict_via_protocol ~base_path ~req_id:req.id
             ~verifier:"operator:dashboard" ~verdict:V.Pass with
         | Error e -> Alcotest.fail e
         | Ok updated ->
@@ -771,13 +800,13 @@ let test_submit_verdict_cannot_overwrite_terminal_receipt () =
     | Error e -> Alcotest.fail e
     | Ok req ->
       (match
-         V.submit_verdict ~base_path ~req_id:req.id ~verifier:"codex"
+         submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"codex"
            ~verdict:V.Pass
        with
        | Error e -> Alcotest.fail e
        | Ok _ -> ());
       (match
-         V.submit_verdict ~base_path ~req_id:req.id ~verifier:"gemini"
+         submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"gemini"
            ~verdict:(V.Fail "overwrite")
        with
        | Error _ -> ()
@@ -791,6 +820,42 @@ let test_submit_verdict_cannot_overwrite_terminal_receipt () =
           (match final.status, final.verifier with
            | V.Completed V.Pass, Some "codex" -> true
            | _ -> false))
+
+let test_concurrent_verdict_is_first_writer_wins () =
+  with_eio_temp_dir (fun base_path ->
+    let req =
+      match
+        V.create_request
+          ~base_path
+          ~task_id:"task-concurrent-verdict"
+          ~output:`Null
+          ~criteria:[]
+          ~worker:"worker"
+          ()
+      with
+      | Ok req -> req
+      | Error detail -> Alcotest.fail detail
+    in
+    let left, right =
+      Eio.Fiber.both
+        (fun () ->
+           V.Internal.submit_verdict
+             ~base_path
+             ~req_id:req.id
+             ~verifier:"verifier-a"
+             ~verdict:V.Pass)
+        (fun () ->
+           V.Internal.submit_verdict
+             ~base_path
+             ~req_id:req.id
+             ~verifier:"verifier-b"
+             ~verdict:(V.Fail "rejected"))
+    in
+    match left, right with
+    | Ok _, Error _ | Error _, Ok _ -> ()
+    | Ok _, Ok _ -> Alcotest.fail "concurrent verdicts both overwrote the receipt"
+    | Error left, Error right ->
+      Alcotest.failf "both concurrent verdicts failed: %s / %s" left right)
 
 let test_auto_verify () =
   with_temp_dir (fun base_path ->
@@ -970,6 +1035,8 @@ let () =
         test_submit_verdict_persists_verifier;
       Alcotest.test_case "submit verdict terminal non-overwrite" `Quick
         test_submit_verdict_cannot_overwrite_terminal_receipt;
+      Alcotest.test_case "concurrent verdict is first-writer-wins" `Quick
+        test_concurrent_verdict_is_first_writer_wins;
       Alcotest.test_case "auto verify" `Quick test_auto_verify;
       Alcotest.test_case "auto verify custom fails" `Quick test_auto_verify_with_custom_fails;
     ];

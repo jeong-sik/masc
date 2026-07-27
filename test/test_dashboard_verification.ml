@@ -532,7 +532,7 @@ let test_summary_bucket_counts () =
     let r2 = create_pending_request ~base_path ~task_id:"t-r2"
         ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
     let verdict_of req ~verdict =
-      match V.submit_verdict ~base_path ~req_id:req.V.id
+      match V.Internal.submit_verdict ~base_path ~req_id:req.V.id
               ~verifier:"v" ~verdict with
       | Ok _ -> ()
       | Error e -> Alcotest.fail e
@@ -563,7 +563,7 @@ let test_summary_recent_clamp () =
     (* recent=0 returns empty list even when rejections exist *)
     let r = create_pending_request ~base_path ~task_id:"t"
         ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
-    (match V.submit_verdict ~base_path ~req_id:r.V.id
+    (match V.Internal.submit_verdict ~base_path ~req_id:r.V.id
              ~verifier:"v" ~verdict:(V.Fail "x") with
      | Ok _ -> () | Error e -> Alcotest.fail e);
     let j = D.summary_json ~base_path ~recent:0 () in

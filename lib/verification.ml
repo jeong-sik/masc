@@ -520,7 +520,20 @@ let create_request ~base_path ~task_id ~output ~criteria ~worker ?request_id () 
   let* _req_id = save_request base_path req in
   Ok req
 
-let submit_verdict ~base_path ~req_id ~verifier ~verdict =
+let with_request_lock ~base_path ~req_id ~operation f =
+  let path = request_path base_path req_id in
+  try File_lock_eio.with_lock path f with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "%s verification %s: %s"
+         operation
+         req_id
+         (Printexc.to_string exn))
+
+let submit_verdict_internal ~base_path ~req_id ~verifier ~verdict =
+  with_request_lock ~base_path ~req_id ~operation:"submit verdict" @@ fun () ->
   let* req = load_request base_path req_id in
   match req.status with
   | Completed _ ->
@@ -536,6 +549,10 @@ let submit_verdict ~base_path ~req_id ~verifier ~verdict =
     let* _req_id = save_request base_path updated in
     Ok updated
 
+module Internal = struct
+  let submit_verdict = submit_verdict_internal
+end
+
 (* Marker verifier recorded when auto_verify transitions a request to
    Completed without a human/LLM judge. Keeps approved_by non-null in the
    dashboard projection so operators can distinguish rule-based passes
@@ -543,6 +560,7 @@ let submit_verdict ~base_path ~req_id ~verifier ~verdict =
 let auto_verifier_marker = "auto"
 
 let auto_verify ~base_path ~req_id =
+  with_request_lock ~base_path ~req_id ~operation:"auto verify" @@ fun () ->
   let* req = load_request base_path req_id in
   match req.status with
   | Completed _ -> Error "Verification request already has a terminal verdict"

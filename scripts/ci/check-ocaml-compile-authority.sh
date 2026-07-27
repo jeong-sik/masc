@@ -167,6 +167,22 @@ def shell_tokens(line: str) -> list[str]:
     return list(lexer)
 
 
+def command_segments(tokens: list[str]) -> list[list[str]]:
+    separators = {";", "&&", "||", "|", "&", "(", ")"}
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in separators:
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
 def count_full_compiles(lines: list[str]) -> int:
     count = 0
     for script in run_scripts(lines):
@@ -175,19 +191,20 @@ def count_full_compiles(lines: list[str]) -> int:
                 tokens = shell_tokens(line)
             except ValueError:
                 continue
-            for index, token in enumerate(tokens[:-1]):
-                command = token.removeprefix("./")
-                if command not in {"dune", "scripts/dune-local.sh"}:
-                    continue
-                if tokens[index + 1] != "build":
-                    continue
-                targets = tokens[index + 2 :]
-                if any(
-                    target in {"@default", "@check", "@install"}
-                    for target in targets
-                ):
-                    count += 1
-                    break
+            for segment in command_segments(tokens):
+                for index, token in enumerate(segment[:-1]):
+                    command = token.removeprefix("./")
+                    if command not in {"dune", "scripts/dune-local.sh"}:
+                        continue
+                    if segment[index + 1] != "build":
+                        continue
+                    targets = segment[index + 2 :]
+                    if any(
+                        target in {"@default", "@check", "@install"}
+                        for target in targets
+                    ):
+                        count += 1
+                        break
     return count
 
 
@@ -198,6 +215,8 @@ probes = {
     "steps:\n  - run: OCAMLPARAM=x opam exec -- dune build @install": 1,
     "steps:\n  - run: ./scripts/dune-local.sh build @default": 1,
     "steps:\n  - run: |\n      dune build \\\n        @check": 1,
+    "steps:\n  - run: dune build @default; dune build @check": 2,
+    "steps:\n  - run: dune build @foo; dune build @check": 1,
 }
 for probe, expected in probes.items():
     actual = count_full_compiles(probe.splitlines())

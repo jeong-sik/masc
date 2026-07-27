@@ -553,39 +553,6 @@ module Internal = struct
   let submit_verdict = submit_verdict_internal
 end
 
-(* Marker verifier recorded when auto_verify transitions a request to
-   Completed without a human/LLM judge. Keeps approved_by non-null in the
-   dashboard projection so operators can distinguish rule-based passes
-   from peer-agent verdicts ("operator:*") and peer keepers (bare names). *)
-let auto_verifier_marker = "auto"
-
-let auto_verify ~base_path ~req_id =
-  with_request_lock ~base_path ~req_id ~operation:"auto verify" @@ fun () ->
-  let* req = load_request base_path req_id in
-  match req.status with
-  | Completed _ -> Error "Verification request already has a terminal verdict"
-  | Pending ->
-    let has_custom =
-      List.exists
-        (function
-          | Custom _ -> true
-          | Schema_match _ | Contains _ | Not_contains _ -> false)
-        req.criteria
-    in
-    if has_custom then
-      Error "Cannot auto-verify: custom criteria require agent judgment"
-    else
-      let verdict = evaluate_all req.output req.criteria in
-      let updated =
-        {
-          req with
-          status = Completed verdict;
-          verifier = Some auto_verifier_marker;
-        }
-      in
-      let* _req_id = save_request base_path updated in
-      Ok updated
-
 (* --- Attribution envelope conversion (Layer 1) ---
    Verification is hybrid: Schema_match / Contains / Not_contains are Det
    (rule-based), Custom is NonDet (LLM judge). Origin is derived from

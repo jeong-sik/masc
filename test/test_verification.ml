@@ -863,36 +863,6 @@ let test_concurrent_verdict_is_first_writer_wins () =
       Alcotest.failf "both concurrent verdicts failed: %s / %s" left right
     | None, _ | _, None -> Alcotest.fail "concurrent verdict fiber did not return")
 
-let test_auto_verify () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:(`String "hello world")
-        ~criteria:[V.Contains "hello"; V.Not_contains "error"]
-        ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-        match V.auto_verify ~base_path ~req_id:req.id with
-        | Error e -> Alcotest.fail e
-        | Ok updated ->
-            Alcotest.(check bool) "auto-verified pass" true
-              (match updated.status with V.Completed V.Pass -> true | _ -> false);
-            (* auto_verify records an "auto" marker so the dashboard can
-               distinguish rule-based passes from peer-agent verdicts. *)
-            Alcotest.(check (option string)) "auto marker recorded"
-              (Some "auto") updated.verifier)
-
-let test_auto_verify_with_custom_fails () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:(`String "test")
-        ~criteria:[V.Custom "check quality"]
-        ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-        match V.auto_verify ~base_path ~req_id:req.id with
-        | Error _ -> ()
-        | Ok _ -> Alcotest.fail "auto-verify with custom should fail")
-
 (* --- ID generation property test (#7544) --- *)
 
 module StringSet = Set.Make (String)
@@ -1043,8 +1013,6 @@ let () =
         test_submit_verdict_cannot_overwrite_terminal_receipt;
       Alcotest.test_case "concurrent verdict is first-writer-wins" `Quick
         test_concurrent_verdict_is_first_writer_wins;
-      Alcotest.test_case "auto verify" `Quick test_auto_verify;
-      Alcotest.test_case "auto verify custom fails" `Quick test_auto_verify_with_custom_fails;
     ];
     "attribution", [
       Alcotest.test_case "origin=Det for rule-based criteria" `Quick

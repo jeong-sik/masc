@@ -91,11 +91,6 @@ module Internal : sig
       has admitted the assigned verifier and committed the task transition. *)
 end
 
-val auto_verify :
-  base_path:string ->
-  req_id:string ->
-  (verification_request, string) result
-
 (** {1 Attribution envelope (Layer 1)}
 
     Convert verification verdicts into the typed attribution envelope used

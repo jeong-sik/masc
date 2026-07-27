@@ -38,20 +38,20 @@ val error_to_string : error -> string
 val generation : t -> int64
 
 val point_read :
-  base_path:string ->
+  Workspace.config ->
   keeper_id:string ->
   unit ->
   (t option, error) result
 
 val record_exact :
-  base_path:string ->
+  Workspace.config ->
   keeper_id:string ->
   generation:int64 ->
   unit ->
   (t, error) result
 
 module For_testing : sig
-  val root_path_for_base_path : base_path:string -> string
+  val root_path : Workspace.config -> string
   val authority_leaf : keeper_id:string -> string
   val with_fd_backed_parent_opening : (unit -> 'a) -> 'a
 end

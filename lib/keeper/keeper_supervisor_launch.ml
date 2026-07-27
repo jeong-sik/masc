@@ -669,7 +669,7 @@ let launch_supervised_fiber_under_admission
   match
     Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
-      ~base_path:ctx.config.Workspace.base_path
+      ctx.config
       meta.name
       (fun () ->
          launch_supervised_fiber_admitted
@@ -745,12 +745,20 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_m
        .authority_failure_to_wire
          failure)
   | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+    let detail =
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+        reason
+    in
+    Keeper_supervisor_supervise_keepalive.record_admission_denied
+      ~publish_lifecycle
+      ~keeper_name:meta.name
+      ~event:"supervisor_keepalive_start"
+      detail;
     Log.Keeper.error
       "supervisor launch denied before mutation by durable lifecycle authority \
        keeper=%s reason=%s"
       meta.name
-      (Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
-         reason)
+      detail
 ;;
 
 (* ── Sweep and recover ───────────────────────────────────── *)

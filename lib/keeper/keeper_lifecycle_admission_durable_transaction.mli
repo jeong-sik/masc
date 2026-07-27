@@ -66,13 +66,22 @@ type 'a permit_lease_result =
 
 val with_permit_lease :
   permit ->
-  base_path:string ->
+  Workspace.config ->
   string ->
   (unit -> 'a) ->
   'a permit_lease_result
 (** Execute one permit-authorized operation under a counted lease. The
     enclosing durable admission cannot release its authority lock until the
     operation returns, raises, or is cancelled and the lease is released. *)
+
+val with_registry_permit_lease :
+  permit ->
+  base_path:string ->
+  string ->
+  (unit -> 'a) ->
+  'a permit_lease_result
+(** Execute one base-path keyed in-memory registry operation under a counted
+    lease. Durable authority reuse remains cluster-root keyed. *)
 
 val with_durable_lifecycle_admission :
   Workspace.config ->
@@ -111,5 +120,5 @@ val blocked_reason_to_yojson : blocked_reason -> Yojson.Safe.t
 val projection_to_yojson : projection -> Yojson.Safe.t
 
 module For_testing : sig
-  val permit_matches : permit -> base_path:string -> string -> bool
+  val permit_matches : permit -> Workspace.config -> string -> bool
 end

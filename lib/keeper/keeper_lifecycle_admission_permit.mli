@@ -18,12 +18,19 @@ val with_permit_lifecycle :
 
 val with_active_permit :
   base_path:string ->
+  masc_root:string ->
   keeper_name:string ->
   evidence:Keeper_lifecycle_admission_durable_types.evidence option ->
   (Keeper_lifecycle_admission_durable_types.permit -> 'a) ->
   'a
 
 val permit_scope_matches :
+  Keeper_lifecycle_admission_durable_types.permit ->
+  masc_root:string ->
+  string ->
+  bool
+
+val permit_registry_scope_matches :
   Keeper_lifecycle_admission_durable_types.permit ->
   base_path:string ->
   string ->

@@ -33,6 +33,27 @@ open Keeper_types_profile
 open Keeper_execution
 module Startup_helpers = Keeper_supervisor_startup_helpers
 
+let record_admission_denied
+      ~publish_lifecycle
+      ~keeper_name
+      ~event
+      reason
+  =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:[ "keeper", keeper_name; "event", event; "reason", reason ]
+    ();
+  publish_lifecycle
+    ~event:
+      (Keeper_lifecycle_events.Custom_event
+         { verb = Keeper_lifecycle_events.Admission_denied
+         ; phase = Some Keeper_state_machine.Offline
+         })
+    keeper_name
+    reason
+    ()
+;;
+
 let supervise_keepalive
       ~(publish_lifecycle :
          event:Keeper_lifecycle_events.lifecycle_event ->
@@ -62,23 +83,11 @@ let supervise_keepalive
       (Ok meta)
   in
   let record_recovery_retained reason =
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string LifecycleDispatchRejections)
-      ~labels:
-        [ "keeper", meta.name
-        ; "event", "supervisor_keepalive_start"
-        ; "reason", reason
-        ]
-      ();
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Admission_denied
-           ; phase = Some Keeper_state_machine.Offline
-           })
-      meta.name
+    record_admission_denied
+      ~publish_lifecycle
+      ~keeper_name:meta.name
+      ~event:"supervisor_keepalive_start"
       reason
-      ()
   in
   let launch_registered reg =
     let () =

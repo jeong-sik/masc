@@ -546,7 +546,7 @@ let with_lifecycle_mutation_admission permit config ~keeper_name ~denied fn =
   match
     Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
-      ~base_path:config.Workspace.base_path
+      config
       keeper_name
       fn
   with
@@ -573,7 +573,7 @@ let with_identity_write_admission permit config m ~denied fn =
   match
     Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
-      ~base_path:config.Workspace.base_path
+      config
       m.Keeper_meta_contract.name
       fn
   with

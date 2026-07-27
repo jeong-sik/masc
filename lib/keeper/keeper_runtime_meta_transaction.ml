@@ -107,10 +107,28 @@ let same_meta_payload left right =
   { left with meta_version = 0 } = { right with meta_version = 0 }
 ;;
 
-let meta_targets_indistinguishable (intent : Journal.intent) =
-  match intent.previous_meta with
-  | Some previous -> same_meta_payload previous intent.candidate_meta
-  | None -> false
+let update_meta_matches_direction
+      (intent : Journal.intent)
+      current
+      previous
+      direction
+  =
+  let target =
+    match direction with
+    | `Rollback -> previous
+    | `Forward -> intent.candidate_meta
+  in
+  same_meta_payload current target
+  && current.meta_version >= previous.meta_version
+  &&
+  let same_version_parity =
+    Int.equal
+      (Int.rem current.meta_version 2)
+      (Int.rem previous.meta_version 2)
+  in
+  match direction with
+  | `Rollback -> same_version_parity
+  | `Forward -> not same_version_parity
 ;;
 
 type observed_meta =
@@ -125,10 +143,15 @@ let observe_meta config (intent : Journal.intent) =
   | Ok None -> Ok Meta_missing
   | Ok (Some current) ->
     (match intent.previous_meta with
-     | Some previous when same_meta_payload current previous ->
-       Ok (Meta_previous current)
-     | Some _ | None ->
+     | None ->
        if same_meta_payload current intent.candidate_meta
+       then Ok (Meta_candidate current)
+       else Ok Meta_unrelated
+     | Some previous ->
+       if update_meta_matches_direction intent current previous `Rollback
+       then Ok (Meta_previous current)
+       else if
+         update_meta_matches_direction intent current previous `Forward
        then Ok (Meta_candidate current)
        else Ok Meta_unrelated)
 ;;
@@ -241,12 +264,6 @@ let metadata_at_target config intent direction =
     Ok true
   | Ok (Meta_previous _), `Rollback -> Ok true
   | Ok (Meta_candidate _), `Forward -> Ok true
-  | Ok (Meta_previous _), `Forward
-    when meta_targets_indistinguishable intent ->
-    Ok true
-  | Ok (Meta_candidate _), `Rollback
-    when meta_targets_indistinguishable intent ->
-    Ok true
   | Ok _, _ -> Ok false
 ;;
 

@@ -28,10 +28,10 @@ let witness_of_nonce ~config ~keeper_id ~source ~owner_id nonce =
   }
 ;;
 
-let floor_for_create ~base_path ~keeper_id =
+let floor_for_create config ~keeper_id =
   match
     Keeper_shutdown_generation_floor.point_read
-      ~base_path
+      config
       ~keeper_id
       ()
   with
@@ -51,7 +51,7 @@ let with_mutation_admission permit config ~keeper_id fn =
   match
     Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
-      ~base_path:config.Workspace.base_path
+      config
       keeper_id
       fn
   with
@@ -63,8 +63,7 @@ let with_mutation_admission permit config ~keeper_id fn =
 ;;
 
 let create_admitted config ~keeper_id ~owner_id () =
-  let base_path = config.Workspace.base_path in
-  let* floor = floor_for_create ~base_path ~keeper_id in
+  let* floor = floor_for_create config ~keeper_id in
   let* nonce =
     next_for_config_with_hooks
       ~snapshot_warnings:Head.snapshot_settlement_warnings

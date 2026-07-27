@@ -47,10 +47,11 @@ let close_and_drain_permit permit =
     await_reentrant_leases_drained permit)
 ;;
 
-let with_active_permit ~base_path ~keeper_name ~evidence fn =
+let with_active_permit ~base_path ~masc_root ~keeper_name ~evidence fn =
   let scope_id = Atomic.fetch_and_add next_permit_scope 1 in
   let permit =
     { base_path
+    ; masc_root
     ; keeper_name
     ; evidence
     ; scope_id
@@ -68,7 +69,20 @@ let with_active_permit ~base_path ~keeper_name ~evidence fn =
       (fun () -> fn permit))
 ;;
 
-let permit_scope_matches (permit : permit) ~base_path keeper_name =
+let permit_scope_matches (permit : permit) ~masc_root keeper_name =
+  (match Eio.Fiber.get inherited_permit_scope_suppressed_key with
+   | None -> true
+   | Some suppressed_scope_id ->
+     not (Int.equal suppressed_scope_id permit.scope_id))
+  && String.equal permit.masc_root masc_root
+  && String.equal permit.keeper_name keeper_name
+  &&
+  match Eio.Fiber.get active_permit_scope_key with
+  | Some active_permit -> Int.equal active_permit.scope_id permit.scope_id
+  | None -> false
+;;
+
+let permit_registry_scope_matches (permit : permit) ~base_path keeper_name =
   (match Eio.Fiber.get inherited_permit_scope_suppressed_key with
    | None -> true
    | Some suppressed_scope_id ->

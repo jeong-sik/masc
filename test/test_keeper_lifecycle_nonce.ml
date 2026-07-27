@@ -348,9 +348,10 @@ let test_concurrent_create_witnesses_are_exclusive () =
 
 let test_shutdown_floor_bounds_create () =
   with_base "masc_lifecycle_witness_floor_" @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
   ignore
     (Masc.Keeper_shutdown_generation_floor.record_exact
-       ~base_path
+       config
        ~keeper_id:"keeper-a"
        ~generation:7L
        ()
@@ -364,10 +365,11 @@ let test_shutdown_floor_bounds_create () =
 
 let test_runtime_max_is_last_publishable_nonce () =
   with_base "masc_lifecycle_witness_runtime_max_" @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
   let runtime_max = Int64.of_int max_int in
   ignore
     (Masc.Keeper_shutdown_generation_floor.record_exact
-       ~base_path
+       config
        ~keeper_id:"keeper-a"
        ~generation:(Int64.pred runtime_max)
        ()
@@ -496,6 +498,10 @@ let () =
             "reentrant lease drains before admission release"
             `Quick
             test_reentrant_lease_drains_before_admission_release
+        ; test_case
+            "permit scope is cluster scoped"
+            `Quick
+            test_permit_scope_is_cluster_scoped
         ] )
     ]
 ;;

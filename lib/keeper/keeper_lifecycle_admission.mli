@@ -116,7 +116,7 @@ module Durable_transaction : sig
 
   val with_permit_lease :
     permit ->
-    base_path:string ->
+    Workspace.config ->
     string ->
     (unit -> 'a) ->
     'a permit_lease_result
@@ -142,6 +142,6 @@ module Durable_transaction : sig
   val projection_to_yojson : projection -> Yojson.Safe.t
 
   module For_testing : sig
-    val permit_matches : permit -> base_path:string -> string -> bool
+    val permit_matches : permit -> Workspace.config -> string -> bool
   end
 end

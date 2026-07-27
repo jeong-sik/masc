@@ -43,8 +43,8 @@ let ( let* ) result fn = match result with Ok value -> fn value | Error error ->
 let generation floor = floor.generation
 let sha256 value = Digestif.SHA256.(to_hex (digest_string value))
 
-let root_path_for_base_path ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) root_leaf
+let root_path config =
+  Filename.concat (Workspace.masc_root_dir config) root_leaf
 ;;
 
 let authority_leaf ~keeper_id =
@@ -147,12 +147,12 @@ let with_head_parent parent fn =
   | None -> fn parent
 ;;
 
-let rec prepare_root ~base_path =
+let rec prepare_root config =
   match Fs_compat.get_fs_opt () with
   | None -> Error Filesystem_capability_unavailable
   | Some fs ->
-    let ownership_root = Common.masc_dir_from_base_path ~base_path in
-    let root_path = root_path_for_base_path ~base_path in
+    let ownership_root = Workspace.masc_root_dir config in
+    let root_path = root_path config in
     (match
        Keeper_fs_durable_directory.ensure
          ~before_prepare:Fun.id
@@ -164,7 +164,7 @@ let rec prepare_root ~base_path =
      | Ok lease ->
        if Keeper_fs_durable_directory.lease_is_current lease
        then Ok Eio.Path.(fs / root_path)
-       else prepare_root ~base_path)
+       else prepare_root config)
 ;;
 
 let entropy_source () =
@@ -176,9 +176,10 @@ let entropy_source () =
     Error (Entropy_source_failed (Printexc.to_string exception_))
 ;;
 
-let validate_inputs ~base_path ~keeper_id =
-  if Filename.is_relative base_path
-  then Error (Invalid_base_path base_path)
+let validate_inputs config ~keeper_id =
+  let masc_root = Workspace.masc_root_dir config in
+  if Filename.is_relative masc_root
+  then Error (Invalid_base_path masc_root)
   else if
     String.equal (String.trim keeper_id) ""
     || not (String.equal keeper_id (String.trim keeper_id))
@@ -186,9 +187,9 @@ let validate_inputs ~base_path ~keeper_id =
   else Ok ()
 ;;
 
-let point_read ~base_path ~keeper_id () =
-  let* () = validate_inputs ~base_path ~keeper_id in
-  let* root = prepare_root ~base_path in
+let point_read config ~keeper_id () =
+  let* () = validate_inputs config ~keeper_id in
+  let* root = prepare_root config in
   let* secure_random = entropy_source () in
   match
     with_head_parent root (fun parent ->
@@ -269,12 +270,12 @@ let rec record
              | Head.Unchanged, _ -> Error (Head_write_failed failure))))
 ;;
 
-let record_exact ~base_path ~keeper_id ~generation () =
-  let* () = validate_inputs ~base_path ~keeper_id in
+let record_exact config ~keeper_id ~generation () =
+  let* () = validate_inputs config ~keeper_id in
   if Int64.compare generation 0L <= 0
   then Error (Invalid_generation generation)
   else
-    let* root = prepare_root ~base_path in
+    let* root = prepare_root config in
     record
       ~remaining_retries:retry_limit
       ~attempts:1
@@ -310,7 +311,7 @@ let error_to_string = function
 ;;
 
 module For_testing = struct
-  let root_path_for_base_path = root_path_for_base_path
+  let root_path = root_path
   let authority_leaf = authority_leaf
   let with_fd_backed_parent_opening fn =
     Eio.Fiber.with_binding fd_backed_parent_opening_key () fn

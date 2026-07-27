@@ -3350,9 +3350,7 @@ let test_runtime_meta_identical_target_honors_forward_preference () =
       (match Masc_test_deps.write_current_keeper_meta config original with
        | Ok () -> ()
        | Error detail -> Alcotest.fail detail);
-      let candidate =
-        { original with meta_version = original.meta_version + 1 }
-      in
+      let candidate = original in
       let intent =
         let shutdown_supersession =
           match
@@ -3388,14 +3386,26 @@ let test_runtime_meta_identical_target_honors_forward_preference () =
           ~keeper_name
           ~transaction_id:intent.transaction_id
           (fun permit ->
-            Keeper_runtime_meta_transaction.complete_forward
-              permit
-              config
-              intent)
+            match Keeper_meta_store.write_meta config candidate with
+            | Error detail -> Alcotest.fail detail
+            | Ok () ->
+              Keeper_runtime_meta_transaction.recover
+                permit
+                config
+                intent
+                ~prefer:`Rollback)
       with
-      | Durable_admission.Admission_completed (Ok ())
-      | Durable_admission.Admission_completed_with_attention (Ok (), _) ->
+      | Durable_admission.Admission_completed
+          (Ok Keeper_runtime_meta_transaction.Forward_committed)
+      | Durable_admission.Admission_completed_with_attention
+          (Ok Keeper_runtime_meta_transaction.Forward_committed, _) ->
         ()
+      | Durable_admission.Admission_completed
+          (Ok Keeper_runtime_meta_transaction.Rolled_back)
+      | Durable_admission.Admission_completed_with_attention
+          (Ok Keeper_runtime_meta_transaction.Rolled_back, _) ->
+        Alcotest.fail
+          "candidate metadata version was misclassified as rollback"
       | Durable_admission.Admission_completed (Error error)
       | Durable_admission.Admission_completed_with_attention
           (Error error, _) ->

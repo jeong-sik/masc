@@ -20,7 +20,8 @@ type 'a lifecycle_mutation_result =
 
 let with_lifecycle_mutation_admission permit ~base_path ~keeper_name fn =
   match
-    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+    Keeper_lifecycle_admission_durable_transaction
+    .with_registry_permit_lease
       permit
       ~base_path
       keeper_name

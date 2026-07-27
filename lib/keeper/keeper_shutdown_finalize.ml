@@ -544,7 +544,7 @@ let publish_generation_floor_before_meta_removal ~config operation =
   | Remove_meta ->
     (match
        Keeper_shutdown_generation_floor.record_exact
-         ~base_path:config.Workspace.base_path
+         config
          ~keeper_id:operation.keeper_name
          ~generation:(Int64.of_int operation.generation)
          ()
@@ -806,8 +806,8 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
   let finish ~permit ~lifecycle_token registry_unregistered =
     match
       Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
-        permit
-        ~base_path:config.Workspace.base_path
+      permit
+        config
         operation.keeper_name
         (fun () ->
            finish_admitted ~permit ~lifecycle_token registry_unregistered)

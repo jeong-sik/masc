@@ -4,8 +4,11 @@ include Keeper_lifecycle_admission_durable_types
 open Keeper_lifecycle_admission_permit
 open Keeper_lifecycle_admission_journal
 
-let permit_matches (permit : permit) ~base_path keeper_name =
-  permit_scope_matches permit ~base_path keeper_name
+let permit_matches (permit : permit) config keeper_name =
+  permit_scope_matches
+    permit
+    ~masc_root:(Workspace.masc_root_dir config)
+    keeper_name
   &&
   let active_lease = Eio.Fiber.get active_permit_lease_key in
   with_permit_lifecycle permit (fun lifecycle ->
@@ -13,8 +16,22 @@ let permit_matches (permit : permit) ~base_path keeper_name =
     || lease_is_live_for_permit permit active_lease)
 ;;
 
-let with_permit_lease permit ~base_path keeper_name fn =
-  if not (permit_scope_matches permit ~base_path keeper_name)
+let with_permit_lease permit config keeper_name fn =
+  if
+    not
+      (permit_scope_matches
+         permit
+         ~masc_root:(Workspace.masc_root_dir config)
+         keeper_name)
+  then Permit_lease_denied
+  else
+    match try_with_reentrant_lease permit (fun _ -> fn ()) with
+    | Some value -> Permit_lease_completed value
+    | None -> Permit_lease_denied
+;;
+
+let with_registry_permit_lease permit ~base_path keeper_name fn =
+  if not (permit_registry_scope_matches permit ~base_path keeper_name)
   then Permit_lease_denied
   else
     match try_with_reentrant_lease permit (fun _ -> fn ()) with
@@ -23,6 +40,7 @@ let with_permit_lease permit ~base_path keeper_name fn =
 ;;
 
 let with_durable_lifecycle_admission config ~keeper_name fn =
+  let masc_root = Workspace.masc_root_dir config in
   let acquire_fresh () =
     match authority_lock_path config keeper_name with
     | Error failure ->
@@ -39,6 +57,7 @@ let with_durable_lifecycle_admission config ~keeper_name fn =
                 Ok
                   (with_active_permit
                      ~base_path:config.Workspace.base_path
+                     ~masc_root
                      ~keeper_name
                      ~evidence
                      fn))
@@ -67,12 +86,12 @@ let with_durable_lifecycle_admission config ~keeper_name fn =
   | Some permit
     when permit_scope_matches
            permit
-           ~base_path:config.Workspace.base_path
+           ~masc_root
            keeper_name ->
     (match
        with_permit_lease
          permit
-         ~base_path:config.Workspace.base_path
+         config
          keeper_name
          (fun () -> fn permit)
      with
@@ -102,6 +121,7 @@ let with_recovery_lifecycle_admission
                 Ok
                   (with_active_permit
                      ~base_path:config.Workspace.base_path
+                     ~masc_root:(Workspace.masc_root_dir config)
                      ~keeper_name
                      ~evidence:(Some evidence)
                      fn)
@@ -181,6 +201,7 @@ let with_revival_launch_admission_under_lock
                 Ok
                   (with_active_permit
                      ~base_path:config.Workspace.base_path
+                     ~masc_root:(Workspace.masc_root_dir config)
                      ~keeper_name
                      ~evidence:(Some current)
                      fn)

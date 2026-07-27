@@ -107,7 +107,7 @@ let replace_or_recover_exact permit ~config meta ~expected_agent_name =
   match
     Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
-      ~base_path:config.Workspace.base_path
+      config
       meta.Keeper_meta_contract.name
       (fun () ->
          replace_or_recover_exact_admitted

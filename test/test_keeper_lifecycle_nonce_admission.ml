@@ -39,7 +39,7 @@ let test_reentrant_lease_drains_before_admission_release () =
                ignore
                  (Admission.with_permit_lease
                     permit
-                    ~base_path
+                    config
                     "keeper-a"
                     (fun () -> raise Nested_admission_failure));
                false
@@ -58,7 +58,7 @@ let test_reentrant_lease_drains_before_admission_release () =
                  ignore
                    (Admission.with_permit_lease
                       permit
-                      ~base_path
+                      config
                       "keeper-a"
                       (fun () ->
                          Eio.Cancel.cancel
@@ -78,7 +78,7 @@ let test_reentrant_lease_drains_before_admission_release () =
              let first_reentry =
                Admission.with_permit_lease
                  permit
-                 ~base_path
+                 config
                  "keeper-a"
                  (fun () ->
                     Eio.Promise.resolve resolve_child_entered ();
@@ -87,7 +87,7 @@ let test_reentrant_lease_drains_before_admission_release () =
                       resolve_lease_observed
                       (Admission.For_testing.permit_matches
                          permit
-                         ~base_path
+                         config
                          "keeper-a");
                     Eio.Promise.await release_child_body)
              in
@@ -98,7 +98,7 @@ let test_reentrant_lease_drains_before_admission_release () =
              let inherited_permit_is_live =
                Admission.For_testing.permit_matches
                  permit
-                 ~base_path
+                 config
                  "keeper-a"
              in
              let reacquired =
@@ -108,11 +108,11 @@ let test_reentrant_lease_drains_before_admission_release () =
                  (fun fresh_permit ->
                     ( Admission.For_testing.permit_matches
                         permit
-                        ~base_path
+                        config
                         "keeper-a"
                     , Admission.For_testing.permit_matches
                         fresh_permit
-                        ~base_path
+                        config
                         "keeper-a" ))
              in
              Eio.Promise.resolve
@@ -160,4 +160,59 @@ let test_reentrant_lease_drains_before_admission_release () =
   | Admission.Admission_blocked reason ->
     fail
       (Admission.blocked_reason_to_wire reason)
+;;
+
+let test_permit_scope_is_cluster_scoped () =
+  with_base "masc_lifecycle_permit_cluster_scope_" @@ fun base_path ->
+  let module Admission =
+    Masc.Keeper_lifecycle_admission.Durable_transaction
+  in
+  let default_config = Masc.Workspace.default_config base_path in
+  let cluster_config =
+    { default_config with
+      backend_config =
+        { default_config.backend_config with cluster_name = "cluster-b" }
+    }
+  in
+  match
+    Admission.with_durable_lifecycle_admission
+      default_config
+      ~keeper_name:"keeper-a"
+      (fun default_permit ->
+         let stale_matches =
+           Admission.For_testing.permit_matches
+             default_permit
+             cluster_config
+             "keeper-a"
+         in
+         let stale_lease =
+           Admission.with_permit_lease
+             default_permit
+             cluster_config
+             "keeper-a"
+             (fun () -> ())
+         in
+         let fresh =
+           Admission.with_durable_lifecycle_admission
+             cluster_config
+             ~keeper_name:"keeper-a"
+             (fun cluster_permit ->
+                Admission.For_testing.permit_matches
+                  cluster_permit
+                  cluster_config
+                  "keeper-a")
+         in
+         stale_matches, stale_lease, fresh)
+  with
+  | Admission.Admission_completed
+      ( false
+      , Admission.Permit_lease_denied
+      , Admission.Admission_completed true ) ->
+    ()
+  | Admission.Admission_completed _ ->
+    fail "cluster permit scope reused a foreign durable authority"
+  | Admission.Admission_completed_with_attention _ ->
+    fail "cluster permit test completed with release attention"
+  | Admission.Admission_blocked reason ->
+    fail (Admission.blocked_reason_to_wire reason)
 ;;

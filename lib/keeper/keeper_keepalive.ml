@@ -98,7 +98,7 @@ let persist_directive_meta_update
     match
       Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
         permit
-        ~base_path:config.Workspace.base_path
+        config
         entry.name
         persist_admitted
     with
@@ -1362,7 +1362,7 @@ let start_keepalive_under_admission
   match
     Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
-      ~base_path:ctx.config.Workspace.base_path
+      ctx.config
       meta.name
       (fun () ->
          start_keepalive_admitted

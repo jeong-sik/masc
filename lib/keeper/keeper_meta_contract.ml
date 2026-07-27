@@ -573,6 +573,10 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
    default runtime (the designed fallback; RFC-0206 §2.1 fail-fast still applies
    to the default itself). The id is opaque here; only the OAS adapter parses
    it. *)
+let runtime_trace_id (meta : keeper_meta) =
+  Keeper_id.Trace_id.to_string meta.runtime.trace_id
+;;
+
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id

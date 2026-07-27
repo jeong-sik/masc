@@ -146,7 +146,7 @@ let seed_runtime_meta config name =
   match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> Alcotest.fail err
   | Ok meta -> (
-      match Store.write_meta config meta with
+      match Masc_test_deps.write_current_keeper_meta config meta with
       | Ok () -> meta
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
@@ -383,7 +383,7 @@ active_goal_ids = ["goal-masc-improver"]
       active_goal_ids = [ "stale-goal" ];
     }
   in
-  (match Store.write_meta config stale with
+  (match Masc_test_deps.write_current_keeper_meta config stale with
    | Ok () -> ()
    | Error err -> Alcotest.failf "write stale meta failed: %s" err);
   let returned =

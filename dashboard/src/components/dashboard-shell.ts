@@ -299,6 +299,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       fleet?.blocker ? `blocker=${fleet.blocker}` : null,
       `keeper=${presentation.keeper}`,
       `reason=${presentation.reason}`,
+      presentation.detail ? `detail=${presentation.detail}` : null,
       `operator_action=${presentation.action}`,
     ].filter((item): item is string => item != null).join(', '),
     tone: presentation.tone,

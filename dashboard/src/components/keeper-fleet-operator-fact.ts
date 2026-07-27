@@ -31,6 +31,7 @@ export interface KeeperFleetOperatorFactPresentation
   extends KeeperFleetOperatorActionPresentation {
   keeper: string
   reason: DashboardBlockedKeeperFact['reason']
+  detail: string | null
 }
 
 const ACTION_PRESENTATION = {
@@ -39,6 +40,12 @@ const ACTION_PRESENTATION = {
     tone: 'warn',
     Icon: CirclePause,
     action: 'resume selected paused keepers or confirm an intentional operator pause policy.',
+  },
+  inspect_lifecycle_transaction: {
+    label: 'Keeper lifecycle transaction blocked',
+    tone: 'bad',
+    Icon: ShieldAlert,
+    action: 'inspect the durable lifecycle transaction and settle its current authority before retrying.',
   },
   repair_keeper_meta_file: {
     label: 'Keeper metadata unreadable',
@@ -197,5 +204,6 @@ export function keeperFleetOperatorFactPresentation(
           : presentation.tone,
     keeper: fact.keeper_name ?? fact.agent_name ?? 'Keeper fleet',
     reason: fact.reason,
+    detail: fact.lifecycle_admission_reason ?? null,
   }
 }

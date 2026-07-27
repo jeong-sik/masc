@@ -56,7 +56,7 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
          ; runtime = { meta.runtime with nonce = meta.runtime.nonce }
          }
        in
-       Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
+       Masc_test_deps.write_current_keeper_meta config meta |> require_ok "persist Keeper metadata";
        let persisted =
          Keeper_meta_store.read_meta config keeper_name
          |> require_ok "read persisted Keeper metadata"
@@ -211,7 +211,7 @@ let test_paused_owner_cancellation_commits_once () =
           { resumed.runtime with nonce = resumed.runtime.nonce + 1 }
       }
     in
-    Keeper_meta_store.write_meta config resumed
+    Masc_test_deps.write_current_keeper_meta config resumed
     |> require_ok "persist replacement owner generation";
     Keeper_registry.For_testing.clear ();
     let replay =
@@ -344,7 +344,7 @@ let test_pending_cancellation_replays_after_owner_transition () =
              { resumed.runtime with nonce = resumed.runtime.nonce + 1 }
          }
        in
-       Keeper_meta_store.write_meta config resumed
+       Masc_test_deps.write_current_keeper_meta config resumed
        |> require_ok "persist replacement after pending cancellation";
        let replay =
          Transaction.cancel_pending config ~keeper_name request

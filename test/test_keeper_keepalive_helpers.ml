@@ -70,7 +70,7 @@ let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
     let agent_name = "keeper-heartbeat-current-task-owner-agent" in
     let task_id = "task-heartbeat-current" in
     let meta = make_keepalive_meta ~name:keeper_name ~agent_name in
-    (match Keeper_meta_store.write_meta config meta with
+    (match Masc_test_deps.write_current_keeper_meta config meta with
      | Ok () -> ()
      | Error err -> fail ("write_meta failed: " ^ err));
     Workspace.write_backlog config
@@ -423,7 +423,7 @@ let test_closed_board_audience_routes_only_its_authority () =
      | Error _ | Ok _ -> false)
 
 let persist_and_register_board_lane config meta =
-  (match Keeper_meta_store.write_meta config meta with
+  (match Masc_test_deps.write_current_keeper_meta config meta with
    | Ok () -> ()
    | Error detail -> fail ("write_meta failed: " ^ detail));
   ignore
@@ -607,7 +607,7 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
        let meta = make_board_resume_meta "restartlane" in
-       (match Keeper_meta_store.write_meta config meta with
+       (match Masc_test_deps.write_current_keeper_meta config meta with
         | Ok () -> ()
         | Error detail -> fail ("write_meta failed: " ^ detail));
        (match

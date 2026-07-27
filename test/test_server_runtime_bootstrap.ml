@@ -1243,7 +1243,7 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
 let terminal_fixture_epoch = 0.0
 
 let write_keeper_meta_exn config meta =
-  match Keeper_meta_store.write_meta config meta with
+  match Masc_test_deps.write_current_keeper_meta config meta with
   | Ok () -> ()
   | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
 

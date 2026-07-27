@@ -234,6 +234,7 @@ let error_class = function
   | Resume_rejected
       { cause =
           ( Resume.Reservation_conflict _
+          | Resume.Durable_lifecycle_admission_blocked _
           | Resume.Receipt_conflict _
           | Resume.Durable_owner_nonce_changed _
           | Resume.Durable_owner_identity_changed

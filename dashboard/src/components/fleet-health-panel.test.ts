@@ -176,6 +176,7 @@ describe('FleetHealthPanel', () => {
             task_status: null,
             reason: 'phase_failing',
             action: 'repair_failing_keeper',
+            lifecycle_admission_reason: 'forward_cleanup_authority:keeper=capacity-missing,transaction=tx-current,stage=forward_cleanup_pending',
             operator_action_type: null,
             operator_tool_name: null,
             operator_action_confirm_required: null,
@@ -203,6 +204,7 @@ describe('FleetHealthPanel', () => {
     expect(operatorFact.querySelector('[data-icon="Wrench"]')).toBeTruthy()
     expect(operatorFact.textContent).toContain('Keeper failing')
     expect(operatorFact.textContent).toContain('inspect and recover failing keepers')
+    expect(operatorFact.textContent).toContain('forward_cleanup_authority:keeper=capacity-missing')
     expect(screen.getByText('13/17')).toBeTruthy()
     expect(screen.getByText('analyst')).toBeTruthy()
     expect(screen.getByText('operator_paused')).toBeTruthy()

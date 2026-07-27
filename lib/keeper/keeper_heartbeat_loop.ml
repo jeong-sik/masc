@@ -44,6 +44,13 @@ let with_in_turn_liveness_pulse =
    aliases so callers (incl. .mli consumers) stay byte-identical. *)
 module Stimulus_intake = Keeper_heartbeat_stimulus_intake
 
+(* #25978 removed this body while its interface declaration and two test
+   consumers remained, so the library stopped matching its own signature. The
+   recovery projection it delegates to is unchanged. *)
+let project_transition_outbox ~base_path ~keeper_name =
+  Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
+;;
+
 let stimulus_urgency_to_string = Stimulus_intake.stimulus_urgency_to_string
 let pending_board_event_of_stimulus = Stimulus_intake.pending_board_event_of_stimulus
 let record_event_queue_stimulus_turn_started =

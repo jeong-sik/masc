@@ -373,7 +373,7 @@ let test_goal_completion_requires_nonempty_claim () =
     (get_string_field error "error_code");
   let current = current_goal config goal.id in
   check bool "missing claim cannot complete" true
-    Goal_phase.is_executing current.phase;
+    (Goal_phase.is_executing current.phase);
   check bool "missing claim writes no receipt" true
     (Option.is_none current.completion_receipt)
 ;;

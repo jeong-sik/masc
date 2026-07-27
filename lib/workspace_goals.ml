@@ -196,6 +196,26 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ])
 ;;
 
+let conditional_goal_error_result
+      ~tool_name
+      ~start_time
+      (error : Goal_store.conditional_update_error)
+  =
+  let code, class_ =
+    match error with
+    | Goal_store.Goal_not_found -> Not_found, Tool_result.Workflow_rejection
+    | Goal_store.Goal_snapshot_changed -> Conflict, Tool_result.Workflow_rejection
+    | Goal_store.Goal_persistence_failed _ ->
+      Internal_error, Tool_result.Runtime_failure
+  in
+  error_result_typed
+    ~class_
+    ~tool_name
+    ~start_time
+    ~code
+    (Goal_store.conditional_update_error_to_string error)
+;;
+
 let handle_goal_completion_request
       ~tool_name
       ~start_time

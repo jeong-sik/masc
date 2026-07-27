@@ -933,7 +933,6 @@ let conditional_update_error_to_string = function
   | Goal_snapshot_changed ->
     "Goal changed while completion was being reviewed; obtain a new verdict \
      for the current Goal snapshot"
-    "Goal completion approval does not authorize this exact operation"
   | Goal_persistence_failed msg -> msg
 ;;
 

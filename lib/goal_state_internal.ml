@@ -41,7 +41,7 @@ let evidence_from_current
       ~workspace_identity
       ~state_version
       ~state_goals
-      ~goal
+      ~(goal : Goal_store.goal)
       ~completion_claim
       ~requesting_agent
   =

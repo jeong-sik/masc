@@ -1,7 +1,7 @@
 # Keeper Full Lifecycle Behavior
 
 Status: Living product SSOT  
-Last evidence update: 2026-07-27 17:38 KST  
+Last evidence update: 2026-07-27 22:28 KST
 Evidence rule: source code and green tests are not live proof.
 
 ## 1. Who uses MASC
@@ -112,9 +112,15 @@ code path.
 
 **Agent can do:** join MASC, inspect the fleet, choose or create work, and delegate without supplying a provider or model.
 
-**Current verdict:** `NOT_PROVEN_FRESH`
+**Current verdict:** `PARTIAL_LIVE`
 
-**Missing:** current main must compile, then the fresh config must materialize exactly eight Keepers.
+**Observed:** current runtime materialized exactly eight named Keeper fibers.
+Seven produced turn records. `kinobot-frontend` remained a running but
+non-executing fiber because its config endpoint reported proactive activation
+while the effective Registry projection kept it disabled.
+
+**Missing:** all eight Keepers must execute through the same declarative config
+authority without an operator filesystem repair.
 
 ### B02. Create and finish work
 
@@ -134,9 +140,14 @@ code path.
 
 **Expected behavior:** every blocked state has a typed reason and next action. No silent failure and no permanent stop from an ordinary provider, parsing, judgment, or capacity failure.
 
-**Current verdict:** `NOT_PROVEN_FRESH`
+**Current verdict:** `PARTIAL_LIVE`
 
-**Missing:** successful materialization plus repeated turn evidence after an injected failure.
+**Observed:** seven Keepers produced repeated turns. `verifier` survived a Gemma
+HTTP 500 once by advancing to GLM and later resumed successful Gemma turns.
+
+**Missing:** a post-checkpoint failure must preserve the remaining frozen
+Runtime suffix for the next turn; every blocked Keeper must expose that pending
+target and reason.
 
 ### B04. Runtime failover
 
@@ -146,9 +157,15 @@ code path.
 typed failure evidence, no model/provider branching in MASC, and no rejection
 of an ordinary text Runtime merely because it lacks native structured output.
 
-**Current verdict:** `WIRED_NOT_PROVEN`
+**Current verdict:** `WIRED_FAILING_LIVE`
 
-**Missing:** current OAS consumer migration and one fresh live failover trace.
+**Observed:** `verifier` produced one Gemma HTTP 500 to GLM success trace.
+Subsequent Gemma failures had no rotation attempt because the next Runtime
+suffix was discarded at the checkpoint boundary.
+
+**Missing:** the next actual turn starts at the preserved successor, a missing
+successor terminates visibly instead of looping, and resumed success updates the
+same declared lane preference.
 
 ### B05. Continuous context correction
 
@@ -166,9 +183,13 @@ of an ordinary text Runtime merely because it lacks native structured output.
 
 **Expected behavior:** asynchronous LLM extraction, typed validation, visible retry or blocker, and no duplicate semantic reinjection.
 
-**Current verdict:** `NOT_PROVEN_FRESH`
+**Current verdict:** `PARTIAL_LIVE`
 
-**Missing:** successful extraction from a new Keeper turn and later recall.
+**Observed:** fresh Librarian episode and fact files were written and later
+turn records show Memory OS recall blocks.
+
+**Missing:** bounded extraction success across the fleet, visible typed failure,
+and proof that source coverage does not advance over unextracted content.
 
 ### B07. Recall
 
@@ -176,9 +197,13 @@ of an ordinary text Runtime merely because it lacks native structured output.
 
 **Expected behavior:** LLM relevance selection runs off the critical path. If it is late or fails, reuse the last valid selection and continue.
 
-**Current verdict:** `NOT_PROVEN_FRESH`
+**Current verdict:** `WIRED_FAILING_LIVE`
 
-**Missing:** relevant-memory selection that changes with the Task and does not reinsert the same fixed block every turn.
+**Observed:** recall blocks are injected, but their byte size grows and repeated
+content dominates many turns.
+
+**Missing:** relevant-memory selection that changes with the Task and does not
+reinsert the same fixed block every turn.
 
 ### B08. Consolidation
 
@@ -196,9 +221,14 @@ of an ordinary text Runtime merely because it lacks native structured output.
 
 **Expected behavior:** a closed tool cycle is atomic input to an LLM. No deterministic oldest-message eviction. Failure keeps the source and Keeper alive.
 
-**Current verdict:** `PARTIAL_WORKTREE`
+**Current verdict:** `WIRED_FAILING_LIVE`
 
-**Missing:** bounded input, new-delta/backlog selection, Runtime failover, checkpoint install, and next-turn proof.
+**Observed:** all eight public compaction snapshot inventories are empty while
+turn request and recall sizes grow. No live checkpoint replacement has been
+observed.
+
+**Missing:** bounded input, new-delta/backlog selection, Runtime failover,
+checkpoint install, and next-turn proof.
 
 ### B10. Board attention and Schedule
 
@@ -238,9 +268,15 @@ of an ordinary text Runtime merely because it lacks native structured output.
 
 **Agent receives:** typed state, stable identifiers, immutable evidence, and the same next action.
 
-**Current verdict:** `NOT_PROVEN_FRESH`
+**Current verdict:** `CONTRADICTED_LIVE`
 
-**Missing:** dashboard/API parity checks across the Full Lifecycle.
+**Observed:** the `kinobot-frontend` config API reported
+`proactive.enabled=true` while the composite Surface reported
+`proactive_enabled=false`, `proactive_disabled`, and
+`scheduled_autonomous_disabled`.
+
+**Missing:** dashboard/API parity checks across the Full Lifecycle, starting
+with immediate equality after an activation config POST.
 
 ### B14. Clear memory and context
 
@@ -318,6 +354,12 @@ Pricing may be measured and displayed later. It does not limit, route, rank, adm
 | 2026-07-27 17:38 KST | authenticated `POST https://ollama.com/v1/chat/completions` with `json_object` | Qwen and Gemma returned valid JSON; DeepSeek Flash reached the service but 32 output tokens were insufficient | High |
 | 2026-07-27 17:42 KST | authenticated `json_schema` probe | Qwen and Gemma returned fenced JSON; DeepSeek returned non-JSON text. Native schema is not a portable admission requirement | High |
 | 2026-07-27 17:46 KST | fresh declarative config edit | exactly eight Keeper TOMLs are selected for autoboot; Runtime assignments are 4 Flash, 2 GLM, 1 Qwen Cloud, 1 Gemma Cloud | High for source, not live |
+| 2026-07-27 22:24 KST | `GET /health?full=1` | current process reported `status=ok` and `keeper_fibers=8` | High for fiber presence only |
+| 2026-07-27 22:25 KST | eight `GET /api/v1/keepers/:name/turn-records?limit=1` calls | seven Keepers had fresh-runtime turn records; `kinobot-frontend` had none | High |
+| 2026-07-27 22:28 KST | `kinobot-frontend` config, composite, turn records, and system log | config said proactive true; effective activation was false; scheduler skipped with `scheduled_autonomous_disabled`; turn record count remained zero | High |
+| 2026-07-27 22:24 KST | eight `GET /api/v1/keepers/:name/compaction-snapshots` calls | every inventory was empty; no live compaction or checkpoint-install proof | High |
+| 2026-07-27 22:25 KST | latest turn records and earlier live trace comparison | seven Keepers used the intended Runtime distribution; verifier had one Gemma-to-GLM recovery, but later post-checkpoint failures did not retain the successor | High |
+| 2026-07-27 22:25 KST | fresh turn-record prompt blocks | recall was active, but representative blocks ranged from 1,455 to 9,962 bytes and continued accumulating without a semantic replacement cycle | Medium |
 
 [Official Ollama Qwen 3.5 Cloud model page](https://ollama.com/library/qwen3.5%3Acloud)  
 [Official Ollama Gemma 4 model page](https://ollama.com/library/gemma4)  

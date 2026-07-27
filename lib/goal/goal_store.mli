@@ -129,17 +129,21 @@ val update_state :
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
-type conditional_update_outcome =
-  | Updated of goal
-  | Unchanged of goal
+type conditional_completion_outcome =
+  | Completed_now of goal
+  | Not_completed of goal
 
-val update_goal_if :
+val complete_goal_if_matches :
   Workspace_utils.config ->
   goal_id:string ->
-  (goal -> goal option) ->
-  (conditional_update_outcome, string) result
-(** Atomically applies a conditional update under the Goal store lock.
-    [None] returns [Unchanged] without writing the store or bumping its version. *)
+  metric:string option ->
+  target_value:string option ->
+  last_review_note:string option ->
+  last_review_at:string option ->
+  (conditional_completion_outcome, string) result
+(** Atomically completes an executing Goal only when its current metric and
+    target still match the caller's typed snapshot. A mismatch returns
+    [Not_completed] without writing or bumping the Goal store version. *)
 
 val update_goal :
   Workspace_utils.config ->

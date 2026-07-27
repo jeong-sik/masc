@@ -102,13 +102,9 @@ let test_target_counts_distinct_approved_tasks () =
   with_workspace
   @@ fun config ->
   let goal = create_goal config ~id:"goal-two" ~target:2 in
-  List.iter
-    (fun task_id ->
-      Workspace_goal_index.link_task_to_goal
-        config
-        ~goal_id:goal.id
-        ~task_id)
-    [ "task-1"; "task-2" ];
+  Workspace_goal_index.write_goal_task_links
+    config
+    [ goal.id, [ "task-1"; "task-1"; "task-2" ] ];
   let projector = Goal_approved_task_projector.create () in
   emit_task_event config ~kind:Event_kind.Task.Approved ~task_id:"task-1";
   emit_task_event config ~kind:Event_kind.Task.Approved ~task_id:"task-1";
@@ -172,6 +168,43 @@ let test_link_failure_holds_cursor_for_retry () =
     (Goal_phase.to_string (goal_phase config goal.id))
 ;;
 
+let test_goal_event_failure_is_repaired () =
+  with_workspace
+  @@ fun config ->
+  let goal = create_goal config ~id:"goal-event-repair" ~target:1 in
+  Workspace_goal_index.link_task_to_goal
+    config
+    ~goal_id:goal.id
+    ~task_id:"task-event-repair";
+  emit_task_event
+    config
+    ~kind:Event_kind.Task.Approved
+    ~task_id:"task-event-repair";
+  let event_path = Goal_event.path config in
+  Unix.mkdir event_path 0o755;
+  let projector = Goal_approved_task_projector.create () in
+  (match Goal_approved_task_projector.run projector config with
+   | Error (Goal_approved_task_projector.Goal_event_failed _) -> ()
+   | Error error ->
+       fail (Goal_approved_task_projector.error_to_string error)
+   | Ok _ -> fail "expected Goal event failure");
+  check string "Goal update committed" "completed"
+    (Goal_phase.to_string (goal_phase config goal.id));
+  check int "cursor held for repair" 0
+    (Goal_approved_task_projector.last_seq projector);
+  Unix.rmdir event_path;
+  (match Goal_approved_task_projector.run projector config with
+   | Ok _ -> ()
+   | Error error ->
+       fail (Goal_approved_task_projector.error_to_string error));
+  check int "canonical event repaired once" 1 (goal_event_count config);
+  (match Goal_approved_task_projector.run projector config with
+   | Ok _ -> ()
+   | Error error ->
+       fail (Goal_approved_task_projector.error_to_string error));
+  check int "repair is idempotent" 1 (goal_event_count config)
+;;
+
 let () =
   run
     "goal-approved-task-projector"
@@ -192,6 +225,10 @@ let () =
             "link failure holds cursor"
             `Quick
             test_link_failure_holds_cursor_for_retry
+        ; test_case
+            "Goal event failure is repaired"
+            `Quick
+            test_goal_event_failure_is_repaired
         ] )
     ]
 ;;

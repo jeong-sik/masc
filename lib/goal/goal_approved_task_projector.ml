@@ -64,7 +64,7 @@ let metric_of_goal (goal : Goal_store.goal) =
 ;;
 
 let eligible_goal (goal : Goal_store.goal) =
-  goal.phase = Goal_phase.Executing
+  (goal.phase = Goal_phase.Executing || goal.phase = Goal_phase.Completed)
   && Option.is_some (metric_of_goal goal)
 ;;
 
@@ -106,16 +106,35 @@ let target_satisfied ~approved_task_ids ~links (goal : Goal_store.goal) =
   match metric_of_goal goal with
   | None -> false
   | Some (Verifier_approved_done_tasks { target }) ->
-      let approved_count =
+      let linked_task_ids =
         linked_task_ids links goal.id
-        |> List.fold_left
-             (fun count task_id ->
-               if String_set.mem task_id approved_task_ids
-               then count + 1
-               else count)
-             0
+        |> String_set.of_list
+      in
+      let approved_count =
+        String_set.inter linked_task_ids approved_task_ids
+        |> String_set.cardinal
       in
       approved_count >= target
+;;
+
+let projector_actor = "system/goal-approved-task-projector"
+
+let ensure_completed_goal_event config (goal : Goal_store.goal) =
+  try
+    ignore
+      (Goal_event.ensure_phase
+         config
+         ~goal_id:goal.id
+         ~phase:Goal_phase.Completed
+         ~actor:projector_actor
+         ~goal_updated_at:goal.updated_at);
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Error
+        (Goal_event_failed
+           { goal_id = goal.id; detail = Printexc.to_string exn })
 ;;
 
 let replay_events (state : t) config =
@@ -148,7 +167,7 @@ let replay_events (state : t) config =
 
 let run (state : t) config =
   let eligible_goals =
-    Goal_store.list_goals config ~phase:Goal_phase.Executing ()
+    Goal_store.list_goals config ()
     |> List.filter eligible_goal
   in
   match eligible_goals with
@@ -161,12 +180,39 @@ let run (state : t) config =
         ; last_seq = state.last_seq
         }
   | _ ->
-      (match Workspace_goal_index.read_goal_task_links_r config with
-       | Error detail -> Error (Link_read_failed detail)
-       | Ok links ->
-           (match replay_events state config with
-            | Error _ as error -> error
-            | Ok (events, approved_task_ids, next_last_seq) ->
+      let completed_goals, executing_goals =
+        List.partition
+          (fun (goal : Goal_store.goal) ->
+            goal.phase = Goal_phase.Completed)
+          eligible_goals
+      in
+      let rec ensure_existing = function
+        | [] -> Ok ()
+        | goal :: rest ->
+            (match ensure_completed_goal_event config goal with
+             | Error _ as error -> error
+             | Ok () -> ensure_existing rest)
+      in
+      (match ensure_existing completed_goals with
+       | Error _ as error -> error
+       | Ok () ->
+           (match executing_goals with
+            | [] ->
+                Ok
+                  { eligible_goal_count = List.length eligible_goals
+                  ; replayed_event_count = 0
+                  ; approved_task_count =
+                      String_set.cardinal state.approved_task_ids
+                  ; completed_goal_ids = []
+                  ; last_seq = state.last_seq
+                  }
+            | _ ->
+                (match Workspace_goal_index.read_goal_task_links_r config with
+                 | Error detail -> Error (Link_read_failed detail)
+                 | Ok links ->
+                     (match replay_events state config with
+                      | Error _ as error -> error
+                      | Ok (events, approved_task_ids, next_last_seq) ->
                 let rec complete completed = function
                   | [] -> Ok (List.rev completed)
                   | (goal : Goal_store.goal) :: rest ->
@@ -175,52 +221,30 @@ let run (state : t) config =
                       else
                         let review_at = Masc_domain.now_iso () in
                         (match
-                           Goal_store.update_goal_if
+                           Goal_store.complete_goal_if_matches
                              config
                              ~goal_id:goal.id
-                             (fun current ->
-                               if
-                                 current.phase = Goal_phase.Executing
-                                 && target_satisfied
-                                      ~approved_task_ids
-                                      ~links
-                                      current
-                               then
-                                 Some
-                                   { current with
-                                     phase = Goal_phase.Completed
-                                   ; last_review_note =
-                                       Some
-                                         "Completed from durable verifier-approved \
-                                          Task events."
-                                   ; last_review_at = Some review_at
-                                   }
-                               else None)
+                             ~metric:goal.metric
+                             ~target_value:goal.target_value
+                             ~last_review_note:
+                               (Some
+                                  "Completed from durable verifier-approved \
+                                   Task events.")
+                             ~last_review_at:(Some review_at)
                          with
                          | Error detail ->
                              Error
                                (Goal_update_failed
                                   { goal_id = goal.id; detail })
-                         | Ok (Goal_store.Unchanged _) ->
+                         | Ok (Goal_store.Not_completed _) ->
                              complete completed rest
-                         | Ok (Goal_store.Updated updated) ->
-                             (try
-                                Goal_event.emit_phase
-                                  config
-                                  ~goal_id:updated.id
-                                  ~phase:updated.phase
-                                  ~actor:"system/goal-approved-task-projector";
-                                complete (updated.id :: completed) rest
-                              with
-                              | Eio.Cancel.Cancelled _ as exn -> raise exn
-                              | exn ->
-                                  Error
-                                    (Goal_event_failed
-                                       { goal_id = updated.id
-                                       ; detail = Printexc.to_string exn
-                                       })))
+                         | Ok (Goal_store.Completed_now updated) ->
+                             (match ensure_completed_goal_event config updated with
+                              | Error _ as error -> error
+                              | Ok () ->
+                                  complete (updated.id :: completed) rest))
                 in
-                (match complete [] eligible_goals with
+                (match complete [] executing_goals with
                  | Error _ as error -> error
                  | Ok completed_goal_ids ->
                      state.approved_task_ids <- approved_task_ids;
@@ -232,5 +256,6 @@ let run (state : t) config =
                            String_set.cardinal approved_task_ids
                        ; completed_goal_ids
                        ; last_seq = next_last_seq
-                       })))
+                       }))))
+       )
 ;;

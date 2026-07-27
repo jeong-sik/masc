@@ -39,6 +39,9 @@ let ensure_fs env =
   Fs_compat.set_fs (Eio.Stdenv.fs env)
 
 let with_fd_backed_lifecycle_head_parents fn =
+  Keeper_lifecycle_admission.Durable_transaction.For_testing
+  .with_fd_backed_parent_opening
+  @@ fun () ->
   Keeper_lifecycle_nonce.For_testing.with_fd_backed_parent_opening
   @@ fun () ->
   Keeper_dead_revival_transaction.For_testing.with_fd_backed_parent_opening fn

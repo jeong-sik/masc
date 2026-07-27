@@ -806,6 +806,7 @@ let test_lifecycle_reservation_is_per_keeper_and_owner_typed () =
 let test_lifecycle_owner_gates_meta_and_registry_mutations () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -2623,6 +2624,7 @@ let test_update_keeper_surfaces_committed_cleanup_required () =
 let test_update_keeper_rebases_intent_after_join_race () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let keeper_name = "update-rebase-after-join-race" in
@@ -2780,6 +2782,7 @@ let ordinary_update_args keeper_name =
 let with_running_ordinary_update_fixture ~keeper_name fn =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -3190,6 +3193,7 @@ let test_create_keeper_fork_rejection_removes_candidate_state () =
 let test_create_runtime_meta_crash_recovery_removes_dangling_runtime () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let keeper_name = "create-runtime-meta-crash" in
@@ -3327,6 +3331,7 @@ let test_update_runtime_meta_crash_recovery_retries_durable_intent () =
 let test_runtime_meta_identical_target_honors_forward_preference () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_fd_backed_lifecycle_head_parents @@ fun () ->
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   let keeper_name = "runtime-meta-identical-forward" in

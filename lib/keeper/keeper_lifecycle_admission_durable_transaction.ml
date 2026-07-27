@@ -179,10 +179,11 @@ let with_revival_launch_admission_under_lock
     (match journal_parent config, journal_entropy () with
      | Ok parent, Ok secure_random ->
        (match
-          Head.read
-            ~secure_random
-            ~parent
-            ~leaf:(journal_leaf keeper_name)
+          with_head_parent parent (fun parent ->
+            Head.read
+              ~secure_random
+              ~parent
+              ~leaf:(journal_leaf keeper_name))
         with
         | Ok snapshot
           when Head.snapshot_settlement_warnings snapshot <> [] ->
@@ -389,4 +390,5 @@ let projection_to_yojson projection =
 
 module For_testing = struct
   let permit_matches = permit_matches
+  let with_fd_backed_parent_opening = with_fd_backed_parent_opening
 end

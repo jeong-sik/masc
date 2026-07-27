@@ -6,6 +6,20 @@ open Keeper_lifecycle_admission_durable_types
 let journal_schema = "masc.keeper-dead-revival-journal.v3"
 let head_entropy_bytes = 32 * 33
 
+let fd_backed_parent_opening_key : unit Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let with_head_parent parent fn =
+  match Eio.Fiber.get fd_backed_parent_opening_key with
+  | Some () -> Eio.Path.with_open_dir parent fn
+  | None -> fn parent
+;;
+
+let with_fd_backed_parent_opening fn =
+  Eio.Fiber.with_binding fd_backed_parent_opening_key () fn
+;;
+
 let sha256 value =
   Digestif.SHA256.(to_hex (digest_string value))
 ;;
@@ -279,10 +293,11 @@ let read_revival_locked config keeper_name =
     Blocked (Authority_unreadable { keeper_name; failure })
   | Ok parent, Ok secure_random ->
     (match
-       Head.read
-         ~secure_random
-         ~parent
-         ~leaf:(journal_leaf keeper_name)
+       with_head_parent parent (fun parent ->
+         Head.read
+           ~secure_random
+           ~parent
+           ~leaf:(journal_leaf keeper_name))
      with
      | Error _ ->
        Blocked

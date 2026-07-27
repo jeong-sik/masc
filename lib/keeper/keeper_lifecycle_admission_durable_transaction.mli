@@ -122,4 +122,5 @@ val projection_to_yojson : projection -> Yojson.Safe.t
 
 module For_testing : sig
   val permit_matches : permit -> Workspace.config -> string -> bool
+  val with_fd_backed_parent_opening : (unit -> 'a) -> 'a
 end

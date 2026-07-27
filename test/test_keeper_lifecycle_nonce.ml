@@ -450,6 +450,9 @@ let test_authority_root_is_cluster_scoped () =
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc.Keeper_lifecycle_admission.Durable_transaction.For_testing
+  .with_fd_backed_parent_opening
+  @@ fun () ->
   Nonce.For_testing.with_fd_backed_parent_opening @@ fun () ->
   Masc.Keeper_shutdown_generation_floor.For_testing.with_fd_backed_parent_opening
   @@ fun () ->

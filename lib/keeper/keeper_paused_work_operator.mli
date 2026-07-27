@@ -47,6 +47,8 @@ val outcome_to_yojson : outcome -> Yojson.Safe.t
 val outcome_projection_complete : outcome -> bool
 val error_to_string : error -> string
 val error_class : error -> error_class
+val admission_busy : error -> Keeper_turn_admission.autonomous_block option
+(** Typed unavailable detail for boundary adapters. *)
 
 val inventory_json :
   Workspace.config -> keeper_name:string -> (Yojson.Safe.t, inventory_error) result

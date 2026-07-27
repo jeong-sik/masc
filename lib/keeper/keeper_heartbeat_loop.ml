@@ -124,6 +124,15 @@ type keepalive_turn_outcome = {
   cycle_status : keepalive_cycle_status;
 }
 
+let consume_deferred_runtime_lane_hint hint_ref expected =
+  match !hint_ref with
+  | Some current
+    when Keeper_turn_driver.equal_deferred_runtime_lane expected current ->
+    hint_ref := None;
+    true
+  | None | Some _ -> false
+;;
+
 exception Event_queue_settlement_failed of string
 
 type transition_projection_gate =
@@ -810,6 +819,9 @@ let commit_transcript_corruption_and_project
 ;;
 
 module For_testing = struct
+  let consume_deferred_runtime_lane_hint =
+    consume_deferred_runtime_lane_hint
+
   type nonrec transcript_corruption_commit = transcript_corruption_commit =
     | Transcript_pause_persisted
     | Transcript_pause_and_settlement_persisted
@@ -885,6 +897,10 @@ let run_keepalive_unified_turn
       ~(proactive_warmup_elapsed : bool)
       ~(reactive_wake : bool)
       ~(shared_context : Agent_sdk.Context.t)
+      ~(deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option)
+      ~(on_deferred_runtime_consumed : unit -> unit)
+      ~(record_deferred_runtime_lane :
+          Keeper_turn_driver.deferred_runtime_lane -> unit)
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
@@ -1262,6 +1278,8 @@ let run_keepalive_unified_turn
           in
           let run_cycle () =
             run_keeper_cycle
+              ?deferred_runtime_lane
+              ~on_deferred_runtime_consumed
               ?exact_execution_guard:dispatch_guard
               ?event_bus
               ?hitl_resolution
@@ -1277,6 +1295,9 @@ let run_keepalive_unified_turn
               ()
           in
           let cycle_outcome = run_cycle () in
+          Option.iter
+            record_deferred_runtime_lane
+            (Cycle.deferred_runtime_lane cycle_outcome);
           cycle_outcome_ref := Some cycle_outcome;
           Cycle.meta cycle_outcome)
         else meta_after_triage
@@ -1665,6 +1686,7 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_sdk.Context.create () in
+  let deferred_runtime_lane_ref = ref None in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
@@ -1849,6 +1871,16 @@ let run_heartbeat_loop
               | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
                 false
             in
+            let deferred_runtime_lane = !deferred_runtime_lane_ref in
+            let on_deferred_runtime_consumed () =
+              Option.iter
+                (fun expected ->
+                   ignore
+                     (consume_deferred_runtime_lane_hint
+                        deferred_runtime_lane_ref
+                        expected))
+                deferred_runtime_lane
+            in
             let r =
               run_keepalive_unified_turn
                 ~ctx
@@ -1858,6 +1890,10 @@ let run_heartbeat_loop
                 ~proactive_warmup_elapsed
                 ~reactive_wake
                 ~shared_context
+                ~deferred_runtime_lane
+                ~on_deferred_runtime_consumed
+                ~record_deferred_runtime_lane:
+                  (fun hint -> deferred_runtime_lane_ref := Some hint)
             in
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
             turn_running := false;

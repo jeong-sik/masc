@@ -97,24 +97,34 @@ function executionReceiptTone(execution: KeeperCompositeExecution | undefined): 
   return 'warn'
 }
 
-function executionReceiptLabel(execution: KeeperCompositeExecution | undefined): string | null {
+export function executionReceiptLabel(execution: KeeperCompositeExecution | undefined): string | null {
   if (!execution) return null
   if (!execution.latest_receipt_present) return 'receipt 없음'
   const terminal = shortText(execution.terminal_reason_code, 32)
   const elapsed = formatMs(execution.duration_ms)
+  const deferredRuntime = shortText(execution.runtime?.degraded_retry_runtime, 32)
+  const deferredRetry = deferredRuntime
+    ? `${execution.runtime?.degraded_retry_applied ? 'retry applied' : 'retry queued'} -> ${deferredRuntime}`
+    : ''
   return [
     execution.outcome ?? 'unknown',
     terminal,
     elapsed,
+    deferredRetry,
   ].filter(Boolean).join(' · ')
 }
 
-function executionReceiptTitle(execution: KeeperCompositeExecution | undefined): string {
+export function executionReceiptTitle(execution: KeeperCompositeExecution | undefined): string {
   if (!execution?.latest_receipt_present) return '아직 execution receipt가 없습니다.'
+  const deferredRuntime = execution.runtime?.degraded_retry_runtime
+  const deferredRetry = deferredRuntime
+    ? `retry: ${execution.runtime?.degraded_retry_applied ? 'applied' : 'queued'} -> ${deferredRuntime}`
+    : ''
   return [
     execution.recorded_at ? `recorded_at: ${execution.recorded_at}` : '',
     execution.operator_disposition ? `operator: ${execution.operator_disposition}` : '',
     execution.operator_disposition_reason ? `reason: ${execution.operator_disposition_reason}` : '',
+    deferredRetry,
     execution.runtime?.fallback_reason ? `fallback: ${execution.runtime.fallback_reason}` : '',
     execution.error?.kind ? `error: ${execution.error.kind}` : '',
     execution.error?.message_preview ? execution.error.message_preview : '',

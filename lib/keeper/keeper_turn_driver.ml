@@ -67,6 +67,27 @@ type provider_attempt_outcomes =
   ; turn_result : provider_run_result
   }
 
+type runtime_attempt_candidate =
+  | Resolved_runtime of Runtime.t
+  | Missing_runtime of string
+
+type deferred_runtime_lane =
+  { assignment_id : string
+  ; failed_runtime_id : string
+  ; next_runtime_id : string
+  ; later_runtime_ids : string list
+  ; failure : Agent_sdk.Error.sdk_error
+  }
+
+let deferred_runtime_ids hint =
+  hint.next_runtime_id :: hint.later_runtime_ids
+
+let equal_deferred_runtime_lane left right =
+  String.equal left.assignment_id right.assignment_id
+  && String.equal left.failed_runtime_id right.failed_runtime_id
+  && String.equal left.next_runtime_id right.next_runtime_id
+  && left.later_runtime_ids = right.later_runtime_ids
+
 let project_provider_attempt_result ~replay_prefix_projection provider_result =
   let turn_result =
     match provider_result with
@@ -134,6 +155,7 @@ let attempt_runtime_candidates
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
     ?lane_id
+    ?(on_retry_deferred = fun _ -> ())
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -173,31 +195,41 @@ let attempt_runtime_candidates
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
            Keeper_runtime_manifest.Runtime_failed;
-         if
-            let allow_retry =
-              allow_retry
-                ~runtime_id:attempt_runtime_id
-                ~attempt:idx
-                error
-            in
-            let allow_accept_no_progress_retry =
-              if
-                Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
-                  error
-              then
-                allow_accept_no_progress_retry
-                  ~runtime_id:attempt_runtime_id
-                  ~attempt:idx
-                  error
-              else true
-            in
-            lane_should_retry
-              ~is_last
-              ~allow_retry
-              ~allow_accept_no_progress_retry
-              error
+         let retry_admitted =
+           allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
+         in
+         let allow_accept_no_progress_retry =
+           if
+             Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
+               error
+           then
+             allow_accept_no_progress_retry
+               ~runtime_id:attempt_runtime_id
+               ~attempt:idx
+               error
+           else true
+         in
+         let retryable_with_input_authority =
+           lane_should_retry
+             ~is_last
+             ~allow_retry:true
+             ~allow_accept_no_progress_retry
+             error
+         in
+         if retry_admitted && retryable_with_input_authority
          then loop (idx + 1) rest
-         else Error error)
+         else (
+           (match retryable_with_input_authority, rest with
+            | true, next :: later ->
+              on_retry_deferred
+                { assignment_id = runtime_id
+                ; failed_runtime_id = attempt_runtime_id
+                ; next_runtime_id = runtime_id_of next
+                ; later_runtime_ids = List.map runtime_id_of later
+                ; failure = error
+                }
+            | false, _ | true, [] -> ());
+           Error error))
   in
   loop 0 candidates
 
@@ -211,6 +243,13 @@ let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
   | Some runtime -> Ok runtime
   | None -> Error (runtime_candidate_missing_error id)
+
+let resolve_runtime_candidate_for_attempt ?on_missing id =
+  match resolve_runtime_candidate id with
+  | Ok _ as resolved -> resolved
+  | Error _ as missing ->
+    Option.iter (fun consume -> consume ()) on_missing;
+    missing
 
 let resolve_runtime_candidates ids =
   let rec loop acc = function
@@ -312,6 +351,9 @@ let run_named
     ?on_runtime_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
+    ?deferred_runtime_lane
+    ?on_runtime_retry_deferred
+    ?on_deferred_runtime_consumed
     ?provider_config_transform
     ?sw
     ?net
@@ -367,16 +409,18 @@ let run_named
      operators can route through explicit failover groups.  Lane candidate
      order passes through the sticky last-good preference so a known-healthy
      failover candidate is tried before re-hitting a dead head candidate. *)
-  let lane_resolution = Runtime.resolve_assignment runtime_id in
   let lane_id_opt, lane_candidate_ids =
-    match lane_resolution with
-    | `Missing -> None, []
-    | `Single_runtime runtime -> None, [ runtime.Runtime.id ]
-    | `Lane lane ->
-      let lane_id = Runtime_lane.id lane in
-      ( Some lane_id
-      , Runtime_lane_preference.prefer_order ~lane_id
-          (Runtime_lane.ordered_candidates lane) )
+    match deferred_runtime_lane with
+    | Some hint -> Some hint.assignment_id, deferred_runtime_ids hint
+    | None ->
+      (match Runtime.resolve_assignment runtime_id with
+       | `Missing -> None, []
+       | `Single_runtime runtime -> None, [ runtime.Runtime.id ]
+       | `Lane lane ->
+         let lane_id = Runtime_lane.id lane in
+         ( Some lane_id
+         , Runtime_lane_preference.prefer_order ~lane_id
+             (Runtime_lane.ordered_candidates lane) ))
   in
   if lane_candidate_ids = []
   then
@@ -409,15 +453,29 @@ let run_named
     | first :: rest -> first, rest
     | [] -> runtime_id, []
   in
-  let* first_candidate = resolve_runtime_candidate first_candidate_id in
-  let* remaining_runtimes = resolve_runtime_candidates remaining_candidate_ids in
+  let* first_candidate =
+    resolve_runtime_candidate_for_attempt
+      ?on_missing:
+        (match deferred_runtime_lane with
+         | Some _ -> on_deferred_runtime_consumed
+         | None -> None)
+      first_candidate_id
+  in
+  let* remaining_runtimes =
+    match deferred_runtime_lane with
+    | Some _ -> Ok []
+    | None -> resolve_runtime_candidates remaining_candidate_ids
+  in
   let reroute_decision =
-    lane_modality_reroute_decision
-      ~checkpoint_messages
-      ~initial_messages
-      ~goal_blocks:current_goal_blocks
-      ~first_candidate
-      ~remaining_runtimes
+    match deferred_runtime_lane with
+    | Some _ -> Runtime_agent.No_reroute_needed
+    | None ->
+      lane_modality_reroute_decision
+        ~checkpoint_messages
+        ~initial_messages
+        ~goal_blocks:current_goal_blocks
+        ~first_candidate
+        ~remaining_runtimes
   in
   let first_runtime_id, first_runtime =
     first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
@@ -425,6 +483,17 @@ let run_named
   in
   let attempt_runtimes =
     dedupe_runtimes_preserve_order (first_runtime :: remaining_runtimes)
+  in
+  let attempt_candidates =
+    match deferred_runtime_lane with
+    | None -> List.map (fun runtime -> Resolved_runtime runtime) attempt_runtimes
+    | Some hint ->
+      List.map
+        (fun runtime_id ->
+           match Runtime.get_runtime_by_id runtime_id with
+           | Some runtime -> Resolved_runtime runtime
+           | None -> Missing_runtime runtime_id)
+        (deferred_runtime_ids hint)
   in
   let assigned_runtime_context_window =
     Runtime.max_context_of_runtime first_candidate
@@ -527,6 +596,7 @@ let run_named
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
     ?lane_id:lane_id_opt
+    ?on_retry_deferred:on_runtime_retry_deferred
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
         Keeper_turn_driver_try_provider.same_run_retry_allowed
@@ -543,10 +613,20 @@ let run_named
           attempt
           (Oas_compat.error_kind error);
       allowed)
-    ~runtime_id
-    ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
+    ~runtime_id:
+      (match deferred_runtime_lane with
+       | Some hint -> hint.assignment_id
+       | None -> runtime_id)
+    ~runtime_id_of:(function
+      | Resolved_runtime runtime -> runtime.Runtime.id
+      | Missing_runtime runtime_id -> runtime_id)
     ~emit_runtime_manifest
-    ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
+    ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id candidate ->
+      match candidate with
+      | Missing_runtime runtime_id ->
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        Error (runtime_candidate_missing_error runtime_id), None
+      | Resolved_runtime runtime ->
       let error_runtime_id = attempt_runtime_id in
       let inference_policy =
         attempt_inference_policy
@@ -558,8 +638,10 @@ let run_named
          match provider_config_transform with
          | None -> Ok runtime.Runtime.provider_config
          | Some transform -> transform runtime.Runtime.provider_config
-       with
-      | Error err -> Error err, None
+      with
+      | Error err ->
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        Error err, None
       | Ok provider_config ->
         let candidate = Runtime_candidate.of_provider_config provider_config in
         (* Cached provider health is observation only. Every eligible runtime
@@ -612,6 +694,7 @@ let run_named
             ; seq_ref
             }
           in
+          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
           let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider
               try_provider_ctx candidate
@@ -622,11 +705,21 @@ let run_named
               provider_result
           in
           outcomes.turn_result, checkpoint_after)
-    attempt_runtimes
+    attempt_candidates
 
 
 module For_testing = struct
   type nonrec provider_attempt_outcomes = provider_attempt_outcomes
+
+  let make_deferred_runtime_lane ~assignment_id ~failed_runtime_id
+        ~next_runtime_id ~later_runtime_ids ~failure =
+    { assignment_id
+    ; failed_runtime_id
+    ; next_runtime_id
+    ; later_runtime_ids
+    ; failure
+    }
+  ;;
 
   let project_provider_attempt_result = project_provider_attempt_result
   let provider_result outcomes = outcomes.provider_result
@@ -639,6 +732,10 @@ module For_testing = struct
 
   let lane_modality_reroute_decision = lane_modality_reroute_decision
   let dedupe_runtimes_preserve_order = dedupe_runtimes_preserve_order
+  let resolve_runtime_candidates = resolve_runtime_candidates
+  let resolve_runtime_candidate_for_attempt =
+    resolve_runtime_candidate_for_attempt
+
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
 	  let attempt_inference_policy = attempt_inference_policy
   let attempt_runtime_candidates = attempt_runtime_candidates

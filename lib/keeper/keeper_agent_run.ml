@@ -241,6 +241,9 @@ let run_turn
       ?degraded_retry_runtime
       ?fallback_reason
       ?(runtime_rotation_attempts = [])
+      ?deferred_runtime_lane
+      ?on_runtime_retry_deferred
+      ?on_deferred_runtime_consumed
       ?(is_retry = false)
       ?shared_context
       ?event_bus
@@ -254,6 +257,11 @@ let run_turn
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
+  let deferred_runtime_lane_ref = ref None in
+  let record_runtime_retry_deferred hint =
+    deferred_runtime_lane_ref := Some hint;
+    Option.iter (fun callback -> callback hint) on_runtime_retry_deferred
+  in
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
   let partition, _ =
@@ -653,6 +661,9 @@ let run_turn
                              ~site:"runtime_runtime"
                              config
                              manifest)
+                      ?deferred_runtime_lane
+                      ~on_runtime_retry_deferred:record_runtime_retry_deferred
+                      ?on_deferred_runtime_consumed
                       ?stream_idle_timeout_s
                       ?body_timeout_s:
                         (Keeper_runtime_resolved.body_timeout_override_sec ())
@@ -794,6 +805,30 @@ let run_turn
                                 ())
                           ()))
                in
+       let deferred_retry =
+         Option.map
+           (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
+              let reason =
+                match
+                  Keeper_error_classify.recoverable_runtime_failure_reason
+                    hint.failure
+                with
+                | Some reason -> reason
+                | None -> Keeper_error_classify.Deferred_runtime_lane
+              in
+              hint.next_runtime_id, reason)
+           !deferred_runtime_lane_ref
+       in
+       let receipt_degraded_retry_runtime =
+         match deferred_retry with
+         | Some (runtime_id, _) -> Some runtime_id
+         | None -> degraded_retry_runtime
+       in
+       let receipt_fallback_reason =
+         match deferred_retry with
+         | Some (_, reason) -> Some reason
+         | None -> fallback_reason
+       in
        let receipt_result =
          Keeper_agent_run_receipt.finalize
            ~config
@@ -806,8 +841,8 @@ let run_turn
            ~runtime_manifest_context
            ~acc
            ~degraded_retry_applied
-           ~degraded_retry_runtime
-           ~fallback_reason
+           ~degraded_retry_runtime:receipt_degraded_retry_runtime
+           ~fallback_reason:receipt_fallback_reason
            ~runtime_rotation_attempts
            ~turn_result
            ~receipt_turn_count_ref

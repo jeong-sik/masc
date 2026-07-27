@@ -66,6 +66,18 @@ val provider_attempt_finished_decision :
 
 (** {1 Named runtime execution} *)
 
+type deferred_runtime_lane = private
+  { assignment_id : string
+  ; failed_runtime_id : string
+  ; next_runtime_id : string
+  ; later_runtime_ids : string list
+  ; failure : Agent_sdk.Error.sdk_error
+  }
+
+val deferred_runtime_ids : deferred_runtime_lane -> string list
+val equal_deferred_runtime_lane :
+  deferred_runtime_lane -> deferred_runtime_lane -> bool
+
 val run_named :
   runtime_id:string ->
   ?keeper_name:string ->
@@ -103,6 +115,9 @@ val run_named :
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
+  ?deferred_runtime_lane:deferred_runtime_lane ->
+  ?on_runtime_retry_deferred:(deferred_runtime_lane -> unit) ->
+  ?on_deferred_runtime_consumed:(unit -> unit) ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
@@ -122,6 +137,14 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
+  val make_deferred_runtime_lane :
+    assignment_id:string ->
+    failed_runtime_id:string ->
+    next_runtime_id:string ->
+    later_runtime_ids:string list ->
+    failure:Agent_sdk.Error.sdk_error ->
+    deferred_runtime_lane
+
   type provider_attempt_outcomes
 
   val project_provider_attempt_result :
@@ -167,6 +190,14 @@ module For_testing : sig
     Runtime_agent.reroute_decision
 
   val dedupe_runtimes_preserve_order : Runtime.t list -> Runtime.t list
+  val resolve_runtime_candidates :
+    string list ->
+    (Runtime.t list, Agent_sdk.Error.sdk_error) result
+
+  val resolve_runtime_candidate_for_attempt :
+    ?on_missing:(unit -> unit) ->
+    string ->
+    (Runtime.t, Agent_sdk.Error.sdk_error) result
 
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
@@ -183,6 +214,7 @@ module For_testing : sig
     ?allow_accept_no_progress_retry:
       (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
     ?lane_id:string ->
+    ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
     emit_runtime_manifest:

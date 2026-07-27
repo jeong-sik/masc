@@ -38,8 +38,13 @@ val manual_compaction_followup_failure
     Queue settlement uses this projection to preserve an LLM judgment
     successor without replaying the completed compaction transaction. *)
 
+val deferred_runtime_lane :
+  cycle_outcome -> Keeper_turn_driver.deferred_runtime_lane option
+
 val run_keeper_cycle
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
+  -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t

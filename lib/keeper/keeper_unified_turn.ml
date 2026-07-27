@@ -60,17 +60,19 @@ type turn_failure =
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
   ; source_lease_disposition : source_lease_disposition
+  ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   }
 
 let turn_failure_of_error
       ~runtime_id
       ~fallback_boundary
       ~exact_failure_execution
+      ~deferred_runtime_lane
       error
   =
   match exact_failure_execution with
   | Some (runtime_id, route, source_lease_disposition) ->
-    { error; runtime_id; route; source_lease_disposition }
+    { error; runtime_id; route; source_lease_disposition; deferred_runtime_lane }
   | None ->
     { error
     ; runtime_id
@@ -79,6 +81,7 @@ let turn_failure_of_error
           ~boundary:fallback_boundary
           error
     ; source_lease_disposition = Follow_failure_route
+    ; deferred_runtime_lane
     }
 ;;
 
@@ -597,6 +600,8 @@ let append_provider_overflow_manifest
 
 let run_keeper_cycle
       ?exact_execution_guard
+      ?deferred_runtime_lane
+      ?on_deferred_runtime_consumed
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(publication_recovery_provider :
@@ -636,6 +641,7 @@ let run_keeper_cycle
             ~boundary:Keeper_runtime_failure_route.Masc_execution
             error
       ; source_lease_disposition = Follow_failure_route
+      ; deferred_runtime_lane = None
       }
   | Ok { entry; publication_recovery } ->
   let meta = entry.meta in
@@ -667,11 +673,28 @@ let run_keeper_cycle
   in
   let turn_start = Mtime_clock.now () in
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
+    let degraded_retry_info =
+      Option.map
+        (fun (hint : Keeper_turn_driver.deferred_runtime_lane) ->
+           let fallback_reason =
+             match
+               Keeper_error_classify.recoverable_runtime_failure_reason
+                 hint.failure
+             with
+             | Some reason -> reason
+             | None -> Keeper_error_classify.Deferred_runtime_lane
+           in
+           { Keeper_error_classify.next_runtime = hint.next_runtime_id
+           ; fallback_reason
+           })
+        deferred_runtime_lane
+    in
     { cycle_completed = false
     ; manifest_seq = 0
     ; current_turn_blocker_info = None
     ; last_execution = None
-    ; degraded_retry_info = None
+    ; degraded_retry_info
+    ; deferred_runtime_lane = None
     ; runtime_rotation_attempts = []
     ; failure_reason = None
     ; retry_phase_started_at = None
@@ -719,7 +742,11 @@ let run_keeper_cycle
       * Keeper_unified_turn_execution.turn_state
     =
       let _ = phase_opt in
-      let effective_runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+      let effective_runtime_id =
+        match deferred_runtime_lane with
+        | Some hint -> hint.Keeper_turn_driver.next_runtime_id
+        | None -> Keeper_meta_contract.runtime_id_of_meta meta
+      in
       let source =
         match Runtime.runtime_id_for_keeper meta.name with
         | Some id when String.trim id <> "" -> "assigned"
@@ -768,6 +795,12 @@ let run_keeper_cycle
          (match profile_and_execution
           with
           | Error err ->
+            Option.iter
+              (fun _ ->
+                 Option.iter
+                   (fun consume -> consume ())
+                   on_deferred_runtime_consumed)
+              deferred_runtime_lane;
             let terminal_reason_code =
               Printf.sprintf
                 "pre_dispatch_%s"
@@ -1077,6 +1110,8 @@ let run_keeper_cycle
                            ; shared_context
                            ; trajectory_acc
                            ; turn_id = keeper_turn_id
+                           ; deferred_runtime_lane
+                           ; on_deferred_runtime_consumed
                            }
                            ~initial_execution
                            ~turn_state
@@ -1460,11 +1495,12 @@ dominant source of the observed CAS race exhaustion after
       ~turn_state
       ~registry_base_path
   in
-  let failure_of_error error =
+  let failure_of_error ?deferred_runtime_lane error =
     turn_failure_of_error
       ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
       ~fallback_boundary:Keeper_runtime_failure_route.Masc_execution
       ~exact_failure_execution:!exact_failure_execution
+      ~deferred_runtime_lane
       error
   in
   match phase_gate_outcome with
@@ -1475,8 +1511,12 @@ dominant source of the observed CAS race exhaustion after
   | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err ->
     Error (failure_of_error err)
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
-    let result, _turn_state = main_path turn_state phase_opt in
-    result
-    |> Result.map (fun meta -> Turn_completed meta)
-    |> Result.map_error failure_of_error
+    let result, turn_state = main_path turn_state phase_opt in
+    (match result with
+     | Ok meta -> Ok (Turn_completed meta)
+     | Error error ->
+       Error
+         (failure_of_error
+            ?deferred_runtime_lane:turn_state.deferred_runtime_lane
+            error))
 ;;

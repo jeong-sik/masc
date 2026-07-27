@@ -1055,6 +1055,182 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
     [ "small.test_model"; "smaller.test_model" ]
     !attempts
 
+let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
+  let attempts = ref [] in
+  let deferred = ref [] in
+  let err =
+    Agent_sdk.Error.Api
+      (Agent_sdk.Retry.ServerError
+         { status = 500; message = "checkpoint-observed failure" })
+  in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
+      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~runtime_id:"lane.frozen"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+        attempts := runtime_id :: !attempts;
+        Error err, None)
+      [ "runtime.a"; "runtime.b"; "runtime.c"; "runtime.d" ]
+  in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "checkpoint denial must end the current run");
+  Alcotest.(check (list string))
+    "no same-run second POST"
+    [ "runtime.a" ]
+    (List.rev !attempts);
+  match List.rev !deferred with
+  | [ hint ] ->
+    Alcotest.(check string)
+      "failed runtime"
+      "runtime.a"
+      hint.Driver.failed_runtime_id;
+    Alcotest.(check (list string))
+      "frozen suffix preserved"
+      [ "runtime.b"; "runtime.c"; "runtime.d" ]
+      (Driver.deferred_runtime_ids hint)
+  | hints ->
+    Alcotest.failf "expected one deferred suffix, got %d" (List.length hints)
+
+let test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail () =
+  let attempts = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"runtime.b"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+        attempts := runtime_id :: !attempts;
+        match runtime_id with
+        | "runtime.b" -> Error (retryable_network_error "b failed"), None
+        | "runtime.c" -> Ok runtime_id, None
+        | "runtime.a" ->
+          Alcotest.fail "failed lane prefix must not replay on the next cycle"
+        | other -> Alcotest.failf "unexpected runtime %s" other)
+      [ "runtime.b"; "runtime.c"; "runtime.d" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string) "same-run tail succeeds" "runtime.c" runtime_id
+   | Error error ->
+     Alcotest.failf "expected suffix success: %s" (Agent_sdk.Error.to_string error));
+  Alcotest.(check (list string))
+    "next cycle starts at B then advances to C"
+    [ "runtime.b"; "runtime.c" ]
+    (List.rev !attempts)
+
+let test_deferred_cycle_post_checkpoint_replaces_hint_with_tail () =
+  let deferred = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
+      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~runtime_id:"runtime.b"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+        Alcotest.(check string) "only B attempted" "runtime.b" runtime_id;
+        Error (retryable_network_error "b checkpoint failure"), None)
+      [ "runtime.b"; "runtime.c"; "runtime.d" ]
+  in
+  (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected B failure");
+  match List.rev !deferred with
+  | [ hint ] ->
+    Alcotest.(check (list string))
+      "replacement hint is C,D"
+      [ "runtime.c"; "runtime.d" ]
+      (Driver.deferred_runtime_ids hint)
+  | hints ->
+    Alcotest.failf "expected one replacement hint, got %d" (List.length hints)
+
+let test_single_candidate_checkpoint_failure_has_no_hint () =
+  let deferred = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
+      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~runtime_id:"runtime.only"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
+        Error (retryable_network_error "only failed"), None)
+      [ "runtime.only" ]
+  in
+  (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected failure");
+  Alcotest.(check int) "no successor means no hint" 0 (List.length !deferred)
+
+let test_deferred_hint_refs_are_not_shared () =
+  let failure = retryable_network_error "checkpoint failure" in
+  let hint =
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"lane.one"
+      ~failed_runtime_id:"runtime.a"
+      ~next_runtime_id:"runtime.b"
+      ~later_runtime_ids:[ "runtime.c" ]
+      ~failure
+  in
+  let first = ref (Some hint) in
+  let second = ref (Some hint) in
+  Alcotest.(check bool)
+    "first owner consumes its hint"
+    true
+    (Masc.Keeper_heartbeat_loop.For_testing.consume_deferred_runtime_lane_hint
+       first
+       hint);
+  Alcotest.(check bool) "first hint cleared" true (Option.is_none !first);
+  Alcotest.(check bool)
+    "second owner remains independent"
+    true
+    (Option.is_some !second)
+
+let test_missing_deferred_successor_is_typed_error () =
+  match
+    Driver.For_testing.resolve_runtime_candidates
+      [ "runtime.definitely-missing-deferred-successor" ]
+  with
+  | Error (Agent_sdk.Error.Internal detail) ->
+    Alcotest.(check bool)
+      "missing successor is loud"
+      true
+      (String.length (String.trim detail) > 0)
+  | Error error ->
+    Alcotest.failf
+      "expected typed internal missing-successor error, got %s"
+      (Agent_sdk.Error.to_string error)
+  | Ok _ -> Alcotest.fail "missing successor unexpectedly resolved"
+
+let test_missing_deferred_head_is_consumed_once () =
+  let consumed = ref 0 in
+  let result =
+    Driver.For_testing.resolve_runtime_candidate_for_attempt
+      ~on_missing:(fun () -> incr consumed)
+      "runtime.definitely-missing-deferred-head"
+  in
+  (match result with
+   | Error (Agent_sdk.Error.Internal _) -> ()
+   | Error error ->
+     Alcotest.failf
+       "expected typed missing-head error, got %s"
+       (Agent_sdk.Error.to_string error)
+   | Ok _ -> Alcotest.fail "missing deferred head unexpectedly resolved");
+  Alcotest.(check int) "missing head consumed once" 1 !consumed
+
+let test_initial_lane_exhaustion_cannot_escape_declared_candidates () =
+  match
+    Masc.Keeper_unified_turn_execution.For_testing
+      .declared_lane_failure_of_error
+      (retryable_network_error "declared lane exhausted")
+  with
+  | Masc.Keeper_unified_turn_execution.For_testing
+      .Declared_runtime_lane_exhausted ->
+    ()
+  | Masc.Keeper_unified_turn_execution.For_testing
+      .Provider_context_overflow _ ->
+    Alcotest.fail "network exhaustion must not enter an outer catalog fallback"
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -1145,5 +1321,37 @@ let () =
             "context overflow on last candidate stays terminal"
             `Quick
             test_attempt_loop_overflow_on_last_candidate_is_terminal;
+          Alcotest.test_case
+            "checkpoint denial defers exact frozen suffix once"
+            `Quick
+            test_checkpoint_denial_defers_exact_frozen_suffix_once;
+          Alcotest.test_case
+            "deferred cycle starts at supplied successor and keeps tail"
+            `Quick
+            test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail;
+          Alcotest.test_case
+            "deferred post-checkpoint failure replaces hint with tail"
+            `Quick
+            test_deferred_cycle_post_checkpoint_replaces_hint_with_tail;
+          Alcotest.test_case
+            "single candidate checkpoint failure has no hint"
+            `Quick
+            test_single_candidate_checkpoint_failure_has_no_hint;
+          Alcotest.test_case
+            "deferred hint refs are not shared"
+            `Quick
+            test_deferred_hint_refs_are_not_shared;
+          Alcotest.test_case
+            "missing deferred successor is typed error"
+            `Quick
+            test_missing_deferred_successor_is_typed_error;
+          Alcotest.test_case
+            "missing deferred head is consumed once"
+            `Quick
+            test_missing_deferred_head_is_consumed_once;
+          Alcotest.test_case
+            "initial lane exhaustion cannot escape declared candidates"
+            `Quick
+            test_initial_lane_exhaustion_cannot_escape_declared_candidates;
         ] );
     ]

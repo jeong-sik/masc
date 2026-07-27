@@ -92,11 +92,11 @@ while IFS= read -r rel || [ -n "$rel" ]; do
   dest="$CONFIG_DIR/$rel"
   [ -f "$src" ] || die "manifest lists missing file: $rel (expected $src)"
 
-  # Track bootable keepers for the summary (keepers/<name>.toml, excluding base).
+  # Track bootable keepers for the summary. Every keepers/<name>.toml is a
+  # keeper; no filename is reserved for shared defaults.
   case "$rel" in
     keepers/*.toml)
-      stem="$(basename "$rel" .toml)"
-      [ "$stem" = "base" ] || keeper_names+=("$stem")
+      keeper_names+=("$(basename "$rel" .toml)")
       ;;
   esac
 

@@ -1303,7 +1303,6 @@ export async function refreshGoals(): Promise<void> {
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
     hydrateGoalTreeObservationError(err)
-    const message = goalTreeError.value ?? errorMessageOr(err, 'Goal refresh failed')
     lastGoalsRefreshAt.value = null
     showToast(WORK_GOAL_LOAD_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
   } finally {

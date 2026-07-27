@@ -1608,6 +1608,10 @@ let prepare_registration_result
     ()
 ;;
 
+let mark_transition_projected_result state ~transition_id =
+  State.mark_transition_projected ~transition_id state
+;;
+
 let project_transition_outbox_result
       ~append_before_retire
       ~base_path
@@ -1623,9 +1627,9 @@ let project_transition_outbox_result
       | [ entry ] ->
         let* () = append_before_retire entry in
         let* projected =
-          State.mark_transition_projected
-            ~transition_id:entry.receipt.transition_id
+          mark_transition_projected_result
             state
+            ~transition_id:entry.receipt.transition_id
         in
         let* projected = bump_revision projected in
         let* () = save_state_unlocked owner projected in

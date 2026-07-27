@@ -80,39 +80,22 @@ export function WorkspaceSigil({
   return html`<span class=${`kw-sigil${beat ? ' kw-sigil-beat' : ''}`} style=${style} title=${id} aria-label=${id}>${sigil}</span>`
 }
 
-/** Normalize the canonical status token (from `keeperDisplayStatus`) into
- *  the closed `KeeperPhaseToken` keyspace. Unknown tokens collapse to
- *  `'unknown'` so `PHASE_TONE` / `PHASE_LABEL_KO` lookups are total.
+/** The canonical status token for a keeper.
  *
- *  Previously this was `keeperPhaseToken` reading from `lifecycle_phase`
- *  directly. That returned the raw `lifecycle_phase ?? phase` value
- *  (PascalCase) — incompatible with the lowercase-keyed SSOT in
- *  `fleet-tone.ts`. Routing through `keeperDisplayStatus` (which already
- *  applies the lowercasing + isKeeperPaused short-circuit) means there is
- *  exactly one mapping table from `KeeperPhase` to lowercase token (in
- *  `keeper-runtime-display.ts:197` `keeperLifecycleStatus`). */
+ *  `keeperDisplayStatus` now declares `KeeperPhaseToken` as its return
+ *  type, so this is a pass-through. It previously re-narrowed with a
+ *  runtime `hasOwnProperty` guard because that function returned `string`;
+ *  the guard was where `'idle'` / `'listening'` / `'handingoff'` /
+ *  `'offline'` silently became `'unknown'`, i.e. `확인 필요`. Parsing now
+ *  happens once, at the wire boundary inside `keeperDisplayStatus`
+ *  (`toKeeperPhaseToken` in `lib/fleet-tone.ts`), so re-checking here would
+ *  only be able to hide a producer bug, not catch one.
+ *
+ *  Kept as a named function rather than inlined: three call sites read it
+ *  as "the token for this keeper", and it is the seam to change if the
+ *  workspace ever needs a token different from the shared display one. */
 export function phaseTokenFromKeeper(keeper: Keeper): KeeperPhaseToken {
-  const token = keeperDisplayStatus(keeper).trim().toLowerCase()
-  return isKeeperPhaseToken(token) ? token : 'unknown'
-}
-
-/** Closed-sum guard. `keeperDisplayStatus` returns a `string` (its
- *  signature is intentionally permissive because callers pass through
- *  arbitrary backend status values), so we narrow here against the
- *  declared token union. New tokens from the wire that are not yet in
- *  `KeeperPhaseToken` collapse to `'unknown'` via this fallback.
- *
- *  Why `Object.prototype.hasOwnProperty.call` instead of `value in PHASE_TONE`:
- *  the `in` operator walks the prototype chain. Although `PHASE_TONE` is
- *  now built with `Object.create(null)` (see `lib/fleet-tone.ts`) so
- *  this specific leak no longer applies, the `hasOwnProperty` form is
- *  defensive against future refactors that switch the map to a plain
- *  object literal or a `Map`. Either backend leak mode would let a
- *  wire token like `'constructor'` or `'toString'` slip past the
- *  `'unknown'` fallback and surface inherited `Object.prototype`
- *  members in `keeperStatusTone` / `keeperPhaseLabel`. */
-function isKeeperPhaseToken(value: string): value is KeeperPhaseToken {
-  return Object.prototype.hasOwnProperty.call(PHASE_TONE, value)
+  return keeperDisplayStatus(keeper)
 }
 
 /** Phase label shown in the roster sub-row and the chat header state pill.

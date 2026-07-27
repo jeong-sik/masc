@@ -51,9 +51,15 @@ const STRONG_GLOW = '0 0 10px color-mix(in srgb, currentColor 32%, transparent)'
 export const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   // Labels come from the fleet-tone PHASE_LABEL_KO SSOT (PascalCase
   // KeeperPhase → lowercase KeeperPhaseToken is a 1:1 mapping) so the
-  // badge cannot drift from the roster/workspace vocabulary. 'Offline'
-  // has no KeeperPhaseToken counterpart, so it keeps the local literal.
-  Offline:    { label: '오프라인',     color: 'var(--color-fg-muted)', bg: 'var(--color-bg-elevated)',   border: 'var(--color-border-default)',   glow: 'none',        icon: '○' },
+  // badge cannot drift from the roster/workspace vocabulary.
+  //
+  // `Offline` reads `unbooted`, not `offline`: `keeperLifecycleStatus`
+  // (`lib/keeper-runtime-display.ts`) maps the `Offline` phase onto the
+  // `unbooted` token, so every other surface renders `미기동` for this
+  // keeper. This entry said `오프라인` and was the last cell where the
+  // agent detail header disagreed with itself — the phase badge and the
+  // status badge sit on the same line.
+  Offline:    { label: PHASE_LABEL_KO.unbooted,     color: 'var(--color-fg-muted)', bg: 'var(--color-bg-elevated)',   border: 'var(--color-border-default)',   glow: 'none',        icon: '○' },
   Running:    { label: PHASE_LABEL_KO.running,     color: 'var(--color-status-ok)',         bg: 'var(--ok-10)',     border: 'var(--ok-20)',      glow: SOFT_GLOW,     icon: '●' },
   Failing:    { label: PHASE_LABEL_KO.failing,     color: 'var(--color-status-warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '▲' },
   Overflowed: { label: PHASE_LABEL_KO.overflowed, color: 'var(--color-status-warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '⚠' },
@@ -90,8 +96,24 @@ export function pipelineStageDetailLabel(detail: string | null | undefined): str
   return PIPELINE_STAGE_DETAIL_LABELS[trimmed] ?? trimmed.replaceAll('_', ' ')
 }
 
+/** Shown when there is no phase to show — absent, blank, or a token this
+ *  build does not know.
+ *
+ *  Previously this was `PHASE_STYLES.Offline`, which was fine only while
+ *  that entry's label was the vague `오프라인`. Now that `Offline` carries
+ *  its real meaning (`미기동`, matching `keeperLifecycleStatus`'s
+ *  `Offline → unbooted` mapping), reusing it as the fallback would assert
+ *  "this keeper never booted" about a keeper we simply have no phase for.
+ *  It renders `확인 필요` instead — the same word every other surface uses
+ *  for an unresolved status — while keeping the neutral grey styling. */
+const UNKNOWN_PHASE_STYLE: PhaseStyle = {
+  ...PHASE_STYLES.Offline,
+  label: PHASE_LABEL_KO.unknown,
+  icon: '?',
+}
+
 export function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseStyle {
-  if (!phase) return PHASE_STYLES.Offline
+  if (!phase) return UNKNOWN_PHASE_STYLE
   // Use the SSOT boundary parser (`toKeeperPhase`) instead of the raw
   // `as KeeperPhase` assertion. `toKeeperPhase` accepts both PascalCase
   // (canonical `Keeper.phase`) and lowercase backend tokens (the same
@@ -102,7 +124,7 @@ export function getPhaseStyle(phase: KeeperPhase | string | null | undefined): P
   // total parser, not coerced through an unchecked cast that silently
   // accesses an undefined record key.
   const typed = toKeeperPhase(phase)
-  return typed != null ? PHASE_STYLES[typed] : PHASE_STYLES.Offline
+  return typed != null ? PHASE_STYLES[typed] : UNKNOWN_PHASE_STYLE
 }
 
 /** Phase badge — color-coded pill showing the keeper lifecycle phase. */

@@ -65,6 +65,7 @@ let ensure_registered_keeper ~base_path keeper_name =
 let pending_entry
       ?(input_tag = "default")
       ?(keeper_name = "keeper")
+      ?(include_request_context = true)
       ~base_path
       ()
   =
@@ -94,7 +95,8 @@ let pending_entry
              ; "input_tag", `String input_tag
              ])
         ~base_path
-        ~request_context
+        ?request_context:
+          (if include_request_context then Some request_context else None)
         ()
     with
     | Ok id -> id
@@ -1655,8 +1657,19 @@ let test_owner_fifo_atomic_drain_is_nonsharing () =
             ~source:"hitl-owner-fifo-drain"
             [ { id = "hitl-owner-fifo-drain"; base_url = server.base_url } ]);
        select_auto_judge_mode base_path;
-       let first = pending_entry ~input_tag:"first" ~base_path () in
+       let first =
+         pending_entry
+           ~input_tag:"first"
+           ~include_request_context:false
+           ~base_path
+           ()
+       in
        let second = pending_entry ~input_tag:"second" ~base_path () in
+       check
+         (option yojson)
+         "FIFO head reproduces absent causal context"
+         None
+         first.request_context;
        let initial = Gate.resume_persisted_auto_judges ~base_path in
        check
          (list string)

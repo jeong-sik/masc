@@ -49,14 +49,14 @@ let request_context_availability_to_string = function
   | Context_not_captured -> "not_captured"
 ;;
 
-let request_context_availability_of_entry (entry : pending_approval) =
+let request_context_projection (entry : pending_approval) =
   match entry.request_context with
-  | Some _ -> Context_captured
-  | None -> Context_not_captured
+  | Some request_context -> Context_captured, request_context
+  | None -> Context_not_captured, `Null
 ;;
 
 let build_context_bundle ~(entry : pending_approval) =
-  let availability = request_context_availability_of_entry entry in
+  let availability, request_context = request_context_projection entry in
   `Assoc
     [ "keeper_name", `String entry.keeper_name
     ; "tool_name", `String entry.tool_name
@@ -67,8 +67,7 @@ let build_context_bundle ~(entry : pending_approval) =
     ; "input", entry.input
     ; ( "request_context_availability"
       , `String (request_context_availability_to_string availability) )
-    ; ( "request_context"
-      , Option.value entry.request_context ~default:`Null )
+    ; "request_context", request_context
     ]
 ;;
 

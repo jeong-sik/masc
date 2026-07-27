@@ -81,6 +81,7 @@ type exact_attempt_state =
 type summary_attempt_pre_worker_unavailable_code =
   | Summary_pre_worker_auto_judge_unavailable
   | Summary_pre_worker_mode_state_invalid
+  | Summary_pre_worker_start_reserved
 
 type summary_attempt_pre_worker_unavailable =
   { reason_code : summary_attempt_pre_worker_unavailable_code
@@ -311,6 +312,8 @@ let summary_attempt_pre_worker_unavailable_code_to_string = function
     "auto_judge_unavailable"
   | Summary_pre_worker_mode_state_invalid ->
     "mode_state_invalid"
+  | Summary_pre_worker_start_reserved ->
+    "start_reserved"
 ;;
 
 let summary_attempt_disposition_to_yojson = function
@@ -457,6 +460,8 @@ let summary_attempt_disposition_of_yojson_with_error json =
            Ok Summary_pre_worker_auto_judge_unavailable
          | "mode_state_invalid" ->
            Ok Summary_pre_worker_mode_state_invalid
+         | "start_reserved" ->
+           Ok Summary_pre_worker_start_reserved
          | reason_code ->
            Error
              (Printf.sprintf

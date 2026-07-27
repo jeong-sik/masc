@@ -99,7 +99,7 @@ export type KeeperSummaryAttemptDisposition =
   | { code: 'persistence_uncertain'; operator_detail: string }
   | {
       code: 'pre_worker_unavailable'
-      reason_code: 'auto_judge_unavailable' | 'mode_state_invalid'
+      reason_code: 'auto_judge_unavailable' | 'mode_state_invalid' | 'start_reserved'
       operator_detail: string
     }
 

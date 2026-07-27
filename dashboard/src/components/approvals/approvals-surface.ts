@@ -309,9 +309,11 @@ function blockedSummaryAttempt(
     ? 'Auto Judge 중단 · exact identity 미결합'
     : disposition.code === 'persistence_uncertain'
       ? 'Auto Judge 중단 · durability 확인 필요'
-      : disposition.reason_code === 'mode_state_invalid'
-        ? 'Auto Judge 중단 · Gate mode 상태 불가'
-        : 'Auto Judge 중단 · 시작 불가'
+      : disposition.reason_code === 'start_reserved'
+        ? 'Auto Judge 시작 · exact identity 예약됨'
+        : disposition.reason_code === 'mode_state_invalid'
+          ? 'Auto Judge 중단 · Gate mode 상태 불가'
+          : 'Auto Judge 중단 · 시작 불가'
   return html`
     <div
       class="ap-summary ap-summary-failed"

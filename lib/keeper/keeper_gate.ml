@@ -545,6 +545,28 @@ let durable_pre_worker_unavailable_error reason = function
     ^ Keeper_approval_queue.exact_attempt_error_to_string error
 ;;
 
+let pre_worker_start_reserved_detail =
+  "Auto Judge worker start is durably reserved before exact attempt binding."
+;;
+
+let reserve_pre_worker_start
+      (entry : Keeper_approval_queue.pending_approval)
+  =
+  match
+    mark_pre_worker_unavailable
+      entry
+      ~reason_code:Keeper_approval_queue.Summary_pre_worker_start_reserved
+      ~operator_detail:pre_worker_start_reserved_detail
+  with
+  | Ok true -> Ok ()
+  | Ok false ->
+    Error "Auto Judge worker start reservation was not applied"
+  | Error error ->
+    Error
+      ("Auto Judge worker start reservation failed: "
+       ^ Keeper_approval_queue.exact_attempt_error_to_string error)
+;;
+
 let rec spawn_claimed_auto_judge_entry_with
       ~(spawn_worker : hitl_worker_spawner)
       (entry : Keeper_approval_queue.pending_approval)
@@ -571,6 +593,7 @@ let rec spawn_claimed_auto_judge_entry_with
          |> durable_pre_worker_unavailable_error reason
          |> Result.error)
   in
+  let start_after_reservation () =
   match Eio_context.get_root_switch_opt () with
   | Some sw ->
     (try
@@ -639,7 +662,10 @@ let rec spawn_claimed_auto_judge_entry_with
        | Error reason -> fail_before_worker ~reason
      with
      | Eio.Cancel.Cancelled _ as exn ->
-       release_auto_judge entry;
+       let reason =
+         "Auto Judge worker start was cancelled: " ^ Printexc.to_string exn
+       in
+       ignore (fail_before_worker ~reason);
        raise exn
      | exn ->
        let reason =
@@ -649,6 +675,12 @@ let rec spawn_claimed_auto_judge_entry_with
   | None ->
     fail_before_worker
       ~reason:"Auto Judge unavailable: server root switch is not installed"
+  in
+  match reserve_pre_worker_start entry with
+  | Ok () -> start_after_reservation ()
+  | Error reason ->
+    release_auto_judge entry;
+    Error reason
 
 and spawn_claimed_auto_judge_entry entry =
   spawn_claimed_auto_judge_entry_with
@@ -698,18 +730,33 @@ and retry_auto_judge_entry
         ~operator_detail:reason
       |> durable_pre_worker_unavailable_error reason
     in
-    (match
-       drain_auto_judge_owner
-         ~base_path:entry.audit_base_path
-         ~keeper_name:entry.keeper_name
-         ()
+    (try
+       match
+         drain_auto_judge_owner
+           ~base_path:entry.audit_base_path
+           ~keeper_name:entry.keeper_name
+           ()
+       with
+       | Error reason -> Error (reblock reason)
+       | Ok outcome ->
+         (match List.assoc_opt entry.id outcome.failures, outcome.started_id with
+          | Some reason, _ -> Error (reblock reason)
+          | None, Some id when String.equal id entry.id -> Ok Retry_started
+          | None, (Some _ | None) -> Ok Retry_queued)
      with
-     | Error reason -> Error (reblock reason)
-     | Ok outcome ->
-       (match List.assoc_opt entry.id outcome.failures, outcome.started_id with
-        | Some reason, _ -> Error (reblock reason)
-        | None, Some id when String.equal id entry.id -> Ok Retry_started
-        | None, (Some _ | None) -> Ok Retry_queued))
+     | Eio.Cancel.Cancelled _ as exn ->
+       let reason =
+         "Auto Judge retry was cancelled before exact attempt binding: "
+         ^ Printexc.to_string exn
+       in
+       ignore (reblock reason);
+       raise exn
+     | exn ->
+       let reason =
+         "Auto Judge retry failed before exact attempt binding: "
+         ^ Printexc.to_string exn
+       in
+       Error (reblock reason))
 
 and start_auto_judge (entry : Keeper_approval_queue.pending_approval) =
   if not (claim_auto_judge entry)
@@ -1083,13 +1130,13 @@ let resume_persisted_auto_judges_with
            started_ids, entry.id :: finalized_ids, skipped_ids, failures
          | `Start (Ok Skipped) | `Finalize (Ok Judgment_skipped) ->
            started_ids, finalized_ids, entry.id :: skipped_ids, failures
-         | `Start (Error _reason) ->
+         | `Start (Error reason) ->
            ( started_ids
            , finalized_ids
            , skipped_ids
            , { approval_id = entry.id
              ; code = Resume_worker_start_failed
-             ; operator_detail = "Auto Judge worker did not start."
+             ; operator_detail = reason
              }
              :: failures )
          | `Finalize (Error (code, operator_detail)) ->

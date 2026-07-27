@@ -656,7 +656,16 @@ let validate_entry_exact_attempt
     Exact_bound { status = Exact_quarantined cause; _ }, summary_status
     when summary_status = exact_attempt_quarantine_summary_status cause ->
     Ok ()
-  | (Summary_attempt_in_flight | Summary_attempt_persistence_uncertain),
+  | Summary_attempt_in_flight,
+    Exact_bound
+      { status =
+          ( Exact_dispatch_uncertain
+          | Exact_released_before_dispatch )
+      ; _
+      },
+    Summary_pending ->
+    Ok ()
+  | Summary_attempt_persistence_uncertain,
     Exact_bound
       { status =
           ( Exact_dispatch_uncertain
@@ -671,6 +680,19 @@ let validate_entry_exact_attempt
     Error "completed exact attempt requires an available summary"
   | _ ->
     Error "exact attempt and summary status are not a valid current-schema pair"
+;;
+
+let summary_attempt_allows_exact_bind = function
+  | Summary_attempt_ready
+  | Summary_attempt_pre_worker_unavailable
+      { reason_code = Summary_pre_worker_start_reserved; _ } ->
+    true
+  | Summary_attempt_in_flight
+  | Summary_attempt_identity_unbound
+  | Summary_attempt_persistence_uncertain
+  | Summary_attempt_pre_worker_unavailable _
+  | Summary_attempt_settled ->
+    false
 ;;
 
 let pending_entry_of_yojson ~base_path json =
@@ -1993,8 +2015,10 @@ let bind_summary_exact_attempt_with
            | Summary_pending ->
              (match entry.exact_attempt with
                | Exact_unbound
-                 when entry.summary_attempt_disposition
-                      <> Summary_attempt_ready ->
+                 when
+                   not
+                     (summary_attempt_allows_exact_bind
+                        entry.summary_attempt_disposition) ->
                  Error
                    (Exact_attempt_rejected
                       (Exact_attempt_disposition_conflict
@@ -2523,6 +2547,13 @@ let mark_summary_attempt_pre_worker_unavailable
          with
          | (Summary_not_requested | Summary_pending), Exact_unbound,
            Summary_attempt_ready ->
+           Some
+             { entry with
+               summary_attempt_disposition = blocked
+             }
+         | (Summary_not_requested | Summary_pending), Exact_unbound,
+           Summary_attempt_pre_worker_unavailable
+             { reason_code = Summary_pre_worker_start_reserved; _ } ->
            Some
              { entry with
                summary_attempt_disposition = blocked

@@ -424,6 +424,38 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     ).toBeNull()
   })
 
+  it('rejects unknown queue-row authority fields', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: 'pending',
+        summary_attempt_authority: 'ready',
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects restart-only exact states from in-flight rows', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-restart-only',
+          call_id: 'call-restart-only',
+          plan_fingerprint: 'plan-restart-only',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'released_recovery_required',
+          quarantine_cause: null,
+        },
+        summary_attempt_disposition: { code: 'in_flight' },
+        summary_status: 'pending',
+      }),
+    ).toBeNull()
+  })
+
   it('rejects absent or malformed current queue state without fabricating defaults', () => {
     expect(normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: undefined })).toBeNull()
     expect(

@@ -267,6 +267,7 @@ function normalizeKeeperSummaryAttemptDisposition(
       return (
         reasonCode === 'auto_judge_unavailable'
         || reasonCode === 'mode_state_invalid'
+        || reasonCode === 'start_reserved'
       )
         && typeof operatorDetail === 'string'
         && operatorDetail.length > 0
@@ -286,6 +287,31 @@ function normalizeKeeperSummaryAttemptDisposition(
 
 export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQueueItem | null {
   if (!isRecord(raw)) return null
+  const canonicalKeys = [
+    'id',
+    'keeper_name',
+    'tool_name',
+    'input_hash',
+    'sequence',
+    'requested_at',
+    'waiting_s',
+    'turn_id',
+    'task_id',
+    'goal_id',
+    'goal_ids',
+    'summary_status',
+    'exact_attempt',
+    'summary_attempt_disposition',
+  ]
+  const hasInput = Object.prototype.hasOwnProperty.call(raw, 'input')
+  const hasInputPreview = Object.prototype.hasOwnProperty.call(raw, 'input_preview')
+  if (hasInput !== hasInputPreview) return null
+  if (
+    !hasOnlyKeys(
+      raw,
+      hasInput ? [...canonicalKeys, 'input', 'input_preview'] : canonicalKeys,
+    )
+  ) return null
   const id = asString(raw.id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
@@ -329,8 +355,10 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
       case 'in_flight':
         return exactAttempt.state === 'bound'
           && summaryStatus.status === 'pending'
-          && exactAttempt.status !== 'completed'
-          && exactAttempt.status !== 'quarantined'
+          && (
+            exactAttempt.status === 'dispatch_uncertain'
+            || exactAttempt.status === 'released_before_dispatch'
+          )
       case 'settled':
         return exactAttempt.state === 'bound'
           && (
@@ -353,6 +381,12 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
               === exactAttemptQuarantineSummaryReason(exactAttempt.quarantine_cause)
         }
         return summaryStatus.status === 'pending'
+          && (
+            exactAttempt.status === 'dispatch_uncertain'
+            || exactAttempt.status === 'released_before_dispatch'
+            || exactAttempt.status === 'released_recovery_required'
+            || exactAttempt.status === 'restart_quarantined'
+          )
       default: {
         const _never: never = disposition
         return _never

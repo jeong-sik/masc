@@ -77,6 +77,7 @@ type exact_attempt_state =
 type summary_attempt_pre_worker_unavailable_code =
   | Summary_pre_worker_auto_judge_unavailable
   | Summary_pre_worker_mode_state_invalid
+  | Summary_pre_worker_start_reserved
 
 type summary_attempt_pre_worker_unavailable =
   { reason_code : summary_attempt_pre_worker_unavailable_code

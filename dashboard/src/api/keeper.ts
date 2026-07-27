@@ -1,17 +1,17 @@
 // MASC Dashboard — Keeper messaging (operator-mediated queue, SSE streaming)
 
-import { asNumber, asString, isRecord } from '../components/common/normalize'
+import { asNumber, asString, isRecord } from "../components/common/normalize";
 import {
   formatKeeperVisibleReply,
   keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
-} from '../keeper-message'
+} from "../keeper-message";
 import type {
   KeeperConversationDetails,
   KeeperQueueReceiptFailureKind,
   KeeperUserInputBlock,
-} from '../types'
-import type { DashboardAuthErrorCode } from '../types/dashboard-execution'
+} from "../types";
+import type { DashboardAuthErrorCode } from "../types/dashboard-execution";
 import {
   currentDashboardActor,
   apiRequestErrorFromResponse,
@@ -26,19 +26,22 @@ import {
   fetchWithTimeout,
   fetchJsonWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
-} from './core'
-import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
-import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
+} from "./core";
+import { ensureDevToken, resetDevTokenBootstrap } from "./dev-token";
+import {
+  isKeeperChatReceiptId,
+  parseKeeperQueueRevision,
+} from "../lib/keeper-chat-receipt";
 import type {
   KeeperCompositeSnapshot,
   FleetCompositeSnapshot,
-} from './schemas/keeper-composite'
-import type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
-import type { KeeperCatchupDigest } from './schemas/keeper-catchup-digest'
+} from "./schemas/keeper-composite";
+import type { KeeperChatHistoryMessage } from "./schemas/keeper-chat-history";
+import type { KeeperCatchupDigest } from "./schemas/keeper-catchup-digest";
 import type {
   KeeperTransition,
   KeeperTransitionsResponse,
-} from './schemas/keeper-transitions'
+} from "./schemas/keeper-transitions";
 
 export type {
   KeeperCompositeSnapshot,
@@ -61,9 +64,9 @@ export type {
   KeeperCompositeRuntimeState,
   KeeperCompositeCompactionStage,
   FleetCompositeSnapshot,
-} from './schemas/keeper-composite'
-export type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
-export type { KeeperTransition, KeeperTransitionsResponse }
+} from "./schemas/keeper-composite";
+export type { KeeperChatHistoryMessage } from "./schemas/keeper-chat-history";
+export type { KeeperTransition, KeeperTransitionsResponse };
 
 // --- Runtime trace evidence (split to keeper-runtime-trace.ts) ---
 export type {
@@ -94,21 +97,23 @@ export type {
   KeeperRuntimeTraceLinkedArtifact,
   KeeperRuntimeTraceLinkedArtifacts,
   KeeperRuntimeTraceResponse,
-} from './keeper-runtime-trace'
+} from "./keeper-runtime-trace";
 export {
   parseKeeperRuntimeTrace,
   fetchKeeperRuntimeTrace,
-} from './keeper-runtime-trace'
+} from "./keeper-runtime-trace";
 
 // --- Keeper lifecycle (split to keeper-lifecycle.ts) ---
 export type {
+  KeeperCheckpointCurrentError,
+  KeeperCheckpointHistoryError,
   KeeperCheckpointSummary,
   KeeperCheckpointInventory,
   BulkKeeperDirectiveAction,
   BulkKeeperDirectiveResult,
   BulkKeeperDirectiveResponse,
   BulkKeeperResumeTarget,
-} from './keeper-lifecycle'
+} from "./keeper-lifecycle";
 export {
   bootKeeper,
   shutdownKeeper,
@@ -120,167 +125,192 @@ export {
   fetchKeeperCheckpoints,
   deleteKeeperHistorySnapshots,
   bulkKeeperDirective,
-} from './keeper-lifecycle'
+} from "./keeper-lifecycle";
 
 // --- Types ---
 
 export interface KeeperToolReply {
-  text: string
-  details: KeeperConversationDetails | null
+  text: string;
+  details: KeeperConversationDetails | null;
 }
 
 export type QueuedKeeperMessageStatus =
-  | 'queued'
-  | 'running'
-  | 'cancelling'
-  | 'done'
-  | 'error'
-  | 'lost'
-  | 'cancelled'
-  | 'persistence_failed'
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "done"
+  | "error"
+  | "lost"
+  | "cancelled"
+  | "persistence_failed";
 
 export interface QueuedKeeperMessageSubmission {
-  requestId: string
-  keeperName: string
-  status: QueuedKeeperMessageStatus
-  message?: string
+  requestId: string;
+  keeperName: string;
+  status: QueuedKeeperMessageStatus;
+  message?: string;
 }
 
 export interface QueuedKeeperMessageResult {
-  requestId: string
-  keeperName: string
-  status: QueuedKeeperMessageStatus
-  submittedAt?: number
-  completedAt?: number
-  elapsedSec?: number
-  ok?: boolean
-  result?: unknown
+  requestId: string;
+  keeperName: string;
+  status: QueuedKeeperMessageStatus;
+  submittedAt?: number;
+  completedAt?: number;
+  elapsedSec?: number;
+  ok?: boolean;
+  result?: unknown;
 }
 
 export interface QueuedKeeperMessageCancelResult {
-  requestId: string
-  status: 'cancelling' | 'cancelled'
-  message?: string
+  requestId: string;
+  status: "cancelling" | "cancelled";
+  message?: string;
 }
 
-const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatus>([
-  'done',
-  'error',
-  'lost',
-  'cancelled',
-  'persistence_failed',
-])
+const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES =
+  new Set<QueuedKeeperMessageStatus>([
+    "done",
+    "error",
+    "lost",
+    "cancelled",
+    "persistence_failed",
+  ]);
 
-function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
-  switch (asString(value, '').trim()) {
-    case 'queued':
-      return 'queued'
-    case 'running':
-      return 'running'
-    case 'cancelling':
-      return 'cancelling'
-    case 'done':
-      return 'done'
-    case 'error':
-      return 'error'
-    case 'lost':
-      return 'lost'
-    case 'cancelled':
-      return 'cancelled'
-    case 'persistence_failed':
-      return 'persistence_failed'
+function normalizeQueuedKeeperMessageStatus(
+  value: unknown,
+): QueuedKeeperMessageStatus {
+  switch (asString(value, "").trim()) {
+    case "queued":
+      return "queued";
+    case "running":
+      return "running";
+    case "cancelling":
+      return "cancelling";
+    case "done":
+      return "done";
+    case "error":
+      return "error";
+    case "lost":
+      return "lost";
+    case "cancelled":
+      return "cancelled";
+    case "persistence_failed":
+      return "persistence_failed";
     default:
-      throw new Error(`unsupported keeper message status: ${JSON.stringify(value)}`)
+      throw new Error(
+        `unsupported keeper message status: ${JSON.stringify(value)}`,
+      );
   }
 }
 
-function optionalNumberField(record: Record<string, unknown>, key: string): number | undefined {
-  const value = record[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+function optionalNumberField(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
-function parseQueuedKeeperMessageSubmission(data: unknown): QueuedKeeperMessageSubmission {
-  const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
+function parseQueuedKeeperMessageSubmission(
+  data: unknown,
+): QueuedKeeperMessageSubmission {
+  const record = isRecord(data) ? data : null;
+  const requestId = asString(record?.request_id, "").trim();
   if (!requestId) {
-    throw new Error('keeper message queue response missing request_id')
+    throw new Error("keeper message queue response missing request_id");
   }
   return {
     requestId,
-    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
+    keeperName: (
+      asString(record?.keeper_name) ?? asString(record?.destination_id, "")
+    ).trim(),
     status: normalizeQueuedKeeperMessageStatus(record?.status),
     message: asString(record?.message),
-  }
+  };
 }
 
-function parseQueuedKeeperMessageResult(data: unknown): QueuedKeeperMessageResult {
-  const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
+function parseQueuedKeeperMessageResult(
+  data: unknown,
+): QueuedKeeperMessageResult {
+  const record = isRecord(data) ? data : null;
+  const requestId = asString(record?.request_id, "").trim();
   if (!requestId) {
-    throw new Error('keeper message result response missing request_id')
+    throw new Error("keeper message result response missing request_id");
   }
   return {
     requestId,
-    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
+    keeperName: (
+      asString(record?.keeper_name) ?? asString(record?.destination_id, "")
+    ).trim(),
     status: normalizeQueuedKeeperMessageStatus(record?.status),
-    submittedAt: record ? optionalNumberField(record, 'submitted_at') : undefined,
-    completedAt: record ? optionalNumberField(record, 'completed_at') : undefined,
-    elapsedSec: record ? optionalNumberField(record, 'elapsed_sec') : undefined,
-    ok: typeof record?.ok === 'boolean' ? record.ok : undefined,
+    submittedAt: record
+      ? optionalNumberField(record, "submitted_at")
+      : undefined,
+    completedAt: record
+      ? optionalNumberField(record, "completed_at")
+      : undefined,
+    elapsedSec: record ? optionalNumberField(record, "elapsed_sec") : undefined,
+    ok: typeof record?.ok === "boolean" ? record.ok : undefined,
     result: record?.result,
-  }
+  };
 }
 
-function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessageCancelResult {
-  const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
+function parseQueuedKeeperMessageCancelResult(
+  data: unknown,
+): QueuedKeeperMessageCancelResult {
+  const record = isRecord(data) ? data : null;
+  const requestId = asString(record?.request_id, "").trim();
   if (!requestId) {
-    throw new Error('keeper message cancel response missing request_id')
+    throw new Error("keeper message cancel response missing request_id");
   }
-  const status = normalizeQueuedKeeperMessageStatus(record?.status)
-  if (status !== 'cancelling' && status !== 'cancelled') {
-    throw new Error(`keeper message cancel response has non-cancellation status: ${status}`)
+  const status = normalizeQueuedKeeperMessageStatus(record?.status);
+  if (status !== "cancelling" && status !== "cancelled") {
+    throw new Error(
+      `keeper message cancel response has non-cancellation status: ${status}`,
+    );
   }
   return {
     requestId,
     status,
     message: asString(record?.message),
-  }
+  };
 }
 
 export interface KeeperTurnInterruptResult {
-  cancelled: boolean
-  turn_id?: number
-  reason?: string
+  cancelled: boolean;
+  turn_id?: number;
+  reason?: string;
 }
 
 export async function interruptKeeperTurn(
   keeperName: string,
   opts: { signal?: AbortSignal } = {},
 ): Promise<KeeperTurnInterruptResult> {
-  const path = '/api/v1/keepers/turn/interrupt'
-  const resp = await fetchControlPlane(
-    path,
-    {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify({ name: keeperName.trim() }),
-      signal: opts.signal,
-    },
-  )
+  const path = "/api/v1/keepers/turn/interrupt";
+  const resp = await fetchControlPlane(path, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ name: keeperName.trim() }),
+    signal: opts.signal,
+  });
   if (!resp.ok) {
-    throw await apiRequestErrorFromResponse('POST', path, resp)
+    throw await apiRequestErrorFromResponse("POST", path, resp);
   }
-  const data = (await resp.json()) as Record<string, unknown>
+  const data = (await resp.json()) as Record<string, unknown>;
   return {
     cancelled: data.cancelled === true,
-    turn_id: typeof data.turn_id === 'number' ? data.turn_id : undefined,
+    turn_id: typeof data.turn_id === "number" ? data.turn_id : undefined,
     reason: asString(data.reason),
-  }
+  };
 }
 
-export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult): boolean {
-  return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status)
+export function isTerminalQueuedKeeperMessage(
+  result: QueuedKeeperMessageResult,
+): boolean {
+  return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status);
 }
 
 // Server no longer enforces an external timeout for keeper_msg.
@@ -288,21 +318,21 @@ export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult)
 // Client-side abort via AbortSignal is the recommended cancellation path.
 
 export interface KeeperChatStreamEvent {
-  type: string
-  threadId?: string
-  runId?: string
-  messageId?: string
-  role?: string
-  delta?: string
-  snapshot?: string
-  message?: string
-  code?: string
-  name?: string
-  value?: unknown
-  timestamp?: number
+  type: string;
+  threadId?: string;
+  runId?: string;
+  messageId?: string;
+  role?: string;
+  delta?: string;
+  snapshot?: string;
+  message?: string;
+  code?: string;
+  name?: string;
+  value?: unknown;
+  timestamp?: number;
   // AG-UI tool call fields (TOOL_CALL_START / TOOL_CALL_ARGS / TOOL_CALL_END)
-  toolCallId?: string
-  toolCallName?: string
+  toolCallId?: string;
+  toolCallName?: string;
 }
 
 // --- Direct and operator-mediated messaging ---
@@ -314,34 +344,34 @@ async function callKeeperMessageViaOperator(
   const payload: Record<string, unknown> = {
     message,
     direct_reply: true,
-  }
+  };
   const response = await runOperatorAction({
     actor: currentDashboardActor(),
-    action_type: 'keeper_message',
-    target_type: 'keeper',
+    action_type: "keeper_message",
+    target_type: "keeper",
     target_id: name,
     payload,
-  })
+  });
 
-  const resultPayload = isRecord(response.result) ? response.result : null
+  const resultPayload = isRecord(response.result) ? response.result : null;
   const rawReply =
-    resultPayload && typeof resultPayload.reply === 'string'
+    resultPayload && typeof resultPayload.reply === "string"
       ? resultPayload.reply
-      : ''
+      : "";
   const detailsRaw =
     resultPayload && isRecord(resultPayload.result)
       ? resultPayload.result
-      : resultPayload
-  const details = normalizeKeeperConversationDetails(detailsRaw)
-  const text = formatKeeperVisibleReply(rawReply || '(empty reply)')
-  return { text, details }
+      : resultPayload;
+  const details = normalizeKeeperConversationDetails(detailsRaw);
+  const text = formatKeeperVisibleReply(rawReply || "(empty reply)");
+  return { text, details };
 }
 
 export async function sendKeeperMessageDetailed(
   name: string,
   message: string,
 ): Promise<KeeperToolReply> {
-  return callKeeperMessageViaOperator(name, message)
+  return callKeeperMessageViaOperator(name, message);
 }
 
 export async function submitQueuedKeeperMessage(
@@ -350,141 +380,153 @@ export async function submitQueuedKeeperMessage(
 ): Promise<QueuedKeeperMessageSubmission> {
   const response = await runOperatorAction({
     actor: currentDashboardActor(),
-    action_type: 'keeper_message',
-    target_type: 'keeper',
+    action_type: "keeper_message",
+    target_type: "keeper",
     target_id: name,
     payload: {
       message,
       direct_reply: true,
     },
-  })
-  const operatorResult = isRecord(response.result) ? response.result : null
+  });
+  const operatorResult = isRecord(response.result) ? response.result : null;
   const queuePayload =
     operatorResult && isRecord(operatorResult.result)
       ? operatorResult.result
-      : operatorResult
-  return parseQueuedKeeperMessageSubmission(queuePayload)
+      : operatorResult;
+  return parseQueuedKeeperMessageSubmission(queuePayload);
 }
 
 export async function fetchQueuedKeeperMessageResult(
   requestId: string,
   opts: { signal?: AbortSignal } = {},
 ): Promise<QueuedKeeperMessageResult> {
-  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}`
+  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}`;
   const resp = await fetchWithTimeout(
     path,
     { headers: jsonHeaders(), signal: opts.signal },
     DEFAULT_GET_TIMEOUT_MS,
-  )
+  );
   if (!resp.ok) {
-    throw await apiRequestErrorFromResponse('GET', path, resp)
+    throw await apiRequestErrorFromResponse("GET", path, resp);
   }
-  return parseQueuedKeeperMessageResult(await resp.json())
+  return parseQueuedKeeperMessageResult(await resp.json());
 }
 
 export async function cancelQueuedKeeperMessage(
   requestId: string,
   opts: { signal?: AbortSignal } = {},
 ): Promise<QueuedKeeperMessageCancelResult> {
-  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}/cancel`
-  const resp = await fetchControlPlane(
-    path,
-    {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: '{}',
-      signal: opts.signal,
-    },
-  )
+  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}/cancel`;
+  const resp = await fetchControlPlane(path, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: opts.signal,
+  });
   if (!resp.ok) {
-    throw await apiRequestErrorFromResponse('POST', path, resp)
+    throw await apiRequestErrorFromResponse("POST", path, resp);
   }
-  return parseQueuedKeeperMessageCancelResult(await resp.json())
+  return parseQueuedKeeperMessageCancelResult(await resp.json());
 }
 
-export function queuedKeeperMessageError(result: QueuedKeeperMessageResult): string {
-  if (result.status === 'cancelled') return '요청이 취소되었습니다.'
-  const payload = isRecord(result.result) ? result.result : null
-  const message = asString(payload?.message) ?? asString(payload?.reason)
-  const error = asString(payload?.error)
-  return message ?? error ?? `Keeper message request ${result.requestId} ended with ${result.status}`
+export function queuedKeeperMessageError(
+  result: QueuedKeeperMessageResult,
+): string {
+  if (result.status === "cancelled") return "요청이 취소되었습니다.";
+  const payload = isRecord(result.result) ? result.result : null;
+  const message = asString(payload?.message) ?? asString(payload?.reason);
+  const error = asString(payload?.error);
+  return (
+    message ??
+    error ??
+    `Keeper message request ${result.requestId} ended with ${result.status}`
+  );
 }
 
-export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): KeeperToolReply {
-  if (result.status === 'cancelled') {
+export function queuedKeeperMessageToReply(
+  result: QueuedKeeperMessageResult,
+): KeeperToolReply {
+  if (result.status === "cancelled") {
     return {
-      text: '요청이 취소되었습니다.',
+      text: "요청이 취소되었습니다.",
       details: null,
-    }
+    };
   }
-  const payload = isRecord(result.result) ? result.result : null
-  const rawReply = asString(payload?.reply, '').trim()
-  const details = normalizeKeeperConversationDetails(payload ?? result.result)
-  if (result.status === 'done' && keeperTurnOutcomeSuppressesReply(details?.turnOutcome)) {
+  const payload = isRecord(result.result) ? result.result : null;
+  const rawReply = asString(payload?.reply, "").trim();
+  const details = normalizeKeeperConversationDetails(payload ?? result.result);
+  if (
+    result.status === "done" &&
+    keeperTurnOutcomeSuppressesReply(details?.turnOutcome)
+  ) {
     return {
-      text: '',
+      text: "",
       details,
-    }
+    };
   }
-  const fallback = rawReply || queuedKeeperMessageError(result)
+  const fallback = rawReply || queuedKeeperMessageError(result);
   return {
-    text: formatKeeperVisibleReply(fallback || '(empty reply)'),
+    text: formatKeeperVisibleReply(fallback || "(empty reply)"),
     details,
-  }
+  };
 }
 
 // --- SSE streaming ---
 
 function parseSseFrames(chunk: string): { frames: string[]; rest: string } {
-  const normalized = chunk.replace(/\r\n/g, '\n')
-  const frames: string[] = []
-  let start = 0
+  const normalized = chunk.replace(/\r\n/g, "\n");
+  const frames: string[] = [];
+  let start = 0;
   for (;;) {
-    const split = normalized.indexOf('\n\n', start)
+    const split = normalized.indexOf("\n\n", start);
     if (split < 0) {
       return {
         frames,
         rest: normalized.slice(start),
-      }
+      };
     }
-    frames.push(normalized.slice(start, split))
-    start = split + 2
+    frames.push(normalized.slice(start, split));
+    start = split + 2;
   }
 }
 
 function parseSseEvent(frame: string): KeeperChatStreamEvent | null {
   const dataLines = frame
-    .split('\n')
-    .filter(line => line.startsWith('data:'))
-    .map(line => line.slice(5).trimStart())
-  if (dataLines.length === 0) return null
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart());
+  if (dataLines.length === 0) return null;
   try {
-    return JSON.parse(dataLines.join('\n')) as KeeperChatStreamEvent
+    return JSON.parse(dataLines.join("\n")) as KeeperChatStreamEvent;
   } catch (err) {
-    console.debug('[keeper-stream] SSE frame parse failed', dataLines.join('\n').slice(0, 120), err instanceof Error ? err.message : err)
-    return null
+    console.debug(
+      "[keeper-stream] SSE frame parse failed",
+      dataLines.join("\n").slice(0, 120),
+      err instanceof Error ? err.message : err,
+    );
+    return null;
   }
 }
 
 function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
-  return event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR'
+  return event.type === "RUN_FINISHED" || event.type === "RUN_ERROR";
 }
 
 export interface StreamAttachment {
-  id: string
-  type: 'image' | 'file'
-  name: string
-  size: number
-  mimeType: string
-  data: string
+  id: string;
+  type: "image" | "file";
+  name: string;
+  size: number;
+  mimeType: string;
+  data: string;
 }
 
 /** Co-view context sent from dashboard surfaces such as the Copilot Dock. */
 export interface KeeperStreamSurfaceContext {
-  label: string
-  route: string
-  scene: string
-  fields: unknown
+  label: string;
+  route: string;
+  scene: string;
+  fields: unknown;
 }
 
 /** Outcome of a keeper chat stream read loop.
@@ -492,22 +534,25 @@ export interface KeeperStreamSurfaceContext {
  *  RUN_FINISHED / RUN_ERROR event — the response was cut mid-stream
  *  and callers must not present it as a completed reply. */
 export interface KeeperStreamOutcome {
-  terminal: boolean
+  terminal: boolean;
 }
 
 function keeperStreamErrorMessage(raw: string, status: number): string {
-  let message = raw || `스트리밍 요청 실패 (${status})`
+  let message = raw || `스트리밍 요청 실패 (${status})`;
   try {
-    const parsed = JSON.parse(raw) as { error?: string | { message?: string }; message?: string }
-    if (typeof parsed.error === 'string') {
-      message = parsed.error
+    const parsed = JSON.parse(raw) as {
+      error?: string | { message?: string };
+      message?: string;
+    };
+    if (typeof parsed.error === "string") {
+      message = parsed.error;
     } else {
-      message = parsed.error?.message ?? parsed.message ?? message
+      message = parsed.error?.message ?? parsed.message ?? message;
     }
   } catch {
     // Keep raw text fallback.
   }
-  return message
+  return message;
 }
 
 /**
@@ -518,10 +563,10 @@ function keeperStreamErrorMessage(raw: string, status: number): string {
  * that simply omitted the token.
  */
 const STALE_TOKEN_AUTH_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
-  'invalid_token',
-  'token_expired',
-  'actor_mismatch',
-])
+  "invalid_token",
+  "token_expired",
+  "actor_mismatch",
+]);
 
 /**
  * Decide whether a 401 body signals a stale/wrong bearer token.
@@ -531,45 +576,47 @@ const STALE_TOKEN_AUTH_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
  */
 function isStaleTokenAuthError(raw: string): boolean {
   try {
-    const parsed = JSON.parse(raw) as { auth_error_code?: unknown }
-    const code = parsed.auth_error_code
-    if (typeof code === 'string') {
-      return STALE_TOKEN_AUTH_CODES.has(code as DashboardAuthErrorCode)
+    const parsed = JSON.parse(raw) as { auth_error_code?: unknown };
+    const code = parsed.auth_error_code;
+    if (typeof code === "string") {
+      return STALE_TOKEN_AUTH_CODES.has(code as DashboardAuthErrorCode);
     }
   } catch {
-    return false
+    return false;
   }
-  return false
+  return false;
 }
 
 async function refreshLoopbackDevTokenAfterMismatch(): Promise<boolean> {
-  if (isRemoteAccess() || !getStoredToken()) return false
-  const meta = getStoredTokenMeta()
-  if (meta?.source === 'manual') return false
+  if (isRemoteAccess() || !getStoredToken()) return false;
+  const meta = getStoredTokenMeta();
+  if (meta?.source === "manual") return false;
 
-  clearStoredToken()
-  resetDevTokenBootstrap()
-  await ensureDevToken()
-  return getStoredToken() !== null
+  clearStoredToken();
+  resetDevTokenBootstrap();
+  await ensureDevToken();
+  return getStoredToken() !== null;
 }
 
 export interface StreamKeeperMessageOptions {
-  signal?: AbortSignal
-  onEvent: (event: KeeperChatStreamEvent) => void
-  attachments?: StreamAttachment[]
-  userBlocks?: KeeperUserInputBlock[]
-  channel?: string
-  channelWorkspaceId?: string
-  turnInstructions?: string
-  surfaceContext?: KeeperStreamSurfaceContext
+  signal?: AbortSignal;
+  onEvent: (event: KeeperChatStreamEvent) => void;
+  attachments?: StreamAttachment[];
+  userBlocks?: KeeperUserInputBlock[];
+  channel?: string;
+  channelWorkspaceId?: string;
+  turnInstructions?: string;
+  surfaceContext?: KeeperStreamSurfaceContext;
 }
 
-function streamUserBlockToWire(block: KeeperUserInputBlock): Record<string, unknown> {
-  if (block.type === 'text') {
+function streamUserBlockToWire(
+  block: KeeperUserInputBlock,
+): Record<string, unknown> {
+  if (block.type === "text") {
     return {
-      type: 'text',
+      type: "text",
       text: block.text,
-    }
+    };
   }
   return {
     type: block.type,
@@ -577,7 +624,7 @@ function streamUserBlockToWire(block: KeeperUserInputBlock): Record<string, unkn
     name: block.name,
     mime_type: block.mimeType,
     size: block.size,
-  }
+  };
 }
 
 export async function streamKeeperMessage(
@@ -598,245 +645,276 @@ export async function streamKeeperMessage(
     name,
     message,
     direct_reply: true,
+  };
+  if (channel && channel.trim() !== "") {
+    body.channel = channel.trim();
   }
-  if (channel && channel.trim() !== '') {
-    body.channel = channel.trim()
+  if (channelWorkspaceId && channelWorkspaceId.trim() !== "") {
+    body.channel_workspace_id = channelWorkspaceId.trim();
   }
-  if (channelWorkspaceId && channelWorkspaceId.trim() !== '') {
-    body.channel_workspace_id = channelWorkspaceId.trim()
-  }
-  if (turnInstructions && turnInstructions.trim() !== '') {
-    body.turn_instructions = turnInstructions.trim()
+  if (turnInstructions && turnInstructions.trim() !== "") {
+    body.turn_instructions = turnInstructions.trim();
   }
   if (surfaceContext && Object.keys(surfaceContext).length > 0) {
-    body.surface_context = surfaceContext
+    body.surface_context = surfaceContext;
   }
   if (attachments && attachments.length > 0) {
-    body.attachments = attachments.map(att => ({
+    body.attachments = attachments.map((att) => ({
       id: att.id,
       type: att.type,
       name: att.name,
       size: att.size,
       mime_type: att.mimeType,
       data: att.data,
-    }))
+    }));
   }
   if (userBlocks && userBlocks.length > 0) {
-    body.user_blocks = userBlocks.map(streamUserBlockToWire)
+    body.user_blocks = userBlocks.map(streamUserBlockToWire);
   }
-  const requestBody = JSON.stringify(body)
-  const postStream = () => fetch('/api/v1/keepers/chat/stream', {
-    method: 'POST',
-    headers: {
-      ...jsonHeaders(),
-      Accept: 'text/event-stream',
-    },
-    body: requestBody,
-    signal,
-  })
+  const requestBody = JSON.stringify(body);
+  const postStream = () =>
+    fetch("/api/v1/keepers/chat/stream", {
+      method: "POST",
+      headers: {
+        ...jsonHeaders(),
+        Accept: "text/event-stream",
+      },
+      body: requestBody,
+      signal,
+    });
 
-  let res = await postStream()
+  let res = await postStream();
 
   if (!res.ok) {
-    let raw = await res.text()
+    let raw = await res.text();
     if (
-      res.status === 401
-      && isStaleTokenAuthError(raw)
-      && await refreshLoopbackDevTokenAfterMismatch()
+      res.status === 401 &&
+      isStaleTokenAuthError(raw) &&
+      (await refreshLoopbackDevTokenAfterMismatch())
     ) {
-      res = await postStream()
+      res = await postStream();
       if (res.ok) {
-        raw = ''
+        raw = "";
       } else {
-        raw = await res.text()
+        raw = await res.text();
       }
     }
     if (!res.ok) {
-      throw new Error(keeperStreamErrorMessage(raw, res.status))
+      throw new Error(keeperStreamErrorMessage(raw, res.status));
     }
   }
 
   if (!res.body) {
-    throw new Error('스트리밍 응답 본문 사용 불가')
+    throw new Error("스트리밍 응답 본문 사용 불가");
   }
 
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
 
   try {
     for (;;) {
-      const { done, value } = await reader.read()
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
-      const { frames, rest } = parseSseFrames(buffer)
-      buffer = rest
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const { frames, rest } = parseSseFrames(buffer);
+      buffer = rest;
       for (const frame of frames) {
-        const event = parseSseEvent(frame)
-        if (!event) continue
-        onEvent(event)
+        const event = parseSseEvent(frame);
+        if (!event) continue;
+        onEvent(event);
         if (isTerminalKeeperStreamEvent(event)) {
           try {
-            await reader.cancel()
+            await reader.cancel();
           } catch {
             // Ignore stream cancellation errors after terminal events.
           }
-          return { terminal: true }
+          return { terminal: true };
         }
       }
-      if (done) break
+      if (done) break;
     }
-    const tail = buffer.trim()
+    const tail = buffer.trim();
     if (tail) {
-      const event = parseSseEvent(tail)
+      const event = parseSseEvent(tail);
       if (event) {
-        onEvent(event)
-        if (isTerminalKeeperStreamEvent(event)) return { terminal: true }
+        onEvent(event);
+        if (isTerminalKeeperStreamEvent(event)) return { terminal: true };
       }
     }
     // Connection closed without RUN_FINISHED / RUN_ERROR: mid-stream cut.
-    return { terminal: false }
+    return { terminal: false };
   } finally {
-    reader.releaseLock()
+    reader.releaseLock();
   }
 }
 
 // --- Chat history ---
 
-export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind
+export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind;
 
 export type KeeperChatReceiptState =
-  | { kind: 'pending' }
-  | { kind: 'inflight'; leaseId: string; startedAt: number }
+  | { kind: "pending" }
+  | { kind: "inflight"; leaseId: string; startedAt: number }
   | {
-      kind: 'recovery_required'
-      leaseId: string
-      startedAt: number
-      dispatchable: false
+      kind: "recovery_required";
+      leaseId: string;
+      startedAt: number;
+      dispatchable: false;
     }
-  | { kind: 'delivered'; completedAt: number; outcomeRef: string | null }
+  | { kind: "delivered"; completedAt: number; outcomeRef: string | null }
   | {
-      kind: 'failed'
-      failureKind: KeeperChatReceiptFailureKind
-      detail: string
-      completedAt: number
-      outcomeRef: string | null
-    }
+      kind: "failed";
+      failureKind: KeeperChatReceiptFailureKind;
+      detail: string;
+      completedAt: number;
+      outcomeRef: string | null;
+    };
 
 export interface KeeperChatReceipt {
-  keeperName: string
-  receiptId: string
-  revision: string
-  state: KeeperChatReceiptState
+  keeperName: string;
+  receiptId: string;
+  revision: string;
+  state: KeeperChatReceiptState;
 }
 
 export type KeeperChatRecoveryDecision =
-  | { kind: 'requeue_unconfirmed' }
+  | { kind: "requeue_unconfirmed" }
   | {
-      kind: 'cancel_unconfirmed'
-      detail: string
-      outcomeRef: string | null
-    }
+      kind: "cancel_unconfirmed";
+      detail: string;
+      outcomeRef: string | null;
+    };
 
 export interface KeeperChatRecoveryResult {
-  decision: KeeperChatRecoveryDecision['kind']
-  receipt: KeeperChatReceipt
-  audit: { recorded: true } | { recorded: false; error: string }
+  decision: KeeperChatRecoveryDecision["kind"];
+  receipt: KeeperChatReceipt;
+  audit: { recorded: true } | { recorded: false; error: string };
 }
 
-const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
-  'turn_failed',
-  'no_visible_reply',
-  'transcript_persist_failed',
-  'connector_unavailable',
-  'delivery_failed',
-  'cancelled',
-  'internal_error',
-  'recovery_interrupted',
-])
+const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>(
+  [
+    "turn_failed",
+    "no_visible_reply",
+    "transcript_persist_failed",
+    "connector_unavailable",
+    "delivery_failed",
+    "cancelled",
+    "internal_error",
+    "recovery_interrupted",
+  ],
+);
 
 export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
-  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v2') {
-    throw new Error('Keeper chat receipt response has an unsupported schema')
+  if (!isRecord(value) || value.schema !== "keeper_chat_queue.receipt.v2") {
+    throw new Error("Keeper chat receipt response has an unsupported schema");
   }
-  const keeperName = asString(value.keeper_name, '').trim()
-  const receiptId = asString(value.receipt_id, '').trim()
-  const revision = parseKeeperQueueRevision(value.revision)
-  const rawState = isRecord(value.state) ? value.state : null
-  const kind = asString(rawState?.kind, '').trim()
+  const keeperName = asString(value.keeper_name, "").trim();
+  const receiptId = asString(value.receipt_id, "").trim();
+  const revision = parseKeeperQueueRevision(value.revision);
+  const rawState = isRecord(value.state) ? value.state : null;
+  const kind = asString(rawState?.kind, "").trim();
   if (
-    !keeperName
-    || !isKeeperChatReceiptId(receiptId)
-    || !rawState
-    || revision === undefined
+    !keeperName ||
+    !isKeeperChatReceiptId(receiptId) ||
+    !rawState ||
+    revision === undefined
   ) {
-    throw new Error('Keeper chat receipt response is missing identity or state')
+    throw new Error(
+      "Keeper chat receipt response is missing identity or state",
+    );
   }
-  let state: KeeperChatReceiptState
-  const nullableString = (fieldName: string, fieldValue: unknown): string | null => {
-    if (fieldValue === null || fieldValue === undefined) return null
-    if (typeof fieldValue !== 'string') {
-      throw new Error(`Keeper chat receipt ${fieldName} must be a string or null`)
+  let state: KeeperChatReceiptState;
+  const nullableString = (
+    fieldName: string,
+    fieldValue: unknown,
+  ): string | null => {
+    if (fieldValue === null || fieldValue === undefined) return null;
+    if (typeof fieldValue !== "string") {
+      throw new Error(
+        `Keeper chat receipt ${fieldName} must be a string or null`,
+      );
     }
-    const trimmed = fieldValue.trim()
+    const trimmed = fieldValue.trim();
     if (!trimmed) {
-      throw new Error(`Keeper chat receipt ${fieldName} must not be empty`)
+      throw new Error(`Keeper chat receipt ${fieldName} must not be empty`);
     }
-    return trimmed
-  }
+    return trimmed;
+  };
   switch (kind) {
-    case 'pending':
-      state = { kind }
-      break
-    case 'inflight': {
-      const leaseId = asString(rawState.lease_id, '').trim()
-      const startedAt = asNumber(rawState.started_at)
-      if (!leaseId || typeof startedAt !== 'number') {
-        throw new Error('Keeper chat inflight receipt is missing lease metadata')
+    case "pending":
+      state = { kind };
+      break;
+    case "inflight": {
+      const leaseId = asString(rawState.lease_id, "").trim();
+      const startedAt = asNumber(rawState.started_at);
+      if (!leaseId || typeof startedAt !== "number") {
+        throw new Error(
+          "Keeper chat inflight receipt is missing lease metadata",
+        );
       }
-      state = { kind, leaseId, startedAt }
-      break
+      state = { kind, leaseId, startedAt };
+      break;
     }
-    case 'recovery_required': {
-      const leaseId = asString(rawState.lease_id, '').trim()
-      const startedAt = asNumber(rawState.started_at)
-      if (!leaseId || typeof startedAt !== 'number' || rawState.dispatchable !== false) {
-        throw new Error('Keeper chat recovery-required receipt has invalid recovery evidence')
+    case "recovery_required": {
+      const leaseId = asString(rawState.lease_id, "").trim();
+      const startedAt = asNumber(rawState.started_at);
+      if (
+        !leaseId ||
+        typeof startedAt !== "number" ||
+        rawState.dispatchable !== false
+      ) {
+        throw new Error(
+          "Keeper chat recovery-required receipt has invalid recovery evidence",
+        );
       }
-      state = { kind, leaseId, startedAt, dispatchable: false }
-      break
+      state = { kind, leaseId, startedAt, dispatchable: false };
+      break;
     }
-    case 'delivered': {
-      const completedAt = asNumber(rawState.completed_at)
-      if (typeof completedAt !== 'number') {
-        throw new Error('Keeper chat delivered receipt is missing completion time')
+    case "delivered": {
+      const completedAt = asNumber(rawState.completed_at);
+      if (typeof completedAt !== "number") {
+        throw new Error(
+          "Keeper chat delivered receipt is missing completion time",
+        );
       }
       state = {
         kind,
         completedAt,
-        outcomeRef: nullableString('outcome_ref', rawState.outcome_ref),
-      }
-      break
+        outcomeRef: nullableString("outcome_ref", rawState.outcome_ref),
+      };
+      break;
     }
-    case 'failed': {
-      const failureKind = asString(rawState.failure_kind, '') as KeeperChatReceiptFailureKind
-      const detail = asString(rawState.detail, '').trim()
-      const completedAt = asNumber(rawState.completed_at)
-      if (!KEEPER_CHAT_RECEIPT_FAILURE_KINDS.has(failureKind) || !detail || typeof completedAt !== 'number') {
-        throw new Error('Keeper chat failed receipt has invalid failure metadata')
+    case "failed": {
+      const failureKind = asString(
+        rawState.failure_kind,
+        "",
+      ) as KeeperChatReceiptFailureKind;
+      const detail = asString(rawState.detail, "").trim();
+      const completedAt = asNumber(rawState.completed_at);
+      if (
+        !KEEPER_CHAT_RECEIPT_FAILURE_KINDS.has(failureKind) ||
+        !detail ||
+        typeof completedAt !== "number"
+      ) {
+        throw new Error(
+          "Keeper chat failed receipt has invalid failure metadata",
+        );
       }
       state = {
         kind,
         failureKind,
         detail,
         completedAt,
-        outcomeRef: nullableString('outcome_ref', rawState.outcome_ref),
-      }
-      break
+        outcomeRef: nullableString("outcome_ref", rawState.outcome_ref),
+      };
+      break;
     }
     default:
-      throw new Error(`Keeper chat receipt has unknown state: ${kind || '<empty>'}`)
+      throw new Error(
+        `Keeper chat receipt has unknown state: ${kind || "<empty>"}`,
+      );
   }
-  return { keeperName, receiptId, revision, state }
+  return { keeperName, receiptId, revision, state };
 }
 
 export async function fetchKeeperChatReceipt(
@@ -847,11 +925,13 @@ export async function fetchKeeperChatReceipt(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}`,
     { headers: jsonHeaders() },
     DEFAULT_GET_TIMEOUT_MS,
-  )
+  );
   if (!resp.ok) {
-    throw new Error(`fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`)
+    throw new Error(
+      `fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`,
+    );
   }
-  return parseKeeperChatReceipt(data)
+  return parseKeeperChatReceipt(data);
 }
 
 export async function resolveKeeperChatRecovery(
@@ -861,43 +941,46 @@ export async function resolveKeeperChatRecovery(
   leaseId: string,
   decision: KeeperChatRecoveryDecision,
 ): Promise<KeeperChatRecoveryResult> {
-  const decisionPayload = decision.kind === 'requeue_unconfirmed'
-    ? { kind: decision.kind }
-    : {
-        kind: decision.kind,
-        detail: decision.detail,
-        outcome_ref: decision.outcomeRef,
-      }
+  const decisionPayload =
+    decision.kind === "requeue_unconfirmed"
+      ? { kind: decision.kind }
+      : {
+          kind: decision.kind,
+          detail: decision.detail,
+          outcome_ref: decision.outcomeRef,
+        };
   const raw = await post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/recovery`,
     {
-      schema: 'keeper_chat_queue.recovery.request.v1',
+      schema: "keeper_chat_queue.recovery.request.v1",
       expected_revision: expectedRevision,
       lease_id: leaseId,
       decision: decisionPayload,
     },
-  )
+  );
   if (
-    !isRecord(raw)
-    || raw.schema !== 'keeper_chat_queue.recovery.result.v1'
-    || raw.ok !== true
-    || raw.decision !== decision.kind
-    || !isRecord(raw.audit)
-    || typeof raw.audit.recorded !== 'boolean'
+    !isRecord(raw) ||
+    raw.schema !== "keeper_chat_queue.recovery.result.v1" ||
+    raw.ok !== true ||
+    raw.decision !== decision.kind ||
+    !isRecord(raw.audit) ||
+    typeof raw.audit.recorded !== "boolean"
   ) {
-    throw new Error('resolveKeeperChatRecovery: invalid response envelope')
+    throw new Error("resolveKeeperChatRecovery: invalid response envelope");
   }
-  const receipt = parseKeeperChatReceipt(raw.receipt)
+  const receipt = parseKeeperChatReceipt(raw.receipt);
   if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
-    throw new Error('resolveKeeperChatRecovery: response identity mismatch')
+    throw new Error("resolveKeeperChatRecovery: response identity mismatch");
   }
   const audit = raw.audit.recorded
     ? { recorded: true as const }
     : {
         recorded: false as const,
-        error: asString(raw.audit.error, '').trim() || 'recovery audit persistence failed',
-      }
-  return { decision: decision.kind, receipt, audit }
+        error:
+          asString(raw.audit.error, "").trim() ||
+          "recovery audit persistence failed",
+      };
+  return { decision: decision.kind, receipt, audit };
 }
 
 export async function fetchKeeperChatHistory(
@@ -914,17 +997,20 @@ export async function fetchKeeperChatHistory(
     `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
     { headers: jsonHeaders() },
     DEFAULT_GET_TIMEOUT_MS,
-  )
+  );
   if (!resp.ok) {
-    throw new Error(`fetchKeeperChatHistory: HTTP ${resp.status} ${resp.statusText}`)
+    throw new Error(
+      `fetchKeeperChatHistory: HTTP ${resp.status} ${resp.statusText}`,
+    );
   }
   if (!Array.isArray(data)) {
-    throw new Error('fetchKeeperChatHistory: response is not an array')
+    throw new Error("fetchKeeperChatHistory: response is not an array");
   }
-  const { safeParseKeeperChatHistoryMessage } = await import('./schemas/keeper-chat-history')
+  const { safeParseKeeperChatHistoryMessage } =
+    await import("./schemas/keeper-chat-history");
   return data
     .map(safeParseKeeperChatHistoryMessage)
-    .filter((m): m is KeeperChatHistoryMessage => m !== null)
+    .filter((m): m is KeeperChatHistoryMessage => m !== null);
 }
 
 // Since-last-seen catch-up digest for one keeper. `sinceUnix` is the operator's
@@ -940,26 +1026,29 @@ export async function fetchKeeperCatchupDigest(
   const resp = await fetch(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/digest?since_unix=${encodeURIComponent(String(sinceUnix))}`,
     { headers: jsonHeaders() },
-  )
+  );
   if (!resp.ok) {
-    throw new Error(`fetchKeeperCatchupDigest: HTTP ${resp.status} ${resp.statusText}`)
+    throw new Error(
+      `fetchKeeperCatchupDigest: HTTP ${resp.status} ${resp.statusText}`,
+    );
   }
-  const data: unknown = await resp.json()
-  const { parseKeeperCatchupDigest } = await import('./schemas/keeper-catchup-digest')
-  const digest = parseKeeperCatchupDigest(data)
+  const data: unknown = await resp.json();
+  const { parseKeeperCatchupDigest } =
+    await import("./schemas/keeper-catchup-digest");
+  const digest = parseKeeperCatchupDigest(data);
   if (!digest) {
-    throw new Error('fetchKeeperCatchupDigest: invalid digest payload')
+    throw new Error("fetchKeeperCatchupDigest: invalid digest payload");
   }
-  return digest
+  return digest;
 }
 
 export interface KeeperCatchupJudgmentResponse {
-  ok: true
-  status: 'fusion_started'
-  runId: string
-  ownerKeeper: string
-  fusionRoute: string
-  digest: KeeperCatchupDigest
+  ok: true;
+  status: "fusion_started";
+  runId: string;
+  ownerKeeper: string;
+  fusionRoute: string;
+  digest: KeeperCatchupDigest;
 }
 
 export async function runKeeperCatchupJudgment(
@@ -969,59 +1058,60 @@ export async function runKeeperCatchupJudgment(
   const raw = await post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/catchup-judge`,
     { since_unix: sinceUnix },
-  )
+  );
   if (!isRecord(raw) || raw.ok !== true) {
-    throw new Error('runKeeperCatchupJudgment: invalid response envelope')
+    throw new Error("runKeeperCatchupJudgment: invalid response envelope");
   }
-  const runId = asString(raw.run_id)
-  const ownerKeeper = asString(raw.owner_keeper)
-  const fusionRoute = asString(raw.fusion_route)
+  const runId = asString(raw.run_id);
+  const ownerKeeper = asString(raw.owner_keeper);
+  const fusionRoute = asString(raw.fusion_route);
   if (!runId || !ownerKeeper || !fusionRoute) {
-    throw new Error('runKeeperCatchupJudgment: missing run metadata')
+    throw new Error("runKeeperCatchupJudgment: missing run metadata");
   }
-  const { parseKeeperCatchupDigest } = await import('./schemas/keeper-catchup-digest')
-  const digest = parseKeeperCatchupDigest(raw.digest)
+  const { parseKeeperCatchupDigest } =
+    await import("./schemas/keeper-catchup-digest");
+  const digest = parseKeeperCatchupDigest(raw.digest);
   if (!digest) {
-    throw new Error('runKeeperCatchupJudgment: invalid digest payload')
+    throw new Error("runKeeperCatchupJudgment: invalid digest payload");
   }
   return {
     ok: true,
-    status: 'fusion_started',
+    status: "fusion_started",
     runId,
     ownerKeeper,
     fusionRoute,
     digest,
-  }
+  };
 }
 
 // --- Keeper observability API ---
 
 export interface MemoryKindUsageEntry {
-  kind: string
-  used: number
-  cap: number
-  priority: number
+  kind: string;
+  used: number;
+  cap: number;
+  priority: number;
 }
 
 export interface KeeperStateDiagramResponse {
-  keeper: string
-  current_phase: string
-  mermaid: string
-  runtime_fsm_mermaid?: string
-  compaction_submachine_mermaid?: string | null
+  keeper: string;
+  current_phase: string;
+  mermaid: string;
+  runtime_fsm_mermaid?: string;
+  compaction_submachine_mermaid?: string | null;
   // Structured data for Cytoscape FSM rendering
-  tool_count?: number
-  runtime_models?: string[]
-  last_provider_result?: string | null
-  runtime_models_source?: string
-  last_provider_result_source?: string
-  memory_kind_usage?: MemoryKindUsageEntry[]
+  tool_count?: number;
+  runtime_models?: string[];
+  last_provider_result?: string | null;
+  runtime_models_source?: string;
+  last_provider_result_source?: string;
+  memory_kind_usage?: MemoryKindUsageEntry[];
   /** RFC-0149 §3.1 — sibling field carrying the typed memory-bank
    *  read failure class (`yojson_parse_error | io_error | type_error
    *  | other`).  `null` means the bank was readable; a string label
    *  means the read failed and `memory_kind_usage` contains the
    *  empty-counts fallback rather than a real snapshot. */
-  memory_kind_usage_error_class?: string | null
+  memory_kind_usage_error_class?: string | null;
 }
 
 export async function fetchKeeperTransitions(
@@ -1033,49 +1123,54 @@ export async function fetchKeeperTransitions(
     `/api/v1/keepers/${encodeURIComponent(name)}/transitions?limit=${limit}`,
     { headers: jsonHeaders(), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`transitions fetch failed: ${resp.status}`)
-  const { parseKeeperTransitionsResponse } = await import('./schemas/keeper-transitions')
-  return parseKeeperTransitionsResponse(await resp.json())
+  );
+  if (!resp.ok) throw new Error(`transitions fetch failed: ${resp.status}`);
+  const { parseKeeperTransitionsResponse } =
+    await import("./schemas/keeper-transitions");
+  return parseKeeperTransitionsResponse(await resp.json());
 }
 
 // --- Keeper lifecycle timeline (#12798) ---
 
 // Detail views need enough recent lifecycle entries to avoid silently truncating
 // active keepers, while compact surfaces can still pass an explicit lower limit.
-export const KEEPER_LIFECYCLE_DEFAULT_LIMIT = 200
+export const KEEPER_LIFECYCLE_DEFAULT_LIMIT = 200;
 
 export interface KeeperLifecycleEvent {
-  ts: number
-  event: string
-  phase: string | null
-  detail: string
+  ts: number;
+  event: string;
+  phase: string | null;
+  detail: string;
 }
 
 export interface KeeperLifecycleTimelineResponse {
-  keeper: string
-  count: number
-  events: KeeperLifecycleEvent[]
+  keeper: string;
+  count: number;
+  events: KeeperLifecycleEvent[];
 }
 
 function parseKeeperLifecycleEvent(raw: unknown): KeeperLifecycleEvent {
-  if (!isRecord(raw)) throw new Error('lifecycle event is not a record')
+  if (!isRecord(raw)) throw new Error("lifecycle event is not a record");
   return {
-    ts: typeof raw.ts === 'number' ? raw.ts : 0,
-    event: typeof raw.event === 'string' ? raw.event : '',
-    phase: typeof raw.phase === 'string' ? raw.phase : null,
-    detail: typeof raw.detail === 'string' ? raw.detail : '',
-  }
+    ts: typeof raw.ts === "number" ? raw.ts : 0,
+    event: typeof raw.event === "string" ? raw.event : "",
+    phase: typeof raw.phase === "string" ? raw.phase : null,
+    detail: typeof raw.detail === "string" ? raw.detail : "",
+  };
 }
 
-export function parseKeeperLifecycleResponse(raw: unknown): KeeperLifecycleTimelineResponse {
-  if (!isRecord(raw)) throw new Error('lifecycle response is not a record')
-  const events = Array.isArray(raw.events) ? raw.events.map(parseKeeperLifecycleEvent) : []
+export function parseKeeperLifecycleResponse(
+  raw: unknown,
+): KeeperLifecycleTimelineResponse {
+  if (!isRecord(raw)) throw new Error("lifecycle response is not a record");
+  const events = Array.isArray(raw.events)
+    ? raw.events.map(parseKeeperLifecycleEvent)
+    : [];
   return {
-    keeper: typeof raw.keeper === 'string' ? raw.keeper : '',
-    count: typeof raw.count === 'number' ? raw.count : events.length,
+    keeper: typeof raw.keeper === "string" ? raw.keeper : "",
+    count: typeof raw.count === "number" ? raw.count : events.length,
     events,
-  }
+  };
 }
 
 export async function fetchKeeperLifecycle(
@@ -1087,9 +1182,9 @@ export async function fetchKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/lifecycle?limit=${limit}`,
     { headers: jsonHeaders(), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`lifecycle fetch failed: ${resp.status}`)
-  return parseKeeperLifecycleResponse(await resp.json())
+  );
+  if (!resp.ok) throw new Error(`lifecycle fetch failed: ${resp.status}`);
+  return parseKeeperLifecycleResponse(await resp.json());
 }
 
 export async function fetchKeeperStateDiagram(
@@ -1100,9 +1195,9 @@ export async function fetchKeeperStateDiagram(
     `/api/v1/keepers/${encodeURIComponent(name)}/state-diagram`,
     { headers: jsonHeaders(), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`state-diagram fetch failed: ${resp.status}`)
-  return resp.json() as Promise<KeeperStateDiagramResponse>
+  );
+  if (!resp.ok) throw new Error(`state-diagram fetch failed: ${resp.status}`);
+  return resp.json() as Promise<KeeperStateDiagramResponse>;
 }
 
 export async function fetchKeeperComposite(
@@ -1113,71 +1208,75 @@ export async function fetchKeeperComposite(
     `/api/v1/keepers/${encodeURIComponent(name)}/composite`,
     { headers: jsonHeaders(), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
-  const { parseKeeperCompositeSnapshot } = await import('./schemas/keeper-composite')
-  return parseKeeperCompositeSnapshot(await resp.json())
+  );
+  if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`);
+  const { parseKeeperCompositeSnapshot } =
+    await import("./schemas/keeper-composite");
+  return parseKeeperCompositeSnapshot(await resp.json());
 }
-
 
 /**
  * LT-16a: fetch the fleet-wide composite snapshot in one envelope.
  * Backend reuses the same per-snapshot shape as fetchKeeperComposite,
  * wrapped in { generated_at, count, snapshots: [...] }.
  */
-export async function fetchKeepersComposite(
-  opts?: { signal?: AbortSignal },
-): Promise<FleetCompositeSnapshot> {
+export async function fetchKeepersComposite(opts?: {
+  signal?: AbortSignal;
+}): Promise<FleetCompositeSnapshot> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/composite`,
     { headers: jsonHeaders(), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`fleet composite fetch failed: ${resp.status}`)
-  const { parseFleetCompositeSnapshot } = await import('./schemas/keeper-composite')
-  return parseFleetCompositeSnapshot(await resp.json())
+  );
+  if (!resp.ok) throw new Error(`fleet composite fetch failed: ${resp.status}`);
+  const { parseFleetCompositeSnapshot } =
+    await import("./schemas/keeper-composite");
+  return parseFleetCompositeSnapshot(await resp.json());
 }
 
 // --- Eval Quality (RFC-MASC-005 Phase 3) ---
 
 export interface EvalLayerResult {
-  layer_name: string
-  passed: boolean
-  score: number | null
-  evidence: string[]
-  detail: string | null
+  layer_name: string;
+  passed: boolean;
+  score: number | null;
+  evidence: string[];
+  detail: string | null;
 }
 
 export interface EvalVerdict {
-  schema_version: number
-  all_passed: boolean
-  coverage: number
-  layer_results: EvalLayerResult[]
+  schema_version: number;
+  all_passed: boolean;
+  coverage: number;
+  layer_results: EvalLayerResult[];
 }
 
 export interface EvalSnapshot {
-  agent_name: string
-  session_id: string | null
-  worker_run_id: string
-  timestamp: number
-  verdict: EvalVerdict
-  baseline_status: string | null
+  agent_name: string;
+  session_id: string | null;
+  worker_run_id: string;
+  timestamp: number;
+  verdict: EvalVerdict;
+  baseline_status: string | null;
 }
 
 export interface KeeperEvalResponse {
-  keeper: string
-  count: number
-  latest_coverage: number | null
-  latest_all_passed: boolean | null
-  snapshots: EvalSnapshot[]
+  keeper: string;
+  count: number;
+  latest_coverage: number | null;
+  latest_all_passed: boolean | null;
+  snapshots: EvalSnapshot[];
 }
 
-export async function fetchKeeperEval(name: string, limit = 10): Promise<KeeperEvalResponse> {
+export async function fetchKeeperEval(
+  name: string,
+  limit = 10,
+): Promise<KeeperEvalResponse> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/eval?limit=${limit}`,
     { headers: jsonHeaders() },
     DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`eval fetch failed: ${resp.status}`)
-  return resp.json() as Promise<KeeperEvalResponse>
+  );
+  if (!resp.ok) throw new Error(`eval fetch failed: ${resp.status}`);
+  return resp.json() as Promise<KeeperEvalResponse>;
 }

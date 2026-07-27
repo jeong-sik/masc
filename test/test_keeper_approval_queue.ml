@@ -706,6 +706,110 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
          Alcotest.failf "one oldest same-owner entry expected, got %d" (List.length entries))
 ;;
 
+(* Owner selection used to read only the FIFO head, so a head that never
+   becomes startable on its own froze every later approval for that Keeper.
+   Two durable shapes reach that state and neither clears without an operator:
+   a judgment that concluded in [Require_human], which [resolve_judgment]
+   persists no transition for, and a pre-worker failure awaiting an explicit
+   retry. Observed live on 2026-07-28 holding 18 approvals across two Keepers,
+   the oldest for 2416s. *)
+let head_of_line_owner = "head-of-line-owner"
+
+let require_human_summary () : AQ.hitl_context_summary =
+  { summary_version = AQ.current_hitl_context_summary_version
+  ; generated_at = 1.0
+  ; model_run_id = "model-run-head-of-line"
+  ; context_summary = "head approval was handed to a human"
+  ; key_questions = []
+  ; judgment = AQ.Require_human
+  ; rationale = "operator decision required"
+  }
+;;
+
+let completed_exact_binding (entry : AQ.pending_approval) =
+  AQ.exact_attempt_binding_with_status
+    (AQ.make_exact_attempt_binding
+       ~approval_id:entry.id
+       ~input_hash:entry.input_hash
+       ~sequence:entry.sequence
+       ~slot_id:"slot-head-of-line"
+       ~call_id:"call-head-of-line"
+       ~plan_fingerprint:"plan-head-of-line"
+       ~request_body_sha256:"sha256-head-of-line"
+       ())
+    AQ.Exact_completed
+;;
+
+let check_owner_selection label ~base_path ~expected entries =
+  match
+    Gate.For_testing.ready_auto_judges_for_owner
+      ~base_path
+      ~keeper_name:head_of_line_owner
+      entries
+  with
+  | [ selected ] ->
+    Alcotest.(check string) label expected selected.AQ.id
+  | [] -> Alcotest.failf "%s: owner selection returned nothing" label
+  | selected ->
+    Alcotest.failf "%s: expected one entry, got %d" label (List.length selected)
+;;
+
+let test_terminal_head_does_not_stall_owner_queue () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let head =
+         pending_entry_exn
+           (submit ~base_path ~keeper_name:head_of_line_owner ~input:(`Int 1))
+       in
+       let follower =
+         pending_entry_exn
+           (submit ~base_path ~keeper_name:head_of_line_owner ~input:(`Int 2))
+       in
+       Alcotest.(check bool)
+         "head carries the earlier durable sequence"
+         true
+         (head.sequence < follower.sequence);
+       check_owner_selection
+         "a startable head keeps its place at the front"
+         ~base_path
+         ~expected:head.id
+         [ follower; head ];
+       let judged_head =
+         { head with
+           AQ.summary_status = AQ.Summary_available (require_human_summary ())
+         ; AQ.summary_attempt_disposition = AQ.Summary_attempt_settled
+         ; AQ.exact_attempt = AQ.Exact_bound (completed_exact_binding head)
+         }
+       in
+       check_owner_selection
+         "a Require_human head releases the owner slot to the next approval"
+         ~base_path
+         ~expected:follower.id
+         [ judged_head; follower ];
+       let blocked_head =
+         { head with
+           AQ.summary_status = AQ.Summary_pending
+         ; AQ.summary_attempt_disposition =
+             AQ.Summary_attempt_pre_worker_unavailable
+               { reason_code = AQ.Summary_pre_worker_auto_judge_unavailable
+               ; operator_detail =
+                   "HITL summary: exact outer-turn request context is unavailable"
+               }
+         }
+       in
+       check_owner_selection
+         "a pre-worker-blocked head releases the owner slot to the next approval"
+         ~base_path
+         ~expected:follower.id
+         [ blocked_head; follower ])
+;;
+
 let test_different_owners_claim_in_parallel () =
   (* Real concurrent proof: fibers race the per-owner claim, so the
      one-winner-per-owner invariant is exercised under actual Atomic
@@ -2980,6 +3084,10 @@ let () =
             "same owner drains by durable sequence"
             `Quick
             test_same_owner_drain_uses_sequence_not_wall_clock
+        ; Alcotest.test_case
+            "terminal head does not stall the owner queue"
+            `Quick
+            test_terminal_head_does_not_stall_owner_queue
         ; Alcotest.test_case
             "different owners activate in parallel"
             `Quick

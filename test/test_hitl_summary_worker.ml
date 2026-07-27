@@ -1698,6 +1698,81 @@ let test_owner_fifo_atomic_drain_is_nonsharing () =
          (F.post_count server))
 ;;
 
+let test_require_human_head_does_not_stop_owner_drain () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-require-human-drain" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let successor_server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       let publish_successor_lane () =
+         publish_lane
+           [ "hitl-require-human-successor" ]
+           (F.resolver_snapshot
+              ~source:"hitl-require-human-successor"
+              [ { id = "hitl-require-human-successor"
+                ; base_url = successor_server.base_url
+                }
+              ])
+       in
+       let head_server =
+         F.start_server
+           ~on_request_before_reply:publish_successor_lane
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "require_human")))
+       in
+       publish_lane
+         [ "hitl-require-human-head" ]
+         (F.resolver_snapshot
+            ~source:"hitl-require-human-head"
+            [ { id = "hitl-require-human-head"; base_url = head_server.base_url } ]);
+       select_auto_judge_mode base_path;
+       let head = pending_entry ~input_tag:"require-human-head" ~base_path () in
+       let successor = pending_entry ~input_tag:"successor" ~base_path () in
+       let recovery = Gate.resume_persisted_auto_judges ~base_path in
+       check
+         (list string)
+         "recovery starts the oldest owner entry"
+         [ head.id ]
+         recovery.started_ids;
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"Require_human head stopped the same-owner successor"
+         (fun () -> F.post_count successor_server = 1);
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"successor did not complete after Require_human head"
+         (fun () ->
+            Option.is_none
+              (Q.For_testing.get_pending_entry_unchecked ~id:successor.id));
+       (match Q.For_testing.get_pending_entry_unchecked ~id:head.id with
+        | Some
+            { exact_attempt =
+                Q.Exact_bound { status = Q.Exact_completed; _ }
+            ; summary_status =
+                Q.Summary_available { judgment = Q.Require_human; _ }
+            ; summary_attempt_disposition = Q.Summary_attempt_settled
+            ; _
+            } ->
+          ()
+        | _ -> fail "Require_human head lost its durable operator-visible state");
+       check int "Require_human head judged once" 1 (F.post_count head_server);
+       check int "same-owner successor judged once" 1 (F.post_count successor_server))
+;;
+
 let test_gate_judgment_prompt_comes_from_registry () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
@@ -1803,6 +1878,10 @@ let () =
             "owner FIFO atomic drain is non-sharing"
             `Quick
             test_owner_fifo_atomic_drain_is_nonsharing
+        ; test_case
+            "Require_human head does not stop owner drain"
+            `Quick
+            test_require_human_head_does_not_stop_owner_drain
         ] )
     ]
 ;;

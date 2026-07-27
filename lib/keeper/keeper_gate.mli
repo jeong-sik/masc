@@ -110,9 +110,15 @@ val decide :
   decision
 
 (** Recover durable Auto Judge work for exactly one workspace. Each exact
-    [(base_path, keeper_name)] owner evaluates only its oldest entry.
-    Failed, quarantined, released, uncertain, or otherwise ineligible oldest
-    state is a FIFO barrier: recovery never activates a later same-owner entry.
+    [(base_path, keeper_name)] owner activates at most one entry: the oldest
+    one that still carries Auto Judge work. An oldest entry that is failed,
+    quarantined, released, uncertain, judged [Require_human], or otherwise
+    ineligible carries no such work and is passed over instead of held as a
+    FIFO barrier. None of those states leaves itself, so treating them as a
+    barrier starved every later same-owner entry for as long as the owner
+    stayed in one: observed on 2026-07-28 holding 25 approvals across two
+    Keepers, the oldest for 2416s, while every drive path kept firing. Entries
+    that do carry work keep durable sequence order among themselves.
     Completion drains only that owner's FIFO. Decisive output without an exact
     attempt identity is retained pending and recorded as a recovery failure.
     Completed exact output is first idempotently strict-rewritten with the same

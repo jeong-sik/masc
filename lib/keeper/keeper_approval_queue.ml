@@ -1694,6 +1694,85 @@ let consume_approved_resolution
     Ok Consumption_committed
 ;;
 
+let consume_matching_approved_resolution
+      ~base_path
+      ~keeper_name
+      ~tool_name
+      ~input
+  =
+  let input_hash = normalized_input_hash input in
+  let result =
+    with_pending_store_lock (fun () ->
+      match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+      | Some error -> Error (Grant_store_unavailable error)
+      | None ->
+        let matching_delivery =
+          Atomic.get deliveries
+          |> SMap.to_seq
+          |> Seq.filter_map (fun (id, delivery) ->
+            let entry = delivery.entry in
+            if
+              (not delivery.grant_consumed)
+              && String.equal entry.audit_base_path base_path
+              && String.equal entry.keeper_name keeper_name
+              && String.equal entry.tool_name tool_name
+              && String.equal entry.input_hash input_hash
+              &&
+              match delivery.decision with
+              | Decision.Approve -> true
+              | Decision.Reject _ | Decision.Edit _ -> false
+            then Some (id, delivery)
+            else None)
+          |> Seq.fold_left
+               (fun earliest ((_, candidate) as current) ->
+                  match earliest with
+                  | None -> Some current
+                  | Some (_, existing) ->
+                    if candidate.entry.sequence < existing.entry.sequence
+                    then Some current
+                    else earliest)
+               None
+        in
+        (match matching_delivery with
+         | None -> Ok None
+         | Some (id, delivery) ->
+           let consumed_delivery = { delivery with grant_consumed = true } in
+           let updated_deliveries =
+             SMap.add id consumed_delivery (Atomic.get deliveries)
+           in
+           (match
+              persist_snapshot_unlocked
+                ~base_path
+                ~pending_map:(Atomic.get pending)
+                ~delivery_map:updated_deliveries
+            with
+            | Error error -> Error (Grant_store_unavailable error)
+            | Ok () ->
+              Atomic.set deliveries updated_deliveries;
+              Ok (Some (id, delivery)))))
+  in
+  match result with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some (id, delivery)) ->
+    let entry = delivery.entry in
+    audit_approval_event
+      ~base_path
+      ~event_type:"matching_grant_consumed"
+      ~id
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ?turn_id:entry.turn_id
+      ?task_id:entry.task_id
+      ?goal_id:entry.goal_id
+      ~goal_ids:entry.goal_ids
+      ~source_approval_id:id
+      ~decision_source:delivery.source
+      ~decision:Decision.Approve
+      ();
+    Ok (Some id)
+;;
+
 let input_preview_of_json (json : Yojson.Safe.t) =
   (* Per-leaf marker-aware truncation: a naive [String.sub] on the
      serialized form would chop a [masc:blob ...] marker mid-field and

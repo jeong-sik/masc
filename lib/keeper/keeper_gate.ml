@@ -1489,39 +1489,53 @@ let decide_without_cycle_grant ~keeper_always_allow request =
     Allow { source })
   else
     let mode = Keeper_gate_mode.read ~base_path:request.base_path in
-    (match mode with
-     | Ok Keeper_gate_mode.Always_allow ->
-       let source = Workspace_always_allow in
-       audit_allow
-         request
-         ~decision_source:Keeper_approval_queue.Always_allowed
-         source;
-       Allow { source }
-     | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
-       (match
-          Keeper_approval_queue.find_matching_rule
-            ~base_path:request.base_path
-            ~keeper_name:request.keeper_name
-            ~tool_name:request.operation
-            ~input:request.input
-            ()
-        with
-        | Error error ->
-          observe_exact_rule_store_degraded request error;
-          decide_from_selected_mode request mode
-        | Ok (Keeper_approval_queue.Rule_match_active rule_match) ->
-          let source = Exact_always_rule rule_match.rule_id in
-          audit_allow
-            request
-            ~rule_match
-            ~decision_source:Keeper_approval_queue.Always_allowed
-            source;
-          Allow { source }
-        | Ok (Keeper_approval_queue.Rule_match_expired rule_match) ->
-          observe_exact_rule_expired request rule_match;
-          decide_from_selected_mode request mode
-        | Ok Keeper_approval_queue.Rule_match_absent ->
-          decide_from_selected_mode request mode))
+    match mode with
+    | Ok Keeper_gate_mode.Always_allow ->
+      let source = Workspace_always_allow in
+      audit_allow
+        request
+        ~decision_source:Keeper_approval_queue.Always_allowed
+        source;
+      Allow { source }
+    | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
+      (match
+         Keeper_approval_queue.consume_matching_approved_resolution
+           ~base_path:request.base_path
+           ~keeper_name:request.keeper_name
+           ~tool_name:request.operation
+           ~input:request.input
+       with
+       | Error error ->
+         Unavailable (Approval_grant_unavailable error)
+       | Ok (Some approval_id) ->
+         let source = One_shot_resolution approval_id in
+         audit_allow request ~source_approval_id:approval_id source;
+         Allow { source }
+       | Ok None ->
+         (match
+            Keeper_approval_queue.find_matching_rule
+              ~base_path:request.base_path
+              ~keeper_name:request.keeper_name
+              ~tool_name:request.operation
+              ~input:request.input
+              ()
+          with
+          | Error error ->
+            observe_exact_rule_store_degraded request error;
+            decide_from_selected_mode request mode
+          | Ok (Keeper_approval_queue.Rule_match_active rule_match) ->
+            let source = Exact_always_rule rule_match.rule_id in
+            audit_allow
+              request
+              ~rule_match
+              ~decision_source:Keeper_approval_queue.Always_allowed
+              source;
+            Allow { source }
+          | Ok (Keeper_approval_queue.Rule_match_expired rule_match) ->
+            observe_exact_rule_expired request rule_match;
+            decide_from_selected_mode request mode
+          | Ok Keeper_approval_queue.Rule_match_absent ->
+            decide_from_selected_mode request mode))
 ;;
 
 let decide ?cycle_grant ~keeper_always_allow request =

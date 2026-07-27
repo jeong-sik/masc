@@ -1190,6 +1190,65 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
+let test_restarted_turn_reuses_matching_approved_resolution () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-restarted-turn" in
+  let input =
+    `Assoc
+      [ "capability", `String "web_search"
+      ; "input", `Assoc [ "query", `String "durable exact retry" ]
+      ]
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let approval_id = submit ~base_path ~keeper_name ~input in
+       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input
+         ; base_path
+         ; causal_context =
+             Some { Gate.turn_id = Some 18; snapshot = `Assoc [] }
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       (match Gate.decide ~keeper_always_allow:false request with
+        | Gate.Allow { source = Gate.One_shot_resolution actual_id } ->
+          Alcotest.(check string) "reused approval id" approval_id actual_id
+        | Gate.Allow
+            { source =
+                ( Gate.Exact_always_rule _
+                | Gate.Keeper_always_allow
+                | Gate.Workspace_always_allow )
+            } ->
+          Alcotest.fail "restarted turn widened the exact approval"
+        | Gate.Deferred _ ->
+          Alcotest.fail "restarted turn created a duplicate approval"
+        | Gate.Unavailable reason ->
+          Alcotest.fail (Gate.unavailable_reason_to_string reason));
+       (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+        | Ok AQ.Resolution_consumed -> ()
+        | Ok AQ.Resolution_unconsumed ->
+          Alcotest.fail "matching restarted turn did not consume the approved effect"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       match AQ.list_pending_entries_for_workspace ~base_path with
+       | Ok [] -> ()
+       | Ok entries ->
+         Alcotest.failf
+           "matching restarted turn created %d duplicate approval(s)"
+           (List.length entries)
+       | Error error -> Alcotest.fail (AQ.storage_error_to_string error))
+;;
+
 let test_exact_binding_codec_validates_entry_identity () =
   let base_path = temp_dir () in
   Fun.protect
@@ -3288,6 +3347,10 @@ let () =
             "cycle grant binds origin and is consumed once"
             `Quick
             test_cycle_grant_uses_exact_effect_and_is_consumed_once
+        ; Alcotest.test_case
+            "restarted turn reuses matching approved resolution"
+            `Quick
+            test_restarted_turn_reuses_matching_approved_resolution
         ; Alcotest.test_case
             "exact binding codec validates identity and current causes"
             `Quick

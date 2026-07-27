@@ -155,6 +155,18 @@ val consume_approved_resolution :
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
 
+(** Atomically consume the earliest unconsumed approved resolution matching
+    the exact Keeper, opaque operation identity, and canonical complete input.
+    This lets a restarted originating turn reuse its already-approved effect
+    before the separate resolution wake reaches the front of the event queue.
+    [Ok None] means no matching approved resolution exists. *)
+val consume_matching_approved_resolution :
+  base_path:string ->
+  keeper_name:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  (string option, grant_error) result
+
 (** {1 Exact Always Allowed rules} *)
 
 val list_rules :

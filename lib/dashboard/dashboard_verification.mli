@@ -39,6 +39,8 @@
         "completion_contract": [ "criterion text", ... ],
         "required_artifacts":  [ "required artifact", ... ],
         "submitted_evidence":  [ "submitted evidence ref", ... ],
+        "evidence_projection_error":
+          "missing/malformed current-schema field ..." | null,
         "verdict":             "pass" | "fail" | "partial" | null,
         "verdict_reason":      "..."
       }

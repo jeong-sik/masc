@@ -325,6 +325,7 @@ function VerificationRow({
   const hasContract = row.completion_contract.length > 0
   const hasRequiredArtifacts = row.required_artifacts.length > 0
   const hasSubmittedEvidence = row.submitted_evidence.length > 0
+  const hasEvidenceProjectionError = row.evidence_projection_error != null
   const hasTaskTitle = row.task_title !== ''
   const hasRequestSummary = row.request_summary !== ''
   const hasNextAction = row.next_action != null && row.next_action !== ''
@@ -332,6 +333,7 @@ function VerificationRow({
     hasContract ||
     hasRequiredArtifacts ||
     hasSubmittedEvidence ||
+    hasEvidenceProjectionError ||
     hasTaskTitle ||
     hasRequestSummary ||
     hasNextAction ||
@@ -387,6 +389,16 @@ function VerificationRow({
           : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
       </td>
       <td class="py-2">
+        ${hasEvidenceProjectionError
+          ? html`
+              <div
+                role="alert"
+                class="mb-1 text-3xs text-[var(--text-bad)]"
+              >
+                Evidence projection error: ${row.evidence_projection_error}
+              </div>
+            `
+          : null}
         ${hasDetails
           ? html`
               <details class="text-2xs">

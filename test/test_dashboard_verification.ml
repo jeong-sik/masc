@@ -235,6 +235,8 @@ let test_requests_json_shape () =
      | _ -> Alcotest.fail "submitted_evidence should be list");
     Alcotest.(check bool) "legacy required_evidence alias removed"
       true (member "required_evidence" r = `Null);
+    Alcotest.(check bool) "valid empty/non-empty evidence has no projection error"
+      true (member "evidence_projection_error" r = `Null);
     (* Pending status (no verifier yet) *)
     (match member "status" r with
      | `String "pending" -> ()
@@ -413,6 +415,39 @@ let test_requests_json_surfaces_conflict_triage_fields () =
      | `String "Reconcile board / planning / mutation surfaces before ordinary approval." -> ()
      | _ -> Alcotest.fail "next_action mismatch"))
 
+let test_requests_json_surfaces_evidence_projection_error () =
+  with_temp_base_path (fun base_path ->
+    let output =
+      `Assoc [
+        ("submitted_evidence", `List [
+          `String "trace://must-not-be-partially-projected";
+          `Int 7;
+        ]);
+      ]
+    in
+    let _req =
+      match V.create_request ~base_path ~task_id:"task-malformed-evidence"
+              ~output ~criteria:[] ~worker:"keeper-alpha" () with
+      | Ok req -> req
+      | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
+    in
+    let row =
+      match member "requests" (D.requests_json ~base_path ()) with
+      | `List [row] -> row
+      | _ -> Alcotest.fail "expected one malformed evidence request"
+    in
+    Alcotest.(check (list string)) "missing required artifacts project empty"
+      [] (member "required_artifacts" row |> Yojson.Safe.Util.to_list
+          |> List.map Yojson.Safe.Util.to_string);
+    Alcotest.(check (list string)) "malformed submitted evidence projects empty"
+      [] (member "submitted_evidence" row |> Yojson.Safe.Util.to_list
+          |> List.map Yojson.Safe.Util.to_string);
+    Alcotest.(check string) "missing and malformed fields are distinguished"
+      ("missing current-schema field \"required_artifacts\"; "
+       ^ "malformed current-schema field \"submitted_evidence\": "
+       ^ "expected an array of strings")
+      (member "evidence_projection_error" row |> Yojson.Safe.Util.to_string))
+
 (* ── summary_json ───────────────────────────────────── *)
 
 let int_field name j =
@@ -555,6 +590,8 @@ let () =
         test_requests_json_ignores_legacy_root_entries;
       Alcotest.test_case "conflict triage fields" `Quick
         test_requests_json_surfaces_conflict_triage_fields;
+      Alcotest.test_case "evidence projection errors" `Quick
+        test_requests_json_surfaces_evidence_projection_error;
       Alcotest.test_case "fd pressure remains observation-only" `Quick
         test_requests_and_summary_remain_available_after_fd_observation;
     ];

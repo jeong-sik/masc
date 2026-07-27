@@ -106,6 +106,7 @@ function makeRequest(overrides: Partial<VerificationRequest> = {}): Verification
     completion_contract: [],
     required_artifacts: [],
     submitted_evidence: [],
+    evidence_projection_error: null,
     verdict: null,
     verdict_reason: '',
     ...overrides,
@@ -302,6 +303,23 @@ describe('VerificationRequestsPanel', () => {
       expect(screen.getByText('trace://submitted-runtime-proof')).toBeTruthy()
       expect(screen.queryByText('Required Evidence')).toBeNull()
     })
+  })
+
+  it('renders missing and malformed evidence projection warnings', () => {
+    setData([
+      makeRequest({
+        evidence_projection_error:
+          'missing current-schema field "required_artifacts"; malformed current-schema field "submitted_evidence": expected an array of strings',
+      }),
+    ])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    expect(screen.getByRole('alert').textContent).toContain(
+      'missing current-schema field "required_artifacts"',
+    )
+    expect(screen.getByRole('alert').textContent).toContain(
+      'malformed current-schema field "submitted_evidence"',
+    )
   })
 })
 

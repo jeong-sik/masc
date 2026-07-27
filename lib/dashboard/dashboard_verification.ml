@@ -32,19 +32,35 @@ let completion_contract_of_criteria (criteria : V.criterion list) : string list 
     | V.Contains _ | V.Not_contains _ | V.Schema_match _ -> None
   ) criteria
 
-(** Read one current typed evidence list. Missing or malformed fields project
-    as empty; no legacy field aliases are consulted. *)
-let string_list_of_output field (output : Yojson.Safe.t) : string list =
+(** Read one required current-schema evidence list. Empty arrays are valid;
+    missing or malformed fields carry a public projection error. No legacy
+    field aliases are consulted and malformed arrays are never partially
+    projected. *)
+let string_list_of_output field (output : Yojson.Safe.t)
+  : string list * string option =
+  let missing () =
+    [], Some (Printf.sprintf "missing current-schema field %S" field)
+  in
+  let malformed detail =
+    ( [],
+      Some (Printf.sprintf
+        "malformed current-schema field %S: %s" field detail) )
+  in
+  let rec strings acc = function
+    | [] -> Some (List.rev acc)
+    | `String value :: rest -> strings (value :: acc) rest
+    | _ -> None
+  in
   match output with
   | `Assoc fields ->
       (match List.assoc_opt field fields with
        | Some (`List items) ->
-           List.filter_map (function
-             | `String s -> Some s
-             | _ -> None
-           ) items
-       | _ -> [])
-  | _ -> []
+           (match strings [] items with
+            | Some values -> values, None
+            | None -> malformed "expected an array of strings")
+       | Some _ -> malformed "expected an array of strings"
+       | None -> missing ())
+  | _ -> malformed "verification output must be an object"
 
 (* Pull task_title from the submit envelope so the UI detail cell has a
    fallback when contract/evidence/verdict_reason are all empty. Empty
@@ -120,11 +136,18 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     derive_status_fields req
   in
   let contract = completion_contract_of_criteria req.criteria in
-  let required_artifacts =
+  let required_artifacts, required_artifacts_error =
     string_list_of_output "required_artifacts" req.output
   in
-  let submitted_evidence =
+  let submitted_evidence, submitted_evidence_error =
     string_list_of_output "submitted_evidence" req.output
+  in
+  let evidence_projection_error =
+    [required_artifacts_error; submitted_evidence_error]
+    |> List.filter_map Fun.id
+    |> function
+    | [] -> None
+    | errors -> Some (String.concat "; " errors)
   in
   let task_title = task_title_of_output req.output in
   let request_kind = request_kind_of_output req.output in
@@ -151,6 +174,8 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
      `List (List.map (fun s -> `String s) required_artifacts));
     ("submitted_evidence",
      `List (List.map (fun s -> `String s) submitted_evidence));
+    ("evidence_projection_error",
+     Json_util.string_opt_to_json evidence_projection_error);
     ("verdict", Json_util.string_opt_to_json verdict_opt);
     ("verdict_reason", `String verdict_reason);
   ]

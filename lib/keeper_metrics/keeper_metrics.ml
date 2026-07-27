@@ -141,8 +141,10 @@ type t =
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
+  | MemoryLaneCoalesced
   | MemoryLanePending
   | MemoryLaneInFlight
+  | MemoryLaneLatestPending
   | MemoryLaneExecutionSlotBusy
   | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
@@ -359,8 +361,10 @@ let to_string = function
   | MemoryLaneSubmitted -> "masc_keeper_memory_lane_submitted_total"
   | MemoryLaneRanInline -> "masc_keeper_memory_lane_ran_inline_total"
   | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"
+  | MemoryLaneCoalesced -> "masc_keeper_memory_lane_coalesced_total"
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
+  | MemoryLaneLatestPending -> "masc_keeper_memory_lane_latest_pending"
   | MemoryLaneExecutionSlotBusy -> "masc_keeper_memory_lane_execution_slot_busy_total"
   | MemoryBankCompactionFailures -> "masc_keeper_memory_bank_compaction_failures_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"

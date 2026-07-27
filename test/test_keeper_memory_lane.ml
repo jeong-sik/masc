@@ -22,6 +22,7 @@ let test_inline_when_uninitialized () =
   match outcome with
   | Lane.Ran_inline -> ()
   | Lane.Submitted -> Alcotest.fail "expected Ran_inline, got Submitted"
+  | Lane.Coalesced -> Alcotest.fail "expected Ran_inline, got Coalesced"
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
 ;;
 
@@ -34,6 +35,7 @@ let test_inline_contains_raise () =
   match outcome with
   | Lane.Ran_inline -> ()
   | Lane.Submitted -> Alcotest.fail "expected Ran_inline, got Submitted"
+  | Lane.Coalesced -> Alcotest.fail "expected Ran_inline, got Coalesced"
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
 ;;
 
@@ -103,19 +105,23 @@ let test_independent_across_keepers () =
   Alcotest.(check (list string)) "k2 before k1" [ "k2"; "k1" ] (List.rev !order)
 ;;
 
-(* With max_pending = 2, a third concurrent unit for one keeper is dropped. *)
-let test_saturation_drops () =
+(* The deterministic lane retains its existing bounded-drop policy. *)
+let test_deterministic_saturation_drops () =
   Lane.For_testing.reset ();
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
       let p_release, set_release = Eio.Promise.create () in
       let o1 =
-        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () ->
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Deterministic (fun () ->
           Eio.Promise.await p_release)
       in
-      let o2 = Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () -> ()) in
-      let o3 = Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () -> ()) in
+      let o2 =
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Deterministic (fun () -> ())
+      in
+      let o3 =
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Deterministic (fun () -> ())
+      in
       (match o1 with
        | Lane.Submitted -> ()
        | _ -> Alcotest.fail "o1 not submitted");
@@ -125,8 +131,62 @@ let test_saturation_drops () =
       (match o3 with
        | Lane.Dropped -> ()
        | Lane.Submitted -> Alcotest.fail "o3 should be Dropped, got Submitted"
+       | Lane.Coalesced -> Alcotest.fail "deterministic lane must not coalesce"
        | Lane.Ran_inline -> Alcotest.fail "o3 should be Dropped, got Ran_inline");
       Eio.Promise.resolve set_release ()))
+;;
+
+(* Librarian saturation keeps one running unit and one overwriteable latest
+   snapshot. Every submit returns immediately; only the newest pending snapshot
+   evaluates after the blocker. *)
+let test_librarian_saturation_coalesces_latest () =
+  Lane.For_testing.reset ();
+  let evaluated = ref [] in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let started, set_started = Eio.Promise.create () in
+      let release, set_release = Eio.Promise.create () in
+      let running =
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () ->
+          Eio.Promise.resolve set_started ();
+          Eio.Promise.await release;
+          evaluated := "running" :: !evaluated)
+      in
+      Eio.Promise.await started;
+      let snapshot trace generation messages () =
+        evaluated :=
+          Printf.sprintf "%s:%d:%s" trace generation (String.concat "," messages)
+          :: !evaluated
+      in
+      let stale =
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian
+          (snapshot "trace-stale" 1 [ "stale" ])
+      in
+      let newer =
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian
+          (snapshot "trace-newer" 2 [ "newer" ])
+      in
+      let newest =
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian
+          (snapshot "trace-newest" 3 [ "newest-a"; "newest-b" ])
+      in
+      (match running, stale, newer, newest with
+       | Lane.Submitted, Lane.Submitted, Lane.Coalesced, Lane.Coalesced -> ()
+       | _ -> Alcotest.fail "unexpected Librarian coalescing outcomes");
+      (match Lane.For_testing.pending ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian with
+       | Some 2 -> ()
+       | Some n -> Alcotest.failf "running+latest bound should be 2, got %d" n
+       | None -> Alcotest.fail "missing Librarian lane entry");
+      Eio.Promise.resolve set_release ()));
+  Alcotest.(check (list string))
+    "only running and newest snapshot evaluate"
+    [ "running"; "trace-newest:3:newest-a,newest-b" ]
+    (List.rev !evaluated);
+  match Lane.For_testing.pending ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian with
+  | Some 0 -> ()
+  | Some n -> Alcotest.failf "pending leaked after coalesced drain: %d" n
+  | None -> Alcotest.fail "Librarian lane entry missing"
 ;;
 
 (* The regression this split exists for: a saturated librarian lane must not
@@ -161,10 +221,12 @@ let test_lanes_have_independent_budgets () =
        | Lane.Submitted, Lane.Submitted -> ()
        | _ -> Alcotest.fail "librarian lane should admit two units");
       (match lib3 with
-       | Lane.Dropped -> ()
-       | _ -> Alcotest.fail "librarian lane should be saturated at the bound");
+       | Lane.Coalesced -> ()
+       | _ -> Alcotest.fail "librarian lane should coalesce at the bound");
       (match det with
        | Lane.Submitted -> ()
+       | Lane.Coalesced ->
+         Alcotest.fail "deterministic unit must not use Librarian coalescing"
        | Lane.Dropped ->
          Alcotest.fail "deterministic unit dropped by a saturated librarian lane"
        | Lane.Ran_inline -> Alcotest.fail "deterministic unit ran inline");
@@ -183,21 +245,28 @@ let test_lanes_have_independent_budgets () =
    recovers and later units run. *)
 let test_releases_on_raise () =
   Lane.For_testing.reset ();
-  let ran_after = ref false in
+  let latest_ran = ref false in
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
-      let _ =
-        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () -> raise Test_boom)
+      let started, set_started = Eio.Promise.create () in
+      let release, set_release = Eio.Promise.create () in
+      let first =
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () ->
+          Eio.Promise.resolve set_started ();
+          Eio.Promise.await release;
+          raise Test_boom)
       in
-      Eio.Fiber.yield ();
-      Eio.Fiber.yield ();
-      let _ =
-        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () -> ran_after := true)
+      Eio.Promise.await started;
+      let latest =
+        Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () ->
+          latest_ran := true)
       in
-      Eio.Fiber.yield ();
-      Eio.Fiber.yield ()));
-  Alcotest.(check bool) "lane recovered after raise" true !ran_after;
+      (match first, latest with
+       | Lane.Submitted, Lane.Submitted -> ()
+       | _ -> Alcotest.fail "raise fixture submissions were not accepted");
+      Eio.Promise.resolve set_release ()));
+  Alcotest.(check bool) "latest runs after raising unit" true !latest_ran;
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian with
   | Some 0 -> ()
   | Some n -> Alcotest.failf "pending leaked: %d" n
@@ -207,6 +276,7 @@ let test_releases_on_raise () =
 (* Cancellation during shutdown releases both the mutex and the pending slot. *)
 let test_releases_on_cancel () =
   Lane.For_testing.reset ();
+  let latest_ran = ref false in
   (try
      Eio_main.run (fun _env ->
        Eio.Switch.run (fun sw ->
@@ -218,14 +288,25 @@ let test_releases_on_cancel () =
              Eio.Promise.resolve set_started ();
              Eio.Promise.await never)
          in
+         let latest =
+           Lane.submit ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian (fun () ->
+             latest_ran := true)
+         in
          (match outcome with
           | Lane.Submitted -> ()
-         | Lane.Ran_inline -> Alcotest.fail "cancel test unexpectedly ran inline"
-         | Lane.Dropped -> Alcotest.fail "cancel test unexpectedly dropped");
+          | Lane.Coalesced -> Alcotest.fail "first cancel unit unexpectedly coalesced"
+          | Lane.Ran_inline -> Alcotest.fail "cancel test unexpectedly ran inline"
+          | Lane.Dropped -> Alcotest.fail "cancel test unexpectedly dropped");
+         (match latest with
+          | Lane.Submitted -> ()
+          | Lane.Coalesced -> Alcotest.fail "first latest unit unexpectedly coalesced"
+         | Lane.Ran_inline -> Alcotest.fail "latest cancel unit unexpectedly ran inline"
+          | Lane.Dropped -> Alcotest.fail "latest cancel unit unexpectedly dropped");
          Eio.Promise.await started;
          Eio.Switch.fail sw Cancel_lane_test))
    with
    | Cancel_lane_test -> ());
+  Alcotest.(check bool) "latest did not run after switch cancel" false !latest_ran;
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian with
   | Some 0 -> ()
   | Some n -> Alcotest.failf "pending leaked after cancel: %d" n
@@ -254,6 +335,7 @@ let test_finished_switch_drops_without_leak () =
   (match outcome with
    | Lane.Dropped -> ()
    | Lane.Submitted -> Alcotest.fail "expected Dropped, got Submitted"
+   | Lane.Coalesced -> Alcotest.fail "expected Dropped, got Coalesced"
    | Lane.Ran_inline -> Alcotest.fail "expected Dropped, got Ran_inline");
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" ~lane:Lane.Librarian with
   | Some 0 -> ()
@@ -281,7 +363,14 @@ let () =
             "independent across keepers"
             `Quick
             test_independent_across_keepers
-        ; Alcotest.test_case "saturation drops" `Quick test_saturation_drops
+        ; Alcotest.test_case
+            "deterministic saturation drops"
+            `Quick
+            test_deterministic_saturation_drops
+        ; Alcotest.test_case
+            "librarian saturation coalesces latest"
+            `Quick
+            test_librarian_saturation_coalesces_latest
         ; Alcotest.test_case
             "lanes have independent budgets"
             `Quick

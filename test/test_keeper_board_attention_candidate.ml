@@ -117,6 +117,25 @@ let keeper_context ?(active_goal_ids = []) () =
     ]
 ;;
 
+(* The writer correctly refuses non-finite floats, so render the row textually
+   to model out-of-band corruption of an otherwise current-schema ledger and
+   verify that the reader fails closed through its recorded_at finite guard. *)
+let render_row_with_non_finite ~field ~literal json =
+  match json with
+  | `Assoc fields ->
+    let rendered =
+      List.map
+        (fun (key, value) ->
+           Printf.sprintf
+             "%s:%s"
+             (Yojson.Safe.to_string (`String key))
+             (if String.equal key field then literal else Yojson.Safe.to_string value))
+        fields
+    in
+    Printf.sprintf "{%s}" (String.concat "," rendered)
+  | _ -> Alcotest.fail "candidate JSON is not an object"
+;;
+
 let candidate ?(context = keeper_context ()) signal :
   A.candidate
   =
@@ -289,9 +308,13 @@ let rewrite_first_comment rewrite = function
   | _ -> Alcotest.fail "expected comments array"
 ;;
 
-let expect_record_error ~base_path label candidate =
+let expect_record_error ?expected_detail ~base_path label candidate =
   match A.record ~base_path candidate with
-  | A.Record_error _ -> ()
+  | A.Record_error detail ->
+    Option.iter
+      (fun expected ->
+         Alcotest.(check string) (label ^ " error") expected detail)
+      expected_detail
   | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded")
 ;;
 
@@ -490,13 +513,21 @@ let test_non_finite_lifecycle_times_are_rejected () =
       "sangsu.jsonl"
   in
   let non_finite_row =
-    A.candidate_to_json { valid with recorded_at = Float.infinity }
-    |> Yojson.Safe.to_string
+    render_row_with_non_finite
+      ~field:"recorded_at"
+      ~literal:"Infinity"
+      (A.candidate_to_json valid)
   in
   Out_channel.with_open_bin ledger_path (fun channel ->
     output_string channel (non_finite_row ^ "\n"));
   match A.load_candidates ~base_path ~keeper_name:valid.keeper_name with
-  | Error _ -> ()
+  | Error detail ->
+    let expected = "board attention candidate.recorded_at must be finite" in
+    if not (String.ends_with ~suffix:expected detail)
+    then
+      Alcotest.failf
+        "non-finite durable candidate returned the wrong reader error: %s"
+        detail
   | Ok _ -> Alcotest.fail "load accepted a non-finite durable candidate"
 ;;
 
@@ -504,10 +535,18 @@ let test_non_finite_complete_request_evidence_is_rejected () =
   with_temp_base "board-attention-candidate-request-finite" @@ fun base_path ->
   let base = candidate (signal "post-request-finite") in
   let at_signal value =
-    let signal =
-      { (signal "post-request-finite") with updated_at = Some value }
+    (* [candidate] derives candidate_id by serializing the signal, which yojson 3
+       refuses to do for a non-finite float. Hash a finite placeholder and inject
+       the value afterwards: the stored record, not the id, is under test. *)
+    let placeholder =
+      { (signal "post-request-finite") with updated_at = Some 0.0 }
     in
-    let candidate = candidate signal in
+    let candidate = candidate placeholder in
+    let candidate =
+      { candidate with
+        signal = { candidate.signal with updated_at = Some value }
+      }
+    in
     { candidate with
       judgment_request =
         candidate.judgment_request
@@ -549,10 +588,13 @@ let test_non_finite_complete_request_evidence_is_rejected () =
     }
   in
   let locations =
-    [ "signal.updated_at", at_signal
-    ; "post.created_at", at_post
-    ; "comment.created_at", at_comment
-    ; "nested post evidence", at_nested_evidence
+    [ ( "signal.updated_at"
+      , Some
+          "invalid Board attention candidate: candidate.signal contains a non-finite number"
+      , at_signal )
+    ; "post.created_at", None, at_post
+    ; "comment.created_at", None, at_comment
+    ; "nested post evidence", None, at_nested_evidence
     ]
   in
   let non_finite_values =
@@ -562,10 +604,11 @@ let test_non_finite_complete_request_evidence_is_rejected () =
     ]
   in
   List.iter
-    (fun (location, make_candidate) ->
+    (fun (location, expected_detail, make_candidate) ->
        List.iter
          (fun (number, value) ->
             expect_record_error
+              ?expected_detail
               ~base_path
               (number ^ " at " ^ location)
               (make_candidate value))

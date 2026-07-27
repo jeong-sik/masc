@@ -197,6 +197,22 @@ val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
 
 ### 7.2 심판 — `Structured.extract`
 
+> **철회됨 (2026-07-27).** 아래의 provider-native JSON schema 강제는 구현되지 않았고,
+> 되돌릴 계획도 없다. `Fusion_judge.apply_fusion_judge_output_contract`는 capability를
+> 읽지 않고 `Keeper_structured_output_schema.without_response_format`를 무조건 적용한다
+> (`response_format = Off`, `output_schema = None`). 계약은 프롬프트의
+> `Fusion_judge_parse.expected_json_doc`가 싣고, `Fusion_judge_parse.of_string`의 strict
+> 파싱이 위반을 `Parse_error`로 fail-loud한다.
+>
+> 철회 근거는 `lib/fusion/fusion_judge.ml:157-164`에 기록되어 있다: (1) capability 사실이
+> 거짓일 수 있다 — ollama.com cloud는 `json_schema`를 declared로 보고하면서 조용히 무시한다
+> (2026-07-02 probe), 그리고 현재 심판 런타임이 가리키는 엔드포인트가 그것이다. (2) #22768이
+> "native schema or fail before HTTP"를 도입했다가 미지원 preset의 fusion을 영구 불능으로
+> 만들어 되돌려졌다.
+>
+> 이 절은 `lib/fusion/fusion_judge.mli` 헤더가 "RFC가 요구하는지 확인하지 않았다"로 남겨둔
+> 미해결 항목이었다. 요구는 실재했고, 맞추는 쪽이 RFC다.
+
 `oas/lib/structured.mli:38` (provider-native JSON schema 강제, 미지원 provider fail-fast):
 ```ocaml
 val extract : sw:_ -> net:_ -> ?provider:Provider.config -> config:agent_config

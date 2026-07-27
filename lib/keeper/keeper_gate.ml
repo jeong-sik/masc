@@ -479,20 +479,15 @@ let compare_auto_judge_entries
   Int.compare left.sequence right.sequence
 ;;
 
-let earliest_auto_judge_for_owner ?exclude_id ~base_path ~keeper_name entries =
-  let sorted =
-    entries
-    |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
-      String.equal entry.audit_base_path base_path
-      && String.equal entry.keeper_name keeper_name
-      && (match exclude_id with
-          | Some id -> not (String.equal id entry.id)
-          | None -> true))
-    |> List.sort compare_auto_judge_entries
-  in
-  match sorted with
-  | [] -> None
-  | entry :: _ -> Some entry
+(* Every pending approval for the owner, in durable sequence order. Selection
+   ranges over this list; [ready_auto_judges_for_owner] decides which member
+   Auto Judge may start. *)
+let owner_auto_judges_in_fifo_order ~base_path ~keeper_name entries =
+  entries
+  |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+    String.equal entry.audit_base_path base_path
+    && String.equal entry.keeper_name keeper_name)
+  |> List.sort compare_auto_judge_entries
 ;;
 
 let auto_judge_entry_has_start_reservation
@@ -517,35 +512,45 @@ let auto_judge_entry_has_start_reservation
   | _ -> false
 ;;
 
+(* Sequence order is kept, but selection ranges over the entries Auto Judge can
+   still start instead of testing only the FIFO head. A head that is not
+   startable is not always transient. An entry whose judgment concluded in
+   [Require_human] keeps [Summary_attempt_settled] with [Summary_available]
+   for as long as it stays pending, because [resolve_judgment] persists no
+   transition for that verdict; a [Summary_attempt_pre_worker_unavailable]
+   entry waits for an explicit operator retry. Both classify as not ready, so
+   testing only the head stops the whole owner queue at the first such entry
+   and no drain trigger can restart it. Observed on 2026-07-28: 18 approvals
+   across two Keepers sat behind two heads of exactly these two kinds, the
+   oldest for 2416s, while new submissions kept firing the drain. Concurrency
+   remains bounded by [claim_auto_judge], not by this ordering. Selection still
+   yields at most one entry, so a drain reached from the tool-call hot path
+   makes at most one start attempt; an entry that fails to start becomes not
+   startable and the next trigger passes over it. *)
 let ready_auto_judges_for_owner
-      ?exclude_id
       ?reserved_id
       ~base_path
       ~keeper_name
       entries
   =
+  let startable (entry : Keeper_approval_queue.pending_approval) =
+    auto_judge_entry_ready entry
+    ||
+    (match reserved_id with
+     | Some reserved_id ->
+       auto_judge_entry_has_start_reservation reserved_id entry
+     | None -> false)
+  in
   match
-    earliest_auto_judge_for_owner
-      ?exclude_id
-      ~base_path
-      ~keeper_name
-      entries
+    owner_auto_judges_in_fifo_order ~base_path ~keeper_name entries
+    |> List.find_opt startable
   with
-  | Some entry
-    when
-      auto_judge_entry_ready entry
-      ||
-      (match reserved_id with
-       | Some reserved_id ->
-         auto_judge_entry_has_start_reservation reserved_id entry
-       | None -> false) ->
-    [ entry ]
-  | Some _ | None -> []
+  | Some entry -> [ entry ]
+  | None -> []
 ;;
 
 type auto_judge_drain_blocker =
   | Drain_owner_active of string
-  | Drain_fifo_predecessor of string
   | Drain_entry_changed of string
   | Drain_entry_missing of string
   | Drain_start_failed of string * string
@@ -556,10 +561,6 @@ let auto_judge_drain_blocker_to_string = function
   | Drain_owner_active approval_id ->
     Printf.sprintf
       "Auto Judge retry could not start because approval %s owns the active worker"
-      approval_id
-  | Drain_fifo_predecessor approval_id ->
-    Printf.sprintf
-      "Auto Judge retry could not start because approval %s is first in FIFO"
       approval_id
   | Drain_entry_changed approval_id ->
     Printf.sprintf
@@ -854,7 +855,6 @@ and start_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
        Ok Skipped)
 
 and drain_auto_judge_owner_queue
-      ?exclude_id
       ?reserved_id
       ~base_path
       ~keeper_name
@@ -907,32 +907,30 @@ and drain_auto_judge_owner_queue
   |> Result.map (fun entries ->
     let selected =
       ready_auto_judges_for_owner
-        ?exclude_id
         ?reserved_id
         ~base_path
         ~keeper_name
         entries
     in
+    (* Selection ranges over every startable entry, so an empty selection under
+       a reservation means the reserved entry itself is no longer startable --
+       never that an earlier approval holds the FIFO head. *)
     let blocker =
       match reserved_id, selected with
       | Some reserved_id, [] ->
         (match
-           earliest_auto_judge_for_owner
-             ?exclude_id
-             ~base_path
-             ~keeper_name
+           List.exists
+             (fun (entry : Keeper_approval_queue.pending_approval) ->
+                String.equal entry.id reserved_id)
              entries
          with
-         | None -> Some (Drain_entry_missing reserved_id)
-         | Some entry when String.equal entry.id reserved_id ->
-           Some (Drain_entry_changed entry.id)
-         | Some entry -> Some (Drain_fifo_predecessor entry.id))
+         | false -> Some (Drain_entry_missing reserved_id)
+         | true -> Some (Drain_entry_changed reserved_id))
       | _ -> None
     in
     loop [] blocker selected)
 
 and drain_auto_judge_owner
-      ?exclude_id
       ?reserved_id
       ~base_path
       ~keeper_name
@@ -941,7 +939,6 @@ and drain_auto_judge_owner
   match Keeper_gate_mode.read ~base_path with
   | Ok Keeper_gate_mode.Auto_judge ->
     drain_auto_judge_owner_queue
-      ?exclude_id
       ?reserved_id
       ~base_path
       ~keeper_name
@@ -1039,27 +1036,42 @@ let recovered_work_for_base_path ~base_path =
         Auto_judge_owner_set.empty
         entries
     in
+    let recovered_work_for_entry
+          (entry : Keeper_approval_queue.pending_approval)
+      =
+      match classify_auto_judge_entry entry with
+      | Auto_judge_not_requested
+      | Auto_judge_pending_unbound ->
+        Some (Activate_worker entry)
+      | Auto_judge_finalizable
+          ({ judgment = (Keeper_approval_queue.Approve | Keeper_approval_queue.Deny); _ }
+           as summary) ->
+        Some (Finalize_judgment (entry, summary))
+      | Auto_judge_finalizable
+          { judgment = Keeper_approval_queue.Require_human; _ }
+      | Auto_judge_ineligible ->
+        None
+    in
+    let entry_of_recovered_work = function
+      | Activate_worker entry -> entry
+      | Finalize_judgment (entry, _) -> entry
+    in
+    (* Per owner, recover the earliest entry that still carries Auto Judge
+       work. Reading only the FIFO head and classifying it afterwards lets a
+       head with no work -- a Require_human judgment waiting on an operator, or
+       any ineligible disposition -- hide every recoverable entry behind it.
+       That is the same head-of-line stall [ready_auto_judges_for_owner]
+       avoids, and it would leave restart, the only remaining escape from a
+       stalled owner, recovering nothing for that owner. *)
     owners
     |> Auto_judge_owner_set.elements
     |> List.filter_map (fun (_, keeper_name) ->
-      earliest_auto_judge_for_owner
-        ~base_path
-        ~keeper_name
-        entries)
-    |> List.sort compare_auto_judge_entries
-    |> List.filter_map (fun entry ->
-        match classify_auto_judge_entry entry with
-        | Auto_judge_not_requested
-        | Auto_judge_pending_unbound ->
-          Some (Activate_worker entry)
-        | Auto_judge_finalizable
-            ({ judgment = (Keeper_approval_queue.Approve | Keeper_approval_queue.Deny); _ }
-             as summary) ->
-          Some (Finalize_judgment (entry, summary))
-        | Auto_judge_finalizable
-            { judgment = Keeper_approval_queue.Require_human; _ }
-        | Auto_judge_ineligible ->
-          None))
+      owner_auto_judges_in_fifo_order ~base_path ~keeper_name entries
+      |> List.find_map recovered_work_for_entry)
+    |> List.sort (fun left right ->
+      compare_auto_judge_entries
+        (entry_of_recovered_work left)
+        (entry_of_recovered_work right)))
 ;;
 
 let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval) =

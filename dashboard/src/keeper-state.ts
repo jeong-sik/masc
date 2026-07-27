@@ -1433,6 +1433,28 @@ function mergeLocalAssistantTraceSteps(
       traceSteps: localTraceSourceByRequestId.traceSteps,
     }
   }
+  // Queue-lane join: a keeper that was busy answers through the chat queue, so
+  // the stream carries KEEPER_CHAT_QUEUED (receipt id, no request id). Such a
+  // placeholder has neither request id nor turnRef, and its receipt is the only
+  // producer identity shared with the history row. Without this the trace stays
+  // unmerged and the transcript renders a second "턴 타임라인".
+  const historyReceiptIds = new Set(queueReceiptIds(historyEntry))
+  const localTraceSourceByReceipt = historyReceiptIds.size > 0
+    ? localEntries.find(
+        entry =>
+          entry.role === 'assistant'
+          && (entry.traceSteps?.length ?? 0) > 0
+          && !consumed.has(entry.id)
+          && queueReceiptIds(entry).some(receiptId => historyReceiptIds.has(receiptId)),
+      )
+    : undefined
+  if (localTraceSourceByReceipt?.traceSteps?.length) {
+    consumed.add(localTraceSourceByReceipt.id)
+    return {
+      ...historyEntry,
+      traceSteps: localTraceSourceByReceipt.traceSteps,
+    }
+  }
   const historyTurnRef = historyEntry.turnRef?.trim()
   const localTraceSourceByTurnRef = historyTurnRef
     ? localEntries.find(
@@ -1479,11 +1501,27 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       // A terminal durable-receipt observation is also operator evidence, not
       // a duplicate assistant reply: keep it alongside the canonical history
       // row so its Pending/Inflight/Delivered/Failed lifecycle remains visible.
+      // ...unless the history row already carries this placeholder's identity
+      // and its trace was folded in above (mergeLocalAssistantTraceSteps).
+      // A queue-lane placeholder whose stream died holds only the trace and an
+      // empty text; keeping it next to the converged history row renders the
+      // same turn twice, and only the placeholder copy shows per-tool
+      // durations (live 2026-07-28).
       const isReceiptObservation =
-        entry.role === 'assistant' && Boolean(entry.details?.queueReceiptId)
-      const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery)
-        || isReceiptObservation
-        || !coveredByHistory
+        entry.role === 'assistant'
+        && Boolean(entry.details?.queueReceiptId)
+        && !coveredByHistory
+      // A converged assistant row supersedes its own placeholder even while the
+      // placeholder still reads in-flight: a stream that died before
+      // REPLY_DETAILS leaves `sending` set forever, so treating in-flight as
+      // unconditionally live renders the same turn twice (live 2026-07-28,
+      // queue lane). Convergence requires a shared producer identity, so this
+      // cannot collapse two genuinely distinct turns.
+      const supersededByHistory = entry.role === 'assistant' && coveredByHistory
+      const shouldKeepLocalEntry = !supersededByHistory
+        && (isInFlightDelivery(entry.delivery)
+          || isReceiptObservation
+          || !coveredByHistory)
       return entry.delivery !== 'history' && !isCoveredToolRow && shouldKeepLocalEntry
     },
   )

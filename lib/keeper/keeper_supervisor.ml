@@ -29,22 +29,24 @@ let empty_sweep_acc =
 ;;
 
 let pending_hitl_approval_counts config =
-  let pending_entries = Keeper_approval_queue.list_pending_entries () in
-  keeper_names config
-  |> List.filter_map (fun name ->
-       let pending_count =
-         List.fold_left
-           (fun count (entry : Keeper_approval_queue.pending_approval) ->
-              if String.equal entry.keeper_name name
-              then count + 1
-              else count)
-           0
-           pending_entries
-       in
-       if pending_count = 0 then None else Some (name, pending_count))
+  Keeper_approval_queue.list_pending_entries_for_workspace
+    ~base_path:config.base_path
+  |> Result.map (fun pending_entries ->
+    keeper_names config
+    |> List.filter_map (fun name ->
+         let pending_count =
+           List.fold_left
+             (fun count (entry : Keeper_approval_queue.pending_approval) ->
+                if String.equal entry.keeper_name name
+                then count + 1
+                else count)
+             0
+             pending_entries
+         in
+         if pending_count = 0 then None else Some (name, pending_count)))
 
 let pending_hitl_approval_keeper_names config =
-  pending_hitl_approval_counts config |> List.map fst
+  pending_hitl_approval_counts config |> Result.map (List.map fst)
 ;;
 
 let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
@@ -53,12 +55,20 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
   let dead_ttl_sec = Runtime_params.get Runtime_settings.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
   (* HITL requests are observable inputs, not Keeper-lane ownership. *)
-  pending_hitl_approval_counts ctx.config
-  |> List.iter (fun (name, pending_count) ->
-       Log.Keeper.info
-         "keeper:%s has %d pending HITL request(s); Keeper lane remains available"
-         name
-         pending_count);
+  (match pending_hitl_approval_counts ctx.config with
+   | Ok counts ->
+     List.iter
+       (fun (name, pending_count) ->
+          Log.Keeper.info
+            "keeper:%s has %d pending HITL request(s); Keeper lane remains available"
+            name
+            pending_count)
+       counts
+   | Error error ->
+     Log.Keeper.error
+       "pending HITL visibility unavailable workspace=%s error=%s"
+       base_path
+       (Keeper_approval_queue.storage_error_to_string error));
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)
@@ -248,18 +258,19 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               old_entry.name
               reason
           | Keeper_lifecycle_admission.Autonomous_admitted ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string RestartAttempts)
-              ~labels:[ "keeper", old_entry.name ]
-              ();
-            (* Dispatch restart intent only after lifecycle admission. A
-               paused or tombstoned lane never enters the restarting FSM. *)
-            Keeper_registry.dispatch_event_unit
-              ~base_path
-              old_entry.name
-              (Keeper_state_machine.Supervisor_restart_attempt { attempt });
-            let old_crash_log = old_entry.crash_log in
-         (match Keeper_registry.register_restarting ~base_path old_entry.name meta with
+            let restart_admitted permit =
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string RestartAttempts)
+                ~labels:[ "keeper", old_entry.name ]
+                ();
+              (* Registration and launch share the same durable admission.
+                 No Not_started replacement lane can escape a denied fence. *)
+              Keeper_registry.dispatch_event_unit
+                ~base_path
+                old_entry.name
+                (Keeper_state_machine.Supervisor_restart_attempt { attempt });
+              let old_crash_log = old_entry.crash_log in
+              (match Keeper_registry.register_restarting ~base_path old_entry.name meta with
           | Error (Keeper_registry.Restart_shutdown_reserved operation_id) ->
             Log.Keeper.warn
               "%s: restart skipped because shutdown operation %s owns admission"
@@ -290,7 +301,14 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               ~restart_count:attempt
               ~last_restart_ts:now
               ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
-            (match launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg with
+            (match
+               launch_supervised_fiber_under_admission
+                 permit
+                 ~proactive_warmup_sec:0
+                 ctx
+                 meta
+                 reg
+             with
              | Error _ ->
                (* Launch gate aborted fail-closed (no fiber; done resolved and
                   Crashed published by the gate). Announcing Restarted/Running
@@ -314,8 +332,34 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                  Keeper_metrics.(to_string RestartOutcomes)
                  ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
                  ();
-               Log.Keeper.info "%s: restarted (attempt %d)" old_entry.name attempt);
-            ))
+               Log.Keeper.info "%s: restarted (attempt %d)" old_entry.name attempt))
+            in
+            (match
+               Keeper_lifecycle_admission.Durable_transaction
+               .with_durable_lifecycle_admission
+                 ctx.config
+                 ~keeper_name:old_entry.name
+                 restart_admitted
+             with
+             | Keeper_lifecycle_admission.Durable_transaction
+               .Admission_completed () ->
+               ()
+             | Keeper_lifecycle_admission.Durable_transaction
+               .Admission_completed_with_attention ((), failure) ->
+               Log.Keeper.error
+                 "%s: supervisor restart admission release requires attention: %s"
+                 old_entry.name
+                 (Keeper_lifecycle_admission.Durable_transaction
+                  .authority_failure_to_wire
+                    failure)
+             | Keeper_lifecycle_admission.Durable_transaction
+               .Admission_blocked reason ->
+               Log.Keeper.info
+                 "%s: supervisor restart blocked by durable lifecycle authority: %s"
+                 old_entry.name
+                 (Keeper_lifecycle_admission.Durable_transaction
+                 .blocked_reason_to_wire
+                    reason)))
        | _ ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)

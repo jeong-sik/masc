@@ -107,6 +107,7 @@ let canonical_keeper_meta_key_names =
       ; "agent_name", `String "__keeper-meta-key-seed__"
       ; "persona", `String "__keeper-meta-key-seed__"
       ; "trace_id", `String "__keeper-meta-key-seed__"
+      ; "generation", `Int 1
       ]
   in
   match meta_of_json seed_json with

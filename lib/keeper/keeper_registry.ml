@@ -560,7 +560,8 @@ let cleanup_tracking_exact (entry : registry_entry) =
 
 let clear () =
   Atomic.set registry StringMap.empty;
-  Atomic.set running_count_atomic 0
+  Atomic.set running_count_atomic 0;
+  Keeper_exact_flow_scope.clear ()
 ;;
 
 (* -- Board cursor -------------------------------------------------- *)
@@ -1085,18 +1086,24 @@ let dispatch_event_exact
 ;;
 
 let dispatch_event_exact_for_lifecycle
+      permit
       token
       (entry : registry_entry)
       ?(origin = Generic_dispatch)
       event
   =
-  dispatch_event_with_audit_internal
+  Keeper_registry_setup.with_lifecycle_mutation_admission
+    permit
     ~base_path:entry.base_path
-    ~lifecycle_token:token
-    ~expected_lane:(Keeper_lane.id entry.lane)
-    ~origin
-    entry.name
-    event
+    ~keeper_name:entry.name
+    (fun () ->
+       dispatch_event_with_audit_internal
+         ~base_path:entry.base_path
+         ~lifecycle_token:token
+         ~expected_lane:(Keeper_lane.id entry.lane)
+         ~origin
+         entry.name
+         event)
 ;;
 
 let dispatch_event ~base_path ?(origin = Generic_dispatch) name event =
@@ -1197,11 +1204,21 @@ let prepare_fiber_launch ~base_path name =
   dispatch_event ~base_path name Keeper_state_machine.Fiber_started
 ;;
 
-let prepare_fiber_launch_for_lifecycle token (entry : registry_entry) =
-  Atomic.set entry.fiber_stop false;
-  Atomic.set entry.fiber_wakeup false;
-  Atomic.set entry.waiting_for_inference false;
-  dispatch_event_exact_for_lifecycle token entry Keeper_state_machine.Fiber_started
+let prepare_fiber_launch_for_lifecycle permit token (entry : registry_entry) =
+  Keeper_registry_setup.with_lifecycle_mutation_admission
+    permit
+    ~base_path:entry.base_path
+    ~keeper_name:entry.name
+    (fun () ->
+       Atomic.set entry.fiber_stop false;
+       Atomic.set entry.fiber_wakeup false;
+       Atomic.set entry.waiting_for_inference false;
+       dispatch_event_with_audit_internal
+         ~base_path:entry.base_path
+         ~lifecycle_token:token
+         ~expected_lane:(Keeper_lane.id entry.lane)
+         entry.name
+         Keeper_state_machine.Fiber_started)
 ;;
 
 let get_phase ~base_path name =

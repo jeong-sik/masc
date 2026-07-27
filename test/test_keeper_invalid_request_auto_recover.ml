@@ -29,7 +29,7 @@ let test_is_invalid_request_error_only_for_api_invalid_request () =
     (EC.is_invalid_request_error
        (Agent_sdk.Error.Provider
           (Llm_provider.Error.InvalidRequest
-             { provider = "provider"; reason = "bad body" })));
+             { provider = "provider"; reason = "Invalid request: bad body" })));
   check
     bool
     "ContextOverflow does not match"
@@ -39,9 +39,10 @@ let test_is_invalid_request_error_only_for_api_invalid_request () =
           (ContextOverflow { message = "exceeded"; limit = None })));
   check
     bool
-    "Internal does not match"
+    "rendered internal text does not match"
     false
-    (EC.is_invalid_request_error (Agent_sdk.Error.Internal "some error"))
+    (EC.is_invalid_request_error
+       (Agent_sdk.Error.Internal "Bad Request: arbitrary provider text"))
 ;;
 
 let test_invalid_request_is_auto_recoverable () =
@@ -50,6 +51,24 @@ let test_invalid_request_is_auto_recoverable () =
     "Api InvalidRequest is auto-recoverable at turn level"
     true
     (EC.is_auto_recoverable_turn_error (invalid_request "bad body"))
+;;
+
+let test_transport_400_bridges_to_typed_api_invalid_request () =
+  let classified =
+    Llm_provider.Retry.classify_error
+      ~retry_after_header:None
+      ~status:400
+      ~body:"transport rejection"
+  in
+  match classified with
+  | Llm_provider.Retry.InvalidRequest _ ->
+    check
+      bool
+      "transport-classified 400 reaches the typed API predicate"
+      true
+      (EC.is_invalid_request_error (Agent_sdk.Error.Api classified))
+  | _ ->
+    fail "HTTP 400 transport classification did not produce InvalidRequest"
 ;;
 
 let test_consecutive_counter_bounds_exemption () =
@@ -103,40 +122,6 @@ let test_counters_are_per_keeper () =
   KUF.reset_invalid_request_failures ~keeper_name:keeper_b
 ;;
 
-(* Drift guard for the legacy string arms in [EC.is_invalid_request_error]
-   (#25606).  The classification shape and the rendered prefix are both
-   produced by the pinned OAS SDK (oas 5851df2e, lib/llm_provider/retry.ml):
-   [Retry.classify_error] maps HTTP 400/422 to
-   [InvalidRequest { reason = Unknown_invalid_request; message = body }] and
-   [Retry.error_message] renders it as ["Invalid request (%s): %s"] — the
-   prefix the legacy string arm matches.  This test generates the real SDK
-   product and asserts the predicate catches it and the rendering keeps the
-   matched prefix, so an SDK-side shape change fails here instead of
-   silently deadening the matcher.  At the pin no [sdk_error] rendering
-   starts with ["Bad Request"] or ["oas-ollama_cloud"]; those string arms
-   are defensive legacy shapes with no SDK producer to pin. *)
-let test_sdk_invalid_request_shape_drift_guard () =
-  let api_error =
-    Llm_provider.Retry.classify_error
-      ~retry_after_header:None
-      ~status:400
-      ~body:"Bad Request"
-  in
-  let err = Agent_sdk.Error.Api api_error in
-  check
-    bool
-    "SDK-classified 400 is caught by the predicate"
-    true
-    (EC.is_invalid_request_error err);
-  check
-    bool
-    "SDK rendering keeps the Invalid request prefix the string arm matches"
-    true
-    (String.starts_with
-       ~prefix:"Invalid request"
-       (Agent_sdk.Error.to_string err))
-;;
-
 let () =
   run
     "keeper_invalid_request_auto_recover"
@@ -150,6 +135,10 @@ let () =
             `Quick
             test_invalid_request_is_auto_recoverable
         ; test_case
+            "HTTP 400 transport classification bridges to typed Api InvalidRequest"
+            `Quick
+            test_transport_400_bridges_to_typed_api_invalid_request
+        ; test_case
             "consecutive counter bounds the crash-accounting exemption"
             `Quick
             test_consecutive_counter_bounds_exemption
@@ -157,10 +146,6 @@ let () =
             "consecutive counters are per-keeper"
             `Quick
             test_counters_are_per_keeper
-        ; test_case
-            "SDK 400 classification/rendering shape drift guard"
-            `Quick
-            test_sdk_invalid_request_shape_drift_guard
         ] )
     ]
 ;;

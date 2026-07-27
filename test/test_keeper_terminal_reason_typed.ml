@@ -50,7 +50,7 @@ let meta_fixture_exn json =
 ;;
 
 let write_meta_exn config meta =
-  match KMS.write_meta config meta with
+  match Masc_test_deps.write_current_keeper_meta config meta with
   | Ok () -> ()
   | Error err -> failwith ("write_meta failed: " ^ err)
 ;;

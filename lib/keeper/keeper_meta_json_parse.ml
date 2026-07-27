@@ -200,12 +200,26 @@ let parse_persisted_max_context_override json =
          (Json_util.kind_name other))
 ;;
 
+let parse_required_positive_generation json =
+  match Json_util.assoc_member_opt "generation" json with
+  | None -> Error "missing generation in persisted keeper runtime"
+  | Some (`Int value) when value > 0 -> Ok value
+  | Some (`Intlit raw) ->
+    (match int_of_string_opt raw with
+     | Some value when value > 0 && String.equal raw (string_of_int value) ->
+       Ok value
+     | Some _ | None ->
+       Error "persisted keeper generation must be a positive integer")
+  | Some _ -> Error "persisted keeper generation must be a positive integer"
+;;
+
 let parse_keeper_state
       (json : Yojson.Safe.t)
       ~(trace_id : Keeper_id.Trace_id.t)
       ~(trace_history : string list)
       ~(keeper_name : string)
       ~max_context_override
+      ~nonce
   : parsed_keeper_state
   =
   (match Json_util.assoc_member_opt "auto_resume_after_sec" json with
@@ -223,12 +237,6 @@ let parse_keeper_state
          ; "site", "retired_auto_resume_field_migration_needed"
          ]
        ());
-  (* The OCaml field is [nonce]; the persisted JSON key stays ["generation"] for
-     backward compatibility with existing on-disk meta files (every other JSON
-     surface — keeper status, dashboard — already keeps this key while reading
-     [rt.nonce]). Renaming the key here would load every pre-rename meta file
-     as [nonce = 0] and silently reset the fencing counter. *)
-  let nonce = Safe_ops.json_int ~default:0 "generation" json in
   let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
   let ps_created_at_raw = Safe_ops.json_string ~default:"" "created_at" json in
   let ps_updated_at_raw = Safe_ops.json_string ~default:"" "updated_at" json in
@@ -427,6 +435,9 @@ let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
 ;;
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
+  match parse_required_positive_generation json with
+  | Error _ as error -> error
+  | Ok persisted_nonce ->
   try
     match reject_removed_keeper_meta_shapes json with
     | Error e -> Error e
@@ -447,6 +458,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ~trace_history:identity.pk_trace_history
                    ~keeper_name:identity.pk_name
                    ~max_context_override
+                   ~nonce:persisted_nonce
                in
                if not (validate_name identity.pk_name)
                then Error "invalid keeper meta (bad name)"

@@ -6,6 +6,8 @@ struct
     | Exact_execution_failed
     | Exact_execution_cancelled
     | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
     | Invalid_structural_evidence
     | Invalid_structural_source_after_dispatch
     | Commit_admission_unavailable
@@ -156,25 +158,12 @@ struct
         ~keeper_name:name
   ;;
   
-  let transition_outbox_result ~base_path name =
-    Keeper_event_queue_persistence.transition_outbox_result
-      ~base_path
-      ~keeper_name:name
-  ;;
-  
   let exact_execution_binding_result ~base_path name =
     Keeper_event_queue_persistence.exact_execution_binding_result
       ~base_path
       ~keeper_name:name
   ;;
-  
-  let mark_transition_projected_result ~base_path name ~transition_id =
-    Keeper_event_queue_persistence.mark_transition_projected_result
-      ~base_path
-      ~keeper_name:name
-      ~transition_id
-  ;;
-  
+
   let settle_bound_exact_nonterminal_result
         ~base_path
         name

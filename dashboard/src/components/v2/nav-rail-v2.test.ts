@@ -34,10 +34,29 @@ describe('NavRailV2 schedule item', () => {
   })
 
   it('does not derive a badge from schedule lifecycle state', () => {
-    render(html`<${NavRailV2} badges=${{ approvals: 3 }} />`, container)
+    render(html`<${NavRailV2} badges=${{ approvals: { state: 'ready', count: 3 } }} />`, container)
 
     expect(scheduleNavItem(container)).toBeTruthy()
     expect(scheduleNavItem(container)?.querySelector('.nav-badge')).toBeNull()
+  })
+
+  it('renders the typed unavailable approval fact on the mobile rail', () => {
+    const unavailable = {
+      state: 'unavailable',
+      code: 'reset_required',
+      title: 'Gate durable queue unavailable · runtime reset required',
+      operator_detail: 'pending store requires reset',
+      severity: 'bad',
+      icon: '!',
+    } as const
+    render(html`<${NavRailV2} badges=${{ approvals: unavailable }} mobile=${true} />`, container)
+
+    const approval = Array.from(container.querySelectorAll('.nav-item'))
+      .find(el => el.textContent?.includes('승인'))
+    const badge = approval?.querySelector('.nav-badge')
+    expect(badge?.textContent).toBe('!')
+    expect(badge?.getAttribute('data-severity')).toBe('bad')
+    expect(badge?.getAttribute('title')).toContain(unavailable.operator_detail)
   })
 
   // Rail order + group breaks mirror the 2026-07 keeper-v2 standalone export.

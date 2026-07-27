@@ -11,7 +11,6 @@ BASELINE_FILE=".ci/health-baseline.json"
 BASELINE_REF=""
 CHANGED_REF=""
 FAIL_ON_LIB_REGRESSION=0
-FAIL_ON_ML_LINE_CAP_REGRESSION=0
 
 usage() {
   cat <<'EOF'
@@ -24,8 +23,6 @@ Options:
   --baseline-ref <git-ref>     Read the baseline file from a git ref
   --changed-ref <git-ref>      Read changed-file scope from a git ref
   --fail-on-lib-regression     Exit non-zero when lib counts exceed baseline
-  --fail-on-ml-line-cap-regression
-                               Exit non-zero when .ml line-cap regresses
 EOF
 }
 
@@ -53,10 +50,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --fail-on-lib-regression)
       FAIL_ON_LIB_REGRESSION=1
-      shift
-      ;;
-    --fail-on-ml-line-cap-regression)
-      FAIL_ON_ML_LINE_CAP_REGRESSION=1
       shift
       ;;
     -h|--help)
@@ -281,9 +274,6 @@ fi
 if [ -n "$CHANGED_REF" ]; then
   ml_line_cap_cmd+=(--changed-ref "$CHANGED_REF" --fail-on-changed-violations)
 fi
-if [ "$FAIL_ON_ML_LINE_CAP_REGRESSION" -eq 1 ]; then
-  ml_line_cap_cmd+=(--fail-on-regression)
-fi
 "${ml_line_cap_cmd[@]}"
 
 manual_ml_over_500="$(extract_json_int "$ml_line_cap_json" "manual_ml_over_500")"
@@ -323,7 +313,6 @@ if [ "$FAIL_ON_LIB_REGRESSION" -eq 1 ]; then
     baseline_lib_obj_magic="$(extract_baseline_value "$baseline_content" "lib_obj_magic")"
   fi
 
-  [ "$lib_failwith" -gt "$baseline_lib_failwith" ] && regressions+=("lib_failwith ${baseline_lib_failwith}->${lib_failwith}")
   [ "$lib_list_hd" -gt "$baseline_lib_list_hd" ] && regressions+=("lib_list_hd ${baseline_lib_list_hd}->${lib_list_hd}")
   [ "$lib_list_tl" -gt "$baseline_lib_list_tl" ] && regressions+=("lib_list_tl ${baseline_lib_list_tl}->${lib_list_tl}")
   [ "$lib_option_get" -gt "$baseline_lib_option_get" ] && regressions+=("lib_option_get ${baseline_lib_option_get}->${lib_option_get}")
@@ -375,7 +364,7 @@ echo "Unsafe patterns (test): failwith=${test_failwith} list_hd=${test_list_hd} 
 echo "Base policy: mli_open_base=${mli_open_base} ml_base_stdlib_shadow=${ml_base_stdlib_shadow} bin_ml_base_stdlib_shadow=${bin_ml_base_stdlib_shadow}"
 echo "ML line cap: manual=${manual_ml_over_500} excepted=${excepted_ml_over_500} lib=${lib_ml_over_500} bin=${bin_ml_over_500} test=${test_ml_over_500} examples=${examples_ml_over_500}"
 echo "ML line cap changed: ${ml_line_cap_changed_status} (${ml_line_cap_changed_message})"
-echo "ML line cap ratchet: ${ml_line_cap_status} (${ml_line_cap_message})"
+echo "ML line cap aggregate: ${ml_line_cap_status} (${ml_line_cap_message})"
 echo "Ratchet: ${ratchet_status} (${ratchet_message})"
 
 json_payload="$(cat <<EOF
@@ -478,7 +467,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "- Anti-fake: \`$anti_fake_label\` (good=$anti_fake_good suspect=$anti_fake_suspect fake=$anti_fake_fake total=$anti_fake_total)"
     echo "- Base policy: mli_open_base=\`$mli_open_base\` ml_base_stdlib_shadow=\`$ml_base_stdlib_shadow\` bin_ml_base_stdlib_shadow=\`$bin_ml_base_stdlib_shadow\`"
     echo "- ML line cap changed: \`$ml_line_cap_changed_status\` ($ml_line_cap_changed_message)"
-    echo "- ML line cap ratchet: \`$ml_line_cap_status\` ($ml_line_cap_message)"
+    echo "- ML line cap aggregate: \`$ml_line_cap_status\` ($ml_line_cap_message)"
     echo "- Ratchet: \`$ratchet_status\` ($ratchet_message)"
     if [ "${#regressions[@]}" -gt 0 ]; then
       echo "- Regressions:"

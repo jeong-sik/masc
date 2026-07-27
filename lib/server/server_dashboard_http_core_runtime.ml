@@ -1,14 +1,9 @@
 (** Dashboard HTTP compute-runtime bindings, extracted from
-    [server_dashboard_http_core.ml]. Provides the
-    [set_executor_pool] alias, [dashboard_runtime] constructor,
-    the [run_dashboard_compute] dispatch wrapper, and the
+    [server_dashboard_http_core.ml]. Provides the [dashboard_runtime]
+    constructor, [run_dashboard_compute] dispatch wrapper, and
     [state_dashboard_runtime_caps] state-decomposer. *)
 
 open Server_dashboard_http_runtime_support
-
-(** Executor pool for CPU-heavy dashboard compute.
-    Pool reference is shared via [Executor_pool_ref] in masc_core. *)
-let set_executor_pool = Server_dashboard_http_runtime_support.set_executor_pool
 
 let dashboard_runtime ?net ?mono_clock (config : Workspace.config)
   : Server_dashboard_http_runtime_support.runtime option

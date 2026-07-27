@@ -190,6 +190,7 @@ let test_grpc_pause_directive_records_reason () =
        Keeper_registry.For_testing.clear ();
        ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper_name meta);
        Keeper_keepalive.process_directive
+         ~config
          ~agent_name:keeper_name
          Keeper_directive.Pause;
        (match Keeper_registry.get ~base_path:config.base_path keeper_name with
@@ -202,6 +203,7 @@ let test_grpc_pause_directive_records_reason () =
             (latched_reason_wire entry.meta)
         | None -> fail "expected registered keeper after pause directive");
        Keeper_keepalive.process_directive
+         ~config
          ~agent_name:keeper_name
          Keeper_directive.Wakeup;
        (match Keeper_registry.get ~base_path:config.base_path keeper_name with

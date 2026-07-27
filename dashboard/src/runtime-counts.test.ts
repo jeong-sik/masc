@@ -219,15 +219,15 @@ describe('resolveRuntimeCounts', () => {
       paused_keepers: 2,
       paused_keepers_health: { count: 3 },
       keeper_fleet_safety: {
-        running_keeper_fiber_count: 0,
+        executable_keeper_fiber_count: 0,
         paused_keeper_count: 4,
       },
     } as any
 
     expect(resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)).toEqual({
-      runningKeepers: 0,
+      executableKeepers: 0,
       pausedKeepers: 3,
-      hasRunningKeepers: true,
+      hasExecutableKeepers: true,
       hasPausedKeepers: true,
     })
 
@@ -246,7 +246,7 @@ describe('resolveRuntimeCounts', () => {
     })
   })
 
-  it('does not fall back to keeper_fibers when running_keeper_fiber_count is absent', () => {
+  it('does not fall back to keeper_fibers when executable capacity is absent', () => {
     const runtimeFleetSafety = {
       keeper_fibers: 9,
       keeper_fleet_safety: {},
@@ -258,7 +258,7 @@ describe('resolveRuntimeCounts', () => {
   it('does not derive offline keepers from execution rows when runtime health is authoritative', () => {
     const runtimeFleetSafety = {
       keeper_fleet_safety: {
-        running_keeper_fiber_count: 2,
+        executable_keeper_fiber_count: 2,
         paused_keeper_count: 1,
       },
     } as any
@@ -289,12 +289,7 @@ describe('resolveRuntimeCounts', () => {
       keeper_fleet_safety: {},
     } as any
 
-    expect(resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)).toEqual({
-      runningKeepers: 0,
-      pausedKeepers: 2,
-      hasRunningKeepers: false,
-      hasPausedKeepers: true,
-    })
+    expect(resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)).toBeNull()
 
     expect(resolveRuntimeCounts({
       executionLoaded: true,
@@ -307,9 +302,9 @@ describe('resolveRuntimeCounts', () => {
       shellConfiguredKeepers: 13,
       runtimeFleetSafety,
     })).toEqual({
-      live: { agents: 0, keepers: 0, pausedKeepers: 2, offlineKeepers: 0, transientKeepers: 0, keeperRows: 2, tasks: 0, totalRuntimes: 0, available: true },
+      live: { agents: 0, keepers: 9, pausedKeepers: 0, offlineKeepers: 6, transientKeepers: 0, keeperRows: 15, tasks: 0, totalRuntimes: 9, available: true },
       configured: { keepers: 13, totalRuntimes: 9, source: 'shell' },
-      source: 'runtime-health',
+      source: 'execution',
     })
   })
 
@@ -327,7 +322,7 @@ describe('resolveRuntimeCounts', () => {
         paused_keepers: 1,
         paused_keepers_health: { count: 1 },
         keeper_fleet_safety: {
-          running_keeper_fiber_count: 2,
+          executable_keeper_fiber_count: 2,
           paused_keeper_count: 1,
         },
       } as any,
@@ -353,7 +348,7 @@ describe('resolveRuntimeCounts', () => {
         paused_keepers: 3,
         paused_keepers_health: { count: 3 },
         keeper_fleet_safety: {
-          running_keeper_fiber_count: 0,
+          executable_keeper_fiber_count: 0,
           paused_keeper_count: 3,
         },
       } as any,

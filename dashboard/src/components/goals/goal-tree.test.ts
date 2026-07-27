@@ -118,7 +118,11 @@ describe('GoalTree', () => {
       postId: null,
     }
     mocks.workspaceFsmSnapshot.value = null
-    hydrateGoalTreeSnapshot({ tree: [], summary: emptySummary() })
+    hydrateGoalTreeSnapshot({
+      approval_queue_state: { state: 'ready' },
+      tree: [],
+      summary: emptySummary(),
+    })
   })
 
   afterEach(() => {
@@ -134,6 +138,7 @@ describe('GoalTree', () => {
     const child = makeGoal('goal-child', 'Child goal')
     const parent = makeGoal('goal-parent', 'Parent goal', [child])
     const treePayload: DashboardGoalsTreeResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [parent],
       summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
     }
@@ -187,6 +192,7 @@ describe('GoalTree', () => {
       },
     } satisfies GoalTreeNode
     const treePayload: DashboardGoalsTreeResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [goal],
       summary: { ...emptySummary(), total_goals: 1, active_goals: 1, total_tasks: 1, done_tasks: 1 },
     }
@@ -266,6 +272,7 @@ describe('GoalTree', () => {
       },
     } satisfies GoalTreeNode
     const treePayload: DashboardGoalsTreeResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [goal],
       summary: { ...emptySummary(), total_goals: 1, active_goals: 1, total_tasks: 15, done_tasks: 5 },
     }
@@ -297,6 +304,7 @@ describe('GoalTree', () => {
   it('renders a loading indicator while the goal tree is refreshing', async () => {
     const goal = makeGoal('goal-loading', 'Loading goal')
     const treePayload: DashboardGoalsTreeResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [goal],
       summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
     }

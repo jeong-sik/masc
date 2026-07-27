@@ -1,7 +1,7 @@
 (** Per-Keeper Board-attention judgment worker.
 
     MASC owns candidate membership, domain judgment state, and durable exact
-    callbacks. OAS owns provider-neutral flow admission, dispatch, and
+    callbacks. OAS owns opaque-runtime flow admission, dispatch, and
     advancement. Process-local wakes only request another durable inspection. *)
 
 type contention =
@@ -14,9 +14,10 @@ type step =
   | Idle
   | Contended of contention
   | Rescan_later of contention
+  | Owner_unregistered_deferred of { candidate_id : string }
   | Judgment_completed of
       { candidate_id : string
-      ; owner_wake : Keeper_registry.wakeup_outcome
+      ; owner_wake : Keeper_registry.exact_wakeup_outcome
       }
   | Candidate_already_consumed of { candidate_id : string }
   | Partition_blocked of
@@ -30,10 +31,15 @@ type retry_reason =
 
 type drain_outcome =
   | Drained
+  | Owner_generation_deferred of { candidate_id : string }
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
       }
+(** [Owner_generation_deferred] terminates only the stale worker generation.
+    It neither marks the durable partition drained nor schedules a retry; the
+    unchanged pending partition remains discoverable when the lifecycle-owned
+    registration starts the next owner generation. *)
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
@@ -67,7 +73,7 @@ val run :
   keeper_name:string ->
   (unit, fatal_error) result
 (** Register and run the wake-driven worker until [sw] is cancelled. The clock
-    is forwarded to OAS execution. MASC owns no Provider execution policy.
+    is forwarded to OAS execution. MASC owns no execution-target policy.
     Setup or durability errors end this lifecycle instead of awaiting another
     wake. Exact claim contention schedules one generation-keyed delayed wake on
     the worker switch; it never recursively claims a sibling in the same turn.
@@ -87,6 +93,16 @@ val settle_one_completed :
 
 module For_testing : sig
   type rearm_scheduler
+
+  val process_next_exact
+    :  clock:_ Eio.Time.clock
+    -> net:Eio_context.eio_net option
+    -> now:(unit -> float)
+    -> worker_epoch:Keeper_board_attention_partition.Worker_epoch.t
+    -> base_path:string
+    -> keeper_name:string
+    -> (step, string) result
+  (** Exercise the production prepare/execute/result projection path. *)
 
   val process_next_with_claim_ready_exact :
     claim_ready_exact:
@@ -111,8 +127,8 @@ module For_testing : sig
          (Keeper_board_attention_exact_flow.attempt_provenance ->
           (unit, string) result) ->
        before_advance:
-         (failed:Keeper_board_attention_exact_flow.attempt_provenance ->
-          next:Keeper_board_attention_exact_flow.attempt_provenance ->
+         (failed:Keeper_board_attention_exact_flow.advance_source ->
+          next:Keeper_board_attention_exact_flow.candidate_visit ->
           (unit, string) result) ->
        'prepared ->
        ( Keeper_board_attention_candidate.judgment
@@ -137,19 +153,19 @@ module For_testing : sig
          (Keeper_board_attention_exact_flow.attempt_provenance ->
           (unit, string) result) ->
        before_advance:
-         (failed:Keeper_board_attention_exact_flow.attempt_provenance ->
-          next:Keeper_board_attention_exact_flow.attempt_provenance ->
+         (failed:Keeper_board_attention_exact_flow.advance_source ->
+          next:Keeper_board_attention_exact_flow.candidate_visit ->
           (unit, string) result) ->
        'prepared ->
        ( Keeper_board_attention_candidate.judgment
        , string Keeper_board_attention_exact_flow.execution_error )
        result) ->
     (step, string) result
-  (** Inject one provider-neutral exact-flow preparation and execution. The
+  (** Inject one opaque-runtime exact-flow preparation and execution. The
       next Pending candidate is prepared before it is claimed; setup failure
       returns an error with the candidate still Pending and its partition Ready.
       The execution seam must invoke the supplied callbacks at the same boundaries
-      as OAS. It exposes no Provider cause, receipt phase, or dispatch count. *)
+      as OAS. It exposes no target cause, receipt phase, or dispatch count. *)
 
   val drain_available :
     yield:(unit -> unit) ->
@@ -167,8 +183,8 @@ module For_testing : sig
          (Keeper_board_attention_exact_flow.attempt_provenance ->
           (unit, string) result) ->
        before_advance:
-         (failed:Keeper_board_attention_exact_flow.attempt_provenance ->
-          next:Keeper_board_attention_exact_flow.attempt_provenance ->
+         (failed:Keeper_board_attention_exact_flow.advance_source ->
+          next:Keeper_board_attention_exact_flow.candidate_visit ->
           (unit, string) result) ->
        'prepared ->
        ( Keeper_board_attention_candidate.judgment

@@ -258,7 +258,6 @@ let turn_resources_error ~surface failure =
 
 let preflight_keeper_invocation ~surface ctx args request =
   let name = Keeper_invocation_contract.target_name request in
-    let direct_reply = get_bool args "direct_reply" false in
     let tool_name = invocation_tool_name surface in
     match Keeper_meta_contract.reject_removed_model_args ~tool_name args with
     | Error e -> Error e
@@ -275,21 +274,8 @@ let preflight_keeper_invocation ~surface ctx args request =
     match ensure_keeper_exists ~ctx ~name with
     | Error e -> Error e
     | Ok meta ->
-      match resolve_turn_runtime_id meta with
-      | Error e -> Error e
-      | Ok turn_runtime_id ->
-        let effective_models =
-          if direct_reply then
-            Provider_runtime_projection.default_execution_model_strings
-              (                 (turn_runtime_id))
-          else
-            effective_model_labels_for_turn meta
-        in
-        match Keeper_types_support.ensure_api_keys_for_labels effective_models with
-        | Error e -> Error e
-        | Ok () ->
-          Keeper_turn_helpers.ensure_local_discovery_ready effective_models
-          |> Result.map (fun () -> request))))
+      resolve_turn_runtime_id meta
+      |> Result.map (fun _ -> request))))
 
 let preflight_keeper_msg ctx args =
   let name = get_string args "name" "" in
@@ -533,32 +519,14 @@ let run_keeper_invocation_turn_admitted
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~generation:meta.runtime.nonce ()
       in
-      let effective_models =
-        if direct_reply then
-          Provider_runtime_projection.default_execution_model_strings
-            turn_runtime_id
-        else
-          effective_model_labels_for_turn meta
-      in
-      Progress.Tracker.step turn_tracker ~message:"Validating API keys" ();
-      (match Keeper_types_support.ensure_api_keys_for_labels effective_models with
-       | Error e ->
-         Progress.stop_tracking turn_task_id;
-         tool_result_error ("" ^ e)
-       | Ok () ->
-         Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
-         (match Keeper_turn_helpers.ensure_local_discovery_ready effective_models with
-          | Error e ->
-            Progress.stop_tracking turn_task_id;
-            tool_result_error ("" ^ e)
-	      | Ok () ->
-	        (match
-	           Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
-	             ~requested_override:meta.max_context_override
-	             ~runtime_id:turn_runtime_id
-	         with
-	         | Error error ->
-	           Progress.stop_tracking turn_task_id;
+      Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
+      (match
+         Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+           ~requested_override:meta.max_context_override
+           ~runtime_id:turn_runtime_id
+       with
+		         | Error error ->
+		           Progress.stop_tracking turn_task_id;
 	           tool_result_error
 	             (Keeper_context_runtime.max_context_resolution_error_to_string error)
 	         | Ok resolution ->
@@ -1029,7 +997,7 @@ let run_keeper_invocation_turn_admitted
               in
               tool_result_ok_data reply_json
 
-))))))))))
+))))))))
 
 let handle_keeper_invocation
       ?on_text_delta

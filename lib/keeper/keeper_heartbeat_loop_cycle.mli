@@ -24,7 +24,10 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; no_compaction : Keeper_post_turn.no_compaction
       }
-  | Manual_compaction_applied of cycle_outcome
+  | Manual_compaction_applied of
+      { receipt : Keeper_manual_compaction.applied_receipt
+      ; followup : cycle_outcome
+      }
 
 and failure_judgment_terminal =
   | Judgment_boundary_failed of { detail : string }

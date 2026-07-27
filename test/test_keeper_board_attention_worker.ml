@@ -1,7 +1,16 @@
 module A = Masc.Keeper_board_attention_candidate
 module E = Masc.Keeper_board_attention_exact_flow
 module Event_queue = Keeper_event_queue
-module Event_queue_persistence = Keeper_event_queue_persistence
+module Event_queue_persistence_source = Keeper_event_queue_persistence
+module Event_queue_persistence = struct
+  include Event_queue_persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
 module J = Masc.Keeper_board_attention_judgment
 module P = Masc.Keeper_board_attention_partition
 module Q = Masc.Keeper_board_attention_quarantine_command
@@ -141,6 +150,22 @@ let same_provenance
   && String.equal durable.request_body_sha256 projected.request_body_sha256
 ;;
 
+let same_candidate_visit
+      (durable : P.candidate_visit)
+      (projected : E.candidate_visit)
+  =
+  String.equal durable.flow_id projected.flow_id
+  && Int.equal durable.ordinal projected.ordinal
+  && String.equal durable.slot_id projected.slot_id
+  && String.equal
+       durable.catalog_generation_fingerprint
+       projected.catalog_generation_fingerprint
+  && String.equal durable.catalog_evidence_sha256 projected.catalog_evidence_sha256
+  && String.equal
+       durable.target_identity_fingerprint
+       projected.target_identity_fingerprint
+;;
+
 let same_candidate_provenance
       (durable : A.attempt_provenance)
       (projected : E.attempt_provenance)
@@ -210,7 +235,18 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
   with_temp_base "board-attention-worker-callback-chain" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let first = provenance "first" in
-  let second = provenance "second" in
+  let visit suffix ordinal : E.candidate_visit =
+    { flow_id = "flow-callback-chain"
+    ; ordinal
+    ; slot_id = "slot-" ^ suffix
+    ; catalog_generation_fingerprint = "catalog-generation-" ^ suffix
+    ; catalog_evidence_sha256 = "catalog-evidence-" ^ suffix
+    ; target_identity_fingerprint = "target-identity-" ^ suffix
+    }
+  in
+  let rejected = visit "second" 1 in
+  let third_visit = visit "third" 2 in
+  let third = provenance "third" in
   let callbacks = ref [] in
   let observed_time = ref 3.0 in
   let execute ~before_dispatch ~before_advance _candidate =
@@ -220,21 +256,51 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
        when same_provenance durable first -> ()
      | _ -> Alcotest.fail "first callback did not durably bind projected provenance");
     callbacks := !callbacks @ [ "bind-first" ];
-    ok "record advance" (before_advance ~failed:first ~next:second);
+    ok
+      "record executed failure"
+      (before_advance ~failed:(E.Executed_failure first) ~next:rejected);
     (match (load_one_partition ~base_path).state with
-     | P.Running { progress = P.Advancing durable; _ }
-       when same_provenance durable.failed first
-            && same_provenance durable.next second -> ()
-     | _ -> Alcotest.fail "advance callback did not persist the projected pair");
-    callbacks := !callbacks @ [ "advance" ];
-    ok "bind second" (before_dispatch second);
+     | P.Running
+         { progress =
+             P.Advancing
+               { execution_anchor = Some durable
+               ; last_from = None
+               ; next
+               }
+         ; _
+         }
+       when same_provenance durable first
+            && same_candidate_visit next rejected -> ()
+     | _ -> Alcotest.fail "executed failure did not retain its durable anchor");
+    callbacks := !callbacks @ [ "advance-first" ];
+    ok
+      "record predispatch rejection"
+      (before_advance
+         ~failed:(E.Predispatch_rejection rejected)
+         ~next:third_visit);
+    (match (load_one_partition ~base_path).state with
+     | P.Running
+         { progress =
+             P.Advancing
+               { execution_anchor = Some durable
+               ; last_from = Some durable_rejected
+               ; next
+               }
+         ; _
+         }
+       when same_provenance durable first
+            && same_candidate_visit durable_rejected rejected
+            && same_candidate_visit next third_visit -> ()
+     | _ -> Alcotest.fail "predispatch rejection overwrote the execution anchor");
+    callbacks := !callbacks @ [ "advance-rejected" ];
+    ok "bind third" (before_dispatch third);
     (match (load_one_partition ~base_path).state with
      | P.Running { progress = P.Bound durable; _ }
-       when same_provenance durable second -> ()
-     | _ -> Alcotest.fail "second callback did not durably bind projected provenance");
-    callbacks := !callbacks @ [ "bind-second" ];
+       when same_provenance durable third -> ()
+     | _ -> Alcotest.fail "third callback did not durably bind projected provenance");
+    callbacks := !callbacks @ [ "bind-third" ];
     observed_time := 9.0;
-    Ok (judgment second J.Not_relevant)
+    Ok (judgment third J.Not_relevant)
   in
   (match
      ok
@@ -251,12 +317,13 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
    | W.Idle
    | W.Contended _
    | W.Rescan_later _
+   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "worker exact callback chain did not complete");
   Alcotest.(check (list string))
     "durable callback order"
-    [ "bind-first"; "advance"; "bind-second" ]
+    [ "bind-first"; "advance-first"; "advance-rejected"; "bind-third" ]
     !callbacks;
   (match (load_one_candidate ~base_path).status with
    | A.Pending { last_delivery_failure = None } -> ()
@@ -267,7 +334,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
      Alcotest.fail "background worker crossed the owner settlement boundary");
   (match load_one_partition ~base_path with
    | { state = P.Completed { item = { judgment = observed; _ }; completed_at }; _ } ->
-     Alcotest.(check string) "selected opaque slot" second.slot_id observed.slot_id;
+     Alcotest.(check string) "selected opaque slot" third.slot_id observed.slot_id;
      Alcotest.(check (float 0.0)) "completion observes post-execution time" 9.0 completed_at
    | _ -> Alcotest.fail "callback chain did not persist Completed");
   (match ok "owner settlement" (W.settle_one_completed ~base_path ~keeper_name:"sangsu") with
@@ -305,7 +372,10 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        "typed setup failure stops the lifecycle"
        "Board attention exact setup unavailable before claim: network context unavailable"
        detail
-   | Ok (W.Drained | W.Retry_later _) ->
+   | Ok
+       ( W.Drained
+       | W.Owner_generation_deferred _
+       | W.Retry_later _ ) ->
      Alcotest.fail "setup-unavailable drain returned normally");
   Alcotest.(check int) "one setup attempt" 1 !calls;
   Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
@@ -382,6 +452,7 @@ let test_claim_generation_change_discards_without_sibling_selection () =
    | W.Contended _ ->
      Alcotest.fail "changed generation reported quiescent or same-generation contention"
    | W.Judgment_completed _
+   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "claim retry exhaustion produced a terminal step");
@@ -485,6 +556,7 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
    | W.Idle
    | W.Rescan_later _
    | W.Judgment_completed _
+   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "exact claim exhaustion reported quiescent or terminal");
@@ -647,6 +719,7 @@ let test_rescan_later_reaches_delayed_run_rearm () =
        true
        (P.Generation.equal contention.generation observed.generation)
    | W.Drained
+   | W.Owner_generation_deferred _
    | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
      Alcotest.fail "changed selection did not reach typed delayed rescan");
   Alcotest.(check int) "no same-turn rescan" 1 !process_calls;
@@ -974,12 +1047,20 @@ let test_bound_cancellation_is_prompt_and_process_recoverable () =
   | _ -> Alcotest.fail "process-start recovery lost the cancelled Bound provenance"
 ;;
 
-let test_advancing_cancellation_is_prompt_and_process_recoverable () =
+let test_released_cancellation_is_prompt_and_process_recoverable () =
   Eio_main.run @@ fun _env ->
   with_temp_base "board-attention-worker-advancing-cancel" @@ fun base_path ->
   ignore (record ~base_path (candidate ()) : A.candidate);
   let failed = provenance "cancelled-failed" in
-  let next = provenance "cancelled-next" in
+  let next : E.candidate_visit =
+    { flow_id = "flow-cancelled-advance"
+    ; ordinal = 1
+    ; slot_id = "slot-cancelled-next"
+    ; catalog_generation_fingerprint = "catalog-generation-cancelled-next"
+    ; catalog_evidence_sha256 = "catalog-evidence-cancelled-next"
+    ; target_identity_fingerprint = "target-identity-cancelled-next"
+    }
+  in
   let entered, publish_entered = Eio.Promise.create () in
   let never, _resolve_never = Eio.Promise.create () in
   let returned = Atomic.make false in
@@ -991,34 +1072,61 @@ let test_advancing_cancellation_is_prompt_and_process_recoverable () =
             ~prepare:(fun candidate -> Ok candidate)
             ~execute:(fun ~before_dispatch ~before_advance _candidate ->
               ok "bind failed attempt" (before_dispatch failed);
-              ok "record pending advancement" (before_advance ~failed ~next);
+              ok
+                "record failed attempt"
+                (before_advance
+                   ~failed:(E.Executed_failure failed)
+                   ~next);
               Eio.Promise.resolve publish_entered ();
               Eio.Promise.await never)
           : (W.step, string) result);
        Atomic.set returned true)
     (fun () -> Eio.Promise.await entered);
-  Alcotest.(check bool) "advancing cancellation did not return" false (Atomic.get returned);
+  Alcotest.(check bool) "released cancellation did not return" false (Atomic.get returned);
   (match load_one_partition ~base_path with
-   | { state = P.Running { progress = P.Advancing durable; _ }; _ }
-     when same_provenance durable.failed failed
-          && same_provenance durable.next next -> ()
-   | _ -> Alcotest.fail "advancing cancellation performed partition I/O");
+   | { state =
+         P.Running
+           { progress =
+               P.Advancing
+                 { execution_anchor = Some durable
+                 ; last_from = None
+                 ; next = durable_next
+                 }
+           ; _
+           }
+     ; _
+     }
+     when same_provenance durable failed
+          && same_candidate_visit durable_next next ->
+    ()
+   | _ -> Alcotest.fail "cancellation lost durable advancement evidence");
   Alcotest.(check int)
-    "process-start recovery quarantines one Advancing execution"
+    "process-start recovery quarantines one advancing execution"
     1
     (ok
-       "recover cancelled Advancing"
+       "recover cancelled released execution"
        (P.recover_for_process_start
           ~now:4.0
           ~base_path
           ~keeper_name:"sangsu"));
   match load_one_partition ~base_path with
-  | { state = P.Blocked
-        { reason = P.Exact_execution_quarantined (P.Advancing durable); _ }
+  | { state =
+        P.Blocked
+          { reason =
+              P.Exact_execution_quarantined
+                (P.Advancing
+                   { execution_anchor = Some durable
+                   ; last_from = None
+                   ; next = durable_next
+                   })
+          ; _
+          }
     ; _
-    } when same_provenance durable.failed failed
-           && same_provenance durable.next next -> ()
-  | _ -> Alcotest.fail "process-start recovery lost the cancelled Advancing pair"
+    }
+    when same_provenance durable failed
+         && same_candidate_visit durable_next next ->
+   ()
+  | _ -> Alcotest.fail "process-start recovery lost durable advancement evidence"
 ;;
 
 let test_unbound_cancellation_waits_for_process_start_recovery () =
@@ -1461,6 +1569,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Contended _
    | W.Rescan_later _
    | W.Judgment_completed _
+   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "blocked partition was exposed before authorization");
@@ -1575,6 +1684,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Idle
    | W.Contended _
    | W.Rescan_later _
+   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "authorized manual requeue did not complete its exact judgment");
@@ -2029,9 +2139,9 @@ let () =
             `Quick
             test_bound_cancellation_is_prompt_and_process_recoverable
         ; Alcotest.test_case
-            "Advancing cancellation is prompt and process-recoverable"
+            "Released cancellation returns Ready on process recovery"
             `Quick
-            test_advancing_cancellation_is_prompt_and_process_recoverable
+            test_released_cancellation_is_prompt_and_process_recoverable
         ; Alcotest.test_case
             "Unbound cancellation waits for process-start recovery"
             `Quick

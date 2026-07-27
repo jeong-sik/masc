@@ -99,6 +99,7 @@ type failure_stage =
   | Unhandled_worker
   | Task_settlement
   | Pending_confirm_cleanup
+  | Approval_summary_retirement
   | Meta_update
   | Meta_remove
   | Session_remove
@@ -508,6 +509,7 @@ let failure_stage_to_string = function
   | Unhandled_worker -> "unhandled_worker"
   | Task_settlement -> "task_settlement"
   | Pending_confirm_cleanup -> "pending_confirm_cleanup"
+  | Approval_summary_retirement -> "approval_summary_retirement"
   | Meta_update -> "meta_update"
   | Meta_remove -> "meta_remove"
   | Session_remove -> "session_remove"
@@ -525,6 +527,7 @@ let failure_stage_of_string = function
   | "unhandled_worker" -> Ok Unhandled_worker
   | "task_settlement" -> Ok Task_settlement
   | "pending_confirm_cleanup" -> Ok Pending_confirm_cleanup
+  | "approval_summary_retirement" -> Ok Approval_summary_retirement
   | "meta_update" -> Ok Meta_update
   | "meta_remove" -> Ok Meta_remove
   | "session_remove" -> Ok Session_remove

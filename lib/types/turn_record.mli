@@ -28,6 +28,15 @@ type sampling =
 type usage =
   { input_tokens : int option
   ; output_tokens : int option
+  ; cache_creation_input_tokens : int option
+  ; cache_read_input_tokens : int option
+    (* The provider reports these alongside [input_tokens]
+       (Agent_sdk.Types.api_usage) and this record used to drop them, so a reader
+       could not tell whether a large [input_tokens] was mostly cache reads. That
+       matters against [context_window] below: the fill percentage it denominates is
+       read as pressure on the compaction ceiling, and cache-heavy turns and
+       genuinely large prompts are different situations with the same numerator.
+       [None] on legacy rows and on turns where the provider reported no usage. *)
   }
 
 type t =

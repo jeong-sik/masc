@@ -164,6 +164,12 @@ let keeper_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Goal IDs this keeper is allowed to claim work for. Empty clears goal scoping.");
         ]);
+        ("sandbox_profile", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "local"; `String "docker"]);
+          ("default", `String "local");
+          ("description", `String "Sandbox isolation profile. New keepers default to local with playground-only writes when omitted; select docker explicitly when required.");
+        ]);
         ("autoboot_enabled", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If false, persist the keeper but skip auto-start on future server boots.");
@@ -230,6 +236,12 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Goal IDs this keeper is allowed to claim work for. Empty clears goal scoping.");
+        ]);
+        ("sandbox_profile", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "local"; `String "docker"]);
+          ("default", `String "local");
+          ("description", `String "Sandbox isolation profile. New keepers default to local with playground-only writes when omitted; select docker explicitly when required.");
         ]);
         ("autoboot_enabled", `Assoc [
           ("type", `String "boolean");

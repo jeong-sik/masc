@@ -733,7 +733,8 @@ let handle_masc_task_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
   let ctx : Task.Tool.context =
     { config; agent_name = Keeper_tool_shared_runtime.keeper_agent_sender ~meta; sw = None }
   in
-  Task.Tool.dispatch_for_keeper ctx ~name ~args |> dispatch_option_to_execution ~name
+  Task.Tool.dispatch_for_keeper ~created_by:meta.name ctx ~name ~args
+  |> dispatch_option_to_execution ~name
 ;;
 
 let handle_masc_plan_with_outcome ~(config : Workspace.config) ~name ~args =

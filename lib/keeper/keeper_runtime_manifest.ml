@@ -364,9 +364,17 @@ let manifest_top_level_allowlist =
     ; "runtime_id"; "status"; "decision"; "links"
     ]
 
+(* [trigger_detail] keys come from the encoder that writes them, not from a
+   copy kept here. The flat list below used to name only "kind" and
+   "limit_tokens", so a [Request_body_over_capacity] refusal reached the public
+   projection stripped of the two measured integers that justify it — the
+   operator saw the refusal and not its bounds. Sourcing the key set from
+   {!Compaction_trigger.wire_field_names} means a field added to a trigger
+   constructor cannot be dropped here without also failing to compile there. *)
 let decision_public_allowlist =
   StringSet.of_list
-    [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
+    (Compaction_trigger.wire_field_names
+    @ [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
     ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
     ; "compaction_id"; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
@@ -379,11 +387,17 @@ let decision_public_allowlist =
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
     ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"
-    ; "payload_role"; "trigger"; "trigger_detail"; "kind"; "limit_tokens"
+    ; "payload_role"; "trigger"; "trigger_detail"
     ; "ratio"; "threshold"; "count"
     ; "source_requeued"; Keeper_compaction_evidence.exact_evidence_key
     ; "clock_refs"
-    ]
+    ; "checkpoint_installation_schema"; "checkpoint_installation_state"
+    ; "checkpoint_installed_ref"; "checkpoint_installation_auxiliary"
+    ; "compaction_post_install_schema"; "compaction_lifecycle"
+    ; "operator_action_required"; "trace_id"; "generation"; "turn_count"
+    ; "sha256"; "kind"; "detail"; "backtrace_present"; "completion_error"
+    ; "failure_dispatch"; "failure_dispatch_error"
+    ])
 
 let compaction_evidence_public_allowlist =
   StringSet.of_list Keeper_compaction_evidence.wire_field_names

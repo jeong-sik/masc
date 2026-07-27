@@ -1347,8 +1347,29 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
       claimable
   )
 
+let test_self_authored_scoped_task_does_not_hide_peer_work () =
+  with_test_env (fun config ->
+    let keeper = "keeper-goal-filter-agent" in
+    let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
+    let _ =
+      Workspace.add_task config ~goal_id:"goal-a" ~created_by:meta.name
+        ~title:"Own goal routing task" ~priority:1 ~description:""
+    in
+    let _ =
+      Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
+        ~title:"Peer work outside active goal" ~priority:1 ~description:""
+    in
+    let _, claimable, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int)
+      "self-authored scoped work does not suppress peer fallback"
+      1
+      claimable)
+;;
+
 (* The self-authored exclusion must hold through [read_backlog_counts], not
-   only in [task_is_self_authored]: dropping the filter clause leaves every
+   only in [task_is_self_authored_todo]: dropping the filter clause leaves every
    predicate-level test green while the feedback loop stays open. Counts are
    compared against a baseline because the fixture seeds its own tasks. *)
 let test_read_backlog_counts_excludes_self_authored_task () =
@@ -1791,6 +1812,9 @@ let () =
       Alcotest.test_case "read backlog counts falls back to unscoped claimable"
         `Quick
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
+      Alcotest.test_case "self-authored scoped task does not hide peer work"
+        `Quick
+        test_self_authored_scoped_task_does_not_hide_peer_work;
       Alcotest.test_case "read backlog counts excludes self-authored task"
         `Quick
         test_read_backlog_counts_excludes_self_authored_task;

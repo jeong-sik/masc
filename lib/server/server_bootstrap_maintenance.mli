@@ -22,3 +22,12 @@ val start_background_maintenance :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   env:Eio_unix.Stdenv.base ->
   Mcp_server.server_state -> string * string
+
+module Recovery_for_testing : sig
+  val consume_owner_projection_batch :
+    commit_cursor:(unit -> unit) ->
+    keeper_name:('a -> string) ->
+    recover_owner:('a -> unit) ->
+    'a list ->
+    unit
+end

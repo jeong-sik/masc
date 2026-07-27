@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   refreshGate: vi.fn(),
   setGateMode: vi.fn(),
+  retryGateAutoJudge: vi.fn(),
   showToast: vi.fn(),
 }))
 
@@ -13,7 +14,7 @@ vi.mock('./common/toast', () => ({
 vi.mock('../api/dashboard-gate', () => ({
   deleteGateApprovalRule: vi.fn(),
   resolveGateApproval: vi.fn(),
-  retryGateAutoJudge: vi.fn(),
+  retryGateAutoJudge: mocks.retryGateAutoJudge,
   setGateMode: mocks.setGateMode,
 }))
 
@@ -21,7 +22,7 @@ vi.mock('./gate-refresh', () => ({
   refreshGate: mocks.refreshGate,
 }))
 
-import { setKeeperGateMode } from './gate-actions'
+import { retryKeeperAutoJudge, setKeeperGateMode } from './gate-actions'
 import { gateApprovalActing, gateError } from './gate-signals'
 
 const baseResponse = {
@@ -31,7 +32,6 @@ const baseResponse = {
   actor: 'operator',
   changed_at: '2026-07-16T00:00:00Z',
   recovery_error: null,
-  reopened: 0,
   started: 0,
   queued: 0,
 } as const
@@ -39,9 +39,29 @@ const baseResponse = {
 beforeEach(() => {
   mocks.refreshGate.mockReset().mockResolvedValue(undefined)
   mocks.setGateMode.mockReset()
+  mocks.retryGateAutoJudge.mockReset().mockResolvedValue({ ok: true, id: 'appr-1' })
   mocks.showToast.mockReset()
   gateApprovalActing.value = null
   gateError.value = ''
+})
+
+describe('retryKeeperAutoJudge exact observation', () => {
+  it('forwards the complete observed row identity', async () => {
+    const expected = {
+      input_hash: 'a'.repeat(64),
+      sequence: 7,
+      exact_attempt: { state: 'unbound' as const },
+      summary_attempt_disposition: {
+        code: 'identity_unbound' as const,
+        operator_detail:
+          'Exact-output terminalization stopped before an attempt identity was bound.',
+      },
+    }
+
+    await retryKeeperAutoJudge('appr-1', expected)
+
+    expect(mocks.retryGateAutoJudge).toHaveBeenCalledWith('appr-1', expected)
+  })
 })
 
 describe('setKeeperGateMode recovery result', () => {
@@ -67,7 +87,6 @@ describe('setKeeperGateMode recovery result', () => {
     mocks.setGateMode.mockResolvedValue({
       ...baseResponse,
       recovery_status: 'completed',
-      reopened: 2,
       started: 1,
       queued: 1,
     })
@@ -76,7 +95,7 @@ describe('setKeeperGateMode recovery result', () => {
 
     expect(mocks.showToast).toHaveBeenCalledWith(
       'Gate 모드를 Auto Judge(으)로 저장했습니다 · Auto Judge backlog recovery 요청 처리 완료'
-      + ' (reopened 2, started 1, queued 1)',
+      + ' (started 1, queued 1)',
       'success',
     )
     expect(mocks.refreshGate).toHaveBeenCalledWith({ force: true })

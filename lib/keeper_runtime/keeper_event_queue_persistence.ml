@@ -1,6 +1,25 @@
 module Owner_lock = Keeper_event_queue_owner_lock
 module State = Keeper_event_queue_state
 
+type owner_identity = Owner_lock.t
+type owner_identity_error = Owner_lock.resolve_error
+
+let resolve_owner_identity = Owner_lock.resolve
+let owner_identity_error_to_string = Owner_lock.resolve_error_to_string
+let owner_identity_equal = ( == )
+
+let owner_identity_hash owner =
+  Hashtbl.hash
+    ( Owner_lock.base_path owner
+    , Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string )
+;;
+
+let owner_identity_base_path = Owner_lock.base_path
+
+let owner_identity_keeper_name owner =
+  Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
+;;
+
 type lease_kind = State.lease_kind =
   | Single
   | Board_batch
@@ -19,6 +38,8 @@ type exact_execution_terminal_cause = State.exact_execution_terminal_cause =
   | Exact_execution_failed
   | Exact_execution_cancelled
   | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch
   | Commit_admission_unavailable
@@ -143,6 +164,10 @@ type accepted_source_terminal = State.accepted_source_terminal =
 
 type settlement = State.settlement =
   | Ack
+  | Manual_compaction_committed of
+      { commit : State.manual_compaction_commit
+      ; followup : State.manual_compaction_followup
+      }
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
@@ -553,10 +578,6 @@ let active_lease_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.active_lease
 ;;
 
-let transition_outbox_result ~base_path ~keeper_name =
-  load_state_result ~base_path ~keeper_name |> Result.map State.transition_outbox
-;;
-
 let exact_execution_binding_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.exact_execution_binding
 ;;
@@ -587,41 +608,9 @@ let load_result ~base_path ~keeper_name =
   load_with_projection ~projection:replay_queue ~base_path ~keeper_name
 ;;
 
-let unavailable_projection_exn ~keeper_name message =
-  Failure
-    (Printf.sprintf
-       "event queue state unavailable keeper=%s: %s"
-       keeper_name
-       message)
-;;
-
-let load ~base_path ~keeper_name =
-  match load_result ~base_path ~keeper_name with
-  | Error message -> raise (unavailable_projection_exn ~keeper_name message)
-  | Ok queue ->
-    if not (Keeper_event_queue.is_empty queue)
-    then
-      Log.Keeper.info
-        "event_queue_snapshot: restored %s for keeper=%s"
-        (Keeper_event_queue.summary queue)
-        keeper_name;
-    queue
-;;
-
-let load_pending ~base_path ~keeper_name =
-  match load_with_projection ~projection:State.pending ~base_path ~keeper_name with
-  | Ok queue -> queue
-  | Error message -> raise (unavailable_projection_exn ~keeper_name message)
-;;
-
 let load_pending_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.pending
 ;;
-
-type snapshot_pair =
-  { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
-  }
 
 type snapshot_pair_with_errors =
   { pending : Keeper_event_queue.t
@@ -670,11 +659,6 @@ let load_snapshot_pair_with_errors ~base_path ~keeper_name =
     ; inflight = Keeper_event_queue.empty
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
-;;
-
-let load_snapshot_pair ~base_path ~keeper_name =
-  let snapshot = load_snapshot_pair_with_errors ~base_path ~keeper_name in
-  { pending = snapshot.pending; inflight = snapshot.inflight }
 ;;
 
 type snapshot_discovery =
@@ -1612,6 +1596,29 @@ let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
        | Ok state -> Ok (state, ()))
 ;;
 
+let project_transition_outbox_result
+      ~append_before_retire
+      ~base_path
+      ~keeper_name
+  =
+  let ( let* ) = Result.bind in
+  let* state = load_state_result ~base_path ~keeper_name in
+  match State.transition_outbox state with
+  | [] -> Ok ()
+  | [ entry ] ->
+    let* () = append_before_retire entry in
+    mark_transition_projected_result
+      ~base_path
+      ~keeper_name
+      ~transition_id:entry.receipt.transition_id
+  | entries ->
+    Error
+      (Printf.sprintf
+         "event queue transition outbox cardinality invalid keeper=%s count=%d"
+         keeper_name
+         (List.length entries))
+;;
+
 let remove_post_ids stimuli state =
   List.fold_left
     (fun (removed, state) (stimulus : Keeper_event_queue.stimulus) ->
@@ -1677,7 +1684,10 @@ let age_seconds_json ~now = function
 
 type owner_lifecycle =
   | Runnable
-  | Paused_retained
+  | Recoverable
+  | Retained_disabled
+  | Paused_dead
+  | Shutdown_fenced
   | Lifecycle_unknown of string
 
 type keeper_summary =
@@ -1697,7 +1707,11 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
   let owner_lifecycle = owner_lifecycle ~keeper_name in
   let lifecycle_read_errors =
     match owner_lifecycle with
-    | Runnable | Paused_retained -> []
+    | Runnable
+    | Recoverable
+    | Retained_disabled
+    | Paused_dead
+    | Shutdown_fenced -> []
     | Lifecycle_unknown detail ->
       [ Printf.sprintf "keeper lifecycle unavailable keeper=%s: %s" keeper_name detail ]
   in
@@ -1739,7 +1753,10 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
 
 let owner_lifecycle_wire = function
   | Runnable -> "runnable"
-  | Paused_retained -> "paused_retained"
+  | Recoverable -> "recoverable"
+  | Retained_disabled -> "retained_disabled"
+  | Paused_dead -> "paused_dead"
+  | Shutdown_fenced -> "shutdown_fenced"
   | Lifecycle_unknown _ -> "unclassified"
 ;;
 
@@ -1849,17 +1866,68 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   in
   let runnable =
     backlog_summary
-      ~matches:(function Runnable -> true | Paused_retained | Lifecycle_unknown _ -> false)
+      ~matches:(function
+        | Runnable -> true
+        | Recoverable
+        | Retained_disabled
+        | Paused_dead
+        | Shutdown_fenced
+        | Lifecycle_unknown _ -> false)
       summaries
   in
-  let paused_retained =
+  let recoverable =
     backlog_summary
-      ~matches:(function Paused_retained -> true | Runnable | Lifecycle_unknown _ -> false)
+      ~matches:(function
+        | Recoverable -> true
+        | Runnable
+        | Retained_disabled
+        | Paused_dead
+        | Shutdown_fenced
+        | Lifecycle_unknown _ -> false)
+      summaries
+  in
+  let retained_disabled =
+    backlog_summary
+      ~matches:(function
+        | Retained_disabled -> true
+        | Runnable
+        | Recoverable
+        | Paused_dead
+        | Shutdown_fenced
+        | Lifecycle_unknown _ -> false)
+      summaries
+  in
+  let paused_dead =
+    backlog_summary
+      ~matches:(function
+        | Paused_dead -> true
+        | Runnable
+        | Recoverable
+        | Retained_disabled
+        | Shutdown_fenced
+        | Lifecycle_unknown _ -> false)
+      summaries
+  in
+  let shutdown_fenced =
+    backlog_summary
+      ~matches:(function
+        | Shutdown_fenced -> true
+        | Runnable
+        | Recoverable
+        | Retained_disabled
+        | Paused_dead
+        | Lifecycle_unknown _ -> false)
       summaries
   in
   let unclassified =
     backlog_summary
-      ~matches:(function Lifecycle_unknown _ -> true | Runnable | Paused_retained -> false)
+      ~matches:(function
+        | Lifecycle_unknown _ -> true
+        | Runnable
+        | Recoverable
+        | Retained_disabled
+        | Paused_dead
+        | Shutdown_fenced -> false)
       summaries
   in
   let read_errors =
@@ -1881,7 +1949,10 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   let operator_action_required =
     read_errors <> []
     || outbox_count > 0
-    || paused_retained.pending_count + paused_retained.inflight_count > 0
+    || recoverable.pending_count + recoverable.inflight_count > 0
+    || retained_disabled.pending_count + retained_disabled.inflight_count > 0
+    || paused_dead.pending_count + paused_dead.inflight_count > 0
+    || shutdown_fenced.pending_count + shutdown_fenced.inflight_count > 0
   in
   `Assoc
     [ "schema", `String "masc.keeper_event_queue.fleet_summary.v2"
@@ -1910,16 +1981,55 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
            |> List.filter (fun (summary : keeper_summary) ->
              summary.pending_count + summary.inflight_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "paused_retained_pending_count", `Int paused_retained.pending_count
-    ; "paused_retained_inflight_count", `Int paused_retained.inflight_count
-    ; ( "paused_retained_count"
-      , `Int (paused_retained.pending_count + paused_retained.inflight_count) )
-    ; ( "paused_retained_oldest_arrived_at_unix"
-      , json_of_float_opt paused_retained.oldest )
-    ; "paused_retained_oldest_age_seconds", age_seconds_json ~now paused_retained.oldest
-    ; ( "paused_retained_by_keeper"
+    ; "recoverable_pending_count", `Int recoverable.pending_count
+    ; "recoverable_inflight_count", `Int recoverable.inflight_count
+    ; ( "recoverable_backlog_count"
+      , `Int (recoverable.pending_count + recoverable.inflight_count) )
+    ; "recoverable_oldest_arrived_at_unix", json_of_float_opt recoverable.oldest
+    ; "recoverable_oldest_age_seconds", age_seconds_json ~now recoverable.oldest
+    ; ( "recoverable_by_keeper"
       , `List
-          (paused_retained.keepers
+          (recoverable.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
+    ; "retained_disabled_pending_count", `Int retained_disabled.pending_count
+    ; "retained_disabled_inflight_count", `Int retained_disabled.inflight_count
+    ; ( "retained_disabled_backlog_count"
+      , `Int (retained_disabled.pending_count + retained_disabled.inflight_count) )
+    ; ( "retained_disabled_oldest_arrived_at_unix"
+      , json_of_float_opt retained_disabled.oldest )
+    ; ( "retained_disabled_oldest_age_seconds"
+      , age_seconds_json ~now retained_disabled.oldest )
+    ; ( "retained_disabled_by_keeper"
+      , `List
+          (retained_disabled.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
+    ; "paused_dead_pending_count", `Int paused_dead.pending_count
+    ; "paused_dead_inflight_count", `Int paused_dead.inflight_count
+    ; ( "paused_dead_backlog_count"
+      , `Int (paused_dead.pending_count + paused_dead.inflight_count) )
+    ; "paused_dead_oldest_arrived_at_unix", json_of_float_opt paused_dead.oldest
+    ; "paused_dead_oldest_age_seconds", age_seconds_json ~now paused_dead.oldest
+    ; ( "paused_dead_by_keeper"
+      , `List
+          (paused_dead.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
+    ; "shutdown_fenced_pending_count", `Int shutdown_fenced.pending_count
+    ; "shutdown_fenced_inflight_count", `Int shutdown_fenced.inflight_count
+    ; ( "shutdown_fenced_backlog_count"
+      , `Int (shutdown_fenced.pending_count + shutdown_fenced.inflight_count) )
+    ; ( "shutdown_fenced_oldest_arrived_at_unix"
+      , json_of_float_opt shutdown_fenced.oldest )
+    ; ( "shutdown_fenced_oldest_age_seconds"
+      , age_seconds_json ~now shutdown_fenced.oldest )
+    ; ( "shutdown_fenced_by_keeper"
+      , `List
+          (shutdown_fenced.keepers
            |> List.filter (fun (summary : keeper_summary) ->
              summary.pending_count + summary.inflight_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )

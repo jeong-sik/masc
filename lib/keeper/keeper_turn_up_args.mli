@@ -63,8 +63,18 @@ val resolve_mention_targets :
   string list
 
 val resolve_sandbox_profile :
+  ?requested:string ->
   fallback:sandbox_profile option ->
+  unit ->
   sandbox_profile
+(** An explicit [requested] profile wins over the TOML [fallback].
+
+    When neither source states a profile, returns the canonical local sandbox default.
+    Fresh keepers also default to an empty [allowed_paths] list, so that local sandbox
+    is restricted to [.masc/playground/<keeper_name>/].
+
+    [requested] is the caller's raw string; an unparseable one is treated as absent,
+    since the gate rejects those first. *)
 
 val resolve_network_mode :
   sandbox_profile:sandbox_profile ->

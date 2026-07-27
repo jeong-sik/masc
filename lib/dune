@@ -2,7 +2,25 @@
 (library
  (name masc)
  (public_name masc)
- (private_modules keeper_fs_durable_directory)
+ (private_modules
+ keeper_fs_durable_directory
+  keeper_exact_flow_scope
+  keeper_dead_revival_payload
+  keeper_dead_revival_payload_codec
+  keeper_dead_revival_payload_domain
+  keeper_dead_revival_payload_error
+  keeper_dead_revival_payload_inventory
+  keeper_dead_revival_payload_store
+  keeper_dead_revival_payload_types
+  keeper_lifecycle_admission_durable_transaction
+  keeper_lifecycle_admission_durable_types
+  keeper_lifecycle_admission_journal
+  keeper_lifecycle_admission_permit
+  keeper_runtime_meta_journal
+  keeper_runtime_meta_transaction
+  keeper_lifecycle_nonce_storage
+  keeper_lifecycle_nonce_types
+  keeper_meta_runtime_sync_internal)
  (libraries
   mcp_protocol
   mcp_protocol.eio

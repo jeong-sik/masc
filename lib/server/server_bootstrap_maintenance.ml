@@ -79,6 +79,230 @@ let wake_enqueue_counts_of_dispatches dispatches =
     dispatches
 ;;
 
+type transition_outbox_projection_source =
+  | Startup_projection
+  | Maintenance_projection
+
+let transition_outbox_projection_source_to_string = function
+  | Startup_projection -> "startup"
+  | Maintenance_projection -> "maintenance"
+;;
+
+let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
+  let page =
+    Keeper_event_queue_recovery.project_discovered_bounded
+      ~base_path
+      ~budget
+      ~cursor
+  in
+  let report = page.report in
+  let source_label = transition_outbox_projection_source_to_string source in
+  Option.iter
+    (fun error ->
+       Log.Server.error
+         "keeper transition outbox %s discovery retained error=%s"
+         source_label
+         (Keeper_event_queue_recovery.discovery_error_to_string error))
+    report.discovery_error;
+  List.iter
+    (fun (failure : Keeper_event_queue_recovery.owner_failure) ->
+       Log.Server.error
+         "keeper transition outbox %s retained keeper=%s error=%s"
+         source_label
+         failure.keeper_name
+         (Keeper_event_queue_recovery.projection_error_to_string failure.error))
+    report.failures;
+  let should_log =
+    match source with
+    | Startup_projection -> true
+    | Maintenance_projection ->
+      report.converged > 0
+      || report.claim_busy > 0
+      || report.failures <> []
+      || Option.is_some report.discovery_error
+  in
+  if should_log
+  then
+    Log.Server.info
+      "keeper transition outbox %s discovered=%d processed=%d deferred=%d \
+       converged=%d no_pending=%d claim_busy=%d failures=%d"
+      source_label
+      report.discovered
+      report.processed
+      report.deferred
+      report.converged
+      report.no_pending
+      report.claim_busy
+      (List.length report.failures);
+  page
+;;
+
+let owner_has_durable_demand state =
+  not
+    (Keeper_event_queue.is_empty
+       (Keeper_event_queue_state.pending state))
+  || Keeper_event_queue_state.leases state <> []
+  || Keeper_event_queue_state.transition_outbox state <> []
+;;
+
+let load_durable_demand_meta ~base_path ~config ~keeper_name =
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      match
+        Keeper_event_queue_persistence.load_state_result
+          ~base_path
+          ~keeper_name
+      with
+      | Error detail -> Error (`Demand_unknown detail)
+      | Ok state when not (owner_has_durable_demand state) -> Ok None
+      | Ok _state ->
+        (match Keeper_meta_store.read_effective_meta config keeper_name with
+         | Error detail -> Error (`Owner_unknown detail)
+         | Ok None -> Error (`Owner_unknown "durable_keeper_metadata_missing")
+         | Ok (Some meta) -> Ok (Some meta)))
+  with
+  | Ok outcome -> outcome
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Error (`Demand_execution_failed failure)
+  | Error error -> Error (`Executor_unavailable error)
+;;
+
+let recover_projected_durable_demand_owner
+      (ctx : _ Keeper_types_profile.context)
+      (projection : Keeper_event_queue_recovery.owner_projection)
+  =
+  let base_path = ctx.config.base_path in
+  let keeper_name = projection.keeper_name in
+  match projection.outcome with
+  | Ok Keeper_event_queue_recovery.Claim_busy ->
+    Log.Server.info
+      "keeper durable demand recovery retained keeper=%s reason=projection_claim_busy"
+      keeper_name
+  | Error error ->
+    Log.Server.error
+      "keeper durable demand recovery retained keeper=%s reason=projection_unknown detail=%s"
+      keeper_name
+      (Keeper_event_queue_recovery.projection_error_to_string error)
+  | Ok
+      ( Keeper_event_queue_recovery.No_pending_transition
+      | Keeper_event_queue_recovery.Transition_converged ) ->
+    (match
+       load_durable_demand_meta
+         ~base_path
+         ~config:ctx.config
+         ~keeper_name
+     with
+     | Error (`Demand_unknown detail) ->
+       Log.Server.error
+         "keeper durable demand recovery retained keeper=%s reason=demand_unknown detail=%s"
+         keeper_name
+         detail
+     | Error (`Owner_unknown detail) ->
+       Log.Server.error
+         "keeper durable demand recovery retained keeper=%s reason=owner_unknown detail=%s"
+         keeper_name
+         detail
+     | Error (`Executor_unavailable error) ->
+       Log.Server.error
+         "keeper durable demand recovery retained keeper=%s reason=executor_unavailable detail=%s"
+         keeper_name
+         (Executor_pool_ref.strict_submit_error_to_string error)
+     | Error (`Demand_execution_failed (exn, backtrace)) ->
+       Log.Server.error
+         "keeper durable demand recovery retained keeper=%s reason=demand_execution_failed detail=%s\n%s"
+         keeper_name
+         (Printexc.to_string exn)
+         (Printexc.raw_backtrace_to_string backtrace)
+     | Ok None -> ()
+     | Ok (Some meta) ->
+       let admission =
+         Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+       in
+       let runtime =
+         Keeper_activation_readiness.owner_runtime_of_registry_entry
+           (Keeper_registry.get ~base_path keeper_name)
+       in
+       let truth =
+         Keeper_activation_readiness.classify_owner_execution
+           ~shutdown_operation_id:
+             admission.snapshot_shutdown_operation_id
+           ~runtime
+           (Ok meta)
+       in
+       (match truth with
+        | Keeper_activation_readiness.Executable -> ()
+        | Keeper_activation_readiness.Recoverable ->
+          let owner_ctx = { ctx with agent_name = meta.agent_name } in
+          Keeper_supervisor.supervise_keepalive
+            ~proactive_warmup_sec:0
+            owner_ctx
+            meta
+        | Keeper_activation_readiness.Unknown detail ->
+          Log.Server.error
+            "keeper durable demand recovery retained keeper=%s reason=unknown detail=%s"
+            keeper_name
+            detail
+        | ( Keeper_activation_readiness.Retained_disabled _
+          | Keeper_activation_readiness.Paused_dead _
+          | Keeper_activation_readiness.Shutdown_fenced _ ) as retained ->
+          Log.Server.info
+            "keeper durable demand recovery retained keeper=%s reason=%s"
+            keeper_name
+            (Keeper_activation_readiness.owner_execution_truth_to_wire retained)))
+;;
+
+let consume_owner_projection_batch
+      ~commit_cursor
+      ~keeper_name
+      ~recover_owner
+      projections
+  =
+  commit_cursor ();
+  List.iter
+    (fun projection ->
+       let owner = keeper_name projection in
+       try recover_owner projection with
+       | Eio.Cancel.Cancelled _ as exn ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         Printexc.raise_with_backtrace exn backtrace
+       | exn ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         Log.Server.error
+           "keeper durable demand recovery owner failed keeper=%s error=%s\n%s"
+           owner
+           (Printexc.to_string exn)
+           (Printexc.raw_backtrace_to_string backtrace))
+    projections
+;;
+
+let recover_keeper_durable_demand_owners
+      ~source
+      ~budget
+      ~cursor
+      ~commit_cursor
+      ctx
+  =
+  let page =
+    project_keeper_transition_outboxes
+      ~source
+      ~base_path:ctx.Keeper_types_profile.config.base_path
+      ~budget
+      ~cursor
+  in
+  consume_owner_projection_batch
+    ~commit_cursor:(fun () -> commit_cursor page.next_cursor)
+    ~keeper_name:(fun
+                   (projection : Keeper_event_queue_recovery.owner_projection)
+                 ->
+      projection.keeper_name)
+    ~recover_owner:(recover_projected_durable_demand_owner ctx)
+    page.report.projections
+;;
+
+module Recovery_for_testing = struct
+  let consume_owner_projection_batch = consume_owner_projection_batch
+end
+
 (* Run one consolidation pass over every keeper that currently has a fact store.
    The optional [complete] injection lets tests drive the loop with a fake model.
    Provider transport owns the only LLM timeout boundary. The output contract is
@@ -175,6 +399,18 @@ let run_memory_os_consolidation_tick
 ;;
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
+  let recovery_ctx : _ Keeper_types_profile.context =
+    { config
+    ; agent_name = "keeper-maintenance-recovery"
+    ; sw
+    ; clock
+    ; proc_mgr = Some env#process_mgr
+    ; net = state.net
+    ; publication_recovery_provider =
+        Mcp_server.publication_recovery_availability_provider state
+    }
+  in
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
   fork_logged_fiber
@@ -491,6 +727,34 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "maintenance_cleanup")
     (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
+    let transition_projection_cursor =
+      ref Keeper_event_queue_recovery.initial_sweep_cursor
+    in
+    let transition_projection_budget =
+      match
+        Keeper_event_queue_recovery.owner_budget
+          ~max_owners:(Keeper_config.keeper_batch_limit ())
+      with
+      | Ok budget -> Some budget
+      | Error error ->
+        Log.Server.error
+          "keeper transition outbox maintenance disabled: %s"
+          (Keeper_event_queue_recovery.owner_budget_error_to_string error);
+        None
+    in
+    let recover_durable_demand_owners source =
+      Option.iter
+        (fun budget ->
+           recover_keeper_durable_demand_owners
+             ~source
+             ~budget
+             ~cursor:!transition_projection_cursor
+             ~commit_cursor:(fun next_cursor ->
+               transition_projection_cursor := next_cursor)
+             recovery_ctx)
+        transition_projection_budget
+    in
+    recover_durable_demand_owners Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
        clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
@@ -499,6 +763,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
+      recover_durable_demand_owners Maintenance_projection;
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

@@ -853,13 +853,38 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   let linked = List.filter (fun (g : Goal_store.goal) ->
                     List.mem g.id m.active_goal_ids) all_goals in
                   let tasks = Workspace.get_tasks_safe config in
-                  let forest =
-                    Dashboard_goals.build_forest ~config ~goals:linked ~tasks
-                  in
-                  `Assoc [
-                    ("count", `Int (List.length linked));
-                    ("nodes", `List (List.map Dashboard_goals.tree_node_to_json forest));
-                  ]
+                  (match
+                     Keeper_approval_queue
+                     .list_pending_dashboard_json_for_workspace
+                       ~base_path:config.base_path
+                   with
+                  | Error error ->
+                      `Assoc
+                        [
+                          ( "approval_queue_state",
+                            Keeper_approval_queue
+                            .approval_queue_unavailable_state_json
+                              error );
+                          ("count", `Null);
+                          ("nodes", `Null);
+                        ]
+                  | Ok pending_approvals ->
+                      let forest =
+                        Dashboard_goals.build_forest ~config ~goals:linked
+                          ~tasks ~pending_approvals
+                      in
+                      `Assoc
+                        [
+                          ( "approval_queue_state",
+                            Keeper_approval_queue
+                            .approval_queue_ready_state_json );
+                          ("count", `Int (List.length linked));
+                          ( "nodes",
+                            `List
+                              (List.map
+                                 Dashboard_goals.tree_node_to_json
+                                 forest) );
+                        ])
                 else
                   `Null );
               ( "persona",

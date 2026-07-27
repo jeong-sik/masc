@@ -5,16 +5,6 @@
     from the compatibility facade. *)
 
 
-(** Hook invoked after each successful [write_meta] /
-    [write_meta_with_merge]. Reset by the runtime to keep
-    [Workspace_state] caches in sync. *)
-val runtime_meta_write_sync_hook :
-  Workspace.config -> Keeper_meta_contract.keeper_meta -> unit
-
-(** Replace [runtime_meta_write_sync_hook] with [f]. *)
-val register_runtime_meta_write_sync :
-  (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
-
 (** Pre-compiled regex matching the CAS [meta version conflict]
     error message. Exposed for symmetry — used internally by
     [is_version_conflict_error]. *)
@@ -90,11 +80,6 @@ val read_meta_if_changed :
   last_mtime:float ->
   (Keeper_meta_contract.keeper_meta * float) option
 
-(** Atomic write of [persisted] to [path]; runs the
-    [runtime_meta_write_sync_hook] on success. *)
-val persist_meta :
-  Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
-
 (** Persist [m] with a CAS bump on [meta_version]: the write is rejected
     if the on-disk version has moved since [m] was read. There is no force
     / bypass path — cumulative usage counters are a monotone invariant
@@ -109,7 +94,32 @@ val write_meta :
     checked against the same BasePath/name key before entering the per-path
     CAS critical section. *)
 val write_meta_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
+val create_meta :
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
+  Keeper_lifecycle_nonce.create Keeper_lifecycle_nonce.witness ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
+val replace_meta :
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
+  Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
+
+val recover_meta_exact :
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
+  Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
@@ -118,6 +128,10 @@ type identity_update_error =
   | Identity_missing
   | Identity_changed
   | Identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Identity_read_failed of string
   | Identity_write_failed of string
 
@@ -138,6 +152,10 @@ type identity_remove_error =
   | Remove_identity_missing
   | Remove_identity_changed
   | Remove_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Remove_identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Remove_identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Remove_identity_read_failed of string
   | Remove_identity_unlink_failed of string
 
@@ -152,6 +170,15 @@ val remove_meta_if_identity :
   generation:int ->
   (unit, identity_remove_error) result
 
+val remove_meta_if_identity_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
+  Keeper_lifecycle_reservation.token ->
+  Workspace.config ->
+  name:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  generation:int ->
+  (unit, identity_remove_error) result
+
 type exact_identity_error =
   | Exact_identity_missing
   | Exact_identity_changed
@@ -159,6 +186,11 @@ type exact_identity_error =
       { expected : int
       ; actual : int
       }
+  | Exact_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Exact_identity_lifecycle_admission_blocked of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+  | Exact_identity_lifecycle_admission_release_failed of
+      Keeper_lifecycle_admission.Durable_transaction.authority_failure
   | Exact_identity_read_failed of string
   | Exact_identity_unlink_failed of string
 
@@ -187,6 +219,16 @@ val remove_meta_if_exact_identity :
   meta_version:int ->
   (unit, exact_identity_error) result
 
+val remove_meta_if_exact_identity_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
+  Keeper_lifecycle_reservation.token ->
+  Workspace.config ->
+  name:string ->
+  trace_id:Keeper_id.Trace_id.t ->
+  generation:int ->
+  meta_version:int ->
+  (unit, exact_identity_error) result
+
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool
 
@@ -203,6 +245,7 @@ val write_meta_with_merge :
   (unit, string) result
 
 val write_meta_with_merge_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   ?max_retries:int ->
   merge:

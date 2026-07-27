@@ -104,11 +104,21 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     | Error e -> Error (tool_result_error e)
     | Ok () ->
     match
-      reject_removed_keeper_input_keys ~allow_sandbox_fields
+      reject_removed_keeper_input_keys ~allow_sandbox_fields:true
         ~tool_name:"masc_keeper_up" args
     with
     | Error e -> Error (tool_result_error e)
     | Ok () ->
+    if
+      (not allow_sandbox_fields)
+      && Option.is_some (Json_util.assoc_member_opt "network_mode" args)
+    then
+      Error
+        (tool_result_error
+           "removed keeper sandbox args for masc_keeper_up: network_mode. Configure \
+            network posture in keeper TOML/profile defaults; the public keeper-up \
+            contract accepts only the optional sandbox_profile isolation boundary.")
+    else
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
@@ -137,14 +147,25 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     | Error error ->
       Error (tool_result_error (keeper_toml_load_error_to_string error))
     | Ok profile_defaults ->
+    (* An explicit profile must be valid. When neither the call nor keeper TOML states
+       one, creation uses the local sandbox with playground-only writes. This is the
+       narrow safe bootstrap: a fresh keeper can start without a hand-authored TOML,
+       while docker remains an explicit opt-in. *)
     let sandbox_profile_error =
-      match profile_defaults.sandbox_profile with
-      | None ->
+      match sandbox_profile_opt, profile_defaults.sandbox_profile,
+        profile_defaults.manifest_path
+      with
+      | Some raw, _, _ when Option.is_none (sandbox_profile_of_string raw) ->
+        Some
+          (Printf.sprintf
+             "invalid sandbox_profile: %S (expected: local or docker)"
+             raw)
+      | Some _, _, _ | None, Some _, _ | None, None, None -> None
+      | None, None, Some _ ->
         Some
           (missing_required_sandbox_profile_error
              ~keeper_name:name
              profile_defaults)
-      | Some _ -> None
     in
     (* The previous implementation read [<base>/memory/souls/<name>/SOUL.md]
        on every keeper turn-up and wrapped the resulting (or "not found")
@@ -190,9 +211,15 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
   in
   raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
 
-let resolve_sandbox_profile ~fallback =
-  fallback
-  |> Option.value ~default:default_sandbox_profile
+(* An explicit request wins over the TOML default. Without either source, use the
+   canonical local sandbox; creation pairs it with playground-only writes. *)
+let resolve_sandbox_profile ?requested ~fallback () =
+  match Option.bind requested sandbox_profile_of_string with
+  | Some stated -> stated
+  | None ->
+    (match fallback with
+     | Some stated -> stated
+     | None -> default_sandbox_profile)
 
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback

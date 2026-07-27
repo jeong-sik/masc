@@ -297,6 +297,15 @@ let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
 
 let reaction_kind_of_settlement = function
   | Keeper_event_queue_state.Ack -> Event_queue_ack
+  | Keeper_event_queue_state.Manual_compaction_committed
+      { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
+    Event_queue_ack
+  | Keeper_event_queue_state.Manual_compaction_committed
+      { followup =
+          Keeper_event_queue_state.Compaction_commit_failure_judgment _
+      ; _
+      } ->
+    Event_queue_escalated
   | Keeper_event_queue_state.No_compaction _ -> Event_queue_no_compaction
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
   | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
@@ -374,76 +383,77 @@ let event_queue_transition_reaction_json
        ])
 ;;
 
-let append_event_queue_transition_outbox_result
-      ~base_path
-      ~keeper_name
-      (entry : Keeper_event_queue_state.outbox_entry)
+let after_ledger_append_hook :
+  (unit -> (unit, string) result) option Atomic.t
   =
-  match entry.stimuli with
-  | [] ->
-    Error
-      (Printf.sprintf
-         "event queue settlement outbox has no sources keeper=%s transition_id=%s"
-         keeper_name
-         entry.receipt.transition_id)
-  | stimuli ->
-    let store = store_for_base_path ~base_path ~keeper_name in
-    let source_count = List.length stimuli in
-    let rec append_sources source_index = function
-      | [] -> Ok ()
-      | stimulus :: rest ->
-        let event_id = event_queue_transition_event_id entry.receipt source_index in
-        (try
-           Dated_jsonl.append
-             store
-             (event_queue_transition_reaction_json
-                ~keeper_name
-                ~source_index
-                ~source_count
-                ~transition_source:(transition_source_of_stimulus stimulus)
-                entry.receipt
-                stimulus);
-           append_sources (source_index + 1) rest
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Error
-             (Printf.sprintf
-                "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
-                keeper_name
-                event_id
-                (Printexc.to_string exn)))
-    in
-    append_sources 0 stimuli
+  Atomic.make None
 ;;
+
+let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
 
 let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
   let ( let* ) = Result.bind in
-  let* outbox =
-    Keeper_event_queue_persistence.transition_outbox_result
-      ~base_path
-      ~keeper_name
-  in
-  match outbox with
-  | [] -> Ok ()
-  | [ entry ] ->
-    let* () =
-      append_event_queue_transition_outbox_result
-        ~base_path
-        ~keeper_name
-        entry
+  Keeper_event_queue_persistence.project_transition_outbox_result
+    ~append_before_retire:(fun
+        (entry : Keeper_event_queue_state.outbox_entry)
+      ->
+      match entry.stimuli with
+      | [] ->
+        Error
+          (Printf.sprintf
+             "event queue settlement outbox has no sources keeper=%s transition_id=%s"
+             keeper_name
+             entry.receipt.transition_id)
+      | stimuli ->
+        let store = store_for_base_path ~base_path ~keeper_name in
+        let source_count = List.length stimuli in
+        let rec append_sources source_index = function
+          | [] -> Ok ()
+          | stimulus :: rest ->
+            let event_id =
+              event_queue_transition_event_id entry.receipt source_index
+            in
+            (try
+               Dated_jsonl.append
+                 store
+                 (event_queue_transition_reaction_json
+                    ~keeper_name
+                    ~source_index
+                    ~source_count
+                    ~transition_source:(transition_source_of_stimulus stimulus)
+                    entry.receipt
+                    stimulus);
+               append_sources (source_index + 1) rest
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Error
+                 (Printf.sprintf
+                    "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
+                    keeper_name
+                    event_id
+                    (Printexc.to_string exn)))
+        in
+        let* () = append_sources 0 stimuli in
+        (match Atomic.get after_ledger_append_hook with
+         | None -> Ok ()
+         | Some hook -> hook ()))
+    ~base_path
+    ~keeper_name
+
+module For_testing = struct
+  let with_after_ledger_append ~after_ledger_append f =
+    Stdlib.Mutex.lock after_ledger_append_hook_mutex;
+    let previous =
+      Atomic.exchange after_ledger_append_hook (Some after_ledger_append)
     in
-    Keeper_event_queue_persistence.mark_transition_projected_result
-      ~base_path
-      ~keeper_name
-      ~transition_id:entry.receipt.transition_id
-  | entries ->
-    Error
-      (Printf.sprintf
-         "event queue transition outbox cardinality invalid keeper=%s count=%d"
-         keeper_name
-         (List.length entries))
-;;
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set after_ledger_append_hook previous;
+        Stdlib.Mutex.unlock after_ledger_append_hook_mutex)
+      f
+  ;;
+end
 
 let cursor_json { cursor_ts; post_id } =
   `Assoc
@@ -678,6 +688,10 @@ let require_finite_float ~missing ~non_finite field json =
 let reaction_kind_matches_settlement reaction_kind settlement =
   match reaction_kind, settlement with
   | Event_queue_ack, Keeper_event_queue_state.Ack -> true
+  | Event_queue_ack,
+    Keeper_event_queue_state.Manual_compaction_committed
+      { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
+    true
   | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
   | Event_queue_ack, Keeper_event_queue_state.Settle_from_source_terminal _ -> true
   | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
@@ -689,18 +703,27 @@ let reaction_kind_matches_settlement reaction_kind settlement =
   | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
   | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
   | Event_queue_escalated,
+    Keeper_event_queue_state.Manual_compaction_committed
+      { followup =
+          Keeper_event_queue_state.Compaction_commit_failure_judgment _
+      ; _
+      } ->
+    true
+  | Event_queue_escalated,
     Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
     true
   | Turn_started, _
   | Cursor_ack, _
   | Event_queue_ack,
-    ( Keeper_event_queue_state.No_compaction _
+    ( Keeper_event_queue_state.Manual_compaction_committed _
+    | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_no_compaction,
     ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
     | Keeper_event_queue_state.Settle_from_source_terminal _
@@ -709,6 +732,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_cancelled,
     ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Transfer_accepted _
     | Keeper_event_queue_state.Settle_from_source_terminal _
@@ -717,6 +741,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_requeued,
     ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
@@ -725,6 +750,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_escalated,
     ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
@@ -1438,6 +1464,7 @@ let summarize_rows ~keeper_name ~limit rows =
          if Keeper_event_queue_state.escalation_reason_requests_external_input reason
          then incr event_queue_external_input_count
        | Keeper_event_queue_state.Ack
+       | Keeper_event_queue_state.Manual_compaction_committed _
        | Keeper_event_queue_state.No_compaction _
        | Keeper_event_queue_state.Cancel_accepted _
        | Keeper_event_queue_state.Transfer_accepted _

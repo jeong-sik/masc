@@ -29,6 +29,20 @@ type supersede_blocked_result =
 
 type operator_metadata_supersession_token
 
+val operator_metadata_supersession_token_to_json :
+  operator_metadata_supersession_token ->
+  Yojson.Safe.t
+
+val operator_metadata_supersession_token_of_json :
+  Yojson.Safe.t ->
+  (operator_metadata_supersession_token, error) result
+
+val operator_metadata_supersession_token_matches :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operator_metadata_supersession_token ->
+  bool
+
 type corrupt_record =
   { keeper_name : string
   ; operation_id : Keeper_shutdown_types.Operation_id.t

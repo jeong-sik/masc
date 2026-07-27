@@ -495,6 +495,11 @@ let handle_keeper_task_tool_with_outcome
                   ~title
                   ~priority
                   ~description
+                    (* Attribute keeper-created tasks so the self-author filter
+                       (below, and in claimable counting) can recognize them.
+                       Without this the row has [created_by = None] and a keeper
+                       is offered its own routing/report tasks back as work. *)
+                  ~created_by:meta.name
               in
               Keeper_tool_execution.success
                 (Yojson.Safe.to_string
@@ -507,8 +512,18 @@ let handle_keeper_task_tool_with_outcome
                        , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
                      ]))))
     | Task_claim ->
+    let auto_claim_eligible task =
+      not
+        (Keeper_world_observation_inputs.task_is_self_authored_todo
+           ~meta
+           task)
+    in
     let claim_goal_scope =
-      Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+      Keeper_runtime_contract.resolve_claim_goal_scope
+        ~config
+        ~meta
+        ~task_eligible:auto_claim_eligible
+        ()
     in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
@@ -547,8 +562,18 @@ let handle_keeper_task_tool_with_outcome
         if requested_task_id <> "" then
           explicit_claim_result ()
         else
+          (* Auto-claim (no explicit task_id) must not select the keeper's own
+             authored tasks: that closes the routing/report feedback loop
+             (#25429) the claimable count already excludes. Explicit claim by
+             task_id above is intentional and left unfiltered. The self-author
+             exclusion is a [hard_filter], not a [task_filter]: a hard exclusion
+             must survive the [allow_scope_fallback] widening below, otherwise a
+             keeper whose backlog holds only its own routing/report tasks falls
+             into the fallback, drops the goal-scope filter, and claims its own
+             task right back — exactly the case this is meant to prevent. *)
           Workspace.claim_next_r config ~agent_name:meta.agent_name
             ~task_filter:claim_goal_scope.task_filter
+            ~hard_filter:auto_claim_eligible
             ~allow_scope_fallback:true
             ()
       in

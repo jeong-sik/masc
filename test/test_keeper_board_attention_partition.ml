@@ -75,6 +75,25 @@ let provenance
   { slot_id; call_id; plan_fingerprint; request_body_sha256 }
 ;;
 
+let candidate_visit
+      ?(flow_id = "flow-1")
+      ?(ordinal = 1)
+      ?(slot_id = "slot-next")
+      ?(catalog_generation_fingerprint = "generation-1")
+      ?(catalog_evidence_sha256 = "evidence-1")
+      ?(target_identity_fingerprint = "target-1")
+      ()
+  : P.candidate_visit
+  =
+  { flow_id
+  ; ordinal
+  ; slot_id
+  ; catalog_generation_fingerprint
+  ; catalog_evidence_sha256
+  ; target_identity_fingerprint
+  }
+;;
+
 let judgment ?(judged_at = 101.0) (proof : P.exact_provenance) : A.judgment =
   { verdict = { J.decision = J.Relevant; rationale = "react to this Board event" }
   ; slot_id = proof.slot_id
@@ -531,34 +550,32 @@ let test_existing_judgment_completion_is_atomic_and_restart_safe () =
          { candidate_id = bound_candidate.candidate_id
          ; judgment = judgment bound_proof
          });
-  let advancing_claim = claim ~base_path ~worker_epoch:owner ~now:15.0 in
+  let released_claim = claim ~base_path ~worker_epoch:owner ~now:15.0 in
   let failed =
     provenance ~slot_id:"failed-existing-slot" ~call_id:"failed-existing-call" ()
   in
-  let next =
-    provenance ~slot_id:"next-existing-slot" ~call_id:"next-existing-call" ()
-  in
-  let advancing_bound =
+  let released_bound =
     P.bind_before_dispatch
       ~worker_epoch:owner
       ~base_path
-      ~partition:advancing_claim
+      ~partition:released_claim
       ~provenance:failed
-    |> ok "bind advancing existing-judgment rejection fixture"
-    |> fsynced "bind advancing existing-judgment rejection fixture"
+    |> ok "bind released existing-judgment rejection fixture"
+    |> fsynced "bind released existing-judgment rejection fixture"
   in
+  let next = candidate_visit ~slot_id:"next-existing-slot" () in
   let advancing =
     P.record_before_advance
       ~worker_epoch:owner
       ~base_path
-      ~partition:advancing_bound
-      ~failed
+      ~partition:released_bound
+      ~source:(P.Executed_failure failed)
       ~next
-    |> ok "advance existing-judgment rejection fixture"
-    |> fsynced "advance existing-judgment rejection fixture"
+    |> ok "record existing-judgment advancement fixture"
+    |> fsynced "record existing-judgment advancement fixture"
   in
   expect_error
-    "existing judgment rejects Advancing"
+    "existing judgment cannot bypass OAS-selected advancement"
     (P.complete_existing_judgment
        ~now:16.0
        ~worker_epoch:owner
@@ -566,19 +583,20 @@ let test_existing_judgment_completion_is_atomic_and_restart_safe () =
        ~partition:advancing
        ~item:
          { candidate_id = advancing_candidate.candidate_id
-         ; judgment = judgment next
+         ; judgment = judgment failed
          });
   ignore (completed : P.t)
 ;;
 
-let test_before_advance_is_atomic_and_exact () =
+let test_before_advance_record_is_atomic_and_exact () =
   with_temp_base "board-attention-partition-advance" @@ fun base_path ->
   let pending = candidate ~id:"candidate-advance" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
   let owner = P.Worker_epoch.generate () in
   let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
   let failed = provenance ~slot_id:"slot-failed" ~call_id:"call-failed" () in
-  let next = provenance ~slot_id:"slot-next" ~call_id:"call-next" () in
+  let next_visit = candidate_visit ~slot_id:"slot-next" () in
+  let next = provenance ~slot_id:next_visit.slot_id ~call_id:"call-next" () in
   let bound =
     P.bind_before_dispatch
       ~worker_epoch:owner
@@ -594,60 +612,41 @@ let test_before_advance_is_atomic_and_exact () =
        ~worker_epoch:owner
        ~base_path
        ~partition:bound
-       ~failed:(provenance ~call_id:"other-call" ())
-       ~next);
-  expect_error
-    "before advance rejects same attempt"
-    (P.record_before_advance
-       ~worker_epoch:owner
-       ~base_path
-       ~partition:bound
-       ~failed
-       ~next:failed);
-  let advancing_transition =
+       ~source:
+         (P.Executed_failure (provenance ~call_id:"other-call" ()))
+       ~next:next_visit);
+  let advance_transition =
     ok
       "record before advance"
       (P.record_before_advance
          ~worker_epoch:owner
          ~base_path
          ~partition:bound
-         ~failed
-         ~next)
+         ~source:(P.Executed_failure failed)
+         ~next:next_visit)
   in
-  Alcotest.(check bool) "advance changes durable state" true advancing_transition.changed;
-  let advancing = fsynced "record before advance" advancing_transition in
+  Alcotest.(check bool)
+    "advance record changes durable state"
+    true
+    advance_transition.changed;
+  let advancing = fsynced "record before advance" advance_transition in
   (match advancing.state with
    | P.Running { progress = P.Advancing durable; _ } ->
-     Alcotest.(check bool) "failed proof retained" true (durable.failed = failed);
-     Alcotest.(check bool) "next proof retained" true (durable.next = next)
-   | _ -> Alcotest.fail "partition was not Advancing");
-  let repeated =
-    ok
-      "repeat before advance"
-      (P.record_before_advance
-         ~worker_epoch:owner
-         ~base_path
-         ~partition:advancing
-         ~failed
-         ~next)
-  in
-  Alcotest.(check bool) "idempotent advance reports no state change" false repeated.changed;
-  ignore (fsynced "repeat before advance" repeated : P.t);
-  expect_error
-    "advancing can bind only retained next proof"
-    (P.bind_before_dispatch
-       ~worker_epoch:owner
-       ~base_path
-       ~partition:advancing
-       ~provenance:(provenance ~call_id:"unplanned-call" ()));
+     Alcotest.(check bool)
+       "failed receipt and selected visit persist exactly"
+       true
+       (durable.execution_anchor = Some failed
+        && durable.last_from = None
+        && durable.next = next_visit)
+   | _ -> Alcotest.fail "partition did not retain Advancing evidence");
   let rebound =
     P.bind_before_dispatch
       ~worker_epoch:owner
       ~base_path
       ~partition:advancing
       ~provenance:next
-    |> ok "bind retained next"
-    |> fsynced "bind retained next"
+    |> ok "bind OAS-selected successor"
+    |> fsynced "bind OAS-selected successor"
   in
   expect_error
     "completion cannot use prior attempt provenance"
@@ -726,9 +725,8 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
   with_temp_base "board-attention-partition-restart-hard-cut" @@ fun base_path ->
   let unbound_candidate = candidate ~id:"candidate-unbound" ~recorded_at:1.0 () in
   let bound_candidate = candidate ~id:"candidate-bound" ~recorded_at:2.0 () in
-  let advancing_candidate = candidate ~id:"candidate-advancing" ~recorded_at:3.0 () in
   ignore
-    (roots ~base_path [ advancing_candidate; bound_candidate; unbound_candidate ] : P.t list);
+    (roots ~base_path [ bound_candidate; unbound_candidate ] : P.t list);
   let owner = P.Worker_epoch.generate () in
   let unbound = claim ~base_path ~worker_epoch:owner ~now:10.0 in
   let bound_claim = claim ~base_path ~worker_epoch:owner ~now:11.0 in
@@ -742,37 +740,15 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
      |> ok "bind restart fixture"
      |> fsynced "bind restart fixture"
       : P.t);
-  let advancing_claim = claim ~base_path ~worker_epoch:owner ~now:12.0 in
-  let failed = provenance ~slot_id:"failed-slot" ~call_id:"failed-call" () in
-  let next = provenance ~slot_id:"next-slot" ~call_id:"next-call" () in
-  let advancing_bound =
-    P.bind_before_dispatch
-      ~worker_epoch:owner
-      ~base_path
-      ~partition:advancing_claim
-      ~provenance:failed
-    |> ok "bind advancing fixture"
-    |> fsynced "bind advancing fixture"
-  in
-  ignore
-    (P.record_before_advance
-       ~worker_epoch:owner
-       ~base_path
-       ~partition:advancing_bound
-       ~failed
-       ~next
-     |> ok "advance restart fixture"
-     |> fsynced "advance restart fixture"
-      : P.t);
   Alcotest.(check int)
     "all prior Running roots are explicitly resolved"
-    3
+    2
     (ok
        "process-start recovery"
        (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"sangsu"));
   let recovered = ok "load recovered partitions" (P.load ~base_path ~keeper_name:"sangsu") in
   (match recovered with
-   | [ first; second; third ] ->
+   | [ first; second ] ->
      (match first.state with
       | P.Ready ->
         Alcotest.(check string)
@@ -785,12 +761,6 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
           { reason = P.Exact_execution_quarantined (P.Bound durable); _ } ->
         Alcotest.(check bool) "Bound proof retained in quarantine" true (durable = bound_proof)
       | _ -> Alcotest.fail "Bound Running was not quarantined");
-     (match third.state with
-      | P.Blocked
-          { reason = P.Exact_execution_quarantined (P.Advancing durable); _ } ->
-        Alcotest.(check bool) "failed proof retained in quarantine" true (durable.failed = failed);
-        Alcotest.(check bool) "next proof retained in quarantine" true (durable.next = next)
-      | _ -> Alcotest.fail "Advancing Running was not quarantined");
      let settled_blocked =
        ok "settle terminal Blocked" (P.settle ~now:21.0 ~base_path ~partition:second)
      in
@@ -891,6 +861,9 @@ let test_strict_current_schema_rejects_old_json () =
     true
     (ok "decode" (P.of_yojson encoded) = created);
   expect_error
+    "immediate prior schema v5 is rejected without migration"
+    (P.of_yojson (replace_field "schema_version" (`Int 5) encoded));
+  expect_error
     "old schema is rejected without migration"
     (P.of_yojson (replace_field "schema_version" (`Int 4) encoded));
   let old_running =
@@ -923,7 +896,7 @@ let test_strict_current_schema_rejects_old_json () =
 
 let inject_torn_tail ledger_path =
   let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 ledger_path in
-  output_string output "{\"schema_version\":5,\"partition_id\":\"torn-partial";
+  output_string output "{\"schema_version\":6,\"partition_id\":\"torn-partial";
   close_out output
 ;;
 
@@ -1016,6 +989,73 @@ let test_invalid_or_mismatched_provenance_never_rewrites () =
   | _ -> Alcotest.fail "rejected completion mutated the durable binding"
 ;;
 
+let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
+  with_temp_base "board-attention-partition-predispatch-chain" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-predispatch-chain" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let first = candidate_visit ~slot_id:"slot-a" () in
+  let second =
+    { (candidate_visit ~slot_id:"slot-b" ()) with ordinal = first.ordinal + 1 }
+  in
+  let third =
+    { (candidate_visit ~slot_id:"slot-c" ()) with ordinal = second.ordinal + 1 }
+  in
+  let after_first =
+    P.record_before_advance
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~source:(P.Predispatch_rejection first)
+      ~next:second
+    |> ok "record first predispatch rejection"
+    |> fsynced "record first predispatch rejection"
+  in
+  let after_second =
+    P.record_before_advance
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:after_first
+      ~source:(P.Predispatch_rejection second)
+      ~next:third
+    |> ok "record second predispatch rejection"
+    |> fsynced "record second predispatch rejection"
+  in
+  (match after_second.state with
+   | P.Running
+       { progress =
+           P.Advancing
+             { execution_anchor = None
+             ; last_from = Some durable
+             ; next = durable_next
+             }
+       ; _
+       } ->
+     Alcotest.(check bool)
+       "latest rejected visit and OAS successor are durable"
+       true
+       (durable = second && durable_next = third)
+   | _ -> Alcotest.fail "predispatch chain did not retain latest advancement");
+  let third_provenance = provenance ~slot_id:third.slot_id ~call_id:"call-c" () in
+  let rebound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:after_second
+      ~provenance:third_provenance
+    |> ok "bind OAS-selected third slot"
+    |> fsynced "bind OAS-selected third slot"
+  in
+  match rebound.state with
+  | P.Running { progress = P.Bound durable; _ } ->
+    Alcotest.(check bool)
+      "third slot exact provenance is bound"
+      true
+      (durable = third_provenance)
+  | _ -> Alcotest.fail "third OAS-selected slot was not bindable"
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_partition"
@@ -1041,9 +1081,13 @@ let () =
             `Quick
             test_existing_judgment_completion_is_atomic_and_restart_safe
         ; Alcotest.test_case
-            "before advance is atomic and exact"
+            "before advance record is atomic and exact"
             `Quick
-            test_before_advance_is_atomic_and_exact
+            test_before_advance_record_is_atomic_and_exact
+        ; Alcotest.test_case
+            "predispatch rejection chain binds OAS-selected third slot"
+            `Quick
+            test_predispatch_rejection_chain_binds_oas_selected_third_slot
         ; Alcotest.test_case
             "runtime transitions append then startup compacts"
             `Quick

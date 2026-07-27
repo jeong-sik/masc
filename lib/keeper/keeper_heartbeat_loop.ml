@@ -114,12 +114,25 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
    [Turn_failed] instead of [Turn_succeeded]. Such a cycle must also
    NOT refresh the work-as-heartbeat lease; the count is observation and never
    terminates the Keeper lane. *)
+type keepalive_cycle_status =
+  | Turn_cycle_completed
+  | Turn_cycle_crashed
+  | Deferred_projection_busy
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
-  cycle_crashed : bool;
+  cycle_status : keepalive_cycle_status;
 }
 
 exception Event_queue_settlement_failed of string
+
+type transition_projection_gate =
+  | Projection_ready_for_cycle
+  | Projection_deferred_nonfailure
+  | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
+
+exception Event_queue_projection_deferred
+exception Event_queue_projection_failed of Keeper_event_queue_recovery.projection_error
 
 type board_attention_settlement_outcome =
   | Board_attention_settled of
@@ -451,7 +464,8 @@ let settlement_of_cycle_outcome
      along their usual typed routes and the stimulus re-enters). *)
   | None, _ ->
     (match outcome with
-  | Some (Cycle.Manual_compaction_applied _ as applied) ->
+  | Some (Cycle.Manual_compaction_applied { receipt; _ } as applied) ->
+    let commit = Keeper_manual_compaction.queue_commit_of_applied_receipt receipt in
     (match Cycle.manual_compaction_followup_failure applied with
      | Some
          ({ Keeper_unified_turn.source_lease_disposition =
@@ -461,10 +475,10 @@ let settlement_of_cycle_outcome
                 { judgment; provenance; detail }
           ; _
           } as failure) ->
-       Keeper_registry_event_queue.Escalate
-         { reason = Keeper_registry_event_queue.Failure_judgment_requested
-         ; successor =
-             Some
+       Keeper_registry_event_queue.Manual_compaction_committed
+         { commit
+         ; followup =
+             Keeper_event_queue_state.Compaction_commit_failure_judgment
                (failure_judgment_successor
                   ~arrived_at:settled_at
                   failure
@@ -472,7 +486,11 @@ let settlement_of_cycle_outcome
                   provenance
                   detail)
          }
-     | Some _ | None -> Keeper_registry_event_queue.Ack)
+     | Some _ | None ->
+       Keeper_registry_event_queue.Manual_compaction_committed
+         { commit
+         ; followup = Keeper_event_queue_state.Compaction_commit_ack
+         })
   | Some (Cycle.Completed _) -> Keeper_registry_event_queue.Ack
   | Some (Cycle.Cancelled _) ->
     Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
@@ -575,9 +593,18 @@ let compaction_outcome_of_cycle_outcome = function
 ;;
 
 let project_transition_outbox ~base_path ~keeper_name =
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+  Keeper_event_queue_recovery.project_owner_result
     ~base_path
     ~keeper_name
+;;
+
+let classify_transition_projection = function
+  | Ok
+      ( Keeper_event_queue_recovery.No_pending_transition
+      | Keeper_event_queue_recovery.Transition_converged ) ->
+    Projection_ready_for_cycle
+  | Ok Keeper_event_queue_recovery.Claim_busy -> Projection_deferred_nonfailure
+  | Error error -> Projection_failed_for_cycle error
 ;;
 
 let exact_terminal_source = function
@@ -594,6 +621,7 @@ let exact_terminal_source = function
       } ->
     Some (source, terminal)
   | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Manual_compaction_committed _
   | Keeper_registry_event_queue.No_compaction _
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
@@ -655,6 +683,7 @@ let settle_claimed_lease
              | Keeper_registry_event_queue.Escalate _ ->
                Keeper_registry_event_queue.Exact_escalate
              | Keeper_registry_event_queue.Ack
+             | Keeper_registry_event_queue.Manual_compaction_committed _
              | Keeper_registry_event_queue.Cancel_accepted _
              | Keeper_registry_event_queue.Transfer_accepted _
              | Keeper_registry_event_queue.Settle_from_source_terminal _
@@ -749,11 +778,18 @@ let exact_execution_guard ~base_path ~keeper_name ~lease =
 
 let settlement_is_ack = function
   | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Manual_compaction_committed
+      { followup = Keeper_event_queue_state.Compaction_commit_ack; _ }
   | Keeper_registry_event_queue.No_compaction _
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _ -> true
   | Keeper_registry_event_queue.Settle_from_source_terminal _ -> true
   | Keeper_registry_event_queue.Settle_exact _ -> true
+  | Keeper_registry_event_queue.Manual_compaction_committed
+      { followup =
+          Keeper_event_queue_state.Compaction_commit_failure_judgment _
+      ; _
+      }
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false
@@ -768,6 +804,7 @@ let settlement_is_exact_output_terminal = function
       } ->
     true
   | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Manual_compaction_committed _
   | Keeper_registry_event_queue.No_compaction _
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
@@ -806,6 +843,7 @@ let settlement_is_exact_output_cancellation = function
       } ->
     true
   | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Manual_compaction_committed _
   | Keeper_registry_event_queue.No_compaction _
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
@@ -856,6 +894,25 @@ let commit_transcript_corruption ~stop ~persist_pause ?settle () =
           | Error detail -> Transcript_pause_settlement_failed detail)))
 ;;
 
+let commit_transcript_corruption_and_project
+      ~stop
+      ~persist_pause
+      ?settle
+      ~project_transition_outbox
+      ()
+  =
+  let committed = commit_transcript_corruption ~stop ~persist_pause ?settle () in
+  let projection =
+    match committed with
+    | Transcript_pause_and_settlement_persisted -> project_transition_outbox ()
+    | Transcript_pause_persisted
+    | Transcript_pause_persistence_failed _
+    | Transcript_pause_settlement_failed _ ->
+      Ok ()
+  in
+  committed, projection
+;;
+
 module For_testing = struct
   type nonrec transcript_corruption_commit = transcript_corruption_commit =
     | Transcript_pause_persisted
@@ -864,7 +921,16 @@ module For_testing = struct
     | Transcript_pause_settlement_failed of string
 
   let exact_execution_guard = exact_execution_guard
+  type nonrec transition_projection_gate = transition_projection_gate =
+    | Projection_ready_for_cycle
+    | Projection_deferred_nonfailure
+    | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
+
+  let classify_transition_projection = classify_transition_projection
   let commit_transcript_corruption = commit_transcript_corruption
+  let commit_transcript_corruption_and_project =
+    commit_transcript_corruption_and_project
+  ;;
 
   let settle_claimed_lease_exact
         ~after_exact_disposition_prepare
@@ -926,7 +992,7 @@ let run_keepalive_unified_turn
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
-  then { meta = meta_after_triage; cycle_crashed = false }
+  then { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
   else (
     let consumed_stimuli = ref [] in
     let claimed_lease = ref None in
@@ -1017,14 +1083,7 @@ let run_keepalive_unified_turn
             | Ok
                 ( Keeper_registry_event_queue.Settled _
                 | Keeper_registry_event_queue.Already_settled _ ) ->
-              lease_settled := true;
-              (match
-                 project_transition_outbox
-                   ~base_path:ctx.config.base_path
-                   ~keeper_name:meta_after_triage.name
-               with
-               | Ok () -> ()
-               | Error message -> record_settlement_failure message)
+              lease_settled := true
             | Ok (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
               lease_settled := true;
               record_settlement_failure detail
@@ -1034,12 +1093,16 @@ let run_keepalive_unified_turn
     in
     try
       (match
-         project_transition_outbox
-           ~base_path:ctx.config.base_path
-           ~keeper_name:meta_after_triage.name
+         classify_transition_projection
+           (project_transition_outbox
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name)
        with
-       | Ok () -> ()
-       | Error message -> raise (Event_queue_settlement_failed message));
+       | Projection_ready_for_cycle -> ()
+       | Projection_deferred_nonfailure ->
+         raise Event_queue_projection_deferred
+       | Projection_failed_for_cycle error ->
+         raise (Event_queue_projection_failed error));
       (match
          settle_board_attention_on_owner_lane
            ~base_path:ctx.config.base_path
@@ -1364,29 +1427,42 @@ let run_keepalive_unified_turn
                           ( Keeper_registry_event_queue.Settled _
                           | Keeper_registry_event_queue.Already_settled _ ) ->
                         lease_settled := true;
-                        project_transition_outbox
-                          ~base_path:ctx.config.base_path
-                          ~keeper_name:meta_after_triage.name
+                        Ok ()
                       | Ok
                           (Keeper_registry_event_queue.Committed_followup_failed
                             { detail; _ }) ->
                         lease_settled := true;
                         Error detail)
              in
-             let committed =
-               commit_transcript_corruption
+             let committed, projection =
+               commit_transcript_corruption_and_project
                  ~stop
                  ~persist_pause:(fun () ->
                    Keeper_meta_store.persist_transcript_corruption_pause
                      ctx.config
                      ~keeper_name:meta_after_triage.name)
                  ?settle
+                 ~project_transition_outbox:(fun () ->
+                   match
+                     classify_transition_projection
+                       (project_transition_outbox
+                          ~base_path:ctx.config.base_path
+                          ~keeper_name:meta_after_triage.name)
+                   with
+                   | Projection_ready_for_cycle -> Ok ()
+                   | Projection_deferred_nonfailure ->
+                     Log.Keeper.info
+                       ~keeper_name:meta_after_triage.name
+                       "transcript corruption transition projection deferred after \
+                        durable settlement because the canonical owner claim is busy; \
+                        the outbox remains durable";
+                     Ok ()
+                   | Projection_failed_for_cycle error -> Error error)
                  ()
              in
              (match committed with
-              | Transcript_pause_persisted
-              | Transcript_pause_and_settlement_persisted ->
-                ()
+              | Transcript_pause_persisted -> ()
+              | Transcript_pause_and_settlement_persisted -> ()
               | Transcript_pause_persistence_failed message ->
                 Log.Keeper.error
                   ~keeper_name:meta_after_triage.name
@@ -1399,6 +1475,15 @@ let run_keepalive_unified_turn
                   "transcript corruption terminal settlement failed: %s"
                   message;
                 record_settlement_failure message);
+             (match projection with
+              | Ok () -> ()
+              | Error error ->
+                Log.Keeper.error
+                  ~keeper_name:meta_after_triage.name
+                  "transcript corruption transition projection failed after durable settlement: %s"
+                  (Keeper_event_queue_recovery.projection_error_to_string error);
+                record_settlement_failure
+                  (Keeper_event_queue_recovery.projection_error_to_string error));
              Some committed
            | Keeper_unified_turn.Follow_failure_route
            | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
@@ -1508,34 +1593,6 @@ let run_keepalive_unified_turn
              ~lease
              !cycle_outcome_ref
          in
-         (* RFC-0351 S0 / #25461: advance the compaction streak the settlement
-            above just read. Ordering matters — the settlement decides
-            requeue-vs-escalate from the streak *before* this failure, and this
-            stamp records the failure for the next cycle. *)
-         (let compaction_outcome =
-            compaction_outcome_of_cycle_outcome !cycle_outcome_ref
-          in
-          match compaction_outcome with
-          | None -> ()
-          | Some `Recovered
-            when meta_after_triage.runtime.compaction_rt.consecutive_failures
-                 = 0 ->
-            (* Streak already clear: skip the read-modify-write that every
-               healthy completed turn would otherwise pay. *)
-            ()
-          | Some outcome ->
-            (match
-               Keeper_meta_store.persist_compaction_outcome
-                 ctx.config
-                 ~keeper_name:meta_after_triage.name
-                 ~outcome
-             with
-             | Ok (`Persisted | `No_durable_meta) -> ()
-             | Error message ->
-               Log.Keeper.warn
-                 "compaction outcome counter not persisted keeper=%s: %s"
-                 meta_after_triage.name
-                 message));
          (match
             settle_claimed_lease
               ~exact_execution:true
@@ -1557,12 +1614,19 @@ let run_keepalive_unified_turn
               | Keeper_registry_event_queue.Already_settled _ ) ->
             lease_settled := true;
             (match
-               project_transition_outbox
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:meta_after_triage.name
+               classify_transition_projection
+                 (project_transition_outbox
+                    ~base_path:ctx.config.base_path
+                    ~keeper_name:meta_after_triage.name)
              with
-             | Error message -> raise (Event_queue_settlement_failed message)
-             | Ok () -> ());
+             | Projection_ready_for_cycle -> ()
+             | Projection_deferred_nonfailure ->
+               Log.Keeper.info
+                 ~keeper_name:meta_after_triage.name
+                 "event queue transition projection deferred after durable settlement \
+                  because the canonical owner claim is busy; the outbox remains durable"
+             | Projection_failed_for_cycle error ->
+               raise (Event_queue_projection_failed error));
             check_cancellation_after_exact_terminal_settlement settlement;
             if settlement_is_ack settlement
             then
@@ -1578,8 +1642,60 @@ let run_keepalive_unified_turn
               detail;
             record_settlement_failure detail;
             check_cancellation_after_exact_terminal_settlement settlement));
-      { meta = meta_after_cycle; cycle_crashed = !settlement_failed }
+      (* RFC-0351 S0 / #25461: advance the compaction streak the settlement above
+         just read. Ordering still holds — [settlement_of_cycle_outcome] reads the
+         streak from [meta_after_triage] before this stamp, so requeue-vs-escalate
+         still decides on the count before this failure.
+
+         Hoisted out of the [Some lease] branch. A failure has to consume retry
+         budget whether or not the cycle happened to own an event-queue lease.
+         While this ran inside that branch, a keeper that claimed no lease could
+         neither compact — [dispatch_guard] is [None] without a lease, so the
+         summarizer rejects with an absent exact-execution guard — nor accumulate
+         the streak that would eventually suspend it. Measured 2026-07-25: two
+         keepers at 306 and 368 failed context_compacted attempts with
+         consecutive_failures = 0, retrying without bound, while keepers that did
+         hold a lease reached the ceiling at 21 and 3 and settled. Compaction
+         failures already map to [`Failed] (keeper_unified_turn.ml:448 ->
+         compaction_outcome_of_cycle_outcome), so nothing else was suppressing it. *)
+      (let compaction_outcome =
+         compaction_outcome_of_cycle_outcome !cycle_outcome_ref
+       in
+       match compaction_outcome with
+       | None -> ()
+       | Some `Recovered
+         when meta_after_triage.runtime.compaction_rt.consecutive_failures = 0 ->
+         (* Streak already clear: skip the read-modify-write that every healthy
+            completed turn would otherwise pay. *)
+         ()
+       | Some outcome ->
+         (match
+            Keeper_meta_store.persist_compaction_outcome
+              ctx.config
+              ~keeper_name:meta_after_triage.name
+              ~outcome
+          with
+          | Ok (`Persisted | `No_durable_meta) -> ()
+          | Error message ->
+            Log.Keeper.warn
+              "compaction outcome counter not persisted keeper=%s: %s"
+              meta_after_triage.name
+              message));
+      { meta = meta_after_cycle
+      ; cycle_status =
+          if !settlement_failed then Turn_cycle_crashed else Turn_cycle_completed
+      }
     with
+    | Event_queue_projection_deferred ->
+      { meta = meta_after_triage; cycle_status = Deferred_projection_busy }
+    | Event_queue_projection_failed error ->
+      if not !transcript_corruption_detected
+      then requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
+      record_crashed_cycle_failure
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name
+        (Failure (Keeper_event_queue_recovery.projection_error_to_string error));
+      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
       if
@@ -1602,7 +1718,7 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         exn;
-      { meta = meta_after_triage; cycle_crashed = true })
+      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed })
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
@@ -1858,7 +1974,7 @@ let run_heartbeat_loop
         let t_turn_start = t_board_end in
         let turn_outcome =
           if not admitted_turn
-          then { meta = meta_current; cycle_crashed = false }
+          then { meta = meta_current; cycle_status = Turn_cycle_completed }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
                [turn_running] flag toggles around the dispatch and the
@@ -1890,47 +2006,56 @@ let run_heartbeat_loop
             r)
         in
         let meta_after_proactive = turn_outcome.meta in
-        if not lifecycle_blocked
-        then (
-          (* The registry tracks failure count as observation. A
-             lifecycle-blocked cycle did not run a turn and must not emit a
-             false [Turn_succeeded]. *)
-          let turn_fail_count =
-            Keeper_registry.get_turn_failures
-              ~base_path:ctx.config.base_path
-              m.name
-          in
-          (* RFC-0002: dispatch turn status event *)
-          Keeper_keepalive_signal.dispatch_keepalive_event
-            ~ctx
-            ~keeper_name:m.name
-            (turn_status_event
-               ~turn_fail_count);
-          if turn_fail_count > 0
-          then
-            Keeper_registry.set_failure_reason
-              ~base_path:ctx.config.base_path
-              m.name
-              (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
-          (* Phase 1: work-as-heartbeat — renew point (b).
-             After turn, call Workspace.heartbeat to prove workspace I/O health.
-             On success: refresh freshness lease + reset consecutive_failures.
-             On failure: leave timestamp unchanged → presence sync resumes next cycle.
-             T6 audit: a crashed cycle proves nothing about health — do not
-             refresh the lease or reset consecutive_failures for it. *)
-          if turn_outcome.cycle_crashed
-          then
-            Log.Keeper.info
-              "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
-              m.name
-          else
-            refresh_work_as_heartbeat
-              ~ctx
-              ~meta_after_proactive
-              ~proactive_warmup_elapsed
-              ~work_as_hb
-              ~last_successful_heartbeat_ts
-              ~consecutive_failures);
+        (match turn_outcome.cycle_status with
+         | Deferred_projection_busy ->
+           Log.Keeper.info
+             ~keeper_name:m.name
+             "event queue transition projection deferred because the canonical owner \
+              claim is busy; this keepalive cycle records no turn status, crash, or \
+              work-health refresh"
+         | Turn_cycle_completed | Turn_cycle_crashed ->
+           if not lifecycle_blocked
+           then (
+             (* The registry tracks failure count as observation. A
+                lifecycle-blocked or projection-deferred cycle did not run a turn
+                and must not emit a false [Turn_succeeded]. *)
+             let turn_fail_count =
+               Keeper_registry.get_turn_failures
+                 ~base_path:ctx.config.base_path
+                 m.name
+             in
+             (* RFC-0002: dispatch turn status event *)
+             Keeper_keepalive_signal.dispatch_keepalive_event
+               ~ctx
+               ~keeper_name:m.name
+               (turn_status_event
+                  ~turn_fail_count);
+             if turn_fail_count > 0
+             then
+               Keeper_registry.set_failure_reason
+                 ~base_path:ctx.config.base_path
+                 m.name
+                 (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
+             (* Phase 1: work-as-heartbeat — renew point (b).
+                After turn, call Workspace.heartbeat to prove workspace I/O health.
+                On success: refresh freshness lease + reset consecutive_failures.
+                On failure: leave timestamp unchanged → presence sync resumes next cycle.
+                T6 audit: a crashed cycle proves nothing about health — do not
+                refresh the lease or reset consecutive_failures for it. *)
+             match turn_outcome.cycle_status with
+             | Turn_cycle_crashed ->
+               Log.Keeper.info
+                 "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
+                 m.name
+             | Turn_cycle_completed ->
+               refresh_work_as_heartbeat
+                 ~ctx
+                 ~meta_after_proactive
+                 ~proactive_warmup_elapsed
+                 ~work_as_hb
+                 ~last_successful_heartbeat_ts
+                 ~consecutive_failures
+             | Deferred_projection_busy -> assert false));
         let t_turn_end = Time_compat.now () in
         let interval =
           float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())

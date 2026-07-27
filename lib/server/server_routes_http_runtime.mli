@@ -166,8 +166,6 @@ val make_health_json :
     metas with [paused = true].  The nested [registry_paused_*] and
     [durable_*] fields keep the two sources inspectable so a paused keeper
     removed from the live keepalive set does not disappear from [/health].
-    [running_*] remains as a legacy
-    alias for [registry_paused_*]; it does not mean FSM phase [Running].
     [autoboot_enabled_*] and [details] expose durable pause state without
     changing it. [missing_pause_root_cause] is true when neither a typed latch
     nor a runtime blocker explains the pause. [read_error_count]
@@ -188,18 +186,16 @@ val make_health_json :
     count. It contains no free-space floor, cooldown, or admission decision.
 
     [keeper_fleet_safety] compares configured, unpaused autoboot-enabled
-    keepers with the live healthy-running keeper fiber count while separately
+    keepers with the canonical executable keeper fiber count while separately
     reporting durable paused keepers via [paused_autoboot_enabled_*] and
-    bootable keepers via [bootable_keeper_*].  It distinguishes
-    [running_keeper_fiber_count] / [healthy_running_keeper_fiber_count] from
-    [failing_keeper_fiber_count] and [executable_keeper_fiber_count] because
-    the FSM intentionally allows [Failing] keepers to finish or attempt turns.
-    [effective_reaction_capacity_count] is the sum of healthy [Running] lanes
-    and unpaused, executable [Failing] lanes. It
-    reports [blocked] when autoboot-enabled keepers exist but no executable
-    fiber remains, and [degraded] when executable fibers remain but healthy
-    running capacity is zero or below the safety margin, or effective reaction
-    capacity is below [target_reaction_capacity_count].
+    bootable keepers via [bootable_keeper_*].
+    The canonical reaction capacity and its shortfall use only the shared owner
+    execution snapshot's live [executable_keeper_fiber_count]. It reports
+    [blocked] when autoboot-enabled keepers exist but no executable fiber
+    remains, and [degraded] when live executable capacity is below
+    [target_reaction_capacity_count]. Phase-derived running, failing, and
+    recovering fields remain observations and do not determine status, blocker,
+    operator action, or dashboard live capacity.
     [paused_autoboot_enabled_keeper_count] keeps operator-paused autoboot
     keepers visible without counting them as reaction-capacity targets.
 

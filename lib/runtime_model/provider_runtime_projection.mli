@@ -31,4 +31,3 @@ val default_model_candidate_for_runtime_prefix :
   ?getenv:(string -> string option) -> string -> default_model_candidate option
 
 val default_execution_model_strings : string -> string list
-val default_execution_model_strings_result : string -> (string list, 'a) result

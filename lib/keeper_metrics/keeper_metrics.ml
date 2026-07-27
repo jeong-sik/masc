@@ -89,7 +89,6 @@ type t =
   | TraceEmitFailures
   | TransitionAuditFailures
   | ExecutionReceiptFailures
-  | OperatorBroadcastSuppressed
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures
@@ -145,7 +144,7 @@ type t =
   | MemoryLaneDropped
   | MemoryLanePending
   | MemoryLaneInFlight
-  | MemoryLaneProviderSlotBusy
+  | MemoryLaneExecutionSlotBusy
   | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
   | MetricsSseFailures
@@ -308,7 +307,6 @@ let to_string = function
   | TraceEmitFailures -> "masc_keeper_trace_emit_failures_total"
   | TransitionAuditFailures -> "masc_keeper_transition_audit_failures_total"
   | ExecutionReceiptFailures -> "masc_keeper_execution_receipt_failures_total"
-  | OperatorBroadcastSuppressed -> "masc_keeper_operator_broadcast_suppressed_total"
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
   | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
@@ -365,7 +363,7 @@ let to_string = function
   | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
-  | MemoryLaneProviderSlotBusy -> "masc_keeper_memory_lane_provider_slot_busy_total"
+  | MemoryLaneExecutionSlotBusy -> "masc_keeper_memory_lane_execution_slot_busy_total"
   | MemoryBankCompactionFailures -> "masc_keeper_memory_bank_compaction_failures_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"

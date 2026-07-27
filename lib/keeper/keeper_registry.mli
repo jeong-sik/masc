@@ -41,6 +41,10 @@ type registration_error =
       ; detail : string
       }
 
+type 'a lifecycle_mutation_result =
+  | Lifecycle_mutation_completed of 'a
+  | Lifecycle_mutation_admission_denied
+
 (** Production registration gate: the final registry CAS is serialized with
     Keeper shutdown reservation. Event-queue loading remains outside the
     non-yielding fence critical section. *)
@@ -51,11 +55,12 @@ val register_offline_if_admitted :
   (registry_entry, registration_error) result
 
 val register_offline_if_admitted_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   base_path:string ->
   string ->
   keeper_meta ->
-  (registry_entry, registration_error) result
+  (registry_entry, registration_error) result lifecycle_mutation_result
 
 type register_restarting_error =
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
@@ -81,9 +86,11 @@ val prepare_fiber_launch :
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 val prepare_fiber_launch_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   registry_entry ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+    lifecycle_mutation_result
 
 type unregister_exact_result =
   | Exact_unregistered
@@ -98,9 +105,10 @@ type unregister_exact_result =
 val unregister_exact : registry_entry -> unregister_exact_result
 
 val unregister_exact_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   registry_entry ->
-  unregister_exact_result
+  unregister_exact_result lifecycle_mutation_result
 
 type restore_entry_result =
   | Entry_restored
@@ -112,9 +120,10 @@ type restore_entry_result =
     still absent and [token] owns the reservation. A newer lane is returned
     untouched as [Entry_restore_occupied]. *)
 val restore_entry_if_absent_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   registry_entry ->
-  restore_entry_result
+  restore_entry_result lifecycle_mutation_result
 
 (** Look up a keeper by name. *)
 val get : base_path:string -> string -> registry_entry option
@@ -171,10 +180,11 @@ val update_entry_exact :
   exact_update_result
 
 val update_entry_exact_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   registry_entry ->
   (registry_entry -> registry_entry) ->
-  exact_update_result
+  exact_update_result lifecycle_mutation_result
 
 (** Update a registered entry and return [true] only when a validated write
     was installed.  Missing keepers, no-op closures, and validation failures
@@ -563,11 +573,13 @@ val dispatch_event_exact :
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 val dispatch_event_exact_for_lifecycle :
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
   Keeper_lifecycle_reservation.token ->
   registry_entry ->
   ?origin:lifecycle_event_origin ->
   Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+    lifecycle_mutation_result
 
 (** Like [dispatch_event], but preserves richer audit metadata when the event
     causes a phase transition. *)

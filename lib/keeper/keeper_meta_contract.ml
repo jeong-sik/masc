@@ -494,7 +494,12 @@ let effective_meta_of_profile_defaults
   let target_sandbox_profile =
     match defaults.sandbox_profile, defaults.manifest_path with
     | Some profile, _ -> Ok profile
-    | None, _ -> Error (missing_required_sandbox_profile_error ~keeper_name:meta.name defaults)
+    | None, None -> Ok meta.sandbox_profile
+    | None, Some _ ->
+      Error
+        (missing_required_sandbox_profile_error
+           ~keeper_name:meta.name
+           defaults)
   in
   match target_sandbox_profile with
   | Error _ as err -> err
@@ -573,6 +578,10 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
    default runtime (the designed fallback; RFC-0206 §2.1 fail-fast still applies
    to the default itself). The id is opaque here; only the OAS adapter parses
    it. *)
+let runtime_trace_id (meta : keeper_meta) =
+  Keeper_id.Trace_id.to_string meta.runtime.trace_id
+;;
+
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id

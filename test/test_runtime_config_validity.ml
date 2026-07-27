@@ -933,6 +933,166 @@ List.iter
                Runtime_schema.Reasoning_effort)
         | None -> fail "expected Kimi K2.7 Code capabilities"))
 
+(* The lane-resolution test below iterates the lanes a config declares, so it
+   passes vacuously on a config that declares none of them. Startup does the
+   opposite: it requires every id in
+   Server_runtime_bootstrap.mandatory_exact_output_lane_ids to be present with a
+   non-empty slot list and synthesizes nothing. Absence is therefore the failure
+   mode no existing test could see — #25671 added hitl_auto_judge and main failed
+   every push for ~29 hours because the boot path that would have caught it runs
+   only on push-to-main (#25663). This asserts presence, against the same value
+   startup reads. *)
+let render_runtime_toml_errors (errors : Runtime_toml.parse_error list) =
+  errors
+  |> List.map (fun (error : Runtime_toml.parse_error) ->
+    Printf.sprintf "%s: %s" error.path error.message)
+  |> String.concat "; "
+;;
+
+let assert_mandatory_exact_output_lanes_declared ~label path =
+  check bool (label ^ " exists") true (Sys.file_exists path);
+  match Runtime_toml.parse_file path with
+  | Error errors -> failf "%s should load: %s" label (render_runtime_toml_errors errors)
+  | Ok (config : Runtime_schema.config) ->
+    List.iter
+      (fun lane_id ->
+         match
+           List.find_opt
+             (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+                String.equal lane.id lane_id)
+             config.exact_output_lane_decls
+         with
+         | None ->
+           failf
+             "%s must declare mandatory exact-output lane %s; startup raises \
+              Config_error instead of synthesizing it"
+             label
+             lane_id
+         | Some { slot_ids = []; _ } ->
+           failf
+             "%s declares mandatory exact-output lane %s with no slots; startup \
+              requires at least one OAS target ref"
+             label
+             lane_id
+         | Some { slot_ids = _ :: _; _ } -> ())
+      Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+;;
+
+let boot_path_fixtures_root () =
+  Filename.concat (repo_root ()) "scripts/fixtures"
+;;
+
+let release_evidence_fixture_dir () =
+  Filename.concat (boot_path_fixtures_root ()) "release-evidence"
+;;
+
+(* Discovered, not enumerated: any scripts/fixtures/<name>/runtime.toml is a
+   boot-path config and is checked without touching this test. Enumerating the
+   sites by hand is what let four of them be patched in #25700 while the fifth
+   drifted. *)
+let discover_boot_path_fixture_runtime_tomls () =
+  let root = boot_path_fixtures_root () in
+  if not (Sys.file_exists root) then []
+  else
+    Sys.readdir root
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.filter_map (fun entry ->
+      let candidate = Filename.concat (Filename.concat root entry) "runtime.toml" in
+      if Sys.file_exists candidate then Some ("scripts/fixtures/" ^ entry ^ "/runtime.toml", candidate)
+      else None)
+;;
+
+let test_repo_runtime_toml_declares_mandatory_exact_output_lanes () =
+  assert_mandatory_exact_output_lanes_declared
+    ~label:"config/runtime.toml"
+    (Filename.concat (repo_root ()) "config/runtime.toml")
+;;
+
+let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
+  let fixtures = discover_boot_path_fixture_runtime_tomls () in
+  (* Without this the scan below passes vacuously when discovery finds nothing —
+     the same absence-is-invisible shape this whole test exists to reject. *)
+  check bool "at least one boot-path fixture was discovered" true (fixtures <> []);
+  List.iter
+    (fun (label, path) -> assert_mandatory_exact_output_lanes_declared ~label path)
+    fixtures
+;;
+
+(* release-evidence.sh boots the installed binary in a credential-less CI job,
+   so the second startup gate (require_usable_mandatory_exact_output_lanes,
+   which calls resolve_lane) only passes if the fixture's lane slots are
+   admitted and resolved with no environment secret at all. getenv returns
+   Ok None for every name here, which is stricter than CI: any fixture slot that
+   grows an api_key_env fails this test instead of failing a push to main. *)
+let test_release_evidence_fixture_lanes_resolve_without_credentials () =
+  let fixture_dir = release_evidence_fixture_dir () in
+  let overlay_path = Filename.concat fixture_dir "oas-models-overlay.toml" in
+  let overlay_contents =
+    try In_channel.with_open_bin overlay_path In_channel.input_all with
+    | Sys_error detail ->
+      failf "release-evidence smoke overlay cannot be read: %s" detail
+  in
+  let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
+  let snapshot =
+    match
+      Exact_output.load_resolver_snapshot
+        ~io
+        ~catalog:
+          (Exact_output.Embedded_with_overlay
+             { source = overlay_path; contents = overlay_contents })
+        ()
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "release-evidence smoke overlay should load"
+  in
+  match
+    Runtime_toml.parse_file (Filename.concat fixture_dir "runtime.toml")
+  with
+  | Error errors ->
+    failf
+      "release-evidence smoke runtime.toml should load: %s"
+      (render_runtime_toml_errors errors)
+  | Ok (config : Runtime_schema.config) ->
+    List.iter
+      (fun lane_id ->
+         match
+           List.find_opt
+             (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+                String.equal lane.id lane_id)
+             config.exact_output_lane_decls
+         with
+         | None ->
+           failf
+             "release-evidence smoke runtime.toml must declare lane %s"
+             lane_id
+         | Some lane ->
+           check bool
+             (Printf.sprintf "lane %s has slots" lane_id)
+             true
+             (lane.slot_ids <> []);
+           List.iter
+             (fun target_ref ->
+                match Exact_output.admit_target_ref snapshot target_ref with
+                | Error _ ->
+                  failf
+                    "release-evidence smoke lane %s target %s must exist in the \
+                     overlaid catalog"
+                    lane_id
+                    target_ref
+                | Ok admitted_target ->
+                  (match Exact_output.resolve_target admitted_target with
+                   | Ok _ -> ()
+                   | Error _ ->
+                     failf
+                       "release-evidence smoke lane %s target %s must resolve \
+                        with no credential in the environment"
+                       lane_id
+                       target_ref))
+             lane.slot_ids)
+      Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+;;
+
 let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let root = repo_root () in
   let runtime_path = Filename.concat root "config/runtime.toml" in
@@ -945,7 +1105,7 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let io : Exact_output.resolver_io =
     { getenv =
         (function
-          | "ZAI_CODING_API_KEY" | "DEEPSEEK_API_KEY" ->
+          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY_SB" | "DEEPSEEK_API_KEY" ->
             Ok (Some "exact-output-seed-test")
           | _ -> Ok None)
     }
@@ -1287,6 +1447,98 @@ let test_runtime_toml_parses_optional_max_concurrent () =
          binding.Runtime_schema.max_concurrent
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
+let test_runtime_toml_parses_optional_max_request_body_bytes () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 1048576\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse optional max-request-body-bytes:\n%s" rendered
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "explicit max-request-body-bytes opt-in" (Some 1048576)
+         binding.Runtime_schema.max_request_body_bytes
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
+  (* Undeclared must stay None rather than acquiring a default. OAS reads None as
+     "no ceiling declared" and passes every size; a default here would silently
+     become a product-wide cap nobody chose. *)
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error _ -> failf "runtime TOML without the knob should still parse"
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "omitted max-request-body-bytes stays None" None
+         binding.Runtime_schema.max_request_body_bytes
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_rejects_non_positive_max_request_body_bytes () =
+  let template n =
+    Printf.sprintf
+      "[providers.local]\n\
+       protocol = \"openai-compatible-http\"\n\
+       endpoint = \"http://127.0.0.1:1/v1\"\n\
+       \n\
+       [models.sample]\n\
+       api-name = \"sample\"\n\
+       max-context = 1024\n\
+       \n\
+       [local.sample]\n\
+       max-request-body-bytes = %d\n\
+       \n\
+       [runtime]\n\
+       default = \"local.sample\"\n"
+      n
+  in
+  List.iter
+    (fun n ->
+       match Runtime_toml.parse_string (template n) with
+       | Ok _ -> failf "max-request-body-bytes = %d should be rejected" n
+       | Error errs ->
+         let rendered =
+           errs
+           |> List.map (fun (err : Runtime_toml.parse_error) ->
+             Printf.sprintf "%s: %s" err.path err.message)
+           |> String.concat "\n"
+         in
+         check bool (Printf.sprintf "error mentions the knob for %d" n) true
+           (String_util.contains_substring rendered "max-request-body-bytes"))
+    [ 0; -1 ]
+
 let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
   let content =
     "[providers.local]\n\
@@ -1566,6 +1818,92 @@ let test_runtime_assignment_rejects_commented_disabled_binding () =
         (String_util.contains_substring msg "[runtime.assignments].keeper_a");
       check bool "error mentions disabled runtime id" true
         (String_util.contains_substring msg "local.disabled"))
+
+(* One validator now decides every [runtime] field that names a routing target
+   (keeper assignments, the route ids, media_failover entries), so the properties
+   that were spread across three functions are asserted together.
+
+   Two things can break in a merge like this and neither shows up as a type error.
+   The diagnostics can collapse into one generic message, leaving the operator
+   without the field that is wrong; and the two resolution domains can collapse
+   into one, which would pass any "does the id resolve" test while admitting a
+   lane id at a site whose consumer looks only among runtimes — a config that
+   loads and then cannot route. *)
+let routing_reference_base =
+  "[providers.local]\n\
+   protocol = \"openai-compatible-http\"\n\
+   endpoint = \"http://127.0.0.1:1/v1\"\n\
+   \n\
+   [models.good]\n\
+   api-name = \"chat\"\n\
+   max-context = 1024\n\
+   \n\
+   [local.good]\n\
+   \n\
+   [runtime]\n\
+   default = \"local.good\"\n"
+
+let load_error_of_runtime_toml ~what content =
+  with_temp_runtime_toml content (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> failf "%s should be rejected at load" what
+    | Error msg -> msg)
+
+let test_every_routing_field_names_itself_in_its_diagnostic () =
+  let assignment =
+    load_error_of_runtime_toml
+      ~what:"an assignment to an unknown runtime"
+      (routing_reference_base ^ "\n[runtime.assignments]\nkeeper_a = \"local.typo\"\n")
+  in
+  check bool "assignment diagnostic names the keeper's table entry" true
+    (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"local.typo\"");
+  let route =
+    load_error_of_runtime_toml
+      ~what:"a route naming an unknown runtime"
+      (routing_reference_base ^ "structured_judge = \"local.typo\"\n")
+  in
+  check bool "route diagnostic names the route field" true
+    (String_util.contains_substring route "[runtime].structured_judge = \"local.typo\"");
+  let media =
+    load_error_of_runtime_toml
+      ~what:"a media_failover entry naming an unknown runtime"
+      (routing_reference_base ^ "media_failover = [\"local.typo\"]\n")
+  in
+  (* A list field renders as an entry rather than an equality: [runtime]
+     .media_failover = "local.typo" would tell the operator the list equals one id. *)
+  check bool "media_failover diagnostic names an entry, not an equality" true
+    (String_util.contains_substring media "[runtime].media_failover entry \"local.typo\"")
+
+let test_routing_reference_domains_stay_distinct () =
+  let lane = "\n[runtime.lanes.safe]\nstrategy = \"ordered\"\ncandidates = [\"local.good\"]\n" in
+  (* A route resolves lane-first, mirroring [resolve_assignment], so naming a lane
+     is valid config. *)
+  with_temp_runtime_toml
+    (routing_reference_base ^ "structured_judge = \"safe\"\n" ^ lane)
+    (fun path ->
+      match Runtime.load_list ~config_path:path with
+      | Error msg -> failf "a route may name a lane: %s" msg
+      | Ok (_, _, _, _, structured_judge, _, _, _) ->
+        check (option string) "route keeps the lane id" (Some "safe") structured_judge);
+  (* An assignment resolves among runtimes only. runtime.mli documents the
+     assignment snapshot as ids that resolve to a configured runtime, so admitting
+     a lane here would load a config the assignment consumer cannot look up. *)
+  let assignment =
+    load_error_of_runtime_toml
+      ~what:"an assignment naming a lane"
+      (routing_reference_base ^ lane ^ "\n[runtime.assignments]\nkeeper_a = \"safe\"\n")
+  in
+  check bool "assignment refuses a lane id" true
+    (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"safe\"");
+  (* Keeper_vision_tool resolves media_failover entries among runtimes
+     (keeper_vision_tool.ml:82-89), so the same refusal applies. *)
+  let media =
+    load_error_of_runtime_toml
+      ~what:"a media_failover entry naming a lane"
+      (routing_reference_base ^ "media_failover = [\"safe\"]\n" ^ lane)
+  in
+  check bool "media_failover refuses a lane id" true
+    (String_util.contains_substring media "[runtime].media_failover entry \"safe\"")
 
 let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
   let catalog =
@@ -1985,13 +2323,18 @@ let test_cross_verifier_runtime_routing () =
     match Runtime.load_list ~config_path:path with
     | Ok _ -> failf "unknown [runtime].cross_verifier id must be rejected at load"
     | Error _ -> ());
+  (* The verdict travels as a report_review_verdict tool call and no wire response
+     format is requested (anti_rationalization.ml:243-248), so the JSON-mode
+     requirement was on the wrong axis. The right one — can this model call a tool
+     — is not declarable: Runtime_schema.model_capabilities carries the shapes of
+     tool CHOICE, not tool support. A candidate that cannot serve the tool channel
+     is refused by OAS at dispatch instead, which is failover-eligible. So a model
+     declaring nothing now resolves for this route. *)
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.chat\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "[runtime].cross_verifier must reject models without JSON response \
-         format support"
-    | Error _ -> ())
+    | Error msg ->
+      failf "[runtime].cross_verifier must accept a capability-free model: %s" msg
+    | Ok _ -> ())
 
 let test_memory_os_consolidation_runtime_routing () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -2087,13 +2430,16 @@ let test_structured_judge_runtime_routing () =
     match Runtime.load_list ~config_path:path with
     | Ok _ -> failf "unknown [runtime].structured_judge id must be rejected"
     | Error _ -> ());
+  (* Its consumer requests no wire format — keeper_failure_judge.ml:71-72 applies
+     without_response_format and :88-90 parses by text extraction, with :79-80
+     calling the boundary tool-free. A model that declares nothing therefore serves
+     this route, and refusing it was excluding a runtime on a capability the role
+     never asks for. *)
   with_temp_runtime_toml (base ^ "structured_judge = \"local.chat\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "[runtime].structured_judge must reject models without structured-output \
-         support"
-    | Error _ -> ());
+    | Error msg ->
+      failf "[runtime].structured_judge must accept a capability-free model: %s" msg
+    | Ok _ -> ());
   with_temp_runtime_toml base (fun path ->
     match Runtime.save_config_text ~runtime_config_path:path base with
     | Error msg -> failf "save_config_text should load default fallback: %s" msg
@@ -2150,9 +2496,11 @@ let test_structured_judge_runtime_routing () =
            "structured_judge"))
 
 (* #25394 slice 1: [runtime].structured_judge / .cross_verifier accept a
-   [runtime.lanes] id. The capability contract extends to every candidate
-   (the turn-driver lane walk does not re-filter by capability), and
-   validation follows [resolve_assignment]'s lane-over-runtime precedence. *)
+   [runtime.lanes] id, following [resolve_assignment]'s lane-over-runtime
+   precedence. There is no longer a per-candidate capability contract: #25719
+   dropped the wire-format requirement after finding neither consumer requests
+   one, and the lane-candidate capability check that enforced it was removed with
+   the per-route validators it belonged to. *)
 let judge_lane_base =
   "[providers.local]\n\
    display-name = \"Local\"\n\
@@ -2229,19 +2577,25 @@ let test_structured_judge_lane_target () =
        strategy = \"ordered\"\n\
        candidates = [\"local.judge\", \"local.jsononly\"]\n"
   in
+  (* Formerly rejected: every candidate had to declare supports-structured-output.
+     The consumer requests no wire format at all (keeper_failure_judge.ml:71-72
+     applies without_response_format, :88-90 parses by text extraction, :79-80 calls
+     the boundary tool-free), so a candidate that declares only json_object is a
+     usable candidate for this route and refusing the lane excluded runtimes on a
+     capability the role never asks for. The lane now resolves. *)
   with_temp_runtime_toml incapable_candidate_lane (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "structured_judge lane with a candidate lacking structured output must \
-         be rejected"
     | Error msg ->
-      check bool "error names the route" true
-        (String_util.contains_substring msg "structured_judge");
-      check bool "error names the incapable candidate" true
-        (String_util.contains_substring msg "local.jsononly");
-      check bool "error names the missing capability" true
-        (String_util.contains_substring msg "supports-structured-output"))
+      failf
+        "structured_judge lane should resolve without a wire-format requirement: %s"
+        msg
+    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
+      check (option string) "structured_judge keeps the lane id" (Some "judges")
+        structured_judge;
+      check bool "judges lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "judges")
+           lanes))
 
 (* A lane that shadows a capable runtime id must be validated as the lane:
    [resolve_assignment] hands consumers the lane, so validating the shadowed
@@ -2256,15 +2610,64 @@ let test_structured_judge_lane_shadow_precedence () =
        strategy = \"ordered\"\n\
        candidates = [\"local.jsononly\"]\n"
   in
+  (* This used to prove lane-over-runtime precedence through a capability
+     rejection: the lane's only candidate lacked structured output, so an error
+     naming it showed the lane had been judged rather than the shadowed runtime.
+     The route requires no wire format now, so both branches return Ok and that
+     witness no longer exists at admission.
+
+     The precedence itself is covered where the consumers read it —
+     test_keeper_turn_driver_failover.ml:319
+     test_resolve_assignment_prefers_lane_over_runtime — so nothing is left
+     unasserted. What admission still guarantees is asserted here: a lane id that
+     shadows a runtime id is accepted and materialised, and the route keeps that
+     id rather than silently resolving to the shadowed runtime. *)
   with_temp_runtime_toml shadowing_lane (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "structured_judge naming a lane that shadows a capable runtime must \
-         be judged as the lane (incapable candidate rejected)"
+    | Error msg -> failf "shadowing lane should resolve: %s" msg
+    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
+      check (option string) "structured_judge keeps the shadowing id"
+        (Some "local.judge") structured_judge;
+      check bool "the shadowing lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "local.judge")
+           lanes))
+
+(* memory_os_consolidation was validated before lanes_of_decls ran, so it was the
+   one route that could not name a lane while structured_judge and cross_verifier
+   could. It is now validated after lanes are materialised, with the same
+   lane-over-runtime precedence [resolve_assignment] applies. Its requirement is
+   Resolves_only, so a candidate without declared capabilities is admissible —
+   that is the difference from the judge and verifier lanes. *)
+let test_memory_os_consolidation_lane_target () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let lane_target =
+    judge_lane_base
+    ^ "memory_os_consolidation = \"consolidators\"\n\
+       \n\
+       [runtime.lanes.consolidators]\n\
+       strategy = \"ordered\"\n\
+       candidates = [\"local.chat\", \"local.judge\"]\n"
+  in
+  with_temp_runtime_toml lane_target (fun path ->
+    match Runtime.load_list ~config_path:path with
     | Error msg ->
-      check bool "error names the incapable shadow candidate" true
-        (String_util.contains_substring msg "local.jsononly"))
+      failf "lane-targeted memory_os_consolidation should load: %s" msg
+    | Ok (_, _, _, _, _, _, _, lanes) ->
+      check bool "consolidators lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "consolidators")
+           lanes));
+  (* An unknown id stays an operator typo whether or not lanes exist. *)
+  with_temp_runtime_toml
+    (judge_lane_base ^ "memory_os_consolidation = \"local.absent\"\n")
+    (fun path ->
+      match Runtime.load_list ~config_path:path with
+      | Ok _ ->
+        failf "unknown [runtime].memory_os_consolidation id must still be rejected"
+      | Error msg ->
+        check bool "error names the route" true
+          (String_util.contains_substring msg "memory_os_consolidation"))
 
 let test_cross_verifier_lane_target () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -2293,19 +2696,19 @@ let test_cross_verifier_lane_target () =
        strategy = \"ordered\"\n\
        candidates = [\"local.judge\", \"local.chat\"]\n"
   in
+  (* Formerly rejected because local.chat declares no JSON mode. The route requests
+     no wire format, so the lane resolves and OAS refuses an unusable candidate at
+     dispatch instead — pre-dispatch and failover-eligible. *)
   with_temp_runtime_toml json_incapable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "cross_verifier lane with a candidate lacking JSON mode must be \
-         rejected"
-    | Error msg ->
-      check bool "error names the route" true
-        (String_util.contains_substring msg "cross_verifier");
-      check bool "error names the incapable candidate" true
-        (String_util.contains_substring msg "local.chat");
-      check bool "error names the missing capability" true
-        (String_util.contains_substring msg "supports-response-format-json"))
+    | Error msg -> failf "cross_verifier lane should resolve: %s" msg
+    | Ok (_, _, _, _, _, cross_verifier, _, lanes) ->
+      check (option string) "cross_verifier keeps the lane id" (Some "verifiers")
+        cross_verifier;
+      check bool "verifiers lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "verifiers")
+           lanes))
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -2401,20 +2804,9 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       Runtime_exact_output_registry.resolve_lane registry ~lane_id
     with
     | Ok resolved ->
-      (match resolved.unavailable_slots with
-       | [] ->
-         List.map
-           (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-           resolved.selected_slots
-       | unavailable_slots ->
-         failf
-           "exact-output lane %S unexpectedly has unavailable slots: %s"
-           lane_id
-           (String.concat
-              "; "
-              (List.map
-                 Runtime_exact_output_registry.unavailable_slot_to_string
-                 unavailable_slots)))
+      List.map
+        (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+        resolved.selected_slots
     | Error error ->
       failf
         "exact-output lane %S must exist: %s"
@@ -2777,6 +3169,9 @@ let () =
             "[runtime].cross_verifier accepts JSON-capable lanes"
             `Quick test_cross_verifier_lane_target;
           test_case
+            "[runtime].memory_os_consolidation accepts a lane id"
+            `Quick test_memory_os_consolidation_lane_target;
+          test_case
             "save_config_text validates and refreshes cross_verifier runtime"
             `Quick test_save_config_text_refreshes_cross_verifier_runtime;
           test_case
@@ -2819,6 +3214,12 @@ let () =
             "runtime assignment rejects commented disabled binding"
             `Quick test_runtime_assignment_rejects_commented_disabled_binding;
           test_case
+            "every routing field names itself in its diagnostic"
+            `Quick test_every_routing_field_names_itself_in_its_diagnostic;
+          test_case
+            "routing reference domains stay distinct"
+            `Quick test_routing_reference_domains_stay_distinct;
+          test_case
             "strict init rejects assigned runtime absent from OAS catalog"
             `Quick test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog;
           test_case "atomic runtime getters are consistent after init" `Quick
@@ -2831,6 +3232,12 @@ let () =
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick
             test_runtime_toml_max_concurrent_flows_to_provider_config;
+          test_case "max-request-body-bytes is optional opt-in" `Quick
+            test_runtime_toml_parses_optional_max_request_body_bytes;
+          test_case "omitted max-request-body-bytes stays None" `Quick
+            test_runtime_toml_omitted_max_request_body_bytes_is_none;
+          test_case "non-positive max-request-body-bytes is rejected" `Quick
+            test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case
             "deprecated capability notice warns once per process, not per parse"
             `Quick test_deprecated_capability_notice_warns_once_per_process;
@@ -2848,6 +3255,15 @@ let () =
             `Quick test_runtime_max_context_missing_both_sources_rejected_at_load;
           test_case
             "assignments: unassigned keeper rides [runtime].default"
-            `Quick test_runtime_assignment_default_rider_resolves_to_default_runtime
+            `Quick test_runtime_assignment_default_rider_resolves_to_default_runtime;
+          test_case
+            "repo runtime.toml declares every mandatory exact-output lane"
+            `Quick test_repo_runtime_toml_declares_mandatory_exact_output_lanes;
+          test_case
+            "every discovered boot-path fixture declares the mandatory exact-output lanes"
+            `Quick test_boot_path_fixtures_declare_mandatory_exact_output_lanes;
+          test_case
+            "release-evidence smoke lanes resolve with no credential present"
+            `Quick test_release_evidence_fixture_lanes_resolve_without_credentials
         ] )
     ]

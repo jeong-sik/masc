@@ -13,9 +13,10 @@ type step =
   | Idle
   | Contended of contention
   | Rescan_later of contention
+  | Owner_unregistered_deferred of { candidate_id : string }
   | Judgment_completed of
       { candidate_id : string
-      ; owner_wake : Keeper_registry.wakeup_outcome
+      ; owner_wake : Keeper_registry.exact_wakeup_outcome
       }
   | Candidate_already_consumed of { candidate_id : string }
   | Partition_blocked of
@@ -29,6 +30,7 @@ type retry_reason =
 
 type drain_outcome =
   | Drained
+  | Owner_generation_deferred of { candidate_id : string }
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
@@ -352,6 +354,9 @@ let apply_drain_rearm scheduler = function
   | Drained ->
     reset_contention_rearms scheduler ~keep:None;
     None
+  | Owner_generation_deferred _ ->
+    reset_contention_rearms scheduler ~keep:None;
+    None
   | Retry_later { contention; reason = _ } ->
     reset_contention_rearms scheduler ~keep:(Some contention);
     Some (schedule_contention_rearm scheduler contention)
@@ -396,6 +401,15 @@ let owner_wake ~base_path ~keeper_name =
     ~intent:Keeper_registry.Attention_result
     ~base_path
     keeper_name
+;;
+
+let exact_owner_wake ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | None -> Keeper_registry.Exact_wake_missing
+  | Some entry ->
+    Keeper_registry.wakeup_running_exact
+      ~intent:Keeper_registry.Attention_result
+      entry
 ;;
 
 let candidate_by_id candidate_id candidates =
@@ -461,8 +475,13 @@ let attempt_provenance_of_reason = function
   | Partition.Exact_execution_quarantined (Partition.Bound provenance) ->
     Some (candidate_provenance provenance)
   | Partition.Exact_execution_quarantined
-      (Partition.Advancing { next; _ }) ->
-    Some (candidate_provenance next)
+      (Partition.Advancing
+         { execution_anchor = Some failed; last_from = _; next = _ }) ->
+    Some (candidate_provenance failed)
+  | Partition.Exact_execution_quarantined
+      (Partition.Advancing
+         { execution_anchor = None; last_from = _; next = _ }) ->
+    None
   | Partition.Exact_execution_quarantined Partition.Unbound
   | Partition.Candidate_membership_conflict _
   | Partition.Durable_partition_invariant _
@@ -580,7 +599,11 @@ let preserve_durable_progress partition fallback =
   | Some Partition.Unbound | None -> fallback
 ;;
 
-let complete_and_signal
+type completion_projection =
+  | Completion_projected of Partition.t * Keeper_registry.registry_entry
+  | Completion_blocked of step
+
+let complete_projection
       ~now
       ~worker_epoch
       ~base_path
@@ -603,12 +626,16 @@ let complete_and_signal
         "exact completion"
         transition
     in
-    let owner_wake =
-      owner_wake ~base_path ~keeper_name:completed.Partition.keeper_name
-    in
-    Ok
-      (Judgment_completed
-         { candidate_id = completed.candidate_id; owner_wake })
+    (match
+       Keeper_registry.get
+         ~base_path
+         completed.Partition.keeper_name
+     with
+     | Some owner -> Ok (Completion_projected (completed, owner))
+     | None ->
+       Error
+         ("exact completion lost its registered owner before projection: "
+          ^ completed.keeper_name))
   | Error detail ->
     let reason =
       preserve_durable_progress
@@ -622,6 +649,38 @@ let complete_and_signal
       ~base_path
       !latest_partition
       reason
+    |> Result.map (fun step -> Completion_blocked step)
+;;
+
+let signal_completion = function
+  | Completion_blocked step -> Ok step
+  | Completion_projected (completed, owner) ->
+    let owner_wake =
+      Keeper_registry.wakeup_running_exact
+        ~intent:Keeper_registry.Attention_result
+        owner
+    in
+    Ok
+      (Judgment_completed
+         { candidate_id = completed.candidate_id; owner_wake })
+;;
+
+let complete_and_signal
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
+  =
+  let* projection =
+    complete_projection
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
+  in
+  signal_completion projection
 ;;
 
 let partition_provenance
@@ -635,6 +694,25 @@ let partition_provenance
   }
 ;;
 
+let partition_candidate_visit (visit : Exact_flow.candidate_visit) :
+    Partition.candidate_visit
+  =
+  { flow_id = visit.flow_id
+  ; ordinal = visit.ordinal
+  ; slot_id = visit.slot_id
+  ; catalog_generation_fingerprint = visit.catalog_generation_fingerprint
+  ; catalog_evidence_sha256 = visit.catalog_evidence_sha256
+  ; target_identity_fingerprint = visit.target_identity_fingerprint
+  }
+;;
+
+let partition_advance_source = function
+  | Exact_flow.Executed_failure provenance ->
+    Partition.Executed_failure (partition_provenance provenance)
+  | Exact_flow.Predispatch_rejection visit ->
+    Partition.Predispatch_rejection (partition_candidate_visit visit)
+;;
+
 let setup_error_detail = function
   | Exact_flow.Network_unavailable -> "network context unavailable"
   | Exact_flow.Candidate_not_pending -> "candidate is no longer pending"
@@ -646,15 +724,34 @@ let setup_error_detail = function
     "board exact lane has no admitted slots"
   | Exact_flow.Candidate_invalid { position; slot_id = _ } ->
     Printf.sprintf "board exact lane slot %d has invalid identity" position
-  | Exact_flow.Flow_admission_failed -> "OAS exact-flow admission failed"
+  | Exact_flow.Flow_snapshot_failed -> "OAS exact-flow snapshot failed"
   | Exact_flow.Flow_start_failed -> "OAS exact-flow start failed"
 ;;
 
-let exact_provenance_equal left right =
+let exact_provenance_equal
+      (left : Partition.exact_provenance)
+      (right : Partition.exact_provenance)
+  =
   String.equal left.Partition.slot_id right.Partition.slot_id
   && String.equal left.call_id right.call_id
   && String.equal left.plan_fingerprint right.plan_fingerprint
   && String.equal left.request_body_sha256 right.request_body_sha256
+;;
+
+let candidate_visit_equal
+      (left : Partition.candidate_visit)
+      (right : Partition.candidate_visit)
+  =
+  String.equal left.flow_id right.flow_id
+  && Int.equal left.ordinal right.ordinal
+  && String.equal left.slot_id right.slot_id
+  && String.equal
+       left.catalog_generation_fingerprint
+       right.catalog_generation_fingerprint
+  && String.equal left.catalog_evidence_sha256 right.catalog_evidence_sha256
+  && String.equal
+       left.target_identity_fingerprint
+       right.target_identity_fingerprint
 ;;
 
 let callback_invariant operation cause =
@@ -669,46 +766,96 @@ let before_dispatch_failure_reason partition ~cause ~current =
     when exact_provenance_equal durable projected ->
     Partition.Exact_execution_quarantined progress
   | Some (Partition.Advancing { next; _ } as progress)
-    when exact_provenance_equal next projected ->
+    when String.equal next.slot_id projected.slot_id ->
     Partition.Exact_execution_quarantined progress
   | Some Partition.Unbound
-  | Some (Partition.Bound _ | Partition.Advancing _)
+  | Some (Partition.Bound _)
+  | Some (Partition.Advancing _)
   | None -> callback_invariant "before-dispatch" cause
 ;;
 
 let before_advance_failure_reason partition ~cause ~failed ~next =
-  let failed = partition_provenance failed in
-  let next = partition_provenance next in
+  let source = partition_advance_source failed in
+  let next = partition_candidate_visit next in
   match running_progress partition with
-  | Some (Partition.Bound durable as progress)
-    when exact_provenance_equal durable failed ->
+  | Some
+      (Partition.Advancing
+         { execution_anchor = Some anchor; last_from = None; next = durable_next }
+       as progress)
+    when (match source with
+          | Partition.Executed_failure failed ->
+            exact_provenance_equal anchor failed
+            && candidate_visit_equal durable_next next
+          | Partition.Predispatch_rejection _ -> false) ->
     Partition.Exact_execution_quarantined progress
-  | Some (Partition.Advancing durable as progress)
-    when exact_provenance_equal durable.failed failed
-         && exact_provenance_equal durable.next next ->
+  | Some
+      (Partition.Advancing
+         { execution_anchor = _
+         ; last_from = Some durable_from
+         ; next = durable_next
+         } as progress)
+    when (match source with
+          | Partition.Predispatch_rejection rejected ->
+            candidate_visit_equal durable_from rejected
+            && candidate_visit_equal durable_next next
+          | Partition.Executed_failure _ -> false) ->
     Partition.Exact_execution_quarantined progress
-  | Some Partition.Unbound
-  | Some (Partition.Bound _ | Partition.Advancing _)
+  | Some (Partition.Advancing _ as progress) ->
+    Partition.Exact_execution_quarantined progress
+  | Some (Partition.Bound durable as progress) ->
+    (match source with
+     | Partition.Executed_failure failed
+       when exact_provenance_equal durable failed ->
+       Partition.Exact_execution_quarantined progress
+     | Partition.Executed_failure _
+     | Partition.Predispatch_rejection _ ->
+       callback_invariant "before-advance" cause)
+  | Some Partition.Unbound ->
+    (match source with
+     | Partition.Predispatch_rejection last_from ->
+       Partition.Exact_execution_quarantined
+         (Partition.Advancing
+            { execution_anchor = None
+            ; last_from = Some last_from
+            ; next
+            })
+     | Partition.Executed_failure _ -> callback_invariant "before-advance" cause)
   | None -> callback_invariant "before-advance" cause
 ;;
 
-let execution_blocked_reason partition = function
+type execution_disposition =
+  | Execution_owner_deferred
+  | Execution_blocked of Partition.blocked_reason
+
+let execution_disposition partition = function
+  | Exact_flow.Owner_unregistered_deferred -> Execution_owner_deferred
   | Exact_flow.Flow_already_started _ ->
-    preserve_durable_progress partition Partition.Exact_flow_replayed
+    Execution_blocked
+      (preserve_durable_progress partition Partition.Exact_flow_replayed)
   | Exact_flow.Before_dispatch_persistence_failed
       { cause; current; evidence = _ } ->
-    before_dispatch_failure_reason partition ~cause ~current
+    Execution_blocked
+      (before_dispatch_failure_reason partition ~cause ~current)
   | Exact_flow.Before_advance_persistence_failed
       { cause; failed; next; evidence = _ } ->
-    before_advance_failure_reason partition ~cause ~failed ~next
+    Execution_blocked
+      (before_advance_failure_reason partition ~cause ~failed ~next)
   | Exact_flow.Exact_execution_failed _ ->
-    preserve_durable_progress partition Partition.Exact_execution_terminal
+    Execution_blocked
+      (preserve_durable_progress partition Partition.Exact_execution_terminal)
   | Exact_flow.Provenance_mismatch detail ->
-    preserve_durable_progress
-      partition
-      (Partition.Execution_provenance_mismatch detail)
+    Execution_blocked
+      (preserve_durable_progress
+         partition
+         (Partition.Execution_provenance_mismatch detail))
   | Exact_flow.Domain_output_invalid detail ->
-    preserve_durable_progress partition (Partition.Domain_output_invalid detail)
+    Execution_blocked
+      (preserve_durable_progress
+         partition
+         (Partition.Domain_output_invalid detail))
+  | Exact_flow.Domain_settlement_failed ->
+    Execution_blocked
+      (preserve_durable_progress partition Partition.Exact_execution_terminal)
 ;;
 
 let confirm_exact_transition latest_partition operation = function
@@ -743,13 +890,13 @@ let before_advance
       ~failed
       ~next
   =
-  let failed = partition_provenance failed in
-  let next = partition_provenance next in
+  let source = partition_advance_source failed in
+  let next = partition_candidate_visit next in
   Partition.record_before_advance
     ~worker_epoch
     ~base_path
     ~partition:!latest_partition
-    ~failed
+    ~source
     ~next
   |> confirm_exact_transition latest_partition "exact before-advance record"
 ;;
@@ -781,7 +928,9 @@ let complete_existing_judgment
         transition
     in
     let owner_wake =
-      owner_wake ~base_path ~keeper_name:completed.Partition.keeper_name
+      exact_owner_wake
+        ~base_path
+        ~keeper_name:completed.Partition.keeper_name
     in
     Ok
       (Judgment_completed
@@ -843,6 +992,7 @@ let settle_existing_consumed
 ;;
 
 let process_pending
+      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -859,23 +1009,48 @@ let process_pending
       prepared
   with
   | Error error ->
-    let reason = execution_blocked_reason !latest_partition error in
-    blocked_step
-      ~now:(now ())
-      ~worker_epoch
-      ~base_path
-      !latest_partition
-      reason
+    (match execution_disposition !latest_partition error with
+     | Execution_owner_deferred ->
+       Ok
+         (Owner_unregistered_deferred
+            { candidate_id = (!latest_partition).candidate_id })
+     | Execution_blocked reason ->
+       (match
+          with_current prepared (fun () ->
+            blocked_step
+              ~now:(now ())
+              ~worker_epoch
+              ~base_path
+              !latest_partition
+              reason)
+        with
+        | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+          Ok
+            (Owner_unregistered_deferred
+               { candidate_id = (!latest_partition).candidate_id })
+        | Keeper_exact_flow_scope.Current step -> step))
   | Ok judgment ->
-    complete_and_signal
-      ~now:(now ())
-      ~worker_epoch
-      ~base_path
-      latest_partition
-      judgment
+    (match
+       with_current prepared (fun () ->
+         let* projection =
+           complete_projection
+             ~now:(now ())
+             ~worker_epoch
+             ~base_path
+             latest_partition
+             judgment
+         in
+         signal_completion projection)
+     with
+     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+       Ok
+         (Owner_unregistered_deferred
+            { candidate_id = (!latest_partition).candidate_id })
+     | Keeper_exact_flow_scope.Current step -> step)
 ;;
 
 let process_claimed
+      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -910,6 +1085,7 @@ let process_claimed
            | Some (candidate_id, prepared)
              when String.equal candidate_id candidate.candidate_id ->
              process_pending
+               ~with_current
                ~now
                ~worker_epoch
                ~base_path
@@ -1216,8 +1392,9 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
   loop partitions
 ;;
 
-let process_next_with_claim_ready_exact
+let process_next_with_claim_ready_exact_current
       ~claim_ready_exact
+      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -1250,6 +1427,7 @@ let process_next_with_claim_ready_exact
         Candidate.load_candidates ~base_path ~keeper_name
       in
       process_claimed
+        ~with_current
         ~now
         ~worker_epoch
         ~base_path
@@ -1309,15 +1487,76 @@ let process_next_with_claim_ready_exact
     claim_selected 3
 ;;
 
-let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
-  process_next_with_claim_ready_exact
-    ~claim_ready_exact:Partition.claim_ready_exact
+let assume_current _prepared callback =
+  Keeper_exact_flow_scope.Current (callback ())
+;;
+
+let process_next_with_claim_ready_exact
+      ~claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  process_next_with_claim_ready_exact_current
+    ~claim_ready_exact
+    ~with_current:assume_current
     ~now
     ~worker_epoch
     ~base_path
     ~keeper_name
     ~prepare
     ~execute
+;;
+
+let process_next_current
+      ~with_current
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  process_next_with_claim_ready_exact_current
+    ~claim_ready_exact:Partition.claim_ready_exact
+    ~with_current
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+;;
+
+let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
+  process_next_current
+    ~with_current:assume_current
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+;;
+
+let prepare_exact ~base_path ~keeper_name ~net =
+  Exact_flow.prepare ~base_path ~keeper_name ~net
+;;
+
+let execute_exact ~clock = Exact_flow.execute ~clock
+
+let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
+  process_next_current
+    ~with_current:Exact_flow.with_settlement_generation
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare:(prepare_exact ~base_path ~keeper_name ~net)
+    ~execute:(execute_exact ~clock)
 ;;
 
 let completed_in_order ~base_path ~keeper_name =
@@ -1468,13 +1707,16 @@ let rec drain_available_with_process ~yield ~process =
     Ok (Retry_later { contention; reason = Exact_claim_contended })
   | Ok (Rescan_later contention) ->
     Ok (Retry_later { contention; reason = Selected_generation_changed })
+  | Ok (Owner_unregistered_deferred { candidate_id }) ->
+    Ok (Owner_generation_deferred { candidate_id })
   | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
     yield ();
     drain_available_with_process ~yield ~process
   | Error detail -> Error detail
 ;;
 
-let drain_available
+let drain_available_current
+      ~with_current
       ~yield
       ~now
       ~worker_epoch
@@ -1486,13 +1728,34 @@ let drain_available
   drain_available_with_process
     ~yield
     ~process:(fun () ->
-      process_next
+      process_next_current
+        ~with_current
         ~now
         ~worker_epoch
         ~base_path
         ~keeper_name
         ~prepare
         ~execute)
+;;
+
+let drain_available
+      ~yield
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  drain_available_current
+    ~with_current:assume_current
+    ~yield
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
 ;;
 
 let run
@@ -1543,8 +1806,10 @@ let run
          match startup with
          | Error detail -> fail Process_start_recovery detail
          | Ok () ->
-           let prepare = Exact_flow.prepare ~net in
-           let execute = Exact_flow.execute ~clock in
+           let prepare =
+             prepare_exact ~base_path ~keeper_name ~net
+           in
+           let execute = execute_exact ~clock in
            let contention_rearms =
              make_contention_rearm_scheduler
                ~fork:(fun task -> Eio.Fiber.fork ~sw task)
@@ -1558,7 +1823,8 @@ let run
              | Wake.Wake -> drain ()
            and drain () =
              match
-               drain_available
+               drain_available_current
+                 ~with_current:Exact_flow.with_settlement_generation
                  ~yield:Eio.Fiber.yield
                  ~now:Time_compat.now
                  ~worker_epoch
@@ -1567,6 +1833,13 @@ let run
                  ~prepare
                  ~execute
              with
+             | Ok (Owner_generation_deferred { candidate_id }) ->
+               reset_contention_rearms contention_rearms ~keep:None;
+               Log.Keeper.info
+                 ~keeper_name
+                 "board_attention exact owner generation deferred candidate_id=%s; current worker generation exits without partition mutation"
+                 candidate_id;
+               Ok ()
              | Ok outcome ->
                ignore
                  (apply_drain_rearm contention_rearms outcome
@@ -1587,6 +1860,7 @@ module For_testing = struct
   type nonrec rearm_scheduler = rearm_scheduler
 
   let process_next = process_next
+  let process_next_exact = process_next_exact
   let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
   let drain_available = drain_available
   let drain_available_with_process = drain_available_with_process

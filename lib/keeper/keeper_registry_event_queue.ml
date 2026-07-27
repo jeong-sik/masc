@@ -96,6 +96,10 @@ type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_t
 
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
+  | Manual_compaction_committed of
+      { commit : Keeper_event_queue_state.manual_compaction_commit
+      ; followup : Keeper_event_queue_state.manual_compaction_followup
+      }
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
@@ -365,10 +369,10 @@ let drop_by_post_id ~base_path name ~post_id =
   | Ok persisted_removed -> Ok persisted_removed
 ;;
 
-let snapshot ~base_path name =
+let snapshot_result ~base_path name =
   match Keeper_registry.get ~base_path name with
-  | None -> Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
-  | Some entry -> Atomic.get entry.event_queue
+  | None -> Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:name
+  | Some entry -> Ok (Atomic.get entry.event_queue)
 ;;
 
 let claim_when_result ~base_path name ~claimed_at ~ready =

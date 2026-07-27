@@ -4,6 +4,7 @@ type error =
   | Store_error of Keeper_shutdown_store.error
   | Unsupported_phase
   | Finalization_blocked of Keeper_shutdown_types.t
+  | Finalization_draining of Keeper_shutdown_types.t * string
   | Completion_failed of Keeper_shutdown_types.t * string
 
 let error_to_string = function
@@ -13,6 +14,11 @@ let error_to_string = function
     Printf.sprintf
       "Keeper shutdown finalization blocked in operation %s"
       (Operation_id.to_string operation.operation_id)
+  | Finalization_draining (operation, detail) ->
+    Printf.sprintf
+      "Keeper shutdown finalization is draining operation %s: %s"
+      (Operation_id.to_string operation.operation_id)
+      detail
   | Completion_failed (operation, detail) ->
     Printf.sprintf
       "Keeper shutdown completion delivery failed in operation %s: %s"
@@ -488,11 +494,13 @@ let remove_tree path =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let remove_meta_file ~config operation =
+let remove_meta_file ~permit ~lifecycle_token ~config operation =
   match operation.cleanup_intent.reason with
   | Dashboard_keeper_purge context ->
     (match
-       Keeper_meta_store.remove_meta_if_exact_identity
+       Keeper_meta_store.remove_meta_if_exact_identity_for_lifecycle
+         permit
+         lifecycle_token
          config
          ~name:operation.keeper_name
          ~trace_id:operation.trace_id
@@ -509,7 +517,9 @@ let remove_meta_file ~config operation =
        Error (Keeper_meta_store.exact_identity_error_to_string error))
   | Operator_stop_remove_meta ->
     (match
-       Keeper_meta_store.remove_meta_if_identity
+       Keeper_meta_store.remove_meta_if_identity_for_lifecycle
+         permit
+         lifecycle_token
          config
          ~name:operation.keeper_name
          ~trace_id:operation.trace_id
@@ -525,6 +535,24 @@ let remove_meta_file ~config operation =
        Error (Keeper_meta_store.identity_remove_error_to_string error))
   | Operator_stop_retain_meta
   | Dead_tombstone_cleanup -> Ok ()
+;;
+
+let publish_generation_floor_before_meta_removal ~config operation =
+  match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
+  | Retain_operator_pause
+  | Retain_dead_tombstone -> Ok ()
+  | Remove_meta ->
+    (match
+       Keeper_shutdown_generation_floor.record_exact
+         config
+         ~keeper_id:operation.keeper_name
+         ~generation:(Int64.of_int operation.generation)
+         ()
+     with
+     | Ok _ -> Ok ()
+     | Error error ->
+       Error
+         (Keeper_shutdown_generation_floor.error_to_string error))
 ;;
 
 let remove_session_dir ~config operation =
@@ -548,11 +576,35 @@ let remove_session_dir ~config operation =
   else Ok ()
 ;;
 
-let unregister_exact operation entry =
+let begin_exact_retirement ~base_path operation entry =
   match operation.lane_ownership, entry with
-  | (Dormant_meta | Registered_lane _), None -> Ok false
+  | Dormant_meta, None ->
+    Keeper_lifecycle_reservation.with_key_lock
+      ~base_path
+      ~keeper_name:operation.keeper_name
+      (fun () ->
+         match
+           Keeper_registry.get
+             ~base_path
+             operation.keeper_name
+         with
+         | Some _ ->
+           Error
+             "Keeper registry became occupied before dormant finalization fence"
+         | None -> Ok ())
   | Dormant_meta, Some _ ->
     Error "dormant Keeper operation found a registered lane before finalization"
+  | Registered_lane expected_lane_id, None ->
+    (match
+       Keeper_exact_flow_scope.begin_retirement
+         ~base_path
+         ~keeper_name:operation.keeper_name
+         ~expected_lane_id
+     with
+     | Keeper_exact_flow_scope.Retirement_draining
+     | Keeper_exact_flow_scope.Retirement_not_allocated -> Ok ()
+     | Keeper_exact_flow_scope.Retirement_owner_replaced ->
+       Error "Keeper exact owner was replaced before finalization")
   | Registered_lane expected_lane_id, Some entry ->
     if
       not
@@ -561,12 +613,57 @@ let unregister_exact operation entry =
            expected_lane_id)
     then Error "Keeper registry lane changed before finalization"
     else
-    (match Keeper_registry.unregister_exact entry with
-     | Keeper_registry.Exact_unregistered
-     | Keeper_registry.Exact_entry_missing -> Ok true
-     | Keeper_registry.Exact_entry_replaced ->
+      (match
+         Keeper_exact_flow_scope.begin_retirement
+           ~base_path
+           ~keeper_name:operation.keeper_name
+           ~expected_lane_id
+       with
+       | Keeper_exact_flow_scope.Retirement_draining
+       | Keeper_exact_flow_scope.Retirement_not_allocated -> Ok ()
+       | Keeper_exact_flow_scope.Retirement_owner_replaced ->
+         Error "Keeper exact owner was replaced before finalization")
+;;
+
+let unregister_retired_exact ~permit ~lifecycle_token ~base_path operation entry =
+  match operation.lane_ownership, entry with
+  | Dormant_meta, None -> Ok false
+  | Dormant_meta, Some _ ->
+    Error "dormant Keeper operation found a registered lane before finalization"
+  | Registered_lane expected_lane_id, None ->
+    Keeper_exact_flow_scope.release_owner
+      ~base_path
+      ~keeper_name:operation.keeper_name
+      ~expected_lane_id;
+    Ok false
+  | Registered_lane expected_lane_id, Some entry ->
+    if
+      not
+        (Keeper_lane.Id.equal
+           (Keeper_lane.id entry.Keeper_registry.lane)
+           expected_lane_id)
+    then Error "Keeper registry lane changed before finalization"
+    else
+      (match
+         Keeper_registry.unregister_exact_for_lifecycle
+           permit
+           lifecycle_token
+           entry
+       with
+       | Keeper_registry.Lifecycle_mutation_admission_denied ->
+         Error "Keeper registry finalization lost durable lifecycle admission"
+       | Keeper_registry.Lifecycle_mutation_completed
+           (Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing) ->
+         Keeper_exact_flow_scope.release_owner
+           ~base_path
+           ~keeper_name:operation.keeper_name
+           ~expected_lane_id;
+         Ok true
+     | Keeper_registry.Lifecycle_mutation_completed
+         Keeper_registry.Exact_entry_replaced ->
        Error "Keeper registry lane was replaced during finalization"
-     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+     | Keeper_registry.Lifecycle_mutation_completed
+         (Keeper_registry.Exact_unregister_lifecycle_reserved owner) ->
        Error
          (Printf.sprintf
             "Keeper lifecycle transaction owns registry finalization: %s"
@@ -626,58 +723,220 @@ let deliver_finalized_completion ~config operation =
   | Superseded _ -> Error Unsupported_phase
 ;;
 
-let complete_cleanup ~config ~entry operation cleanup =
-  match remove_meta_file ~config operation with
-  | Error detail -> block ~config operation Meta_remove detail
-  | Ok () ->
-    (match unregister_exact operation entry with
-     | Error detail -> block ~config operation Registry_unregister detail
-     | Ok registry_unregistered ->
-       (match remove_session_dir ~config operation with
-        | Error detail -> block ~config operation Session_remove detail
-        | Ok () ->
-          let meta_removed =
+let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
+  let require_released_summary_owner () =
+    match operation.cleanup_intent.reason with
+    | Operator_stop_retain_meta -> Ok ()
+    | Operator_stop_remove_meta
+    | Dead_tombstone_cleanup
+    | Dashboard_keeper_purge _ ->
+      (match
+         Keeper_approval_queue.list_pending_entries_for_workspace
+           ~base_path:config.base_path
+       with
+       | Error error ->
+         Error
+           (`Failed
+              (Printf.sprintf
+                 "Keeper cleanup cannot prove approval-summary release: %s"
+                 (Keeper_approval_queue.storage_error_to_string error)))
+       | Ok pending_entries ->
+         (match
+            List.find_opt
+              (fun (pending : Keeper_approval_queue.pending_approval) ->
+                 String.equal
+                   pending.keeper_name
+                   operation.keeper_name)
+              pending_entries
+          with
+          | None -> Ok ()
+          | Some pending ->
+            Error
+              (`Draining
+                 (Printf.sprintf
+                    "Keeper cleanup is blocked by pending approval %s; resolve the approval before permanent retirement"
+                    pending.id))))
+  in
+  let finish_admitted ~permit ~lifecycle_token registry_unregistered =
+    match publish_generation_floor_before_meta_removal ~config operation with
+    | Error detail -> block ~config operation Meta_remove detail
+    | Ok () ->
+      (match remove_meta_file ~permit ~lifecycle_token ~config operation with
+       | Error detail -> block ~config operation Meta_remove detail
+       | Ok () ->
+      (match remove_session_dir ~config operation with
+       | Error detail -> block ~config operation Session_remove detail
+       | Ok () ->
+         let meta_removed =
+           match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
+           | Remove_meta -> true
+           | Retain_operator_pause
+           | Retain_dead_tombstone -> false
+         in
+         let accumulator_dropped =
+           meta_removed
+           || registry_unregistered
+           ||
+           match operation.lane_ownership with
+           | Dormant_meta -> true
+           | Registered_lane _ -> false
+         in
+         if accumulator_dropped
+         then Keeper_tool_emission_hook.drop_keeper_accumulator operation.keeper_name;
+         let completion =
+           match completion_action_of_cleanup_reason operation.cleanup_intent.reason with
+           | None -> Completion_not_requested
+           | Some action -> Completion_pending action
+         in
+         let evidence =
+           { cleanup
+           ; meta_removed
+           ; session_removed = operation.cleanup_intent.remove_session
+           ; registry_unregistered
+           ; accumulator_dropped
+           ; completion
+           }
+         in
+         let finalized =
+           { operation with
+             phase = Finalized evidence
+           ; updated_at = Masc_domain.now_iso ()
+           }
+         in
+         match replace ~config finalized with
+         | Error _ as error -> error
+         | Ok persisted_finalized -> Ok persisted_finalized))
+  in
+  let finish ~permit ~lifecycle_token registry_unregistered =
+    match
+      Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+        config
+        operation.keeper_name
+        (fun () ->
+           finish_admitted ~permit ~lifecycle_token registry_unregistered)
+    with
+    | Keeper_lifecycle_admission.Durable_transaction
+      .Permit_lease_completed result ->
+      result
+    | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+      Error
+        (Finalization_draining
+           (operation, "shutdown finalization lost durable lifecycle admission"))
+  in
+  let finalize_with_permit permit =
+    match
+      Keeper_lifecycle_reservation.acquire
+        ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name
+        ~expected_generation:operation.generation
+        ~purpose:Keeper_lifecycle_reservation.Shutdown_finalization
+    with
+    | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+      Error
+        (Finalization_draining
+           ( operation
+           , "shutdown finalization blocked by lifecycle reservation: "
+             ^ Keeper_lifecycle_reservation.snapshot_to_string owner ))
+    | Ok lifecycle_token ->
+      let release_outcome = ref None in
+      let result =
+        Fun.protect
+          ~finally:(fun () ->
+            release_outcome :=
+              Some (Keeper_lifecycle_reservation.release lifecycle_token))
+          (fun () ->
             match
-              meta_disposition_of_cleanup_reason operation.cleanup_intent.reason
+              begin_exact_retirement
+                ~base_path:config.base_path
+                operation
+                entry
             with
-            | Remove_meta -> true
-            | Retain_operator_pause
-            | Retain_dead_tombstone -> false
-          in
-          let accumulator_dropped =
-            meta_removed
-            || registry_unregistered
-            ||
-            match operation.lane_ownership with
-            | Dormant_meta -> true
-            | Registered_lane _ -> false
-          in
-          if accumulator_dropped
-          then Keeper_tool_emission_hook.drop_keeper_accumulator operation.keeper_name;
-          let completion =
-            match completion_action_of_cleanup_reason operation.cleanup_intent.reason with
-            | None -> Completion_not_requested
-            | Some action -> Completion_pending action
-          in
-          let evidence =
-            { cleanup
-            ; meta_removed
-            ; session_removed = operation.cleanup_intent.remove_session
-            ; registry_unregistered
-            ; accumulator_dropped
-            ; completion
-            }
-          in
-          let finalized =
-            { operation with
-              phase = Finalized evidence
-            ; updated_at = Masc_domain.now_iso ()
-            }
-          in
-          (match replace ~config finalized with
-           | Error _ as error -> error
-           | Ok persisted_finalized ->
-             deliver_finalized_completion ~config persisted_finalized)))
+            | Error detail ->
+              block ~config operation Registry_unregister detail
+            | Ok () ->
+              (match require_released_summary_owner () with
+               | Error (`Draining detail) ->
+                 Error (Finalization_draining (operation, detail))
+               | Error (`Failed detail) ->
+                 block
+                   ~config
+                   operation
+                   Approval_summary_retirement
+                   detail
+               | Ok () ->
+                 (match
+                    unregister_retired_exact
+                      ~permit
+                      ~lifecycle_token
+                      ~base_path:config.base_path
+                      operation
+                      entry
+                  with
+                  | Error detail ->
+                    block ~config operation Registry_unregister detail
+                  | Ok registry_unregistered ->
+                    finish
+                      ~permit
+                      ~lifecycle_token
+                      registry_unregistered)))
+      in
+      (match !release_outcome with
+       | Some Keeper_lifecycle_reservation.Released -> result
+       | Some release ->
+         let detail =
+           match release with
+           | Keeper_lifecycle_reservation.Release_missing ->
+             "shutdown finalization lifecycle reservation disappeared"
+           | Keeper_lifecycle_reservation.Release_not_owner owner ->
+             "shutdown finalization lifecycle reservation owner changed: "
+             ^ Keeper_lifecycle_reservation.snapshot_to_string owner
+           | Keeper_lifecycle_reservation.Released -> assert false
+         in
+         Log.Keeper.error
+           "shutdown finalization lifecycle reservation release requires \
+            attention keeper=%s detail=%s"
+           operation.keeper_name
+           detail;
+         result
+       | None -> assert false)
+  in
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name:operation.keeper_name
+      finalize_with_permit
+  with
+  | Admission_completed (Ok finalized) ->
+    deliver_finalized_completion ~config finalized
+  | Admission_completed (Error _ as error) -> error
+  | Admission_completed_with_attention (Ok finalized, failure) ->
+    Log.Keeper.error
+      "shutdown finalization durable admission release requires attention \
+       keeper=%s failure=%s"
+      operation.keeper_name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .authority_failure_to_wire
+         failure);
+    deliver_finalized_completion ~config finalized
+  | Admission_completed_with_attention ((Error _ as error), failure) ->
+    Log.Keeper.error
+      "shutdown finalization durable admission release requires attention \
+       keeper=%s failure=%s"
+      operation.keeper_name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .authority_failure_to_wire
+         failure);
+    error
+  | Admission_blocked reason ->
+    Error
+      (Finalization_draining
+         ( operation
+         , "shutdown finalization blocked by lifecycle authority: "
+           ^ Keeper_lifecycle_admission.Durable_transaction
+             .blocked_reason_to_wire
+              reason ))
 ;;
 
 let run ~config ~entry operation =

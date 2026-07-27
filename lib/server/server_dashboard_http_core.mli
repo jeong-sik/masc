@@ -19,8 +19,6 @@ type dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
-val set_executor_pool : Eio.Executor_pool.t -> unit
-
 val run_dashboard_compute :
   ?mode:dashboard_compute_mode ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

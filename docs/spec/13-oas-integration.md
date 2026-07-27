@@ -302,7 +302,6 @@ Resolution 순서:
 - `provider_name_of_label`: "llama:qwen3.5" -> Some "llama"
 - `max_context_of_label`: label -> Provider_registry.find -> entry.max_context (fallback: 128,000)
 - `resolve_primary_max_context`: label list에서 available한 첫 모델의 max_context
-- `ensure_api_keys_for_labels`: 사용 가능한 API key 존재 여부 검증
 
 ---
 

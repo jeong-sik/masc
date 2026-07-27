@@ -200,6 +200,7 @@ type binding =
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
+  ; max_request_body_bytes : int option
   ; price_input : float option
   ; price_output : float option
   ; keep_alive : string option

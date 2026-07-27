@@ -33,6 +33,7 @@ type claim_goal_scope = {
 val resolve_claim_goal_scope :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  task_eligible:(Masc_domain.task -> bool) ->
   unit ->
   claim_goal_scope
 
@@ -40,10 +41,14 @@ val resolve_claim_goal_scope_for_tasks :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   tasks:Masc_domain.task list ->
+  task_eligible:(Masc_domain.task -> bool) ->
   unit ->
   claim_goal_scope
 (** Backlog-aware claim scope for callers that already loaded tasks. This
-    avoids re-reading the backlog while preserving the empty-scope fallback. *)
+    avoids re-reading the backlog while preserving the empty-scope fallback.
+    [task_eligible] is the caller's hard eligibility boundary; an in-scope task
+    that this keeper cannot claim must not suppress fallback to eligible
+    out-of-scope work. *)
 
 val resolve_observation_claim_goal_scope :
   config:Workspace.config ->

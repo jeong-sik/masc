@@ -178,6 +178,26 @@ let selected_message_count units selected =
     0
     selected
 ;;
+
+let terminal_rejection terminalizer cause =
+  match
+    Keeper_compaction_llm_summarizer.terminalize_post_success
+      terminalizer
+      cause
+  with
+  | Keeper_compaction_llm_summarizer.Terminalized terminal ->
+    Exact_execution_terminal terminal
+  | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
+  | Keeper_compaction_llm_summarizer.Terminalization_already_committed
+  | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed _
+  | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
+    summarization_rejection
+      Keeper_compaction_llm_summarizer.Exact_flow_already_started
+  | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
+    summarization_rejection
+      Keeper_compaction_llm_summarizer.Exact_owner_unregistered_deferred
+;;
+
 let requested_messages_with_plan
       ~(plan_for_units :
          units:Keeper_compaction_unit.closed_unit list ->
@@ -207,10 +227,10 @@ let requested_messages_with_plan
        The observable outcome is deliberately NOT identical to the late
        failure, and the difference is the point:
 
-       - Late: [commit_prepared_compaction] returns [Error], which
-         [Keeper_manual_compaction.run_commit] folds into its catch-all
-         [Error (Recovery _)] -> [Manual_compaction_failed] -> [Requeue
-         Context_compaction_retry]. That settlement is not an ack
+       - Late: [commit_prepared_compaction] returns a typed [Commit_failed],
+         which [Keeper_manual_compaction.run_commit] folds into
+         [Manual_compaction_failed] -> [Requeue Context_compaction_retry].
+         That settlement is not an ack
          (keeper_heartbeat_loop.ml), so the same doomed request is re-driven
          every cycle — one summarizer call each time. This is the live
          livelock: 102 failures and 104 compaction LLM calls in the 74 minutes
@@ -256,10 +276,9 @@ let requested_messages_with_plan
             if not (Keeper_compaction_llm_summarizer.has_changes plan)
             then
               Error
-                (Exact_execution_terminal
-                   (Keeper_compaction_llm_summarizer.terminalize_post_success
-                      post_success_terminalizer
-                      Keeper_event_queue_state.Domain_invalid_output))
+                (terminal_rejection
+                   post_success_terminalizer
+                   Keeper_event_queue_state.Domain_invalid_output)
             else
               Ok
                 { messages =
@@ -277,12 +296,18 @@ let requested_messages_with_plan
                 }))
 ;;
 
-let requested_messages ?exact_execution_guard (meta : keeper_meta) messages =
+let requested_messages
+      ?exact_execution_guard
+      ~base_path
+      (meta : keeper_meta)
+      messages
+  =
   requested_messages_with_plan
     ~plan_for_units:(fun ~units ->
       match
         Keeper_compaction_llm_summarizer.make
           ?exact_execution_guard
+          ~base_path
           ~keeper_name:meta.name
           ()
       with
@@ -386,20 +411,26 @@ let compact_for_request_typed_with
       ; post_success_terminalizer = None
       }
     in
-    let terminal cause =
-      Keeper_compaction_llm_summarizer.terminalize_post_success
-        requested.post_success_terminalizer
-        cause
-    in
-    let reject_post_dispatch_domain_output () =
-      reject
-        (Exact_execution_terminal
-           (terminal Keeper_event_queue_state.Domain_invalid_output))
+    (* Both outcomes are terminal for this attempt, and both used to report
+       [Domain_invalid_output]. That label is defensible — the contract is that only a
+       strictly reducing plan is prepared, so a plan that does not reduce did not
+       satisfy the domain requirement — but it folds two situations an operator repairs
+       differently into one word:
+
+         after = before   the context could not be reduced further
+         after > before   the summarizer produced a LARGER context than it was given
+
+       The second is the summarizer working against itself and is worth seeing on its
+       own; the first is a property of the input. Naming them keeps the terminal's
+       slot_id / call_id / plan fingerprint, which a flat rejection would have dropped
+       (keeper_post_turn.ml maps the two shapes to different payloads). *)
+    let reject_terminal cause =
+      reject (terminal_rejection requested.post_success_terminalizer cause)
     in
     if after_bytes = before_bytes
-    then reject_post_dispatch_domain_output ()
+    then reject_terminal Keeper_event_queue_state.Compaction_produced_no_reduction
     else if after_bytes > before_bytes
-    then reject_post_dispatch_domain_output ()
+    then reject_terminal Keeper_event_queue_state.Compaction_increased_checkpoint
     else (
       let after_messages = message_count compacted_ctx in
       let before_tool_use_count, before_tool_result_count =
@@ -439,10 +470,25 @@ let compact_for_request_typed_with
           ~after_tool_result_count
       with
       | Error error ->
-        reject
-          (Invalid_structural_evidence
-             ( error
-             , terminal Keeper_event_queue_state.Invalid_structural_evidence ))
+        (match
+           Keeper_compaction_llm_summarizer.terminalize_post_success
+             requested.post_success_terminalizer
+             Keeper_event_queue_state.Invalid_structural_evidence
+         with
+         | Keeper_compaction_llm_summarizer.Terminalized terminal ->
+           reject (Invalid_structural_evidence (error, terminal))
+         | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
+         | Keeper_compaction_llm_summarizer.Terminalization_already_committed
+         | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed _
+         | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
+           reject
+             (summarization_rejection
+                Keeper_compaction_llm_summarizer.Exact_flow_already_started)
+         | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
+           reject
+             (summarization_rejection
+                Keeper_compaction_llm_summarizer
+                .Exact_owner_unregistered_deferred))
       | Ok evidence ->
         let compacted_ctx = sync_oas_context compacted_ctx in
         Log.Harness.emit
@@ -469,9 +515,19 @@ let compact_for_request_typed_with
         })
 ;;
 
-let compact_for_request_typed ?exact_execution_guard ~meta ~trigger ctx =
+let compact_for_request_typed
+      ?exact_execution_guard
+      ~base_path
+      ~meta
+      ~trigger
+      ctx
+  =
   compact_for_request_typed_with
-    ~requested_messages:(requested_messages ?exact_execution_guard meta)
+    ~requested_messages:
+      (requested_messages
+         ?exact_execution_guard
+         ~base_path
+         meta)
     ~meta
     ~trigger
     ctx

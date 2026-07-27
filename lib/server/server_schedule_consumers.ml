@@ -91,15 +91,29 @@ let keeper_wake_reaction_ledger_error = function
 ;;
 
 let keeper_wake_reaction_ledger_status_of_fields fields =
-  match optional_string_field "reaction_ledger_status" fields with
-  | Error reason -> Error reason
-  | Ok None -> Ok None
-  | Ok (Some value) when String.equal value reaction_ledger_recorded_label ->
+  let* status = optional_string_field "reaction_ledger_status" fields in
+  let* detail = optional_string_field "reaction_ledger_error" fields in
+  match status, detail with
+  | None, None -> Ok None
+  | Some value, None when String.equal value reaction_ledger_recorded_label ->
     Ok (Some Keeper_wake_reaction_ledger_recorded)
-  | Ok (Some value) when String.equal value reaction_ledger_record_failed_label ->
-    let* reason = string_field "reaction_ledger_error" fields in
+  | Some value, Some reason
+    when String.equal value reaction_ledger_record_failed_label ->
     Ok (Some (Keeper_wake_reaction_ledger_record_failed reason))
-  | Ok (Some value) -> Error ("unsupported reaction_ledger_status: " ^ value)
+  | Some value, _
+    when not
+      (String.equal value reaction_ledger_recorded_label
+       || String.equal value reaction_ledger_record_failed_label) ->
+    Error ("unsupported reaction_ledger_status: " ^ value)
+  | None, Some _ ->
+    Error "reaction_ledger_error requires reaction_ledger_status=record_failed"
+  | Some value, Some _
+    when String.equal value reaction_ledger_recorded_label ->
+    Error "reaction_ledger_status=recorded requires reaction_ledger_error=null"
+  | Some value, None
+    when String.equal value reaction_ledger_record_failed_label ->
+    Error "reaction_ledger_status=record_failed requires reaction_ledger_error"
+  | Some _, _ -> Error "noncanonical reaction ledger receipt"
 ;;
 
 let keeper_wake_reaction_ledger_status_json_fields = function
@@ -132,6 +146,106 @@ let keeper_wake_occurrence_status_of_string = function
   | value -> Error ("unsupported occurrence_status: " ^ value)
 ;;
 
+type keeper_wake_activation_deferred_reason =
+  | Keeper_wake_activation_lifecycle_denied of string
+  | Keeper_wake_activation_autoboot_disabled
+  | Keeper_wake_activation_proactive_disabled
+  | Keeper_wake_activation_shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+  | Keeper_wake_activation_owner_unknown of string
+  | Keeper_wake_activation_unregistered
+  | Keeper_wake_activation_not_running of Keeper_state_machine.phase
+
+type keeper_wake_activation_outcome =
+  | Keeper_wake_activation_signaled
+  | Keeper_wake_activation_deferred of keeper_wake_activation_deferred_reason
+  | Keeper_wake_activation_not_required
+
+let keeper_wake_activation_deferred_reason_fields = function
+  | Keeper_wake_activation_lifecycle_denied detail ->
+    "lifecycle_denied", Some detail
+  | Keeper_wake_activation_autoboot_disabled -> "autoboot_disabled", None
+  | Keeper_wake_activation_proactive_disabled -> "proactive_disabled", None
+  | Keeper_wake_activation_shutdown_fenced operation_id ->
+    ( "shutdown_fenced"
+    , Some (Keeper_shutdown_types.Operation_id.to_string operation_id) )
+  | Keeper_wake_activation_owner_unknown detail -> "owner_unknown", Some detail
+  | Keeper_wake_activation_unregistered -> "unregistered", None
+  | Keeper_wake_activation_not_running phase ->
+    "not_running", Some (Keeper_state_machine.phase_to_string phase)
+;;
+
+let keeper_wake_activation_deferred_reason_of_fields fields =
+  let* reason = string_field "activation_reason" fields in
+  let* detail = optional_string_field "activation_detail" fields in
+  match reason, detail with
+  | "lifecycle_denied", Some detail ->
+    Ok (Keeper_wake_activation_lifecycle_denied detail)
+  | "autoboot_disabled", None -> Ok Keeper_wake_activation_autoboot_disabled
+  | "proactive_disabled", None -> Ok Keeper_wake_activation_proactive_disabled
+  | "shutdown_fenced", Some operation_id ->
+    Keeper_shutdown_types.Operation_id.of_string operation_id
+    |> Result.map (fun operation_id ->
+      Keeper_wake_activation_shutdown_fenced operation_id)
+  | "owner_unknown", Some detail ->
+    Ok (Keeper_wake_activation_owner_unknown detail)
+  | "unregistered", None -> Ok Keeper_wake_activation_unregistered
+  | "not_running", Some phase ->
+    (match Keeper_state_machine.phase_of_string phase with
+     | Some phase -> Ok (Keeper_wake_activation_not_running phase)
+     | None -> Error ("unsupported activation_detail phase: " ^ phase))
+  | ( "lifecycle_denied"
+    | "shutdown_fenced"
+    | "owner_unknown"
+    | "not_running" ), None ->
+    Error ("activation_detail is required for activation_reason: " ^ reason)
+  | ( "autoboot_disabled"
+    | "proactive_disabled"
+    | "unregistered" ), Some _ ->
+    Error ("activation_detail must be null for activation_reason: " ^ reason)
+  | reason, _ -> Error ("unsupported activation_reason: " ^ reason)
+;;
+
+let keeper_wake_activation_outcome_of_fields fields =
+  let* status = string_field "activation_status" fields in
+  let* reason = optional_string_field "activation_reason" fields in
+  let* detail = optional_string_field "activation_detail" fields in
+  match status, reason, detail with
+  | "signaled", None, None -> Ok Keeper_wake_activation_signaled
+  | "not_required", None, None -> Ok Keeper_wake_activation_not_required
+  | "deferred", Some _, _ ->
+    let* reason = keeper_wake_activation_deferred_reason_of_fields fields in
+    Ok (Keeper_wake_activation_deferred reason)
+  | ("signaled" | "not_required"), _, _ ->
+    Error
+      ("activation_status=" ^ status
+       ^ " requires activation_reason=null and activation_detail=null")
+  | "deferred", None, _ ->
+    Error "activation_status=deferred requires activation_reason"
+  | value, _, _ -> Error ("unsupported activation_status: " ^ value)
+;;
+
+let keeper_wake_activation_outcome_json_fields = function
+  | Keeper_wake_activation_signaled ->
+    [ "activation_status", `String "signaled"
+    ; "activation_reason", `Null
+    ; "activation_detail", `Null
+    ]
+  | Keeper_wake_activation_not_required ->
+    [ "activation_status", `String "not_required"
+    ; "activation_reason", `Null
+    ; "activation_detail", `Null
+    ]
+  | Keeper_wake_activation_deferred reason ->
+    let reason, detail = keeper_wake_activation_deferred_reason_fields reason in
+    [ "activation_status", `String "deferred"
+    ; "activation_reason", `String reason
+    ; ( "activation_detail"
+      , match detail with
+        | None -> `Null
+        | Some detail -> `String detail )
+    ]
+;;
+
 type dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
@@ -143,6 +257,7 @@ type dispatch_receipt =
       ; stimulus_id : string option
       ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
       ; occurrence_status : keeper_wake_occurrence_status
+      ; activation_outcome : keeper_wake_activation_outcome
       }
 
 let dispatch_receipt_of_detail = function
@@ -164,6 +279,23 @@ let dispatch_receipt_of_detail = function
         let* value = string_field "occurrence_status" fields in
         keeper_wake_occurrence_status_of_string value
       in
+      let* activation_outcome =
+        keeper_wake_activation_outcome_of_fields fields
+      in
+      let* () =
+        match occurrence_status, activation_outcome with
+        | Keeper_wake_awaiting_ack,
+          ( Keeper_wake_activation_signaled
+          | Keeper_wake_activation_deferred _ ) ->
+          Ok ()
+        | Keeper_wake_awaiting_ack, Keeper_wake_activation_not_required ->
+          Error "awaiting_ack occurrence requires an activation outcome"
+        | (Keeper_wake_already_acked | Keeper_wake_already_cancelled),
+          Keeper_wake_activation_not_required ->
+          Ok ()
+        | (Keeper_wake_already_acked | Keeper_wake_already_cancelled), _ ->
+          Error "terminal occurrence requires activation_status=not_required"
+      in
       Ok
         (Keeper_wake_enqueued
            { keeper_name
@@ -175,6 +307,7 @@ let dispatch_receipt_of_detail = function
            ; stimulus_id
            ; reaction_ledger_status
            ; occurrence_status
+           ; activation_outcome
            })
     else Error ("unsupported schedule dispatch receipt kind: " ^ kind)
   | _ -> Error "schedule dispatch receipt detail must be an object"
@@ -191,6 +324,7 @@ let dispatch_receipt_to_yojson = function
       ; stimulus_id
       ; reaction_ledger_status
       ; occurrence_status
+      ; activation_outcome
       } ->
     `Assoc
       ([ "kind", `String keeper_wake_enqueued_kind
@@ -207,6 +341,7 @@ let dispatch_receipt_to_yojson = function
        ; ( "occurrence_status"
          , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
        ]
+       @ keeper_wake_activation_outcome_json_fields activation_outcome
        @ keeper_wake_reaction_ledger_status_json_fields reaction_ledger_status)
 ;;
 
@@ -255,6 +390,112 @@ type keeper_wake_acceptance =
   | Wake_required
   | Already_acked
   | Already_cancelled
+
+let activation_deferred_of_paused_dead = function
+  | Keeper_activation_readiness.Persisted_lifecycle_denied denial ->
+    Keeper_wake_activation_lifecycle_denied
+      (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+  | Keeper_activation_readiness.Runtime_terminal phase ->
+    Keeper_wake_activation_lifecycle_denied
+      ("runtime_" ^ Keeper_state_machine.phase_to_string phase)
+;;
+
+let activation_outcome_for_required_wake config ~base_path ~keeper_name =
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      match Keeper_meta_store.read_effective_meta config keeper_name with
+      | Ok (Some meta) -> Ok meta
+      | Ok None -> Error "durable keeper metadata missing"
+      | Error detail -> Error detail)
+  with
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Keeper_wake_activation_deferred
+      (Keeper_wake_activation_owner_unknown
+         ("durable keeper metadata read failed: "
+          ^ Executor_pool_ref.strict_submit_error_to_string
+              (Executor_pool_ref.Work_failed failure)))
+  | Error error ->
+    Keeper_wake_activation_deferred
+      (Keeper_wake_activation_owner_unknown
+         ("durable keeper metadata read unavailable: "
+          ^ Executor_pool_ref.strict_submit_error_to_string error))
+  | Ok meta_result ->
+    let admission =
+      Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+    in
+    let runtime =
+      Keeper_activation_readiness.owner_runtime_of_registry_entry
+        (Keeper_registry.get ~base_path keeper_name)
+    in
+    (match
+       Keeper_activation_readiness.classify_owner_execution
+         ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+         ~runtime
+         meta_result
+     with
+     | Keeper_activation_readiness.Retained_disabled
+         Keeper_activation_readiness.Retained_autoboot_disabled ->
+       Keeper_wake_activation_deferred
+         Keeper_wake_activation_autoboot_disabled
+     | Keeper_activation_readiness.Retained_disabled
+         Keeper_activation_readiness.Retained_proactive_disabled ->
+       Keeper_wake_activation_deferred
+         Keeper_wake_activation_proactive_disabled
+     | Keeper_activation_readiness.Paused_dead reason ->
+       Keeper_wake_activation_deferred
+         (activation_deferred_of_paused_dead reason)
+     | Keeper_activation_readiness.Shutdown_fenced operation_id ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_shutdown_fenced operation_id)
+     | Keeper_activation_readiness.Unknown detail ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_owner_unknown detail)
+     | Keeper_activation_readiness.Recoverable ->
+       (match runtime with
+        | Keeper_activation_readiness.Owner_unregistered ->
+          Keeper_wake_activation_deferred Keeper_wake_activation_unregistered
+        | Keeper_activation_readiness.Owner_registered { phase; _ } ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_not_running phase))
+     | Keeper_activation_readiness.Executable ->
+       (match
+          Keeper_registry.wakeup_running
+            ~intent:Keeper_registry.Scheduled_signal
+            ~base_path
+            keeper_name
+        with
+        | Keeper_registry.Signaled -> Keeper_wake_activation_signaled
+        | Keeper_registry.Deferred_unregistered ->
+          Keeper_wake_activation_deferred Keeper_wake_activation_unregistered
+        | Keeper_registry.Deferred_not_running phase ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_not_running phase)
+        | Keeper_registry.Deferred_lifecycle denial ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_lifecycle_denied
+               (Keeper_lifecycle_admission.autonomous_denial_to_wire denial))))
+;;
+
+let log_activation_outcome ~schedule_id ~keeper_name = function
+  | Keeper_wake_activation_signaled
+  | Keeper_wake_activation_not_required -> ()
+  | Keeper_wake_activation_deferred reason ->
+    let reason, detail = keeper_wake_activation_deferred_reason_fields reason in
+    (match detail with
+     | None ->
+       Log.Keeper.info
+         "schedule stimulus retained without owner activation schedule_id=%s keeper=%s reason=%s"
+         schedule_id
+         keeper_name
+         reason
+     | Some detail ->
+       Log.Keeper.info
+         "schedule stimulus retained without owner activation schedule_id=%s keeper=%s reason=%s detail=%s"
+         schedule_id
+         keeper_name
+         reason
+         detail)
+;;
 
 let retryable_dispatch_failure detail =
   Error (Schedule_runner.Retryable_dispatch_failure detail)
@@ -383,34 +624,20 @@ let dispatch_keeper_wake
     | Already_acked -> Keeper_wake_already_acked
     | Already_cancelled -> Keeper_wake_already_cancelled
   in
-  (match acceptance with
-   | Already_acked | Already_cancelled -> ()
-   | Wake_required ->
-     let wakeup_outcome =
-       Keeper_registry.wakeup_running
-         ~intent:Keeper_registry.Scheduled_signal
-         ~base_path
-         keeper_name
-     in
-     (match wakeup_outcome with
-      | Keeper_registry.Signaled -> ()
-      | Keeper_registry.Deferred_unregistered ->
-        Log.Keeper.info
-          "schedule stimulus queued for unregistered keeper schedule_id=%s keeper=%s"
-          request.schedule_id
-          keeper_name
-      | Keeper_registry.Deferred_not_running phase ->
-        Log.Keeper.info
-          "schedule stimulus queued without runnable fiber schedule_id=%s keeper=%s phase=%s"
-          request.schedule_id
-          keeper_name
-          (Keeper_state_machine.phase_to_string phase)
-      | Keeper_registry.Deferred_lifecycle denial ->
-        Log.Keeper.info
-          "schedule stimulus queued but lifecycle admission deferred wake schedule_id=%s keeper=%s reason=%s"
-          request.schedule_id
-          keeper_name
-          (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)));
+  let activation_outcome =
+    match acceptance with
+    | Already_acked | Already_cancelled ->
+      Keeper_wake_activation_not_required
+    | Wake_required ->
+      activation_outcome_for_required_wake
+        config
+        ~base_path
+        ~keeper_name
+  in
+  log_activation_outcome
+    ~schedule_id:request.schedule_id
+    ~keeper_name
+    activation_outcome;
   Ok
     (`Assoc
       ([ "kind", `String keeper_wake_enqueued_kind
@@ -424,6 +651,7 @@ let dispatch_keeper_wake
        ; ( "occurrence_status"
          , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
        ]
+       @ keeper_wake_activation_outcome_json_fields activation_outcome
        @ keeper_wake_reaction_ledger_status_json_fields
            (Some Keeper_wake_reaction_ledger_recorded)))
 ;;

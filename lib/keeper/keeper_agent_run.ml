@@ -840,10 +840,22 @@ let run_turn
         let usage : Turn_record.usage =
           match turn_result with
           | Ok result when result.usage_reported ->
+            (* Cache counts travel with the turn rather than being dropped: a large
+               input_tokens on a cache-heavy turn and one on a genuinely large prompt
+               read identically without them, and the ctx-fill denominator below is the
+               compaction ceiling, so the difference is what an operator acts on. *)
             { input_tokens = Some result.usage.input_tokens
             ; output_tokens = Some result.usage.output_tokens
+            ; cache_creation_input_tokens =
+                Some result.usage.cache_creation_input_tokens
+            ; cache_read_input_tokens = Some result.usage.cache_read_input_tokens
             }
-          | Ok _ | Error _ -> { input_tokens = None; output_tokens = None }
+          | Ok _ | Error _ ->
+            { input_tokens = None
+            ; output_tokens = None
+            ; cache_creation_input_tokens = None
+            ; cache_read_input_tokens = None
+            }
         in
         let request_latency_ms : int option =
           (* RFC-0233 §9 — wall-clock duration of the provider call in

@@ -16,6 +16,8 @@ type exact_execution_terminal_cause =
   | Exact_execution_failed
   | Exact_execution_cancelled
   | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch
   | Commit_admission_unavailable
@@ -150,6 +152,42 @@ type accepted_source_terminal =
   ; source_receipt : source_terminal_receipt
   }
 
+type manual_compaction_auxiliary =
+  | Compaction_commit_durability_unknown of { detail : string }
+  | Compaction_commit_observer_failed of
+      { detail : string
+      ; backtrace_present : bool
+      }
+  | Compaction_release_process_lock_failed of { detail : string }
+  | Compaction_post_commit_unwind_interrupted of
+      { detail : string
+      ; backtrace_present : bool
+      }
+  | Compaction_history_write_failed of
+      { detail : string
+      ; backtrace_present : bool
+      }
+
+type manual_compaction_lifecycle =
+  | Compaction_completion_applied
+  | Compaction_completion_rejected_failure_dispatched of
+      { completion_error : string }
+  | Compaction_completion_rejected_failure_dispatch_failed of
+      { completion_error : string
+      ; failure_dispatch_error : string
+      }
+
+type manual_compaction_commit =
+  { installed_ref : Keeper_checkpoint_ref.t
+  ; auxiliary : manual_compaction_auxiliary list
+  ; lifecycle : manual_compaction_lifecycle
+  ; manifest_error : string option
+  }
+
+type manual_compaction_followup =
+  | Compaction_commit_ack
+  | Compaction_commit_failure_judgment of Keeper_event_queue.stimulus
+
 let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
@@ -163,6 +201,10 @@ let escalation_reason_requests_external_input = function
 
 type settlement =
   | Ack
+  | Manual_compaction_committed of
+      { commit : manual_compaction_commit
+      ; followup : manual_compaction_followup
+      }
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
@@ -441,6 +483,8 @@ let exact_execution_terminal_cause_label = function
   | Exact_execution_failed -> "exact_execution_failed"
   | Exact_execution_cancelled -> "exact_execution_cancelled"
   | Domain_invalid_output -> "domain_invalid_output"
+  | Compaction_produced_no_reduction -> "compaction_produced_no_reduction"
+  | Compaction_increased_checkpoint -> "compaction_increased_checkpoint"
   | Invalid_structural_evidence -> "invalid_structural_evidence"
   | Invalid_structural_source_after_dispatch ->
     "invalid_structural_source_after_dispatch"
@@ -456,6 +500,8 @@ let exact_execution_terminal_cause_of_label = function
   | "exact_execution_failed" -> Ok Exact_execution_failed
   | "exact_execution_cancelled" -> Ok Exact_execution_cancelled
   | "domain_invalid_output" -> Ok Domain_invalid_output
+  | "compaction_produced_no_reduction" -> Ok Compaction_produced_no_reduction
+  | "compaction_increased_checkpoint" -> Ok Compaction_increased_checkpoint
   | "invalid_structural_evidence" -> Ok Invalid_structural_evidence
   | "invalid_structural_source_after_dispatch" ->
     Ok Invalid_structural_source_after_dispatch
@@ -761,6 +807,7 @@ let escalation_reason_of_wire ~label ~detail_json =
 
 let settlement_kind_label = function
   | Ack -> "ack"
+  | Manual_compaction_committed _ -> "manual_compaction_committed"
   | No_compaction _ -> "no_compaction"
   | Cancel_accepted _ -> "cancel_accepted"
   | Transfer_accepted _ -> "transfer_accepted"
@@ -775,6 +822,7 @@ let transition_id (lease : lease) settlement =
   | Settle_exact disposition ->
     Printf.sprintf "%s:settle_exact:%s" lease.lease_id disposition.disposition_id
   | Ack
+  | Manual_compaction_committed _
   | No_compaction _
   | Cancel_accepted _
   | Transfer_accepted _
@@ -796,9 +844,27 @@ let successor_equal left right =
   | None, Some _ | Some _, None -> false
 ;;
 
+let manual_compaction_committed_equal
+    ~(left_commit : manual_compaction_commit)
+    ~(left_followup : manual_compaction_followup)
+    ~(right_commit : manual_compaction_commit)
+    ~(right_followup : manual_compaction_followup)
+  =
+  left_commit = right_commit && left_followup = right_followup
+;;
+
 let settlement_equal left right =
   match left, right with
   | Ack, Ack -> true
+  | ( Manual_compaction_committed
+        { commit = left_commit; followup = left_followup }
+    , Manual_compaction_committed
+        { commit = right_commit; followup = right_followup } ) ->
+    manual_compaction_committed_equal
+      ~left_commit
+      ~left_followup
+      ~right_commit
+      ~right_followup
   | No_compaction left, No_compaction right ->
     Keeper_checkpoint_ref.equal left.source right.source
     && left.reason = right.reason
@@ -975,8 +1041,87 @@ let validate_exact_source_disposition
       Ok ()
 ;;
 
+let manual_compaction_commit_requires_operator_action commit =
+  commit.auxiliary <> []
+  || commit.lifecycle <> Compaction_completion_applied
+  || Option.is_some commit.manifest_error
+;;
+
+let validate_nonempty_manual_compaction_detail field detail =
+  if String.equal (String.trim detail) ""
+  then Error ("manual compaction commit " ^ field ^ " must not be empty")
+  else Ok ()
+;;
+
+let validate_manual_compaction_auxiliary = function
+  | Compaction_commit_durability_unknown { detail }
+  | Compaction_release_process_lock_failed { detail }
+  | Compaction_commit_observer_failed { detail; _ }
+  | Compaction_post_commit_unwind_interrupted { detail; _ }
+  | Compaction_history_write_failed { detail; _ } ->
+    validate_nonempty_manual_compaction_detail "auxiliary detail" detail
+;;
+
+let validate_manual_compaction_lifecycle = function
+  | Compaction_completion_applied -> Ok ()
+  | Compaction_completion_rejected_failure_dispatched { completion_error } ->
+    validate_nonempty_manual_compaction_detail
+      "completion error"
+      completion_error
+  | Compaction_completion_rejected_failure_dispatch_failed
+      { completion_error; failure_dispatch_error } ->
+    let* () =
+      validate_nonempty_manual_compaction_detail
+        "completion error"
+        completion_error
+    in
+    validate_nonempty_manual_compaction_detail
+      "failure dispatch error"
+      failure_dispatch_error
+;;
+
+let validate_manual_compaction_commit commit =
+  let* () =
+    match
+      Keeper_checkpoint_ref.of_persisted
+        ~trace_id:commit.installed_ref.trace_id
+        ~generation:commit.installed_ref.generation
+        ~turn_count:commit.installed_ref.turn_count
+        ~sha256:commit.installed_ref.sha256
+    with
+    | Ok reference when Keeper_checkpoint_ref.equal reference commit.installed_ref ->
+      Ok ()
+    | Ok _ | Error _ -> Error "manual compaction installed ref is invalid"
+  in
+  let* () =
+    List.fold_left
+      (fun result auxiliary ->
+         let* () = result in
+         validate_manual_compaction_auxiliary auxiliary)
+      (Ok ())
+      commit.auxiliary
+  in
+  let* () = validate_manual_compaction_lifecycle commit.lifecycle in
+  match commit.manifest_error with
+  | None -> Ok ()
+  | Some detail ->
+    validate_nonempty_manual_compaction_detail "manifest error" detail
+;;
+
+let validate_manual_compaction_followup = function
+  | Compaction_commit_ack -> Ok ()
+  | Compaction_commit_failure_judgment
+      { Keeper_event_queue.payload = Keeper_event_queue.Failure_judgment _; _ } ->
+    Ok ()
+  | Compaction_commit_failure_judgment _ ->
+    Error "manual compaction failure-judgment follow-up has the wrong payload"
+;;
+
 let validate_settlement = function
   | Ack | Requeue _ -> Ok ()
+  | Manual_compaction_committed { commit; followup } ->
+    let* () = validate_manual_compaction_commit commit in
+    validate_manual_compaction_followup followup
   | No_compaction { reason = Exact_execution_terminal terminal; _ } ->
     validate_exact_execution_terminal terminal
   | No_compaction
@@ -1079,6 +1224,15 @@ let validate_settlement = function
    rules. *)
 let validate_settlement_for_stimuli settlement stimuli =
   match settlement, stimuli with
+  | Manual_compaction_committed _,
+    [ { Keeper_event_queue.payload =
+          Keeper_event_queue.Manual_compaction_requested
+      ; _
+      } ] ->
+    Ok ()
+  | Manual_compaction_committed _, _ ->
+    Error
+      "manual-compaction commit settlement requires one manual-compaction request stimulus"
   | No_compaction _,
     [ { Keeper_event_queue.payload =
           Keeper_event_queue.Manual_compaction_requested
@@ -1179,6 +1333,7 @@ let binding_identity_equal
 
 let identity_bound_nonterminal_settlement = function
   | Ack -> true
+  | Manual_compaction_committed _ -> true
   | Requeue Context_compaction_retry -> true
   | Escalate { reason = Compaction_floor_exceeded _; successor = None } -> true
   | Escalate
@@ -1541,8 +1696,13 @@ let settle_committed ~settled_at ~lease ~settlement state =
     let* () = validate_settlement_for_lease settlement committed in
     let pending =
       match settlement with
-      | Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _
+      | Ack
+      | Manual_compaction_committed { followup = Compaction_commit_ack; _ }
+      | No_compaction _ | Cancel_accepted _ | Transfer_accepted _
       | Settle_from_source_terminal _ -> state.pending
+      | Manual_compaction_committed
+          { followup = Compaction_commit_failure_judgment successor; _ } ->
+        enqueue_if_missing state.pending successor
       | Settle_exact { action = Consume_source; _ } -> state.pending
       | Requeue
           (Retry_after_observed | Context_compaction_retry) ->
@@ -1587,7 +1747,8 @@ let settle ~settled_at ~lease ~settlement state =
      | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _
      | Settle_exact _ ->
        Error "accepted disposition requires its owner-fenced boundary"
-     | Ack | No_compaction _ | Requeue _ | Escalate _ ->
+     | Ack | Manual_compaction_committed _ | No_compaction _ | Requeue _
+     | Escalate _ ->
        settle_committed ~settled_at ~lease ~settlement state)
 ;;
 
@@ -1704,7 +1865,9 @@ let disposition_operation_id = function
   | Transfer_accepted transfer -> Some transfer.operator_operation_id
   | Settle_from_source_terminal source_terminal ->
     Some source_terminal.operator_operation_id
-  | Ack | No_compaction _ | Settle_exact _ | Requeue _ | Escalate _ -> None
+  | Ack | Manual_compaction_committed _ | No_compaction _ | Settle_exact _
+  | Requeue _ | Escalate _ ->
+    None
 ;;
 
 let prior_disposition_by_operation_id operation_id state =
@@ -1996,6 +2159,7 @@ let replay_transition_receipt receipt state =
           ~disposition_id:disposition.disposition_id
           state
       | Ack
+      | Manual_compaction_committed _
       | No_compaction _
       | Cancel_accepted _
       | Transfer_accepted _
@@ -2172,7 +2336,12 @@ let replay_transition_outbox_entry entry state =
              Error "pending source-terminal WAL source conflicts with its receipt"
            | Settle_from_source_terminal _, ([] | _ :: _ :: _) ->
              Error "pending source-terminal WAL must carry exactly one source"
-           | (Ack | No_compaction _ | Settle_exact _ | Requeue _ | Escalate _), _ ->
+           | ( Ack
+             | Manual_compaction_committed _
+             | No_compaction _
+             | Settle_exact _
+             | Requeue _
+             | Escalate _ ), _ ->
              Error
                (Printf.sprintf
                   "event queue WAL receipt has no matching active lease: %s"
@@ -2548,8 +2717,275 @@ let exact_source_disposition_of_yojson json =
   Ok disposition
 ;;
 
+let manual_compaction_auxiliary_to_yojson auxiliary =
+  let kind, detail, backtrace_present =
+    match auxiliary with
+    | Compaction_commit_durability_unknown { detail } ->
+      "commit_durability_unknown", detail, false
+    | Compaction_commit_observer_failed { detail; backtrace_present } ->
+      "commit_observer_failed", detail, backtrace_present
+    | Compaction_release_process_lock_failed { detail } ->
+      "release_process_lock_failed", detail, false
+    | Compaction_post_commit_unwind_interrupted { detail; backtrace_present } ->
+      "post_commit_unwind_interrupted", detail, backtrace_present
+    | Compaction_history_write_failed { detail; backtrace_present } ->
+      "history_write_failed", detail, backtrace_present
+  in
+  `Assoc
+    [ "kind", `String kind
+    ; "detail", `String detail
+    ; "backtrace_present", `Bool backtrace_present
+    ; "operator_action_required", `Bool true
+    ]
+;;
+
+let manual_compaction_auxiliary_of_yojson json =
+  let context = "manual compaction installation auxiliary" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "kind"; "detail"; "backtrace_present"; "operator_action_required" ]
+      fields
+  in
+  let* kind = string_field ~context "kind" fields in
+  let* detail = string_field ~context "detail" fields in
+  let* backtrace_present =
+    match List.assoc_opt "backtrace_present" fields with
+    | Some (`Bool value) -> Ok value
+    | Some _ | None ->
+      Error "manual compaction auxiliary backtrace_present must be boolean"
+  in
+  let* () =
+    match List.assoc_opt "operator_action_required" fields with
+    | Some (`Bool true) -> Ok ()
+    | Some _ | None ->
+      Error "manual compaction auxiliary must require operator action"
+  in
+  let* auxiliary =
+    match kind, backtrace_present with
+    | "commit_durability_unknown", false ->
+      Ok (Compaction_commit_durability_unknown { detail })
+    | "commit_observer_failed", backtrace_present ->
+      Ok (Compaction_commit_observer_failed { detail; backtrace_present })
+    | "release_process_lock_failed", false ->
+      Ok (Compaction_release_process_lock_failed { detail })
+    | "post_commit_unwind_interrupted", backtrace_present ->
+      Ok
+        (Compaction_post_commit_unwind_interrupted
+           { detail; backtrace_present })
+    | "history_write_failed", backtrace_present ->
+      Ok (Compaction_history_write_failed { detail; backtrace_present })
+    | ("commit_durability_unknown" | "release_process_lock_failed"), true ->
+      Error "manual compaction non-exception auxiliary cannot carry a backtrace"
+    | unknown, _ ->
+      Error
+        (Printf.sprintf
+           "unknown manual compaction installation auxiliary: %s"
+           unknown)
+  in
+  let* () = validate_manual_compaction_auxiliary auxiliary in
+  Ok auxiliary
+;;
+
+let manual_compaction_lifecycle_to_yojson = function
+  | Compaction_completion_applied ->
+    `Assoc
+      [ "kind", `String "completion_applied"
+      ; "completion_error", `Null
+      ; "failure_dispatch", `String "not_needed"
+      ; "failure_dispatch_error", `Null
+      ; "operator_action_required", `Bool false
+      ]
+  | Compaction_completion_rejected_failure_dispatched { completion_error } ->
+    `Assoc
+      [ "kind", `String "completion_rejected_failure_dispatched"
+      ; "completion_error", `String completion_error
+      ; "failure_dispatch", `String "applied"
+      ; "failure_dispatch_error", `Null
+      ; "operator_action_required", `Bool true
+      ]
+  | Compaction_completion_rejected_failure_dispatch_failed
+      { completion_error; failure_dispatch_error } ->
+    `Assoc
+      [ "kind", `String "completion_rejected_failure_dispatch_failed"
+      ; "completion_error", `String completion_error
+      ; "failure_dispatch", `String "rejected"
+      ; "failure_dispatch_error", `String failure_dispatch_error
+      ; "operator_action_required", `Bool true
+      ]
+;;
+
+let manual_compaction_lifecycle_of_yojson json =
+  let context = "manual compaction post-install lifecycle" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "kind"
+        ; "completion_error"
+        ; "failure_dispatch"
+        ; "failure_dispatch_error"
+        ; "operator_action_required"
+        ]
+      fields
+  in
+  let* kind = string_field ~context "kind" fields in
+  let lifecycle =
+    match
+      kind,
+      List.assoc_opt "completion_error" fields,
+      List.assoc_opt "failure_dispatch" fields,
+      List.assoc_opt "failure_dispatch_error" fields,
+      List.assoc_opt "operator_action_required" fields
+    with
+    | "completion_applied", Some `Null, Some (`String "not_needed"),
+      Some `Null, Some (`Bool false) ->
+      Ok Compaction_completion_applied
+    | "completion_rejected_failure_dispatched",
+      Some (`String completion_error), Some (`String "applied"), Some `Null,
+      Some (`Bool true) ->
+      Ok
+        (Compaction_completion_rejected_failure_dispatched
+           { completion_error })
+    | "completion_rejected_failure_dispatch_failed",
+      Some (`String completion_error), Some (`String "rejected"),
+      Some (`String failure_dispatch_error), Some (`Bool true) ->
+      Ok
+        (Compaction_completion_rejected_failure_dispatch_failed
+           { completion_error; failure_dispatch_error })
+    | _ -> Error "manual compaction lifecycle fields are inconsistent"
+  in
+  let* lifecycle = lifecycle in
+  let* () = validate_manual_compaction_lifecycle lifecycle in
+  Ok lifecycle
+;;
+
+let manual_compaction_commit_to_yojson commit =
+  `Assoc
+    [ "schema", `String "keeper.manual_compaction_commit.v1"
+    ; "checkpoint_installed_ref", checkpoint_source_to_yojson commit.installed_ref
+    ; ( "checkpoint_installation_auxiliary"
+      , `List
+          (List.map
+             manual_compaction_auxiliary_to_yojson
+             commit.auxiliary) )
+    ; "compaction_lifecycle", manual_compaction_lifecycle_to_yojson commit.lifecycle
+    ; ( "manifest_error"
+      , match commit.manifest_error with
+        | None -> `Null
+        | Some detail -> `String detail )
+    ; ( "operator_action_required"
+      , `Bool (manual_compaction_commit_requires_operator_action commit) )
+    ]
+;;
+
+let manual_compaction_commit_of_yojson json =
+  let context = "manual compaction commit receipt" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "schema"
+        ; "checkpoint_installed_ref"
+        ; "checkpoint_installation_auxiliary"
+        ; "compaction_lifecycle"
+        ; "manifest_error"
+        ; "operator_action_required"
+        ]
+      fields
+  in
+  let* schema = string_field ~context "schema" fields in
+  let* () =
+    if String.equal schema "keeper.manual_compaction_commit.v1"
+    then Ok ()
+    else Error ("unsupported manual compaction commit schema: " ^ schema)
+  in
+  let* installed_ref_json =
+    required_field ~context "checkpoint_installed_ref" fields
+  in
+  let* installed_ref = checkpoint_source_of_yojson installed_ref_json in
+  let* auxiliary =
+    match List.assoc_opt "checkpoint_installation_auxiliary" fields with
+    | Some (`List values) ->
+      List.fold_right
+        (fun value result ->
+           let* auxiliary = manual_compaction_auxiliary_of_yojson value in
+           let* rest = result in
+           Ok (auxiliary :: rest))
+        values
+        (Ok [])
+    | Some _ | None ->
+      Error "manual compaction installation auxiliary must be a list"
+  in
+  let* lifecycle_json = required_field ~context "compaction_lifecycle" fields in
+  let* lifecycle = manual_compaction_lifecycle_of_yojson lifecycle_json in
+  let* manifest_error =
+    match List.assoc_opt "manifest_error" fields with
+    | Some `Null -> Ok None
+    | Some (`String detail) -> Ok (Some detail)
+    | Some _ | None ->
+      Error "manual compaction manifest_error must be string or null"
+  in
+  let commit = { installed_ref; auxiliary; lifecycle; manifest_error } in
+  let* () = validate_manual_compaction_commit commit in
+  let* operator_action_required =
+    match List.assoc_opt "operator_action_required" fields with
+    | Some (`Bool value) -> Ok value
+    | Some _ | None ->
+      Error "manual compaction operator_action_required must be boolean"
+  in
+  if
+    Bool.equal
+      operator_action_required
+      (manual_compaction_commit_requires_operator_action commit)
+  then Ok commit
+  else Error "manual compaction operator action fact does not match receipt"
+;;
+
+let manual_compaction_followup_to_yojson = function
+  | Compaction_commit_ack -> `Assoc [ "kind", `String "ack" ]
+  | Compaction_commit_failure_judgment successor ->
+    `Assoc
+      [ "kind", `String "failure_judgment_requested"
+      ; "successor", Keeper_event_queue.stimulus_to_yojson successor
+      ]
+;;
+
+let manual_compaction_followup_of_yojson json =
+  let context = "manual compaction commit follow-up" in
+  let* fields = assoc_fields ~context json in
+  let* kind = string_field ~context "kind" fields in
+  let* followup =
+    match kind with
+    | "ack" ->
+      let* () = exact_fields ~context ~expected:[ "kind" ] fields in
+      Ok Compaction_commit_ack
+    | "failure_judgment_requested" ->
+      let* () =
+        exact_fields ~context ~expected:[ "kind"; "successor" ] fields
+      in
+      let* successor_json = required_field ~context "successor" fields in
+      let* successor = Keeper_event_queue.stimulus_of_yojson successor_json in
+      Ok (Compaction_commit_failure_judgment successor)
+    | unknown ->
+      Error (Printf.sprintf "unknown manual compaction follow-up: %s" unknown)
+  in
+  let* () = validate_manual_compaction_followup followup in
+  Ok followup
+;;
+
 let settlement_to_yojson = function
   | Ack -> `Assoc [ "kind", `String "ack" ]
+  | Manual_compaction_committed { commit; followup } ->
+    `Assoc
+      [ "kind", `String "manual_compaction_committed"
+      ; "receipt", manual_compaction_commit_to_yojson commit
+      ; "followup", manual_compaction_followup_to_yojson followup
+      ]
   | No_compaction { source; reason } ->
     let fields =
       [ "kind", `String "no_compaction"
@@ -2633,6 +3069,17 @@ let settlement_of_yojson json =
   | "ack" ->
     let* () = exact_fields ~context ~expected:[ "kind" ] fields in
     Ok Ack
+  | "manual_compaction_committed" ->
+    let* () =
+      exact_fields ~context ~expected:[ "kind"; "receipt"; "followup" ] fields
+    in
+    let* receipt_json = required_field ~context "receipt" fields in
+    let* commit = manual_compaction_commit_of_yojson receipt_json in
+    let* followup_json = required_field ~context "followup" fields in
+    let* followup = manual_compaction_followup_of_yojson followup_json in
+    let settlement = Manual_compaction_committed { commit; followup } in
+    let* () = validate_settlement settlement in
+    Ok settlement
   | "no_compaction" ->
     let* reason_label = string_field ~context "reason" fields in
     let* source_json = required_field ~context "source" fields in
@@ -2814,6 +3261,7 @@ let accepted_transfer_projection_of_yojson json =
   match settlement with
   | Transfer_accepted transfer -> Ok transfer
   | Ack
+  | Manual_compaction_committed _
   | No_compaction _
   | Cancel_accepted _
   | Settle_from_source_terminal _
@@ -2865,6 +3313,7 @@ let transition_receipt_of_yojson json =
         expected_lease_id
         disposition.disposition_id
     | Ack
+    | Manual_compaction_committed _
     | No_compaction _
     | Cancel_accepted _
     | Transfer_accepted _

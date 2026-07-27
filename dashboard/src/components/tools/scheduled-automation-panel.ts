@@ -368,6 +368,9 @@ function dispatchReceiptRows(
   receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined,
 ): Array<{ label: string; value: string }> {
   if (!receipt) return []
+  if (receipt.projection_status === 'unrecognized_detail') {
+    return [{ label: 'reason', value: receipt.reason }]
+  }
   const rows: Array<{ label: string; value: string | null | undefined }> = [
     { label: 'kind', value: receipt.kind },
     { label: 'queue', value: receipt.queue },
@@ -378,10 +381,11 @@ function dispatchReceiptRows(
     { label: 'keeper', value: receipt.keeper_name },
     { label: 'schedule', value: receipt.schedule_id },
     { label: 'urgency', value: receipt.urgency },
+    { label: 'occurrence_status', value: receipt.occurrence_status },
+    { label: 'activation_status', value: receipt.activation_status },
+    { label: 'activation_reason', value: receipt.activation_reason },
+    { label: 'activation_detail', value: receipt.activation_detail },
     { label: 'post_id', value: receipt.post_id },
-    { label: 'author', value: receipt.author },
-    { label: 'hearth', value: receipt.hearth },
-    { label: 'reason', value: receipt.reason },
   ]
   return rows.filter((row): row is { label: string; value: string } => {
     return typeof row.value === 'string' && row.value.trim() !== ''
@@ -403,7 +407,9 @@ function DispatchReceiptBlock({
         ? 'sch-kvs'
         : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
       data-schedule-dispatch-receipt=${receipt.projection_status}
-      data-schedule-dispatch-receipt-kind=${receipt.kind ?? ''}
+      data-schedule-dispatch-receipt-kind=${receipt.projection_status === 'recognized'
+        ? receipt.kind
+        : ''}
     >
       <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
         ${compact
@@ -608,11 +614,14 @@ function hasWakeEvidenceSummary(request: DashboardScheduledAutomationRequest): b
 }
 
 function wakeEvidenceJoinKey(request: DashboardScheduledAutomationRequest): string | null {
+  const receipt = request.dispatch_receipt?.projection_status === 'recognized'
+    ? request.dispatch_receipt
+    : null
   const candidates = [
-    request.dispatch_receipt?.post_id,
+    receipt?.post_id,
     request.keeper_queue_evidence?.post_id,
     request.keeper_reaction_evidence?.post_id,
-    request.dispatch_receipt?.stimulus_id,
+    receipt?.stimulus_id,
     request.keeper_reaction_evidence?.stimulus_id,
   ]
   for (const candidate of candidates) {

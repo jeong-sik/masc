@@ -30,7 +30,7 @@ depends: [
   "cohttp-eio" {>= "6.0"}
   "piaf" {= "0.2.0"}
   "eio-ssl" {>= "0.3.0"}
-  "agent_sdk" {>= "0.222.2"}
+  "agent_sdk" {>= "0.223.1"}
   "uri" {>= "4.4"}
   "tls" {>= "2.0"}
   "tls-eio" {>= "2.0"}
@@ -57,6 +57,7 @@ depends: [
   "eio_posix" {>= "0.16"}
   "cstruct" {>= "6.0"}
   "digestif" {>= "1.1"}
+  "optint"
   "ocaml-protoc-plugin" {>= "4.0"}
   "pbrt" {>= "3.0" & < "4.0"}
   "h2" {>= "0.13"}

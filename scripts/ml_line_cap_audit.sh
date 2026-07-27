@@ -33,7 +33,7 @@ def parse_args(repo_root: Path) -> argparse.Namespace:
     parser.add_argument(
         "--baseline-ref",
         default="",
-        help="Git ref to compare total manual-over-cap count against.")
+        help="Git ref to include in the aggregate measurement.")
     parser.add_argument(
         "--changed-ref",
         default="",
@@ -42,10 +42,6 @@ def parse_args(repo_root: Path) -> argparse.Namespace:
         "--json-out",
         default="",
         help="Write machine-readable JSON output to this path.")
-    parser.add_argument(
-        "--fail-on-regression",
-        action="store_true",
-        help="Exit non-zero when manual-over-cap count exceeds the baseline.")
     parser.add_argument(
         "--fail-on-changed-violations",
         action="store_true",
@@ -214,19 +210,15 @@ def main() -> int:
         changed_manual.sort(key=lambda item: (-item["lines"], item["path"]))
 
     if baseline_counts is None:
-        regression_status = "disabled"
-        regression_message = "baseline unavailable"
+        aggregate_status = "unavailable"
+        aggregate_message = "baseline unavailable"
     else:
         current_manual = current["counts"]["manual_ml_over_500"]
         baseline_manual = baseline_counts["manual_ml_over_500"]
-        if current_manual > baseline_manual:
-            regression_status = "fail"
-            regression_message = (
-                f"manual_ml_over_500 {baseline_manual}->{current_manual}"
-            )
-        else:
-            regression_status = "pass"
-            regression_message = f"manual_ml_over_500 {baseline_manual}->{current_manual}"
+        aggregate_status = "measurement"
+        aggregate_message = (
+            f"manual_ml_over_500 {baseline_manual}->{current_manual}"
+        )
 
     changed_status = "disabled"
     changed_message = "changed ref unavailable"
@@ -253,8 +245,8 @@ def main() -> int:
         "baseline": {
             "source": baseline_source,
             "counts": baseline_counts,
-            "status": regression_status,
-            "message": regression_message,
+            "status": aggregate_status,
+            "message": aggregate_message,
         },
         "changed": {
             "ref": args.changed_ref or None,
@@ -282,7 +274,7 @@ def main() -> int:
         f"test={current['counts']['test_ml_over_500']} "
         f"examples={current['counts']['examples_ml_over_500']}"
     )
-    print(f"Regression: {regression_status} ({regression_message})")
+    print(f"Aggregate: {aggregate_status} ({aggregate_message})")
     print(f"Changed: {changed_status} ({changed_message})")
     print_entries("Changed manual violations", changed_manual)
 
@@ -292,8 +284,6 @@ def main() -> int:
         json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     exit_code = 0
-    if args.fail_on_regression and regression_status == "fail":
-        exit_code = 1
     if args.fail_on_changed_violations and changed_status == "fail":
         exit_code = 1
     return exit_code

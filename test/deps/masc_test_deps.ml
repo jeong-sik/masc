@@ -1,6 +1,8 @@
 (* Shared dependency re-export for MASC test suite.
    Also hosts tiny test helpers that need a single SSOT across files. *)
 
+module Server_grpc_tool_dispatch = Server_grpc_tool_dispatch
+
 (** Install the Eio clock + optional switch in every registry the lib
     code reads from.
 
@@ -25,8 +27,9 @@ let init_keeper_tool_registry () =
     (Masc.Unified_tool_registry.register_all ();
      Masc.Unified_tool_registry.enforce_visible_tag_coverage ())
 
-(** Test fixture parser for [keeper_meta] JSON. It supplies only a trace id
-    when a focused fixture omits one, then delegates to the production parser. *)
+(** Test fixture parser for current-schema [keeper_meta] JSON. It supplies a
+    trace id and the first positive generation when a focused fixture omits
+    them, then delegates to the production parser. *)
 let meta_of_json_fixture (json : Yojson.Safe.t) =
   let augment fields =
     let has key = List.exists (fun (k, _) -> String.equal k key) fields in
@@ -56,7 +59,9 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       if String.length candidate <= 64 then candidate
       else String.sub candidate 0 64
     in
-    fields |> add_if_missing "trace_id" (`String trace_id)
+    fields
+    |> add_if_missing "trace_id" (`String trace_id)
+    |> add_if_missing "generation" (`Int 1)
   in
   let json' =
     match json with
@@ -99,6 +104,56 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
            | Some _ as v -> v
            | None -> meta.telemetry_feedback_window_hours)
       }
+
+(** Persist a current-schema fixture. An absent row is created only through a
+    fresh, admission-scoped lifecycle nonce witness; an existing row uses the
+    ordinary identity-preserving write path. *)
+let write_current_keeper_meta
+      config
+      (meta : Masc.Keeper_meta_contract.keeper_meta)
+  =
+  match Masc.Keeper_meta_store.read_meta config meta.name with
+  | Error detail -> Error detail
+  | Ok (Some _) -> Masc.Keeper_meta_store.write_meta config meta
+  | Ok None ->
+    let module Durable =
+      Masc.Keeper_lifecycle_admission.Durable_transaction
+    in
+    (match
+       Durable.with_durable_lifecycle_admission
+         config
+         ~keeper_name:meta.name
+         (fun permit ->
+            match
+              Masc.Keeper_lifecycle_nonce.create
+                permit
+                config
+                ~keeper_id:meta.name
+                ~owner_id:
+                  (Masc.Keeper_meta_contract.runtime_trace_id meta)
+                ()
+            with
+            | Error error ->
+              Error (Masc.Keeper_lifecycle_nonce.error_to_string error)
+            | Ok witness ->
+              Masc.Keeper_meta_store.create_meta
+                permit
+                witness
+                config
+                meta)
+     with
+     | Durable.Admission_completed result -> result
+     | Durable.Admission_completed_with_attention (Error detail, _) ->
+       Error detail
+     | Durable.Admission_completed_with_attention (Ok (), failure) ->
+       Error
+         ("current fixture lifecycle admission release failed: "
+          ^ Durable.authority_failure_to_wire failure)
+     | Durable.Admission_blocked reason ->
+       Error
+         ("current fixture lifecycle admission blocked: "
+          ^ Durable.blocked_reason_to_wire reason))
+;;
 
 (** Walk up the directory tree from [Sys.getcwd()] until [dune-project] is
     found, then return that directory.

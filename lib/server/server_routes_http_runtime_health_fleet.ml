@@ -99,14 +99,6 @@ let paused_keeper_count = function
   | _ -> 0
 ;;
 
-let bool_field name = function
-  | `Assoc fields ->
-      (match List.assoc_opt name fields with
-       | Some (`Bool value) -> value
-       | _ -> false)
-  | _ -> false
-;;
-
 (* Scope keeper counts to the active workspace's base_path so a running
    keeper from another workspace cannot mask a local outage in fleet
    safety. `bootable_keeper_count` is already derived from
@@ -116,7 +108,7 @@ let runtime_base_path_opt () =
   | Some state -> Some (Mcp_server.workspace_config state).base_path
   | None -> None
 
-let keeper_event_queue_health_json () =
+let keeper_event_queue_health_json ~execution_snapshot () =
   match current_server_state_opt () with
   | None ->
     `Assoc
@@ -138,12 +130,30 @@ let keeper_event_queue_health_json () =
       ; "runnable_oldest_arrived_at_unix", `Null
       ; "runnable_oldest_age_seconds", `Null
       ; "runnable_by_keeper", `List []
-      ; "paused_retained_pending_count", `Int 0
-      ; "paused_retained_inflight_count", `Int 0
-      ; "paused_retained_count", `Int 0
-      ; "paused_retained_oldest_arrived_at_unix", `Null
-      ; "paused_retained_oldest_age_seconds", `Null
-      ; "paused_retained_by_keeper", `List []
+      ; "recoverable_pending_count", `Int 0
+      ; "recoverable_inflight_count", `Int 0
+      ; "recoverable_backlog_count", `Int 0
+      ; "recoverable_oldest_arrived_at_unix", `Null
+      ; "recoverable_oldest_age_seconds", `Null
+      ; "recoverable_by_keeper", `List []
+      ; "retained_disabled_pending_count", `Int 0
+      ; "retained_disabled_inflight_count", `Int 0
+      ; "retained_disabled_backlog_count", `Int 0
+      ; "retained_disabled_oldest_arrived_at_unix", `Null
+      ; "retained_disabled_oldest_age_seconds", `Null
+      ; "retained_disabled_by_keeper", `List []
+      ; "paused_dead_pending_count", `Int 0
+      ; "paused_dead_inflight_count", `Int 0
+      ; "paused_dead_backlog_count", `Int 0
+      ; "paused_dead_oldest_arrived_at_unix", `Null
+      ; "paused_dead_oldest_age_seconds", `Null
+      ; "paused_dead_by_keeper", `List []
+      ; "shutdown_fenced_pending_count", `Int 0
+      ; "shutdown_fenced_inflight_count", `Int 0
+      ; "shutdown_fenced_backlog_count", `Int 0
+      ; "shutdown_fenced_oldest_arrived_at_unix", `Null
+      ; "shutdown_fenced_oldest_age_seconds", `Null
+      ; "shutdown_fenced_by_keeper", `List []
       ; "unclassified_pending_count", `Int 0
       ; "unclassified_inflight_count", `Int 0
       ; "unclassified_count", `Int 0
@@ -165,18 +175,21 @@ let keeper_event_queue_health_json () =
          durable queue ages; queue parsing below stays deterministic. *)
     in
     let owner_lifecycle ~keeper_name =
-      match Keeper_meta_store.read_meta config keeper_name with
-      | Ok (Some meta) ->
-        (match pause_kind meta with
-         | Active -> Keeper_event_queue_persistence.Runnable
-         | Operator_paused
-         | Unclassified_paused
-         | Dead_tombstone
-         | Transcript_corruption_reset_required ->
-           Keeper_event_queue_persistence.Paused_retained)
-      | Ok None ->
-        Keeper_event_queue_persistence.Lifecycle_unknown "durable keeper metadata missing"
-      | Error detail -> Keeper_event_queue_persistence.Lifecycle_unknown detail
+      match
+        owner_execution_truth execution_snapshot ~keeper_name
+      with
+      | Keeper_activation_readiness.Executable ->
+        Keeper_event_queue_persistence.Runnable
+      | Keeper_activation_readiness.Recoverable ->
+        Keeper_event_queue_persistence.Recoverable
+      | Keeper_activation_readiness.Retained_disabled _
+        -> Keeper_event_queue_persistence.Retained_disabled
+      | Keeper_activation_readiness.Paused_dead _ ->
+        Keeper_event_queue_persistence.Paused_dead
+      | Keeper_activation_readiness.Shutdown_fenced _ ->
+        Keeper_event_queue_persistence.Shutdown_fenced
+      | Keeper_activation_readiness.Unknown detail ->
+        Keeper_event_queue_persistence.Lifecycle_unknown detail
     in
     Keeper_event_queue_persistence.fleet_summary_json
       ~now
@@ -189,13 +202,19 @@ let keeper_fleet_runtime_resolution_base_fields
     () =
   let base_path = runtime_base_path_opt () in
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
+  let execution_snapshot =
+    match current_server_state_opt () with
+    | Some state ->
+      keeper_execution_snapshot (Mcp_server.workspace_config state)
+    | None -> empty_keeper_execution_snapshot
+  in
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let paused_keepers_json =
     match meta_scan with
     | Some scan ->
       paused_keepers_health_json_of_scan
-        ~running_names:(running_paused_keeper_names ())
+        ~registry_paused_names:(registry_paused_keeper_names ())
         scan.paused_scan
     | None -> paused_keepers_health_json ()
   in
@@ -206,14 +225,16 @@ let keeper_fleet_runtime_resolution_base_fields
         ~bootable_names:scan.bootable_names
         ~autoboot_scan:scan.autoboot_scan
         ~phase_snapshot
+        ~execution_snapshot
         ?base_path
         ~phase_counts
         ~paused_keepers_json
         ()
   | None ->
-    keeper_fleet_safety_health_json
-      ~phase_snapshot
-      ?base_path
+      keeper_fleet_safety_health_json
+        ~phase_snapshot
+        ~execution_snapshot
+        ?base_path
       ~phase_counts
       ~paused_keepers_json
       ()
@@ -230,7 +251,6 @@ let keeper_fleet_runtime_resolution_base_fields
     [ "keeper_fibers", `Int keeper_fibers
     ; "paused_keepers", `Int (paused_keeper_count paused_keepers_json)
     ; "paused_keepers_health", paused_keepers_json
-    ; "keeper_fleet_no_fibers", `Bool (bool_field "no_running_fibers" fleet_safety)
     ; ( "fd_observation"
       , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
           () )

@@ -37,11 +37,11 @@ let keeper_toml_load_error_paths error =
   else [ error.keeper_path; error.failing_path ]
 ;;
 
-let load_profile_doc ~keeper_path ~failing_path =
+let load_profile_doc ~path =
   let error kind detail =
-    Error { keeper_path; failing_path; kind; detail }
+    Error { keeper_path = path; failing_path = path; kind; detail }
   in
-  match Safe_ops.read_file_safe failing_path with
+  match Safe_ops.read_file_safe path with
   | Error detail -> error Read_error detail
   | Ok content ->
     (match Keeper_toml_loader.parse_toml content with
@@ -54,48 +54,30 @@ let load_profile_doc ~keeper_path ~failing_path =
 
 let inspect_keeper_toml (path : string)
     : (string * keeper_profile_defaults, keeper_toml_load_error) result =
-  match load_profile_doc ~keeper_path:path ~failing_path:path with
+  match load_profile_doc ~path with
   | Error _ as error -> error
-  | Ok (doc, child_defaults) ->
-    let defaults_result =
-      match Keeper_toml_loader.toml_string_opt doc "keeper.base" with
-      | None -> Ok child_defaults
-      | Some base_file ->
-        let base_path = Filename.concat (Filename.dirname path) base_file in
-        (match load_profile_doc ~keeper_path:path ~failing_path:base_path with
-         | Error _ as error -> error
-         | Ok (_base_doc, base_defaults) ->
-           Ok
-             (merge_keeper_profile_defaults
-                ~agent_name:"base"
-                ~base:base_defaults
-                ~overlay:child_defaults))
+  | Ok (doc, defaults) ->
+    let unknown_toml_keys = detect_unknown_keeper_toml_keys doc in
+    let defaults = { defaults with unknown_toml_keys } in
+    let name =
+      match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
+      | Some n when n <> "" -> n
+      | _ ->
+        Filename.basename path
+        |> Filename.remove_extension
     in
-    (match defaults_result with
-     | Error _ as error -> error
-     | Ok defaults ->
-        let unknown_toml_keys = detect_unknown_keeper_toml_keys doc in
-        let unknown_toml_keys = List.filter (fun k -> k <> "keeper.base") unknown_toml_keys in
-        let defaults = { defaults with unknown_toml_keys } in
-        let name =
-          match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
-          | Some n when n <> "" -> n
-          | _ ->
-            Filename.basename path
-            |> Filename.remove_extension
-        in
-        if not (validate_name name) then
-          Error
-            { keeper_path = path
-            ; failing_path = path
-            ; kind = Invalid_name
-            ; detail = Printf.sprintf "invalid keeper name '%s'" name
-            }
-        else
-          let id = Ids.Keeper_id.generate ~name ~path in
-          Ok (name,
-              { defaults with manifest_path = Some path
-                            ; id = Some id }))
+    if not (validate_name name) then
+      Error
+        { keeper_path = path
+        ; failing_path = path
+        ; kind = Invalid_name
+        ; detail = Printf.sprintf "invalid keeper name '%s'" name
+        }
+    else
+      let id = Ids.Keeper_id.generate ~name ~path in
+      Ok (name,
+          { defaults with manifest_path = Some path
+                        ; id = Some id })
 
 let load_keeper_toml path =
   match inspect_keeper_toml path with

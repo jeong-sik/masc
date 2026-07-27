@@ -49,7 +49,8 @@ let contains_substring s needle =
   if n_len = 0 then true else loop 0
 
 let has_repo_keeper_config root =
-  Sys.file_exists (Filename.concat root "config/keepers/base.toml")
+  let keepers_dir = Filename.concat root "config/keepers" in
+  Sys.file_exists keepers_dir && Sys.is_directory keepers_dir
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -713,47 +714,6 @@ instructions = "test"
    | Error _ -> ());
   Sys.remove tmp
 
-let test_load_keeper_toml_inherits_base_defaults () =
-  let tmp_dir = Filename.temp_file "keeper_base_toml" "" in
-  Sys.remove tmp_dir;
-  Unix.mkdir tmp_dir 0o755;
-  let base_path = Filename.concat tmp_dir "base.toml" in
-  let child_path = Filename.concat tmp_dir "sangsu.toml" in
-  let write_file path content =
-    let oc = open_out path in
-    output_string oc content;
-    close_out oc
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      if Sys.file_exists child_path then Sys.remove child_path;
-      if Sys.file_exists base_path then Sys.remove base_path;
-      if Sys.file_exists tmp_dir then Unix.rmdir tmp_dir)
-    (fun () ->
-      (* persona⊥{model,runtime}: keeper TOML carries no runtime/model
-         selection (assignment lives in runtime.toml [[runtime.assignments]]).
-         Base inheritance is still exercised by sandbox_profile/network_mode. *)
-      write_file base_path {|
-[keeper]
-sandbox_profile = "docker"
-network_mode = "inherit"
-|};
-      write_file child_path {|
-[keeper]
-base = "base.toml"
-persona_name = "sangsu"
-
-|};
-      match KTP.load_keeper_toml child_path with
-      | Error e -> fail (KTP.keeper_toml_load_error_to_string e)
-      | Ok (name, defaults) ->
-          check string "name from filename" "sangsu" name;
-          check (option string) "base sandbox" (Some "docker")
-            (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-          check (option string) "base network" (Some "inherit")
-            (Option.map KTP.network_mode_to_string defaults.network_mode);
-          ())
-
 (* ================================================================ *)
 (* Discovery tests                                                   *)
 (* ================================================================ *)
@@ -852,9 +812,7 @@ let test_bundled_keeper_profiles_resolve_prompt_defaults () =
       let keepers_dir = Filename.concat repo "config/keepers" in
       Sys.readdir keepers_dir
       |> Array.to_list
-      |> List.filter (fun file ->
-           Filename.check_suffix file ".toml"
-           && not (String.equal file "base.toml"))
+      |> List.filter (fun file -> Filename.check_suffix file ".toml")
       |> List.iter (fun file ->
            let path = Filename.concat keepers_dir file in
            let name = Filename.chop_extension file in
@@ -981,65 +939,6 @@ let test_default_source_snapshot_uses_explicit_base_path () =
     check bool "snapshot parse kind" true (error.kind = KTP.Parse_error);
     check string "snapshot keeper path" keeper_path error.keeper_path;
     check string "snapshot failing path" keeper_path error.failing_path
-
-let test_missing_base_profile_fails_closed () =
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "missing-base.toml" in
-  let base_path_expected = Filename.concat keepers_dir "base.toml" in
-  write_file keeper_path
-    "[keeper]\nbase = \"base.toml\"\ninstructions = \"test\"\n";
-  let error =
-    expect_profile_load_error
-      ~base_path
-      ~keeper_name:"missing-base"
-      ~kind:KTP.Read_error
-      ~failing_path:base_path_expected
-  in
-  check string "child keeper path retained" keeper_path error.keeper_path
-
-let test_parse_invalid_base_profile_fails_closed () =
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "parse-base.toml" in
-  let invalid_base_path = Filename.concat keepers_dir "base.toml" in
-  write_file invalid_base_path "[broken";
-  write_file keeper_path
-    "[keeper]\nbase = \"base.toml\"\ninstructions = \"test\"\n";
-  ignore
-    (expect_profile_load_error
-       ~base_path
-       ~keeper_name:"parse-base"
-       ~kind:KTP.Parse_error
-       ~failing_path:invalid_base_path)
-
-let test_profile_invalid_base_profile_fails_closed () =
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "profile-base.toml" in
-  let invalid_base_path = Filename.concat keepers_dir "base.toml" in
-  write_file
-    invalid_base_path
-    "[keeper]\ngoal = \"removed\"\n";
-  write_file keeper_path
-    "[keeper]\nbase = \"base.toml\"\ninstructions = \"child\"\n";
-  ignore
-    (expect_profile_load_error
-       ~base_path
-       ~keeper_name:"profile-base"
-       ~kind:KTP.Profile_error
-       ~failing_path:invalid_base_path)
-
-let test_unreadable_base_profile_fails_closed () =
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "unreadable-base.toml" in
-  let directory_base_path = Filename.concat keepers_dir "base.toml" in
-  Unix.mkdir directory_base_path 0o755;
-  write_file keeper_path
-    "[keeper]\nbase = \"base.toml\"\ninstructions = \"test\"\n";
-  ignore
-    (expect_profile_load_error
-       ~base_path
-       ~keeper_name:"unreadable-base"
-       ~kind:KTP.Read_error
-       ~failing_path:directory_base_path)
 
 let test_absent_profile_is_legitimate_empty_defaults () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir:_ ->
@@ -1504,19 +1403,6 @@ tool_denylist = ["Execute"]
        check bool "error names tool_denylist" true
          (contains_substring detail "keeper.tool_denylist"))
 
-let test_detect_unknown_keys_accepts_loader_base () =
-  let input = {|
-[keeper]
-base = "base.toml"
-legacy_scope = "removed"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "base include is a loader key"
-      ["keeper.legacy_scope"] unknown
-
 let test_detect_unknown_keys_flags_provider_health_table () =
   let input = {|
 [keeper]
@@ -1667,14 +1553,12 @@ let test_keeper_toml_unknown_keys_in_dir_reports_files () =
     {|
 [keeper]
 name = "alpha"
-base = "base.toml"
 legacy_scope = "removed"
 |};
   write_file (Filename.concat dir "beta.toml")
     {|
 [keeper]
 name = "beta"
-base = "base.toml"
 |};
   write_file (Filename.concat dir "bad.toml")
     {|
@@ -1700,13 +1584,11 @@ let test_health_json_surfaces_keeper_toml_unknown_keys () =
   with_config_dir @@ fun config_dir ->
   let keepers_dir = Filename.concat config_dir "keepers" in
   mkdir_p keepers_dir;
-  write_file (Filename.concat keepers_dir "base.toml")
-    "[keeper]\nsandbox_profile = \"local\"\n";
   write_file (Filename.concat keepers_dir "alpha.toml")
     {|
 [keeper]
 name = "alpha"
-base = "base.toml"
+sandbox_profile = "local"
 legacy_scope = "removed"
 |};
   let unknown_metric () =
@@ -1769,9 +1651,9 @@ let test_health_json_surfaces_typed_keeper_config_error () =
   let keepers_dir = Filename.concat config_dir "keepers" in
   mkdir_p keepers_dir;
   let keeper_path = Filename.concat keepers_dir "broken.toml" in
-  let base_path = Filename.concat keepers_dir "missing-base.toml" in
-  write_file keeper_path
-    "[keeper]\nbase = \"missing-base.toml\"\ninstructions = \"test\"\n";
+  (* Unreadable keeper TOML: the path exists with a .toml suffix but cannot be
+     read, so the loader reports Read_error against the keeper file itself. *)
+  Unix.mkdir keeper_path 0o755;
   let request = health_request () in
   let json =
     Runtime.make_health_json
@@ -1792,7 +1674,7 @@ let test_health_json_surfaces_typed_keeper_config_error () =
     check string "typed kind" "read_error" (row |> member "kind" |> to_string);
     check string "child path" keeper_path
       (row |> member "keeper_path" |> to_string);
-    check string "failing base path" base_path
+    check string "failing path" keeper_path
       (row |> member "failing_path" |> to_string);
     check string "terminal reason" "config_invalid"
       (row |> member "terminal_reason" |> to_string);
@@ -1969,8 +1851,6 @@ let () =
             test_detect_unknown_keys_flags_legacy_dead_config;
           test_case "rejects removed tool policy keys" `Quick
             test_removed_tool_policy_keys_rejected;
-          test_case "accepts loader base include" `Quick
-            test_detect_unknown_keys_accepts_loader_base;
           test_case "flags provider_health table as unknown" `Quick
             test_detect_unknown_keys_flags_provider_health_table;
           test_case "oas_env keys not flagged as unknown" `Quick
@@ -2008,20 +1888,10 @@ let () =
           test_case "load from file" `Quick test_load_from_file;
           test_case "name from filename" `Quick test_load_name_from_filename;
           test_case "invalid name" `Quick test_load_invalid_name;
-          test_case "inherits base defaults" `Quick
-            test_load_keeper_toml_inherits_base_defaults;
           test_case "invalid child blocks before dispatch" `Quick
             test_invalid_child_profile_fails_closed_before_dispatch;
           test_case "default source snapshot uses explicit base path" `Quick
             test_default_source_snapshot_uses_explicit_base_path;
-          test_case "missing base fails closed" `Quick
-            test_missing_base_profile_fails_closed;
-          test_case "parse-invalid base fails closed" `Quick
-            test_parse_invalid_base_profile_fails_closed;
-          test_case "profile-invalid base fails closed" `Quick
-            test_profile_invalid_base_profile_fails_closed;
-          test_case "unreadable base fails closed" `Quick
-            test_unreadable_base_profile_fails_closed;
           test_case "absent profile is valid empty defaults" `Quick
             test_absent_profile_is_legitimate_empty_defaults;
           test_case "persona without keeper TOML remains valid" `Quick

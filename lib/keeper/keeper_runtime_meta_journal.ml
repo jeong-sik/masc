@@ -236,7 +236,7 @@ let validate_intent (intent : intent) =
                        previous.meta_version
                        intent.candidate_meta.meta_version ->
              Ok ()
-           | Update, Some _ ->
+           | Update, Some _, Some _ ->
              Error
                (Invalid_current
                   "update intent must preserve current identity and metadata version"))

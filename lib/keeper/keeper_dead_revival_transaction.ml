@@ -2176,7 +2176,6 @@ let revive_locked
     abort_replacement_before_reserved permit
   in
   let fail_with_rollback = fail_with_rollback permit in
-  let rollback = rollback permit in
   let write_replacement_meta = write_replacement_meta permit in
   match preflight_journal_authority ctx.config original.name with
   | Error error ->

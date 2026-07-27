@@ -178,7 +178,7 @@ let target_meta (intent : Journal.intent) = function
   | `Forward -> Some intent.candidate_meta
 ;;
 
-let runtime_at_target intent direction =
+let runtime_at_target (intent : Journal.intent) direction =
   same_runtime
     (Runtime.runtime_id_for_keeper intent.Journal.keeper_name)
     (target_runtime intent direction)

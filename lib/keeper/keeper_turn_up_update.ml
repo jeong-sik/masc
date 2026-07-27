@@ -844,10 +844,8 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                        in
                                        (match restart_result with
                                         | Ok () ->
-                                          last_recovery_failure := None;
                                           tool_result_error failure
                                         | Error detail ->
-                                          last_recovery_failure := Some detail;
                                           tool_result_error
                                             (failure
                                              ^ "; recovered lane restart failed: "

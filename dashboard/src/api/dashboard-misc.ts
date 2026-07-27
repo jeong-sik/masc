@@ -250,7 +250,8 @@ export interface VerificationRequest {
   submitted_by: string
   approved_by: string | null
   completion_contract: string[]
-  required_evidence: string[]
+  required_artifacts: string[]
+  submitted_evidence: string[]
   verdict: VerificationRequestVerdict
   verdict_reason: string
 }

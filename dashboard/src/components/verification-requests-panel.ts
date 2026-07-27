@@ -323,13 +323,15 @@ function VerificationRow({
   refresh,
 }: { row: VerificationRequest; refresh: () => void }) {
   const hasContract = row.completion_contract.length > 0
-  const hasEvidence = row.required_evidence.length > 0
+  const hasRequiredArtifacts = row.required_artifacts.length > 0
+  const hasSubmittedEvidence = row.submitted_evidence.length > 0
   const hasTaskTitle = row.task_title !== ''
   const hasRequestSummary = row.request_summary !== ''
   const hasNextAction = row.next_action != null && row.next_action !== ''
   const hasDetails =
     hasContract ||
-    hasEvidence ||
+    hasRequiredArtifacts ||
+    hasSubmittedEvidence ||
     hasTaskTitle ||
     hasRequestSummary ||
     hasNextAction ||
@@ -426,12 +428,22 @@ function VerificationRow({
                         </div>
                       `
                     : null}
-                  ${hasEvidence
+                  ${hasRequiredArtifacts
                     ? html`
                         <div>
-                          <${DetailLabel}>Required Evidence</${DetailLabel}>
+                          <${DetailLabel}>Required Artifacts</${DetailLabel}>
                           <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
-                            ${row.required_evidence.map((e) => html`<li><code>${e}</code></li>`)}
+                            ${row.required_artifacts.map((artifact) => html`<li><code>${artifact}</code></li>`)}
+                          </ul>
+                        </div>
+                      `
+                    : null}
+                  ${hasSubmittedEvidence
+                    ? html`
+                        <div>
+                          <${DetailLabel}>Submitted Evidence</${DetailLabel}>
+                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
+                            ${row.submitted_evidence.map((evidence) => html`<li><code>${evidence}</code></li>`)}
                           </ul>
                         </div>
                       `

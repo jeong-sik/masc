@@ -89,14 +89,26 @@ let test_config_input_override_restores_boot_override () =
     Alcotest.(check (option string)) "boot override restored"
       (Some "before") (Config_boot_overrides.get_opt name))
 
-let create_pending_request ~base_path ~task_id ~worker ~criteria ~evidence =
+let create_pending_request_with_artifacts ~required_artifacts ~base_path ~task_id
+    ~worker ~criteria ~evidence =
   let output = `Assoc [
-    ("evidence_refs", `List (List.map (fun s -> `String s) evidence));
+    ("required_artifacts",
+     `List (List.map (fun s -> `String s) required_artifacts));
+    ("submitted_evidence", `List (List.map (fun s -> `String s) evidence));
     ("task_title", `String (Printf.sprintf "title for %s" task_id));
   ] in
   match V.create_request ~base_path ~task_id ~output ~criteria ~worker () with
   | Ok req -> req
   | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
+
+let create_pending_request ~base_path ~task_id ~worker ~criteria ~evidence =
+  create_pending_request_with_artifacts
+    ~required_artifacts:[]
+    ~base_path
+    ~task_id
+    ~worker
+    ~criteria
+    ~evidence
 
 let member key j = Yojson.Safe.Util.member key j
 
@@ -144,14 +156,18 @@ let test_temp_base_path_overrides_and_restores_env_inputs () =
 
 let test_requests_json_shape () =
   with_temp_base_path (fun base_path ->
-    let _req = create_pending_request ~base_path
+    let _req = create_pending_request_with_artifacts ~base_path
         ~task_id:"task-shape"
         ~worker:"keeper-alpha"
         ~criteria:[
           V.Custom "Must reduce FD leak";
           V.Custom "Must pass integration tests";
         ]
-        ~evidence:["artifacts/lsof.before"; "artifacts/lsof.after"] in
+        ~required_artifacts:[
+          "artifact://required-report";
+          "artifact://required-test-log";
+        ]
+        ~evidence:["trace://submitted-runtime-proof"] in
     let j = D.requests_json ~base_path () in
     (* Envelope: updated_at, total, requests *)
     (match member "updated_at" j with
@@ -199,15 +215,26 @@ let test_requests_json_shape () =
            | _ -> Alcotest.fail "contract entry must be string"
          ) items
      | _ -> Alcotest.fail "completion_contract should be list");
-    (match member "required_evidence" r with
+    (match member "required_artifacts" r with
      | `List items ->
-         Alcotest.(check int) "required_evidence len"
+         Alcotest.(check (list string)) "required artifacts stay distinct"
+           ["artifact://required-report"; "artifact://required-test-log"]
+           (List.map Yojson.Safe.Util.to_string items);
+         Alcotest.(check int) "required_artifacts len"
            2 (List.length items);
          List.iter (function
            | `String _ -> ()
-           | _ -> Alcotest.fail "evidence entry must be string"
+           | _ -> Alcotest.fail "required artifact entry must be string"
          ) items
-     | _ -> Alcotest.fail "required_evidence should be list");
+     | _ -> Alcotest.fail "required_artifacts should be list");
+    (match member "submitted_evidence" r with
+     | `List items ->
+         Alcotest.(check (list string)) "submitted evidence stays distinct"
+           ["trace://submitted-runtime-proof"]
+           (List.map Yojson.Safe.Util.to_string items)
+     | _ -> Alcotest.fail "submitted_evidence should be list");
+    Alcotest.(check bool) "legacy required_evidence alias removed"
+      true (member "required_evidence" r = `Null);
     (* Pending status (no verifier yet) *)
     (match member "status" r with
      | `String "pending" -> ()
@@ -346,7 +373,8 @@ let test_requests_json_surfaces_conflict_triage_fields () =
   with_temp_base_path (fun base_path ->
     let output =
       `Assoc [
-        ("evidence_refs", `List [`String "ref-A"]);
+        ("required_artifacts", `List [`String "artifact://required-A"]);
+        ("submitted_evidence", `List [`String "trace://submitted-A"]);
         ("task_title", `String "conflict task");
         ("request_kind", `String "conflict_triage");
         ( "request_summary",

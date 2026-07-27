@@ -104,7 +104,8 @@ function makeRequest(overrides: Partial<VerificationRequest> = {}): Verification
     submitted_by: 'agent-a',
     approved_by: null,
     completion_contract: [],
-    required_evidence: [],
+    required_artifacts: [],
+    submitted_evidence: [],
     verdict: null,
     verdict_reason: '',
     ...overrides,
@@ -281,6 +282,25 @@ describe('VerificationRequestsPanel', () => {
           'Reconcile board / planning / mutation surfaces before ordinary approval.',
         ),
       ).toBeTruthy()
+    })
+  })
+
+  it('renders required artifacts separately from submitted evidence', async () => {
+    setData([
+      makeRequest({
+        required_artifacts: ['artifact://required-contract'],
+        submitted_evidence: ['trace://submitted-runtime-proof'],
+      }),
+    ])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    fireEvent.click(screen.getByText('자세히'))
+    await waitFor(() => {
+      expect(screen.getByText('Required Artifacts')).toBeTruthy()
+      expect(screen.getByText('artifact://required-contract')).toBeTruthy()
+      expect(screen.getByText('Submitted Evidence')).toBeTruthy()
+      expect(screen.getByText('trace://submitted-runtime-proof')).toBeTruthy()
+      expect(screen.queryByText('Required Evidence')).toBeNull()
     })
   })
 })

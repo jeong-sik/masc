@@ -32,13 +32,12 @@ let completion_contract_of_criteria (criteria : V.criterion list) : string list 
     | V.Contains _ | V.Not_contains _ | V.Schema_match _ -> None
   ) criteria
 
-(** The Verification_protocol.on_submit_for_verification writes
-    [output = { evidence_refs = [...]; task_title = "..." }]. We read
-    evidence_refs in a tolerant way: missing or malformed -> empty list. *)
-let required_evidence_of_output (output : Yojson.Safe.t) : string list =
+(** Read one current typed evidence list. Missing or malformed fields project
+    as empty; no legacy field aliases are consulted. *)
+let string_list_of_output field (output : Yojson.Safe.t) : string list =
   match output with
   | `Assoc fields ->
-      (match List.assoc_opt "evidence_refs" fields with
+      (match List.assoc_opt field fields with
        | Some (`List items) ->
            List.filter_map (function
              | `String s -> Some s
@@ -121,7 +120,12 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     derive_status_fields req
   in
   let contract = completion_contract_of_criteria req.criteria in
-  let evidence = required_evidence_of_output req.output in
+  let required_artifacts =
+    string_list_of_output "required_artifacts" req.output
+  in
+  let submitted_evidence =
+    string_list_of_output "submitted_evidence" req.output
+  in
   let task_title = task_title_of_output req.output in
   let request_kind = request_kind_of_output req.output in
   let request_summary = request_summary_of_output req.output in
@@ -143,8 +147,10 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     ("approved_by", Json_util.string_opt_to_json approved_by);
     ("completion_contract",
      `List (List.map (fun s -> `String s) contract));
-    ("required_evidence",
-     `List (List.map (fun s -> `String s) evidence));
+    ("required_artifacts",
+     `List (List.map (fun s -> `String s) required_artifacts));
+    ("submitted_evidence",
+     `List (List.map (fun s -> `String s) submitted_evidence));
     ("verdict", Json_util.string_opt_to_json verdict_opt);
     ("verdict_reason", `String verdict_reason);
   ]

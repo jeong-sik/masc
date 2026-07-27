@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Removed
+- **Breaking (keeper config schema)**: removed the keeper TOML `base = "..."` inheritance mechanism. `keeper.base` is no longer a recognised key, `config/keepers/base.toml` and `presets/classic/keepers/base.toml` are deleted, and every keeper TOML now states its own values. Effective per-keeper profiles are unchanged: each formerly inherited value was written out explicitly (`config/keepers/{taskmaster,issue_king,verifier,adversary}.toml`, `presets/classic/keepers/{backend,frontend,qa,tech_lead}.toml`).
+  - Migration order matters. A keeper TOML that still carries `base = "..."` after this build is deployed does **not** fail to boot: `keeper.base` becomes an unrecognised key, so the keeper loads while silently losing every value it used to inherit, with one `Log.Keeper.warn`, a `masc_config_unknown_keys_ignored_total` increment, and a row on the dashboard drift surface. `/health` additionally reports `keeper_config_schema: config_unknown_keys` with status `blocked` and `operator_action_required: true` for the whole server (`server_routes_http_runtime.ml:479-488`). Flatten the deployed TOMLs first, then deploy this build.
+  - `merge_keeper_profile_defaults` and `merge_string_list` are retained: they still implement the persona `profile.json` → keeper TOML overlay (`keeper_types_profile.ml:244`), which is a separate mechanism. Note `merge_string_list` is replace-if-non-empty, not union.
+
 ### Changed
 - Bumped the OAS Agent SDK pin to `ca7a02b7` (oas#2766). Supports non-standard stop_reason provider dialects (e.g. `context_length_exceeded`, `max_context_length`) and preserves empty completion stop_reason in GLM parser to prevent orphan retries on context overflow.
 - Bumped the OAS Agent SDK pin to `c1eaa88b` (oas#2764). Allows empty delta `id` and `name` strings as `Ok None` in the SSE stream parser to prevent stream failure crashes on GLM-5-Turbo and OpenAI-compatible backends emitting empty initial delta fragments.

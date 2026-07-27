@@ -299,22 +299,9 @@ except ModuleNotFoundError:
 root = pathlib.Path(sys.argv[1])
 
 
-def merge_dicts(base, overlay):
-    merged = dict(base)
-    for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = merge_dicts(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
-
-
-def load_keeper_config(path, seen=None):
-    seen = set() if seen is None else seen
-    resolved = path.resolve()
-    if resolved in seen:
-        return {}
-    seen.add(resolved)
+# Keeper TOMLs are self-contained: no cross-file inheritance, so the file's own
+# [keeper] table is the whole effective config, and every *.toml is a keeper.
+def load_keeper_config(path):
     try:
         raw = tomllib.loads(path.read_text())
     except Exception:
@@ -322,16 +309,11 @@ def load_keeper_config(path, seen=None):
     keeper = raw.get("keeper")
     if not isinstance(keeper, dict):
         return {}
-    base_name = keeper.get("base")
-    if isinstance(base_name, str) and base_name.strip():
-        return merge_dicts(load_keeper_config(path.parent / base_name, seen), keeper)
     return keeper
 
 
 names = []
 for path in sorted(root.glob("*.toml")):
-    if path.name == "base.toml":
-        continue
     keeper = load_keeper_config(path)
     if keeper.get("sandbox_profile") != "docker":
         continue

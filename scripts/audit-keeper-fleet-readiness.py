@@ -170,33 +170,17 @@ def load_toml(path: Path) -> dict[str, Any]:
     return data
 
 
-def merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = merge_dicts(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
+def load_keeper_config(path: Path) -> dict[str, Any]:
+    """Read one keeper TOML's [keeper] table.
 
-
-def load_keeper_config(path: Path, seen: set[Path] | None = None) -> dict[str, Any]:
-    seen = set() if seen is None else seen
-    resolved = path.resolve()
-    if resolved in seen:
-        raise ValueError(f"{path}: cyclic keeper.base include")
-    seen.add(resolved)
-
+    Keeper TOMLs are self-contained: there is no cross-file inheritance, so the
+    file's own [keeper] table is the whole effective config. This mirrors
+    lib/keeper/keeper_types_profile_toml_io.ml inspect_keeper_toml.
+    """
     raw = load_toml(path)
     keeper = raw.get("keeper")
     if not isinstance(keeper, dict):
         return {}
-
-    base_name = keeper.get("base")
-    if isinstance(base_name, str) and base_name.strip():
-        base_path = path.parent / base_name
-        base_keeper = load_keeper_config(base_path, seen)
-        return merge_dicts(base_keeper, keeper)
     return keeper
 
 
@@ -1155,9 +1139,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     if not config_dir.is_dir():
         raise SystemExit(f"keeper config dir not found: {config_dir}")
 
-    config_paths = sorted(
-        path for path in config_dir.glob("*.toml") if path.name != "base.toml"
-    )
+    # Every *.toml in the keepers dir is a keeper, matching discover_keepers_toml
+    # in lib/keeper/keeper_types_profile_toml_io.ml. No filename is reserved.
+    config_paths = sorted(config_dir.glob("*.toml"))
     keepers = [
         audit_keeper(
             base_path=base_path,

@@ -14,6 +14,20 @@
   Semaphore wait O(K²), Dashboard N+1 O(K×N), Credential starvation O(K),
   Config 파일 O(K) 폭발. "땜빵을 땜빵으로 막지 말고" 근본 재설계.
 
+## Superseded 2026-07-27 — keeper TOML `base =` 상속 제거
+
+이 문서가 2026-05-05 에 확인한 내용 중, keeper TOML 의 `base = "base.toml"`
+상속 기제에 근거한 rebuttal 은 더 이상 성립하지 않습니다. 해당 기제는
+2026-07-27 에 제거되었습니다: `config/keepers/base.toml` 삭제, loader 의
+`keeper.base` 해석 삭제, 모든 keeper TOML 이 자기 값을 직접 갖는 형태로
+flatten. 따라서 `keeper.base` 는 이제 **unknown key** 로 취급되어 WARN +
+drift surface 에 보고됩니다 — audit 이 원래 주장했던 "unknown key 경고"
+쪽이 지금은 맞습니다.
+
+영향받는 행: §1-4 전체, §2 요구사항 2 첫 행, §2 요구사항 3 첫 행,
+§4-1 `keeper.base` 행, Phase 2 action item 11. 각 행에 `— superseded
+2026-07-27` 를 붙였습니다. 원문 판정은 작성 시점 기록으로 보존합니다.
+
 ## Why this response document
 
 이 audit은 매우 야심찬 통합 설계서이며, 정량 클레임 다수(turn slot 1, keeper
@@ -121,12 +135,19 @@ GitHub identity materialization은 현재 설계 대상이 아니다. audit이 �
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
 | `config/keepers/`에 14개 .toml 파일 | **6개** (`base.toml`, `issue_king.toml`, `masc-improver.toml`, `ramarama.toml`, `sangsu.toml`, `taskmaster.toml`) | **D** |
-| 36개로 확장 → 36개 파일 | base+overrides 패턴 이미 적용됨 — `sangsu.toml` line 2: `base = "base.toml"` (overrides 4 줄) | **D** |
-| "5개 keeper 파일을 base+overrides로 축소 필요"의 근거 | 이미 5 persona × ~5 line override + 1 base.toml 구조 | **D** |
+| 36개로 확장 → 36개 파일 | base+overrides 패턴 이미 적용됨 — `sangsu.toml` line 2: `base = "base.toml"` (overrides 4 줄) — superseded 2026-07-27 | **D** |
+| "5개 keeper 파일을 base+overrides로 축소 필요"의 근거 | 이미 5 persona × ~5 line override + 1 base.toml 구조 — superseded 2026-07-27 | **D** |
 
 **§1-4 결과**: audit의 가장 명백한 stale. 5 persona file은 이미 minimal
 override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overrides는
 이미 land.
+
+> superseded 2026-07-27: base+overrides 는 land 된 뒤 제거되었다. 측정
+> 결과 상속이 실제로 전달한 값은 거의 없었다(live fleet 17 children 중
+> `instructions` 상속 1건, `autoboot_enabled` 0건). 지금은 keeper TOML 당
+> 파일 수가 곧 keeper 수이고, 각 파일이 자기 값을 전부 갖는다. 즉 이
+> 행이 반박했던 "파일 수 O(K)" 쪽이 현재 구조다 — 단, 그것을 비용이
+> 아니라 명시성으로 택한 결정이다.
 
 ### §1-5 Metric/Telemetry: O(K²) 콜백
 
@@ -156,7 +177,7 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| `unknown keys: keeper.base` 경고 | **경고 없음으로 확인됨**: `lib/keeper/keeper_types_profile.ml:1237` 에서 `keeper.base` 를 base inheritance pointer 로 별도 처리하고, 1253 줄에서 `unknown_toml_keys` 리스트에서 명시적으로 filter out (`k <> "keeper.base"`). 즉 `keeper.base` 키는 valid key 로 인정되며 warning 발생 시점이 없음 | **D** |
+| `unknown keys: keeper.base` 경고 | **경고 없음으로 확인됨**: `lib/keeper/keeper_types_profile.ml:1237` 에서 `keeper.base` 를 base inheritance pointer 로 별도 처리하고, 1253 줄에서 `unknown_toml_keys` 리스트에서 명시적으로 filter out (`k <> "keeper.base"`). 즉 `keeper.base` 키는 valid key 로 인정되며 warning 발생 시점이 없음 — **superseded 2026-07-27: 인용된 코드는 삭제됨. `keeper.base` 는 이제 unknown key 로 WARN + drift 보고됨(audit 쪽이 맞음)** | **D → 현재 무효** |
 | 죽은 필드 (`work_discovery_sources`, `retired_git_author_config`, etc.) | active cleanup 트랙: **#13091 (drop dead persona-schema computed signals -6 LOC)**, **#13076 (unexport internal-only helpers across 4 components)**, **#13070 (-655 LOC dead ide-editor-mock)**, **#13071 (-40 LOC orphans)** — 같은 axis 매주 진행 | **B** |
 | `masc persona create` CLI + validate | 미구현 | **C — design idea** |
 
@@ -166,7 +187,7 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| 모든 필드가 TOML에 노출됨 | sangsu.toml 실제 5줄 (basic 필드만) — base.toml에 default 응집 | **D — already minimal** |
+| 모든 필드가 TOML에 노출됨 | sangsu.toml 실제 5줄 (basic 필드만) — base.toml에 default 응집 — **superseded 2026-07-27: base.toml 삭제, default 응집 없음. 각 keeper TOML 이 자기 값을 명시** | **D → 현재 무효** |
 | `--advanced` 옵션 필요 | 5 persona file이 모두 minimal override임을 감안하면 advanced disclosure는 unprioritized | **C** |
 
 **§2-3 결과**: 현재 config는 이미 minimal. Progressive disclosure는 향후 CLI
@@ -212,7 +233,7 @@ candidate (RFC-0029)**.
 
 | 필드 | audit 클레임 | 실제 | 분류 |
 |------|-------------|------|------|
-| `keeper.base` | 죽음 (unknown key 경고) | sangsu.toml line 2가 실제 사용 — base.toml inheritance 선언 | **D — false** |
+| `keeper.base` | 죽음 (unknown key 경고) | sangsu.toml line 2가 실제 사용 — base.toml inheritance 선언 — **superseded 2026-07-27: 기제 제거됨. audit 의 "unknown key 경고" 가 현재 동작** | **D → 현재 audit 이 맞음** |
 | `work_discovery_sources` | 죽음, `work.source`로 대체 | sangsu.toml line 4가 실제 사용. 코드 caller 확인 필요 | TBD |
 | `retired_git_author_config` | 죽음, 항상 `"retired_credential_config"` | active cleanup 후보 | **C** |
 | retired nested tool-access preset field | 중복 with `tools.preset` | sangsu.toml line 8 실제 사용. `tools.preset`은 audit의 가정 키 | **D — false** |
@@ -274,7 +295,7 @@ cleanup 트랙에 추가 가능.
 | 8 | Turn slot 1개 → K/2개 | **D** | 이미 32 default + env-tunable |
 | 9 | Semaphore → Token Bucket | **B** | RFC-0026/0027 active axis (memory `feedback_semaphore_tier_is_architectural_anti_pattern.md`) |
 | 10 | Dashboard N+1 → batch query | **C** | 진짜 design improvement. SQL 제안은 스택 mismatch — RFC-0029 후보 |
-| 11 | Config TOML 14개 → base+overrides 2개 | **D** | 이미 적용됨 (5 persona × `base = "base.toml"`) |
+| 11 | Config TOML 14개 → base+overrides 2개 | **D → 현재 무효** | 이미 적용됨 (5 persona × `base = "base.toml"`) — superseded 2026-07-27: 기제 제거, 파일당 self-contained |
 
 ### Phase 3: 필드 정리
 

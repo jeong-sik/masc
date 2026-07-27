@@ -139,9 +139,15 @@ non-canonical field that reaches MASC is rejected explicitly.
 
 ### 4.5 Persona / prompt examples
 
-The `issue_king` persona (`config/personas/issue_king/profile.json`) and base keeper config (`config/keepers/base.toml`) explicitly instruct:
+The `issue_king` persona (`config/personas/issue_king/profile.json`) explicitly instructs:
 
 > "PR 생성은 준비된 작업 브랜치에서 git push 후 별도 실행 축이 아니라 Execute typed argv 경로로 수행한다."
+
+This section previously also cited `config/keepers/base.toml` as a second source of that
+instruction. That file no longer exists: the keeper TOML `base = "..."` inheritance
+mechanism was removed and every keeper TOML now carries its own `instructions` block
+verbatim. When auditing prompt text, grep every file under `config/keepers/`; there is no
+single shared prompt file to check.
 
 This is correct, but if any few-shot example, memory, or older prompt template still shows an `args` or `command` wrapper, the model may copy it.
 
@@ -222,9 +228,9 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king
 
 | File | Why |
 |---|---|
-| `config/keepers/issue_king.toml` | Provider/runtime binding for `issue_king` |
+| `config/keepers/issue_king.toml` | Provider/runtime binding for `issue_king`, and its own `instructions` block |
 | `config/personas/issue_king/profile.json` | Prompt examples mentioning Execute |
-| `config/keepers/base.toml` | Base prompt examples |
+| `config/keepers/*.toml` | Prompt examples — each keeper carries its own `instructions`; the former shared `base.toml` is gone |
 | `oas/lib/llm_provider/backend_gemini.ml` | If provider is Gemini, check `args` unwrap |
 | `oas/lib/llm_provider/backend_openai_parse.ml` | If provider is OpenAI-compatible |
 | `oas/lib/llm_provider/backend_anthropic.ml` | If provider is Anthropic |

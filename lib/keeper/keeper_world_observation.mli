@@ -257,7 +257,7 @@ val pending_board_event_of_external_attention :
   Keeper_external_attention.item ->
   pending_board_event
 
-(** Convert a queued Event Layer stimulus back into structured board activity
+(** Convert a queued Event Layer stimulus into structured turn activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
     [Bg_completed] (RFC-0290), and [Schedule_due] produce [Some];
     [Bootstrap] returns [None] (no prompt injection).

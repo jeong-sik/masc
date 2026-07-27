@@ -492,7 +492,7 @@ let pending_board_event_of_scheduled_wake
   ; post_id
   ; author = scheduled_automation_actor
   ; title
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len sw.message
+  ; preview = sw.message
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at

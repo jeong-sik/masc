@@ -370,10 +370,23 @@ let heartbeat_event_intake
              acc
          then acc
          else (
-           Log.Keeper.info
-             "turn entry: promoted queued board stimulus post_id=%s keeper=%s"
-             event.Keeper_world_observation.post_id
-             meta_after_triage.name;
+           (match event.Keeper_world_observation.event_kind with
+            | Keeper_world_observation.Schedule_due ->
+              Log.Keeper.info
+                "turn entry: promoted scheduled work occurrence_id=%s keeper=%s"
+                event.Keeper_world_observation.post_id
+                meta_after_triage.name
+            | Keeper_world_observation.Board_post_created
+            | Keeper_world_observation.Board_comment_added
+            | Keeper_world_observation.Board_reaction_changed _
+            | Keeper_world_observation.Fusion_completed
+            | Keeper_world_observation.Bg_completed
+            | Keeper_world_observation.External_attention
+            | Keeper_world_observation.Goal_assigned ->
+              Log.Keeper.info
+                "turn entry: promoted queued observation post_id=%s keeper=%s"
+                event.Keeper_world_observation.post_id
+                meta_after_triage.name);
            event :: acc))
       pending_board_events
       (List.rev queued_observations)

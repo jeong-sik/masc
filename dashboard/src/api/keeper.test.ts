@@ -1220,7 +1220,10 @@ describe('keeper lifecycle', () => {
         trace_id: 'trace-keeper-test',
         session_dir: '/tmp/trace-keeper-test',
         current: null,
+        current_status: 'missing',
+        current_error: null,
         history: [],
+        history_errors: [],
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1238,7 +1241,9 @@ describe('keeper lifecycle', () => {
       }),
     )
     expect(result.trace_id).toBe('trace-keeper-test')
+    expect(result.current_status).toBe('missing')
     expect(result.history).toEqual([])
+    expect(result.history_errors).toEqual([])
   })
 
   it('posts selected OAS history snapshot ids for deletion', async () => {
@@ -1254,7 +1259,10 @@ describe('keeper lifecycle', () => {
           trace_id: 'trace-keeper-test',
           session_dir: '/tmp/trace-keeper-test',
           current: null,
+          current_status: 'missing',
+          current_error: null,
           history: [],
+          history_errors: [],
         },
       }), {
         status: 200,

@@ -8,6 +8,8 @@ import { requestConfirm } from './common/confirm-dialog'
 import {
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  type KeeperCheckpointCurrentError,
+  type KeeperCheckpointHistoryError,
   type KeeperCheckpointInventory,
   type KeeperCheckpointSummary,
 } from '../api/keeper'
@@ -67,11 +69,31 @@ export function filterCheckpointHistory(
 function CheckpointSummaryCard({
   title,
   summary,
+  status,
+  error,
 }: {
   title: string
   summary: KeeperCheckpointSummary | null
+  status: KeeperCheckpointInventory['current_status']
+  error: KeeperCheckpointCurrentError | null
 }) {
   if (!summary) {
+    if (status === 'unavailable') {
+      return html`
+        <div
+          class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-xs text-[var(--rose-light)] v2-monitoring-card"
+          role="alert"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold">${title}: checkpoint 읽기 실패</span>
+            <${SnapshotBadge} tone="bad">${error?.kind ?? 'unknown'}</${SnapshotBadge}>
+          </div>
+          ${error?.detail
+            ? html`<div class="mt-2 break-words font-mono text-2xs">${error.detail}</div>`
+            : null}
+        </div>
+      `
+    }
     return html`
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-card">
         ${title}: 저장된 checkpoint 없음
@@ -95,6 +117,46 @@ function CheckpointSummaryCard({
       ${summary.latest_preview
         ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--color-fg-primary)]">${summary.latest_preview}</div>`
         : null}
+    </div>
+  `
+}
+
+function CheckpointHistoryFailures({
+  failures,
+}: {
+  failures: readonly KeeperCheckpointHistoryError[]
+}) {
+  if (failures.length === 0) return null
+  return html`
+    <div
+      class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 v2-monitoring-panel"
+      role="alert"
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-semibold text-[var(--rose-light)]">
+          읽지 못한 checkpoint history
+        </span>
+        <${SnapshotBadge} tone="bad">${failures.length}</${SnapshotBadge}>
+      </div>
+      <div class="mt-2 flex flex-col gap-2">
+        ${failures.map(failure => html`
+          <div
+            class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--color-bg-surface)] px-2.5 py-2 text-2xs"
+            key=${failure.snapshot_id}
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-mono text-[var(--color-fg-primary)]">${failure.snapshot_id}</span>
+              <${SnapshotBadge} tone=${failure.status === 'missing' ? 'warn' : 'bad'}>
+                ${failure.error_kind}
+              </${SnapshotBadge}>
+            </div>
+            ${failure.error_detail
+              ? html`<div class="mt-1 break-words font-mono text-[var(--rose-light)]">${failure.error_detail}</div>`
+              : null}
+            <div class="mt-1 break-all font-mono text-[var(--color-fg-muted)]">${failure.path}</div>
+          </div>
+        `)}
+      </div>
     </div>
   `
 }
@@ -198,6 +260,17 @@ export function KeeperCheckpointPanel({
     `
   }
 
+  if (!inventory) {
+    return html`
+      <div
+        class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-xs text-[var(--rose-light)] v2-monitoring-panel"
+        role="alert"
+      >
+        checkpoint inventory 응답이 없습니다.
+      </div>
+    `
+  }
+
   return html`
     <div class="flex flex-col gap-3 v2-monitoring-panel">
       <div class="flex items-center justify-between gap-3 v2-monitoring-toolbar">
@@ -221,8 +294,12 @@ export function KeeperCheckpointPanel({
 
       <${CheckpointSummaryCard}
         title="현재 active checkpoint"
-        summary=${inventory?.current ?? null}
+        summary=${inventory.current}
+        status=${inventory.current_status}
+        error=${inventory.current_error}
       />
+
+      <${CheckpointHistoryFailures} failures=${inventory.history_errors} />
 
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-panel">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 py-2 v2-monitoring-toolbar">

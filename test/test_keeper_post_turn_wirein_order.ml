@@ -300,7 +300,10 @@ let test_manual_compaction_serializes_owner_lane () =
       publish_exact_fixture
         ~source:"post-turn owner-lane compaction"
         exact_server;
-      Result.get_ok (Masc_test_deps.write_current_keeper_meta config meta);
+      (match Masc_test_deps.write_current_keeper_meta config meta with
+       | Ok () -> ()
+       | Error detail ->
+         Alcotest.failf "keeper meta fixture persist failed: %s" detail);
       let owner_entry = Masc.Keeper_registry.For_testing.register ~base_path meta.name meta in
       let peer_entry = Masc.Keeper_registry.For_testing.register ~base_path peer.name peer in
       Atomic.set owner_entry.fiber_wakeup false;
@@ -1273,7 +1276,12 @@ let test_prepare_commit_source_cas () =
        fail "stale prepared value did not reach canonical rejection"))
 ;;
 
-let run_post_install_domain_valid_failure ~name domain_valid_failure =
+let run_post_install_failure
+      ~name
+      ?domain_valid_failure
+      ?(cancel_after_install = false)
+      ()
+  =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1354,25 +1362,30 @@ let run_post_install_domain_valid_failure ~name domain_valid_failure =
        let outcome =
          Post_turn.For_testing.commit_prepared_compaction_with_history
            ~after_checkpoint_installed:(fun () ->
-             match
-               Post_turn.For_testing.claim_post_success_commit prepared
-             with
-             | Summarizer.Commit_claim_in_progress waiter ->
-               internal_waiter := Some waiter;
-               (match Post_turn.commit_prepared_compaction prepared with
-                | Post_turn.Commit_in_progress waiter ->
-                  outer_waiter := Some waiter
-                | Post_turn.Committed _
-                | Post_turn.Commit_failed _
-                | Post_turn.Already_committed _
-                | Post_turn.Already_rejected _ ->
-                  fail "installed commit did not expose its outer waiter")
-             | Summarizer.Commit_claim_acquired
-             | Summarizer.Commit_claim_already_committed
-             | Summarizer.Commit_claim_rejected _
-             | Summarizer.Commit_claim_owner_unregistered_deferred ->
-               fail "installed commit did not expose its affine waiter")
-           ~domain_valid_failure
+             (match
+                Post_turn.For_testing.claim_post_success_commit prepared
+              with
+              | Summarizer.Commit_claim_in_progress waiter ->
+                internal_waiter := Some waiter;
+                (match Post_turn.commit_prepared_compaction prepared with
+                 | Post_turn.Commit_in_progress waiter ->
+                   outer_waiter := Some waiter
+                 | Post_turn.Committed _
+                 | Post_turn.Commit_failed _
+                 | Post_turn.Already_committed _
+                 | Post_turn.Already_rejected _ ->
+                   fail "installed commit did not expose its outer waiter")
+              | Summarizer.Commit_claim_acquired
+              | Summarizer.Commit_claim_already_committed
+              | Summarizer.Commit_claim_rejected _
+              | Summarizer.Commit_claim_owner_unregistered_deferred ->
+                fail "installed commit did not expose its affine waiter");
+             if cancel_after_install
+             then
+               raise
+                 (Eio.Cancel.Cancelled
+                    (Failure "injected post-install compaction cancellation")))
+           ?domain_valid_failure
            ~save_oas_history:(fun ~session_dir:_ _ -> ())
            prepared
        in
@@ -1440,17 +1453,28 @@ let run_post_install_domain_valid_failure ~name domain_valid_failure =
 ;;
 
 let test_post_install_domain_valid_error_resolves_waiters () =
-  run_post_install_domain_valid_failure
+  run_post_install_failure
     ~name:"post-install-domain-valid-error"
-    (Post_turn.For_testing.Domain_valid_error
-       "injected Domain_valid settlement error")
+    ~domain_valid_failure:
+      (Post_turn.For_testing.Domain_valid_error
+         "injected Domain_valid settlement error")
+    ()
 ;;
 
 let test_post_install_domain_valid_exception_resolves_waiters () =
-  run_post_install_domain_valid_failure
+  run_post_install_failure
     ~name:"post-install-domain-valid-exception"
-    (Post_turn.For_testing.Domain_valid_exception
-       (Failure "injected Domain_valid settlement exception"))
+    ~domain_valid_failure:
+      (Post_turn.For_testing.Domain_valid_exception
+         (Failure "injected Domain_valid settlement exception"))
+    ()
+;;
+
+let test_post_install_cancellation_returns_committed_failure () =
+  run_post_install_failure
+    ~name:"post-install-cancellation"
+    ~cancel_after_install:true
+    ()
 ;;
 
 let test_invalid_structural_evidence_after_dispatch_is_terminal () =
@@ -1911,6 +1935,8 @@ let () =
         `Quick test_post_install_domain_valid_error_resolves_waiters;
       test_case "post-install Domain_valid exception resolves waiters"
         `Quick test_post_install_domain_valid_exception_resolves_waiters;
+      test_case "post-install cancellation returns committed failure"
+        `Quick test_post_install_cancellation_returns_committed_failure;
       test_case "invalid structural evidence is post-dispatch terminal"
         `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
       test_case "non-reducing output is quarantined"

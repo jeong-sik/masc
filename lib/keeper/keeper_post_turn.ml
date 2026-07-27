@@ -518,6 +518,8 @@ let rejection_disposition = function
   | Exact_admission_failed
   | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
+  | Exact_execution_authority_absent
+  | Exact_execution_authority_rejected
   | Exact_execution_bind_failed
   | Exact_flow_already_started ->
     Nonterminal_rejection
@@ -775,6 +777,7 @@ let prepare_compaction_with
 ;;
 
 let prepare_compaction
+      ?before_dispatch_authority
       ?exact_execution_guard
       ~base_path
       ~base_dir
@@ -785,6 +788,7 @@ let prepare_compaction
   prepare_compaction_with
     ~compact_for_request:
       (Keeper_compact_policy.compact_for_request_typed
+         ?before_dispatch_authority
          ?exact_execution_guard
          ~base_path)
     ~base_dir
@@ -948,13 +952,15 @@ let commit_prepared_compaction_with
     with
     | Eio.Cancel.Cancelled _ as exn ->
       let raw_bt = Printexc.get_raw_backtrace () in
-      Eio.Cancel.protect (fun () ->
-        match !installed_recovery with
-        | None ->
+      (match !installed_recovery with
+       | None ->
+         Eio.Cancel.protect (fun () ->
           ignore
             (terminalize_claimed
-               Keeper_event_queue_state.Exact_execution_cancelled)
-        | Some recovery ->
+               Keeper_event_queue_state.Exact_execution_cancelled));
+         Printexc.raise_with_backtrace exn raw_bt
+       | Some recovery ->
+         Eio.Cancel.protect (fun () ->
           let detail =
             "post-install compaction finalization was cancelled: "
             ^ Printexc.to_string exn
@@ -969,12 +975,10 @@ let commit_prepared_compaction_with
             | Ok () -> detail
             | Error terminal_detail -> terminal_detail
           in
-          ignore
-            (publish_owner
-               (commit_failure
-                  ~committed:recovery
-                  (Checkpoint_candidate_failed terminal_detail))));
-      Printexc.raise_with_backtrace exn raw_bt
+          publish_owner
+            (commit_failure
+               ~committed:recovery
+               (Checkpoint_candidate_failed terminal_detail))))
     | exn ->
       let detail = Printexc.to_string exn in
       log_keeper_exn ~label:"compaction checkpoint save exception" exn;
@@ -1076,6 +1080,7 @@ module For_testing = struct
 end
 
 let recover_latest_checkpoint_for_compaction
+    ?before_dispatch_authority
     ?exact_execution_guard
     ~(base_path : string)
     ~(base_dir : string)
@@ -1085,6 +1090,7 @@ let recover_latest_checkpoint_for_compaction
   : prepared_commit_outcome =
   match
     prepare_compaction
+      ?before_dispatch_authority
       ?exact_execution_guard
       ~base_path
       ~base_dir

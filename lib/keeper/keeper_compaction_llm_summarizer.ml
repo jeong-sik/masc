@@ -61,6 +61,9 @@ type exact_execution_guard =
       (exact_write_outcome, string) result
   }
 
+type before_dispatch_authority =
+  attempt_observation -> (unit, string) result
+
 type post_success_completion =
   { waiter : unit Eio.Promise.t
   ; resolve : unit -> unit
@@ -149,6 +152,8 @@ type summarization_failure =
   | Exact_attempt_start_failed
   | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
+  | Exact_execution_authority_absent
+  | Exact_execution_authority_rejected
   | Exact_execution_bind_failed
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
@@ -1063,6 +1068,8 @@ let prepare_lane ~base_path ~keeper_name ~registry ~lane_id ~units =
 
 type exact_flow_callback_failure =
   | Owner_unregistered_deferred
+  | Authority_absent
+  | Authority_rejected
   | Bind_failed
   | Bind_sync_unconfirmed of Keeper_event_queue_state.exact_execution_terminal
   | Release_failed of Keeper_event_queue_state.exact_execution_terminal
@@ -1070,12 +1077,32 @@ type exact_flow_callback_failure =
 
 let bind_exact_execution
       ~keeper_name
+      ~before_dispatch_authority
       ~exact_execution_guard
       observation
   =
-  match exact_execution_guard with
-  | None -> Ok ()
-  | Some guard ->
+  let authorize () =
+    match before_dispatch_authority, exact_execution_guard with
+    | None, None -> Error Authority_absent
+    | None, Some _ -> Ok ()
+    | Some authorize, _ ->
+      (match authorize observation with
+       | Ok () -> Ok ()
+       | Error detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "compaction lifecycle authority rejected dispatch slot=%s call_id=%s: %s"
+           observation.slot_id
+           observation.call_id
+           detail;
+         Error Authority_rejected)
+  in
+  match authorize () with
+  | Error _ as error -> error
+  | Ok () ->
+    (match exact_execution_guard with
+     | None -> Ok ()
+     | Some guard ->
     (match guard.before_dispatch observation with
      | Ok Fsync_completed -> Ok ()
      | Error detail ->
@@ -1097,7 +1124,7 @@ let bind_exact_execution
          (Bind_sync_unconfirmed
             (terminal_of_observation
                Keeper_event_queue_state.Terminal_persistence_failed
-               observation)))
+               observation))))
 ;;
 
 let release_exact_execution
@@ -1135,6 +1162,8 @@ let release_exact_execution
 
 let summarization_failure_of_callback = function
   | Owner_unregistered_deferred -> Exact_owner_unregistered_deferred
+  | Authority_absent -> Exact_execution_authority_absent
+  | Authority_rejected -> Exact_execution_authority_rejected
   | Bind_failed -> Exact_execution_bind_failed
   | Bind_sync_unconfirmed terminal
   | Release_failed terminal
@@ -1146,6 +1175,7 @@ let execute_prepared_lane_current
       ~keeper_name
       ~net
       ?clock
+      ?before_dispatch_authority
       ?exact_execution_guard
       prepared_lane
   =
@@ -1172,10 +1202,18 @@ let execute_prepared_lane_current
     let observation = observe_flow_attempt_receipt candidate in
     match
       with_current (fun () ->
-        match bind_exact_execution ~keeper_name ~exact_execution_guard observation with
+        match
+          bind_exact_execution
+            ~keeper_name
+            ~before_dispatch_authority
+            ~exact_execution_guard
+            observation
+        with
         | Error _ as error -> error
         | Ok () ->
-          if Option.is_some exact_execution_guard
+          if
+            Option.is_some exact_execution_guard
+            || Option.is_some before_dispatch_authority
           then bound_observation := Some observation;
           Ok ())
     with
@@ -1345,7 +1383,14 @@ let execute_prepared_lane_current
   | `Flow _ -> settle ()
 ;;
 
-let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane =
+let execute_prepared_lane
+      ~keeper_name
+      ~net
+      ?clock
+      ?before_dispatch_authority
+      ?exact_execution_guard
+      prepared_lane
+  =
   match
     Keeper_exact_flow_scope.with_current
       prepared_lane.flow_scope
@@ -1358,6 +1403,7 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
            ~keeper_name
            ~net
            ?clock
+           ?before_dispatch_authority
            ?exact_execution_guard
            prepared_lane)
   with
@@ -1367,6 +1413,7 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
 ;;
 
 let run_exact
+      ?before_dispatch_authority
       ?exact_execution_guard
       ~base_path
       ~keeper_name
@@ -1390,10 +1437,17 @@ let run_exact
           ~lane_id:"compaction_exact"
           ~units
       in
-      execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane
+      execute_prepared_lane
+        ~keeper_name
+        ~net
+        ?clock
+        ?before_dispatch_authority
+        ?exact_execution_guard
+        prepared_lane
 ;;
 
 let make_resolved
+      ?before_dispatch_authority
       ?exact_execution_guard
       ~base_path
       ~(keeper_name : string)
@@ -1406,6 +1460,7 @@ let make_resolved
     Some
       (fun ~units ->
          run_exact
+           ?before_dispatch_authority
            ?exact_execution_guard
            ~base_path
            ~keeper_name
@@ -1417,8 +1472,19 @@ let make_resolved
   | _ -> None
 ;;
 
-let make ?exact_execution_guard ~base_path ~keeper_name () =
-  make_resolved ?exact_execution_guard ~base_path ~keeper_name ()
+let make
+      ?before_dispatch_authority
+      ?exact_execution_guard
+      ~base_path
+      ~keeper_name
+      ()
+  =
+  make_resolved
+    ?before_dispatch_authority
+    ?exact_execution_guard
+    ~base_path
+    ~keeper_name
+    ()
 ;;
 
 let completed_plan completed = completed.plan

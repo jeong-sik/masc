@@ -297,6 +297,7 @@ let requested_messages_with_plan
 ;;
 
 let requested_messages
+      ?before_dispatch_authority
       ?exact_execution_guard
       ~base_path
       (meta : keeper_meta)
@@ -306,6 +307,7 @@ let requested_messages
     ~plan_for_units:(fun ~units ->
       match
         Keeper_compaction_llm_summarizer.make
+          ?before_dispatch_authority
           ?exact_execution_guard
           ~base_path
           ~keeper_name:meta.name
@@ -516,6 +518,7 @@ let compact_for_request_typed_with
 ;;
 
 let compact_for_request_typed
+      ?before_dispatch_authority
       ?exact_execution_guard
       ~base_path
       ~meta
@@ -525,6 +528,7 @@ let compact_for_request_typed
   compact_for_request_typed_with
     ~requested_messages:
       (requested_messages
+         ?before_dispatch_authority
          ?exact_execution_guard
          ~base_path
          meta)

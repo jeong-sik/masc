@@ -163,7 +163,9 @@ val dispatch_post_turn_lifecycle_events
   -> unit
 
 val recover_latest_checkpoint_for_compaction
-  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  :  ?before_dispatch_authority:
+       Keeper_compaction_llm_summarizer.before_dispatch_authority
+  -> ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
   -> base_path:string
   -> base_dir:string
   -> meta:keeper_meta
@@ -172,7 +174,9 @@ val recover_latest_checkpoint_for_compaction
   -> Keeper_post_turn.prepared_commit_outcome
 
 val prepare_compaction
-  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  :  ?before_dispatch_authority:
+       Keeper_compaction_llm_summarizer.before_dispatch_authority
+  -> ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
   -> base_path:string
   -> base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta

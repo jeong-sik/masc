@@ -5,6 +5,8 @@ type compaction_rejection =
   | Exact_attempt_start_failed
   | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
+  | Exact_execution_authority_absent
+  | Exact_execution_authority_rejected
   | Exact_execution_bind_failed
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
@@ -25,6 +27,8 @@ let compaction_rejection_to_tag = function
   | Exact_owner_unregistered_deferred ->
     "exact_owner_unregistered_deferred"
   | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
+  | Exact_execution_authority_absent -> "exact_execution_authority_absent"
+  | Exact_execution_authority_rejected -> "exact_execution_authority_rejected"
   | Exact_execution_bind_failed -> "exact_execution_bind_failed"
   | Exact_flow_already_started -> "exact_flow_already_started"
   | Exact_execution_terminal terminal ->
@@ -61,6 +65,10 @@ let summarization_rejection = function
     Exact_owner_unregistered_deferred
   | Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable ->
     Exact_execution_context_unavailable
+  | Keeper_compaction_llm_summarizer.Exact_execution_authority_absent ->
+    Exact_execution_authority_absent
+  | Keeper_compaction_llm_summarizer.Exact_execution_authority_rejected ->
+    Exact_execution_authority_rejected
   | Keeper_compaction_llm_summarizer.Exact_execution_bind_failed ->
     Exact_execution_bind_failed
   | Keeper_compaction_llm_summarizer.Exact_flow_already_started ->

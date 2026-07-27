@@ -232,12 +232,12 @@ let test_absent_guard_is_typed_at_before_dispatch () =
           context
       in
       check int
-        "the keeper lifecycle permits one provider request"
-        1
+        "missing lifecycle authority prevents provider dispatch"
+        0
         (Exact_fixture.post_count server);
       (match preparation.Compact_policy.decision with
-       | Compact_policy.Prepared Manual -> ()
-       | _ -> fail "the lifecycle-owned compaction was not prepared"))
+       | Compact_policy.Rejected (Manual, Exact_execution_authority_absent) -> ()
+       | _ -> fail "missing lifecycle authority did not reject compaction"))
 ;;
 
 let () =

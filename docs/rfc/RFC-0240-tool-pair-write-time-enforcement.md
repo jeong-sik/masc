@@ -533,6 +533,32 @@ appended block states precisely that, including what is *not* known. It
 completes a record rather than inventing one. The agent then re-observes
 state, which is what a human operator does after an interrupted command.
 
+**Why the content states uncertainty rather than consulting a record.**
+masc has no per-tool-call settlement authority to consult **(verified
+07-28)**. Execution receipts are turn-level and carry no `tool_use_id`
+(`~/.masc/keepers/<name>/execution-receipts/`, schema
+`keeper.execution_receipt.v1`). The decision log does carry
+`tool_use_id` with a `disposition`, but `tool_exec` is emitted *after*
+execution with `duration_ms`/`result_bytes`
+(`lib/keeper/keeper_tools_oas_handler_exec.ml:114-190`), so it is lost
+with the unflushed buffer at exactly the crash being recovered — all six
+unresolved ids from the 2026-07-27 incident are absent from their
+keepers' `decisions.jsonl` while completed ids from the same turns are
+present. Absence therefore cannot be read as "did not run".
+
+OAS does have the authority: `Pipeline_execution_resume`
+(`oas/lib/pipeline/pipeline_execution_resume.ml`) classifies a crashed
+tool turn against the execution journal and replays settled results
+rather than re-executing. masc does not use it — `rg` for
+`Execution_journal|Pipeline_execution_resume|durable_execution` over
+masc `lib/` and `bin/` returns **zero hits**, and receipts record
+`oas_dispatch_mode: single_provider_agent_run` with
+`oas_internal_runtime_disabled: true`. Adopting OAS durable execution
+for keeper turns is the principled successor to §2.4 and would replace
+"may or may not have taken effect" with a journal-backed answer. It is a
+separate project; until then, stating the uncertainty is the accurate
+report, not a shortcut.
+
 **Effect classification (design question, not yet settled).** Whether
 every interrupted call may be auto-closed, or whether effectful tools
 should additionally raise an operator notice, depends on the tool

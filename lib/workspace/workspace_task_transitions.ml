@@ -66,8 +66,9 @@ let transition_task_outcome_r
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
-        (* The workspace FSM owns lifecycle and identity invariants. Completion
-           evidence is submitted for an assigned verifier's terminal verdict. *)
+        (* The workspace FSM owns lifecycle and identity invariants. Strict
+           contracts submit evidence for an assigned verifier's terminal
+           verdict; advisory/default tasks preserve direct owner completion. *)
         let* () =
           (match action, task.task_status with
           | Masc_domain.Claim, Masc_domain.Todo ->
@@ -102,6 +103,7 @@ let transition_task_outcome_r
               ~agent_name
               ~task_id
               ~task_status:task.task_status
+              ~requires_verification:(Masc_domain.task_requires_verification task)
               ~action
               ~now
               ~notes

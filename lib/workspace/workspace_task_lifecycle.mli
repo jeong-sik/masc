@@ -34,6 +34,7 @@ val decide
   -> agent_name:string
   -> task_id:string
   -> task_status:Masc_domain.task_status
+  -> requires_verification:bool
   -> action:Masc_domain.task_action
   -> now:string
   -> notes:string
@@ -43,4 +44,5 @@ val decide
 val valid_next_actions
   :  same_agent:bool
   -> task_status:Masc_domain.task_status
+  -> requires_verification:bool
   -> Masc_domain.task_action list

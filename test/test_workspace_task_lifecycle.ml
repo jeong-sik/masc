@@ -4,13 +4,14 @@ module D = Masc_domain
 let owner = "alice"
 let now = "2026-07-13T00:00:00Z"
 
-let decide ~same_agent ~task_status ~action () =
+let decide ?(requires_verification = true) ~same_agent ~task_status ~action () =
   L.decide
     ~new_verification_id:(fun () -> "vrf-1")
     ~same_agent:(fun _ -> same_agent)
     ~agent_name:owner
     ~task_id:"task-1"
     ~task_status
+    ~requires_verification
     ~action
     ~now
     ~notes:"evidence at /tmp/proof"
@@ -52,6 +53,20 @@ let test_claimed_done_requires_verification_submission () =
   let claimed = D.Claimed { assignee = owner; claimed_at = now } in
   decide ~same_agent:true ~task_status:claimed ~action:D.Done_action ()
   |> expect_error L.Verification_submission_required
+;;
+
+let test_default_done_is_terminal () =
+  match
+    decide
+      ~requires_verification:false
+      ~same_agent:true
+      ~task_status:in_progress
+      ~action:D.Done_action
+      ()
+  with
+  | Ok { new_status = D.Done { assignee; _ }; _ }
+    when String.equal assignee owner -> ()
+  | Ok _ | Error _ -> failwith "advisory/default owner completion must be terminal"
 ;;
 
 let test_verdict_requires_assigned_winner () =
@@ -132,6 +147,7 @@ let test_awaiting_claim_has_one_non_producer_winner () =
 let () =
   test_done_requires_verification_submission ();
   test_claimed_done_requires_verification_submission ();
+  test_default_done_is_terminal ();
   test_verdict_requires_assigned_winner ();
   test_awaiting_claim_has_one_non_producer_winner ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

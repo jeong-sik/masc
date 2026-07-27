@@ -40,7 +40,7 @@ let schemas : Masc_domain.tool_schema list = [
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
-Completion must be submitted for an assigned verifier's approve/reject verdict. \
+Only tasks with contract.strict=true must be submitted for an assigned verifier's approve/reject verdict; advisory/default tasks may complete directly. \
 submit_for_verification creates an asynchronous review state; any non-producer may race to claim it, but only the committed phase-assigned distinct verifier may approve/reject. \
 To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
 Priority 1=urgent, 5=low (default 3). \
@@ -219,7 +219,7 @@ Tip: Look for status='todo' tasks to claim.";
   {
     name = "masc_transition";
     description =
-      "Move a Task through claim, start, submit_for_verification, approve, reject, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Direct done is rejected for active tasks: the assignee submits completion evidence, a distinct verifier claims it, and only that assigned verifier may approve or reject. Supports expected_version CAS.";
+      "Move a Task through claim, start, submit_for_verification, approve, reject, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Direct done is terminal for advisory/default tasks. Tasks with contract.strict=true require the assignee to submit completion evidence, then a distinct phase-assigned verifier may approve or reject. Supports expected_version CAS.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

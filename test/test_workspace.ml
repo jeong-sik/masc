@@ -1174,7 +1174,7 @@ let test_strict_task_done_requires_verification_submission () =
        | Some { task_status = Masc_domain.Claimed _; _ } -> true
        | Some _ | None -> false))
 
-let test_default_task_done_requires_verification_submission () =
+let test_default_task_done_is_terminal () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Default Task" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
@@ -1184,13 +1184,14 @@ let test_default_task_done_requires_verification_submission () =
         ~action:Masc_domain.Done_action
         ~notes:"done" ()
     in
-    Alcotest.(check bool) "default task direct done rejected" true
+    Alcotest.(check bool) "default task direct done succeeds" true
       (match direct with
-       | Error error ->
-         str_contains
-           (Masc_domain.masc_error_to_string error)
-           "must be submitted for verification"
-       | Ok _ -> false))
+       | Ok _ -> true
+       | Error _ -> false);
+    Alcotest.(check bool) "default task is terminal" true
+      (match find_task config "task-001" with
+       | Some { task_status = Masc_domain.Done _; _ } -> true
+       | Some _ | None -> false))
 
 let test_audit_orphan_tasks () =
   with_test_env (fun config ->
@@ -1807,8 +1808,8 @@ let () =
     "verification_guard", [
       Alcotest.test_case "strict task done requires verification submission" `Quick
         test_strict_task_done_requires_verification_submission;
-      Alcotest.test_case "default task done requires verification submission" `Quick
-        test_default_task_done_requires_verification_submission;
+      Alcotest.test_case "default task done is terminal" `Quick
+        test_default_task_done_is_terminal;
     ];
 
     (* === Board Admin Tests === *)

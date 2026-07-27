@@ -357,6 +357,7 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
+  | Deferred_runtime_lane
   | Empty_no_progress
   | Thinking_only_no_progress
 
@@ -369,6 +370,7 @@ let degraded_retry_reason_to_string = function
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
+  | Deferred_runtime_lane -> "deferred_runtime_lane"
   | Empty_no_progress -> "empty_no_progress"
   | Thinking_only_no_progress -> "thinking_only_no_progress"
 
@@ -645,6 +647,7 @@ let default_degraded_rotation_candidates
        Without this, two unavailable runtimes had nowhere to go (#23373,
        incidents 2026-05-21 / 2026-07-06). *)
     candidates_with_catalog
+  | Some Deferred_runtime_lane -> []
   | Some (Hard_quota | Rate_limit)
   | None ->
     default_candidates

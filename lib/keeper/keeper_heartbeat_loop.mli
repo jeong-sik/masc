@@ -216,6 +216,10 @@ val run_keepalive_unified_turn :
   proactive_warmup_elapsed:bool ->
   reactive_wake:bool ->
   shared_context:Agent_sdk.Context.t ->
+  deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+  on_deferred_runtime_consumed:(unit -> unit) ->
+  record_deferred_runtime_lane:
+    (Keeper_turn_driver.deferred_runtime_lane -> unit) ->
   keepalive_turn_outcome
 
 val refresh_work_as_heartbeat :
@@ -259,6 +263,11 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> unit
 
 module For_testing : sig
+  val consume_deferred_runtime_lane_hint :
+    Keeper_turn_driver.deferred_runtime_lane option ref ->
+    Keeper_turn_driver.deferred_runtime_lane ->
+    bool
+
   type transition_projection_gate =
     | Projection_ready_for_cycle
     | Projection_deferred_nonfailure

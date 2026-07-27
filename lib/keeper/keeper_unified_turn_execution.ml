@@ -23,6 +23,15 @@ type retry_loop_input =
   ; attempted_runtimes : string list
   }
 
+type declared_lane_failure =
+  | Provider_context_overflow of Keeper_state_machine.event
+  | Declared_runtime_lane_exhausted
+
+let declared_lane_failure_of_error err =
+  match context_overflow_event_of_error err with
+  | Some event -> Provider_context_overflow event
+  | None -> Declared_runtime_lane_exhausted
+
 let autonomous_yield_request ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
@@ -82,6 +91,8 @@ type ctx =
   ; shared_context : Agent_sdk.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
+  ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
+  ; on_deferred_runtime_consumed : (unit -> unit) option
   }
 
 let run (ctx : ctx)
@@ -117,6 +128,8 @@ let run (ctx : ctx)
       ; event_bus_integrity_error_snapshot = _
       ; tool_completed_count_snapshot = _
       ; attempt = _attempt
+      ; deferred_runtime_lane
+      ; on_deferred_runtime_consumed
       } =
     ctx
   in
@@ -134,6 +147,7 @@ let run (ctx : ctx)
       failure before any stage may fall back, while every typed stage blocks a
       same-run fallback. *)
    let checkpoint_stage_observed = Atomic.make false in
+   let deferred_runtime_lane_ref = ref None in
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
@@ -212,6 +226,12 @@ let run (ctx : ctx)
                       turn_state.degraded_retry_info)
                  ~runtime_rotation_attempts:
                    (List.rev turn_state.runtime_rotation_attempts)
+                 ?deferred_runtime_lane:
+                   (if is_retry then None else deferred_runtime_lane)
+                 ~on_runtime_retry_deferred:
+                   (fun hint -> deferred_runtime_lane_ref := Some hint)
+                 ?on_deferred_runtime_consumed:
+                   (if is_retry then None else on_deferred_runtime_consumed)
                  ~temperature:execution.temperature
                  ~trajectory_acc
                  ~is_retry
@@ -246,30 +266,7 @@ let run (ctx : ctx)
     in
     result, turn_state
   in
-  let record_runtime_rotation_attempt
-        turn_state
-        ~productive_phase_elapsed_ms
-        ?retry_phase_elapsed_ms
-        ~(from_runtime : string)
-        ~(retry : EC.degraded_retry)
-        ~(outcome : Keeper_execution_receipt.runtime_rotation_outcome)
-        (err : Agent_sdk.Error.sdk_error)
-    =
-    let attempt : Keeper_execution_receipt.runtime_rotation_attempt =
-      Keeper_unified_turn_rotation_attempt.build
-        ~recorded_at:(now_iso ())
-        ~productive_phase_elapsed_ms
-        ?retry_phase_elapsed_ms
-        ~from_runtime
-        ~retry
-        ~outcome
-        err
-    in
-    { turn_state with
-      runtime_rotation_attempts = attempt :: turn_state.runtime_rotation_attempts
-    }
-  in
-  let rec retry_loop (input : retry_loop_input) (turn_state : turn_state) =
+  let retry_loop (input : retry_loop_input) (turn_state : turn_state) =
     let { run_meta
         ; execution
         ; run_generation
@@ -279,9 +276,6 @@ let run (ctx : ctx)
         }
       =
       input
-    in
-    let execution_runtime_id =
-      execution.runtime_id
     in
     let mark_terminal_error err =
       match EC.extract_input_required err with
@@ -336,6 +330,12 @@ let run (ctx : ctx)
         meta.name;
       Ok result, turn_state
     | Error err ->
+      let turn_state =
+        match !deferred_runtime_lane_ref with
+        | Some hint ->
+          { turn_state with deferred_runtime_lane = Some hint }
+        | None -> turn_state
+      in
       let checkpoint_observed =
         not
           (Keeper_turn_driver_try_provider.same_run_retry_allowed
@@ -351,138 +351,43 @@ let run (ctx : ctx)
            current OAS contract cannot continue without admitting the input again"
           meta.name
           checkpoint_observed;
-      match
-          ( Keeper_turn_runtime_budget.plan_degraded_retry_step
-            ~base_runtime:(runtime_id_of_meta meta)
-            ~current_runtime_id:execution_runtime_id
-            ~attempted_runtimes
-            ~attempt
-            ~err
-            ~allow_retry:(fun _ -> same_run_retry_has_input_authority)
-            ~publish_cascade_resolution:
-              (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt err ->
-                 Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-                   ~keeper_name:meta.name
-                   ~runtime_id
-                   ~decision
-                   ~reason
-                   ~next_runtime
-                   ~attempt
-                   ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-                   ~error_message:(Some (Agent_sdk.Error.to_string err)))
-            ~emit_runtime_selected:
-              (fun ~runtime_id ~fallback_reason ->
-                 Keeper_metrics.emit_runtime_selected
-                   ~keeper_name:meta.name
-                   ~runtime_id
-                   ~fallback_reason)
-            ~emit_runtime_rotation:
-              (fun ~from_runtime ~to_runtime ~reason ->
-                 Keeper_metrics.emit_runtime_rotation
-                   ~keeper_name:meta.name
-                   ~from_runtime
-                   ~to_runtime
-                   ~reason)
-            ~setup_runtime:
-              (fun runtime_id ->
-                 Keeper_unified_turn_pre_dispatch.build_runtime_execution
-                   ~meta
-                   ~runtime_id)
-          , context_overflow_event_of_error err )
-        with
-        | Keeper_turn_runtime_budget.Degraded_retry_step_setup_failed
-            { retry = degraded_retry; reason = fallback_reason; fail_open_err }, _ ->
-             let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
-               current_turn_phase_elapsed_ms turn_state.retry_phase_started_at
-             in
-             let turn_state =
-               record_runtime_rotation_attempt
-                 turn_state
-                 ~productive_phase_elapsed_ms
-                 ?retry_phase_elapsed_ms
-                 ~from_runtime:execution.runtime_id
-                 ~retry:degraded_retry
-                 ~outcome:
-                   Keeper_execution_receipt.Rotation_setup_failed
-                 fail_open_err
-             in
-             Log.Keeper.warn
-               "%s: recoverable runtime failure in %s suggested \
-                degraded retry to %s (reason=%s), but retry setup \
-                failed: %s"
-               meta.name
-               execution_runtime_id
-               degraded_retry.next_runtime
-               fallback_reason
-               (short_preview
-                  (Agent_sdk.Error.to_string fail_open_err));
-             mark_terminal_error fail_open_err;
-             Error fail_open_err, turn_state
-        | Keeper_turn_runtime_budget.Degraded_retry_step_prepared
-            { retry = degraded_retry; reason = fallback_reason; next = next_execution }, _ ->
-             let next_execution_runtime_id =
-               next_execution.runtime_id
-             in
-             let turn_state =
-               if Option.is_none turn_state.retry_phase_started_at
-               then { turn_state with retry_phase_started_at = Some (Eio.Time.now clock) }
-               else turn_state
-             in
-             let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
-               current_turn_phase_elapsed_ms turn_state.retry_phase_started_at
-             in
-             let turn_state =
-               record_runtime_rotation_attempt
-                 turn_state
-                 ~productive_phase_elapsed_ms
-                 ?retry_phase_elapsed_ms
-                 ~from_runtime:execution.runtime_id
-                 ~retry:degraded_retry
-                 ~outcome:
-                   Keeper_execution_receipt.Rotation_retry_scheduled
-                 err
-             in
-             let turn_state =
-               { turn_state with degraded_retry_info = Some degraded_retry }
-             in
-             (* A rotation retry was scheduled: the runtime failed but the lane
-                stays usable and recovers on the next runtime. This is a
-                recovering, receipted event (Rotation_retry_scheduled above), not
-                a failure that stalled the lane — Info per
-                docs/spec/18-log-severity-taxonomy.md. WARN is reserved for the
-                terminal setup-failed arm above, so WARN tracks failures that did
-                not self-heal instead of narrating every rotation. *)
-             Log.Keeper.info
-               "%s: recoverable runtime failure in %s; rotation \
-               retry on runtime=%s reason=%s max_context=%d \
-                context_budget=%d primary_budget=%d \
-                requested_override=%s: %s"
-               meta.name
-               execution_runtime_id
-               next_execution_runtime_id
-               fallback_reason
-               next_execution.max_context
-               next_execution.max_context_resolution.effective_budget
-               next_execution.max_context_resolution.primary_budget
-               (match
-                  next_execution.max_context_resolution
-                    .requested_override
-                with
-                | Some requested -> string_of_int requested
-                | None -> "none")
-               (short_preview (Agent_sdk.Error.to_string err));
-             Eio.Fiber.yield ();
-             retry_loop
-               { run_meta
-               ; execution = next_execution
-               ; run_generation
-               ; attempt = 1
-               ; is_retry = true
-               ; attempted_runtimes =
-                   next_execution_runtime_id :: attempted_runtimes
-               }
-               turn_state
-        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed, Some overflow_event ->
+      match !deferred_runtime_lane_ref with
+      | Some hint ->
+        let reason =
+          (match
+             Keeper_error_classify.recoverable_runtime_failure_reason
+               hint.failure
+           with
+           | Some reason -> reason
+           | None -> Keeper_error_classify.Deferred_runtime_lane)
+          |> Keeper_error_classify.degraded_retry_reason_to_string
+        in
+        Log.Keeper.info
+          ~keeper_name:meta.name
+          "%s: deferred frozen runtime lane suffix after checkpoint \
+           failed_runtime=%s next_runtime=%s remaining=%d reason=%s"
+          meta.name
+          hint.failed_runtime_id
+          hint.next_runtime_id
+          (List.length hint.later_runtime_ids)
+          reason;
+        mark_terminal_error err;
+        Error err, turn_state
+      | None when Option.is_some deferred_runtime_lane ->
+        Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+          ~keeper_name:meta.name
+          ~runtime_id:execution.runtime_id
+          ~decision:No_degraded_retry
+          ~reason:"frozen_runtime_suffix_exhausted"
+          ~next_runtime:None
+          ~attempt
+          ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+          ~error_message:(Some (Agent_sdk.Error.to_string err));
+        mark_terminal_error err;
+        Error err, turn_state
+      | None ->
+        (match declared_lane_failure_of_error err with
+         | Provider_context_overflow overflow_event ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
@@ -534,18 +439,18 @@ let run (ctx : ctx)
             ~reason:"provider_context_overflow";
           mark_terminal_error err;
           Error err, turn_state
-        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed, None ->
+         | Declared_runtime_lane_exhausted ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
             ~decision:No_degraded_retry
-            ~reason:"terminal_error_no_degraded_retry"
+            ~reason:"declared_runtime_lane_exhausted"
             ~next_runtime:None
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
-          Error err, turn_state
+          Error err, turn_state)
   in
   (* Do not wrap the full keeper turn in a cumulative wall-clock timeout.
      Long voice/OAS turns can keep making stream or tool progress beyond the
@@ -568,3 +473,11 @@ let run (ctx : ctx)
   in
   result, turn_state
 )
+
+module For_testing = struct
+  type nonrec declared_lane_failure = declared_lane_failure =
+    | Provider_context_overflow of Keeper_state_machine.event
+    | Declared_runtime_lane_exhausted
+
+  let declared_lane_failure_of_error = declared_lane_failure_of_error
+end

@@ -86,12 +86,21 @@ let manual_compaction_followup_failure = function
   | Manual_compaction_not_applied _ -> None
 ;;
 
+let rec deferred_runtime_lane = function
+  | Failed { failure; _ } -> failure.Keeper_unified_turn.deferred_runtime_lane
+  | Manual_compaction_applied { followup; _ } -> deferred_runtime_lane followup
+  | Completed _ | Cancelled _ | Skipped _ | Busy _ | Manual_compaction_failed _
+  | Manual_compaction_not_applied _ -> None
+;;
+
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
    turn slot ([Keeper_turn_admission]). The post-failure meta re-reads stay
    inside the slot for the same reason as the chat lane: a concurrent turn
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
       ?exact_execution_guard
+      ?deferred_runtime_lane
+      ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
@@ -108,6 +117,8 @@ let run_keeper_cycle_admitted
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       Keeper_unified_turn.run_keeper_cycle
         ?exact_execution_guard
+        ?deferred_runtime_lane
+        ?on_deferred_runtime_consumed
         ~config:ctx.config
         ~meta:meta_after_triage
         ~publication_recovery_provider:ctx.publication_recovery_provider
@@ -188,6 +199,8 @@ let run_keeper_cycle_admitted
 let run_keeper_cycle_with
       ~run_manual_compaction
       ?exact_execution_guard
+      ?deferred_runtime_lane
+      ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
@@ -242,6 +255,8 @@ let run_keeper_cycle_with
         ~keeper_name:meta_after_triage.name
         (run_keeper_cycle_admitted
            ?exact_execution_guard
+           ?deferred_runtime_lane
+           ?on_deferred_runtime_consumed
            ~ctx
            ~meta_after_triage
            ~stop
@@ -295,6 +310,8 @@ let run_keeper_cycle_with
 
 let run_keeper_cycle
       ?exact_execution_guard
+      ?deferred_runtime_lane
+      ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
@@ -317,6 +334,8 @@ run_keeper_cycle_with
          ~meta
          ())
     ?exact_execution_guard
+    ?deferred_runtime_lane
+    ?on_deferred_runtime_consumed
     ?event_bus
     ?hitl_resolution
     ?continuation_delivery_channel

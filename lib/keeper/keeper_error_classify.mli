@@ -102,6 +102,7 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
+  | Deferred_runtime_lane
   | Empty_no_progress
   | Thinking_only_no_progress
 

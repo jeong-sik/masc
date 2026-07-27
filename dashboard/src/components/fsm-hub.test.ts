@@ -21,7 +21,11 @@ import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
 import { deriveOperationalInsight } from './fsm-hub-invariant-analysis'
 import { flagTooltip, invariantDescription } from './fsm-hub-health-panels'
 import { isTransitionInSegment } from './fsm-hub-timeline-panels'
-import { filterKeeperNames } from './fsm-hub'
+import {
+  executionReceiptLabel,
+  executionReceiptTitle,
+  filterKeeperNames,
+} from './fsm-hub'
 
 function observation(
   overrides: Partial<CompositeObservation> = {},
@@ -91,6 +95,27 @@ function snapshot(
 }
 
 describe('fsm-hub derived state', () => {
+  it('shows queued and applied deferred runtime targets from the receipt SSOT', () => {
+    const execution = {
+      latest_receipt_present: true,
+      outcome: 'receipt_failed',
+      terminal_reason_code: 'provider_error',
+      duration_ms: 1200,
+      runtime: {
+        degraded_retry_applied: false,
+        degraded_retry_runtime: 'runtime.b',
+        fallback_reason: 'deferred_runtime_lane',
+      },
+    } as KeeperCompositeSnapshot['execution']
+
+    expect(executionReceiptLabel(execution)).toContain('retry queued -> runtime.b')
+    expect(executionReceiptTitle(execution)).toContain('retry: queued -> runtime.b')
+
+    if (execution?.runtime) execution.runtime.degraded_retry_applied = true
+    expect(executionReceiptLabel(execution)).toContain('retry applied -> runtime.b')
+    expect(executionReceiptTitle(execution)).toContain('retry: applied -> runtime.b')
+  })
+
   it('skips duplicate observations when tracked fields are unchanged', () => {
     const first = observation()
 

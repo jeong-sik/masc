@@ -55,108 +55,10 @@ struct
   type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
     | Fsync_completed
     | Visible_sync_unconfirmed of string
-  
-  let bind_exact_execution_result
-        ~base_path
-        name
-        ~lease
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-    =
-    Keeper_event_queue_persistence.bind_exact_execution_result
-      ~base_path
-      ~keeper_name:name
-      ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-      ()
-  ;;
-  
-  (* TEL-OK: this facade only forwards the durable transition; the persistence
-     SSOT owns its transition telemetry. *)
-  let release_exact_execution_before_dispatch_result
-        ~base_path
-        name
-        ~lease
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-    =
-    Keeper_event_queue_persistence.release_exact_execution_before_dispatch_result
-      ~base_path
-      ~keeper_name:name
-      ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-      ()
-  ;;
-  
-  let quarantine_exact_execution_result
-        ~base_path
-        name
-        ~lease
-        ~terminal
-    =
-    Keeper_event_queue_persistence.quarantine_exact_execution_result
-      ~base_path
-      ~keeper_name:name
-      ~lease
-      ~terminal
-      ()
-  ;;
-
-  let prepare_exact_source_disposition_result
-        ~base_path
-        name
-        ~lease
-        ~source
-        ~terminal
-        ~semantic
-        ~prepared_at
-    =
-    Keeper_event_queue_persistence.prepare_exact_source_disposition_result
-      ~base_path
-      ~keeper_name:name
-      ~lease
-      ~source
-      ~terminal
-      ~semantic
-      ~prepared_at
-      ()
-  ;;
-
-  let finalize_exact_source_disposition_result
-        ~base_path
-        name
-        ~settled_at
-        ~lease
-        ~disposition_id
-    =
-    Keeper_event_queue_persistence.finalize_exact_source_disposition_result
-      ~base_path
-      ~keeper_name:name
-      ~settled_at
-      ~lease
-      ~disposition_id
-      ~after_commit:(Publish.publish_pending ~base_path name)
-      ()
-  ;;
-  
-  let active_lease_result ~base_path name =
-    match Keeper_registry.get ~base_path name with
-    | None -> Error (Printf.sprintf "keeper not registered: %s" name)
-    | Some _ ->
-      Keeper_event_queue_persistence.active_lease_result
-        ~base_path
-        ~keeper_name:name
-  ;;
+  (* bind / release_before_dispatch / quarantine / prepare / finalize and
+     settle_bound_exact_nonterminal took a lease and had no reachable caller
+     after #25969 moved production to peek/ack; active_lease_result could only
+     ever answer None. Only the binding read below survives. *)
   
   let exact_execution_binding_result ~base_path name =
     Keeper_event_queue_persistence.exact_execution_binding_result
@@ -164,25 +66,4 @@ struct
       ~keeper_name:name
   ;;
 
-  let settle_bound_exact_nonterminal_result
-        ~base_path
-        name
-        ~settled_at
-        ~lease
-        ~binding
-        ~settlement
-    =
-    Keeper_event_queue_persistence.settle_bound_exact_nonterminal_result
-      ~base_path
-      ~keeper_name:name
-      ~settled_at
-      ~lease
-      ~slot_id:binding.slot_id
-      ~call_id:binding.call_id
-      ~plan_fingerprint:binding.plan_fingerprint
-      ~request_body_sha256:binding.request_body_sha256
-      ~settlement
-      ~after_commit:(Publish.publish_pending ~base_path name)
-      ()
-  ;;
 end

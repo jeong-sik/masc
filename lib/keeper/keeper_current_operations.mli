@@ -5,10 +5,6 @@ type source = private
       { revision : int64
       ; stimulus : Keeper_event_queue.stimulus
       }
-  | Event_queue_lease of
-      { revision : int64
-      ; lease : Keeper_event_queue_state.lease
-      }
   | Event_queue_outbox of
       { revision : int64
       ; entry : Keeper_event_queue_state.outbox_entry

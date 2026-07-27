@@ -65,12 +65,27 @@ let with_temp_dir prefix f =
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
+(* [claim_manual_lease] built a lease for the removed exact-execution fence and
+   already had no callers here. *)
 
-(* claim_manual_lease, persisted_checkpoint_source_exn, and
-   settle_terminal_disposition_result used to live here. They existed only to
-   drive the durable exact-execution guard removed above (a claimed lease to
-   bind it to, a checkpoint source and a terminal disposition to settle
-   against), so none of the surviving cases call them. *)
+let persisted_checkpoint_source_exn trace_id =
+  match Keeper_id.Trace_id.of_string trace_id with
+  | Error detail -> Alcotest.failf "checkpoint source trace id failed: %s" detail
+  | Ok trace_id ->
+    (match
+       Keeper_checkpoint_ref.of_persisted
+         ~trace_id
+         ~generation:1
+         ~turn_count:1
+         ~sha256:(String.make 64 'a')
+     with
+     | Ok source -> source
+     | Error _ -> Alcotest.fail "persisted checkpoint source ref failed")
+;;
+
+(* [settle_terminal_disposition_result] drove prepare/finalize of an exact
+   source disposition through a lease. Both entry points went with the lease
+   model, and this helper already had no callers here. *)
 
 let execute_prepared_lane
       ~keeper_name
@@ -907,5 +922,8 @@ let () =
             `Quick
             test_post_success_commit_claim_blocks_reject
         ] )
+      (* The "affinity and non-sharing" group held only cases whose functions
+         #25993 removed; its registrations were left behind and the group is now
+         empty. See #26013. *)
     ]
 ;;

@@ -137,11 +137,13 @@ let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
   page
 ;;
 
+(* A leases term sat between these two. It could not contribute since #25969
+   moved production to peek/ack and left [State.of_yojson] restoring no leases,
+   so demand is decided by pending work and the transition outbox. *)
 let owner_has_durable_demand state =
   not
     (Keeper_event_queue.is_empty
        (Keeper_event_queue_state.pending state))
-  || Keeper_event_queue_state.leases state <> []
   || Keeper_event_queue_state.transition_outbox state <> []
 ;;
 

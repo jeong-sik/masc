@@ -7,8 +7,6 @@
     that per-entry Atomic only after commit.  No coupling to the central
     registry Atomic state primitive. *)
 
-type lease = Keeper_event_queue_persistence.lease
-
 type pending_selection = Keeper_event_queue_persistence.pending_selection =
   { source_revision : int64
   ; kind : Keeper_event_queue_persistence.lease_kind
@@ -124,8 +122,6 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
       ; detail : string
       }
 
-let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
-let lease_kind = Keeper_event_queue_persistence.lease_kind
 
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
@@ -400,61 +396,10 @@ let ack_pending_result ~base_path name ~selection =
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;
+(* claim_when_result / claim_board_result / settle_result / cancel_accepted_result
+   took or produced a lease and became unreachable when #25969 moved production
+   to peek/ack. *)
 
-let claim_when_result ~base_path name ~claimed_at ~ready =
-  match Keeper_registry.get ~base_path name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
-  | Some _ ->
-    Keeper_event_queue_persistence.claim_when_result
-      ~base_path
-      ~keeper_name:name
-      ~claimed_at
-      ~ready
-      ~after_commit:(publish_pending ~base_path name)
-      ()
-;;
-
-let claim_board_result ~base_path name ~claimed_at =
-  match Keeper_registry.get ~base_path name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
-  | Some _ ->
-    Keeper_event_queue_persistence.claim_board_result
-      ~base_path
-      ~keeper_name:name
-      ~claimed_at
-      ~after_commit:(publish_pending ~base_path name)
-      ()
-;;
-
-let settle_result ~base_path name ~settled_at ~lease ~settlement =
-  Keeper_event_queue_persistence.settle_result
-    ~base_path
-    ~keeper_name:name
-    ~settled_at
-    ~lease
-    ~settlement
-    ~after_commit:(publish_pending ~base_path name)
-    ()
-;;
-
-let cancel_accepted_result
-      ~base_path
-      name
-      ~current_owner_nonce
-      ~settled_at
-      ~lease
-      ~cancellation
-  =
-  Keeper_event_queue_persistence.cancel_accepted_result
-    ~base_path
-    ~keeper_name:name
-    ~current_owner_nonce
-    ~settled_at
-    ~lease
-    ~cancellation
-    ~after_commit:(publish_pending ~base_path name)
-    ()
-;;
 
 let cancel_pending_accepted_result
       ~base_path

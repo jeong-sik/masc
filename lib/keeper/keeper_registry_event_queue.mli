@@ -6,8 +6,6 @@
     entry-owned [event_queue : Keeper_event_queue.t Atomic.t].  No central
     registry Atomic is touched. *)
 
-type lease = Keeper_event_queue_persistence.lease
-
 type pending_selection = Keeper_event_queue_persistence.pending_selection =
   { source_revision : int64
   ; kind : Keeper_event_queue_persistence.lease_kind
@@ -166,11 +164,6 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
       ; detail : string
       }
 
-val lease_stimuli : lease -> Keeper_event_queue.stimulus list
-val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
-
-val active_lease_result :
-  base_path:string -> string -> (lease option, string) result
 
 val peek_when_result :
   base_path:string ->
@@ -193,88 +186,10 @@ val ack_pending_result :
 val exact_execution_binding_result :
   base_path:string -> string -> (exact_execution_binding option, string) result
 
-val claim_when_result :
-  base_path:string ->
-  string ->
-  claimed_at:float ->
-  ready:(Keeper_event_queue.stimulus -> bool) ->
-  (lease option, string) result
-
-val claim_board_result :
-  base_path:string -> string -> claimed_at:float -> (lease option, string) result
-
-val settle_result :
-  base_path:string ->
-  string ->
-  settled_at:float ->
-  lease:lease ->
-  settlement:settlement ->
-  (settle_result, string) result
-
-val settle_bound_exact_nonterminal_result :
-  base_path:string ->
-  string ->
-  settled_at:float ->
-  lease:lease ->
-  binding:exact_execution_binding ->
-  settlement:settlement ->
-  (settle_result, string) result
-
-val bind_exact_execution_result :
-  base_path:string ->
-  string ->
-  lease:lease ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  (exact_write_outcome, string) result
-
-val release_exact_execution_before_dispatch_result :
-  base_path:string ->
-  string ->
-  lease:lease ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  (exact_write_outcome, string) result
-
-val quarantine_exact_execution_result :
-  base_path:string ->
-  string ->
-  lease:lease ->
-  terminal:exact_execution_terminal ->
-  (exact_write_outcome, string) result
-
-val prepare_exact_source_disposition_result :
-  base_path:string ->
-  string ->
-  lease:lease ->
-  source:Keeper_checkpoint_ref.t ->
-  terminal:exact_execution_terminal ->
-  semantic:exact_settlement_semantic ->
-  prepared_at:float ->
-  (exact_source_disposition * exact_write_outcome, string) result
-
-val finalize_exact_source_disposition_result :
-  base_path:string ->
-  string ->
-  settled_at:float ->
-  lease:lease ->
-  disposition_id:string ->
-  (settle_result, string) result
-
-val cancel_accepted_result :
-  base_path:string ->
-  string ->
-  current_owner_nonce:int ->
-  settled_at:float ->
-  lease:lease ->
-  cancellation:accepted_cancellation ->
-  (settle_result, string) result
-(** Commit an owner-fenced accepted cancellation and publish the resulting
-    pending projection to the exact live registry lane after durable commit. *)
+(* claim_when_result / claim_board_result / settle_result and the lease-taking
+   exact-execution fence lived here, together with cancel_accepted_result.
+   #25969 moved production to peek/ack and nothing outside tests could obtain a
+   lease afterwards. The pending-side commits below need none. *)
 
 val cancel_pending_accepted_result :
   base_path:string ->

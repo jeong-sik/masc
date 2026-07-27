@@ -253,14 +253,6 @@ type settlement =
       ; successor : Keeper_event_queue.stimulus option
       }
 
-type lease =
-  { lease_id : string
-  ; sequence : int64
-  ; kind : lease_kind
-  ; claimed_at : float option
-  ; stimuli : Keeper_event_queue.stimulus list
-  }
-
 type transition_receipt =
   { transition_id : string
   ; event_id : string
@@ -287,13 +279,10 @@ type transfer_projection_result =
 
 val empty : t
 val revision : t -> int64
-val next_lease_sequence : t -> int64
 val pending : t -> Keeper_event_queue.t
-val leases : t -> lease list
 val last_settlement : t -> transition_receipt option
 val transition_outbox : t -> outbox_entry list
 val accepted_transfer_projections : t -> accepted_transfer list
-val lease_kind : lease -> lease_kind
 
 val with_pending : Keeper_event_queue.t -> t -> t
 val with_revision : int64 -> t -> t
@@ -318,118 +307,7 @@ val ack_pending :
     Unrelated queue revisions and enqueues are allowed; a missing, duplicated,
     or changed selected identity fails closed. *)
 
-val claim_when :
-  claimed_at:float ->
-  ready:(Keeper_event_queue.stimulus -> bool) ->
-  t ->
-  (t * lease option, string) result
-(** Lease the earliest pending stimulus accepted by [ready]. Earlier unready
-    stimuli retain their exact relative position, so one unavailable input
-    cannot block unrelated ready work in the same Keeper lane. A successful
-    claim advances the monotonic lease sequence in the same state. *)
-
-val claim_board : claimed_at:float -> t -> (t * lease option, string) result
-(** Lease every pending board stimulus as one ordered digest. *)
-
-val settle :
-  settled_at:float ->
-  lease:lease ->
-  settlement:settlement ->
-  t ->
-  (t * settle_result, string) result
-(** Atomically project one lease disposition into pure state.  Repeating the
-    same semantic settlement returns [Already_settled]; a different settlement
-    for an already-settled lease is an explicit conflict.
-
-    [Retry_after_observed] and [Context_compaction_retry] retain the exact
-    leased stimuli at the
-    pending FIFO tail so unrelated work in the same lane can proceed before
-    another provider attempt. [No_compaction] is accepted
-    only for a lease containing exactly one typed
-    [Manual_compaction_requested] stimulus; it cannot retire product work whose
-    provider turn failed. Non-finite settlement times are rejected. *)
-
 val exact_execution_binding : t -> exact_execution_binding option
-
-val bind_exact_execution :
-  lease:lease ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  t ->
-  (t, string) result
-(** Bind one exact-output identity before provider dispatch. Repeating the same
-    binding is idempotent; every conflicting identity fails closed. *)
-
-val release_exact_execution_before_dispatch :
-  lease:lease ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  t ->
-  (t, string) result
-(** Remove a dispatch-uncertain binding only after OAS proves zero dispatches. *)
-
-val quarantine_exact_execution :
-  lease:lease ->
-  terminal:exact_execution_terminal ->
-  t ->
-  (t, string) result
-(** Advance a matching dispatch-uncertain binding to a typed terminal
-    quarantine without releasing the lease for replay. *)
-
-val prepare_exact_source_disposition :
-  lease:lease ->
-  source:Keeper_checkpoint_ref.t ->
-  terminal:exact_execution_terminal ->
-  semantic:exact_settlement_semantic ->
-  prepared_at:float ->
-  t ->
-  (t * exact_source_disposition, string) result
-(** Atomically replace a matching dispatch fence or source-less terminal
-    quarantine with one immutable terminal source disposition, after matching
-    the opaque producer proof against the durable binding. Repeating the same
-    stable proof adopts the first durable preparation timestamp. *)
-
-val finalize_exact_source_disposition :
-  settled_at:float ->
-  lease:lease ->
-  disposition_id:string ->
-  t ->
-  (t * settle_result, string) result
-(** Finalize only a validated terminal disposition through [Settle_exact].
-    Its source action is applied exactly once by the canonical receipt
-    transition. *)
-
-val settle_bound_exact_nonterminal :
-  settled_at:float ->
-  lease:lease ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  settlement:settlement ->
-  t ->
-  (t * settle_result, string) result
-(** Settle only the identity-bound nonterminal Ack/retry/floor
-    cases. Exact terminal outcomes require
-    {!prepare_exact_source_disposition} followed by
-    {!finalize_exact_source_disposition}. *)
-
-val cancel_accepted :
-  current_owner_nonce:int ->
-  settled_at:float ->
-  lease:lease ->
-  cancellation:accepted_cancellation ->
-  t ->
-  (t * settle_result, string) result
-(** Terminally settle exactly one leased accepted event when both the durable
-    queue revision and owner generation still match the operator snapshot.
-    Generic {!settle} rejects [Cancel_accepted], so callers cannot bypass this
-    owner-fenced boundary. Replaying the same committed cancellation is
-    idempotent; a different operation is a conflict. *)
 
 val cancel_pending_accepted :
   current_owner_nonce:int ->
@@ -461,15 +339,6 @@ val settle_pending_from_source_terminal :
   (t * settle_result, string) result
 (** Terminally settle one exact pending event only when its closed payload
     exactly matches [source_terminal.source_receipt]. *)
-
-val accepted_cancellation_replay :
-  lease ->
-  accepted_cancellation ->
-  t ->
-  (transition_receipt option, string) result
-(** Return the canonical receipt for an already committed exact cancellation
-    without applying current owner-generation or queue-revision fences. A
-    different terminal settlement for the same lease is an explicit conflict. *)
 
 val accepted_pending_cancellation_replay :
   accepted_cancellation ->
@@ -507,15 +376,6 @@ val replay_transition_receipt : transition_receipt -> t -> (t, string) result
     the same retained receipt is idempotent; a different receipt or a missing
     lease is an explicit conflict. *)
 
-val recover_leases : settled_at:float -> t -> (t, string) result
-(** Requeue ordinary active leases with [Registration_recovery]. Any durable
-    exact-execution binding makes recovery fail closed instead of replaying a
-    provider call. *)
-
-val active_lease : t -> lease option
-(** Oldest unsettled lease, if any.  A restarted lane resumes this lease before
-    claiming new pending work. *)
-
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
 (** Atomically retire a durable outbox entry after an external projector has
     materialized its stable [event_id], retaining only the last receipt for an
@@ -524,8 +384,6 @@ val mark_transition_projected : transition_id:string -> t -> (t, string) result
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
 
-val lease_to_yojson : lease -> Yojson.Safe.t
-val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result

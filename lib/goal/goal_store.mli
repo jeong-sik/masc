@@ -129,6 +129,18 @@ val update_state :
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
+type conditional_update_outcome =
+  | Updated of goal
+  | Unchanged of goal
+
+val update_goal_if :
+  Workspace_utils.config ->
+  goal_id:string ->
+  (goal -> goal option) ->
+  (conditional_update_outcome, string) result
+(** Atomically applies a conditional update under the Goal store lock.
+    [None] returns [Unchanged] without writing the store or bumping its version. *)
+
 val update_goal :
   Workspace_utils.config ->
   goal_id:string ->

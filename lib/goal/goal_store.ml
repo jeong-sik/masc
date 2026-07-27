@@ -306,6 +306,32 @@ let update_state config f =
 let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
 
+type conditional_update_outcome =
+  | Updated of goal
+  | Unchanged of goal
+
+let update_goal_if config ~goal_id (f : goal -> goal option) =
+  let lock_path = goals_path config in
+  Workspace_utils.with_file_lock config lock_path (fun () ->
+      let state = read_state config in
+      match find_goal state.goals goal_id with
+      | None -> Error "goal not found"
+      | Some goal ->
+          (match f goal with
+           | None -> Ok (Unchanged goal)
+           | Some (candidate : goal) ->
+               let now = Masc_domain.now_iso () in
+               let updated_goal = { candidate with updated_at = now } in
+               let next_state =
+                 {
+                   version = state.version + 1;
+                   updated_at = now;
+                   goals = replace_goal state.goals updated_goal;
+                 }
+               in
+               let* () = write_state_result config next_state in
+               Ok (Updated updated_goal)))
+
 let update_goal config ~goal_id f =
   let lock_path = goals_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->

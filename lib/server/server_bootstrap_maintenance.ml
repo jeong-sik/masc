@@ -447,6 +447,41 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Tool_metrics_persist.enqueue r
     | _ -> ());
   Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:(Mcp_server.workspace_config state).base_path;
+  (* Goal-owned approved-task projector. Task transitions only emit the
+     existing durable Task.Approved event; this independent consumer replays
+     it once on startup and incrementally thereafter. Its cursor is
+     process-local and advances only after every cross-SSOT projection succeeds,
+     so a failed pass is retried without adding another durable coordination
+     store. *)
+  let goal_approved_task_projector =
+    Goal_approved_task_projector.create ()
+  in
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "goal_approved_task_projector")
+    (fun () ->
+      let rec loop () =
+        (match Goal_approved_task_projector.run goal_approved_task_projector config with
+         | Ok report ->
+             if report.completed_goal_ids <> []
+             then
+               Log.Server.info
+                 "goal approved-task projector: completed=%d replayed=%d \
+                  approved_tasks=%d last_seq=%d"
+                 (List.length report.completed_goal_ids)
+                 report.replayed_event_count
+                 report.approved_task_count
+                 report.last_seq
+         | Error error ->
+             Log.Server.warn
+               "goal approved-task projector: reconciliation required: %s"
+               (Goal_approved_task_projector.error_to_string error));
+        Eio.Time.sleep
+          clock
+          Env_config_runtime.InternalTimers.janitor_interval_sec;
+        loop ()
+      in
+      loop ());
   (* RFC-0234 scheduled automation runner.  Public schedule tools and the
      dashboard-only approval route only mutate the durable ledger; this loop is
      the production caller that observes due rows and emits at-most-once generic wake signals.  It

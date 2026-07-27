@@ -220,20 +220,6 @@ let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () =
     })
 ;;
 
-let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
-  let path =
-    Filename.concat (Workspace_utils.masc_dir ctx.config) "goal_events.jsonl"
-  in
-  Fs_compat.append_jsonl
-    path
-    (`Assoc
-       [ "ts", `String (Masc_domain.now_iso ())
-       ; "goal_id", `String goal_id
-       ; "event_type", `String event_type
-       ; "payload", payload
-       ])
-;;
-
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
@@ -339,15 +325,11 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
            | Error msg ->
              error_result_typed ~tool_name ~start_time ~code:Internal_error msg
            | Ok updated_goal ->
-             emit_goal_event
-               ctx
+             Goal_event.emit_phase
+               ctx.config
                ~goal_id
-               ~event_type:"goal_phase"
-               ~payload:
-                 (`Assoc
-                    [ "phase", Goal_phase.to_yojson updated_goal.phase
-                    ; "actor", `String ctx.agent_name
-                    ]);
+               ~phase:updated_goal.phase
+               ~actor:ctx.agent_name;
              ok_result
                ~tool_name
                ~start_time

@@ -17,6 +17,7 @@
   masc_config
   masc_log
   masc_workspace
+  masc.activity_graph
   shared_audit
   time_compat
   fs_compat

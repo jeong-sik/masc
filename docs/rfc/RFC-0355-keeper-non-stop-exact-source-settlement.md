@@ -1,5 +1,5 @@
 ---
-rfc: 0354
+rfc: 0355
 title: Keeper non-stop exact-source settlement
 status: Draft
 created: 2026-07-27
@@ -16,7 +16,7 @@ evidence:
   - https://ocaml-multicore.github.io/eio/eio/Eio/Cancel/index.html
 ---
 
-# RFC-0354 - Keeper non-stop exact-source settlement
+# RFC-0355 - Keeper non-stop exact-source settlement
 
 ## 0. Decision
 

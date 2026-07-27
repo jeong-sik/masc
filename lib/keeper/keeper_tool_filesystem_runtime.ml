@@ -1060,6 +1060,69 @@ let check_invariant_sandbox_isolation
          ~sandbox_paths:[ target ])
 ;;
 
+(* Invert the recorded Gate effect back into the write mode that produced
+   it. Only the modes this module can reproduce exactly are accepted; an
+   unrecognised effect yields [None] so a caller replays nothing rather than
+   silently downgrading, say, an approved append into an overwrite. *)
+let fs_write_mode_of_gate_effect_operation raw =
+  let spelled operation =
+    String.equal raw (Keeper_alerting_path.path_effect_operation_to_string operation)
+  in
+  if spelled Keeper_alerting_path.Atomic_replace_entry
+  then Some Overwrite
+  else if spelled Keeper_alerting_path.Append_pinned_resource
+  then Some Append
+  else if spelled Keeper_alerting_path.Patch_then_atomic_replace_entry
+  then Some Patch
+  else None
+;;
+
+(* Rebuild the write arguments from a recorded Gate input. The Gate input
+   carries the resolved target under [requested_target] and the mode inside
+   the effect; the handler reads both from the argument object. Only fields
+   the approval carried are emitted, so a content write cannot gain edit
+   fields. *)
+let replay_args_of_gate_input input =
+  let ( let* ) = Result.bind in
+  match input with
+  | `Assoc fields ->
+    let field name = List.assoc_opt name fields in
+    let* target =
+      match field "requested_target" with
+      | Some (`String target) -> Ok target
+      | Some _ -> Error "approved Gate input has a non-string requested_target"
+      | None -> Error "approved Gate input has no requested_target"
+    in
+    let* mode =
+      match field "effect" with
+      | Some (`Assoc effect_fields) ->
+        (match List.assoc_opt "operation" effect_fields with
+         | Some (`String operation) ->
+           (match fs_write_mode_of_gate_effect_operation operation with
+            | Some mode -> Ok mode
+            | None ->
+              Error ("approved Gate effect is not replayable: " ^ operation))
+         | _ -> Error "approved Gate effect has no operation")
+      | _ -> Error "approved Gate input has no effect"
+    in
+    let carried =
+      List.filter_map
+        (fun name -> Option.map (fun value -> name, value) (field name))
+        [ "content"; "old_string"; "new_string"; "replace_all" ]
+    in
+    Ok
+      (`Assoc
+         (("path", `String target)
+          :: ("mode", `String (fs_write_mode_to_string mode))
+          :: carried))
+  | _ -> Error "approved Gate input is not a JSON object"
+;;
+
+(* The opaque Gate operation identity for every local write this module
+   performs. The Gate never parses it; consumers that must recognise the
+   same effect read it from here instead of repeating the literal. *)
+let gate_operation = "filesystem_write"
+
 let file_write_gate_input
       ~gate_effect
       ~requested_target
@@ -1100,7 +1163,7 @@ let decide_file_write
     ?cycle_grant:gate_grant
     ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
     { keeper_name = meta.name
-    ; operation = "filesystem_write"
+    ; operation = gate_operation
     ; input
     ; base_path = config.Workspace.base_path
     ; causal_context = Option.map (fun current -> current ()) gate_context
@@ -1891,7 +1954,7 @@ let handle_file_write_with_outcome
       Ok
         (Write_deferred
            (Keeper_gate_deferred_payload.create
-              ~operation:"filesystem_write"
+              ~operation:gate_operation
               ~approval_id
               ~reason
               ~context:(`Assoc [ "path", `String target ])

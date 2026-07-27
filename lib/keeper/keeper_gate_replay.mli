@@ -31,6 +31,12 @@ val write_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
 (** Replay the approved write behind [approval_id] exactly once.
 
+    [gate_context] is the same causal-context provider the model-issued write
+    path supplies. A replay whose re-derived input no longer matches its
+    approval falls back to an ordinary Gate request, and a request without
+    causal context cannot be summarized for Auto Judge, which stalls the FIFO
+    drain for every later approval.
+
     Consumption is the durable one-shot grant, so a repeated call after a
     successful replay reports {!Not_applicable} rather than writing twice. *)
 val replay_approved_write :
@@ -39,6 +45,7 @@ val replay_approved_write :
   publication_recovery:Keeper_publication_recovery_availability.turn_context ->
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
   grant:Keeper_gate.cycle_grant ->
   approval_id:string ->
   unit ->

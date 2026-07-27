@@ -57,6 +57,10 @@ type path_effect_operation =
     particular, atomic replacement addresses the lexical directory entry and
     does not follow a symlink in the leaf position. *)
 
+val path_effect_operation_to_string : path_effect_operation -> string
+(** The wire spelling used inside a Gate request. Consumers that must invert
+    a recorded request read the spelling from here instead of repeating it. *)
+
 type path_effect
 (** Typed Gate projection of one confined filesystem operation. The locator is
     the allowed-root capability plus its lexical relative path. Operations on

@@ -9,28 +9,15 @@ let outcome_to_string = function
   | Failed detail -> Printf.sprintf "failed: %s" detail
 ;;
 
-(* The opaque operation identity the filesystem runtime submits to the Gate.
-   Replay only recognizes this one identity; every other approved operation
-   stays with its own producer. *)
-let write_operation = "filesystem_write"
+(* Replay recognizes exactly the identity its producer submits; every other
+   approved operation stays with its own producer. The identity is read from
+   that producer so the literal has one definition. *)
+let write_operation = Keeper_tool_filesystem_runtime.gate_operation
 
-let payload_fields = [ "content"; "old_string"; "new_string"; "replace_all" ]
-
-let write_args_of_gate_input input =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "requested_target" fields with
-     | Some (`String target) ->
-       let carried =
-         List.filter_map
-           (fun name ->
-              Option.map (fun value -> name, value) (List.assoc_opt name fields))
-           payload_fields
-       in
-       Ok (`Assoc (("path", `String target) :: carried))
-     | Some _ -> Error "approved Gate input has a non-string requested_target"
-     | None -> Error "approved Gate input has no requested_target")
-  | _ -> Error "approved Gate input is not a JSON object"
+(* The producer owns both the argument schema and the effect encoding, so it
+   owns the inversion; replay only decides whether to spend the grant. *)
+let write_args_of_gate_input =
+  Keeper_tool_filesystem_runtime.replay_args_of_gate_input
 ;;
 
 let summarize_execution (execution : Keeper_tool_execution.t) =
@@ -51,6 +38,7 @@ let replay_approved_write
           Keeper_publication_recovery_availability.turn_context)
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ?continuation_channel
+      ?gate_context
       ~(grant : Keeper_gate.cycle_grant)
       ~approval_id
       ()
@@ -77,6 +65,7 @@ let replay_approved_write
             ~meta
             ~publication_recovery
             ?continuation_channel
+            ?gate_context
             ~gate_grant:grant
             ~args
             ()

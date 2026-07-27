@@ -1097,6 +1097,94 @@ let test_approve_completion_credits_assignee () =
       Alcotest.(check (list string))
         "approve completion credits assignee" [ test_agent_a ] !recorded))
 
+let test_verifier_approval_completes_single_verified_task_goal () =
+  with_test_env (fun config ->
+    let goal_id = "verified-task-goal" in
+    let created_goal, _ =
+      match
+        Goal_store.upsert_goal config ~id:goal_id ~title:"Verified task goal"
+          ~metric:"verifier_approved_done_tasks" ~target_value:"1"
+          ~phase:Goal_phase.Executing ()
+      with
+      | Ok created -> created
+      | Error e -> Alcotest.failf "goal creation failed: %s" e
+    in
+    Alcotest.(check string) "created goal" goal_id created_goal.id;
+    let _ =
+      Workspace.add_task config ~title:"Verified Goal Task" ~priority:1
+        ~description:""
+    in
+    Workspace_goal_index.link_task_to_goal config ~goal_id ~task_id:"task-001";
+    let _ =
+      Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] ()
+    in
+    let _ =
+      Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001"
+    in
+    let submitted =
+      Workspace.transition_task_r config ~agent_name:test_agent_a
+        ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
+        ~notes:"evidence attached" ()
+    in
+    Alcotest.(check bool) "submit ok" true
+      (match submitted with Ok _ -> true | Error _ -> false);
+    let approved =
+      Workspace.transition_task_r config ~agent_name:admin_keeper_agent
+        ~task_id:"task-001" ~action:Masc_domain.Approve_verification
+        ~configured_llm_verdict:configured_llm_completion_pass ()
+    in
+    Alcotest.(check bool) "approve ok" true
+      (match approved with Ok _ -> true | Error _ -> false);
+    let completed_goal =
+      match Goal_store.get_goal config ~goal_id with
+      | Some goal -> goal
+      | None -> Alcotest.fail "linked goal disappeared"
+    in
+    Alcotest.(check string)
+      "verifier approval completes goal"
+      "completed"
+      (Goal_phase.to_string completed_goal.phase))
+
+let test_direct_done_does_not_complete_verified_task_goal () =
+  with_test_env (fun config ->
+    let goal_id = "direct-done-goal" in
+    let _ =
+      match
+        Goal_store.upsert_goal config ~id:goal_id ~title:"Direct done goal"
+          ~metric:"verifier_approved_done_tasks" ~target_value:"1"
+          ~phase:Goal_phase.Executing ()
+      with
+      | Ok created -> created
+      | Error e -> Alcotest.failf "goal creation failed: %s" e
+    in
+    let _ =
+      Workspace.add_task config ~title:"Direct Done Task" ~priority:1
+        ~description:""
+    in
+    Workspace_goal_index.link_task_to_goal config ~goal_id ~task_id:"task-001";
+    let _ =
+      Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] ()
+    in
+    let _ =
+      Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001"
+    in
+    let done_result =
+      Workspace.transition_task_r config ~agent_name:test_agent_a
+        ~task_id:"task-001" ~action:Masc_domain.Done_action
+        ~configured_llm_verdict:configured_llm_completion_pass ~notes:"done" ()
+    in
+    Alcotest.(check bool) "direct done ok" true
+      (match done_result with Ok _ -> true | Error _ -> false);
+    let executing_goal =
+      match Goal_store.get_goal config ~goal_id with
+      | Some goal -> goal
+      | None -> Alcotest.fail "linked goal disappeared"
+    in
+    Alcotest.(check string)
+      "direct done leaves verifier metric executing"
+      "executing"
+      (Goal_phase.to_string executing_goal.phase))
+
 let test_submit_and_approve_rejects_empty_justification () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Justification Task" ~priority:1 ~description:"" in
@@ -1784,6 +1872,10 @@ let () =
     "done_side_effects", [
       Alcotest.test_case "approve completion credits assignee" `Quick
         test_approve_completion_credits_assignee;
+      Alcotest.test_case "verifier approval completes linked goal" `Quick
+        test_verifier_approval_completes_single_verified_task_goal;
+      Alcotest.test_case "direct done does not complete verifier goal" `Quick
+        test_direct_done_does_not_complete_verified_task_goal;
       Alcotest.test_case "submit and approve rejects empty justification" `Quick
         test_submit_and_approve_rejects_empty_justification;
     ];

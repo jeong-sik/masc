@@ -574,6 +574,59 @@ let transition_task_outcome_r
             Masc_domain.task_status_is_done new_status
             && not (Masc_domain.task_status_is_done task.task_status)
           in
+          (* A verifier-approved task is the event counted by the
+             [verifier_approved_done_tasks] Goal metric. Keep this feedback at
+             the committed task transition: the task outcome remains
+             authoritative even if the separate Goal write fails. The current
+             metric contract intentionally supports the MVP target of one
+             verified task without introducing a second completion ledger. *)
+          (match action, new_status with
+           | Masc_domain.Approve_verification, Masc_domain.Done _
+             when completes_task ->
+             let linked_goal_ids =
+               Workspace_goal_index.read_goal_task_links config
+               |> List.filter_map (fun (goal_id, task_ids) ->
+                 if List.mem task_id task_ids then Some goal_id else None)
+             in
+             List.iter
+               (fun goal_id ->
+                 match Goal_store.get_goal config ~goal_id with
+                 | Some
+                     { Goal_store.phase = Goal_phase.Executing
+                     ; metric = Some "verifier_approved_done_tasks"
+                     ; target_value = Some "1"
+                     ; _
+                     } ->
+                   (match
+                      Goal_store.update_goal config ~goal_id (fun goal ->
+                        { goal with
+                          phase = Goal_phase.Completed
+                        ; last_review_note =
+                            Some
+                              (Printf.sprintf
+                                 "Verifier-approved task %s completed the goal."
+                                 task_id)
+                        })
+                    with
+                    | Ok _ -> ()
+                    | Error e ->
+                      Log.TaskState.warn
+                        "verifier-approved task committed but linked Goal update \
+                         failed (task=%s goal=%s): %s"
+                        task_id
+                        goal_id
+                        e)
+                 | Some _
+                 | None -> ())
+               linked_goal_ids
+           | Masc_domain.Claim, _
+           | Masc_domain.Start, _
+           | Masc_domain.Done_action, _
+           | Masc_domain.Cancel, _
+           | Masc_domain.Release, _
+           | Masc_domain.Submit_for_verification, _
+           | Masc_domain.Reject_verification, _
+           | Masc_domain.Approve_verification, _ -> ());
           let phase_duration_ms () =
             Some
               (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))

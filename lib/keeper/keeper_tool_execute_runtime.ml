@@ -40,6 +40,18 @@ let sandbox_target_label = function
   | Masc_exec.Sandbox_target.Docker { image; _ } -> "docker:" ^ image
 ;;
 
+let confined_docker_execute_is_internal
+      ~sandbox_profile
+      ~network_mode
+      ~sandbox_target
+  =
+  match sandbox_profile, network_mode, sandbox_target with
+  | Docker, Network_none, Masc_exec.Sandbox_target.Docker _ -> true
+  | (Local | Docker), (Network_none | Network_inherit),
+    (Masc_exec.Sandbox_target.Host | Masc_exec.Sandbox_target.Docker _) ->
+    false
+;;
+
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
@@ -68,6 +80,7 @@ module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
   let execute_gate_input = execute_gate_input
+  let confined_docker_execute_is_internal = confined_docker_execute_is_internal
   let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
     let redaction = execute_secret_redaction ~base_path ~keeper_name in
     redact_execute_output redaction ~stdout ~stderr
@@ -165,7 +178,7 @@ let handle_tool_execute_typed
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
-        let sandbox_profile, _sandbox_network_mode =
+        let sandbox_profile, sandbox_network_mode =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
         let local_dispatch_sandbox ?(extra_fields = []) () =
@@ -295,33 +308,11 @@ let handle_tool_execute_typed
           ; continuation_channel
           }
         in
-        (match
-           Keeper_gate.decide
-             ?cycle_grant:gate_grant
-             ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
-             gate_request
-         with
-         | Keeper_gate.Deferred { approval_id; reason } ->
-           Keeper_gate_deferred_payload.create
-             ~operation:"tool_execute"
-             ~approval_id
-             ~reason
-             ~context:(`Assoc typed_context_fields)
-             ()
-           |> Keeper_gate_deferred_payload.to_execution
-         | Keeper_gate.Unavailable reason ->
-           typed_error_json
-             ~extra_fields:
-               [ "error", `String "gate_unavailable"
-               ; "gate_reason"
-               , `String (Keeper_gate.unavailable_reason_to_string reason)
-               ]
-             "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
-         | Keeper_gate.Allow authorization ->
+        let dispatch_authorized authorization_source =
           Log.Keeper.info
             ~keeper_name:meta.name
             "external effect authorized operation=tool_execute source=%s"
-            (Keeper_gate.authorization_source_to_string authorization.source);
+            authorization_source;
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)
           let t0 = Unix.gettimeofday () in
@@ -513,6 +504,39 @@ let handle_tool_execute_typed
             if succeeded
             then Keeper_tool_execution.success payload
             else Keeper_tool_execution.failure payload
+        in
+        if
+          confined_docker_execute_is_internal
+            ~sandbox_profile
+            ~network_mode:sandbox_network_mode
+            ~sandbox_target:dispatch_sandbox
+        then dispatch_authorized "confined_docker_network_none"
+        else (
+          match
+            Keeper_gate.decide
+              ?cycle_grant:gate_grant
+              ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
+              gate_request
+          with
+          | Keeper_gate.Deferred { approval_id; reason } ->
+            Keeper_gate_deferred_payload.create
+              ~operation:"tool_execute"
+              ~approval_id
+              ~reason
+              ~context:(`Assoc typed_context_fields)
+              ()
+            |> Keeper_gate_deferred_payload.to_execution
+          | Keeper_gate.Unavailable reason ->
+            typed_error_json
+              ~extra_fields:
+                [ "error", `String "gate_unavailable"
+                ; "gate_reason"
+                , `String (Keeper_gate.unavailable_reason_to_string reason)
+                ]
+              "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
+          | Keeper_gate.Allow authorization ->
+            dispatch_authorized
+              (Keeper_gate.authorization_source_to_string authorization.source)
         )))
 
 let handle_tool_execute_with_outcome

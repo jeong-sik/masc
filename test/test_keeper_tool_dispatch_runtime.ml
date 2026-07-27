@@ -2,6 +2,7 @@ open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KTE = Masc.Keeper_tool_execution
+module KTER = Masc.Keeper_tool_execute_runtime
 module KES = Masc.Keeper_tool_shared_runtime
 module KTD = Masc.Keeper_tool_descriptor
 module Workspace = Masc.Workspace
@@ -2279,6 +2280,45 @@ let test_manual_gate_defers_tool_execute_before_process () =
         Yojson.Safe.Util.(data |> member "gate" |> member "decision" |> to_string);
       check bool "Manual Gate starts no process" false (Sys.file_exists marker))
 
+let test_only_network_none_docker_execute_is_internal () =
+  let module Profile = Keeper_types_profile_sandbox in
+  let module Target = Masc_exec.Sandbox_target in
+  let runner
+        ~on_stdout_chunk:_
+        ~on_stderr_chunk:_
+        ~stdin_content:_
+        ~argv:_
+        ~env:_
+        ~cwd:_
+    =
+    Unix.WEXITED 0, "", ""
+  in
+  let docker = Target.docker ~image:"test-image" ~runner () in
+  let host = Target.host () in
+  let internal sandbox_profile network_mode sandbox_target =
+    KTER.For_testing.confined_docker_execute_is_internal
+      ~sandbox_profile
+      ~network_mode
+      ~sandbox_target
+  in
+  check bool
+    "network-none Docker dispatch is internal"
+    true
+    (internal Profile.Docker Profile.Network_none docker);
+  check bool
+    "network-inherit Docker dispatch still uses Gate"
+    false
+    (internal Profile.Docker Profile.Network_inherit docker);
+  check bool
+    "Docker profile local fallback still uses Gate"
+    false
+    (internal Profile.Docker Profile.Network_none host);
+  check bool
+    "Local dispatch still uses Gate"
+    false
+    (internal Profile.Local Profile.Network_inherit host)
+;;
+
 let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
   with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -3160,6 +3200,8 @@ let () =
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "Manual Gate defers tool_execute before process" `Quick
         test_manual_gate_defers_tool_execute_before_process;
+      test_case "only network-none Docker execute is internal" `Quick
+        test_only_network_none_docker_execute_is_internal;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "OAS handler threads Eio context to keeper dispatch" `Quick

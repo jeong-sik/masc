@@ -38,6 +38,11 @@ module For_testing : sig
     sandbox_profile:string ->
     sandbox_target:string ->
     Yojson.Safe.t
+  val confined_docker_execute_is_internal :
+    sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
+    sandbox_target:Masc_exec.Sandbox_target.t ->
+    bool
   val redact_execute_output :
     base_path:string ->
     keeper_name:string ->

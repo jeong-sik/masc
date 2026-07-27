@@ -9,6 +9,12 @@ type lease_kind =
   | Single
   | Board_batch
 
+type pending_selection =
+  { source_revision : int64
+  ; kind : lease_kind
+  ; stimuli : Keeper_event_queue.stimulus list
+  }
+
 type requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
@@ -291,6 +297,16 @@ val lease_kind : lease -> lease_kind
 
 val with_pending : Keeper_event_queue.t -> t -> t
 val with_revision : int64 -> t -> t
+
+val peek_when :
+  ready:(Keeper_event_queue.stimulus -> bool) ->
+  t ->
+  pending_selection option
+
+val ack_pending :
+  selection:pending_selection ->
+  t ->
+  (t, string) result
 
 val claim_when :
   claimed_at:float ->

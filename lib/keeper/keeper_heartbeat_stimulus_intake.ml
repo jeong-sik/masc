@@ -95,7 +95,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
-  claimed_lease : Keeper_registry_event_queue.lease option;
+  pending_selection : Keeper_registry_event_queue.pending_selection option;
   event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -327,21 +327,15 @@ let heartbeat_event_intake
      payload-family priority hierarchy. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
-  let claim_new () =
-    Keeper_registry_event_queue.claim_when_result
+  let select_pending () =
+    Keeper_registry_event_queue.peek_when_result
       ~base_path
       keeper_name
-      ~claimed_at:(Time_compat.now ())
       ~ready:(stimulus_ready_for_intake ~base_path)
   in
-  let claimed_lease =
-    match Keeper_registry_event_queue.active_lease_result ~base_path keeper_name with
-    | Error _ as error -> error
-    | Ok (Some _ as lease) -> Ok lease
-    | Ok None -> claim_new ()
-  in
-  let queued_observations, consumed_stimuli, claimed_lease, event_queue_claim_error =
-    match claimed_lease with
+  let pending_selection = select_pending () in
+  let queued_observations, consumed_stimuli, pending_selection, event_queue_claim_error =
+    match pending_selection with
     | Error message ->
       Log.Keeper.error
         "turn entry: event queue claim failed keeper=%s: %s"
@@ -349,10 +343,10 @@ let heartbeat_event_intake
         message;
       [], [], None, Some message
     | Ok None -> [], [], None, None
-    | Ok (Some lease) ->
-      let stimuli = Keeper_registry_event_queue.lease_stimuli lease in
+    | Ok (Some selection) ->
+      let stimuli = selection.Keeper_registry_event_queue.stimuli in
       let observations =
-        match Keeper_registry_event_queue.lease_kind lease, stimuli with
+        match selection.kind, stimuli with
         | Keeper_event_queue_persistence.Board_batch, batch ->
           consume_board_stimulus_batch ~meta_after_triage batch
         | Keeper_event_queue_persistence.Single, stimuli ->
@@ -360,7 +354,7 @@ let heartbeat_event_intake
             (consume_single_heartbeat_stimulus ~ctx ~meta_after_triage)
             stimuli
       in
-      observations, stimuli, Some lease, None
+      observations, stimuli, Some selection, None
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in
@@ -387,7 +381,7 @@ let heartbeat_event_intake
   { pending_board_events
   ; consumed_stimulus_count
   ; consumed_stimuli
-  ; claimed_lease
+  ; pending_selection
   ; event_queue_claim_error
   ; event_queue_triggers
   }

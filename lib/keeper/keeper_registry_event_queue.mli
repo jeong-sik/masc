@@ -8,6 +8,13 @@
 
 type lease = Keeper_event_queue_persistence.lease
 
+type pending_selection = Keeper_event_queue_persistence.pending_selection =
+  { source_revision : int64
+  ; kind : Keeper_event_queue_persistence.lease_kind
+  ; stimuli : Keeper_event_queue.stimulus list
+  }
+
+
 type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
@@ -164,6 +171,18 @@ val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
 
 val active_lease_result :
   base_path:string -> string -> (lease option, string) result
+
+val peek_when_result :
+  base_path:string ->
+  string ->
+  ready:(Keeper_event_queue.stimulus -> bool) ->
+  (pending_selection option, string) result
+
+val ack_pending_result :
+  base_path:string ->
+  string ->
+  selection:pending_selection ->
+  (unit, string) result
 
 val exact_execution_binding_result :
   base_path:string -> string -> (exact_execution_binding option, string) result

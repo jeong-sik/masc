@@ -665,7 +665,8 @@ let rec spawn_claimed_auto_judge_entry_with
        let reason =
          "Auto Judge worker start was cancelled: " ^ Printexc.to_string exn
        in
-       ignore (fail_before_worker ~reason);
+       (match fail_before_worker ~reason with
+        | Ok _ | Error _ -> ());
        raise exn
      | exn ->
        let reason =
@@ -749,7 +750,7 @@ and retry_auto_judge_entry
          "Auto Judge retry was cancelled before exact attempt binding: "
          ^ Printexc.to_string exn
        in
-       ignore (reblock reason);
+       let _reblocked_reason = reblock reason in
        raise exn
      | exn ->
        let reason =
@@ -1223,7 +1224,7 @@ let defer request reason =
             | None -> Judge_requested))
       | Human_requested | Auto_judge_unavailable _ | Mode_state_invalid _ -> reason
     in
-    let persist_mode_state_invalid detail =
+    let persist_pre_worker_block ~reason_code detail =
       match
         Keeper_approval_queue.get_pending_entry_for_workspace
           ~base_path:request.base_path
@@ -1233,11 +1234,7 @@ let defer request reason =
       | Ok None -> Ok ()
       | Ok (Some entry) ->
         (match
-           mark_pre_worker_unavailable
-             entry
-             ~reason_code:
-               Keeper_approval_queue.Summary_pre_worker_mode_state_invalid
-             ~operator_detail:detail
+           mark_pre_worker_unavailable entry ~reason_code ~operator_detail:detail
          with
          | Ok _ -> Ok ()
          | Error (Keeper_approval_queue.Exact_attempt_storage_error error) ->
@@ -1252,21 +1249,36 @@ let defer request reason =
              ();
            Log.Keeper.warn
              ~keeper_name:request.keeper_name
-             "Auto Judge mode-state block observation superseded approval=%s reason=%s"
+             "Auto Judge pre-worker block observation superseded approval=%s \
+              reason_code=%s reason=%s"
              approval_id
+             (Keeper_approval_queue
+              .summary_attempt_pre_worker_unavailable_code_to_string
+                reason_code)
              (Keeper_approval_queue.exact_attempt_error_to_string
                 (Keeper_approval_queue.Exact_attempt_rejected rejection));
            Ok ())
     in
     (match reason with
      | Mode_state_invalid detail ->
-       (match persist_mode_state_invalid detail with
+       (match
+          persist_pre_worker_block
+            ~reason_code:
+              Keeper_approval_queue.Summary_pre_worker_mode_state_invalid
+            detail
+        with
         | Ok () -> Deferred { approval_id; reason }
         | Error error -> Unavailable (Queue_storage_unavailable error))
-     | Human_requested
-     | Judge_requested
-     | Auto_judge_unavailable _ ->
-       Deferred { approval_id; reason })
+     | Auto_judge_unavailable detail ->
+       (match
+          persist_pre_worker_block
+            ~reason_code:
+              Keeper_approval_queue.Summary_pre_worker_auto_judge_unavailable
+            detail
+        with
+        | Ok () -> Deferred { approval_id; reason }
+        | Error error -> Unavailable (Queue_storage_unavailable error))
+     | Human_requested | Judge_requested -> Deferred { approval_id; reason })
 ;;
 
 let observe_exact_rule_store_degraded request error =

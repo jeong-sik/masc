@@ -1031,19 +1031,31 @@ let test_darwin_feature_level_precedes_fcntl () =
     | Some offset -> offset
     | None -> failf "capability exact read stub does not contain %S" needle
   in
-  let darwin_level = offset_of "_DARWIN_C_SOURCE" in
+  (* Anchored on the whole guarded block rather than on the bare macro name.
+     The first occurrence of "_DARWIN_C_SOURCE" in the stub is the guard's own
+     !defined(...) test, not the #define under it, so deleting the #define line
+     — the exact #25734 regression #25745 repaired — left both of the previous
+     orderings satisfied and this case green while no macOS checkout could
+     compile fs_compat. No CI runner is macOS (every runs-on in .github is
+     ubuntu-latest except release.yml's continue-on-error macos-14 matrix
+     entry), so nothing else would have caught it. Matching the block proves in
+     one needle that the definition exists, sits inside the __APPLE__ guard,
+     and is closed; offset_of fails the case when it does not. *)
+  let darwin_level_block =
+    String.concat
+      "\n"
+      [ "#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)"
+      ; "#define _DARWIN_C_SOURCE"
+      ; "#endif"
+      ]
+  in
+  let darwin_level = offset_of darwin_level_block in
   let fcntl_include = offset_of "#include <fcntl.h>" in
   check
     bool
-    "Darwin feature level is raised before <fcntl.h>"
+    "the Apple-guarded Darwin feature level is raised before <fcntl.h>"
     true
-    (darwin_level < fcntl_include);
-  (* Raised under an __APPLE__ guard so other platforms keep their own level. *)
-  check
-    bool
-    "the Darwin level is guarded to Apple"
-    true
-    (offset_of "defined(__APPLE__)" < darwin_level)
+    (darwin_level < fcntl_include)
 ;;
 
 let () =

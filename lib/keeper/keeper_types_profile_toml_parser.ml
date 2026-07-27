@@ -186,8 +186,6 @@ let canonical_keeper_toml_key_names =
   ; "always_allow"
   ]
 
-let loader_level_keeper_toml_key_names = [ "base" ]
-
 let () =
   assert (
     List.sort String.compare canonical_keeper_toml_key_names
@@ -198,8 +196,7 @@ let () =
     assert on the key list without mocking the Log subsystem. *)
 let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
   let known =
-    (canonical_keeper_toml_key_names @ loader_level_keeper_toml_key_names)
-    |> List.map (fun k -> "keeper." ^ k)
+    canonical_keeper_toml_key_names |> List.map (fun k -> "keeper." ^ k)
   in
   let oas_env_prefix = oas_env_key_prefix in
   let oas_env_prefix_len = String.length oas_env_prefix in

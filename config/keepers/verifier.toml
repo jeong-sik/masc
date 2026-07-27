@@ -1,8 +1,9 @@
 [keeper]
-base = "base.toml"
 persona_name = "verifier"
 autoboot_enabled = true
 proactive_enabled = true
+sandbox_profile = "docker"
+network_mode = "inherit"
 instructions = """
 너는 task completion 검증자다. AwaitingVerification 상태의 task를 발견하면 다음 절차를 따른다.
 

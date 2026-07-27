@@ -21,10 +21,12 @@ root — they are install-time seed sources, not runtime config.
 ```
 presets/<preset>/
   manifest.txt                 # SSOT file list (seed-team.sh + install.sh read it)
-  keepers/base.toml            # loader template, autoboot_enabled = false
-  keepers/<name>.toml          # one per keeper, autoboot_enabled = true
+  keepers/<name>.toml          # one per keeper, self-contained, autoboot_enabled = true
   personas/<name>/profile.json # persona for each keeper
 ```
+
+Each keeper TOML is self-contained: every field the keeper gets is written in its
+own file. There is no shared defaults file and no cross-file inheritance.
 
 `manifest.txt` is the single source of truth for which files a preset ships.
 `seed-team.sh` copies them from the local repo/image; `install.sh --team` fetches
@@ -37,7 +39,14 @@ A conventional software team: `tech_lead`, `backend`, `frontend`, `qa`. The tech
 lead breaks requirements into tasks and reviews PRs; backend and frontend
 implement; QA verifies. All four run on `ollama_cloud.deepseek-v4-flash`.
 
-`keepers/base.toml` sets `sandbox_profile = "local"` (not `"docker"`) so the
-demo boots cleanly when the server itself runs inside a container — see the
-comment in that file for the Docker-in-Docker rationale and the host-native
-override.
+All four keeper TOMLs set `sandbox_profile = "local"` (not `"docker"`).
+
+WORKAROUND: the quick-start install can run the MASC server itself inside a
+Docker container. With `sandbox_profile = "docker"` each keeper Execute would
+spawn a nested container (Docker-in-Docker), which needs a mounted host docker
+socket and fails closed on a plain `docker compose up`. The classic-team demo
+keepers collaborate over the board/tasks/chat and do not require
+container-isolated shell execution to show the dashboard working.
+Root fix: when running the server natively on a host (not in a container),
+override to `sandbox_profile = "docker"` per keeper for real Execute isolation,
+or mount `/var/run/docker.sock` into the server container and switch back.

@@ -102,7 +102,6 @@ val profile_defaults_of_toml :
   (keeper_profile_defaults, string) result
 val parsed_field_key_names : string list
 val canonical_keeper_toml_key_names : string list
-val loader_level_keeper_toml_key_names : string list
 val detect_unknown_keeper_toml_keys :
   Keeper_toml_loader.toml_doc -> string list
 val unknown_keeper_toml_warning_key_limit : int

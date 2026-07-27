@@ -1,4 +1,3 @@
-keepers/base.toml
 keepers/tech_lead.toml
 keepers/backend.toml
 keepers/frontend.toml

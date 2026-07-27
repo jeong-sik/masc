@@ -309,7 +309,13 @@ let report_pending_read_drop ~reason ~path ~detail =
 
 let exact_request_context_version = 1
 
-let pending_entry_to_yojson (entry : pending_approval) =
+let pending_entry_to_yojson
+      ?(include_request_context = true)
+      (entry : pending_approval)
+  =
+  let request_context =
+    if include_request_context then entry.request_context else None
+  in
   `Assoc
     [ "id", `String entry.id
     ; "keeper_name", `String entry.keeper_name
@@ -320,11 +326,11 @@ let pending_entry_to_yojson (entry : pending_approval) =
     ; "requested_at", `Float entry.requested_at
     ; "turn_id", Json_util.int_opt_to_json entry.turn_id
     ; ( "request_context"
-      , match entry.request_context with
+      , match request_context with
         | Some context -> context
         | None -> `Null )
     ; ( "request_context_version"
-      , match entry.request_context with
+      , match request_context with
         | Some _ -> `Int exact_request_context_version
         | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
@@ -347,9 +353,19 @@ let approval_decision_to_yojson = function
     `Assoc [ "kind", `String "edit"; "input", input ]
 ;;
 
+(* [request_context] is the Auto Judge / HITL summary input: the whole Keeper
+   turn context (history_messages, system prompts, dynamic_context) captured at
+   request time. Its only reader is Hitl_summary_worker, which runs while the
+   entry is still pending. A delivery is already resolved, so the context is
+   dead weight there — and it dominated the store: 71 deliveries held ~30MB of
+   duplicated context against 19 bytes of decision each.
+
+   Dropping it on the delivery wire shape stays decode-compatible: the reader
+   treats [request_context] as optional and keys the version field off its
+   presence, so existing snapshots still load and re-save smaller. *)
 let persisted_delivery_to_yojson delivery =
   `Assoc
-    [ "entry", pending_entry_to_yojson delivery.entry
+    [ "entry", pending_entry_to_yojson ~include_request_context:false delivery.entry
     ; "decision", approval_decision_to_yojson delivery.decision
     ; "source", `String (decision_source_to_string delivery.source)
     ; "remember_rule", `Bool delivery.remember_rule
@@ -368,7 +384,9 @@ let map_values_for_base ~base_path map project =
 let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
   let pending_entries =
     map_values_for_base ~base_path pending_map Fun.id
-    |> List.map pending_entry_to_yojson
+    (* Wrapped rather than passed bare: [pending_entry_to_yojson] now leads with
+       an optional argument, which OCaml only erases at application. *)
+    |> List.map (fun entry -> pending_entry_to_yojson entry)
   in
   let delivery_entries =
     map_values_for_base ~base_path delivery_map (fun delivery -> delivery.entry)

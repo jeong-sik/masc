@@ -34,6 +34,7 @@ import { describe, expect, it } from 'vitest'
 const BACKEND_EMITTED: Record<string, string> = {
   'approval:pending': '../lib/keeper/keeper_approval_queue.ml',
   'approval:resolved': '../lib/keeper/keeper_approval_queue.ml',
+  'approval:summary_updated': '../lib/keeper/keeper_approval_queue.ml',
   execution_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   runtime_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
   keeper_chat_appended: '../lib/keeper/keeper_chat_broadcast.ml',
@@ -186,4 +187,33 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
       expect(source).toContain(`"${eventType}"`)
     })
   }
+
+  // Reverse direction, scoped to the approval:* class. The interim scope note
+  // at the top of this file excludes "backend emits a type the FE never
+  // handles", and that exclusion is exactly how approval:summary_updated
+  // shipped unrouted: the constant existed in schemas/sse.ts, the payload had
+  // schema coverage, and nothing bound it to a refresh — so Auto Judge
+  // verdicts settled invisibly until the 120-180s periodic sweep. Full-surface
+  // reverse parity remains the closed-sum keystone's job; this pins the one
+  // class the HITL queue's liveness depends on.
+  const backendApprovalEvents = [
+    ...new Set(
+      readFileSync(resolve(process.cwd(), '../lib/keeper/keeper_approval_queue.ml'), 'utf8')
+        .matchAll(/"(approval:[a-z_]+)"/g),
+    ),
+  ].map(match => match[1])
+
+  it('parses a non-empty backend approval:* inventory', () => {
+    // Positive control: a rename or regex drift that matches nothing must fail
+    // loud here rather than vacuously pass the assertion below.
+    expect(backendApprovalEvents).toContain('approval:pending')
+  })
+
+  it('routes every backend-emitted approval:* event on the FE', () => {
+    const unrouted = backendApprovalEvents.filter(t => !feRouted.has(t))
+    expect(
+      unrouted,
+      `backend emits these approval events but sse-store.ts never routes them, so the HITL queue will not refresh on them: ${unrouted.join(', ')}`,
+    ).toEqual([])
+  })
 })

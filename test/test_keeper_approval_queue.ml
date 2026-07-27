@@ -752,6 +752,78 @@ let test_different_owners_claim_in_parallel () =
          (Gate.For_testing.claim_auto_judge entry_a2))
 ;;
 
+let test_delivery_wire_shape_drops_request_context () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-delivery-context" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       (* Stands in for the production capture, which is the whole outer turn
+          (history_messages + system prompts). Padded so a regression that
+          re-inlines it into the delivery shows up in the byte assertion below,
+          not only in the shape assertions. *)
+       let bulky_history =
+         List.init 64 (fun i ->
+           `String (Printf.sprintf "outer turn message %d %s" i (String.make 256 'x')))
+       in
+       let request_context =
+         `Assoc
+           [ ( "initial"
+             , `Assoc
+                 [ "history_messages", `List bulky_history
+                 ; "base_system_prompt", `String (String.make 512 'b')
+                 ] )
+           ; "completed_tool_calls", `List []
+           ]
+       in
+       let context_bytes = String.length (Yojson.Safe.to_string request_context) in
+       let id =
+         submit_with_context
+           ~turn_id:7
+           ~request_context
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "document" ])
+           ()
+       in
+       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let open Yojson.Safe.Util in
+       let delivery_entry =
+         read_pending_snapshot ~base_path
+         |> member "deliveries"
+         |> to_list
+         |> List.map (fun delivery -> delivery |> member "entry")
+         |> List.find_opt (fun entry ->
+           String.equal (entry |> member "id" |> to_string) id)
+       in
+       (match delivery_entry with
+        | None -> Alcotest.fail "approved request did not persist a delivery"
+        | Some delivery_entry ->
+          Alcotest.check yojson
+            "delivery drops the summary-only request context"
+            `Null
+            (delivery_entry |> member "request_context");
+          Alcotest.check yojson
+            "delivery drops the context version marker"
+            `Null
+            (delivery_entry |> member "request_context_version"));
+       let snapshot_bytes = String.length (read_pending_snapshot_bytes ~base_path) in
+       Alcotest.(check bool)
+         (Printf.sprintf
+            "resolved snapshot (%d bytes) stays under the dropped context (%d bytes)"
+            snapshot_bytes
+            context_bytes)
+         true
+         (snapshot_bytes < context_bytes);
+       (* The trimmed delivery shape must still load: the reader keys the
+          version field off request_context presence, so absent is legal. *)
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path))
+;;
+
 let test_resolution_is_durable_and_origin_scoped () =
   let base_path = temp_dir () in
   let keeper_name = "queue-origin" in
@@ -3008,6 +3080,10 @@ let () =
             "non-approved resolution payload is delivered"
             `Quick
             test_nonapproved_resolution_payload_is_delivered
+        ; Alcotest.test_case
+            "delivery wire shape drops the request context"
+            `Quick
+            test_delivery_wire_shape_drops_request_context
         ] )
     ]
 ;;

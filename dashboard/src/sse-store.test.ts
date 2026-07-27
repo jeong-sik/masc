@@ -261,6 +261,23 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshGate).toHaveBeenCalledWith({ force: true })
   })
 
+  it('routes an approval:summary_updated SSE event to the Gate refresh (Auto Judge verdict contract)', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateRefresh(refreshGate)
+
+    // The Auto Judge verdict lands on this event, not on approval:resolved: a
+    // `require_human` judgment settles the summary while the row stays pending,
+    // so resolution never fires. Without this route the queue kept rendering
+    // "generating summary" until the 120-180s periodic sweep even though the
+    // judge had settled in ~2s.
+    sseStore.routeServerPushEvent({ type: 'approval:summary_updated' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshGate).toHaveBeenCalledWith({ force: true })
+  })
+
   it('hydrates the canonical project_snapshot SSE event without an HTTP fetch', async () => {
     const { sseStore, sse } = await loadSseStore()
     const cleanup = sseStore.setupSSEReaction()

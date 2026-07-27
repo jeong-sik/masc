@@ -637,6 +637,36 @@ function decodeCompactionReinjectionObservation(
   }
 }
 
+function decodeCompactionOutcome(raw: unknown): KeeperCompactionOutcome | null | undefined {
+  if (raw === null) return null
+  const value = asString(raw)
+  switch (value) {
+    case 'checkpoint_committed':
+    case 'retry_without_checkpoint':
+    case 'lifecycle_cleanup_failed_without_checkpoint':
+      return value
+    case undefined:
+    default:
+      return undefined
+  }
+}
+
+function compactionOutcomeContractIsValid(
+  outcome: KeeperCompactionOutcome | null,
+  evidence: KeeperCompactionExactEvidence | null,
+  failureCause: string | null,
+): boolean {
+  switch (outcome) {
+    case null:
+      return evidence === null && failureCause === null
+    case 'checkpoint_committed':
+      return evidence !== null && failureCause === null
+    case 'retry_without_checkpoint':
+    case 'lifecycle_cleanup_failed_without_checkpoint':
+      return evidence === null && Boolean(failureCause?.trim())
+  }
+}
+
 function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
@@ -649,23 +679,18 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
   const runtimeId = asNullableString(raw.runtime_id)
   const compactionSource = asNullableString(raw.compaction_source)
   const exactEvidence = decodeCompactionExactEvidence(raw.exact_evidence)
-  const compactionOutcome = asNullableString(raw.compaction_outcome)
-  const failureCause = asNullableString(raw.failure_cause)
+  const compactionOutcome = decodeCompactionOutcome(raw.compaction_outcome)
+  const failureCause =
+    raw.failure_cause === null ? null : asString(raw.failure_cause)
   const reinjectionObservation =
     decodeCompactionReinjectionObservation(raw.reinjection_observation)
-  if (exactEvidence === undefined || reinjectionObservation === undefined) return null
   if (
-    compactionOutcome !== null
-    && compactionOutcome !== 'checkpoint_committed'
-    && compactionOutcome !== 'retry_without_checkpoint'
-    && compactionOutcome !== 'lifecycle_cleanup_failed_without_checkpoint'
+    exactEvidence === undefined
+    || compactionOutcome === undefined
+    || failureCause === undefined
+    || reinjectionObservation === undefined
   ) return null
-  if (compactionOutcome === 'checkpoint_committed' && exactEvidence === null) return null
-  if (
-    (compactionOutcome === 'retry_without_checkpoint'
-      || compactionOutcome === 'lifecycle_cleanup_failed_without_checkpoint')
-    && !failureCause?.trim()
-  ) return null
+  if (!compactionOutcomeContractIsValid(compactionOutcome, exactEvidence, failureCause)) return null
   return {
     id,
     keeper,

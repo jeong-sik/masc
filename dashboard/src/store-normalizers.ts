@@ -10,8 +10,10 @@ import { normalizeStopCause } from './lib/stop-cause'
 import { parseAgentStatus } from './lib/agent-status'
 import {
   DASHBOARD_BLOCKED_KEEPER_REASONS,
+  DASHBOARD_KEEPER_EXECUTION_TRUTHS,
   DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS,
   DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
+  DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES,
 } from './types/dashboard-execution'
 import type {
   Agent, Task, TaskGateEvaluation, Message, ServerStatus,
@@ -23,7 +25,9 @@ import type {
   DashboardConfigResolutionItem,
   DashboardBlockedKeeperFact,
   DashboardBlockedKeeperReason,
+  DashboardKeeperExecutionTruth,
   DashboardKeeperFleetOperatorAction,
+  DashboardKeeperNonExecutableCause,
   DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
   DashboardBlockerClassObject,
@@ -711,6 +715,10 @@ const dashboardBlockedKeeperReasonSet: ReadonlySet<string> =
   new Set(DASHBOARD_BLOCKED_KEEPER_REASONS)
 const dashboardKeeperFleetOperatorActionSet: ReadonlySet<string> =
   new Set(DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS)
+const dashboardKeeperExecutionTruthSet: ReadonlySet<string> =
+  new Set(DASHBOARD_KEEPER_EXECUTION_TRUTHS)
+const dashboardKeeperNonExecutableCauseSet: ReadonlySet<string> =
+  new Set(DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES)
 
 function currentKeeperFleetFactInvalid(): DashboardBlockedKeeperFact {
   return {
@@ -720,6 +728,8 @@ function currentKeeperFleetFactInvalid(): DashboardBlockedKeeperFact {
     task_status: null,
     reason: 'current_fact_invalid',
     action: 'inspect_current_keeper_fact',
+    execution_truth: 'unknown',
+    non_executable_cause: 'current_fact_invalid',
     operator_action_type: null,
     operator_tool_name: null,
     operator_action_confirm_required: null,
@@ -739,16 +749,25 @@ function normalizeDashboardBlockedKeeperFact(raw: unknown): DashboardBlockedKeep
   const taskStatus = raw.task_status == null ? null : nonEmptyString(raw.task_status)
   const rawReason = nonEmptyString(raw.reason)
   const rawAction = nonEmptyString(raw.action)
+  const rawExecutionTruth = nonEmptyString(raw.execution_truth)
+  const rawNonExecutableCause = nonEmptyString(raw.non_executable_cause)
   if (
     rawReason == null
     || !dashboardBlockedKeeperReasonSet.has(rawReason)
     || rawAction == null
     || !dashboardKeeperFleetOperatorActionSet.has(rawAction)
+    || rawExecutionTruth == null
+    || !dashboardKeeperExecutionTruthSet.has(rawExecutionTruth)
+    || rawNonExecutableCause == null
+    || !dashboardKeeperNonExecutableCauseSet.has(rawNonExecutableCause)
   ) {
     return null
   }
   const reason = rawReason as DashboardBlockedKeeperReason
   const action = rawAction as DashboardKeeperFleetOperatorAction
+  const executionTruth = rawExecutionTruth as DashboardKeeperExecutionTruth
+  const nonExecutableCause =
+    rawNonExecutableCause as DashboardKeeperNonExecutableCause
   if (keeperName == null && !(reason === 'no_keeper_binding' && agentName != null)) {
     return null
   }
@@ -759,6 +778,8 @@ function normalizeDashboardBlockedKeeperFact(raw: unknown): DashboardBlockedKeep
     task_status: taskStatus,
     reason,
     action,
+    execution_truth: executionTruth,
+    non_executable_cause: nonExecutableCause,
     operator_action_type:
       raw.operator_action_type == null ? null : nonEmptyString(raw.operator_action_type),
     operator_tool_name:

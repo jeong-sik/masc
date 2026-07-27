@@ -301,6 +301,8 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       `keeper=${presentation.keeper}`,
       presentation.taskId ? `task=${presentation.taskId}` : null,
       `reason=${presentation.reason}`,
+      `execution_truth=${presentation.executionTruth}`,
+      `non_executable_cause=${presentation.nonExecutableCause}`,
       // One chip speaks for the whole fleet, so it has to say when it is
       // showing the most severe of several blocked keepers rather than the
       // only one.

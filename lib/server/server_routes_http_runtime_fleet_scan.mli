@@ -101,11 +101,28 @@ val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
 type keeper_execution_owner = {
   keeper_name : string;
   truth : Keeper_activation_readiness.owner_execution_truth;
+  non_executable_cause : keeper_non_executable_cause option;
 }
+and keeper_non_executable_cause =
+  | Cause_owner_absent_from_snapshot
+  | Cause_owner_unregistered
+  | Cause_no_keeper_binding
+  | Cause_fiber_dead
+  | Cause_lane_exited
+  | Cause_completion_settled
+  | Cause_autoboot_disabled
+  | Cause_proactive_disabled
+  | Cause_lifecycle_denied
+  | Cause_runtime_terminal
+  | Cause_shutdown_fenced
+  | Cause_metadata_unavailable
+  | Cause_runtime_not_live
 type keeper_execution_snapshot = {
   owners : keeper_execution_owner list;
   executable_names : string list;
 }
+val keeper_non_executable_cause_to_wire :
+  keeper_non_executable_cause -> string
 val empty_keeper_execution_snapshot : keeper_execution_snapshot
 val keeper_execution_snapshot :
   Workspace.config -> keeper_execution_snapshot

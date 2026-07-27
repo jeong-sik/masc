@@ -257,9 +257,38 @@ export const DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS = [
   'inspect_current_keeper_fact',
 ] as const
 
+export const DASHBOARD_KEEPER_EXECUTION_TRUTHS = [
+  'executable',
+  'recoverable',
+  'retained_disabled',
+  'paused_dead',
+  'shutdown_fenced',
+  'unknown',
+] as const
+
+export const DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES = [
+  'owner_absent_from_snapshot',
+  'owner_unregistered',
+  'no_keeper_binding',
+  'fiber_dead',
+  'lane_exited',
+  'completion_settled',
+  'autoboot_disabled',
+  'proactive_disabled',
+  'lifecycle_denied',
+  'runtime_terminal',
+  'shutdown_fenced',
+  'metadata_unavailable',
+  'runtime_not_live',
+  'current_fact_invalid',
+] as const
+
 export type DashboardBlockedKeeperReason = typeof DASHBOARD_BLOCKED_KEEPER_REASONS[number]
 export type DashboardKeeperFleetOperatorAction =
   typeof DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS[number]
+export type DashboardKeeperExecutionTruth = typeof DASHBOARD_KEEPER_EXECUTION_TRUTHS[number]
+export type DashboardKeeperNonExecutableCause =
+  typeof DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES[number]
 
 export interface DashboardBlockedKeeperFact {
   keeper_name: string | null
@@ -268,6 +297,8 @@ export interface DashboardBlockedKeeperFact {
   task_status: string | null
   reason: DashboardBlockedKeeperReason
   action: DashboardKeeperFleetOperatorAction
+  execution_truth: DashboardKeeperExecutionTruth
+  non_executable_cause: DashboardKeeperNonExecutableCause
   operator_action_type: string | null
   operator_tool_name: string | null
   operator_action_confirm_required: boolean | null

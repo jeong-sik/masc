@@ -31,6 +31,8 @@ export interface KeeperFleetOperatorFactPresentation
   extends KeeperFleetOperatorActionPresentation {
   keeper: string
   reason: DashboardBlockedKeeperFact['reason']
+  executionTruth: DashboardBlockedKeeperFact['execution_truth']
+  nonExecutableCause: DashboardBlockedKeeperFact['non_executable_cause']
   // The row collapses to keeper_name ?? agent_name, which is null for
   // no_keeper_binding facts — so two unbound tasks of one agent rendered as
   // indistinguishable rows while the instruction said to reassign "the task".
@@ -174,6 +176,8 @@ export const CURRENT_KEEPER_FLEET_FACT_INVALID: DashboardBlockedKeeperFact = {
   task_status: null,
   reason: 'current_fact_invalid',
   action: 'inspect_current_keeper_fact',
+  execution_truth: 'unknown',
+  non_executable_cause: 'current_fact_invalid',
   operator_action_type: null,
   operator_tool_name: null,
   operator_action_confirm_required: null,
@@ -218,6 +222,8 @@ export function keeperFleetOperatorFactPresentation(
           : presentation.tone,
     keeper: fact.keeper_name ?? fact.agent_name ?? 'Keeper fleet',
     reason: fact.reason,
+    executionTruth: fact.execution_truth,
+    nonExecutableCause: fact.non_executable_cause,
     taskId: fact.task_id,
   }
 }

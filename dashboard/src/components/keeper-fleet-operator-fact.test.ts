@@ -17,6 +17,8 @@ function fact(
     task_status: null,
     reason: 'durable_paused_autoboot_enabled',
     action: 'resume_or_leave_paused',
+    execution_truth: 'paused_dead',
+    non_executable_cause: 'lifecycle_denied',
     operator_action_type: null,
     operator_tool_name: null,
     operator_action_confirm_required: null,
@@ -33,6 +35,8 @@ describe('keeper fleet operator fact presentation', () => {
     expect(presentation.Icon).toBe(CirclePause)
     expect(presentation.action).toContain('resume selected paused keepers')
     expect(presentation.reason).toBe('durable_paused_autoboot_enabled')
+    expect(presentation.executionTruth).toBe('paused_dead')
+    expect(presentation.nonExecutableCause).toBe('lifecycle_denied')
   })
 
   it('fails a missing current fleet fact closed', () => {
@@ -114,12 +118,16 @@ describe('keeper fleet operator fact presentation', () => {
         task_id: 'task-7f3a',
         reason: 'no_keeper_binding',
         action: 'create_keeper_or_reassign_task',
+        execution_truth: 'unknown',
+        non_executable_cause: 'no_keeper_binding',
       }),
       'degraded',
     )
 
     expect(presentation.keeper).toBe('dreamer')
     expect(presentation.taskId).toBe('task-7f3a')
+    expect(presentation.executionTruth).toBe('unknown')
+    expect(presentation.nonExecutableCause).toBe('no_keeper_binding')
   })
 
   it('reports absent task identity as null rather than a placeholder', () => {

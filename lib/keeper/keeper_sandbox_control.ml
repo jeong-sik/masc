@@ -312,6 +312,13 @@ let playground_repo_entry_json ~(source : string) ~(repo_name : string)
 let cached_playground_repo_entries playground_abs =
   let cache_path = Filename.concat playground_abs ".playground_state.json" in
   try
+    (* An absent cache is the normal state before the first observation writes
+       one, so it is not an observation failure; only a present-but-unreadable
+       cache is. The existence check stays inside the handler because
+       [Fs_compat.file_exists] can itself raise [Sys_error], and that raise is a
+       genuine failure. [observed_is_dir] draws the same line for directories. *)
+    if not (Fs_compat.file_exists cache_path) then []
+    else
     match Yojson.Safe.from_file cache_path with
     | `Assoc _ as json -> (
         match Json_util.assoc_member_opt "repos" json with

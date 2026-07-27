@@ -40,12 +40,23 @@ let record_outcome outcome =
    captured, so its absence is stated in the bundle rather than refusing to
    judge — a refusal parks the entry at the head of the FIFO drain and stalls
    every later approval (#25966). *)
+type request_context_availability =
+  | Context_captured
+  | Context_not_captured
+
+let request_context_availability_to_string = function
+  | Context_captured -> "captured"
+  | Context_not_captured -> "not_captured"
+;;
+
+let request_context_availability_of_entry (entry : pending_approval) =
+  match entry.request_context with
+  | Some _ -> Context_captured
+  | None -> Context_not_captured
+;;
+
 let build_context_bundle ~(entry : pending_approval) =
-  let request_context_availability =
-    match entry.request_context with
-    | Some _ -> "present"
-    | None -> "absent"
-  in
+  let availability = request_context_availability_of_entry entry in
   `Assoc
     [ "keeper_name", `String entry.keeper_name
     ; "tool_name", `String entry.tool_name
@@ -54,7 +65,8 @@ let build_context_bundle ~(entry : pending_approval) =
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
     ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
     ; "input", entry.input
-    ; "request_context_availability", `String request_context_availability
+    ; ( "request_context_availability"
+      , `String (request_context_availability_to_string availability) )
     ; ( "request_context"
       , Option.value entry.request_context ~default:`Null )
     ]

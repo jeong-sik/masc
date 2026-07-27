@@ -296,7 +296,7 @@ let test_context_bundle_is_exact () =
     (bundle |> member "request_context");
   check yojson
     "context availability is stated"
-    (`String "present")
+    (`String "captured")
     (bundle |> member "request_context_availability");
   check yojson "no derived classification" `Null (bundle |> member "classification")
 ;;
@@ -324,7 +324,7 @@ let test_context_bundle_without_request_context () =
     (bundle |> member "tool_name");
   check yojson
     "absence is stated, not inferred"
-    (`String "absent")
+    (`String "not_captured")
     (bundle |> member "request_context_availability");
   check yojson "context is null" `Null (bundle |> member "request_context")
 ;;

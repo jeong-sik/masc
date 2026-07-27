@@ -688,6 +688,93 @@ let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta) fields =
      | Some _ -> None)
   | _ -> None
 
+type activation_write_error = { code : string; detail : string }
+
+let activation_bool_fields fields =
+  [ "autoboot_enabled"; "proactive_enabled" ]
+  |> List.filter_map (fun key ->
+       match List.assoc_opt key fields with
+       | Some (`Bool value) -> Some (key, value)
+       | Some _ | None -> None)
+
+let persist_activation_fields ~(config : Workspace.config) ~name fields =
+  match activation_bool_fields fields with
+  | [] -> Ok ()
+  | bool_fields ->
+    (match
+       Keeper_types_profile.keeper_toml_path_opt_for_base_path
+         ~base_path:config.base_path
+         name
+     with
+     | None ->
+       Error
+         { code = "keeper_toml_missing"
+         ; detail = Printf.sprintf "keeper %S has no declarative TOML" name
+         }
+     | Some path ->
+       (match Keeper_toml_loader.update_keeper_toml_bool_fields ~path bool_fields with
+        | Ok () -> Ok ()
+        | Error detail ->
+          Error
+            { code = "keeper_toml_write_failed"
+            ; detail = Printf.sprintf "%s: %s" path detail
+            }))
+
+let prevalidate_config_update
+      (config : Workspace.config)
+      (old : Keeper_meta_contract.keeper_meta)
+      (parsed : Keeper_turn_up_args.parsed_args)
+  =
+  match old.latched_reason with
+  | Some Keeper_latched_reason.Dead_tombstone ->
+    Error "keeper identity is terminal; create a fresh Keeper"
+  | Some
+      ( Keeper_latched_reason.Operator_paused _
+      | Keeper_latched_reason.Transcript_corruption_reset_required )
+  | None ->
+    (match
+       Keeper_turn_up_update.resolve_active_goal_ids
+         config
+         parsed
+         old.active_goal_ids
+     with
+     | Error _ as error -> error
+     | Ok _ ->
+       Keeper_turn_up_args.validate_sandbox_settings
+         ~allowed_paths:
+           (Option.value ~default:old.allowed_paths parsed.allowed_paths_opt))
+
+let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event =
+  Dashboard_cache.invalidate (keeper_config_cache_key config name);
+  Dashboard_cache.invalidate (keeper_composite_cache_key config name);
+  Dashboard_cache.invalidate_prefix
+    (Printf.sprintf "dashboard:fleet-composite:%s" config.base_path);
+  match runtime_event with
+  | Some event -> refresh_keeper_execution_surfaces ~config ~name event
+  | None -> invalidate_keeper_execution_surfaces ~config ()
+
+let respond_config_sync_error
+      ~request
+      reqd
+      ~status
+      ~name
+      ~config_applied
+      ~code
+      ~detail
+      ()
+  =
+  Http.Response.json_value
+    ~status
+    ~request
+    (`Assoc
+      [ "ok", `Bool false
+      ; "keeper", `String name
+      ; "config_applied", `Bool config_applied
+      ; "runtime_sync", `Bool false
+      ; "error", `Assoc [ "code", `String code; "detail", `String detail ]
+      ])
+    reqd
+
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
@@ -773,6 +860,25 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                            respond_error reqd
                              (Keeper_types_profile.tool_result_body result)
                        | Ok parsed ->
+                           (match prevalidate_config_update config meta0 parsed with
+                            | Error detail -> respond_error reqd detail
+                            | Ok () ->
+                           (match persist_activation_fields ~config ~name fields with
+                            | Error { code; detail } ->
+                              Log.Keeper.error
+                                "dashboard keeper activation config rejected keeper=%s: %s"
+                                name
+                                detail;
+                              respond_config_sync_error
+                                ~request:req
+                                reqd
+                                ~status:`Conflict
+                                ~name
+                                ~config_applied:false
+                                ~code
+                                ~detail
+                                ()
+                            | Ok () ->
                            (* Dashboard edits are user-initiated and win for the
                               fields they touch; update_keeper now persists via
                               a CAS merge ([heartbeat_fields_from_disk]) so a
@@ -787,18 +893,30 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                            in
                            if not
                                 (Keeper_types_profile.tool_result_success result)
-                           then
-                             respond_error reqd
-                               (Keeper_types_profile.tool_result_body result)
+                           then (
+                             let detail = Keeper_types_profile.tool_result_body result in
+                             Log.Keeper.error
+                               "dashboard keeper config runtime sync failed keeper=%s: %s"
+                               name
+                               detail;
+                             invalidate_config_surfaces ~config ~name None;
+                             respond_config_sync_error
+                               ~request:req
+                               reqd
+                               ~status:`Service_unavailable
+                               ~name
+                               ~config_applied:true
+                               ~code:"keeper_runtime_sync_failed"
+                               ~detail
+                               ())
                            else (
-                             Dashboard_cache.invalidate
-                               (keeper_config_cache_key config name);
+                             invalidate_config_surfaces ~config ~name (Some "restarted");
                              let (_st, json) =
                                Dashboard_http_keeper.keeper_config_json config
                                  name
                              in
                              Http.Response.json_value ~compress:true
-                               ~request:req json reqd))))
+                               ~request:req json reqd))))))
            | None ->
                respond_error reqd "request body must be a JSON object"
          with Yojson.Json_error e ->

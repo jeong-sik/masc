@@ -60,10 +60,10 @@ let toml_string_list (doc : toml_doc) (key : string) : string list =
 (** Update or insert a key under a [table] in a TOML file.
     Preserves comments, formatting, and other fields.
     Returns [Ok new_content] or [Error reason]. *)
-let update_field_in_content
+let update_rendered_field_in_content
       ~(table : string)
       ~(key : string)
-      ~(value : string)
+      ~(rendered_value : string)
       (content : string)
   : (string, string) result
   =
@@ -82,7 +82,7 @@ let update_field_in_content
        if !insert_before_next_table && String.length trimmed > 0 && trimmed.[0] = '['
        then (
          (* New table started — insert the field before it *)
-         result_lines := Printf.sprintf "%s = \"%s\"" key value :: !result_lines;
+         result_lines := Printf.sprintf "%s = %s" key rendered_value :: !result_lines;
          found := true;
          insert_before_next_table := false);
        if String.trim trimmed = table_header
@@ -95,7 +95,7 @@ let update_field_in_content
          in_target_table := false;
          if !insert_before_next_table && not !found
          then (
-           result_lines := Printf.sprintf "%s = \"%s\"" key value :: !result_lines;
+           result_lines := Printf.sprintf "%s = %s" key rendered_value :: !result_lines;
            found := true;
            insert_before_next_table := false);
          result_lines := line :: !result_lines)
@@ -105,7 +105,7 @@ let update_field_in_content
          && ((String.starts_with trimmed ~prefix:key_prefix)
              || (String.starts_with trimmed ~prefix:key_prefix_eq))
        then (
-         result_lines := Printf.sprintf "%s = \"%s\"" key value :: !result_lines;
+         result_lines := Printf.sprintf "%s = %s" key rendered_value :: !result_lines;
          found := true;
          insert_before_next_table := false)
        else result_lines := line :: !result_lines)
@@ -113,11 +113,19 @@ let update_field_in_content
   (* If we were in the target table at EOF and didn't find the key, append *)
   if (not !found) && !insert_before_next_table
   then (
-    result_lines := Printf.sprintf "%s = \"%s\"" key value :: !result_lines;
+    result_lines := Printf.sprintf "%s = %s" key rendered_value :: !result_lines;
     found := true);
   if not !found
   then Error (Printf.sprintf "table [%s] not found in TOML" table)
   else Ok (String.concat "\n" (List.rev !result_lines))
+;;
+
+let update_field_in_content ~table ~key ~value content =
+  update_rendered_field_in_content
+    ~table
+    ~key
+    ~rendered_value:(Printf.sprintf "\"%s\"" value)
+    content
 ;;
 
 (** Atomic file write: write to temp file then rename.
@@ -149,6 +157,29 @@ let update_keeper_toml_field ~(path : string) ~(key : string) ~(value : string)
   | Ok content ->
     (match update_field_in_content ~table:"keeper" ~key ~value content with
      | Error e -> Error e
+     | Ok updated -> atomic_write_file ~path updated)
+;;
+
+let update_keeper_toml_bool_fields ~(path : string) fields
+  : (unit, string) result
+  =
+  match Safe_ops.read_file_safe path with
+  | Error e -> Error (Printf.sprintf "cannot read %s: %s" path e)
+  | Ok content ->
+    let updated =
+      List.fold_left
+        (fun result (key, value) ->
+          Result.bind result (fun current ->
+            update_rendered_field_in_content
+              ~table:"keeper"
+              ~key
+              ~rendered_value:(string_of_bool value)
+              current))
+        (Ok content)
+        fields
+    in
+    (match updated with
+     | Error _ as error -> error
      | Ok updated -> atomic_write_file ~path updated)
 ;;
 

@@ -77,6 +77,9 @@ type exact_execution_guard =
       attempt_observation ->
       (exact_write_outcome, string) result
   }
+
+type before_dispatch_authority =
+  attempt_observation -> (unit, string) result
 (** Explicit lease-scoped exact-execution persistence authority.
     [before_dispatch] must return [Fsync_completed] before POST; this means
     payload and parent [Unix.fsync] returned and supports process-restart
@@ -96,11 +99,8 @@ type summarization_failure =
   | Exact_attempt_start_failed
   | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_absent
-        (** No exact-execution guard was supplied. The current optional boundary
-            reports this from OAS's before-dispatch callback, after affine replay
-            detection and before POST. It does not diagnose why the caller lacked
-            a guard. *)
+  | Exact_execution_authority_absent
+  | Exact_execution_authority_rejected
   | Exact_execution_bind_failed
         (** A guard was supplied and its before-dispatch bind did not reach
             Fsync_completed. A persistence fault, unrelated to lease ownership. *)
@@ -139,6 +139,7 @@ val execute_prepared_lane
   :  keeper_name:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
+  -> ?before_dispatch_authority:before_dispatch_authority
   -> ?exact_execution_guard:exact_execution_guard
   -> prepared_lane
   -> (completed_plan, summarization_failure) result
@@ -148,7 +149,8 @@ val execute_prepared_lane
     execute-once, advancement, and provenance. [plan_of_json] alone enforces the
     MASC-owned compaction schema and domain rules after success. *)
 val make
-  :  ?exact_execution_guard:exact_execution_guard
+  :  ?before_dispatch_authority:before_dispatch_authority
+  -> ?exact_execution_guard:exact_execution_guard
   -> base_path:string
   -> keeper_name:string
   -> unit

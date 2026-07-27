@@ -1,5 +1,20 @@
 (** Compaction_trigger — explicit context compaction request origin. *)
 
+type serving_input_capacity =
+  | Boundary_unknown of
+      { input_tokens : int
+      ; accepted_through : int
+      ; rejected_from : int option
+      }
+  | Input_rejected of
+      { input_tokens : int
+      ; accepted_through : int
+      ; rejected_from : int
+      }
+(** Provider-neutral token-capacity evidence produced by OAS admission. The
+    measured request and accepted/rejected boundary remain distinct from both
+    a model context-window declaration and serialized request-body bytes. *)
+
 type t =
   | Provider_overflow of { limit_tokens : int option }
       (** Typed provider context-window overflow. [limit_tokens] is the
@@ -19,6 +34,11 @@ type t =
           refusal says nothing about the provider's token window, so folding it
           into [limit_tokens] would have to report [None] — an unknown limit for
           a limit that is known exactly. *)
+  | Serving_input_capacity of serving_input_capacity
+      (** OAS exhausted admission candidates and returned a measured token
+          boundary. Only [Boundary_unknown] and [Input_rejected] can construct
+          this trigger; unavailable or stale measurements are not compaction
+          requests. *)
   | Manual
 
 (** Closed label set for Otel_metric_store / SSE [trigger] label.
@@ -52,6 +72,21 @@ type decode_error =
   | Request_body_within_capacity of
       { actual_bytes : int
       ; limit_bytes : int
+      }
+  | Missing_serving_capacity_field of string
+  | Invalid_serving_capacity_field of string
+  | Serving_capacity_not_over_limit of
+      { input_tokens : int
+      ; accepted_through : int
+      }
+  | Invalid_boundary_unknown of
+      { input_tokens : int
+      ; rejected_from : int
+      }
+  | Invalid_input_rejected_boundary of
+      { input_tokens : int
+      ; accepted_through : int
+      ; rejected_from : int option
       }
 
 val decode_error_to_string : decode_error -> string

@@ -27,46 +27,138 @@ let init_keeper_tool_registry () =
     (Masc.Unified_tool_registry.register_all ();
      Masc.Unified_tool_registry.enforce_visible_tag_coverage ())
 
-(** Test fixture parser for current-schema [keeper_meta] JSON. It supplies a
-    trace id and the first positive generation when a focused fixture omits
-    them, then delegates to the production parser. *)
+(** Test fixture parser for current-schema [keeper_meta] JSON. Focused fixtures
+    may specify only the fields relevant to a test; every omitted persisted
+    field is completed from one deterministic current-schema object before the
+    production parser sees it. *)
 let meta_of_json_fixture (json : Yojson.Safe.t) =
-  let augment fields =
-    let has key = List.exists (fun (k, _) -> String.equal k key) fields in
-    let add_if_missing key v fs =
-      if has key then fs else fs @ [ (key, v) ]
-    in
-    let sanitize_trace_fragment s =
-      let buf = Buffer.create (String.length s) in
-      String.iter
-        (fun c ->
-          match c with
-          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' ->
-              Buffer.add_char buf c
-          | _ -> Buffer.add_char buf '-')
-        s;
-      match String.trim (Buffer.contents buf) with
-      | "" -> "fixture"
-      | fragment -> fragment
-    in
-    let trace_id =
+  let fixture_config_keys =
+    [ "allowed_paths"
+    ; "mention_targets"
+    ; "proactive_enabled"
+    ; "always_allow"
+    ; "autoboot_enabled"
+    ; "telemetry_feedback_enabled"
+    ; "telemetry_feedback_window_hours"
+    ]
+  in
+  let mem_key key keys = List.exists (String.equal key) keys in
+  let sanitize_trace_fragment s =
+    let buf = Buffer.create (String.length s) in
+    String.iter
+      (fun c ->
+        match c with
+        | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' ->
+            Buffer.add_char buf c
+        | _ -> Buffer.add_char buf '-')
+      s;
+    match String.trim (Buffer.contents buf) with
+    | "" -> "fixture"
+    | fragment -> fragment
+  in
+  let json', fixture_json =
+    match json with
+    | `Assoc fields ->
+      let module Schema = Masc.Keeper_meta_json_current_schema in
       let name =
         match List.assoc_opt "name" fields with
-        | Some (`String s) -> s
+        | Some (`String value) -> value
         | _ -> "fixture"
       in
-      let candidate = "trace-" ^ sanitize_trace_fragment name in
-      if String.length candidate <= 64 then candidate
-      else String.sub candidate 0 64
-    in
-    fields
-    |> add_if_missing "trace_id" (`String trace_id)
-    |> add_if_missing "generation" (`Int 1)
-  in
-  let json' =
-    match json with
-    | `Assoc fields -> `Assoc (augment fields)
-    | other -> other
+      let trace_id =
+        let candidate = "trace-" ^ sanitize_trace_fragment name in
+        if String.length candidate <= 64 then candidate
+        else String.sub candidate 0 64
+      in
+      let default_value = function
+        | Schema.Name -> `String name
+        | Schema.Agent_name ->
+          `String (Masc.Keeper_identity.keeper_agent_name name)
+        | Schema.Persona -> `Null
+        | Schema.Instructions -> `String ""
+        | Schema.Trace_id -> `String trace_id
+        | Schema.Multimodal_policy ->
+          `String
+            (Masc.Keeper_types_profile.multimodal_policy_to_string
+               Masc.Keeper_types_profile.default_multimodal_policy)
+        | Schema.Trace_history -> `List []
+        | Schema.Generation -> `Int 1
+        | Schema.Last_handoff_ts -> `Float 0.
+        | Schema.Created_at | Schema.Updated_at ->
+          `String "1970-01-01T00:00:00Z"
+        | Schema.Total_turns
+        | Schema.Total_input_tokens
+        | Schema.Total_output_tokens
+        | Schema.Total_tokens
+        | Schema.Last_input_tokens
+        | Schema.Last_output_tokens
+        | Schema.Last_total_tokens
+        | Schema.Last_latency_ms
+        | Schema.Compaction_count
+        | Schema.Last_compaction_before_tokens
+        | Schema.Last_compaction_after_tokens
+        | Schema.Compaction_consecutive_failures
+        | Schema.Proactive_count_total
+        | Schema.Proactive_visible_count_total
+        | Schema.Consecutive_noop_count
+        | Schema.Autonomous_action_count
+        | Schema.Autonomous_turn_count
+        | Schema.Autonomous_text_turn_count
+        | Schema.Autonomous_tool_turn_count
+        | Schema.Board_reactive_turn_count
+        | Schema.Mention_reactive_turn_count
+        | Schema.Noop_turn_count
+        | Schema.Meta_version -> `Int 0
+        | Schema.Total_cost_usd
+        | Schema.Last_turn_ts
+        | Schema.Last_compaction_ts
+        | Schema.Last_proactive_ts
+        | Schema.Last_visible_proactive_ts
+        | Schema.Last_compaction_check_ts -> `Float 0.
+        | Schema.Last_proactive_outcome ->
+          `String
+            (Masc.Keeper_meta_contract.proactive_cycle_outcome_to_string
+               Masc.Keeper_meta_contract.Proactive_never_started)
+        | Schema.Last_proactive_reason
+        | Schema.Last_proactive_preview
+        | Schema.Last_autonomous_action_at -> `String ""
+        | Schema.Last_compaction_decision -> `String "initialized"
+        | Schema.Active_goal_ids -> `List []
+        | Schema.Message_scope_ack_id
+        | Schema.Last_blocker
+        | Schema.Last_runtime_attempt
+        | Schema.Latched_reason
+        | Schema.Current_task_id
+        | Schema.Keeper_id -> `Null
+        | Schema.Paused -> `Bool false
+        | Schema.Oas_env -> `Assoc []
+      in
+      let field_values =
+        List.map
+          (fun field ->
+             let key = Schema.field_name field in
+             let value =
+               match List.assoc_opt key fields with
+               | Some value -> value
+               | None -> default_value field
+             in
+             field, value)
+          Schema.all_fields
+      in
+      let unknown_fields =
+        List.filter
+          (fun (key, _) ->
+             (not (mem_key key Schema.current_field_names))
+             && not (mem_key key fixture_config_keys))
+          fields
+      in
+      let canonical_fields =
+        match Schema.object_of_field_values field_values with
+        | `Assoc canonical_fields -> canonical_fields
+        | _ -> invalid_arg "current keeper fixture schema did not produce an object"
+      in
+      `Assoc (canonical_fields @ unknown_fields), json
+    | other -> other, other
   in
   (* Production [meta_of_json] no longer reads TOML-only config keys from JSON
      (TOML is the SSOT; the runtime JSON carries only runtime state). Focused
@@ -77,7 +169,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
   | Error _ as e -> e
   | Ok meta ->
     let open Masc.Keeper_meta_contract in
-    let bool_opt key = Safe_ops.json_bool_opt key json' in
+    let bool_opt key = Safe_ops.json_bool_opt key fixture_json in
     let apply_bool_opt key current =
       match bool_opt key with Some _ as v -> v | None -> current
     in
@@ -85,7 +177,9 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       match bool_opt key with Some v -> v | None -> current
     in
     let apply_string_list key current =
-      match Safe_ops.json_string_list key json' with [] -> current | xs -> xs
+      match Safe_ops.json_string_list key fixture_json with
+      | [] -> current
+      | xs -> xs
     in
     Ok
       { meta with
@@ -100,7 +194,9 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       ; telemetry_feedback_enabled =
           apply_bool_opt "telemetry_feedback_enabled" meta.telemetry_feedback_enabled
       ; telemetry_feedback_window_hours =
-          (match Safe_ops.json_int_opt "telemetry_feedback_window_hours" json' with
+          (match
+             Safe_ops.json_int_opt "telemetry_feedback_window_hours" fixture_json
+           with
            | Some _ as v -> v
            | None -> meta.telemetry_feedback_window_hours)
       }
@@ -148,11 +244,37 @@ let write_current_keeper_meta
             | Error error ->
               Error (Masc.Keeper_lifecycle_nonce.error_to_string error)
             | Ok witness ->
-              Masc.Keeper_meta_store.create_meta
-                permit
-                witness
-                config
-                meta)
+              let target = Masc.Keeper_lifecycle_nonce.witness_target witness in
+              let trace_id =
+                Masc.Keeper_meta_contract.runtime_trace_id meta
+              in
+              if
+                not
+                  (String.equal
+                     trace_id
+                     (Masc.Keeper_lifecycle_nonce.identity_owner_id target))
+              then
+                Error
+                  "current fixture lifecycle witness owner does not match the \
+                   requested trace"
+              else
+                (match
+                   Masc.Keeper_lifecycle_nonce.runtime_int_of_nonce
+                     (Masc.Keeper_lifecycle_nonce.identity_nonce target)
+                 with
+                 | Error error ->
+                   Error (Masc.Keeper_lifecycle_nonce.error_to_string error)
+                 | Ok generation ->
+                   let meta =
+                     Masc.Keeper_meta_contract.map_runtime
+                       (fun runtime -> { runtime with nonce = generation })
+                       meta
+                   in
+                   Masc.Keeper_meta_store.create_meta
+                     permit
+                     witness
+                     config
+                     meta))
      with
      | Durable.Admission_completed result -> result
      | Durable.Admission_completed_with_attention (Error detail, _) ->

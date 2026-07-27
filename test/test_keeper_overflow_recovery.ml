@@ -37,8 +37,73 @@ let test_provider_overflow_trigger_roundtrip () =
     ; Compaction_trigger.Provider_overflow { limit_tokens = None }
     ; Compaction_trigger.Request_body_over_capacity
         { actual_bytes = 1_048_577; limit_bytes = 1_048_576 }
+    ; Compaction_trigger.Serving_input_capacity
+        (Compaction_trigger.Boundary_unknown
+           { input_tokens = 524_299
+           ; accepted_through = 524_298
+           ; rejected_from = None
+           })
+    ; Compaction_trigger.Serving_input_capacity
+        (Compaction_trigger.Boundary_unknown
+           { input_tokens = 524_299
+           ; accepted_through = 524_298
+           ; rejected_from = Some 524_300
+           })
+    ; Compaction_trigger.Serving_input_capacity
+        (Compaction_trigger.Input_rejected
+           { input_tokens = 524_300
+           ; accepted_through = 524_298
+           ; rejected_from = 524_299
+           })
     ; Compaction_trigger.Manual
-    ]
+    ];
+  let decode_serving ~reason ~input_tokens ~accepted_through ~rejected_from =
+    Compaction_trigger.of_detail_json
+      (`Assoc
+        [ "kind", `String "serving_input_capacity"
+        ; "reason", `String reason
+        ; "input_tokens", `Int input_tokens
+        ; "accepted_through", `Int accepted_through
+        ; "rejected_from", `Int rejected_from
+        ])
+  in
+  (match
+     decode_serving
+       ~reason:"boundary_unknown"
+       ~input_tokens:524_300
+       ~accepted_through:524_298
+       ~rejected_from:524_299
+   with
+   | Error
+       (Compaction_trigger.Invalid_boundary_unknown
+          { input_tokens = 524_300; rejected_from = 524_299 } as error) ->
+     check
+       string
+       "boundary_unknown diagnostic states its valid side"
+       "serving input capacity boundary_unknown requires rejected_from > input_tokens, got input=524300 rejected=524299"
+       (Compaction_trigger.decode_error_to_string error)
+   | Ok _ | Error _ ->
+     fail "boundary_unknown admitted a rejection at or below the measured input");
+  match
+    decode_serving
+      ~reason:"input_rejected"
+      ~input_tokens:524_300
+      ~accepted_through:524_298
+      ~rejected_from:524_301
+  with
+  | Error
+      (Compaction_trigger.Invalid_input_rejected_boundary
+         { input_tokens = 524_300
+         ; accepted_through = 524_298
+         ; rejected_from = Some 524_301
+         } as error) ->
+    check
+      string
+      "input_rejected diagnostic states its valid interval"
+      "serving input capacity input_rejected requires accepted_through < rejected_from <= input_tokens, got input=524300 accepted=524298 rejected=524301"
+      (Compaction_trigger.decode_error_to_string error)
+  | Ok _ | Error _ ->
+    fail "input_rejected admitted a boundary above the measured input"
 ;;
 
 let test_request_body_over_capacity_rejects_non_refusals () =

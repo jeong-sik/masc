@@ -201,7 +201,6 @@ and goal_assignment = {
 }
 (** Payload for [Goal_assigned]. *)
 
-
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always
     ["fusion-run:<run_id>"]. Board projection availability is not event

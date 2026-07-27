@@ -204,6 +204,12 @@ type provider_overflow_recovery =
       { reason : string
       ; recovery : Keeper_post_turn.compaction_recovery
       }
+  | Provider_overflow_lifecycle_cleanup_failed of
+      { trigger : Compaction_trigger.t
+      ; reason : string
+      ; source_lease_disposition : source_lease_disposition
+      ; recovery : Keeper_post_turn.compaction_recovery option
+      }
 
 let recover_provider_context_overflow_in_lane
       ?exact_execution_guard
@@ -212,34 +218,28 @@ let recover_provider_context_overflow_in_lane
       ~(meta : keeper_meta)
       error
   =
-  match capacity_refusal_of_error error with
-  | None -> Not_provider_overflow
-  | Some refusal ->
+  match capacity_transition_of_error error with
+  | Not_capacity
+  | Capacity_non_compacting _
+  | Compact_next_cycle Compaction_trigger.Manual ->
+    Not_provider_overflow
+  | Compact_next_cycle trigger ->
     let origin = Keeper_registry.Post_turn_lifecycle in
-    let trigger =
-      match refusal with
-      | Keeper_turn_runtime_budget.Provider_context_window { limit_tokens } ->
-        Compaction_trigger.Provider_overflow { limit_tokens }
-      | Keeper_turn_runtime_budget.Serialized_request_body { actual_bytes; limit_bytes }
-        -> Compaction_trigger.Request_body_over_capacity { actual_bytes; limit_bytes }
-    in
     (* [Context_overflow_detected] is the only event that latches
        [context_overflow] (keeper_state_machine.ml:214), the flag the lane needs
        before it will admit a compaction, and that flag is axis-agnostic. Its
-       payload is read only for the "overflowed" lifecycle log line
-       (keeper_state_machine.ml:287-291), so a byte refusal carries no token limit
-       and that one line reads limit=unknown. The measured bytes are not lost:
-       they travel on [trigger] into the durable compaction record. Reshaping the
-       event payload into a closed capacity-evidence sum is the follow-up — it
-       touches keeper_state_machine_json.ml, a durable codec, so it needs a schema
-       migration rather than riding along here. *)
+       token-only payload is read for the lifecycle log line. The canonical
+       [trigger] retains the complete token, byte, or serving-boundary evidence
+       through checkpoint commit. *)
     let overflow_event =
       Keeper_state_machine.Context_overflow_detected
         { limit_tokens =
-            (match refusal with
-             | Keeper_turn_runtime_budget.Provider_context_window { limit_tokens } ->
-               limit_tokens
-             | Keeper_turn_runtime_budget.Serialized_request_body _ -> None)
+            (match trigger with
+             | Compaction_trigger.Provider_overflow { limit_tokens } -> limit_tokens
+             | Compaction_trigger.Request_body_over_capacity _
+             | Compaction_trigger.Serving_input_capacity _
+             | Compaction_trigger.Manual ->
+               None)
         }
     in
     let dispatch stage event =
@@ -276,11 +276,25 @@ let recover_provider_context_overflow_in_lane
     in
     let retry_after_started ?recovery reason =
       record_overflow_failure ~config ~meta ~reason;
-      (* fire-and-forget: retry proceeds from the recorded failure either way. *)
-      ignore (release_failed_lifecycle reason);
-      match recovery with
-      | None -> Provider_overflow_retry_without_checkpoint { trigger; reason }
-      | Some recovery -> Provider_overflow_retry_with_checkpoint { reason; recovery }
+      match release_failed_lifecycle reason with
+      | Error cleanup_error ->
+        let reason =
+          Printf.sprintf "%s; lifecycle_cleanup=%s" reason cleanup_error
+        in
+        let source_lease_disposition =
+          match recovery with
+          | None ->
+            Requeue_after_context_compaction
+              (Compaction_attempt_failed { reason })
+          | Some _ ->
+            Requeue_after_context_compaction Compaction_committed
+        in
+        Provider_overflow_lifecycle_cleanup_failed
+          { trigger; reason; source_lease_disposition; recovery }
+      | Ok () ->
+        (match recovery with
+         | None -> Provider_overflow_retry_without_checkpoint { trigger; reason }
+         | Some recovery -> Provider_overflow_retry_with_checkpoint { reason; recovery })
     in
     let terminal_no_compaction no_compaction =
       Eio.Cancel.protect (fun () ->
@@ -292,14 +306,20 @@ let recover_provider_context_overflow_in_lane
              ~keeper_name:meta.name
              "provider overflow terminal observation failed without reopening exact request: %s"
              (Printexc.to_string exn));
-        (match release_failed_lifecycle reason with
-         | Ok () -> ()
-         | Error detail ->
-           Log.Keeper.error
-             ~keeper_name:meta.name
-             "provider overflow terminal lifecycle cleanup failed; preserving the canonical no-compaction outcome: %s"
-             detail);
-        Provider_overflow_no_compaction no_compaction)
+        match release_failed_lifecycle reason with
+        | Ok () -> Provider_overflow_no_compaction no_compaction
+        | Error cleanup_error ->
+          Provider_overflow_lifecycle_cleanup_failed
+            { trigger
+            ; reason =
+                Printf.sprintf
+                  "%s; lifecycle_cleanup=%s"
+                  reason
+                  cleanup_error
+            ; source_lease_disposition =
+                source_lease_disposition_after_no_compaction no_compaction
+            ; recovery = None
+            })
     in
     let applied recovery =
       match
@@ -356,18 +376,63 @@ let recover_provider_context_overflow_in_lane
        Provider_overflow_retry_without_checkpoint { trigger; reason }
      | Ok () ->
        (match dispatch "compaction_started" Keeper_state_machine.Compaction_started with
-        | Error reason -> retry_after_started reason
-        | Ok () ->
-          (try
-             commit_outcome
-               (
-               recover_latest_checkpoint_for_compaction
-                 ?exact_execution_guard
-                 ~base_path:config.base_path
-                 ~base_dir
-                 ~meta
-                 ~trigger
-                 ())
+       | Error reason -> retry_after_started reason
+       | Ok () ->
+          let expected_owner_trace =
+            Keeper_id.Trace_id.to_string meta.runtime.trace_id
+          in
+          let lifecycle_authority =
+            match Keeper_registry.get ~base_path:config.base_path meta.name with
+            | Some entry
+              when entry.phase = Keeper_state_machine.Compacting
+                   && String.equal
+                        (Keeper_id.Trace_id.to_string
+                           entry.meta.runtime.trace_id)
+                        expected_owner_trace ->
+              let expected_transition_seq = entry.transition_seq in
+              Ok
+                (fun (_ : Keeper_compaction_llm_summarizer.attempt_observation) ->
+                   match Keeper_registry.get ~base_path:config.base_path meta.name with
+                   | Some current
+                     when current.phase = Keeper_state_machine.Compacting
+                          && current.transition_seq = expected_transition_seq
+                          && String.equal
+                               (Keeper_id.Trace_id.to_string
+                                  current.meta.runtime.trace_id)
+                               expected_owner_trace ->
+                     Ok ()
+                   | Some current ->
+                     Error
+                       (Printf.sprintf
+                          "compaction lifecycle authority changed before dispatch \
+                           phase=%s transition_seq=%d expected_transition_seq=%d"
+                          (Keeper_state_machine.phase_to_string current.phase)
+                          current.transition_seq
+                          expected_transition_seq)
+                   | None ->
+                     Error
+                       "compaction lifecycle authority disappeared before dispatch")
+            | Some entry ->
+              Error
+                (Printf.sprintf
+                   "compaction lifecycle authority was not installed phase=%s"
+                   (Keeper_state_machine.phase_to_string entry.phase))
+            | None -> Error "compaction lifecycle authority entry is missing"
+          in
+          (match lifecycle_authority with
+           | Error reason -> retry_after_started reason
+           | Ok before_dispatch_authority ->
+             (try
+                commit_outcome
+                  (
+                  recover_latest_checkpoint_for_compaction
+                    ~before_dispatch_authority
+                    ?exact_execution_guard
+                    ~base_path:config.base_path
+                    ~base_dir
+                    ~meta
+                    ~trigger
+                    ())
            with
            | Eio.Cancel.Cancelled _ as exn ->
              let backtrace = Printexc.get_raw_backtrace () in
@@ -391,7 +456,7 @@ let recover_provider_context_overflow_in_lane
                    "provider overflow cancellation cleanup raised: %s"
                    (Printexc.to_string cleanup_exn));
              Printexc.raise_with_backtrace exn backtrace
-           | exn -> retry_after_started (Printexc.to_string exn))))
+              | exn -> retry_after_started (Printexc.to_string exn)))))
 ;;
 
 let append_provider_overflow_manifest
@@ -427,7 +492,7 @@ let append_provider_overflow_manifest
              (`Assoc
                [ "trigger", `String (Compaction_trigger.to_label trigger)
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "source_requeued", `Bool true
+               ; "requeue_disposition_requested", `Bool true
                ; "error", error
                ; ( Keeper_compaction_evidence.exact_evidence_key
                  , Keeper_compaction_evidence.to_json evidence )
@@ -490,13 +555,43 @@ let append_provider_overflow_manifest
              (`Assoc
                [ "trigger", `String (Compaction_trigger.to_label trigger)
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "source_requeued", `Bool true
+               ; "requeue_disposition_requested", `Bool true
                ; "error", `String reason
                ]))
         Keeper_runtime_manifest.Context_compacted
     in
     Requeue_after_context_compaction (Compaction_attempt_failed { reason }),
     turn_state
+  | Provider_overflow_lifecycle_cleanup_failed
+      { trigger; reason; source_lease_disposition; recovery } ->
+    let turn_state =
+      match recovery with
+      | Some recovery ->
+        append_recovery
+          ~status:"lifecycle_cleanup_failed"
+          ~error:(`String reason)
+          ~recovery
+          turn_state
+      | None ->
+        Keeper_unified_turn_manifest.append_manifest
+          ~config
+          ~runtime_manifest_context
+          ~turn_start
+          ~turn_state
+          ~site:"provider_overflow_compaction_lifecycle_cleanup_failed"
+          ~status:"lifecycle_cleanup_failed"
+          ~compaction_source:"provider_overflow"
+          ~decision:
+            (Keeper_runtime_manifest.with_payload_role
+               ~payload_role:Checkpoint
+               (`Assoc
+                 [ "trigger", `String (Compaction_trigger.to_label trigger)
+                 ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+                 ; "reason", `String reason
+                 ]))
+          Keeper_runtime_manifest.Context_compacted
+    in
+    source_lease_disposition, turn_state
 ;;
 
 let run_keeper_cycle

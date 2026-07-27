@@ -487,7 +487,7 @@ let test_bind_failure_prevents_post () =
   Alcotest.(check int) "bind failure prevents POST" 0 (F.post_count server)
 ;;
 
-let test_missing_dispatch_guard_prevents_post () =
+let test_dispatch_authority_without_queue_guard () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
@@ -504,11 +504,11 @@ let test_missing_dispatch_guard_prevents_post () =
        ~keeper_name:"keeper-missing-guard"
        ~net
        ~clock
+       ~before_dispatch_authority:(fun _ -> Ok ())
        prepared
    with
-   | Error C.Exact_execution_guard_absent -> ()
-   | Error _ -> Alcotest.fail "missing guard returned the wrong typed failure"
-   | Ok _ -> Alcotest.fail "missing guard unexpectedly executed");
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "keeper-lifecycle execution did not dispatch");
   (match
      C.execute_prepared_lane
        ~keeper_name:"keeper-missing-guard"
@@ -517,9 +517,9 @@ let test_missing_dispatch_guard_prevents_post () =
        prepared
    with
    | Error C.Exact_flow_already_started -> ()
-   | Error _ -> Alcotest.fail "consumed missing-guard flow hid affine replay"
+   | Error _ -> Alcotest.fail "consumed lifecycle-owned flow hid affine replay"
    | Ok _ -> Alcotest.fail "consumed missing-guard flow executed twice");
-  Alcotest.(check int) "missing guard prevents POST" 0 (F.post_count server)
+  Alcotest.(check int) "keeper lifecycle permits one POST" 1 (F.post_count server)
 ;;
 
 let test_release_failure_blocks_successor () =
@@ -689,7 +689,7 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
      = [ Keeper_event_queue_state.Exact_execution_failed, first_slot ])
 ;;
 
-let test_cancellation_quarantines_only_bound_identity () =
+let test_cancellation_preserves_lifecycle_authorized_identity () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let hold_response, _resolve_hold_response = Eio.Promise.create () in
@@ -716,31 +716,19 @@ let test_cancellation_quarantines_only_bound_identity () =
       snapshot
   in
   let prepared = prepare_exn ~keeper_name:"keeper-cancelled" ~registry () in
-  let bound = ref [] in
-  let quarantined = ref [] in
-  let guard : C.exact_execution_guard =
-    { before_dispatch =
-        (fun observation ->
-           bound := observation.slot_id :: !bound;
-           Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun _ -> Alcotest.fail "cancelled bound identity must not advance")
-    ; quarantine =
-        (fun cause observation ->
-           quarantined := (cause, observation.slot_id) :: !quarantined;
-           Ok C.Fsync_completed)
-    }
-  in
+  let authorized = ref [] in
   let cancel_context, resolve_cancel_context = Eio.Promise.create () in
   let execution =
     Eio.Fiber.fork_promise ~sw (fun () ->
       Eio.Cancel.sub (fun context ->
         Eio.Promise.resolve resolve_cancel_context context;
-        execute_prepared_lane
+        C.execute_prepared_lane
           ~keeper_name:"keeper-cancelled"
           ~net
           ~clock
-          ~exact_execution_guard:guard
+          ~before_dispatch_authority:(fun observation ->
+            authorized := observation.slot_id :: !authorized;
+            Ok ())
           prepared))
   in
   let result =
@@ -763,12 +751,10 @@ let test_cancellation_quarantines_only_bound_identity () =
     "cancellation terminal is phase-neutral"
     true
     (terminal.cause = Keeper_event_queue_state.Exact_execution_cancelled);
-  Alcotest.(check (list string)) "only first identity was bound" [ first_slot ] (List.rev !bound);
-  Alcotest.(check bool)
-    "only the bound identity was quarantined"
-    true
-    (List.rev !quarantined
-     = [ Keeper_event_queue_state.Exact_execution_cancelled, first_slot ]);
+  Alcotest.(check (list string))
+    "only first identity was lifecycle-authorized"
+    [ first_slot ]
+    (List.rev !authorized);
   Alcotest.(check int) "cancelled request posts once" 1 (F.post_count first);
   Alcotest.(check int) "cancellation never dispatches successor" 0 (F.post_count successor)
 ;;
@@ -1042,7 +1028,6 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "masc-post-success-restart-at-most-once" @@ fun base_path ->
   let keeper_name = "restart-at-most-once" in
-  let lease = claim_manual_lease ~base_path ~keeper_name in
   let first_slot = "restart-first" in
   let successor_slot = "restart-successor" in
   let first =
@@ -1061,7 +1046,8 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
   let registry =
     publish_exn ~slot_ids:[ first_slot; successor_slot ] snapshot
   in
-  let prepared = prepare_exn ~keeper_name ~registry () in
+  let prepared = prepare_exn ~base_path ~keeper_name ~registry () in
+  let lease = claim_manual_lease ~base_path ~keeper_name in
   let guard =
     Keeper_heartbeat_loop.For_testing.exact_execution_guard
       ~base_path
@@ -1145,8 +1131,18 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
     ; payload = Q.Manual_compaction_requested
     }
   in
-  let expected_pending =
-    Q.enqueue Q.empty pending_successor
+  let check_only_probe_pending label state =
+    match Q.to_list (State.pending state) with
+    | [ pending ] ->
+      Alcotest.(check string)
+        (label ^ " identity")
+        pending_successor.post_id
+        pending.post_id
+    | pending ->
+      Alcotest.failf
+        "%s count: expected one pending probe, got %d"
+        label
+        (List.length pending)
   in
   (match
      P.update_checked_result
@@ -1177,10 +1173,9 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
     "durable opaque binding identity is unchanged"
     true
     (State.exact_execution_binding recovered = Some binding_before);
-  Alcotest.(check bool)
-    "restart adds no pending or requeue beyond the probe"
-    true
-    (State.pending recovered = expected_pending);
+  check_only_probe_pending
+    "restart adds no pending beyond the probe"
+    recovered;
   Alcotest.(check int)
     "restart creates no requeue transition"
     0
@@ -1208,10 +1203,9 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
     | Error detail ->
         Alcotest.failf "post-claim state reload failed: %s" detail
   in
-  Alcotest.(check bool)
+  check_only_probe_pending
     "fenced successor remains pending after scheduling"
-    true
-    (State.pending after_claim = expected_pending);
+    after_claim;
   Alcotest.(check int)
     "provider POST remains exactly once after restart"
     1
@@ -2112,9 +2106,9 @@ let () =
             `Quick
             test_bind_failure_prevents_post
         ; Alcotest.test_case
-            "missing guard prevents POST"
+            "lifecycle authority permits dispatch without queue guard"
             `Quick
-            test_missing_dispatch_guard_prevents_post
+            test_dispatch_authority_without_queue_guard
         ; Alcotest.test_case
             "release failure blocks successor"
             `Quick
@@ -2142,9 +2136,9 @@ let () =
             `Quick
             test_final_oas_flow_failure_is_generic_source_terminal
         ; Alcotest.test_case
-            "cancellation quarantines bound identity"
+            "cancellation preserves lifecycle-authorized identity"
             `Quick
-            test_cancellation_quarantines_only_bound_identity
+            test_cancellation_preserves_lifecycle_authorized_identity
         ; Alcotest.test_case
             "terminalization is canonical and durable"
             `Quick

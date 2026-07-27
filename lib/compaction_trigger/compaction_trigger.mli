@@ -79,7 +79,11 @@ type decode_error =
       { input_tokens : int
       ; accepted_through : int
       }
-  | Invalid_serving_capacity_boundary of
+  | Invalid_boundary_unknown of
+      { input_tokens : int
+      ; rejected_from : int
+      }
+  | Invalid_input_rejected_boundary of
       { input_tokens : int
       ; accepted_through : int
       ; rejected_from : int option

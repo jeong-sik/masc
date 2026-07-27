@@ -144,7 +144,11 @@ type decode_error =
       { input_tokens : int
       ; accepted_through : int
       }
-  | Invalid_serving_capacity_boundary of
+  | Invalid_boundary_unknown of
+      { input_tokens : int
+      ; rejected_from : int
+      }
+  | Invalid_input_rejected_boundary of
       { input_tokens : int
       ; accepted_through : int
       ; rejected_from : int option
@@ -180,10 +184,15 @@ let decode_error_to_string = function
       "serving input capacity requires input_tokens > accepted_through, got %d and %d"
       input_tokens
       accepted_through
-  | Invalid_serving_capacity_boundary
+  | Invalid_boundary_unknown { input_tokens; rejected_from } ->
+    Printf.sprintf
+      "serving input capacity boundary_unknown requires rejected_from > input_tokens, got input=%d rejected=%d"
+      input_tokens
+      rejected_from
+  | Invalid_input_rejected_boundary
       { input_tokens; accepted_through; rejected_from } ->
     Printf.sprintf
-      "serving input capacity rejected_from must be greater than accepted_through and no greater than input_tokens, got input=%d accepted=%d rejected=%s"
+      "serving input capacity input_rejected requires accepted_through < rejected_from <= input_tokens, got input=%d accepted=%d rejected=%s"
       input_tokens
       accepted_through
       (match rejected_from with
@@ -236,7 +245,12 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
      | Some (`String "serving_input_capacity") ->
        let* () =
          reject_unknown_fields
-           [ "kind"; "reason"; "input_tokens"; "accepted_through"; "rejected_from" ]
+           [ kind_field
+           ; reason_field
+           ; input_tokens_field
+           ; accepted_through_field
+           ; rejected_from_field
+           ]
        in
        let integer_field ~positive field =
          match List.assoc_opt field fields with
@@ -245,20 +259,22 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
          | None -> Error (Missing_serving_capacity_field field)
          | Some _ -> Error (Invalid_serving_capacity_field field)
        in
-       let* input_tokens = integer_field ~positive:true "input_tokens" in
-       let* accepted_through = integer_field ~positive:false "accepted_through" in
+       let* input_tokens = integer_field ~positive:true input_tokens_field in
+       let* accepted_through =
+         integer_field ~positive:false accepted_through_field
+       in
        let* reason =
-         match List.assoc_opt "reason" fields with
+         match List.assoc_opt reason_field fields with
          | Some (`String value) -> Ok value
-         | None -> Error (Missing_serving_capacity_field "reason")
-         | Some _ -> Error (Invalid_serving_capacity_field "reason")
+         | None -> Error (Missing_serving_capacity_field reason_field)
+         | Some _ -> Error (Invalid_serving_capacity_field reason_field)
        in
        let* rejected_from =
-         match List.assoc_opt "rejected_from" fields with
+         match List.assoc_opt rejected_from_field fields with
          | Some `Null -> Ok None
          | Some (`Int value) when value > 0 -> Ok (Some value)
-         | None -> Error (Missing_serving_capacity_field "rejected_from")
-         | Some _ -> Error (Invalid_serving_capacity_field "rejected_from")
+         | None -> Error (Missing_serving_capacity_field rejected_from_field)
+         | Some _ -> Error (Invalid_serving_capacity_field rejected_from_field)
        in
        if input_tokens <= accepted_through
        then Error (Serving_capacity_not_over_limit { input_tokens; accepted_through })
@@ -277,10 +293,13 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
                     ; accepted_through
                     ; rejected_from = Some rejected_from
                     }))
-          | "boundary_unknown", _
+          | "boundary_unknown", Some rejected_from ->
+            Error
+              (Invalid_boundary_unknown
+                 { input_tokens; rejected_from })
           | "input_rejected", None ->
             Error
-              (Invalid_serving_capacity_boundary
+              (Invalid_input_rejected_boundary
                  { input_tokens; accepted_through; rejected_from })
           | "input_rejected", Some rejected_from
             when rejected_from > accepted_through
@@ -291,9 +310,9 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
                     { input_tokens; accepted_through; rejected_from }))
           | "input_rejected", Some _ ->
             Error
-              (Invalid_serving_capacity_boundary
+              (Invalid_input_rejected_boundary
                  { input_tokens; accepted_through; rejected_from })
-          | _, _ -> Error (Invalid_serving_capacity_field "reason"))
+          | _, _ -> Error (Invalid_serving_capacity_field reason_field))
      | Some (`String "manual") ->
        let* () = reject_unknown_fields [ kind_field ] in
        Ok Manual

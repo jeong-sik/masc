@@ -74,7 +74,14 @@ let test_provider_overflow_trigger_roundtrip () =
        ~accepted_through:524_298
        ~rejected_from:524_299
    with
-   | Error (Compaction_trigger.Invalid_serving_capacity_boundary _) -> ()
+   | Error
+       (Compaction_trigger.Invalid_boundary_unknown
+          { input_tokens = 524_300; rejected_from = 524_299 } as error) ->
+     check
+       string
+       "boundary_unknown diagnostic states its valid side"
+       "serving input capacity boundary_unknown requires rejected_from > input_tokens, got input=524300 rejected=524299"
+       (Compaction_trigger.decode_error_to_string error)
    | Ok _ | Error _ ->
      fail "boundary_unknown admitted a rejection at or below the measured input");
   match
@@ -84,7 +91,17 @@ let test_provider_overflow_trigger_roundtrip () =
       ~accepted_through:524_298
       ~rejected_from:524_301
   with
-  | Error (Compaction_trigger.Invalid_serving_capacity_boundary _) -> ()
+  | Error
+      (Compaction_trigger.Invalid_input_rejected_boundary
+         { input_tokens = 524_300
+         ; accepted_through = 524_298
+         ; rejected_from = Some 524_301
+         } as error) ->
+    check
+      string
+      "input_rejected diagnostic states its valid interval"
+      "serving input capacity input_rejected requires accepted_through < rejected_from <= input_tokens, got input=524300 accepted=524298 rejected=524301"
+      (Compaction_trigger.decode_error_to_string error)
   | Ok _ | Error _ ->
     fail "input_rejected admitted a boundary above the measured input"
 ;;

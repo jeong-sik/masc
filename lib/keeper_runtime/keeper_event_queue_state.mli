@@ -89,12 +89,6 @@ type exact_execution_binding =
     cannot pass through generic settlement or registration recovery. *)
 
 type escalation_reason =
-  | Failure_judgment_requested
-  | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_external_input_requested of
-      { judge_runtime_id : string
-      ; rationale : string
-      }
   | Compaction_exact_lane_unconfigured of
       { source : Keeper_checkpoint_ref.t
       }
@@ -222,7 +216,6 @@ type manual_compaction_commit =
 
 type manual_compaction_followup =
   | Compaction_commit_ack
-  | Compaction_commit_failure_judgment of Keeper_event_queue.stimulus
 
 val manual_compaction_commit_requires_operator_action
   :  manual_compaction_commit
@@ -236,11 +229,6 @@ val exact_execution_terminal_cause_of_label
   :  string
   -> (exact_execution_terminal_cause, string) result
 val exact_execution_terminal_to_string : exact_execution_terminal -> string
-
-val escalation_reason_requests_external_input : escalation_reason -> bool
-(** [true] only when the LLM judgment explicitly reports that the Keeper must
-    await unavailable external input. A judgment-boundary failure remains a
-    separate observed error. *)
 
 type settlement =
   | Ack
@@ -399,7 +387,7 @@ val settle_bound_exact_nonterminal :
   settlement:settlement ->
   t ->
   (t * settle_result, string) result
-(** Settle only the identity-bound nonterminal Ack/retry/floor/failure-judgment
+(** Settle only the identity-bound nonterminal Ack/retry/floor
     cases. Exact terminal outcomes require
     {!prepare_exact_source_disposition} followed by
     {!finalize_exact_source_disposition}. *)

@@ -30,12 +30,6 @@ include Keeper_registry_event_queue_exact_execution.Make (struct
   end)
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
-  | Failure_judgment_requested
-  | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_external_input_requested of
-      { judge_runtime_id : string
-      ; rationale : string
-      }
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
   | Compaction_exact_output_terminal of
       { source : Keeper_checkpoint_ref.t
@@ -228,7 +222,6 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _ ->
     None

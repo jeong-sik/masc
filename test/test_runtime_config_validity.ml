@@ -2430,11 +2430,8 @@ let test_structured_judge_runtime_routing () =
     match Runtime.load_list ~config_path:path with
     | Ok _ -> failf "unknown [runtime].structured_judge id must be rejected"
     | Error _ -> ());
-  (* Its consumer requests no wire format — keeper_failure_judge.ml:71-72 applies
-     without_response_format and :88-90 parses by text extraction, with :79-80
-     calling the boundary tool-free. A model that declares nothing therefore serves
-     this route, and refusing it was excluding a runtime on a capability the role
-     never asks for. *)
+  (* The shared structured-judge runtime identity is not itself a wire-format
+     capability declaration. Individual domain consumers own that request. *)
   with_temp_runtime_toml (base ^ "structured_judge = \"local.chat\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg ->
@@ -2577,12 +2574,9 @@ let test_structured_judge_lane_target () =
        strategy = \"ordered\"\n\
        candidates = [\"local.judge\", \"local.jsononly\"]\n"
   in
-  (* Formerly rejected: every candidate had to declare supports-structured-output.
-     The consumer requests no wire format at all (keeper_failure_judge.ml:71-72
-     applies without_response_format, :88-90 parses by text extraction, :79-80 calls
-     the boundary tool-free), so a candidate that declares only json_object is a
-     usable candidate for this route and refusing the lane excluded runtimes on a
-     capability the role never asks for. The lane now resolves. *)
+  (* Formerly rejected: every candidate had to declare structured output even
+     though this runtime identity is selected before a domain consumer declares
+     its own wire-format requirement. The lane therefore resolves here. *)
   with_temp_runtime_toml incapable_candidate_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg ->

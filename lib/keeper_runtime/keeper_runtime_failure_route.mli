@@ -11,10 +11,9 @@
       exists, but does not synthesize or enforce a delay.
     - [Rotate_now] — a different runtime may succeed immediately
       (credentials, model availability, no-progress recovery hints).
-    - [Escalate_judgment] — deterministic failure: mechanical retry or
-      rotation cannot change the outcome. The keeper keeps running; the
-      failure becomes a typed stimulus
-      ([Keeper_event_queue.Failure_judgment]) for an LLM-boundary verdict.
+    - [Exhausted_visible_alive] — deterministic failure: mechanical retry or
+      rotation cannot change the outcome. The keeper keeps running and exposes
+      the typed terminal observation; it does not dispatch a second LLM call.
 
     Classification is typed-only: a quota error routes by its typed class.
     Divergence between this route and the legacy
@@ -53,8 +52,8 @@ type rotate_class =
       (** accept-rejections carrying an explicit no-progress recovery hint:
           a different model may make progress *)
 
-(** Deterministic-failure classes escalated for an LLM-boundary verdict. *)
-type judgment_class =
+(** Typed terminal classes that mechanical retry or rotation cannot change. *)
+type terminal_class =
   | Deterministic_request  (** request-body/schema rejections; retry is futile *)
   | Context_overflow  (** typed context-window overflow *)
   | Contract_violation
@@ -71,13 +70,11 @@ type judgment_class =
   | Terminal_effect_workflow_rejection
   | Internal_opaque
       (** unhandled internal exceptions, serialization/io/orchestration/agent
-          family errors; judgment is the fail-open route that keeps the
-          keeper alive *)
+          family errors; the failure stays visible while the keeper remains
+          alive *)
 
-(** Typed origin of a judgment request. The route class says what kind of
-    decision is needed; this provenance says which execution boundary produced
-    it. *)
-type judgment_provenance =
+(** Typed origin of a terminal observation. *)
+type failure_provenance =
   | Oas_api_error
   | Oas_provider_error
   | Oas_agent_error
@@ -104,12 +101,11 @@ type route =
             none. The value is preserved rather than clamped or replaced. *)
       }
   | Rotate_now of { rotate : rotate_class }
-  | Escalate_judgment of
-      { judgment : judgment_class
-      ; provenance : judgment_provenance
+  | Exhausted_visible_alive of
+      { terminal : terminal_class
+      ; provenance : failure_provenance
       ; detail : string
-        (** display-only failure summary for the judgment prompt, bounded
-            by [Keeper_internal_error.cap_blocker_detail]. Never matched. *)
+        (** Display-only bounded failure summary. Never matched. *)
       }
 
 val route_of_error : boundary:error_boundary -> Agent_sdk.Error.sdk_error -> route
@@ -125,35 +121,15 @@ val retry_after_of_route : route -> float option
 
 val route_kind_label : route -> string
 (** Stable telemetry label: ["retry_after_observed" | "rotate_now" |
-    "escalate_judgment"]. *)
+    "exhausted_visible_alive"]. *)
 
 val retry_class_label : retry_class -> string
-val retry_class_of_label : string -> retry_class option
 val rotate_class_label : rotate_class -> string
-val rotate_class_of_label : string -> rotate_class option
-val judgment_class_label : judgment_class -> string
+val terminal_class_label : terminal_class -> string
 
-val judgment_provenance_label : judgment_provenance -> string
-(** Stable wire/telemetry label. The idle counter remains a typed field and is
-    not embedded in this label. *)
-
-val judgment_provenance_same_boundary :
-  judgment_provenance -> judgment_provenance -> bool
-(** Typed durable-identity comparison. Two idle-detected values share the same
-    producer boundary even when their observation counts differ; no routing
-    decision is derived from wire labels. *)
-
-val judgment_provenance_to_yojson : judgment_provenance -> Yojson.Safe.t
-
-val judgment_provenance_of_yojson :
-  Yojson.Safe.t -> (judgment_provenance, string) result
-(** Total codec for durable queue stimuli. Unknown kinds and invalid idle
-    counters are explicit [Error] values. *)
+val failure_provenance_label : failure_provenance -> string
+(** Stable telemetry label. *)
 
 val route_class_label : route -> string
 (** The route's class label ([retry_class_label] / [rotate_class_label] /
-    [judgment_class_label] respectively). *)
-
-val judgment_class_of_label : string -> judgment_class option
-(** Closed inverse of [judgment_class_label] for durable queue snapshots;
-    unknown labels are [None] (fail-closed at the parse boundary). *)
+    [terminal_class_label] respectively). *)

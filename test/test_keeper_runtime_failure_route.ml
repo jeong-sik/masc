@@ -88,9 +88,9 @@ let test_api_auth_rotates_invalid_request_judges () =
             ; reason = Llm_provider.Retry.Unknown_invalid_request
             }))
   with
-  | KFR.Escalate_judgment { judgment = KFR.Deterministic_request; _ } -> ()
+  | KFR.Exhausted_visible_alive { terminal = KFR.Deterministic_request; _ } -> ()
   | other ->
-    Alcotest.failf "invalid request should judge, got %s"
+    Alcotest.failf "invalid request should exhaust, got %s"
       (KFR.route_kind_label other)
 
 let test_api_input_capacity_is_terminal_judgment () =
@@ -112,9 +112,9 @@ let test_api_input_capacity_is_terminal_judgment () =
          { message = "typed capacity"; constraint_; reason })
   in
   check_route
-    "accepted bound remains a deterministic terminal judgment"
-    (KFR.Escalate_judgment
-       { judgment = KFR.Deterministic_request
+    "accepted bound remains a deterministic terminal observation"
+    (KFR.Exhausted_visible_alive
+       { terminal = KFR.Deterministic_request
        ; provenance = KFR.Oas_api_error
        ; detail =
            Agent_sdk.Error.to_string
@@ -140,9 +140,9 @@ let test_api_input_capacity_is_terminal_judgment () =
          Llm_provider.Input_token_count.Anthropic_messages_count_tokens)
   in
   check_route
-    "measurement-unavailable remains a terminal judgment"
-    (KFR.Escalate_judgment
-       { judgment = KFR.Deterministic_request
+    "measurement-unavailable remains a terminal observation"
+    (KFR.Exhausted_visible_alive
+       { terminal = KFR.Deterministic_request
        ; provenance = KFR.Oas_api_error
        ; detail =
            Agent_sdk.Error.to_string measurement_unavailable
@@ -175,9 +175,9 @@ let test_provider_config_judges () =
       (Agent_sdk.Error.Provider
          (Llm_provider.Error.MissingApiKey { var_name = "GLM_API_KEY" }))
   with
-  | KFR.Escalate_judgment { judgment = KFR.Config_mismatch; _ } -> ()
+  | KFR.Exhausted_visible_alive { terminal = KFR.Config_mismatch; _ } -> ()
   | other ->
-    Alcotest.failf "missing api key should judge config, got %s"
+    Alcotest.failf "missing api key should exhaust config, got %s"
       (KFR.route_kind_label other)
 
 let test_masc_internal_backpressure_hint () =
@@ -201,14 +201,14 @@ let test_masc_internal_backpressure_hint () =
     (Some 45.0)
     (KFR.retry_after_of_route (route_of_masc_error err))
 
-let test_masc_internal_judgment_classes () =
+let test_masc_internal_terminal_classes () =
   (match
      route_of_masc_error
        (internal_err
           (Keeper_internal_error.Internal_contract_rejected { reason = "empty" }))
    with
-   | KFR.Escalate_judgment
-       { judgment = KFR.Internal_opaque
+   | KFR.Exhausted_visible_alive
+       { terminal = KFR.Internal_opaque
        ; provenance = KFR.Masc_internal_error
        ; _
        } ->
@@ -233,14 +233,14 @@ let test_masc_internal_judgment_classes () =
 let test_non_provider_families_judge () =
   let raw_internal = Agent_sdk.Error.Internal "boom" in
   (match route_of_oas_error raw_internal with
-   | KFR.Escalate_judgment
-       { judgment = KFR.Internal_opaque; provenance = KFR.Oas_internal_error; _ } ->
+   | KFR.Exhausted_visible_alive
+       { terminal = KFR.Internal_opaque; provenance = KFR.Oas_internal_error; _ } ->
      ()
    | other ->
-     Alcotest.failf "raw Internal should judge, got %s" (KFR.route_kind_label other));
+     Alcotest.failf "raw Internal should exhaust, got %s" (KFR.route_kind_label other));
   (match route_of_masc_error raw_internal with
-   | KFR.Escalate_judgment
-       { judgment = KFR.Internal_opaque; provenance = KFR.Masc_internal_error; _ } ->
+   | KFR.Exhausted_visible_alive
+       { terminal = KFR.Internal_opaque; provenance = KFR.Masc_internal_error; _ } ->
      ()
    | other ->
      Alcotest.failf
@@ -250,176 +250,10 @@ let test_non_provider_families_judge () =
     route_of_oas_error
       (Agent_sdk.Error.Mcp (Agent_sdk.Error.InitializeFailed { detail = "handshake" }))
   with
-  | KFR.Escalate_judgment { judgment = KFR.Protocol_error; _ } -> ()
+  | KFR.Exhausted_visible_alive { terminal = KFR.Protocol_error; _ } -> ()
   | other ->
-    Alcotest.failf "mcp error should judge protocol, got %s"
+    Alcotest.failf "mcp error should exhaust protocol, got %s"
       (KFR.route_kind_label other)
-
-let test_judgment_label_roundtrip () =
-  List.iter
-    (fun judgment ->
-      let label = KFR.judgment_class_label judgment in
-      match KFR.judgment_class_of_label label with
-      | Some parsed when parsed = judgment -> ()
-      | Some _ | None -> Alcotest.failf "label %s does not round-trip" label)
-    [ KFR.Deterministic_request
-    ; KFR.Context_overflow
-    ; KFR.Contract_violation
-    ; KFR.Protocol_error
-    ; KFR.Config_mismatch
-    ; KFR.Provider_integration
-    ; KFR.Internal_opaque
-    ];
-  Alcotest.(check (option reject))
-    "unknown label is fail-closed"
-    None
-    (KFR.judgment_class_of_label "totally_new_class")
-
-let test_judgment_provenance_codec () =
-  let values =
-    [ KFR.Oas_api_error
-    ; KFR.Oas_provider_error
-    ; KFR.Oas_agent_error
-    ; KFR.Oas_mcp_error
-    ; KFR.Oas_config_error
-    ; KFR.Oas_serialization_error
-    ; KFR.Oas_io_error
-    ; KFR.Oas_orchestration_error
-    ; KFR.Oas_internal_error
-    ; KFR.Masc_internal_error
-    ; KFR.Completion_contract
-    ]
-  in
-  List.iter
-    (fun provenance ->
-       match
-         KFR.judgment_provenance_to_yojson provenance
-         |> KFR.judgment_provenance_of_yojson
-       with
-       | Ok parsed ->
-         Alcotest.(check bool)
-           (KFR.judgment_provenance_label provenance ^ " roundtrip")
-           true
-           (parsed = provenance)
-       | Error detail -> Alcotest.fail detail)
-    values;
-  (match
-     KFR.judgment_provenance_of_yojson
-       (`Assoc
-         [ "kind", `String "oas_mcp_error"
-         ; "unexpected", `String "ignored"
-         ])
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "extra provenance field was silently ignored");
-  match
-    KFR.judgment_provenance_of_yojson
-      (`Assoc [ "kind", `String "future_unregistered_boundary" ])
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "unknown provenance decoded"
-
-let test_queue_stimulus_roundtrip () =
-  let fj : Keeper_event_queue.failure_judgment =
-    { fj_runtime_id = "glm-coding.glm-5-turbo"
-    ; fj_judgment = KFR.Protocol_error
-    ; fj_provenance = KFR.Oas_mcp_error
-    ; fj_detail = "mcp handshake failed"
-    }
-  in
-  let stimulus : Keeper_event_queue.stimulus =
-    { post_id = Keeper_event_queue.failure_judgment_post_id fj
-    ; urgency = Keeper_event_queue.Normal
-    ; arrived_at = 1000.0
-    ; payload = Keeper_event_queue.Failure_judgment fj
-    }
-  in
-  Alcotest.(check string)
-    "post_id stable per (runtime, class, provenance)"
-    "failure-judgment:glm-coding.glm-5-turbo:protocol_error:oas_mcp_error"
-    stimulus.post_id;
-  match
-    Keeper_event_queue.stimulus_of_yojson
-      (Keeper_event_queue.stimulus_to_yojson stimulus)
-  with
-  | Ok parsed ->
-    Alcotest.(check bool)
-      "roundtrip preserves identity"
-      true
-      (Keeper_event_queue.stimulus_identity_equal stimulus parsed);
-    let missing_provenance_json =
-      match Keeper_event_queue.stimulus_to_yojson stimulus with
-      | `Assoc stimulus_fields ->
-        let payload =
-          match List.assoc_opt "payload" stimulus_fields with
-          | Some (`Assoc payload_fields) ->
-            `Assoc
-              (List.filter
-                 (fun (name, _) -> not (String.equal name "provenance"))
-                 payload_fields)
-          | _ -> Alcotest.fail "fixture payload is not an object"
-        in
-        `Assoc
-          (("payload", payload)
-           :: List.remove_assoc "payload" stimulus_fields)
-      | _ -> Alcotest.fail "fixture stimulus is not an object"
-    in
-    (match Keeper_event_queue.stimulus_of_yojson missing_provenance_json with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "failure judgment without provenance decoded")
-  | Error msg -> Alcotest.failf "roundtrip failed: %s" msg
-
-let failure_judgment_stimulus ~detail : Keeper_event_queue.stimulus =
-  let fj : Keeper_event_queue.failure_judgment =
-    { fj_runtime_id = "glm-coding.glm-5-turbo"
-    ; fj_judgment = KFR.Deterministic_request
-    ; fj_provenance = KFR.Oas_api_error
-    ; fj_detail = detail
-    }
-  in
-  { post_id = Keeper_event_queue.failure_judgment_post_id fj
-  ; urgency = Keeper_event_queue.Normal
-  ; arrived_at = 1000.0
-  ; payload = Keeper_event_queue.Failure_judgment fj
-  }
-
-(* RFC-0313 W2 loop-safety: the same deterministic failure class repeats
-   with volatile provider text (token counts, addresses) in [fj_detail];
-   the queue must stay bounded to one pending judgment per
-   (runtime, class, provenance kind), or repeated failures self-stimulate judgment turns.
-   Pins the identity semantics that
-   [Keeper_registry_event_queue.enqueue_if_missing] relies on. *)
-let test_queue_bounded_across_detail_variants () =
-  let first = failure_judgment_stimulus ~detail:"chat template token missing (request 1281 tokens)" in
-  let second = failure_judgment_stimulus ~detail:"chat template token missing (request 4096 tokens)" in
-  Alcotest.(check bool)
-    "differing detail is the same durable event"
-    true
-    (Keeper_event_queue.stimulus_identity_equal first second);
-  let queue =
-    Keeper_event_queue.enqueue (Keeper_event_queue.enqueue Keeper_event_queue.empty first) second
-  in
-  Alcotest.(check int)
-    "identity dedup bounds the queue to one entry"
-    1
-    (Keeper_event_queue.length (Keeper_event_queue.dedup_by_identity queue));
-  let other_class =
-    let fj : Keeper_event_queue.failure_judgment =
-      { fj_runtime_id = "glm-coding.glm-5-turbo"
-      ; fj_judgment = KFR.Protocol_error
-      ; fj_provenance = KFR.Oas_mcp_error
-      ; fj_detail = "mcp handshake failed"
-      }
-    in
-    { first with
-      post_id = Keeper_event_queue.failure_judgment_post_id fj
-    ; payload = Keeper_event_queue.Failure_judgment fj
-    }
-  in
-  Alcotest.(check bool)
-    "a different judgment class is a distinct durable event"
-    false
-    (Keeper_event_queue.stimulus_identity_equal first other_class)
 
 let () =
   Alcotest.run
@@ -435,34 +269,20 @@ let () =
             "server error typed variant"
             `Quick
             test_api_server_error_uses_typed_variant
-        ; Alcotest.test_case "auth rotates, invalid judges" `Quick test_api_auth_rotates_invalid_request_judges
+        ; Alcotest.test_case "auth rotates, invalid exhausts" `Quick test_api_auth_rotates_invalid_request_judges
         ; Alcotest.test_case
-            "input capacity is terminal judgment"
+            "input capacity is terminal observation"
             `Quick
             test_api_input_capacity_is_terminal_judgment
         ] )
     ; ( "provider"
       , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint
-        ; Alcotest.test_case "config judges" `Quick test_provider_config_judges
+        ; Alcotest.test_case "config exhausts" `Quick test_provider_config_judges
         ] )
     ; ( "masc_internal"
       , [ Alcotest.test_case "backpressure hint" `Quick test_masc_internal_backpressure_hint
-        ; Alcotest.test_case "judgment classes" `Quick test_masc_internal_judgment_classes
+        ; Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
         ] )
     ; ( "families"
-      , [ Alcotest.test_case "non-provider judge" `Quick test_non_provider_families_judge ] )
-    ; ( "labels"
-      , [ Alcotest.test_case "judgment roundtrip" `Quick test_judgment_label_roundtrip
-        ; Alcotest.test_case
-            "provenance codec"
-            `Quick
-            test_judgment_provenance_codec
-        ] )
-    ; ( "queue"
-      , [ Alcotest.test_case "stimulus roundtrip" `Quick test_queue_stimulus_roundtrip
-        ; Alcotest.test_case
-            "bounded across detail variants"
-            `Quick
-            test_queue_bounded_across_detail_variants
-        ] )
+      , [ Alcotest.test_case "non-provider terminal" `Quick test_non_provider_families_judge ] )
     ]

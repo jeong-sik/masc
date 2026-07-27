@@ -65,20 +65,6 @@ let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
   }
 ;;
 
-let failure_judgment_stimulus () : Keeper_event_queue.stimulus =
-  let judgment : Keeper_event_queue.failure_judgment =
-    { fj_runtime_id = "failed-runtime"
-    ; fj_judgment = Keeper_runtime_failure_route.Config_mismatch
-    ; fj_provenance = Keeper_runtime_failure_route.Oas_config_error
-    ; fj_detail = "configuration unavailable"
-    }
-  in
-  { post_id = Keeper_event_queue.failure_judgment_post_id judgment
-  ; urgency = Keeper_event_queue.Immediate
-  ; arrived_at = 1234.5
-  ; payload = Keeper_event_queue.Failure_judgment judgment
-  }
-;;
 
 let require_ok label = function
   | Ok value -> value
@@ -390,55 +376,6 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   | Ok _ -> fail "empty evidence identity was accepted"
 ;;
 
-let test_failure_judgment_external_input_is_typed_history () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "judgment-attention-keeper" in
-  let stimulus = failure_judgment_stimulus () in
-  ignore
-    (persist_transition_outbox
-       ~base_path
-       ~keeper_name
-      ~settlement:
-        (Keeper_event_queue_state.Escalate
-           { reason =
-               Keeper_event_queue_state.Failure_judgment_external_input_requested
-                 { judge_runtime_id = "opaque-judge-runtime"
-                 ; rationale = "Required external input is unavailable."
-                 }
-           ; successor = None
-           })
-       [ stimulus ]);
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "record external-input judgment transition";
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "resolved judgment is historical" "ok" "status" summary;
-  check bool "historical judgment is not current action" false
-    (summary |> member "operator_action_required" |> to_bool);
-  check int "external-input judgment counted" 1
-    (summary |> member "event_queue_external_input_count" |> to_int);
-  check int "typed transition row is current" 0
-    (summary |> member "quarantined_row_count" |> to_int);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check bool "fleet history is not current action" false
-    (fleet |> member "operator_action_required" |> to_bool);
-  check int "fleet external-input history counted" 1
-    (fleet |> member "event_queue_external_input_count" |> to_int);
-  check (list string) "fleet has no false current reason" []
-    (fleet |> member "status_reasons" |> to_list |> List.map to_string)
-;;
 
 let test_transition_reactions_distinguish_ordered_sources () =
   with_temp_base @@ fun base_path ->
@@ -1160,7 +1097,6 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.Schedule_due
     ; Keeper_reaction_ledger.Connector_attention
     ; Keeper_reaction_ledger.Hitl_resolved
-    ; Keeper_reaction_ledger.Failure_judgment
     ; Keeper_reaction_ledger.Manual_compaction
     ; Keeper_reaction_ledger.Goal_assigned
     ];
@@ -1578,10 +1514,6 @@ let () =
             "missing identity cannot claim an occurrence identity"
             `Quick
             test_missing_identity_does_not_claim_an_occurrence_identity
-        ; test_case
-            "failure judgment external input is typed history"
-            `Quick
-            test_failure_judgment_external_input_is_typed_history
         ; test_case
             "transition reactions distinguish ordered sources"
             `Quick

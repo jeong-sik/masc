@@ -155,7 +155,6 @@ let board_event_kind_label = function
   | Keeper_world_observation.Bg_completed -> "bg_completed"
   | Keeper_world_observation.Schedule_due -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
-  | Keeper_world_observation.Failure_judgment -> "failure_judgment"
   | Keeper_world_observation.Goal_assigned -> "goal_assigned"
 ;;
 
@@ -201,7 +200,6 @@ let board_event_note = function
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due
-  | Keeper_world_observation.Failure_judgment
   | Keeper_world_observation.Goal_assigned -> ""
 ;;
 

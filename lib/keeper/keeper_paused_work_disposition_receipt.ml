@@ -62,7 +62,6 @@ let continuation_binding_of_source source =
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
-  | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _ ->
     No_channel

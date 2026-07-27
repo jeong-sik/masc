@@ -71,12 +71,6 @@ type exact_execution_binding =
   }
 
 type escalation_reason =
-  | Failure_judgment_requested
-  | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_external_input_requested of
-      { judge_runtime_id : string
-      ; rationale : string
-      }
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
   | Compaction_exact_output_terminal of
       { source : Keeper_checkpoint_ref.t
@@ -186,18 +180,6 @@ type manual_compaction_commit =
 
 type manual_compaction_followup =
   | Compaction_commit_ack
-  | Compaction_commit_failure_judgment of Keeper_event_queue.stimulus
-
-let escalation_reason_requests_external_input = function
-  | Failure_judgment_external_input_requested _ -> true
-  | Failure_judgment_requested
-  | Failure_judgment_boundary_failed _
-  | Compaction_exact_lane_unconfigured _
-  | Compaction_exact_output_terminal _
-  | Compaction_retry_exhausted _
-  | Compaction_floor_exceeded _
-  | Transcript_corruption_requires_reset _ -> false
-;;
 
 type settlement =
   | Ack
@@ -549,10 +531,6 @@ let checkpoint_source_reason_detail_to_yojson (source : Keeper_checkpoint_ref.t)
 ;;
 
 let escalation_reason_label = function
-  | Failure_judgment_requested -> "failure_judgment_requested"
-  | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
-  | Failure_judgment_external_input_requested _ ->
-    "failure_judgment_external_input_requested"
   | Compaction_exact_lane_unconfigured _ ->
     "compaction_exact_lane_unconfigured"
   | Compaction_exact_output_terminal _ -> "compaction_exact_output_terminal"
@@ -563,14 +541,6 @@ let escalation_reason_label = function
 ;;
 
 let escalation_reason_detail_to_yojson = function
-  | Failure_judgment_requested -> `Null
-  | Failure_judgment_boundary_failed { detail } ->
-    `Assoc [ "detail", `String detail ]
-  | Failure_judgment_external_input_requested { judge_runtime_id; rationale } ->
-    `Assoc
-      [ "judge_runtime_id", `String judge_runtime_id
-      ; "rationale", `String rationale
-      ]
   | Compaction_exact_lane_unconfigured { source } ->
     checkpoint_source_reason_detail_to_yojson source
   | Compaction_exact_output_terminal { source; terminal } ->
@@ -649,7 +619,6 @@ let checkpoint_source_of_reason_fields ~context fields =
 
 let escalation_reason_of_wire ~label ~detail_json =
   match label, detail_json with
-  | "failure_judgment_requested", `Null -> Ok Failure_judgment_requested
   | "compaction_exact_output_terminal", `Assoc fields ->
     let context = "compaction_exact_output_terminal" in
     let* () =
@@ -701,20 +670,6 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Compaction_exact_lane_unconfigured { source })
-  | "failure_judgment_boundary_failed", `Assoc fields ->
-    let* () =
-      exact_reason_fields
-        ~context:"failure_judgment_boundary_failed"
-        [ "detail" ]
-        fields
-    in
-    let* detail =
-      required_nonempty_reason_string
-        ~context:"failure_judgment_boundary_failed"
-        "detail"
-        fields
-    in
-    Ok (Failure_judgment_boundary_failed { detail })
   | "compaction_retry_exhausted", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -773,33 +728,9 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Transcript_corruption_requires_reset { detail })
-  | "failure_judgment_external_input_requested", `Assoc fields ->
-    let* () =
-      exact_reason_fields
-        ~context:"failure_judgment_external_input_requested"
-        [ "judge_runtime_id"; "rationale" ]
-        fields
-    in
-    let* judge_runtime_id =
-      required_nonempty_reason_string
-        ~context:"failure_judgment_external_input_requested"
-        "judge_runtime_id"
-        fields
-    in
-    let* rationale =
-      required_nonempty_reason_string
-        ~context:"failure_judgment_external_input_requested"
-        "rationale"
-        fields
-    in
-    Ok (Failure_judgment_external_input_requested { judge_runtime_id; rationale })
-  | "failure_judgment_requested", _ ->
-    Error (Printf.sprintf "%s reason_detail must be null" label)
   | "compaction_exact_output_terminal", _ ->
     Error (Printf.sprintf "%s reason_detail must be an object" label)
-  | ( "failure_judgment_boundary_failed"
-    | "failure_judgment_external_input_requested"
-    | "compaction_exact_lane_unconfigured" ), _ ->
+  | "compaction_exact_lane_unconfigured", _ ->
     Error (Printf.sprintf "%s reason_detail must be an object" label)
   | unknown, _ ->
     Error (Printf.sprintf "unknown event queue escalation reason: %s" unknown)
@@ -934,7 +865,6 @@ let source_terminal_receipt_of_stimulus source =
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
-  | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _ ->
     Error "source event does not carry a typed terminal receipt"
@@ -1110,11 +1040,6 @@ let validate_manual_compaction_commit commit =
 
 let validate_manual_compaction_followup = function
   | Compaction_commit_ack -> Ok ()
-  | Compaction_commit_failure_judgment
-      { Keeper_event_queue.payload = Keeper_event_queue.Failure_judgment _; _ } ->
-    Ok ()
-  | Compaction_commit_failure_judgment _ ->
-    Error "manual compaction failure-judgment follow-up has the wrong payload"
 ;;
 
 let validate_settlement = function
@@ -1139,49 +1064,6 @@ let validate_settlement = function
   | Settle_from_source_terminal source_terminal ->
     validate_accepted_source_terminal source_terminal
   | Settle_exact disposition -> validate_exact_source_disposition disposition
-  | Escalate
-      { reason = Failure_judgment_requested
-      ; successor =
-          Some
-            { Keeper_event_queue.payload =
-                Keeper_event_queue.Failure_judgment _
-            ; _
-            }
-      } ->
-    Ok ()
-  | Escalate
-      { reason = Failure_judgment_boundary_failed { detail }
-      ; successor = None
-      }
-    when String.equal (String.trim detail) "" ->
-    Error "failure judgment boundary failure detail must not be empty"
-  | Escalate
-      { reason =
-          Failure_judgment_external_input_requested
-            { judge_runtime_id; rationale }
-      ; successor = None
-      }
-    when
-      String.equal (String.trim judge_runtime_id) ""
-      || String.equal (String.trim rationale) "" ->
-    Error "external-input failure judgment evidence must not be empty"
-  | Escalate
-      { reason =
-          ( Failure_judgment_boundary_failed _
-          | Failure_judgment_external_input_requested _ )
-      ; successor = None
-      } ->
-    Ok ()
-  | Escalate { reason = Failure_judgment_requested; successor = None } ->
-    Error "failure judgment request settlement requires a typed successor"
-  | Escalate { reason = Failure_judgment_requested; successor = Some _ } ->
-    Error "failure judgment request successor has the wrong payload kind"
-  | Escalate { reason = Failure_judgment_boundary_failed _; successor = Some _ } ->
-    Error "failure judgment boundary failure must not enqueue a successor"
-  | Escalate
-      { reason = Failure_judgment_external_input_requested _; successor = Some _ }
-    ->
-    Error "external-input failure judgment must not enqueue a successor"
   | Escalate { reason = Compaction_retry_exhausted _; successor = None } -> Ok ()
   | Escalate { reason = Compaction_retry_exhausted _; successor = Some _ } ->
     Error "compaction retry exhaustion must not enqueue a successor"
@@ -1336,15 +1218,6 @@ let identity_bound_nonterminal_settlement = function
   | Manual_compaction_committed _ -> true
   | Requeue Context_compaction_retry -> true
   | Escalate { reason = Compaction_floor_exceeded _; successor = None } -> true
-  | Escalate
-      { reason = Failure_judgment_requested
-      ; successor =
-          Some
-            { Keeper_event_queue.payload = Keeper_event_queue.Failure_judgment _
-            ; _
-            }
-      } ->
-    true
   | No_compaction _
   | Cancel_accepted _
   | Transfer_accepted _
@@ -1700,9 +1573,6 @@ let settle_committed ~settled_at ~lease ~settlement state =
       | Manual_compaction_committed { followup = Compaction_commit_ack; _ }
       | No_compaction _ | Cancel_accepted _ | Transfer_accepted _
       | Settle_from_source_terminal _ -> state.pending
-      | Manual_compaction_committed
-          { followup = Compaction_commit_failure_judgment successor; _ } ->
-        enqueue_if_missing state.pending successor
       | Settle_exact { action = Consume_source; _ } -> state.pending
       | Requeue
           (Retry_after_observed | Context_compaction_retry) ->
@@ -2948,11 +2818,6 @@ let manual_compaction_commit_of_yojson json =
 
 let manual_compaction_followup_to_yojson = function
   | Compaction_commit_ack -> `Assoc [ "kind", `String "ack" ]
-  | Compaction_commit_failure_judgment successor ->
-    `Assoc
-      [ "kind", `String "failure_judgment_requested"
-      ; "successor", Keeper_event_queue.stimulus_to_yojson successor
-      ]
 ;;
 
 let manual_compaction_followup_of_yojson json =
@@ -2964,13 +2829,6 @@ let manual_compaction_followup_of_yojson json =
     | "ack" ->
       let* () = exact_fields ~context ~expected:[ "kind" ] fields in
       Ok Compaction_commit_ack
-    | "failure_judgment_requested" ->
-      let* () =
-        exact_fields ~context ~expected:[ "kind"; "successor" ] fields
-      in
-      let* successor_json = required_field ~context "successor" fields in
-      let* successor = Keeper_event_queue.stimulus_of_yojson successor_json in
-      Ok (Compaction_commit_failure_judgment successor)
     | unknown ->
       Error (Printf.sprintf "unknown manual compaction follow-up: %s" unknown)
   in

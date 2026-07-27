@@ -20,7 +20,6 @@ type t =
   | TurnScheduled
   | TurnCompleted
   | FailureRoute
-  | FailureJudgmentOutcome
   | IdleSeconds
   | StreamProjectionEventCutoff
   | MetricEmitDropped
@@ -233,7 +232,6 @@ let to_string = function
   | TurnScheduled -> "masc_keeper_turn_scheduled_total"
   | TurnCompleted -> "masc_keeper_turn_completed_total"
   | FailureRoute -> "masc_keeper_failure_route_total"
-  | FailureJudgmentOutcome -> "masc_keeper_failure_judgment_outcome_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | StreamProjectionEventCutoff ->
     "masc_keeper_stream_projection_event_cutoff_total"

@@ -23,9 +23,6 @@ type pending_board_event_kind =
   | Bg_completed
   | Schedule_due
   | External_attention
-  | Failure_judgment
-      (** RFC-0313 W2: deterministic turn failure escalated for an
-          LLM-boundary verdict on the keeper's next turn. *)
   | Goal_assigned
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
           the assignment edge surfaces as actionable turn input. *)
@@ -132,7 +129,6 @@ type event_queue_trigger =
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
-  | Failure_judgment_stimulus
   | Manual_compaction_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
@@ -144,7 +140,6 @@ type turn_reason =
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
-  | Failure_judgment_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -261,19 +256,6 @@ val pending_board_event_of_external_attention :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_external_attention.item ->
   pending_board_event
-
-val apply_failure_judgment_guidance :
-  post_id:string ->
-  judge_runtime_id:string ->
-  guidance:string ->
-  rationale:string ->
-  pending_board_event list ->
-  (pending_board_event list, string) result
-(** Replace exactly one matching [Failure_judgment] observation with the
-    independent judge's canonical resume verdict. The full structured verdict
-    remains observational data, while the typed control path decides whether
-    the action turn is allowed. Missing or duplicate observations are explicit
-    errors. *)
 
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),

@@ -803,15 +803,8 @@ let () =
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
-  (* --- strict persisted load rejects current payloads missing required
-         terminal provenance and preserves the operator-reset evidence. --- *)
-  let failure_judgment : failure_judgment =
-    { fj_runtime_id = "strict-persisted-runtime"
-    ; fj_judgment = Keeper_runtime_failure_route.Protocol_error
-    ; fj_provenance = Keeper_runtime_failure_route.Oas_mcp_error
-    ; fj_detail = "strict persisted fixture"
-    }
-  in
+  (* --- strict persisted load rejects malformed current payloads and
+         preserves the operator-reset evidence. --- *)
   (match
      stimulus_to_yojson
        { post_id = "duplicate-payload"
@@ -835,7 +828,7 @@ let () =
       { post_id = "duplicate-discriminator"
       ; urgency = Normal
       ; arrived_at = 9.5
-      ; payload = Failure_judgment failure_judgment
+      ; payload = fusion_payload ()
       }
     |> function
     | `Assoc stimulus_fields ->
@@ -860,14 +853,6 @@ let () =
       ; urgency = Normal
       ; arrived_at = 10.0
       ; payload = fusion_payload ()
-      }
-    |> fun queue ->
-    enqueue
-      queue
-      { post_id = failure_judgment_post_id failure_judgment
-      ; urgency = Normal
-      ; arrived_at = 11.0
-      ; payload = Failure_judgment failure_judgment
       }
   in
   let assert_strict_persisted_rejected ~label ~rewrite ~expected_detail =
@@ -916,30 +901,6 @@ let () =
     ~label:"missing-terminal"
     ~rewrite:(remove_payload_field ~kind:"fusion_completed" ~field:"terminal")
     ~expected_detail:(Some "terminal");
-  assert_strict_persisted_rejected
-    ~label:"missing-provenance"
-    ~rewrite:(remove_payload_field ~kind:"failure_judgment" ~field:"provenance")
-    ~expected_detail:(Some "provenance");
-  let rewrite_failure_judgment_payload ~label rewrite_fields =
-    rewrite_payload_fields ~kind:"failure_judgment" ~label rewrite_fields
-  in
-  assert_strict_persisted_rejected
-    ~label:"failure-judgment-duplicate-provenance"
-    ~rewrite:
-      (rewrite_failure_judgment_payload
-         ~label:"duplicate provenance"
-         (fun fields ->
-            match List.assoc_opt "provenance" fields with
-            | Some provenance -> ("provenance", provenance) :: fields
-            | None -> Alcotest.fail "failure judgment fixture has no provenance"))
-    ~expected_detail:None;
-  assert_strict_persisted_rejected
-    ~label:"failure-judgment-extra-field"
-    ~rewrite:
-      (rewrite_failure_judgment_payload
-         ~label:"extra compatibility field"
-         (fun fields -> ("legacy_provenance", `String "ignored") :: fields))
-    ~expected_detail:None;
   let rewrite_fusion_payload ~label rewrite_fields =
     rewrite_payload_fields ~kind:"fusion_completed" ~label rewrite_fields
   in

@@ -26,7 +26,6 @@ type pending_board_event_kind =
   | Bg_completed
   | Schedule_due
   | External_attention
-  | Failure_judgment
   | Goal_assigned
 
 type pending_board_event =
@@ -99,7 +98,6 @@ type event_queue_trigger =
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
-  | Failure_judgment_stimulus
   | Manual_compaction_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
@@ -109,7 +107,6 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
-  | Failure_judgment_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -556,88 +553,6 @@ let pending_board_event_of_external_attention
   }
 ;;
 
-(* RFC-0313 W2: surface a deterministic turn failure as actionable turn input
-   for an LLM-boundary verdict. *)
-let pending_board_event_of_failure_judgment
-      ~(meta : keeper_meta)
-      ~(arrived_at : float)
-      (fj : Keeper_event_queue.failure_judgment)
-  : pending_board_event
-  =
-  let author = meta.name in
-  { event_kind = Failure_judgment
-  ; post_id = Keeper_event_queue.failure_judgment_post_id fj
-  ; author
-  ; title =
-      Printf.sprintf
-        "Turn failure escalated for judgment: %s from %s on %s"
-        (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
-        (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
-        fj.fj_runtime_id
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len fj.fj_detail
-  ; hearth = None
-  ; post_kind = Board.System_post
-  ; updated_at = arrived_at
-  ; explicit_mention = false
-  ; matched_targets = []
-  ; self_commented = false
-  ; new_external_since = 1
-  ; latest_external_author = None
-  ; latest_external_preview = None
-  }
-
-let apply_failure_judgment_guidance
-      ~post_id
-      ~judge_runtime_id
-      ~guidance
-      ~rationale
-      events
-  =
-  let matching =
-    List.filter
-      (fun event ->
-         event.event_kind = Failure_judgment
-         && String.equal event.post_id post_id)
-      events
-  in
-  match matching with
-  | [] ->
-    Error
-      (Printf.sprintf
-         "failure judgment guidance has no matching observation: %s"
-         post_id)
-  | _ :: _ :: _ ->
-    Error
-      (Printf.sprintf
-         "failure judgment guidance has duplicate observations: %s"
-         post_id)
-  | [ _ ] ->
-    let verdict =
-      Keeper_failure_judgment_contract.Resume_with_guidance
-        { guidance; rationale }
-    in
-    let preview =
-      `Assoc
-        [ "judge_runtime_id", `String judge_runtime_id
-        ; "verdict", Keeper_failure_judgment_contract.to_yojson verdict
-        ]
-      |> Yojson.Safe.to_string
-    in
-    Ok
-      (List.map
-         (fun event ->
-            if
-              event.event_kind = Failure_judgment
-              && String.equal event.post_id post_id
-            then
-              { event with
-                title = "Independent failure judgment authorized a Keeper action turn"
-              ; preview
-              }
-            else event)
-         events)
-;;
-
 (* RFC-0315 P3 W0: surface a fresh goal assignment as actionable turn input.
    Author is the assigning actor (tool caller or "toml_reconcile"); the event
    records the assignment context and the keeper decides what to do with it. *)
@@ -709,10 +624,6 @@ let pending_board_event_of_stimulus
             ~post_id:stimulus.post_id
             ~arrived_at:stimulus.arrived_at
             sw))
-  | Keeper_event_queue.Failure_judgment fj ->
-    Ok
-      (Some
-         (pending_board_event_of_failure_judgment ~meta ~arrived_at:stimulus.arrived_at fj))
   | Keeper_event_queue.Goal_assigned ga ->
     Ok
       (Some
@@ -1198,9 +1109,6 @@ let keeper_cycle_decision
   let manual_compaction_control =
     List.mem Manual_compaction_stimulus event_queue_triggers
   in
-  let failure_judgment_control =
-    List.mem Failure_judgment_stimulus event_queue_triggers
-  in
   let reactive_triggers =
     [ (if Message_scope.has_kind Message_scope.Mention observation.pending_messages
        then Some Mention_pending
@@ -1232,18 +1140,6 @@ let keeper_cycle_decision
     { should_run = true
     ; channel = Reactive
     ; verdict = Run { reasons = Manual_compaction_pending, [] }
-    ; since_last_scheduled_autonomous = None
-    }
-  else if failure_judgment_control
-  then
-    (* The judge is the recovery control plane for the failure that may have
-       disabled ordinary reactive execution. It must run to a typed verdict,
-       but explicit Keeper pause remains authoritative operator intent. The
-       owning lease is requeued while paused and resumes through this branch
-       after the operator re-enables the Keeper. *)
-    { should_run = true
-    ; channel = Reactive
-    ; verdict = Run { reasons = Failure_judgment_pending, [] }
     ; since_last_scheduled_autonomous = None
     }
   else (

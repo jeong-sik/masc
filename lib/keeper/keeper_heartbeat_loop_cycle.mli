@@ -12,10 +12,6 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; block : Keeper_turn_admission.autonomous_block
       }
-  | Judgment_settled of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; outcome : failure_judgment_terminal
-      }
   | Manual_compaction_failed of
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_manual_compaction.failure
@@ -27,13 +23,6 @@ type cycle_outcome =
   | Manual_compaction_applied of
       { receipt : Keeper_manual_compaction.applied_receipt
       ; followup : cycle_outcome
-      }
-
-and failure_judgment_terminal =
-  | Judgment_boundary_failed of { detail : string }
-  | Judgment_external_input_requested of
-      { judge_runtime_id : string
-      ; rationale : string
       }
 
 val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
@@ -61,7 +50,6 @@ val run_keeper_cycle
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> shared_context:Agent_sdk.Context.t
   -> wake:Keeper_registry.wake_reason
-  -> ?failure_judgment:Keeper_event_queue.failure_judgment
   -> ?manual_compaction_requested:bool
   -> unit
   -> cycle_outcome

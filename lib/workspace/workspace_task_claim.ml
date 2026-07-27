@@ -221,11 +221,14 @@ let claim_task_r config ~agent_name ~task_id ()
                ; "ts", `String (now_iso ())
                ]);
            let evidence_projection =
-             Workspace_query.verification_evidence_projection
-               config
-               ~viewer:agent_name
-               ~task:claimed_task
-             |> Option.value ~default:""
+             match
+               Workspace_query.verification_evidence_projection
+                 config
+                 ~viewer:agent_name
+                 ~task:claimed_task
+             with
+             | Some projection -> projection
+             | None -> ""
            in
            Ok
              (`New_claim

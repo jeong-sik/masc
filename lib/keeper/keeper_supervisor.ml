@@ -29,22 +29,24 @@ let empty_sweep_acc =
 ;;
 
 let pending_hitl_approval_counts config =
-  let pending_entries = Keeper_approval_queue.list_pending_entries () in
-  keeper_names config
-  |> List.filter_map (fun name ->
-       let pending_count =
-         List.fold_left
-           (fun count (entry : Keeper_approval_queue.pending_approval) ->
-              if String.equal entry.keeper_name name
-              then count + 1
-              else count)
-           0
-           pending_entries
-       in
-       if pending_count = 0 then None else Some (name, pending_count))
+  Keeper_approval_queue.list_pending_entries_for_workspace
+    ~base_path:config.base_path
+  |> Result.map (fun pending_entries ->
+    keeper_names config
+    |> List.filter_map (fun name ->
+         let pending_count =
+           List.fold_left
+             (fun count (entry : Keeper_approval_queue.pending_approval) ->
+                if String.equal entry.keeper_name name
+                then count + 1
+                else count)
+             0
+             pending_entries
+         in
+         if pending_count = 0 then None else Some (name, pending_count)))
 
 let pending_hitl_approval_keeper_names config =
-  pending_hitl_approval_counts config |> List.map fst
+  pending_hitl_approval_counts config |> Result.map (List.map fst)
 ;;
 
 let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
@@ -53,12 +55,20 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
   let dead_ttl_sec = Runtime_params.get Runtime_settings.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
   (* HITL requests are observable inputs, not Keeper-lane ownership. *)
-  pending_hitl_approval_counts ctx.config
-  |> List.iter (fun (name, pending_count) ->
-       Log.Keeper.info
-         "keeper:%s has %d pending HITL request(s); Keeper lane remains available"
-         name
-         pending_count);
+  (match pending_hitl_approval_counts ctx.config with
+   | Ok counts ->
+     List.iter
+       (fun (name, pending_count) ->
+          Log.Keeper.info
+            "keeper:%s has %d pending HITL request(s); Keeper lane remains available"
+            name
+            pending_count)
+       counts
+   | Error error ->
+     Log.Keeper.error
+       "pending HITL visibility unavailable workspace=%s error=%s"
+       base_path
+       (Keeper_approval_queue.storage_error_to_string error));
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)

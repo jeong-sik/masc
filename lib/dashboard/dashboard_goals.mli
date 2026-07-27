@@ -54,6 +54,7 @@ val build_forest :
   config:Workspace.config ->
   goals:Goal_store.goal list ->
   tasks:Masc_domain.task list ->
+  pending_approvals:Yojson.Safe.t list ->
   tree_node list
 (** Assembles the goal forest from [goals] / [tasks].
     Every root goal (no parent or parent outside [goals])
@@ -94,3 +95,20 @@ val goal_detail_json :
   (Yojson.Safe.t, string) result
 (** Returns the per-goal detail envelope for [goal_id].
     [Error msg] when the goal is not in the tree. *)
+
+module For_testing : sig
+  val dashboard_goals_tree_json_with_pending_reader :
+    read_pending:
+      (base_path:string ->
+      (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result) ->
+    config:Workspace.config ->
+    Yojson.Safe.t
+
+  val goal_detail_json_with_pending_reader :
+    read_pending:
+      (base_path:string ->
+      (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result) ->
+    config:Workspace.config ->
+    goal_id:string ->
+    (Yojson.Safe.t, string) result
+end

@@ -408,45 +408,6 @@ type capacity_refusal =
       ; limit_bytes : int
       }
 
-(* Variants are enumerated rather than closed with [_ -> None] so a new SDK error
-   forces a decision here. The catch-all this replaces is why the byte axis was
-   invisible: [Request_body_too_large] carries two measured integers and fell
-   through as "not a capacity refusal", so a request that provably exceeded the
-   target's declared byte limit produced no compaction request at all. *)
-let capacity_refusal_of_error (err : Agent_sdk.Error.sdk_error) : capacity_refusal option =
-  match err with
-  | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
-    Some (Provider_context_window { limit_tokens = limit })
-  | Agent_sdk.Error.Api
-      (InvalidRequest { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
-    ->
-    Some (Serialized_request_body { actual_bytes; limit_bytes })
-  | Agent_sdk.Error.Api
-      (InvalidRequest { reason = Json_parse_error | Unknown_invalid_request; _ }) ->
-    (* A malformed request is a defect in what was built, not a size the target
-       refused. Compacting would send the same defect at a smaller size. *)
-    None
-  | Agent_sdk.Error.Api (InputCapacity _) ->
-    (* A third axis, not yet carried: [Serving_constraint.admission_error] measures
-       input *tokens* against probed serving evidence (input_tokens,
-       accepted_through, rejected_from), so it needs its own trigger variant
-       rather than being folded into either axis above. Reaching masc at all means
-       OAS already advanced through every candidate
-       (oas exact_output.ml:924-925), which is where a reduction request belongs. *)
-    None
-  | Agent_sdk.Error.Api
-      ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
-      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
-      | Timeout _ )
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> None
-
 type capacity_non_compaction =
   | Serving_evidence_not_yet_valid of
       { now_unix_s : int
@@ -456,8 +417,7 @@ type capacity_non_compaction =
       { now_unix_s : int
       ; expires_at_unix_s : int
       }
-  | Token_measurement_unavailable of
-      { protocol : Llm_provider.Input_token_count.protocol }
+  | Token_measurement_unavailable
 
 type capacity_transition =
   | Not_capacity
@@ -526,8 +486,8 @@ let capacity_transition_of_error
     Capacity_non_compacting
       (Serving_evidence_expired { now_unix_s; expires_at_unix_s })
   | Agent_sdk.Error.Api
-      (InputCapacity { reason = Token_measurement_unavailable protocol; _ }) ->
-    Capacity_non_compacting (Token_measurement_unavailable { protocol })
+      (InputCapacity { reason = Token_measurement_unavailable _; _ }) ->
+    Capacity_non_compacting Token_measurement_unavailable
   | Agent_sdk.Error.Api
       (InvalidRequest { reason = Json_parse_error | Unknown_invalid_request; _ })
   | Agent_sdk.Error.Api
@@ -545,11 +505,29 @@ let capacity_transition_of_error
     Not_capacity
 ;;
 
+(* The two-axis refusal view is a projection of the canonical transition
+   classifier. This keeps one exhaustive SDK-error match while preserving the
+   narrow token/byte API used by existing lifecycle projections. *)
+let capacity_refusal_of_error
+    (err : Agent_sdk.Error.sdk_error) : capacity_refusal option =
+  match capacity_transition_of_error err with
+  | Compact_next_cycle (Compaction_trigger.Provider_overflow { limit_tokens }) ->
+    Some (Provider_context_window { limit_tokens })
+  | Compact_next_cycle
+      (Compaction_trigger.Request_body_over_capacity { actual_bytes; limit_bytes })
+    ->
+    Some (Serialized_request_body { actual_bytes; limit_bytes })
+  | Compact_next_cycle (Compaction_trigger.Serving_input_capacity _)
+  | Capacity_non_compacting _
+  | Not_capacity ->
+    None
+;;
+
 (* Projection for the two token-axis call sites. Both publish
    reason="provider_context_overflow" and the [Sdk_context_window_exceeded]
    blocker class (keeper_unified_turn_execution.ml:485-509), labels that would be
    wrong for a declared-byte refusal, so this projection admits only the context
-   window. Byte refusals reach compaction through {!capacity_refusal_of_error}. *)
+   window. *)
 let context_overflow_event_of_error
     (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event option =
   match capacity_refusal_of_error err with

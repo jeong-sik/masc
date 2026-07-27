@@ -48,6 +48,10 @@ function emptySummary() {
   }
 }
 
+const readyApprovalQueue = {
+  approval_queue_state: { state: 'ready' as const },
+}
+
 afterEach(() => {
   vi.clearAllMocks()
 })
@@ -55,6 +59,7 @@ afterEach(() => {
 describe('fetchDashboardGoalsTree decoding', () => {
   it('drops nodes missing required id, title, or status', async () => {
     getMock.mockResolvedValue({
+      ...readyApprovalQueue,
       tree: [
         validNode('goal-valid', 'Valid goal'),
         { id: 'goal-no-title', status: 'active' },
@@ -73,6 +78,7 @@ describe('fetchDashboardGoalsTree decoding', () => {
 
   it('drops tasks missing required id, title, or status', async () => {
     getMock.mockResolvedValue({
+      ...readyApprovalQueue,
       tree: [
         validNode('goal-1', 'Goal one', {
           tasks: [
@@ -94,6 +100,7 @@ describe('fetchDashboardGoalsTree decoding', () => {
 
   it('drops malformed child nodes while keeping valid descendants', async () => {
     getMock.mockResolvedValue({
+      ...readyApprovalQueue,
       tree: [
         validNode('goal-parent', 'Parent goal', {
           children: [
@@ -114,6 +121,7 @@ describe('fetchDashboardGoalsTree decoding', () => {
 
   it('backfills missing attainment metric_evaluation from metric presence', async () => {
     getMock.mockResolvedValue({
+      ...readyApprovalQueue,
       tree: [
         validNode('goal-metric', 'Metric goal', {
           metric: 'coverage %',
@@ -136,6 +144,7 @@ describe('fetchDashboardGoalsTree decoding', () => {
 
   it('marks missing attainment payload with declared metric as unevaluated', async () => {
     getMock.mockResolvedValue({
+      ...readyApprovalQueue,
       tree: [
         validNode('goal-missing-attainment', 'Missing attainment', {
           metric: 'coverage %',
@@ -151,8 +160,62 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[0]!.attainment.note).toBe('Attainment projection missing from payload.')
   })
 
+  it('rejects a typed unavailable approval queue instead of decoding an empty tree', async () => {
+    getMock.mockResolvedValue({
+      generated_at: '2026-07-27T00:00:00Z',
+      approval_queue_state: {
+        state: 'unavailable',
+        code: 'reset_required',
+        title: 'Gate durable queue unavailable · runtime reset required',
+        operator_detail: 'pending store requires reset',
+        severity: 'bad',
+        icon: '!',
+      },
+      tree: null,
+      summary: null,
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow(
+      '! Gate durable queue unavailable · runtime reset required: pending store requires reset',
+    )
+  })
+
+  it('rejects a missing approval queue state', async () => {
+    getMock.mockResolvedValue({
+      tree: [],
+      summary: emptySummary(),
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow(
+      '유효하지 않은 dashboard goals approval_queue_state payload',
+    )
+  })
+
+  it('rejects a malformed approval queue state', async () => {
+    getMock.mockResolvedValue({
+      approval_queue_state: { state: 'ready', legacy: true },
+      tree: [],
+      summary: emptySummary(),
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow(
+      '유효하지 않은 dashboard goals approval_queue_state payload',
+    )
+  })
+
+  it('rejects null tree and summary under a ready queue state', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: null,
+      summary: null,
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow()
+  })
+
   it('preserves an explicit runtime snapshot failure in Goal detail', async () => {
     getMock.mockResolvedValue({
+      ...readyApprovalQueue,
       goal: validNode('goal-runtime', 'Runtime goal'),
       linked_tasks: [],
       linked_keepers: [

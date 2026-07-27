@@ -44,13 +44,49 @@ let test_provider_overflow_trigger_roundtrip () =
            ; rejected_from = None
            })
     ; Compaction_trigger.Serving_input_capacity
+        (Compaction_trigger.Boundary_unknown
+           { input_tokens = 524_299
+           ; accepted_through = 524_298
+           ; rejected_from = Some 524_300
+           })
+    ; Compaction_trigger.Serving_input_capacity
         (Compaction_trigger.Input_rejected
            { input_tokens = 524_300
            ; accepted_through = 524_298
            ; rejected_from = 524_299
            })
     ; Compaction_trigger.Manual
-    ]
+    ];
+  let decode_serving ~reason ~input_tokens ~accepted_through ~rejected_from =
+    Compaction_trigger.of_detail_json
+      (`Assoc
+        [ "kind", `String "serving_input_capacity"
+        ; "reason", `String reason
+        ; "input_tokens", `Int input_tokens
+        ; "accepted_through", `Int accepted_through
+        ; "rejected_from", `Int rejected_from
+        ])
+  in
+  (match
+     decode_serving
+       ~reason:"boundary_unknown"
+       ~input_tokens:524_300
+       ~accepted_through:524_298
+       ~rejected_from:524_299
+   with
+   | Error (Compaction_trigger.Invalid_serving_capacity_boundary _) -> ()
+   | Ok _ | Error _ ->
+     fail "boundary_unknown admitted a rejection at or below the measured input");
+  match
+    decode_serving
+      ~reason:"input_rejected"
+      ~input_tokens:524_300
+      ~accepted_through:524_298
+      ~rejected_from:524_301
+  with
+  | Error (Compaction_trigger.Invalid_serving_capacity_boundary _) -> ()
+  | Ok _ | Error _ ->
+    fail "input_rejected admitted a boundary above the measured input"
 ;;
 
 let test_capacity_request_codec_and_identity () =
@@ -77,19 +113,30 @@ let test_capacity_request_codec_and_identity () =
     (Keeper_event_queue.capacity_compaction_request_identity_equal
        request
        decoded);
+  let post_id = Keeper_event_queue.capacity_compaction_request_post_id request in
+  check
+    string
+    "stable domain-separated SHA-256 identity"
+    "capacity-compaction-request:549502733377aae755e8255b5c5c33870983c5123e8d50aeb51552de17573824"
+    post_id;
+  check
+    int
+    "post id retains the full SHA-256 hex"
+    (String.length "capacity-compaction-request:" + 64)
+    (String.length post_id);
   check
     string
     "stable post id round-trips"
-    (Keeper_event_queue.capacity_compaction_request_post_id request)
+    post_id
     (Keeper_event_queue.capacity_compaction_request_post_id decoded);
   let different =
     { Keeper_event_queue.ccr_trigger =
         Compaction_trigger.Serving_input_capacity
           (Compaction_trigger.Boundary_unknown
-             { input_tokens = 524_300
-             ; accepted_through = 524_298
-             ; rejected_from = Some 524_299
-             })
+           { input_tokens = 524_300
+           ; accepted_through = 524_298
+           ; rejected_from = Some 524_301
+           })
     }
   in
   check
@@ -98,7 +145,14 @@ let test_capacity_request_codec_and_identity () =
     false
     (Keeper_event_queue.capacity_compaction_request_identity_equal
        request
-       different)
+       different);
+  check
+    bool
+    "different typed evidence has different post id"
+    false
+    (String.equal
+       post_id
+       (Keeper_event_queue.capacity_compaction_request_post_id different))
 ;;
 
 let test_request_body_over_capacity_rejects_non_refusals () =

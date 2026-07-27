@@ -218,13 +218,18 @@ let capacity_compaction_request_of_yojson = function
 let capacity_compaction_request_identity_equal left right =
   left.ccr_trigger = right.ccr_trigger
 
+let capacity_compaction_request_identity_bytes request =
+  "keeper.capacity_compaction_request.identity.v1\000"
+  ^ (request
+     |> capacity_compaction_request_to_yojson
+     |> Yojson.Safe.to_string)
+
 let capacity_compaction_request_post_id request =
   let digest =
     request
-    |> capacity_compaction_request_to_yojson
-    |> Yojson.Safe.to_string
-    |> Digest.string
-    |> Digest.to_hex
+    |> capacity_compaction_request_identity_bytes
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
   in
   "capacity-compaction-request:" ^ digest
 

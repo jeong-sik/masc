@@ -952,6 +952,11 @@ describe('computeOverviewDigest', () => {
     expect(digest.openGateRequests).toBe(2)
   })
 
+  it('preserves an unavailable Gate queue instead of fabricating zero', () => {
+    const digest = computeOverviewDigest(null, [], [])
+    expect(digest.openGateRequests).toBeNull()
+  })
+
   it('orders top goals by priority and labels the leader by due date', () => {
     const digest = computeOverviewDigest(
       0,

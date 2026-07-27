@@ -9,7 +9,16 @@ let hitl_status_json ~base_path =
 ;;
 
 let dashboard_json ~base_path ~limit:_ ~offset:_ ~status_filter:_ =
-  let approval_queue = Keeper_approval_queue.list_pending_dashboard_json () in
+  let approval_queue, approval_queue_state =
+    match
+      Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+        ~base_path
+    with
+    | Ok items ->
+      `List items, Keeper_approval_queue.approval_queue_ready_state_json
+    | Error error ->
+      `Null, Keeper_approval_queue.approval_queue_unavailable_state_json error
+  in
   let recent_resolved =
     Keeper_approval_queue.list_recent_resolved_json
       ~base_path
@@ -32,6 +41,7 @@ let dashboard_json ~base_path ~limit:_ ~offset:_ ~status_filter:_ =
       , `String
           "External effects use exact Always Allowed, Auto Judge, or nonblocking human HITL." )
     ; "approval_queue", approval_queue
+    ; "approval_queue_state", approval_queue_state
     ; "recent_resolved", `List recent_resolved
     ; "approval_rules", approval_rules
     ; "approval_rules_state", approval_rules_state

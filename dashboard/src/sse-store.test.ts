@@ -831,7 +831,11 @@ describe('setupSSEReaction reconnect hydration', () => {
     sseStore.hydrateDashboardSlice('board', { posts: [], generated_at: 'now' })
     sseStore.hydrateDashboardSlice('goals', {
       planning: { goals: [], generated_at: 'now' },
-      tree: { tree: [], summary: { total_goals: 0 } },
+      tree: {
+        approval_queue_state: { state: 'ready' },
+        tree: [],
+        summary: { total_goals: 0 },
+      },
     })
     sseStore.hydrateDashboardSlice('composite', {
       generated_at: 1,
@@ -841,7 +845,11 @@ describe('setupSSEReaction reconnect hydration', () => {
 
     expect(hydrateBoardSnapshot).toHaveBeenCalledWith({ posts: [], generated_at: 'now' })
     expect(hydratePlanningSnapshot).toHaveBeenCalledWith({ goals: [], generated_at: 'now' })
-    expect(hydrateGoalTreeSnapshot).toHaveBeenCalledWith({ tree: [], summary: { total_goals: 0 } })
+    expect(hydrateGoalTreeSnapshot).toHaveBeenCalledWith({
+      approval_queue_state: { state: 'ready' },
+      tree: [],
+      summary: { total_goals: 0 },
+    })
     expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith({
       generated_at: 1,
       count: 0,

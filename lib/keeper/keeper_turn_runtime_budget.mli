@@ -205,9 +205,7 @@ type capacity_refusal =
 val capacity_refusal_of_error :
   Agent_sdk.Error.sdk_error ->
   capacity_refusal option
-(** Classify a typed SDK error as a capacity refusal. Every SDK variant is
-    enumerated, so adding one forces a decision here instead of returning [None]
-    by default. *)
+(** Project the canonical capacity transition onto the token/byte refusal axes. *)
 
 type capacity_non_compaction =
   | Serving_evidence_not_yet_valid of
@@ -218,8 +216,7 @@ type capacity_non_compaction =
       { now_unix_s : int
       ; expires_at_unix_s : int
       }
-  | Token_measurement_unavailable of
-      { protocol : Llm_provider.Input_token_count.protocol }
+  | Token_measurement_unavailable
 
 type capacity_transition =
   | Not_capacity
@@ -239,7 +236,7 @@ val capacity_transition_of_error :
 val context_overflow_event_of_error :
   Agent_sdk.Error.sdk_error ->
   Keeper_state_machine.event option
-(** The context-window axis of {!capacity_refusal_of_error} as a lifecycle event.
+(** The context-window axis of {!capacity_transition_of_error} as a lifecycle event.
     [Some] only for [Provider_context_window]; a byte refusal returns [None]
     because this projection's call sites label the failure as a context-window
     exceedance. *)

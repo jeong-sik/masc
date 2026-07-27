@@ -1,5 +1,9 @@
 import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
-import type { BoardMonitoring, PendingConfirmSummary } from './gate'
+import type {
+  BoardMonitoring,
+  KeeperApprovalQueueState,
+  PendingConfirmSummary,
+} from './gate'
 
 // --- Dashboard projection responses ---
 
@@ -890,6 +894,7 @@ export interface GoalTreeSummary {
 
 export interface DashboardGoalsTreeResponse {
   generated_at?: string
+  approval_queue_state?: KeeperApprovalQueueState
   tree: GoalTreeNode[]
   summary: GoalTreeSummary
 }

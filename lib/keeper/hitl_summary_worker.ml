@@ -4,7 +4,7 @@ module Exact_output = Agent_sdk.Exact_output
 module Registry = Runtime_exact_output_registry
 module Schema = Keeper_structured_output_schema
 
-let summary_version = 2
+let summary_version = current_hitl_context_summary_version
 let lane_id = "hitl_auto_judge"
 
 let system_prompt () =
@@ -265,24 +265,69 @@ type exact_identity =
   ; request_body_sha256 : string
   }
 
-type strict_snapshot_writer =
-  Keeper_approval_queue.For_testing.strict_snapshot_writer
+type exact_transition =
+  id:string
+  -> input_hash:string
+  -> sequence:int
+  -> slot_id:string
+  -> call_id:string
+  -> plan_fingerprint:string
+  -> request_body_sha256:string
+  -> (exact_attempt_transition, exact_attempt_error) result
 
-type exact_queue_writers =
-  { bind_writer : strict_snapshot_writer option
-  ; release_writer : strict_snapshot_writer option
-  ; complete_writer : strict_snapshot_writer option
-  ; quarantine_writer : strict_snapshot_writer option
-  ; after_bind : (unit -> unit) option
+type exact_completion_transition =
+  id:string
+  -> input_hash:string
+  -> sequence:int
+  -> slot_id:string
+  -> call_id:string
+  -> plan_fingerprint:string
+  -> request_body_sha256:string
+  -> summary:hitl_context_summary
+  -> (exact_attempt_transition, exact_attempt_error) result
+
+type exact_quarantine_transition =
+  id:string
+  -> input_hash:string
+  -> sequence:int
+  -> slot_id:string
+  -> call_id:string
+  -> plan_fingerprint:string
+  -> request_body_sha256:string
+  -> cause:exact_attempt_quarantine_cause
+  -> (exact_attempt_transition, exact_attempt_error) result
+
+type exact_queue_ops =
+  { bind : exact_transition
+  ; release_before_dispatch : exact_transition
+  ; complete : exact_completion_transition
+  ; quarantine : exact_quarantine_transition
+  ; after_bind : unit -> unit
   }
 
-let production_exact_queue_writers =
-  { bind_writer = None
-  ; release_writer = None
-  ; complete_writer = None
-  ; quarantine_writer = None
-  ; after_bind = None
+let create_exact_queue_ops
+      ~bind
+      ~release_before_dispatch
+      ~complete
+      ~quarantine
+      ~after_bind
+  =
+  { bind
+  ; release_before_dispatch
+  ; complete
+  ; quarantine
+  ; after_bind
   }
+;;
+
+let production_exact_queue_ops =
+  create_exact_queue_ops
+    ~bind:Keeper_approval_queue.bind_summary_exact_attempt
+    ~release_before_dispatch:
+      Keeper_approval_queue.release_summary_exact_attempt_before_dispatch
+    ~complete:Keeper_approval_queue.complete_summary_exact_attempt
+    ~quarantine:Keeper_approval_queue.quarantine_summary_exact_attempt
+    ~after_bind:(fun () -> ())
 ;;
 
 let exact_identity_of_candidate
@@ -324,56 +369,40 @@ let with_exact_identity
 ;;
 
 let bind_exact_attempt
-      writers
+      queue_ops
       (entry : pending_approval)
       (identity : exact_identity)
   =
-  match writers.bind_writer with
-  | None ->
-    with_exact_identity
-      entry
-      identity
-      Keeper_approval_queue.bind_summary_exact_attempt
-  | Some save_file_atomic_strict_staged ->
-    with_exact_identity
-      entry
-      identity
-      (Keeper_approval_queue.For_testing.bind_summary_exact_attempt_with_writer
-         ~save_file_atomic_strict_staged)
+  with_exact_identity entry identity queue_ops.bind
 ;;
 
 let release_exact_attempt
-      writers
+      queue_ops
       (entry : pending_approval)
       (identity : exact_identity)
   =
-  match writers.release_writer with
-  | None ->
-    with_exact_identity
-      entry
-      identity
-      Keeper_approval_queue.release_summary_exact_attempt_before_dispatch
-  | Some save_file_atomic_strict_staged ->
-    with_exact_identity
-      entry
-      identity
-      (Keeper_approval_queue.For_testing
-       .release_summary_exact_attempt_before_dispatch_with_writer
-         ~save_file_atomic_strict_staged)
+  with_exact_identity entry identity queue_ops.release_before_dispatch
 ;;
 
 let complete_exact_attempt
-      writers
+      queue_ops
       (entry : pending_approval)
       (identity : exact_identity)
       summary
   =
-  match writers.complete_writer with
-  | None ->
-    with_exact_identity
-      entry
-      identity
-      (fun
+  with_exact_identity
+    entry
+    identity
+    (fun
+      ~id
+      ~input_hash
+      ~sequence
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+    ->
+      queue_ops.complete
         ~id
         ~input_hash
         ~sequence
@@ -381,75 +410,55 @@ let complete_exact_attempt
         ~call_id
         ~plan_fingerprint
         ~request_body_sha256
-      ->
-        Keeper_approval_queue.complete_summary_exact_attempt
-          ~id
-          ~input_hash
-          ~sequence
-          ~slot_id
-          ~call_id
-          ~plan_fingerprint
-          ~request_body_sha256
-          ~summary)
-  | Some save_file_atomic_strict_staged ->
-    with_exact_identity
-      entry
-      identity
-      (fun
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-      ->
-        Keeper_approval_queue.For_testing
-        .complete_summary_exact_attempt_with_writer
-          ~save_file_atomic_strict_staged
-          ~id
-          ~input_hash
-          ~sequence
-          ~slot_id
-          ~call_id
-          ~plan_fingerprint
-          ~request_body_sha256
-          ~summary)
+        ~summary)
 ;;
 
 type flow_callback_error =
-  | Exact_bind_failed of string
+  | Exact_bind_failed of exact_attempt_error
   | Exact_bind_sync_unconfirmed of string
-  | Exact_release_failed of string
+  | Exact_release_failed of exact_attempt_error
   | Exact_release_sync_unconfirmed of string
 
 let flow_callback_error_to_string = function
-  | Exact_bind_failed detail -> "exact bind failed: " ^ detail
+  | Exact_bind_failed error ->
+    "exact bind failed: "
+    ^ Keeper_approval_queue.exact_attempt_error_to_string error
   | Exact_bind_sync_unconfirmed detail ->
     "exact bind sync unconfirmed: " ^ detail
-  | Exact_release_failed detail -> "exact release failed: " ^ detail
+  | Exact_release_failed error ->
+    "exact release failed: "
+    ^ Keeper_approval_queue.exact_attempt_error_to_string error
   | Exact_release_sync_unconfirmed detail ->
     "exact release sync unconfirmed: " ^ detail
+;;
+
+let flow_callback_rejection = function
+  | Exact_bind_failed (Exact_attempt_rejected rejection)
+  | Exact_release_failed (Exact_attempt_rejected rejection) ->
+    Some rejection
+  | Exact_bind_failed (Exact_attempt_storage_error _)
+  | Exact_release_failed (Exact_attempt_storage_error _)
+  | Exact_bind_sync_unconfirmed _
+  | Exact_release_sync_unconfirmed _ ->
+    None
 ;;
 
 type guarded_flow_callback_error =
   | Durable_flow_callback_failed of flow_callback_error
   | Owner_generation_unregistered
 
-let before_dispatch ~queue_writers (entry : pending_approval) candidate =
+let before_dispatch ~queue_ops (entry : pending_approval) candidate =
   let identity = exact_identity_of_candidate candidate in
-  match bind_exact_attempt queue_writers entry identity with
+  match bind_exact_attempt queue_ops entry identity with
   | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
   | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
     Error (Exact_bind_sync_unconfirmed detail)
   | Error error ->
-    Error
-      (Exact_bind_failed
-         (Keeper_approval_queue.exact_attempt_error_to_string error))
+    Error (Exact_bind_failed error)
 ;;
 
 let before_advance
-      ~queue_writers
+      ~queue_ops
       (entry : pending_approval)
       ~failed
       ~next:_
@@ -458,14 +467,12 @@ let before_advance
   | Exact_output.Flow_candidate_rejected _ -> Ok ()
   | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
     let identity = exact_identity_of_candidate candidate in
-    (match release_exact_attempt queue_writers entry identity with
+    (match release_exact_attempt queue_ops entry identity with
      | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
      | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
        Error (Exact_release_sync_unconfirmed detail)
      | Error error ->
-       Error
-         (Exact_release_failed
-            (Keeper_approval_queue.exact_attempt_error_to_string error)))
+       Error (Exact_release_failed error))
 ;;
 
 let log_exact_error (entry : pending_approval) operation detail =
@@ -484,12 +491,64 @@ let exact_attempt_source_resolved (entry : pending_approval) = function
 ;;
 
 exception Exact_terminalization_persistence_failed of string
+exception Exact_terminalization_rejected of exact_attempt_rejection
 exception Cancelled_uncertain of exn * Printexc.raw_backtrace * string
+exception Exact_terminalization_identity_unbound of string
+exception Cancelled_identity_unbound of exn * Printexc.raw_backtrace
+exception Cancelled_exact_rejected of
+  exn * Printexc.raw_backtrace * exact_attempt_rejection
+exception Cancelled_owner_unregistered of exn * Printexc.raw_backtrace
+
+type exact_settlement_error =
+  | Exact_settlement_identity_unbound of string
+  | Exact_settlement_persistence_failed of string
+  | Exact_settlement_rejected of exact_attempt_rejection
+
+type cancellation_settlement =
+  | Cancellation_settled
+  | Cancellation_owner_generation_deferred
+  | Cancellation_exact_settlement_failed of exact_settlement_error
+  | Cancellation_settlement_raised of string
+
+let mark_identity_unbound (entry : pending_approval) =
+  Keeper_approval_queue.mark_summary_attempt_identity_unbound
+    ~base_path:entry.audit_base_path
+    ~id:entry.id
+    ~input_hash:entry.input_hash
+    ~sequence:entry.sequence
+;;
+
+let mark_persistence_uncertain (entry : pending_approval) =
+  Keeper_approval_queue.mark_summary_attempt_persistence_uncertain
+    ~base_path:entry.audit_base_path
+    ~id:entry.id
+    ~input_hash:entry.input_hash
+    ~sequence:entry.sequence
+;;
+
+let persist_identity_unbound (entry : pending_approval) =
+  match mark_identity_unbound entry with
+  | Ok true -> Ok ()
+  | Ok false ->
+    Error `Transition_not_applied
+  | Error (Exact_attempt_storage_error error) ->
+    Error (`Storage_failed (Keeper_approval_queue.storage_error_to_string error))
+  | Error (Exact_attempt_rejected rejection) ->
+    Error (`Rejected rejection)
+;;
+
 let signal_terminalization_persistence_failure
       (entry : pending_approval)
       operation
       detail
   =
+  (match mark_persistence_uncertain entry with
+   | Ok _ -> ()
+   | Error marker_error ->
+     log_exact_error
+       entry
+       "persistence uncertainty observation"
+       (Keeper_approval_queue.exact_attempt_error_to_string marker_error));
   record_outcome "exact_terminal_persistence_failure";
   log_exact_error entry operation detail;
   raise
@@ -501,57 +560,16 @@ let signal_terminalization_persistence_failure
           detail))
 ;;
 
-let mark_unbound_failure (entry : pending_approval) reason =
-  match
-    Keeper_approval_queue.mark_summary_failed
-      ~id:entry.id
-      ~reason
-      ~retryable:false
-  with
-  | Ok true -> Ok ()
-  | Ok false -> Error "unbound failure transition did not change state"
-  | Error error ->
-    Error (Keeper_approval_queue.summary_transition_error_to_string error)
-;;
+type exact_queue_terminalization_error =
+  | Exact_queue_persistence_failed of string
+  | Exact_queue_rejected of exact_attempt_rejection
 
 let quarantine_identity_result
-      ?writer
+      ~queue_ops
       (entry : pending_approval)
       (identity : exact_identity)
       cause
   =
-  let quarantine
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-    =
-    match writer with
-    | None ->
-      Keeper_approval_queue.quarantine_summary_exact_attempt
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-        ~cause
-    | Some save_file_atomic_strict_staged ->
-      Keeper_approval_queue.For_testing.quarantine_summary_exact_attempt_with_writer
-        ~save_file_atomic_strict_staged
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-        ~cause
-  in
   match
     with_exact_identity
       entry
@@ -565,73 +583,128 @@ let quarantine_identity_result
         ~plan_fingerprint
         ~request_body_sha256
       ->
-        quarantine
+        queue_ops.quarantine
           ~id
           ~input_hash
           ~sequence
           ~slot_id
         ~call_id
         ~plan_fingerprint
-        ~request_body_sha256)
+          ~request_body_sha256
+          ~cause)
   with
   | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
   | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-    Error ("quarantine durability confirmation failed: " ^ detail)
+    Error
+      (Exact_queue_persistence_failed
+         ("quarantine durability confirmation failed: " ^ detail))
   | Error error when exact_attempt_source_resolved entry error ->
     record_outcome "exact_source_resolved";
     Ok ()
-  | Error error ->
-    Error (Keeper_approval_queue.exact_attempt_error_to_string error)
+  | Error (Exact_attempt_storage_error error) ->
+    Error
+      (Exact_queue_persistence_failed
+         (Keeper_approval_queue.storage_error_to_string error))
+  | Error (Exact_attempt_rejected rejection) ->
+    Error (Exact_queue_rejected rejection)
 ;;
 
 let quarantine_identity
+      ~queue_ops
       (entry : pending_approval)
       (identity : exact_identity)
       cause
   =
-  match quarantine_identity_result entry identity cause with
+  match quarantine_identity_result ~queue_ops entry identity cause with
   | Ok () -> ()
-  | Error detail ->
+  | Error (Exact_queue_persistence_failed detail) ->
     signal_terminalization_persistence_failure
       entry
       "quarantine persistence"
       detail
+  | Error (Exact_queue_rejected rejection) ->
+    raise (Exact_terminalization_rejected rejection)
 ;;
 
-let quarantine_candidate (entry : pending_approval) candidate cause =
-  quarantine_identity entry (exact_identity_of_candidate candidate) cause
+let quarantine_candidate ~queue_ops (entry : pending_approval) candidate cause =
+  quarantine_identity
+    ~queue_ops
+    entry
+    (exact_identity_of_candidate candidate)
+    cause
 ;;
 
-let settle_current ?quarantine_writer (entry : pending_approval) ~reason ~cause =
-  match Keeper_approval_queue.get_pending_entry ~id:entry.id with
-  | None ->
+let settle_current ~queue_ops (entry : pending_approval) ~reason ~cause =
+  match
+    Keeper_approval_queue.get_pending_entry_for_workspace
+      ~base_path:entry.audit_base_path
+      ~id:entry.id
+  with
+  | Error error ->
+    Error
+      (Exact_settlement_persistence_failed
+         (Keeper_approval_queue.storage_error_to_string error))
+  | Ok None ->
     record_outcome "exact_source_resolved";
     Ok ()
-  | Some { exact_attempt = Exact_unbound; _ } ->
-    mark_unbound_failure entry reason
-  | Some
+  | Ok (Some { exact_attempt = Exact_unbound; _ }) ->
+    Error
+      (Exact_settlement_identity_unbound
+         (Printf.sprintf
+            "HITL exact-output terminalization requires a bound attempt identity approval_id=%s: %s"
+            entry.id
+            reason))
+  | Ok
+      (Some
       { exact_attempt =
           Exact_bound { status = (Exact_completed | Exact_quarantined _); _ }
       ; _
-      } ->
+      }) ->
     record_outcome "exact_source_resolved";
     Ok ()
-  | Some { exact_attempt = Exact_bound binding; _ } ->
+  | Ok (Some { exact_attempt = Exact_bound binding; _ }) ->
     quarantine_identity_result
-      ?writer:quarantine_writer
+      ~queue_ops
       entry
       (exact_identity_of_binding binding)
       cause
+    |> Result.map_error (function
+      | Exact_queue_persistence_failed detail ->
+        Exact_settlement_persistence_failed detail
+      | Exact_queue_rejected rejection ->
+        Exact_settlement_rejected rejection)
 ;;
 
-let settle_current_or_signal (entry : pending_approval) ~reason ~cause =
-  match settle_current entry ~reason ~cause with
-  | Ok () -> ()
-  | Error detail ->
+let signal_settlement_error (entry : pending_approval) = function
+  | Exact_settlement_identity_unbound detail ->
+    (match persist_identity_unbound entry with
+     | Ok () ->
+       record_outcome "exact_identity_unbound";
+       log_exact_error entry "terminalization blocked" detail;
+       raise (Exact_terminalization_identity_unbound detail)
+     | Error `Transition_not_applied ->
+       record_outcome "exact_identity_unbound_source_changed";
+       raise (Exact_terminalization_identity_unbound detail)
+     | Error (`Rejected rejection) ->
+       raise (Exact_terminalization_rejected rejection)
+     | Error (`Storage_failed marker_detail) ->
+       signal_terminalization_persistence_failure
+         entry
+         "identity-unbound observation"
+         marker_detail)
+  | Exact_settlement_persistence_failed detail ->
     signal_terminalization_persistence_failure
       entry
       "terminalization persistence"
       detail
+  | Exact_settlement_rejected rejection ->
+    raise (Exact_terminalization_rejected rejection)
+;;
+
+let settle_current_or_signal ~queue_ops (entry : pending_approval) ~reason ~cause =
+  match settle_current ~queue_ops entry ~reason ~cause with
+  | Ok () -> ()
+  | Error error -> signal_settlement_error entry error
 ;;
 
 let same_catalog_generation left right =
@@ -706,7 +779,7 @@ let success_provenance_matches (flow_success : Exact_output.flow_success) =
 (* ── Flow terminalization ───────────────────────── *)
 
 let handle_success
-      ~queue_writers
+      ~queue_ops
       (prepared : prepared_flow)
       ~on_summary
       (flow_success : Exact_output.flow_success)
@@ -722,7 +795,11 @@ let handle_success
          Exact_output.Domain_rejected
        : (Exact_output.domain_settlement_receipt, Exact_output.domain_settlement_error) result);
     record_outcome "exact_provenance_mismatch";
-    quarantine_candidate entry candidate Exact_flow_execution_failed)
+    quarantine_candidate
+      ~queue_ops
+      entry
+      candidate
+      Exact_flow_execution_failed)
   else
     let call_id =
       candidate.receipt
@@ -743,7 +820,11 @@ let handle_success
          : (Exact_output.domain_settlement_receipt, Exact_output.domain_settlement_error) result);
       record_outcome "exact_domain_invalid_output";
       log_exact_error entry "domain validation" detail;
-      quarantine_candidate entry candidate Exact_domain_invalid_output
+      quarantine_candidate
+        ~queue_ops
+        entry
+        candidate
+        Exact_domain_invalid_output
     | Ok summary ->
       let identity = exact_identity_of_candidate candidate in
       (match
@@ -753,9 +834,13 @@ let handle_success
        with
        | Error _ ->
          record_outcome "exact_domain_settlement_failed";
-         quarantine_identity entry identity Exact_flow_execution_failed
+         quarantine_identity
+           ~queue_ops
+           entry
+           identity
+           Exact_flow_execution_failed
        | Ok _ ->
-         (match complete_exact_attempt queue_writers entry identity summary with
+         (match complete_exact_attempt queue_ops entry identity summary with
           | Ok { write_outcome = Fsync_completed; _ } ->
             record_outcome "ok_summary";
             on_summary summary
@@ -767,19 +852,26 @@ let handle_success
               detail
           | Error error when exact_attempt_source_resolved entry error ->
             record_outcome "exact_source_resolved"
-          | Error error ->
+          | Error (Exact_attempt_rejected rejection) ->
+            raise (Exact_terminalization_rejected rejection)
+          | Error (Exact_attempt_storage_error error) ->
             record_outcome "exact_terminal_persistence_failure";
             log_exact_error
               entry
               "completion"
-              (Keeper_approval_queue.exact_attempt_error_to_string error);
-            quarantine_identity entry identity Exact_terminal_persistence_failure))
+              (Keeper_approval_queue.storage_error_to_string error);
+            quarantine_identity
+              ~queue_ops
+              entry
+              identity
+              Exact_terminal_persistence_failure))
 ;;
 
-let handle_flow_error (prepared : prepared_flow) = function
+let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
   | Exact_output.Flow_attempt_already_started _ ->
     record_outcome "exact_attempt_replay";
     settle_current_or_signal
+      ~queue_ops
       prepared.entry
       ~reason:"HITL exact-output flow attempt was replayed"
       ~cause:Exact_attempt_replay
@@ -788,33 +880,41 @@ let handle_flow_error (prepared : prepared_flow) = function
     (match List.rev evidence.attempts with
      | candidate :: _ ->
        quarantine_candidate
+         ~queue_ops
          prepared.entry
          candidate
          Exact_flow_execution_failed
      | [] ->
        settle_current_or_signal
+         ~queue_ops
          prepared.entry
          ~reason:"HITL exact-output success ordinal allocation failed"
          ~cause:Exact_flow_execution_failed)
   | Exact_output.Flow_attempt_start_failed _ ->
     record_outcome "exact_attempt_start_failed";
     settle_current_or_signal
+      ~queue_ops
       prepared.entry
       ~reason:"HITL exact-output candidate attempt allocation failed"
       ~cause:Exact_flow_execution_failed
   | Exact_output.Flow_candidates_exhausted _ ->
     record_outcome "exact_candidates_exhausted";
     settle_current_or_signal
+      ~queue_ops
       prepared.entry
       ~reason:"HITL exact-output candidates exhausted before dispatch"
       ~cause:Exact_flow_execution_failed
   | Exact_output.Flow_before_dispatch_callback_failed
       { candidate; cause = Durable_flow_callback_failed cause; _ } ->
     record_outcome "exact_bind_failed";
-    settle_current_or_signal
-      prepared.entry
-      ~reason:(flow_callback_error_to_string cause)
-      ~cause:Exact_terminal_persistence_failure;
+    (match flow_callback_rejection cause with
+     | Some rejection -> raise (Exact_terminalization_rejected rejection)
+     | None ->
+       settle_current_or_signal
+         ~queue_ops
+         prepared.entry
+         ~reason:(flow_callback_error_to_string cause)
+         ~cause:Exact_terminal_persistence_failure);
     ignore candidate
   | Exact_output.Flow_before_dispatch_callback_failed
       { cause = Owner_generation_unregistered; _ } ->
@@ -822,21 +922,31 @@ let handle_flow_error (prepared : prepared_flow) = function
   | Exact_output.Flow_before_advance_callback_failed
       { failed; cause = Durable_flow_callback_failed cause; _ } ->
     record_outcome "exact_release_failed";
-    settle_current_or_signal
-      prepared.entry
-      ~reason:(flow_callback_error_to_string cause)
-      ~cause:Exact_terminal_persistence_failure;
+    (match flow_callback_rejection cause with
+     | Some rejection -> raise (Exact_terminalization_rejected rejection)
+     | None ->
+       settle_current_or_signal
+         ~queue_ops
+         prepared.entry
+         ~reason:(flow_callback_error_to_string cause)
+         ~cause:Exact_terminal_persistence_failure);
     ignore failed
   | Exact_output.Flow_before_advance_callback_failed
       { cause = Owner_generation_unregistered; _ } ->
     ()
   | Exact_output.Flow_exact_execution_failed { candidate; _ } ->
     record_outcome "exact_execution_failed";
-    quarantine_candidate prepared.entry candidate Exact_flow_execution_failed
+    quarantine_candidate
+      ~queue_ops
+      prepared.entry
+      candidate
+      Exact_flow_execution_failed
 ;;
 
 type execution_boundary =
   | Executed
+  | Identity_unbound_blocked
+  | Exact_rejection_blocked of exact_attempt_rejection
   | Deferred_unregistered
 
 let with_current_generation (prepared : prepared_flow) callback =
@@ -859,38 +969,34 @@ let with_settlement_generation (prepared : prepared_flow) callback =
     callback
 ;;
 
-let execute_prepared_flow_with_queue_writers_current
-      ~queue_writers
+let execute_prepared_flow_with_queue_ops_current
+      ~queue_ops
       ~net
       ?clock
       ~on_summary
       (prepared : prepared_flow)
   =
-  let bound = ref false in
   let guarded_before_dispatch candidate =
     match with_current_generation prepared (fun () ->
-      before_dispatch ~queue_writers prepared.entry candidate)
+      before_dispatch ~queue_ops prepared.entry candidate)
     with
     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
       Error Owner_generation_unregistered
     | Keeper_exact_flow_scope.Current (Error cause) ->
       Error (Durable_flow_callback_failed cause)
     | Keeper_exact_flow_scope.Current (Ok ()) ->
-      bound := true;
-      Option.iter (fun after_bind -> after_bind ()) queue_writers.after_bind;
+      queue_ops.after_bind ();
       Ok ()
   in
   let guarded_before_advance ~failed ~next =
     match with_current_generation prepared (fun () ->
-      before_advance ~queue_writers prepared.entry ~failed ~next)
+      before_advance ~queue_ops prepared.entry ~failed ~next)
     with
     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
       Error Owner_generation_unregistered
     | Keeper_exact_flow_scope.Current (Error cause) ->
       Error (Durable_flow_callback_failed cause)
-    | Keeper_exact_flow_scope.Current (Ok ()) ->
-      bound := false;
-      Ok ()
+    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
   in
   let settle_current_generation callback =
     match with_settlement_generation prepared callback with
@@ -909,7 +1015,7 @@ let execute_prepared_flow_with_queue_writers_current
     with
     | Ok success ->
       settle_current_generation (fun () ->
-        handle_success ~queue_writers prepared ~on_summary success)
+        handle_success ~queue_ops prepared ~on_summary success)
     | Error
         (Exact_output.Flow_before_dispatch_callback_failed
            { cause = Owner_generation_unregistered; _ })
@@ -918,49 +1024,97 @@ let execute_prepared_flow_with_queue_writers_current
            { cause = Owner_generation_unregistered; _ }) ->
       Deferred_unregistered
     | Error error ->
-      settle_current_generation (fun () -> handle_flow_error prepared error)
+      settle_current_generation (fun () ->
+        handle_flow_error ~queue_ops prepared error)
   with
   | Eio.Cancel.Cancelled _ as cancellation ->
     let cancellation_backtrace = Printexc.get_raw_backtrace () in
-    if not !bound
-    then Printexc.raise_with_backtrace cancellation cancellation_backtrace
-    else (
-      let settlement =
-        try
-          Eio.Cancel.protect
-          @@ fun () ->
-          match
-            with_settlement_generation prepared (fun () ->
-              record_outcome "exact_cancellation";
-              settle_current
-                ?quarantine_writer:queue_writers.quarantine_writer
-                prepared.entry
-                ~reason:"HITL exact-output flow was cancelled"
-                ~cause:Exact_cancellation)
-          with
-          | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-            Error
-              "exact owner generation was replaced before cancellation settlement"
-          | Keeper_exact_flow_scope.Current result -> result
+    let cancelled_uncertain detail =
+      (match mark_persistence_uncertain prepared.entry with
+       | Ok _ -> ()
+       | Error marker_error ->
+         log_exact_error
+           prepared.entry
+           "cancellation uncertainty observation"
+           (Keeper_approval_queue.exact_attempt_error_to_string marker_error));
+      raise
+        (Cancelled_uncertain
+           (cancellation, cancellation_backtrace, detail))
+    in
+    let settlement =
+      try
+        Eio.Cancel.protect
+        @@ fun () ->
+        match
+          with_settlement_generation prepared (fun () ->
+            record_outcome "exact_cancellation";
+            settle_current
+              ~queue_ops
+              prepared.entry
+              ~reason:"HITL exact-output flow was cancelled"
+              ~cause:Exact_cancellation)
         with
-        | exn ->
-          Error
-            ("cancellation settlement raised: " ^ Printexc.to_string exn)
-      in
-      match settlement with
-      | Ok () ->
-        Printexc.raise_with_backtrace cancellation cancellation_backtrace
-      | Error detail ->
-        record_outcome "exact_cancellation_settlement_failed";
-        log_exact_error
-          prepared.entry
-          "cancellation terminalization persistence"
-          detail;
-        raise
-          (Cancelled_uncertain
-             (cancellation, cancellation_backtrace, detail)))
+        | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+          Cancellation_owner_generation_deferred
+        | Keeper_exact_flow_scope.Current (Ok ()) ->
+          Cancellation_settled
+        | Keeper_exact_flow_scope.Current (Error error) ->
+          Cancellation_exact_settlement_failed error
+      with
+      | exn ->
+        Cancellation_settlement_raised
+          ("cancellation settlement raised: " ^ Printexc.to_string exn)
+    in
+    (match settlement with
+     | Cancellation_settled ->
+       Printexc.raise_with_backtrace cancellation cancellation_backtrace
+     | Cancellation_exact_settlement_failed
+         (Exact_settlement_identity_unbound _) ->
+       (match persist_identity_unbound prepared.entry with
+        | Ok () ->
+          raise
+            (Cancelled_identity_unbound
+               (cancellation, cancellation_backtrace))
+        | Error `Transition_not_applied ->
+          raise
+            (Cancelled_identity_unbound
+               (cancellation, cancellation_backtrace))
+        | Error (`Rejected rejection) ->
+          raise
+            (Cancelled_exact_rejected
+               (cancellation, cancellation_backtrace, rejection))
+        | Error (`Storage_failed marker_detail) ->
+          cancelled_uncertain marker_detail)
+     | Cancellation_exact_settlement_failed
+         (Exact_settlement_persistence_failed detail)
+     | Cancellation_settlement_raised detail ->
+       record_outcome "exact_cancellation_settlement_failed";
+       log_exact_error
+         prepared.entry
+         "cancellation terminalization persistence"
+         detail;
+       cancelled_uncertain detail
+     | Cancellation_exact_settlement_failed
+         (Exact_settlement_rejected rejection) ->
+       raise
+         (Cancelled_exact_rejected
+            (cancellation, cancellation_backtrace, rejection))
+     | Cancellation_owner_generation_deferred ->
+       raise
+         (Cancelled_owner_unregistered
+            (cancellation, cancellation_backtrace)))
   | Exact_terminalization_persistence_failed _ as persistence_failure ->
     raise persistence_failure
+  | Exact_terminalization_rejected rejection ->
+    record_outcome "exact_terminal_rejected";
+    log_exact_error
+      prepared.entry
+      "terminalization rejected"
+      (Keeper_approval_queue.exact_attempt_error_to_string
+         (Exact_attempt_rejected rejection));
+    Exact_rejection_blocked rejection
+  | Exact_terminalization_identity_unbound _ ->
+    Identity_unbound_blocked
   | exn ->
     let detail = Printexc.to_string exn in
     record_outcome "crashed";
@@ -970,6 +1124,7 @@ let execute_prepared_flow_with_queue_writers_current
       @@ fun () ->
       with_settlement_generation prepared (fun () ->
         settle_current
+          ~queue_ops
           prepared.entry
           ~reason:("HITL exact-output worker crashed: " ^ detail)
           ~cause:Exact_terminal_persistence_failure)
@@ -978,15 +1133,35 @@ let execute_prepared_flow_with_queue_writers_current
      | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
        Deferred_unregistered
      | Keeper_exact_flow_scope.Current (Ok ()) -> Executed
-     | Keeper_exact_flow_scope.Current (Error persistence_detail) ->
+     | Keeper_exact_flow_scope.Current
+         (Error (Exact_settlement_identity_unbound detail)) ->
+       (match persist_identity_unbound prepared.entry with
+        | Ok () ->
+          record_outcome "exact_identity_unbound";
+          log_exact_error prepared.entry "terminalization blocked" detail;
+          Identity_unbound_blocked
+        | Error `Transition_not_applied ->
+          Identity_unbound_blocked
+        | Error (`Rejected rejection) ->
+          raise (Exact_terminalization_rejected rejection)
+        | Error (`Storage_failed marker_detail) ->
+          signal_terminalization_persistence_failure
+            prepared.entry
+            "identity-unbound observation"
+            marker_detail)
+     | Keeper_exact_flow_scope.Current
+         (Error (Exact_settlement_persistence_failed detail)) ->
        signal_terminalization_persistence_failure
          prepared.entry
          "crash terminalization persistence"
-         persistence_detail)
+         detail
+     | Keeper_exact_flow_scope.Current
+         (Error (Exact_settlement_rejected rejection)) ->
+       raise (Exact_terminalization_rejected rejection))
 ;;
 
-let execute_prepared_flow_with_queue_writers
-      ~queue_writers
+let execute_prepared_flow_with_queue_ops
+      ~queue_ops
       ~net
       ?clock
       ~on_summary
@@ -1004,8 +1179,8 @@ let execute_prepared_flow_with_queue_writers
   | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
     Deferred_unregistered
   | Keeper_exact_flow_scope.Current () ->
-    execute_prepared_flow_with_queue_writers_current
-      ~queue_writers
+    execute_prepared_flow_with_queue_ops_current
+      ~queue_ops
       ~net
       ?clock
       ~on_summary
@@ -1013,8 +1188,8 @@ let execute_prepared_flow_with_queue_writers
 ;;
 
 let execute_prepared_flow ~net ?clock ~on_summary prepared =
-  execute_prepared_flow_with_queue_writers
-    ~queue_writers:production_exact_queue_writers
+  execute_prepared_flow_with_queue_ops
+    ~queue_ops:production_exact_queue_ops
     ~net
     ?clock
     ~on_summary
@@ -1024,10 +1199,16 @@ let execute_prepared_flow ~net ?clock ~on_summary prepared =
 type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
+  | Terminalization_identity_unbound
+  | Terminalization_rejected
   | Owner_unregistered_deferred
 
+type spawn_outcome =
+  | Worker_forked
+  | Worker_not_forked_owner_unregistered
+
 let spawn_with
-      ~queue_writers
+      ~queue_ops
       ~prepare_flow
       ~sw
       ~(entry : pending_approval)
@@ -1047,7 +1228,7 @@ let spawn_with
               ~base_path:entry.audit_base_path
               entry.keeper_name) ->
     on_finish Owner_unregistered_deferred;
-    Ok ()
+    Ok Worker_not_forked_owner_unregistered
   | Error detail -> Error detail
   | Ok prepared ->
     let clock = Eio_context.get_clock_opt () in
@@ -1055,16 +1236,30 @@ let spawn_with
     let execution_outcome =
       try
         match
-          execute_prepared_flow_with_queue_writers
-            ~queue_writers
+          execute_prepared_flow_with_queue_ops
+            ~queue_ops
             ~net
             ?clock
             ~on_summary
             prepared
         with
         | Executed -> `Completed
+        | Identity_unbound_blocked -> `Identity_unbound
+        | Exact_rejection_blocked rejection -> `Rejected rejection
         | Deferred_unregistered -> `Owner_unregistered
       with
+      | Cancelled_identity_unbound
+          (cancellation, cancellation_backtrace) ->
+        `Cancelled_identity_unbound
+          (cancellation, cancellation_backtrace)
+      | Cancelled_exact_rejected
+          (cancellation, cancellation_backtrace, rejection) ->
+        `Cancelled_rejected
+          (cancellation, cancellation_backtrace, rejection)
+      | Cancelled_owner_unregistered
+          (cancellation, cancellation_backtrace) ->
+        `Cancelled_owner_unregistered
+          (cancellation, cancellation_backtrace)
       | Cancelled_uncertain (cancellation, cancellation_backtrace, detail) ->
         `Cancelled_uncertain
           (cancellation, cancellation_backtrace, detail)
@@ -1072,6 +1267,8 @@ let spawn_with
         `Cancelled (cancellation, Printexc.get_raw_backtrace ())
       | Exact_terminalization_persistence_failed _ as uncertainty ->
         `Uncertain uncertainty
+      | Exact_terminalization_rejected rejection ->
+        `Rejected rejection
       | exn -> `Uncertain exn
     in
     match execution_outcome with
@@ -1083,16 +1280,31 @@ let spawn_with
         (cancellation, cancellation_backtrace, _detail) ->
       on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    | `Cancelled_identity_unbound
+        (cancellation, cancellation_backtrace) ->
+      on_finish Terminalization_identity_unbound;
+      Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    | `Cancelled_rejected
+        (cancellation, cancellation_backtrace, _rejection) ->
+      on_finish Terminalization_rejected;
+      Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    | `Cancelled_owner_unregistered
+        (cancellation, cancellation_backtrace) ->
+      on_finish Owner_unregistered_deferred;
+      Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    | `Identity_unbound ->
+      on_finish Terminalization_identity_unbound
+    | `Rejected _ -> on_finish Terminalization_rejected
     | `Owner_unregistered -> on_finish Owner_unregistered_deferred
     | `Uncertain uncertainty ->
       on_finish Terminalization_persistence_uncertain;
       raise uncertainty);
-    Ok ()
+    Ok Worker_forked
 ;;
 
 let spawn =
   spawn_with
-    ~queue_writers:production_exact_queue_writers
+    ~queue_ops:production_exact_queue_ops
     ~prepare_flow
 ;;
 
@@ -1101,7 +1313,10 @@ module For_testing = struct
     | Exact_request_context_unavailable
 
   type nonrec prepared_flow = prepared_flow
-  type nonrec strict_snapshot_writer = strict_snapshot_writer
+  type nonrec exact_transition = exact_transition
+  type nonrec exact_completion_transition = exact_completion_transition
+  type nonrec exact_quarantine_transition = exact_quarantine_transition
+  type nonrec exact_queue_ops = exact_queue_ops
 
   let build_context_bundle = build_context_bundle
   let context_bundle_error_to_string = context_bundle_error_to_string
@@ -1110,55 +1325,48 @@ module For_testing = struct
   let prepare_flow = prepare_flow
   let execute_prepared_flow = execute_prepared_flow
 
-  let execute_prepared_flow_with_writers
-        ?bind_writer
-        ?release_writer
-        ?complete_writer
-        ?quarantine_writer
-        ?after_bind
+  let make_exact_queue_ops
+        ?(bind = production_exact_queue_ops.bind)
+        ?(release_before_dispatch =
+          production_exact_queue_ops.release_before_dispatch)
+        ?(complete = production_exact_queue_ops.complete)
+        ?(quarantine = production_exact_queue_ops.quarantine)
+        ?(after_bind = production_exact_queue_ops.after_bind)
+        ()
+    =
+    create_exact_queue_ops
+      ~bind
+      ~release_before_dispatch
+      ~complete
+      ~quarantine
+      ~after_bind
+  ;;
+
+  let execute_prepared_flow_with_queue_ops
+        ~queue_ops
         ~net
         ?clock
         ~on_summary
         prepared
     =
-    let queue_writers =
-      { bind_writer
-      ; release_writer
-      ; complete_writer
-      ; quarantine_writer
-      ; after_bind
-      }
-    in
-    execute_prepared_flow_with_queue_writers
-      ~queue_writers
+    execute_prepared_flow_with_queue_ops
+      ~queue_ops
       ~net
       ?clock
       ~on_summary
       prepared
   ;;
 
-  let spawn_with_writers
-        ?bind_writer
-        ?release_writer
-        ?complete_writer
-        ?quarantine_writer
-        ?after_bind
+  let spawn_with_queue_ops
+        ~queue_ops
         ~sw
         ~entry
         ~on_summary
         ~on_finish
         ()
     =
-    let queue_writers =
-      { bind_writer
-      ; release_writer
-      ; complete_writer
-      ; quarantine_writer
-      ; after_bind
-      }
-    in
     spawn_with
-      ~queue_writers
+      ~queue_ops
       ~prepare_flow
       ~sw
       ~entry

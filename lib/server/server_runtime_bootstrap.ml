@@ -1178,6 +1178,12 @@ let install_keeper_gate_persistence state =
            failure.reason)
       report.delivery_replay_failures;
     let resume_report = Keeper_gate.resume_persisted_auto_judges ~base_path in
+    (match resume_report.queue_error with
+     | Some error ->
+       Log.Server.error
+         "keeper_gate: Auto Judge recovery queue unavailable error=%s"
+         (Keeper_approval_queue.storage_error_to_string error)
+     | None -> ());
     Log.Server.info
       "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"
       resume_report.requested
@@ -1194,9 +1200,10 @@ let install_keeper_gate_persistence state =
     List.iter
       (fun (failure : Keeper_gate.auto_judge_resume_failure) ->
          Log.Server.error
-           "keeper_gate: recovered Auto Judge start failed approval=%s error=%s"
+           "keeper_gate: recovered Auto Judge failed approval=%s code=%s detail=%s"
            failure.approval_id
-           failure.reason)
+           (Keeper_gate.auto_judge_resume_failure_code_to_string failure.code)
+           failure.operator_detail)
       resume_report.failures
 ;;
 

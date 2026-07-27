@@ -1,6 +1,7 @@
 import { signal, computed } from '@preact/signals'
 import type { DashboardGateResponse } from '../types'
 import { createManagedAsyncResource } from '../lib/async-state'
+import { gateObservationErrorState } from '../lib/gate-observation-state'
 
 // ── Main Gate resource ──
 // Managed (stale-while-revalidate): a refetch keeps the previously loaded data
@@ -9,6 +10,15 @@ import { createManagedAsyncResource } from '../lib/async-state'
 // each post-action refresh made gateData null mid-flight — the approvals
 // queue (and the Gate surface) flashed its empty state every cycle.
 export const gateResource = createManagedAsyncResource<DashboardGateResponse>()
+
+export function gateObservationErrorSnapshot(operatorDetail: string): DashboardGateResponse {
+  return {
+    approval_queue: null,
+    approval_queue_state: gateObservationErrorState(operatorDetail),
+    recent_resolved: [],
+    approval_rules: [],
+  }
+}
 
 export const gateLoading = computed(() => gateResource.state.value.loading)
 export const gateError = signal('')

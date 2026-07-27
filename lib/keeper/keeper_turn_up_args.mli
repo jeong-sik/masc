@@ -66,16 +66,12 @@ val resolve_sandbox_profile :
   ?requested:string ->
   fallback:sandbox_profile option ->
   unit ->
-  sandbox_profile option
-(** An explicit [requested] profile wins over the TOML [fallback]. [None] when neither
-    states one.
+  sandbox_profile
+(** An explicit [requested] profile wins over the TOML [fallback].
 
-    No built-in default. The sandbox is an isolation boundary, so a caller that states
-    nothing gets [None] rather than a quietly chosen profile — the determinism gate
-    names that shape "permissive default on unknown input", and it is the same rule this
-    tool applies by requiring the value at all. The tool gate rejects the
-    nothing-stated case before creation, so this returning [None] is a contract the
-    caller can rely on rather than a case it has to guess at.
+    When neither source states a profile, returns the canonical local sandbox default.
+    Fresh keepers also default to an empty [allowed_paths] list, so that local sandbox
+    is restricted to [.masc/playground/<keeper_name>/].
 
     [requested] is the caller's raw string; an unparseable one is treated as absent,
     since the gate rejects those first. *)

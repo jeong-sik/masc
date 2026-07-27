@@ -51,6 +51,13 @@ val to_human : t -> string
 (** Structured JSON detail for durable observation. *)
 val to_detail_json : t -> Yojson.Safe.t
 
+(** Every key {!to_detail_json} can emit, across all constructors. A consumer
+    that filters or validates the encoded object reads this rather than
+    restating the keys, so a field added to a constructor cannot be dropped by
+    a stale allowlist. Not the per-kind key set — {!of_detail_json} still
+    rejects a key that does not belong to the decoded [kind]. *)
+val wire_field_names : string list
+
 type decode_error =
   | Expected_object
   | Unknown_field of string

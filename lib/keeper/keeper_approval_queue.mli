@@ -18,10 +18,6 @@ type summary_transition_error =
   | Summary_transition_storage_error of storage_error
   | Summary_transition_rejected of summary_transition_rejection
 
-type summary_owner_retirement_error =
-  | Summary_owner_retirement_storage_error of storage_error
-  | Summary_owner_retirement_exact_attempt_unsettled of exact_attempt_binding
-
 type exact_attempt_rejection =
   | Exact_attempt_not_found of string
   | Exact_attempt_key_mismatch of
@@ -32,6 +28,10 @@ type exact_attempt_rejection =
   | Exact_attempt_invalid_identity of string
   | Exact_attempt_summary_not_pending of string
   | Exact_attempt_unbound_state of string
+  | Exact_attempt_disposition_conflict of
+      { approval_id : string
+      ; disposition : summary_attempt_disposition
+      }
   | Exact_attempt_identity_conflict of exact_attempt_binding
   | Exact_attempt_status_conflict of exact_attempt_binding
   | Exact_attempt_provenance_mismatch of
@@ -104,8 +104,12 @@ type install_report =
 type install_error = Install_storage_failed of storage_error
 
 val storage_error_to_string : storage_error -> string
+val approval_queue_unavailable_title : string
+val approval_queue_unavailable_severity : string
+val approval_queue_unavailable_icon : string
+val approval_queue_ready_state_json : Yojson.Safe.t
+val approval_queue_unavailable_state_json : storage_error -> Yojson.Safe.t
 val summary_transition_error_to_string : summary_transition_error -> string
-val summary_owner_retirement_error_to_string : summary_owner_retirement_error -> string
 val exact_attempt_error_to_string : exact_attempt_error -> string
 val grant_error_to_string : grant_error -> string
 val install_error_to_string : install_error -> string
@@ -223,6 +227,7 @@ module For_testing : sig
   val reset_audit_store : unit -> unit
   val reset_runtime_state : unit -> unit
   val with_pending_store_lock : (unit -> 'a) -> 'a
+  val get_pending_entry_unchecked : id:string -> pending_approval option
   val install_persistence_with_after_load_hook :
     base_path:string ->
     after_load:(unit -> unit) ->
@@ -332,10 +337,21 @@ val resolve_with_policy :
 
 (** {1 Query} *)
 
-val list_pending_json : unit -> Yojson.Safe.t
-val list_pending_dashboard_json : unit -> Yojson.Safe.t
-val list_pending_entries : unit -> pending_approval list
-val get_pending_entry : id:string -> pending_approval option
+val list_pending_dashboard_json_for_workspace :
+  base_path:string -> (Yojson.Safe.t list, storage_error) result
+val list_pending_entries_for_workspace :
+  base_path:string -> (pending_approval list, storage_error) result
+
+val store_revision_for_workspace : base_path:string -> int
+(** Monotonic process-local revision of the workspace queue authority.
+    Installation and every transition to unavailable advance the revision so
+    projections cannot reuse a cache entry from an older authority state. *)
+(** Read one workspace's pending rows without collapsing an unavailable,
+    malformed, or reset-required durable store into an empty projection. *)
+val get_pending_entry_for_workspace :
+  base_path:string
+  -> id:string
+  -> (pending_approval option, storage_error) result
 
 val bind_summary_exact_attempt :
   id:string ->
@@ -414,40 +430,59 @@ val mark_summary_pending : id:string -> (bool, summary_transition_error) result
       so a Gate can prevent duplicate judge workers. A bound or quarantined
       exact attempt is rejected explicitly. *)
 
-val attach_summary :
-  id:string -> hitl_context_summary -> (bool, summary_transition_error) result
-
-val mark_summary_failed :
-  id:string ->
-  reason:string ->
-  retryable:bool ->
-  (bool, summary_transition_error) result
-
-(** Durably transition any [Summary_failed] state back to the in-flight marker.
-    Only explicit operator action calls this CAS, so the diagnostic [retryable]
-    classification never controls work. A restart-classified
-    [Exact_released_recovery_required] with [Summary_pending] is also reset to
-    [Exact_unbound] without changing its pending summary marker. A live
-    [Exact_released_before_dispatch] with [Summary_pending] is never accepted.
-    There is no timer or retry count. *)
-val restart_failed_summary : id:string -> (bool, summary_transition_error) result
-
-(** Explicit operator recovery: transition every failed summary for this
-    workspace in one durable transaction. Non-exact failures return to
-    [Summary_not_requested]. Released exact failures return to [Summary_pending]
-    with [Exact_unbound]. Restart-classified released pending work also returns
-    to [Exact_unbound] while remaining [Summary_pending], so only this operator
-    action permits a new exact attempt. Returns the reopened approval ids. *)
-val restart_failed_summaries :
-  base_path:string -> (string list, summary_transition_error) result
-
-(** Fail closed when permanently retiring a Keeper that still owns an exact
-    summary attempt. Otherwise terminalize every unbound pending summary in one
-    durable snapshot, leaving already terminal summaries unchanged. *)
-val retire_summary_owner :
+val mark_summary_attempt_identity_unbound :
   base_path:string ->
-  keeper_name:string ->
-  reason:string ->
-  (string list, summary_owner_retirement_error) result
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  (bool, exact_attempt_error) result
+(** Durably block an unbound pending summary with the stable
+    [Summary_attempt_identity_unbound] fact. The row identity is an exact CAS;
+    no caller supplies diagnostic text. A current start reservation can settle
+    here when its worker terminates before binding an exact attempt. *)
 
-val pending_count_for_keeper : keeper_name:string -> int
+val mark_summary_attempt_persistence_uncertain :
+  base_path:string ->
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  (bool, exact_attempt_error) result
+(** Durably record terminalization durability uncertainty without changing the
+    summary or exact binding. The stored operator detail is fixed by the queue
+    serializer and cannot contain runtime/provider exception text. *)
+
+val mark_summary_attempt_pre_worker_unavailable :
+  base_path:string ->
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  reason_code:summary_attempt_pre_worker_unavailable_code ->
+  operator_detail:string ->
+  (bool, exact_attempt_error) result
+(** Durably block an unbound current-schema row before provider dispatch. The
+    closed reason code and exact non-blank operator detail are persisted in the
+    same snapshot and are retryable only through
+    [reserve_summary_attempt_retry]. *)
+
+val summary_attempt_start_reserved_operator_detail : string
+
+val reserve_summary_attempt_retry :
+  base_path:string ->
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  expected_exact_attempt:exact_attempt_state ->
+  expected_disposition:summary_attempt_disposition ->
+  requested_by:string ->
+  (bool, exact_attempt_error) result
+(** Explicit operator CAS from a blocked row directly to the typed durable
+    start reservation. No intermediate ready row is persisted. The
+    caller-observed row identity, exact attempt, and disposition must still
+    match atomically. A restart-classified released binding returns to unbound
+    in the same write. An existing start reservation is not retryable.
+    Terminal exact quarantine is never retried. *)
+
+val pending_count_for_keeper_in_workspace :
+  base_path:string -> keeper_name:string -> (int, storage_error) result
+(** Count one keeper's pending approvals within the durable workspace store.
+    Store read failures remain explicit instead of collapsing to zero. *)

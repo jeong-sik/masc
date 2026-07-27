@@ -14,10 +14,6 @@ type summary_transition_error =
   | Summary_transition_storage_error of storage_error
   | Summary_transition_rejected of summary_transition_rejection
 
-type summary_owner_retirement_error =
-  | Summary_owner_retirement_storage_error of storage_error
-  | Summary_owner_retirement_exact_attempt_unsettled of exact_attempt_binding
-
 type exact_attempt_rejection =
   | Exact_attempt_not_found of string
   | Exact_attempt_key_mismatch of
@@ -28,6 +24,10 @@ type exact_attempt_rejection =
   | Exact_attempt_invalid_identity of string
   | Exact_attempt_summary_not_pending of string
   | Exact_attempt_unbound_state of string
+  | Exact_attempt_disposition_conflict of
+      { approval_id : string
+      ; disposition : summary_attempt_disposition
+      }
   | Exact_attempt_identity_conflict of exact_attempt_binding
   | Exact_attempt_status_conflict of exact_attempt_binding
   | Exact_attempt_provenance_mismatch of
@@ -104,6 +104,29 @@ let storage_error_to_string error =
   Printf.sprintf "%s: %s" error.path error.reason
 ;;
 
+let approval_queue_unavailable_title =
+  "Gate durable queue unavailable · runtime reset required"
+;;
+
+let approval_queue_unavailable_severity = "bad"
+let approval_queue_unavailable_icon = "!"
+let approval_queue_ready_state_json = `Assoc [ "state", `String "ready" ]
+
+let summary_attempt_start_reserved_operator_detail =
+  "Auto Judge worker start is durably reserved before exact attempt binding."
+;;
+
+let approval_queue_unavailable_state_json error =
+  `Assoc
+    [ "state", `String "unavailable"
+    ; "code", `String "reset_required"
+    ; "title", `String approval_queue_unavailable_title
+    ; "operator_detail", `String (storage_error_to_string error)
+    ; "severity", `String approval_queue_unavailable_severity
+    ; "icon", `String approval_queue_unavailable_icon
+    ]
+;;
+
 let exact_attempt_binding_to_string binding =
   let status =
     match binding.status with
@@ -133,19 +156,8 @@ let exact_attempt_binding_to_string binding =
 let summary_transition_error_to_string = function
   | Summary_transition_storage_error error -> storage_error_to_string error
   | Summary_transition_rejected (Summary_exact_attempt_bound binding) ->
-    "legacy summary transition rejected for exact attempt: "
+    "unbound summary transition rejected for exact attempt: "
     ^ exact_attempt_binding_to_string binding
-;;
-
-let summary_owner_retirement_error_to_string = function
-  | Summary_owner_retirement_storage_error error ->
-    storage_error_to_string error
-  | Summary_owner_retirement_exact_attempt_unsettled binding ->
-    Printf.sprintf
-      "approval summary owner retirement blocked by unsettled exact attempt: approval=%s slot=%s call=%s"
-      binding.approval_id
-      binding.slot_id
-      binding.call_id
 ;;
 
 let exact_attempt_error_to_string = function
@@ -165,6 +177,24 @@ let exact_attempt_error_to_string = function
     Printf.sprintf "exact attempt approval %s summary is not pending" approval_id
   | Exact_attempt_rejected (Exact_attempt_unbound_state approval_id) ->
     Printf.sprintf "exact attempt approval %s has no bound identity" approval_id
+  | Exact_attempt_rejected
+      (Exact_attempt_disposition_conflict { approval_id; disposition }) ->
+    let disposition =
+      match disposition with
+      | Summary_attempt_ready -> "ready"
+      | Summary_attempt_in_flight -> "in_flight"
+      | Summary_attempt_identity_unbound -> "identity_unbound"
+      | Summary_attempt_persistence_uncertain -> "persistence_uncertain"
+      | Summary_attempt_pre_worker_unavailable blocked ->
+        "pre_worker_unavailable:"
+        ^ summary_attempt_pre_worker_unavailable_code_to_string
+            blocked.reason_code
+      | Summary_attempt_settled -> "settled"
+    in
+    Printf.sprintf
+      "exact attempt approval %s rejects dispatch from disposition %s"
+      approval_id
+      disposition
   | Exact_attempt_rejected (Exact_attempt_identity_conflict binding) ->
     "exact attempt identity conflicts with durable binding: "
     ^ exact_attempt_binding_to_string binding
@@ -207,11 +237,12 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 7
+let pending_store_version = 8
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
+let store_revisions : int SMap.t Atomic.t = Atomic.make SMap.empty
 (** Process projection of the next value persisted in each workspace snapshot. *)
 let next_sequences : int SMap.t Atomic.t = Atomic.make SMap.empty
 let first_sequence = 1
@@ -229,16 +260,34 @@ let with_pending_store_lock f =
   Cross_context_mutex.with_durable_lock pending_store_mutex f
 ;;
 
+let bump_store_revision_unlocked ~base_path =
+  let revisions = Atomic.get store_revisions in
+  let revision =
+    match SMap.find_opt base_path revisions with
+    | Some revision -> revision
+    | None -> 0
+  in
+  Atomic.set store_revisions (SMap.add base_path (revision + 1) revisions)
+;;
+
 let mark_store_unavailable_unlocked ~base_path error =
   Atomic.set
     unavailable_stores
-    (SMap.add base_path error (Atomic.get unavailable_stores))
+    (SMap.add base_path error (Atomic.get unavailable_stores));
+  bump_store_revision_unlocked ~base_path
 ;;
 
 let clear_store_unavailable_unlocked ~base_path =
   Atomic.set
     unavailable_stores
-    (SMap.remove base_path (Atomic.get unavailable_stores))
+    (SMap.remove base_path (Atomic.get unavailable_stores));
+  bump_store_revision_unlocked ~base_path
+;;
+
+let store_revision_for_workspace ~base_path =
+  Option.value
+    (SMap.find_opt base_path (Atomic.get store_revisions))
+    ~default:0
 ;;
 
 let pending_store_path ~base_path =
@@ -284,6 +333,9 @@ let pending_entry_to_yojson (entry : pending_approval) =
       ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
       ; "summary_status", summary_status_to_yojson entry.summary_status
       ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
+      ; ( "summary_attempt_disposition"
+        , summary_attempt_disposition_to_yojson
+            entry.summary_attempt_disposition )
       ]
 ;;
 
@@ -392,11 +444,17 @@ let persist_snapshot_with_sequence_unlocked
   match SMap.find_opt base_path (Atomic.get unavailable_stores) with
   | Some error -> Error error
   | None ->
-    save_snapshot_file_unlocked
-      ~base_path
-      ~next_sequence
-      ~pending_map
-      ~delivery_map
+    (match
+       save_snapshot_file_unlocked
+         ~base_path
+         ~next_sequence
+         ~pending_map
+         ~delivery_map
+     with
+     | Ok () as ok -> ok
+     | Error error ->
+       mark_store_unavailable_unlocked ~base_path error;
+       Error error)
 ;;
 
 type store_lifecycle =
@@ -439,12 +497,18 @@ let persist_snapshot_exact_unlocked
   =
   match next_sequence_lifecycle ~base_path with
   | Ready next_sequence ->
-    save_snapshot_file_strict_staged_unlocked
-      ~save_file_atomic_strict_staged
-      ~base_path
-      ~next_sequence
-      ~pending_map
-      ~delivery_map
+    (match
+       save_snapshot_file_strict_staged_unlocked
+         ~save_file_atomic_strict_staged
+         ~base_path
+         ~next_sequence
+         ~pending_map
+         ~delivery_map
+     with
+     | Ok _ as ok -> ok
+     | Error error ->
+       mark_store_unavailable_unlocked ~base_path error;
+       Error error)
   | Uninstalled ->
     Error
       { path = pending_store_path ~base_path
@@ -565,36 +629,74 @@ let validate_entry_exact_attempt
       ~input_hash
       ~sequence
       ~summary_status
+      ~summary_attempt_disposition
       exact_attempt
   =
-  match exact_attempt, summary_status with
-  | Exact_unbound, _ -> Ok ()
-  | Exact_bound binding, _
+  match summary_attempt_disposition, exact_attempt, summary_status with
+  | Summary_attempt_ready, Exact_unbound,
+    (Summary_not_requested | Summary_pending) ->
+    Ok ()
+  | Summary_attempt_identity_unbound, Exact_unbound, Summary_pending ->
+    Ok ()
+  | Summary_attempt_persistence_uncertain, Exact_unbound, Summary_pending ->
+    Ok ()
+  | Summary_attempt_pre_worker_unavailable blocked, Exact_unbound,
+    (Summary_not_requested | Summary_pending)
+    when
+      let detail = String.trim blocked.operator_detail in
+      not (String.equal detail "")
+      && String.equal detail blocked.operator_detail ->
+    Ok ()
+  | _, Exact_bound binding, _
     when not
            (String.equal binding.approval_id id
             && String.equal binding.input_hash input_hash
             && Int.equal binding.sequence sequence) ->
     Error "exact attempt binding key does not match its approval entry"
-  | Exact_bound { status = Exact_completed; _ }, Summary_available _ -> Ok ()
-  | Exact_bound { status = Exact_quarantined cause; _ }, summary_status
+  | (Summary_attempt_settled | Summary_attempt_persistence_uncertain),
+    Exact_bound { status = Exact_completed; _ }, Summary_available _ ->
+    Ok ()
+  | (Summary_attempt_settled | Summary_attempt_persistence_uncertain),
+    Exact_bound { status = Exact_quarantined cause; _ }, summary_status
     when summary_status = exact_attempt_quarantine_summary_status cause ->
     Ok ()
-  | Exact_bound
+  | Summary_attempt_in_flight,
+    Exact_bound
       { status =
           ( Exact_dispatch_uncertain
+          | Exact_released_before_dispatch )
+      ; _
+      },
+    Summary_pending ->
+    Ok ()
+  | Summary_attempt_persistence_uncertain,
+    Exact_bound
+      { status =
+          ( Exact_dispatch_uncertain
+          | Exact_released_before_dispatch
           | Exact_released_recovery_required
           | Exact_restart_quarantined )
       ; _
       },
     Summary_pending ->
     Ok ()
-  | Exact_bound { status = Exact_released_before_dispatch; _ },
-    (Summary_pending | Summary_failed _) ->
-    Ok ()
-  | Exact_bound { status = Exact_completed; _ }, _ ->
+  | _, Exact_bound { status = Exact_completed; _ }, _ ->
     Error "completed exact attempt requires an available summary"
-  | Exact_bound _, _ ->
+  | _ ->
     Error "exact attempt and summary status are not a valid current-schema pair"
+;;
+
+let summary_attempt_allows_exact_bind = function
+  | Summary_attempt_ready
+  | Summary_attempt_pre_worker_unavailable
+      { reason_code = Summary_pre_worker_start_reserved; _ } ->
+    true
+  | Summary_attempt_in_flight
+  | Summary_attempt_identity_unbound
+  | Summary_attempt_persistence_uncertain
+  | Summary_attempt_pre_worker_unavailable _
+  | Summary_attempt_settled ->
+    false
 ;;
 
 let pending_entry_of_yojson ~base_path json =
@@ -622,6 +724,7 @@ let pending_entry_of_yojson ~base_path json =
           ; "continuation_channel"
           ; "summary_status"
           ; "exact_attempt"
+          ; "summary_attempt_disposition"
           ]
         fields
     in
@@ -677,12 +780,20 @@ let pending_entry_of_yojson ~base_path json =
       let* summary_status = summary_status_of_yojson_with_error summary_json in
       let* exact_attempt_json = required_member ~surface "exact_attempt" fields in
       let* exact_attempt = exact_attempt_state_of_yojson_with_error exact_attempt_json in
+      let* summary_attempt_disposition_json =
+        required_member ~surface "summary_attempt_disposition" fields
+      in
+      let* summary_attempt_disposition =
+        summary_attempt_disposition_of_yojson_with_error
+          summary_attempt_disposition_json
+      in
       let* () =
         validate_entry_exact_attempt
           ~id
           ~input_hash
           ~sequence
           ~summary_status
+          ~summary_attempt_disposition
           exact_attempt
       in
       Ok
@@ -702,6 +813,7 @@ let pending_entry_of_yojson ~base_path json =
         ; audit_base_path = base_path
         ; summary_status
         ; exact_attempt
+        ; summary_attempt_disposition
         }
   | _ -> Error "gate_pending.entry must be a JSON object"
 ;;
@@ -940,6 +1052,8 @@ let classify_restarted_entry (entry : pending_approval) =
             (exact_attempt_binding_with_status
                binding
                Exact_restart_quarantined)
+      ; summary_attempt_disposition =
+          Summary_attempt_persistence_uncertain
       }
     , true )
   | Exact_bound
@@ -954,6 +1068,8 @@ let classify_restarted_entry (entry : pending_approval) =
             (exact_attempt_binding_with_status
                binding
                Exact_released_recovery_required)
+      ; summary_attempt_disposition =
+          Summary_attempt_persistence_uncertain
       }
     , true )
   | Exact_unbound, _
@@ -1587,6 +1703,7 @@ let create_entry
     ; audit_base_path
     ; summary_status = Summary_not_requested
     ; exact_attempt = Exact_unbound
+    ; summary_attempt_disposition = Summary_attempt_ready
     }
 ;;
 
@@ -1597,6 +1714,7 @@ let pending_entry_json_fields
   [ "id", `String entry.id
   ; "keeper_name", `String entry.keeper_name
   ; "tool_name", `String entry.tool_name
+  ; "input_hash", `String entry.input_hash
   ; "sequence", `Int entry.sequence
   ; "requested_at", `Float entry.requested_at
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
@@ -1615,6 +1733,9 @@ let pending_entry_json_fields
        canonical [summary_status] field is present in every wire shape. *)
     @ [ "summary_status", summary_status_to_yojson entry.summary_status
       ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
+      ; ( "summary_attempt_disposition"
+        , summary_attempt_disposition_to_yojson
+            entry.summary_attempt_disposition )
       ]
 ;;
 
@@ -1685,6 +1806,9 @@ let record_summary_updated ~now (entry : pending_approval) =
              ; "id", `String entry.id
              ; "summary_status", summary_status_to_yojson entry.summary_status
              ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
+             ; ( "summary_attempt_disposition"
+               , summary_attempt_disposition_to_yojson
+                   entry.summary_attempt_disposition )
              ]
             @ summary_audit_extras entry)
        in
@@ -1724,7 +1848,9 @@ let record_summary_updated ~now (entry : pending_approval) =
 (* ── Durable summary-state transitions ───────────────────── *)
 
 (** Read a pending entry by id. Returns [None] if already resolved. *)
-let get_pending_entry ~id : pending_approval option = SMap.find_opt id (Atomic.get pending)
+let find_pending_entry_unchecked ~id : pending_approval option =
+  SMap.find_opt id (Atomic.get pending)
+;;
 
 let summary_transition_rejection (entry : pending_approval) =
   match entry.exact_attempt with
@@ -1746,35 +1872,9 @@ let persist_pending_entry_unlocked ~map ~(entry : pending_approval) updated_entr
     Ok true
 ;;
 
-(** Complete an unbound legacy judge exactly once. Exact attempts must use
-    [complete_summary_exact_attempt], which commits content and identity
-    together. *)
-let complete_summary ~id summary_status =
-  with_pending_store_lock (fun () ->
-    let map = Atomic.get pending in
-    match SMap.find_opt id map with
-    | None -> Ok false
-    | Some entry ->
-      (match summary_transition_rejection entry with
-       | Some rejection -> Error (Summary_transition_rejected rejection)
-       | None ->
-         (match entry.summary_status with
-          | Summary_pending ->
-            persist_pending_entry_unlocked
-              ~map
-              ~entry
-              { entry with summary_status }
-            |> Result.map_error (fun error ->
-              Summary_transition_storage_error error)
-          | Summary_not_requested
-          | Summary_available _
-          | Summary_failed _ ->
-            Ok false)))
-;;
-
 let publish_summary_update ~id =
   let now = Time_compat.now () in
-  match get_pending_entry ~id with
+  match find_pending_entry_unchecked ~id with
   | Some updated -> record_summary_updated ~now updated
   | None -> ()
 ;;
@@ -1918,13 +2018,39 @@ let bind_summary_exact_attempt_with
                   (Exact_attempt_summary_not_pending entry.id))
            | Summary_pending ->
              (match entry.exact_attempt with
+               | Exact_unbound
+                 when
+                   not
+                     (summary_attempt_allows_exact_bind
+                        entry.summary_attempt_disposition) ->
+                 Error
+                   (Exact_attempt_rejected
+                      (Exact_attempt_disposition_conflict
+                         { approval_id = entry.id
+                         ; disposition =
+                             entry.summary_attempt_disposition
+                         }))
                | Exact_unbound ->
                  persist_exact_attempt_entry_unlocked
                    ~save_file_atomic_strict_staged
                    ~changed:true
                    ~map
                    ~entry
-                   { entry with exact_attempt = Exact_bound candidate }
+                   { entry with
+                     exact_attempt = Exact_bound candidate
+                   ; summary_attempt_disposition =
+                       Summary_attempt_in_flight
+                   }
+                | Exact_bound _
+                  when entry.summary_attempt_disposition
+                       <> Summary_attempt_in_flight ->
+                  Error
+                    (Exact_attempt_rejected
+                       (Exact_attempt_disposition_conflict
+                          { approval_id = entry.id
+                          ; disposition =
+                              entry.summary_attempt_disposition
+                          }))
                 | Exact_bound existing
                   when exact_attempt_identity_matches existing candidate ->
                   (match existing.status with
@@ -1950,7 +2076,11 @@ let bind_summary_exact_attempt_with
                     ~changed:true
                     ~map
                     ~entry
-                    { entry with exact_attempt = Exact_bound candidate }
+                    { entry with
+                      exact_attempt = Exact_bound candidate
+                    ; summary_attempt_disposition =
+                        Summary_attempt_in_flight
+                    }
               | Exact_bound existing ->
                 Error
                   (Exact_attempt_rejected
@@ -2094,15 +2224,24 @@ let quarantine_summary_exact_attempt_with
                     { entry with
                       summary_status = exact_attempt_quarantine_summary_status cause
                     ; exact_attempt = Exact_bound quarantined
+                    ; summary_attempt_disposition =
+                        Summary_attempt_settled
                     }
                 | Exact_quarantined durable_cause
                   when durable_cause = cause ->
+                  let disposition_changed =
+                    entry.summary_attempt_disposition
+                    <> Summary_attempt_settled
+                  in
                   persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
-                    ~changed:false
+                    ~changed:disposition_changed
                     ~map
                     ~entry
-                    entry
+                    { entry with
+                      summary_attempt_disposition =
+                        Summary_attempt_settled
+                    }
                 | Exact_released_before_dispatch
                   when cause = Exact_terminal_persistence_failure
                        || cause = Exact_cancellation
@@ -2120,6 +2259,8 @@ let quarantine_summary_exact_attempt_with
                     { entry with
                       summary_status = exact_attempt_quarantine_summary_status cause
                     ; exact_attempt = Exact_bound quarantined
+                    ; summary_attempt_disposition =
+                        Summary_attempt_settled
                     }
                 | Exact_quarantined _
                 | Exact_released_before_dispatch
@@ -2200,6 +2341,8 @@ let complete_summary_exact_attempt_with
                     { entry with
                     summary_status = Summary_available summary
                   ; exact_attempt = Exact_bound completed
+                  ; summary_attempt_disposition =
+                      Summary_attempt_settled
                   }
               | Exact_completed, Summary_available durable_summary ->
                 if
@@ -2207,12 +2350,19 @@ let complete_summary_exact_attempt_with
                     (hitl_context_summary_to_yojson durable_summary)
                       (hitl_context_summary_to_yojson summary)
                   then
+                    let disposition_changed =
+                      entry.summary_attempt_disposition
+                      <> Summary_attempt_settled
+                    in
                     persist_exact_attempt_entry_unlocked
                       ~save_file_atomic_strict_staged
-                      ~changed:false
+                      ~changed:disposition_changed
                       ~map
                       ~entry
-                      entry
+                      { entry with
+                        summary_attempt_disposition =
+                          Summary_attempt_settled
+                      }
                   else
                     Error
                     (Exact_attempt_rejected
@@ -2265,192 +2415,246 @@ let mark_summary_pending ~id =
   publish_summary_transition ~id result
 ;;
 
-let attach_summary ~id summary =
-  let updated = complete_summary ~id (Summary_available summary) in
-  publish_summary_transition ~id updated
+let publish_summary_attempt_transition ~id = function
+  | Ok true ->
+    publish_summary_update ~id;
+    Ok true
+  | Ok false -> Ok false
+  | Error error -> Error error
 ;;
 
-let mark_summary_failed ~id ~reason ~retryable =
-  let updated = complete_summary ~id (Summary_failed { reason; retryable }) in
-  publish_summary_transition ~id updated
-;;
-
-let restart_failed_summary ~id =
-  let updated =
+let transition_summary_attempt
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+      update
+  =
+  let result =
     with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
       match SMap.find_opt id map with
-        | None -> Ok false
-        | Some
-            ({ summary_status = Summary_pending
-             ; exact_attempt =
-                 Exact_bound
-                   { status = Exact_released_recovery_required; _ }
-             ; _
-             } as entry) ->
-          persist_pending_entry_unlocked
-            ~map
-            ~entry
-            { entry with exact_attempt = Exact_unbound }
-          |> Result.map_error (fun error ->
-            Summary_transition_storage_error error)
-        | Some
-            ({ summary_status = Summary_failed _
-             ; exact_attempt =
-                 Exact_bound { status = Exact_released_before_dispatch; _ }
-             ; _
-             } as entry) ->
-          persist_pending_entry_unlocked
-            ~map
-            ~entry
-            { entry with
-              summary_status = Summary_pending
-            ; exact_attempt = Exact_unbound
-            }
-          |> Result.map_error (fun error ->
-            Summary_transition_storage_error error)
-        | Some entry ->
-          (match summary_transition_rejection entry with
-           | Some rejection -> Error (Summary_transition_rejected rejection)
-           | None ->
-             (match entry.summary_status with
-              | Summary_failed _ ->
-                persist_pending_entry_unlocked
-                  ~map
-                  ~entry
-                  { entry with summary_status = Summary_pending }
-                |> Result.map_error (fun error ->
-                  Summary_transition_storage_error error)
-              | Summary_not_requested
-              | Summary_pending
-              | Summary_available _ ->
-                Ok false)))
+      | None ->
+        Error (Exact_attempt_rejected (Exact_attempt_not_found id))
+      | Some entry
+        when not (String.equal entry.audit_base_path base_path) ->
+        Error (Exact_attempt_rejected (Exact_attempt_not_found id))
+      | Some entry
+        when not
+               (String.equal entry.input_hash input_hash
+                && Int.equal entry.sequence sequence) ->
+        Error
+          (Exact_attempt_rejected
+             (Exact_attempt_key_mismatch
+                { approval_id = id; input_hash; sequence }))
+      | Some entry ->
+        (match update entry with
+         | None -> Ok false
+         | Some updated_entry ->
+           persist_pending_entry_unlocked
+             ~map
+             ~entry
+             updated_entry
+           |> Result.map_error (fun error ->
+             Exact_attempt_storage_error error)))
   in
-  publish_summary_transition ~id updated
+  publish_summary_attempt_transition ~id result
 ;;
 
-let restart_failed_summaries ~base_path =
-  let updated =
-    with_pending_store_lock (fun () ->
-      let map = Atomic.get pending in
-        let reopened_ids, reopened, rejected =
-          SMap.fold
-            (fun id (entry : pending_approval) (ids, acc, rejected) ->
-               if
-                 String.equal entry.audit_base_path base_path
-                 &&
-                 match entry.summary_status, entry.exact_attempt with
-                 | ( Summary_pending
-                   , Exact_bound
-                       { status = Exact_released_recovery_required; _ } ) ->
-                   true
-                 | Summary_failed _, Exact_unbound -> true
-                 | ( Summary_failed _
-                   , Exact_bound
-                       { status = Exact_released_before_dispatch; _ } ) ->
-                   true
-                 | Summary_failed _, Exact_bound _ -> false
-                 | ( Summary_not_requested
-                   | Summary_available _
-                   | Summary_pending ),
-                   _ ->
-                   false
-               then
-                 (match entry.summary_status, entry.exact_attempt with
-                  | ( Summary_pending
-                    , Exact_bound
-                        { status = Exact_released_recovery_required; _ } ) ->
-                    ( id :: ids
-                    , SMap.add
-                        id
-                        { entry with exact_attempt = Exact_unbound }
-                        acc
-                    , rejected )
-                  | ( Summary_failed _
-                    , Exact_bound
-                        { status = Exact_released_before_dispatch; _ } ) ->
-                    ( id :: ids
-                    , SMap.add
-                        id
-                        { entry with
-                          summary_status = Summary_pending
-                        ; exact_attempt = Exact_unbound
-                        }
-                        acc
-                    , rejected )
-                  | Summary_failed _, _ ->
-                    (match summary_transition_rejection entry with
-                     | Some rejection -> ids, acc, Some rejection
-                     | None ->
-                       ( id :: ids
-                       , SMap.add
-                           id
-                           { entry with summary_status = Summary_not_requested }
-                           acc
-                       , rejected ))
-                  | ( Summary_not_requested
-                    | Summary_pending
-                    | Summary_available _ ),
-                    _ ->
-                    ids, acc, rejected)
-               else ids, acc, rejected)
-            map
-            ([], map, None)
-        in
-        match rejected, reopened_ids with
-        | Some rejection, _ ->
-          Error (Summary_transition_rejected rejection)
-        | None, [] -> Ok []
-        | None, _ :: _ ->
-          (match
-             persist_snapshot_unlocked
-             ~base_path
-             ~pending_map:reopened
-             ~delivery_map:(Atomic.get deliveries)
+let mark_summary_attempt_identity_unbound
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+  =
+  transition_summary_attempt
+    ~base_path
+    ~id
+    ~input_hash
+    ~sequence
+    (fun (entry : pending_approval) ->
+       match
+         entry.summary_status,
+         entry.exact_attempt,
+         entry.summary_attempt_disposition
+       with
+       | Summary_pending, Exact_unbound,
+         ( Summary_attempt_ready
+         | Summary_attempt_pre_worker_unavailable
+             { reason_code = Summary_pre_worker_start_reserved; _ } ) ->
+         Some
+           { entry with
+             summary_attempt_disposition =
+               Summary_attempt_identity_unbound
+           }
+       | Summary_pending, Exact_unbound,
+         Summary_attempt_identity_unbound ->
+         Some entry
+       | _ -> None)
+;;
+
+let mark_summary_attempt_persistence_uncertain
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+  =
+  transition_summary_attempt
+    ~base_path
+    ~id
+    ~input_hash
+    ~sequence
+    (fun (entry : pending_approval) ->
+       match
+         entry.summary_status,
+         entry.summary_attempt_disposition
+       with
+       | Summary_not_requested, _
+       | _, Summary_attempt_persistence_uncertain ->
+         None
+       | _ ->
+         Some
+           { entry with
+             summary_attempt_disposition =
+               Summary_attempt_persistence_uncertain
+           })
+;;
+
+let mark_summary_attempt_pre_worker_unavailable
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+      ~reason_code
+      ~operator_detail
+  =
+  let trimmed_detail = String.trim operator_detail in
+  if
+    String.equal trimmed_detail ""
+    || not (String.equal trimmed_detail operator_detail)
+  then
+    Error
+      (Exact_attempt_rejected
+         (Exact_attempt_invalid_identity "operator_detail"))
+  else
+    let blocked =
+      Summary_attempt_pre_worker_unavailable
+        { reason_code; operator_detail }
+    in
+    transition_summary_attempt
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+      (fun (entry : pending_approval) ->
+         match
+           entry.summary_status,
+           entry.exact_attempt,
+           entry.summary_attempt_disposition
          with
-         | Error error ->
-           Error (Summary_transition_storage_error error)
-         | Ok () ->
-           Atomic.set pending reopened;
-           Ok (List.rev reopened_ids)))
-  in
-  match updated with
-  | Error _ as error -> error
-  | Ok ids ->
-    List.iter (fun id -> publish_summary_update ~id) ids;
-    Ok ids
+         | (Summary_not_requested | Summary_pending), Exact_unbound,
+           Summary_attempt_ready ->
+           Some
+             { entry with
+               summary_attempt_disposition = blocked
+             }
+         | (Summary_not_requested | Summary_pending), Exact_unbound,
+           Summary_attempt_pre_worker_unavailable
+             { reason_code = Summary_pre_worker_start_reserved; _ } ->
+           Some
+             { entry with
+               summary_attempt_disposition = blocked
+             }
+         | (Summary_not_requested | Summary_pending), Exact_unbound,
+           current
+           when current = blocked ->
+           Some entry
+         | _ -> None)
 ;;
 
-let retire_summary_owner ~base_path ~keeper_name ~reason =
-  let result =
-    with_pending_store_lock (fun () ->
-      let current = Atomic.get pending in
-      let ids, next, bound =
-        SMap.fold
-          (fun id (entry : pending_approval) (ids, map, bound) ->
-             if String.equal entry.audit_base_path base_path
-                && String.equal entry.keeper_name keeper_name
-             then
-               match entry.summary_status, entry.exact_attempt with
-               | Summary_pending, Exact_bound attempt -> ids, map, Some attempt
-               | Summary_pending, Exact_unbound ->
-                 (id :: ids, SMap.add id { entry with summary_status = Summary_failed { reason; retryable = false } } map, bound)
-               | _ -> ids, map, bound
-             else ids, map, bound)
-          current
-          ([], current, None)
-      in
-      match bound, ids with
-      | Some attempt, _ -> Error (Summary_owner_retirement_exact_attempt_unsettled attempt)
-      | None, [] -> Ok []
-      | None, _ ->
-        (match persist_snapshot_unlocked ~base_path ~pending_map:next ~delivery_map:(Atomic.get deliveries) with
-         | Error error -> Error (Summary_owner_retirement_storage_error error)
-         | Ok () -> Atomic.set pending next; Ok (List.rev ids)))
+let reserve_summary_attempt_retry
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+      ~expected_exact_attempt
+      ~expected_disposition
+      ~requested_by
+  =
+  let exact_attempt_state_equal left right =
+    match left, right with
+    | Exact_unbound, Exact_unbound -> true
+    | Exact_bound left, Exact_bound right ->
+      exact_attempt_identity_matches left right
+      && left.status = right.status
+    | Exact_unbound, Exact_bound _
+    | Exact_bound _, Exact_unbound ->
+      false
   in
-  match result with
-  | Error _ as error -> error
-  | Ok ids -> List.iter (fun id -> publish_summary_update ~id) ids; Ok ids
+  if String.trim requested_by = ""
+  then
+    Error
+      (Exact_attempt_rejected
+         (Exact_attempt_invalid_identity "requested_by"))
+  else
+    let reserved =
+      Summary_attempt_pre_worker_unavailable
+        { reason_code = Summary_pre_worker_start_reserved
+        ; operator_detail = summary_attempt_start_reserved_operator_detail
+        }
+    in
+    transition_summary_attempt
+      ~base_path
+      ~id
+      ~input_hash
+      ~sequence
+      (fun (entry : pending_approval) ->
+         if
+           entry.summary_attempt_disposition <> expected_disposition
+           || not
+                (exact_attempt_state_equal
+                   entry.exact_attempt
+                   expected_exact_attempt)
+         then None
+         else
+           match
+             entry.summary_attempt_disposition,
+             entry.exact_attempt,
+             entry.summary_status
+           with
+           | Summary_attempt_identity_unbound, Exact_unbound,
+             Summary_pending
+           | Summary_attempt_persistence_uncertain, Exact_unbound,
+             Summary_pending ->
+             Some
+               { entry with
+                 summary_status = Summary_pending
+               ; summary_attempt_disposition = reserved
+               }
+           | Summary_attempt_pre_worker_unavailable
+               { reason_code =
+                   ( Summary_pre_worker_auto_judge_unavailable
+                   | Summary_pre_worker_mode_state_invalid )
+               ; _
+               },
+             Exact_unbound,
+             (Summary_not_requested | Summary_pending) ->
+             Some
+               { entry with
+                 summary_status = Summary_pending
+               ; summary_attempt_disposition = reserved
+               }
+           | Summary_attempt_persistence_uncertain,
+             Exact_bound
+               { status = Exact_released_recovery_required; _ },
+             Summary_pending ->
+             Some
+               { entry with
+                 exact_attempt = Exact_unbound
+               ; summary_status = Summary_pending
+               ; summary_attempt_disposition = reserved
+               }
+           | _ -> None)
 ;;
 
 let record_resolution_delivery_failure ~keeper_name ~approval_id reason =
@@ -2685,31 +2889,31 @@ let submit_pending
   let stored =
     with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
-      match
-        find_pending_id_in_map
-          map
-          ~base_path
-          ~keeper_name
-          ~tool_name
-          ~input_hash
-          ~turn_id
-          ~task_id
-          ~goal_id
-          ~goal_ids
-          ~continuation_channel
-      with
-      | Some id -> Ok (id, None)
-      | None ->
-        let id = generate_id () in
-        (match next_sequence_lifecycle ~base_path with
-         | Uninstalled ->
-           Error
-             { path = pending_store_path ~base_path
-             ; reason =
-                 "gate_pending store is not installed; submit requires a completed install"
-             }
-         | Unavailable error -> Error error
-         | Ready sequence ->
+      match next_sequence_lifecycle ~base_path with
+      | Uninstalled ->
+        Error
+          { path = pending_store_path ~base_path
+          ; reason =
+              "gate_pending store is not installed; submit requires a completed install"
+          }
+      | Unavailable error -> Error error
+      | Ready sequence ->
+        (match
+           find_pending_id_in_map
+             map
+             ~base_path
+             ~keeper_name
+             ~tool_name
+             ~input_hash
+             ~turn_id
+             ~task_id
+             ~goal_id
+             ~goal_ids
+             ~continuation_channel
+         with
+         | Some id -> Ok (id, None)
+         | None ->
+           let id = generate_id () in
            if sequence = max_int
            then
              Error
@@ -2803,6 +3007,21 @@ let rec claim_resolution id =
 
 let release_resolution_claim id =
   atomic_update resolution_claims (fun claims -> Resolution_claims.remove id claims)
+;;
+
+let resolve_store_readiness_error ~base_path ~approval_id =
+  match next_sequence_lifecycle ~base_path with
+  | Ready _ -> Ok ()
+  | Unavailable storage_error ->
+    Error (Persistence_failed { approval_id; storage_error })
+  | Uninstalled ->
+    let storage_error =
+      { path = pending_store_path ~base_path
+      ; reason =
+          "gate_pending store is not installed; resolution requires a completed install"
+      }
+    in
+    Error (Persistence_failed { approval_id; storage_error })
 ;;
 
 type journal_error =
@@ -2930,39 +3149,42 @@ let remember_rule_for_delivery delivery =
 let complete_delivery delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
-  if delivery.grant_consumed
-  then Ok { remembered_rule = None }
-  else
-  match deliver_resolution ~base_path delivery.entry delivery.decision with
-  | Error reason -> Error (Delivery_failed { approval_id = id; reason })
+  match resolve_store_readiness_error ~base_path ~approval_id:id with
+  | Error _ as error -> error
   | Ok () ->
-    (match remember_rule_for_delivery delivery with
-     | Error storage_error ->
-       Error (Persistence_failed { approval_id = id; storage_error })
-     | Ok remembered_rule ->
-       let finish () =
-         resolve_entry
-           ~base_path
-           delivery.entry
-           ~source:delivery.source
-           delivery.decision;
-         signal_resolution_after_commit
-           ~base_path
-           ~keeper_name:delivery.entry.keeper_name
-           ~approval_id:id;
-         Ok { remembered_rule }
-       in
-       (match delivery.decision with
-        | Decision.Approve ->
-          (* Keep the resolved journal entry until the exact Gate request
-             consumes it. The wake event is only a correlation message and
-             cannot become a second authorization SSOT. *)
-          finish ()
-        | Decision.Reject _ | Decision.Edit _ ->
-          (match remove_delivery_from_store delivery with
-           | Error storage_error ->
-             Error (Persistence_failed { approval_id = id; storage_error })
-           | Ok () -> finish ())))
+    if delivery.grant_consumed
+    then Ok { remembered_rule = None }
+    else
+      (match deliver_resolution ~base_path delivery.entry delivery.decision with
+       | Error reason -> Error (Delivery_failed { approval_id = id; reason })
+       | Ok () ->
+         (match remember_rule_for_delivery delivery with
+          | Error storage_error ->
+            Error (Persistence_failed { approval_id = id; storage_error })
+          | Ok remembered_rule ->
+            let finish () =
+              resolve_entry
+                ~base_path
+                delivery.entry
+                ~source:delivery.source
+                delivery.decision;
+              signal_resolution_after_commit
+                ~base_path
+                ~keeper_name:delivery.entry.keeper_name
+                ~approval_id:id;
+              Ok { remembered_rule }
+            in
+            (match delivery.decision with
+             | Decision.Approve ->
+               (* Keep the resolved journal entry until the exact Gate request
+                  consumes it. The wake event is only a correlation message and
+                  cannot become a second authorization SSOT. *)
+               finish ()
+             | Decision.Reject _ | Decision.Edit _ ->
+               (match remove_delivery_from_store delivery with
+                | Error storage_error ->
+                  Error (Persistence_failed { approval_id = id; storage_error })
+                | Ok () -> finish ()))))
 ;;
 
 let compare_pending_order left right =
@@ -3091,12 +3313,14 @@ module For_testing = struct
   ;;
 
   let with_pending_store_lock = with_pending_store_lock
+  let get_pending_entry_unchecked = find_pending_entry_unchecked
 
   let reset_runtime_state () =
     with_pending_store_lock (fun () ->
       Atomic.set pending SMap.empty;
       Atomic.set deliveries SMap.empty;
       Atomic.set unavailable_stores SMap.empty;
+      Atomic.set store_revisions SMap.empty;
       Atomic.set next_sequences SMap.empty)
   ;;
 
@@ -3133,92 +3357,109 @@ let resolve_with_policy
       ()
   : (resolution_result, resolve_error) result
   =
-  let belongs_to_workspace () =
-    match SMap.find_opt id (Atomic.get pending) with
-    | Some entry -> String.equal entry.audit_base_path base_path
-    | None ->
-      (match SMap.find_opt id (Atomic.get deliveries) with
-       | Some delivery -> String.equal delivery.entry.audit_base_path base_path
-       | None -> false)
-  in
-  if not (belongs_to_workspace ())
-  then Error (Not_found id)
-  else if not (claim_resolution id)
-  then Error (Already_resolved id)
-  else
-    Fun.protect
-      ~finally:(fun () -> release_resolution_claim id)
-      (fun () ->
-         if not (belongs_to_workspace ())
-         then Error (Not_found id)
-         else match SMap.find_opt id (Atomic.get pending) with
-         | Some _ ->
-           let remember_rule =
-             match decision with
-             | Decision.Approve -> remember_rule
-             | Decision.Reject _ | Decision.Edit _ -> false
-           in
-           let rule_expires_at =
-             if remember_rule then rule_expires_at else None
-           in
-           (match
-              journal_resolution
-                ~id
-                ~decision
-                ~source
-                ~remember_rule
-                ~rule_expires_at
-                ~created_by
-            with
-            | Error Journal_not_found -> Error (Not_found id)
-            | Error (Journal_storage storage_error) ->
-              Error (Persistence_failed { approval_id = id; storage_error })
-            | Ok delivery -> complete_delivery delivery)
-         | None ->
-           (match SMap.find_opt id (Atomic.get deliveries) with
-            | None -> Error (Not_found id)
-            | Some delivery ->
-              let same_request =
-                approval_decision_equal decision delivery.decision
-                && source = delivery.source
-                && remember_rule = delivery.remember_rule
-                && rule_expires_at = delivery.rule_expires_at
-                && created_by = delivery.created_by
-              in
-              if same_request
-              then complete_delivery delivery
-              else Error (Already_resolved id)))
+  match resolve_store_readiness_error ~base_path ~approval_id:id with
+  | Error _ as error -> error
+  | Ok () ->
+    let belongs_to_workspace () =
+      match SMap.find_opt id (Atomic.get pending) with
+      | Some entry -> String.equal entry.audit_base_path base_path
+      | None ->
+        (match SMap.find_opt id (Atomic.get deliveries) with
+         | Some delivery -> String.equal delivery.entry.audit_base_path base_path
+         | None -> false)
+    in
+    if not (belongs_to_workspace ())
+    then Error (Not_found id)
+    else if not (claim_resolution id)
+    then Error (Already_resolved id)
+    else
+      Fun.protect
+        ~finally:(fun () -> release_resolution_claim id)
+        (fun () ->
+           if not (belongs_to_workspace ())
+           then Error (Not_found id)
+           else match SMap.find_opt id (Atomic.get pending) with
+           | Some _ ->
+             let remember_rule =
+               match decision with
+               | Decision.Approve -> remember_rule
+               | Decision.Reject _ | Decision.Edit _ -> false
+             in
+             let rule_expires_at =
+               if remember_rule then rule_expires_at else None
+             in
+             (match
+                journal_resolution
+                  ~id
+                  ~decision
+                  ~source
+                  ~remember_rule
+                  ~rule_expires_at
+                  ~created_by
+              with
+              | Error Journal_not_found -> Error (Not_found id)
+              | Error (Journal_storage storage_error) ->
+                Error (Persistence_failed { approval_id = id; storage_error })
+              | Ok delivery -> complete_delivery delivery)
+           | None ->
+             (match SMap.find_opt id (Atomic.get deliveries) with
+              | None -> Error (Not_found id)
+              | Some delivery ->
+                let same_request =
+                  approval_decision_equal decision delivery.decision
+                  && source = delivery.source
+                  && remember_rule = delivery.remember_rule
+                  && rule_expires_at = delivery.rule_expires_at
+                  && created_by = delivery.created_by
+                in
+                if same_request
+                then complete_delivery delivery
+                else Error (Already_resolved id)))
 ;;
 
 (* ── Query ────────────────────────────────────────────────── *)
 
-(** List all pending approvals as JSON. *)
 let pending_entries_in_sequence_order () =
   SMap.fold (fun _id entry acc -> entry :: acc) (Atomic.get pending) []
   |> List.sort compare_pending_order
 ;;
 
-let list_pending_json () : Yojson.Safe.t =
-  pending_entries_in_sequence_order ()
-  |> List.map (fun entry -> `Assoc (pending_entry_json_fields entry))
-  |> fun entries -> `List entries
+let list_pending_entries_for_workspace ~base_path =
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+    | Some error -> Error error
+    | None ->
+      pending_entries_in_sequence_order ()
+      |> List.filter (fun (entry : pending_approval) ->
+        String.equal entry.audit_base_path base_path)
+      |> fun entries -> Ok entries)
 ;;
 
-let list_pending_dashboard_json () : Yojson.Safe.t =
-  pending_entries_in_sequence_order ()
-  |> List.map (fun entry ->
-    `Assoc (pending_entry_json_fields ~include_input:true entry))
-  |> fun entries -> `List entries
+let get_pending_entry_for_workspace ~base_path ~id =
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+    | Some error -> Error error
+    | None ->
+      (match SMap.find_opt id (Atomic.get pending) with
+       | Some entry when String.equal entry.audit_base_path base_path ->
+         Ok (Some entry)
+       | Some _ | None -> Ok None))
 ;;
 
-let list_pending_entries () : pending_approval list =
-  pending_entries_in_sequence_order ()
+let list_pending_dashboard_json_for_workspace ~base_path =
+  list_pending_entries_for_workspace ~base_path
+  |> Result.map (fun entries ->
+    entries
+    |> List.map (fun entry ->
+      `Assoc (pending_entry_json_fields ~include_input:true entry)))
 ;;
 
-let pending_count_for_keeper ~keeper_name : int =
-  SMap.fold
-    (fun _ (entry : pending_approval) count ->
-       if String.equal entry.keeper_name keeper_name then count + 1 else count)
-    (Atomic.get pending)
-    0
+let pending_count_for_keeper_in_workspace ~base_path ~keeper_name =
+  list_pending_entries_for_workspace ~base_path
+  |> Result.map (fun entries ->
+    List.fold_left
+      (fun count (entry : pending_approval) ->
+        if String.equal entry.keeper_name keeper_name then count + 1 else count)
+      0
+      entries)
 ;;

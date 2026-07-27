@@ -59,12 +59,68 @@ export type HitlSummaryStatus =
   | { status: 'not_requested' }
   | { status: 'pending' }
   | { status: 'available'; summary: HitlContextSummary }
-  | { status: 'failed'; reason: string; retryable: boolean }
+  | { status: 'failed'; reason: string }
+
+export type KeeperExactAttemptStatus =
+  | 'dispatch_uncertain'
+  | 'released_before_dispatch'
+  | 'released_recovery_required'
+  | 'quarantined'
+  | 'restart_quarantined'
+  | 'completed'
+
+export type KeeperExactAttemptQuarantineCause =
+  | 'flow_execution_failed'
+  | 'cancellation'
+  | 'attempt_replay'
+  | 'domain_invalid_output'
+  | 'terminal_persistence_failure'
+
+export type KeeperExactAttemptState =
+  | { state: 'unbound' }
+  | {
+      state: 'bound'
+      approval_id: string
+      input_hash: string
+      sequence: number
+      slot_id: string
+      call_id: string
+      plan_fingerprint: string
+      request_body_sha256: string
+      status: KeeperExactAttemptStatus
+      quarantine_cause: KeeperExactAttemptQuarantineCause | null
+    }
+
+export type KeeperSummaryAttemptDisposition =
+  | { code: 'ready' }
+  | { code: 'in_flight' }
+  | { code: 'settled' }
+  | { code: 'identity_unbound'; operator_detail: string }
+  | { code: 'persistence_uncertain'; operator_detail: string }
+  | {
+      code: 'pre_worker_unavailable'
+      reason_code: 'auto_judge_unavailable' | 'mode_state_invalid' | 'start_reserved'
+      operator_detail: string
+    }
+
+export type KeeperBlockedSummaryAttemptDisposition = Extract<
+  KeeperSummaryAttemptDisposition,
+  { code: 'identity_unbound' | 'persistence_uncertain' | 'pre_worker_unavailable' }
+>
+
+export interface KeeperAutoJudgeRearmExpectation {
+  input_hash: string
+  sequence: number
+  exact_attempt: KeeperExactAttemptState
+  summary_attempt_disposition: KeeperBlockedSummaryAttemptDisposition
+}
 
 export interface KeeperApprovalQueueItem {
   id: string
   keeper_name: string
   tool_name: string
+  input_hash: string
+  sequence: number
   requested_at?: string | null
   waiting_s?: number
   turn_id?: number | null
@@ -73,10 +129,29 @@ export interface KeeperApprovalQueueItem {
   goal_ids?: string[]
   input?: unknown
   input_preview?: string | null
-  /** HITL operator briefing state. `null` when the backend payload omits it or
-   *  the wire shape violates the contract — never coerced into a fake state. */
-  summary_status?: HitlSummaryStatus | null
+  summary_status: HitlSummaryStatus
+  exact_attempt: KeeperExactAttemptState
+  summary_attempt_disposition: KeeperSummaryAttemptDisposition
 }
+
+export type KeeperApprovalQueueState =
+  | { state: 'ready' }
+  | {
+      state: 'unavailable'
+      code: 'reset_required'
+      title: string
+      operator_detail: string
+      severity: 'bad'
+      icon: '!'
+    }
+  | {
+      state: 'observation_error'
+      code: 'observation_failed'
+      title: string
+      operator_detail: string
+      severity: 'bad'
+      icon: '!'
+    }
 
 export interface KeeperResolvedApprovalItem {
   id: string
@@ -118,7 +193,8 @@ export interface GateModeStatus {
 export interface DashboardGateResponse {
   generated_at?: string
   note?: string
-  approval_queue?: KeeperApprovalQueueItem[]
+  approval_queue: KeeperApprovalQueueItem[] | null
+  approval_queue_state: KeeperApprovalQueueState
   recent_resolved?: KeeperResolvedApprovalItem[]
   approval_rules?: KeeperApprovalRule[]
   hitl?: {

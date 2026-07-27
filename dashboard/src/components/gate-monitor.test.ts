@@ -50,6 +50,7 @@ describe('GateMonitor', () => {
       generated_at: '2026-04-21T00:00:00Z',
       window_minutes: 60,
       tool_rejections: [],
+      approval_queue_state: { state: 'ready' },
       approval_queue: {
         depth: 0,
         p50_wait_sec: null,
@@ -81,6 +82,7 @@ describe('GateMonitor', () => {
       tool_rejections: [
         { tool: 'tool_edit_file', reason: 'Gate denied', count: 3 },
       ],
+      approval_queue_state: { state: 'ready' },
       approval_queue: {
         depth: 0,
         p50_wait_sec: null,
@@ -98,5 +100,36 @@ describe('GateMonitor', () => {
 
     expect(container.querySelector('.v2-monitoring-toolbar')).not.toBeNull()
     expect(container.querySelector('.v2-monitoring-table')).not.toBeNull()
+  })
+
+  it('renders canonical queue unavailability instead of an empty queue', async () => {
+    const get = vi.fn().mockResolvedValue({
+      generated_at: '2026-07-27T00:00:00Z',
+      window_minutes: 60,
+      tool_rejections: [],
+      approval_queue_state: {
+        state: 'unavailable',
+        code: 'reset_required',
+        title: 'Gate durable queue unavailable · runtime reset required',
+        operator_detail: 'pending store requires reset',
+        severity: 'bad',
+        icon: '!',
+      },
+      approval_queue: null,
+    })
+    const { GateMonitor } = await loadMonitor(get)
+
+    await act(async () => {
+      render(html`<${GateMonitor} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Gate durable queue unavailable · runtime reset required',
+    )
+    expect(container.textContent).toContain('pending store requires reset')
+    expect(container.textContent).not.toContain('대기열 깊이')
+    expect(container.textContent).not.toContain('없음')
   })
 })

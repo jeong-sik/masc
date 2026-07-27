@@ -21,8 +21,33 @@ type t =
 
 (* Field names are the wire contract for [of_detail_json]; naming them once keeps
    the encoder and the decoder from drifting apart. *)
+let kind_field = "kind"
+let limit_tokens_field = "limit_tokens"
 let actual_bytes_field = "actual_bytes"
 let limit_bytes_field = "limit_bytes"
+let reason_field = "reason"
+let input_tokens_field = "input_tokens"
+let accepted_through_field = "accepted_through"
+let rejected_from_field = "rejected_from"
+
+(* Every key [to_detail_json] can emit, across all constructors. Consumers that
+   filter the encoded object — the runtime manifest public projection is the
+   one in tree — read this instead of restating the keys, so adding a field to
+   a trigger constructor cannot leave a stale allowlist silently dropping it.
+   Before this existed the manifest listed only [kind_field] and
+   [limit_tokens_field], so the byte bounds of a
+   [Request_body_over_capacity] refusal never reached the dashboard. *)
+let wire_field_names =
+  [ kind_field
+  ; limit_tokens_field
+  ; actual_bytes_field
+  ; limit_bytes_field
+  ; reason_field
+  ; input_tokens_field
+  ; accepted_through_field
+  ; rejected_from_field
+  ]
+;;
 
 let to_label = function
   | Provider_overflow _ -> "provider_overflow"
@@ -62,26 +87,26 @@ let to_human = function
 let to_detail_json : t -> Yojson.Safe.t = function
   | Provider_overflow { limit_tokens } ->
     `Assoc
-      [ "kind", `String "provider_overflow"
-      ; ( "limit_tokens"
+      [ kind_field, `String "provider_overflow"
+      ; ( limit_tokens_field
         , match limit_tokens with
           | Some limit_tokens -> `Int limit_tokens
           | None -> `Null )
       ]
   | Request_body_over_capacity { actual_bytes; limit_bytes } ->
     `Assoc
-      [ "kind", `String "request_body_over_capacity"
+      [ kind_field, `String "request_body_over_capacity"
       ; actual_bytes_field, `Int actual_bytes
       ; limit_bytes_field, `Int limit_bytes
       ]
   | Serving_input_capacity
       (Boundary_unknown { input_tokens; accepted_through; rejected_from }) ->
     `Assoc
-      [ "kind", `String "serving_input_capacity"
-      ; "reason", `String "boundary_unknown"
-      ; "input_tokens", `Int input_tokens
-      ; "accepted_through", `Int accepted_through
-      ; ( "rejected_from"
+      [ kind_field, `String "serving_input_capacity"
+      ; reason_field, `String "boundary_unknown"
+      ; input_tokens_field, `Int input_tokens
+      ; accepted_through_field, `Int accepted_through
+      ; ( rejected_from_field
         , match rejected_from with
           | Some value -> `Int value
           | None -> `Null )
@@ -89,13 +114,13 @@ let to_detail_json : t -> Yojson.Safe.t = function
   | Serving_input_capacity
       (Input_rejected { input_tokens; accepted_through; rejected_from }) ->
     `Assoc
-      [ "kind", `String "serving_input_capacity"
-      ; "reason", `String "input_rejected"
-      ; "input_tokens", `Int input_tokens
-      ; "accepted_through", `Int accepted_through
-      ; "rejected_from", `Int rejected_from
+      [ kind_field, `String "serving_input_capacity"
+      ; reason_field, `String "input_rejected"
+      ; input_tokens_field, `Int input_tokens
+      ; accepted_through_field, `Int accepted_through
+      ; rejected_from_field, `Int rejected_from
       ]
-  | Manual -> `Assoc [ "kind", `String "manual" ]
+  | Manual -> `Assoc [ kind_field, `String "manual" ]
 ;;
 
 type decode_error =
@@ -181,10 +206,10 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
     in
     let ( let* ) = Result.bind in
     let* () = reject_duplicate_fields [] fields in
-    (match List.assoc_opt "kind" fields with
+    (match List.assoc_opt kind_field fields with
      | Some (`String "provider_overflow") ->
-       let* () = reject_unknown_fields [ "kind"; "limit_tokens" ] in
-       (match List.assoc_opt "limit_tokens" fields with
+       let* () = reject_unknown_fields [ kind_field; limit_tokens_field ] in
+       (match List.assoc_opt limit_tokens_field fields with
         | Some `Null -> Ok (Provider_overflow { limit_tokens = None })
         | Some (`Int limit_tokens) when limit_tokens > 0 ->
           Ok (Provider_overflow { limit_tokens = Some limit_tokens })
@@ -192,7 +217,7 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
         | Some _ -> Error Invalid_provider_limit)
      | Some (`String "request_body_over_capacity") ->
        let* () =
-         reject_unknown_fields [ "kind"; actual_bytes_field; limit_bytes_field ]
+         reject_unknown_fields [ kind_field; actual_bytes_field; limit_bytes_field ]
        in
        let positive_int field =
          match List.assoc_opt field fields with
@@ -238,36 +263,39 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
        if input_tokens <= accepted_through
        then Error (Serving_capacity_not_over_limit { input_tokens; accepted_through })
        else
-         let boundary_valid =
-           match rejected_from with
-           | None -> true
-           | Some value ->
-             value > accepted_through && value <= input_tokens
-         in
-         if not boundary_valid
-         then
-           Error
-             (Invalid_serving_capacity_boundary
-                { input_tokens; accepted_through; rejected_from })
-         else
-           (match reason, rejected_from with
-            | "boundary_unknown", rejected_from ->
-              Ok
-                (Serving_input_capacity
-                   (Boundary_unknown
-                      { input_tokens; accepted_through; rejected_from }))
-            | "input_rejected", Some rejected_from ->
-              Ok
-                (Serving_input_capacity
-                   (Input_rejected
-                      { input_tokens; accepted_through; rejected_from }))
-            | "input_rejected", None ->
-              Error
-                (Invalid_serving_capacity_boundary
-                   { input_tokens; accepted_through; rejected_from = None })
-            | _, _ -> Error (Invalid_serving_capacity_field "reason"))
+         (match reason, rejected_from with
+          | "boundary_unknown", None ->
+            Ok
+              (Serving_input_capacity
+                 (Boundary_unknown { input_tokens; accepted_through; rejected_from = None }))
+          | "boundary_unknown", Some rejected_from
+            when rejected_from > input_tokens ->
+            Ok
+              (Serving_input_capacity
+                 (Boundary_unknown
+                    { input_tokens
+                    ; accepted_through
+                    ; rejected_from = Some rejected_from
+                    }))
+          | "boundary_unknown", _
+          | "input_rejected", None ->
+            Error
+              (Invalid_serving_capacity_boundary
+                 { input_tokens; accepted_through; rejected_from })
+          | "input_rejected", Some rejected_from
+            when rejected_from > accepted_through
+                 && rejected_from <= input_tokens ->
+            Ok
+              (Serving_input_capacity
+                 (Input_rejected
+                    { input_tokens; accepted_through; rejected_from }))
+          | "input_rejected", Some _ ->
+            Error
+              (Invalid_serving_capacity_boundary
+                 { input_tokens; accepted_through; rejected_from })
+          | _, _ -> Error (Invalid_serving_capacity_field "reason"))
      | Some (`String "manual") ->
-       let* () = reject_unknown_fields [ "kind" ] in
+       let* () = reject_unknown_fields [ kind_field ] in
        Ok Manual
      | Some (`String kind) -> Error (Unknown_kind kind)
      | Some _ -> Error Invalid_kind

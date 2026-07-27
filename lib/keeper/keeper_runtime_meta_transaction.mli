@@ -13,6 +13,8 @@ type recovery_failure =
   | Journal_failure of Keeper_runtime_meta_journal.error
   | Runtime_convergence_failed of string
   | Metadata_convergence_failed of string
+  | Shutdown_supersession_failed of string
+  | Shutdown_supersession_binding_invalid
   | Unrelated_runtime_observed of string option
   | Unrelated_metadata_observed
   | Both_directions_failed of

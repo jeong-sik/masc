@@ -60,13 +60,13 @@ check_boundary() {
     "$WORKER" \
     "worker must execute only the affine OAS flow"
   require_pattern \
-    'let guarded_before_dispatch[[:space:]]+candidate[[:space:]]*=[[:space:]]*match[[:space:]]+with_current_generation[[:space:]]+prepared[[:space:]]+\(fun[[:space:]]+\(\)[[:space:]]*->[[:space:]]*before_dispatch[[:space:]]+~queue_writers[[:space:]]+prepared\.entry[[:space:]]+candidate\)' \
+    'let guarded_before_dispatch[[:space:]]+candidate[[:space:]]*=[[:space:]]*match[[:space:]]+with_current_generation[[:space:]]+prepared[[:space:]]+\(fun[[:space:]]+\(\)[[:space:]]*->[[:space:]]*before_dispatch[[:space:]]+~queue_ops[[:space:]]+prepared\.entry[[:space:]]+candidate\)' \
     "$WORKER" \
-    "guarded before_dispatch must call the production durable bind callback inside the owner-generation fence"
+    "guarded before_dispatch must call the durable queue authority inside the owner-generation fence"
   require_pattern \
-    'let guarded_before_advance[[:space:]]+~failed[[:space:]]+~next[[:space:]]*=[[:space:]]*match[[:space:]]+with_current_generation[[:space:]]+prepared[[:space:]]+\(fun[[:space:]]+\(\)[[:space:]]*->[[:space:]]*before_advance[[:space:]]+~queue_writers[[:space:]]+prepared\.entry[[:space:]]+~failed[[:space:]]+~next\)' \
+    'let guarded_before_advance[[:space:]]+~failed[[:space:]]+~next[[:space:]]*=[[:space:]]*match[[:space:]]+with_current_generation[[:space:]]+prepared[[:space:]]+\(fun[[:space:]]+\(\)[[:space:]]*->[[:space:]]*before_advance[[:space:]]+~queue_ops[[:space:]]+prepared\.entry[[:space:]]+~failed[[:space:]]+~next\)' \
     "$WORKER" \
-    "guarded before_advance must call the production durable advance callback inside the owner-generation fence"
+    "guarded before_advance must call the durable queue authority inside the owner-generation fence"
   require_pattern \
     '~before_dispatch:guarded_before_dispatch' \
     "$WORKER" \
@@ -76,21 +76,21 @@ check_boundary() {
     "$WORKER" \
     "execute_flow_once must use the owner-generation-guarded durable advance callback"
   require_pattern \
-    'bind_summary_exact_attempt' \
+    '~bind:Keeper_approval_queue\.bind_summary_exact_attempt' \
     "$WORKER" \
-    "before_dispatch must bind the real OAS receipt"
+    "production queue authority must bind the real OAS receipt"
   require_pattern \
-    'release_summary_exact_attempt_before_dispatch' \
+    '~release_before_dispatch:[[:space:]]*Keeper_approval_queue\.release_summary_exact_attempt_before_dispatch' \
     "$WORKER" \
-    "before_advance must durably release the failed receipt"
+    "production queue authority must durably release the failed receipt"
   require_pattern \
-    'quarantine_summary_exact_attempt' \
+    '~quarantine:Keeper_approval_queue\.quarantine_summary_exact_attempt' \
     "$WORKER" \
-    "terminal failures must quarantine the exact receipt"
+    "production queue authority must quarantine the exact receipt"
   require_pattern \
-    'complete_summary_exact_attempt' \
+    '~complete:Keeper_approval_queue\.complete_summary_exact_attempt' \
     "$WORKER" \
-    "success must atomically complete the exact receipt and summary"
+    "production queue authority must atomically complete the exact receipt and summary"
   require_pattern \
     'write_outcome = Fsync_completed' \
     "$WORKER" \
@@ -206,7 +206,7 @@ self_test() (
   done
 
   sed \
-    's/~before_dispatch:guarded_before_dispatch/~before_dispatch:(before_dispatch ~queue_writers prepared.entry)/' \
+    's/~before_dispatch:guarded_before_dispatch/~before_dispatch:(before_dispatch ~queue_ops prepared.entry)/' \
     "$fixture/lib/keeper/hitl_summary_worker.ml" \
     >"$fixture/lib/keeper/hitl_summary_worker.ml.tmp"
   mv \
@@ -218,7 +218,19 @@ self_test() (
   cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
 
   sed \
-    's/~before_advance:guarded_before_advance/~before_advance:(before_advance ~queue_writers prepared.entry)/' \
+    's/~bind:Keeper_approval_queue.bind_summary_exact_attempt/~bind:test_only_bind/' \
+    "$fixture/lib/keeper/hitl_summary_worker.ml" \
+    >"$fixture/lib/keeper/hitl_summary_worker.ml.tmp"
+  mv \
+    "$fixture/lib/keeper/hitl_summary_worker.ml.tmp" \
+    "$fixture/lib/keeper/hitl_summary_worker.ml"
+  if HITL_EXACT_BOUNDARY_ROOT="$fixture" "$0" --check >/dev/null 2>&1; then
+    fail "self-test accepted a detached production durable bind authority"
+  fi
+  cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
+
+  sed \
+    's/~before_advance:guarded_before_advance/~before_advance:(before_advance ~queue_ops prepared.entry)/' \
     "$fixture/lib/keeper/hitl_summary_worker.ml" \
     >"$fixture/lib/keeper/hitl_summary_worker.ml.tmp"
   mv \

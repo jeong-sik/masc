@@ -1,14 +1,16 @@
 import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
-import { isRecord, asNullableString, asString, asNumber, asInt, asStringList, asBoolean } from '../components/common/normalize'
+import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
-  BoardAttachmentDecode, BoardAttachmentKind,
-  BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
-  KeeperApprovalQueueItem,
+    BoardAttachmentDecode, BoardAttachmentKind,
+    BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
+    KeeperApprovalQueueItem, KeeperExactAttemptState,
+    KeeperExactAttemptStatus, KeeperExactAttemptQuarantineCause,
+    KeeperSummaryAttemptDisposition,
   GateJudgment, HitlContextSummary, HitlSummaryStatus,
   SubBoard, SubBoardAccess,
 } from '../types'
@@ -80,22 +82,48 @@ function normalizeGateJudgment(raw: unknown): GateJudgment | null {
   return raw === 'approve' || raw === 'deny' || raw === 'require_human' ? raw : null
 }
 
+const CURRENT_HITL_CONTEXT_SUMMARY_VERSION = 2
+
 function normalizeHitlContextSummary(raw: unknown): HitlContextSummary | null {
-  if (!isRecord(raw)) return null
+  if (
+    !isRecord(raw)
+    || !hasOnlyKeys(raw, [
+      'summary_version',
+      'generated_at',
+      'model_run_id',
+      'context_summary',
+      'key_questions',
+      'judgment',
+      'rationale',
+    ])
+  ) return null
+  const summaryVersion = asInt(raw.summary_version)
+  const generatedAt = asNullableIsoTimestamp(raw.generated_at)
+  const modelRunId = asString(raw.model_run_id, '').trim()
   const summaryText = asString(raw.context_summary, '').trim()
-  // A summary with no body carries no operator value; treat it as absent rather
-  // than rendering an empty briefing card.
-  if (!summaryText) return null
   const judgment = normalizeGateJudgment(raw.judgment)
-  if (!judgment) return null
+  const keyQuestions = Array.isArray(raw.key_questions)
+    && raw.key_questions.every(value => typeof value === 'string')
+    ? raw.key_questions
+    : null
+  const rationale = typeof raw.rationale === 'string' ? raw.rationale.trim() : null
+  if (
+    summaryVersion !== CURRENT_HITL_CONTEXT_SUMMARY_VERSION
+    || generatedAt === null
+    || !modelRunId
+    || !summaryText
+    || !judgment
+    || keyQuestions === null
+    || rationale === null
+  ) return null
   return {
-    summary_version: asInt(raw.summary_version) ?? 0,
-    generated_at: asNullableIsoTimestamp(raw.generated_at),
-    model_run_id: asNullableString(raw.model_run_id),
+    summary_version: summaryVersion,
+    generated_at: generatedAt,
+    model_run_id: modelRunId,
     context_summary: summaryText,
-    key_questions: asStringList(raw.key_questions),
+    key_questions: keyQuestions,
     judgment,
-    rationale: asString(raw.rationale, '').trim(),
+    rationale,
   }
 }
 
@@ -108,15 +136,150 @@ function normalizeHitlSummaryStatus(raw: unknown): HitlSummaryStatus | null {
   if (!isRecord(raw)) return null
   switch (raw.status) {
     case 'available': {
+      if (!hasOnlyKeys(raw, ['status', 'summary'])) return null
       const summary = normalizeHitlContextSummary(raw.summary)
       return summary ? { status: 'available', summary } : null
     }
-    case 'failed':
-      return {
-        status: 'failed',
-        reason: asString(raw.reason, '').trim(),
-        retryable: asBoolean(raw.retryable, false),
-      }
+    case 'failed': {
+      if (!hasOnlyKeys(raw, ['status', 'reason', 'retryable'])) return null
+      const reason = asString(raw.reason, '').trim()
+      return reason && raw.retryable === false
+        ? { status: 'failed', reason }
+        : null
+    }
+    default:
+      return null
+  }
+}
+
+const EXACT_ATTEMPT_STATUSES: ReadonlySet<string> = new Set([
+  'dispatch_uncertain',
+  'released_before_dispatch',
+  'released_recovery_required',
+  'quarantined',
+  'restart_quarantined',
+  'completed',
+])
+
+const EXACT_ATTEMPT_QUARANTINE_CAUSES: ReadonlySet<string> = new Set([
+  'flow_execution_failed',
+  'cancellation',
+  'attempt_replay',
+  'domain_invalid_output',
+  'terminal_persistence_failure',
+])
+
+function exactAttemptQuarantineSummaryReason(cause: string): string {
+  return `Auto Judge exact attempt quarantined: ${cause}`
+}
+
+function hasOnlyKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const keys = Object.keys(raw)
+  return keys.length === allowed.length && keys.every(key => allowed.includes(key))
+}
+
+function normalizeKeeperExactAttempt(raw: unknown): KeeperExactAttemptState | null {
+  if (!isRecord(raw)) return null
+  if (raw.state === 'unbound') {
+    return hasOnlyKeys(raw, ['state']) ? { state: 'unbound' } : null
+  }
+  if (
+    raw.state !== 'bound'
+    || !hasOnlyKeys(raw, [
+      'state',
+      'approval_id',
+      'input_hash',
+      'sequence',
+      'slot_id',
+      'call_id',
+      'plan_fingerprint',
+      'request_body_sha256',
+      'status',
+      'quarantine_cause',
+    ])
+  ) return null
+  const approvalId = asString(raw.approval_id, '').trim()
+  const inputHash = asString(raw.input_hash, '').trim()
+  const sequence = asInt(raw.sequence)
+  const slotId = asString(raw.slot_id, '').trim()
+  const callId = asString(raw.call_id, '').trim()
+  const planFingerprint = asString(raw.plan_fingerprint, '').trim()
+  const requestBodySha256 = asString(raw.request_body_sha256, '').trim()
+  const status = typeof raw.status === 'string' && EXACT_ATTEMPT_STATUSES.has(raw.status)
+    ? raw.status as KeeperExactAttemptStatus
+    : null
+  const quarantineCause =
+    typeof raw.quarantine_cause === 'string'
+    && EXACT_ATTEMPT_QUARANTINE_CAUSES.has(raw.quarantine_cause)
+      ? raw.quarantine_cause as KeeperExactAttemptQuarantineCause
+      : null
+  if (
+    !approvalId
+    || !/^[0-9a-f]{64}$/.test(inputHash)
+    || typeof sequence !== 'number'
+    || sequence <= 0
+    || !slotId
+    || !callId
+    || !planFingerprint
+    || !/^[0-9a-f]{64}$/.test(requestBodySha256)
+    || !status
+    || (status === 'quarantined'
+      ? quarantineCause === null
+      : raw.quarantine_cause !== null)
+  ) return null
+  return {
+    state: 'bound',
+    approval_id: approvalId,
+    input_hash: inputHash,
+    sequence,
+    slot_id: slotId,
+    call_id: callId,
+    plan_fingerprint: planFingerprint,
+    request_body_sha256: requestBodySha256,
+    status,
+    quarantine_cause: quarantineCause,
+  }
+}
+
+function normalizeKeeperSummaryAttemptDisposition(
+  raw: unknown,
+): KeeperSummaryAttemptDisposition | null {
+  if (!isRecord(raw) || typeof raw.code !== 'string') return null
+  switch (raw.code) {
+    case 'ready':
+    case 'in_flight':
+    case 'settled':
+      return hasOnlyKeys(raw, ['code']) ? { code: raw.code } : null
+    case 'identity_unbound':
+    case 'persistence_uncertain': {
+      const operatorDetail = asString(raw.operator_detail, '').trim()
+      const expectedDetail = raw.code === 'identity_unbound'
+        ? 'Exact-output terminalization stopped before an attempt identity was bound.'
+        : 'Exact-output terminalization durability is not confirmed.'
+      return operatorDetail === expectedDetail
+        && hasOnlyKeys(raw, ['code', 'operator_detail'])
+        ? { code: raw.code, operator_detail: operatorDetail }
+        : null
+    }
+    case 'pre_worker_unavailable': {
+      const reasonCode = raw.reason_code
+      const operatorDetail = raw.operator_detail
+      return (
+        reasonCode === 'auto_judge_unavailable'
+        || reasonCode === 'mode_state_invalid'
+        || reasonCode === 'start_reserved'
+      )
+        && typeof operatorDetail === 'string'
+        && operatorDetail.length > 0
+        && operatorDetail.trim() === operatorDetail
+        && hasOnlyKeys(raw, ['code', 'reason_code', 'operator_detail'])
+        ? {
+            code: raw.code,
+            reason_code: reasonCode,
+            operator_detail: operatorDetail,
+          }
+        : null
+    }
     default:
       return null
   }
@@ -124,14 +287,119 @@ function normalizeHitlSummaryStatus(raw: unknown): HitlSummaryStatus | null {
 
 export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQueueItem | null {
   if (!isRecord(raw)) return null
+  const canonicalKeys = [
+    'id',
+    'keeper_name',
+    'tool_name',
+    'input_hash',
+    'sequence',
+    'requested_at',
+    'waiting_s',
+    'turn_id',
+    'task_id',
+    'goal_id',
+    'goal_ids',
+    'summary_status',
+    'exact_attempt',
+    'summary_attempt_disposition',
+  ]
+  const hasInput = Object.prototype.hasOwnProperty.call(raw, 'input')
+  const hasInputPreview = Object.prototype.hasOwnProperty.call(raw, 'input_preview')
+  if (hasInput !== hasInputPreview) return null
+  if (
+    !hasOnlyKeys(
+      raw,
+      hasInput ? [...canonicalKeys, 'input', 'input_preview'] : canonicalKeys,
+    )
+  ) return null
   const id = asString(raw.id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
-  if (!id || !keeperName || !toolName) return null
+  const inputHash = asString(raw.input_hash, '').trim()
+  const sequence = asInt(raw.sequence)
+  if (
+    !id
+    || !keeperName
+    || !toolName
+    || !/^[0-9a-f]{64}$/.test(inputHash)
+    || typeof sequence !== 'number'
+    || sequence <= 0
+  ) return null
+  const summaryStatus = normalizeHitlSummaryStatus(raw.summary_status)
+  const exactAttempt = normalizeKeeperExactAttempt(raw.exact_attempt)
+  const disposition =
+    normalizeKeeperSummaryAttemptDisposition(raw.summary_attempt_disposition)
+  if (!summaryStatus || !exactAttempt || !disposition) return null
+  if (
+    exactAttempt.state === 'bound'
+    && (
+      exactAttempt.approval_id !== id
+      || exactAttempt.input_hash !== inputHash
+      || exactAttempt.sequence !== sequence
+    )
+  ) return null
+  const validPair = (() => {
+    switch (disposition.code) {
+      case 'ready':
+        return exactAttempt.state === 'unbound'
+          && (summaryStatus.status === 'not_requested' || summaryStatus.status === 'pending')
+      case 'identity_unbound':
+        return exactAttempt.state === 'unbound'
+          && summaryStatus.status === 'pending'
+      case 'pre_worker_unavailable':
+        return exactAttempt.state === 'unbound'
+          && (
+            summaryStatus.status === 'not_requested'
+            || summaryStatus.status === 'pending'
+          )
+      case 'in_flight':
+        return exactAttempt.state === 'bound'
+          && summaryStatus.status === 'pending'
+          && (
+            exactAttempt.status === 'dispatch_uncertain'
+            || exactAttempt.status === 'released_before_dispatch'
+          )
+      case 'settled':
+        return exactAttempt.state === 'bound'
+          && (
+            (exactAttempt.status === 'completed' && summaryStatus.status === 'available')
+            || (
+              exactAttempt.status === 'quarantined'
+              && exactAttempt.quarantine_cause !== null
+              && summaryStatus.status === 'failed'
+              && summaryStatus.reason
+                === exactAttemptQuarantineSummaryReason(exactAttempt.quarantine_cause)
+            )
+          )
+      case 'persistence_uncertain':
+        if (exactAttempt.state === 'unbound') return summaryStatus.status === 'pending'
+        if (exactAttempt.status === 'completed') return summaryStatus.status === 'available'
+        if (exactAttempt.status === 'quarantined') {
+          return exactAttempt.quarantine_cause !== null
+            && summaryStatus.status === 'failed'
+            && summaryStatus.reason
+              === exactAttemptQuarantineSummaryReason(exactAttempt.quarantine_cause)
+        }
+        return summaryStatus.status === 'pending'
+          && (
+            exactAttempt.status === 'dispatch_uncertain'
+            || exactAttempt.status === 'released_before_dispatch'
+            || exactAttempt.status === 'released_recovery_required'
+            || exactAttempt.status === 'restart_quarantined'
+          )
+      default: {
+        const _never: never = disposition
+        return _never
+      }
+    }
+  })()
+  if (!validPair) return null
   return {
     id,
     keeper_name: keeperName,
     tool_name: toolName,
+    input_hash: inputHash,
+    sequence,
     requested_at: asNullableIsoTimestamp(raw.requested_at),
     waiting_s: asNumber(raw.waiting_s),
     turn_id: asInt(raw.turn_id),
@@ -140,7 +408,9 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     goal_ids: asStringList(raw.goal_ids),
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),
-    summary_status: normalizeHitlSummaryStatus(raw.summary_status),
+    summary_status: summaryStatus,
+    exact_attempt: exactAttempt,
+    summary_attempt_disposition: disposition,
   }
 }
 

@@ -33,6 +33,7 @@ function response(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
   return {
     generated_at: '2026-06-24T00:00:00Z',
     approval_queue: queue,
+    approval_queue_state: { state: 'ready' },
     recent_resolved: [],
     approval_rules: [],
   } as DashboardGateResponse
@@ -95,7 +96,7 @@ describe('Gate resource (stale-while-revalidate)', () => {
     expect(signals.gateData.value?.approval_queue).toHaveLength(0)
   })
 
-  it('retains the last good data and surfaces the message when a refresh fails', async () => {
+  it('replaces stale ready data with a typed observation error when refresh fails', async () => {
     const { fetchDashboardGate, signals, actions } = await loadGate()
 
     fetchDashboardGate.mockResolvedValueOnce(response([queueItem('a1')]))
@@ -104,8 +105,19 @@ describe('Gate resource (stale-while-revalidate)', () => {
     fetchDashboardGate.mockRejectedValueOnce(new Error('Gate 새로고침 실패'))
     await actions.refreshGate()
 
-    // Failure does not wipe the queue, and the error is visible (no silent failure).
-    expect(signals.gateData.value?.approval_queue).toHaveLength(1)
+    expect(signals.gateData.value).toEqual({
+      approval_queue: null,
+      approval_queue_state: {
+        state: 'observation_error',
+        code: 'observation_failed',
+        title: 'Gate observation unavailable',
+        operator_detail: 'Gate 새로고침 실패',
+        severity: 'bad',
+        icon: '!',
+      },
+      recent_resolved: [],
+      approval_rules: [],
+    })
     expect(signals.gateError.value).toContain('Gate 새로고침 실패')
     expect(signals.gateLoading.value).toBe(false)
   })

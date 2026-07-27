@@ -196,11 +196,7 @@ let test_unusable_capacity_evidence_is_non_compacting () =
     Budget.capacity_transition_of_error
       (measurement_unavailable constraint_)
   with
-  | Budget.Capacity_non_compacting
-      (Budget.Token_measurement_unavailable
-         { protocol =
-             Llm_provider.Input_token_count.Anthropic_messages_count_tokens
-         }) ->
+  | Budget.Capacity_non_compacting Budget.Token_measurement_unavailable ->
     ()
   | _ -> fail "measurement-unavailable became compactable"
 ;;

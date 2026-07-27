@@ -269,7 +269,14 @@ jobs:
           # harness file — including non-.sh/.json ones and future extensions —
           # must force build=true. ci_core is intentionally NOT OR-ed here:
           # the ci_core block below already forces build=true.
-          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
+          # scripts/fixtures/ is a prefix for the same reason (#25726 moved the
+          # release-evidence fixtures out of heredocs into files): test/dune
+          # declares (source_tree ../scripts/fixtures) and
+          # test_runtime_config_validity.ml discovers scripts/fixtures/<name>/
+          # runtime.toml, so a fixture edit changes test input while matching
+          # none of the suffixes above (.toml is not .ml/.json/.sh) and the
+          # Build job would skip.
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
             build=true
           fi
 

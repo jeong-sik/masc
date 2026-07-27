@@ -18,7 +18,9 @@ type hitl_context_summary =
   ; rationale : string
   }
 
-and summary_status =
+val current_hitl_context_summary_version : int
+
+type summary_status =
   | Summary_not_requested
   | Summary_pending
   | Summary_available of hitl_context_summary
@@ -72,6 +74,25 @@ type exact_attempt_state =
   | Exact_unbound
   | Exact_bound of exact_attempt_binding
 
+type summary_attempt_pre_worker_unavailable_code =
+  | Summary_pre_worker_auto_judge_unavailable
+  | Summary_pre_worker_mode_state_invalid
+  | Summary_pre_worker_start_reserved
+
+type summary_attempt_pre_worker_unavailable =
+  { reason_code : summary_attempt_pre_worker_unavailable_code
+  ; operator_detail : string
+  }
+
+type summary_attempt_disposition =
+  | Summary_attempt_ready
+  | Summary_attempt_in_flight
+  | Summary_attempt_identity_unbound
+  | Summary_attempt_persistence_uncertain
+  | Summary_attempt_pre_worker_unavailable of
+      summary_attempt_pre_worker_unavailable
+  | Summary_attempt_settled
+
 (** A pending request never owns or suspends a Keeper lane. [sequence] is the
     durable queue-issued order identity; [requested_at] is observation only. *)
 type pending_approval =
@@ -91,6 +112,7 @@ type pending_approval =
   ; audit_base_path : string
   ; summary_status : summary_status
   ; exact_attempt : exact_attempt_state
+  ; summary_attempt_disposition : summary_attempt_disposition
   }
 
 (** Exact queue resolution. This is an outcome value, not a risk class,
@@ -166,6 +188,10 @@ val exact_attempt_quarantine_cause_to_string :
   exact_attempt_quarantine_cause -> string
 val is_lowercase_sha256 : string -> bool
 val exact_attempt_state_to_yojson : exact_attempt_state -> Yojson.Safe.t
+val summary_attempt_pre_worker_unavailable_code_to_string :
+  summary_attempt_pre_worker_unavailable_code -> string
+val summary_attempt_disposition_to_yojson :
+  summary_attempt_disposition -> Yojson.Safe.t
 
 val hitl_context_summary_of_yojson_with_error :
   Yojson.Safe.t -> (hitl_context_summary, string) Stdlib.result
@@ -175,6 +201,9 @@ val summary_status_of_yojson_with_error :
 
 val exact_attempt_state_of_yojson_with_error :
   Yojson.Safe.t -> (exact_attempt_state, string) Stdlib.result
+
+val summary_attempt_disposition_of_yojson_with_error :
+  Yojson.Safe.t -> (summary_attempt_disposition, string) Stdlib.result
 
 val approval_rule_of_yojson_with_error :
   Yojson.Safe.t -> (approval_rule, string) Stdlib.result

@@ -233,7 +233,7 @@ let recover_created_meta permit config (intent : Journal.intent) target =
   let* witness =
     Keeper_lifecycle_nonce.recover_exact
       permit
-      ~base_path:config.Workspace.base_path
+      config
       ~keeper_id:intent.keeper_name
       ~source:None
       ~target:target_identity
@@ -387,7 +387,7 @@ let clear_exact config intent direction =
       |> Result.map_error (fun error -> Journal_failure error))
 ;;
 
-let recover ?lifecycle_token permit config intent ~prefer =
+let recover ?lifecycle_token permit config (intent : Journal.intent) ~prefer =
   if
     not
       (Option.for_all
@@ -477,18 +477,16 @@ let recover ?lifecycle_token permit config intent ~prefer =
 ;;
 
 let complete_forward ?lifecycle_token permit config intent =
-  recover
-    ?lifecycle_token
-    permit
-    config
-    intent
-    ~prefer:`Forward
-  |> Result.bind (function
-    | Forward_committed -> Ok ()
-    | Rolled_back ->
-      Error
-        (Metadata_convergence_failed
-           "committed transaction unexpectedly recovered by rollback"))
+  (* [Result.bind] takes the result first, unlike [Result.map_error] used
+     elsewhere in this file, so it cannot be piped into the same way. *)
+  Result.bind
+    (recover ?lifecycle_token permit config intent ~prefer:`Forward)
+    (function
+      | Forward_committed -> Ok ()
+      | Rolled_back ->
+        Error
+          (Metadata_convergence_failed
+             "committed transaction unexpectedly recovered by rollback"))
 ;;
 
 let recover_leaf config leaf =
@@ -506,7 +504,10 @@ let recover_leaf config leaf =
          (fun permit ->
             recover permit config intent ~prefer:`Rollback)
      with
-     | Admission_completed result -> Result.map (fun value -> `Recovered value) result
+     | Admission_completed result ->
+       result
+       |> Result.map (fun value -> `Recovered value)
+       |> Result.map_error recovery_failure_to_string
      | Admission_completed_with_attention (result, failure) ->
        (match result with
         | Ok value -> Ok (`Recovered value)

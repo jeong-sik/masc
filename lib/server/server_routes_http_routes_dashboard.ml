@@ -379,22 +379,20 @@ type gate_mode_recovery =
   | Recovery_not_requested
 
 let gate_mode_change_json change recovery =
-  let recovery_status, recovery_error, reopened, started, queued =
+  let recovery_status, recovery_error, started, queued =
     match recovery with
     | Recovery_completed report ->
       ( "completed"
       , `Null
-      , List.length report.reopened_ids
       , List.length report.started_ids
       , report.queued )
-    | Recovery_failed detail -> "failed", `String detail, 0, 0, 0
-    | Recovery_not_requested -> "not_requested", `Null, 0, 0, 0
+    | Recovery_failed detail -> "failed", `String detail, 0, 0
+    | Recovery_not_requested -> "not_requested", `Null, 0, 0
   in
   let `Assoc fields = Keeper_gate_mode.change_json change in
   `Assoc
     (("recovery_status", `String recovery_status)
      :: ("recovery_error", recovery_error)
-     :: ("reopened", `Int reopened)
      :: ("started", `Int started)
      :: ("queued", `Int queued)
      :: fields)
@@ -1162,8 +1160,9 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/gate/tool-events" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = dashboard_gate_tool_events_http_json req in
+       with_public_read (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let json = dashboard_gate_tool_events_http_json req ~base_path in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/mode" (fun request reqd ->

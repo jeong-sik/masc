@@ -385,7 +385,9 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
       submit "not-persisted";
       check (list string) "only persisted pending keeper is surfaced"
         [ blocked.name ]
-        (Sup.pending_hitl_approval_keeper_names config))
+        (match Sup.pending_hitl_approval_keeper_names config with
+         | Ok names -> names
+         | Error error -> fail (AQ.storage_error_to_string error)))
 
 (* Sweep paths that resolve a keeper's runtime id reach
    [Keeper_meta_contract.runtime_id_of_meta], which falls back to
@@ -1054,12 +1056,22 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
               (publication_recovery_registry env sw config);
         }
       in
-      let pending_before = List.length (AQ.list_pending_entries ()) in
+      let pending_before =
+        AQ.list_pending_entries_for_workspace ~base_path:config.base_path
+        |> Result.get_ok
+        |> List.length
+      in
       sweep_and_recover_no_materialize ctx;
       check bool "paused keeper has no synthetic approval" false
-        (AQ.pending_count_for_keeper ~keeper_name:meta.name > 0);
+        (AQ.pending_count_for_keeper_in_workspace
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+         |> Result.get_ok
+         |> fun count -> count > 0);
       check int "approval count unchanged" pending_before
-        (List.length (AQ.list_pending_entries ()));
+        (AQ.list_pending_entries_for_workspace ~base_path:config.base_path
+         |> Result.get_ok
+         |> List.length);
       let persisted_meta =
         match Keeper_meta_store.read_meta config meta.name with
         | Ok (Some value) -> value
@@ -1132,12 +1144,20 @@ let test_sweep_reports_pending_hitl_approval () =
       in
       check bool "pending HITL approval visibility emitted" true visibility_seen;
       check bool "approval remains pending after visibility sweep" true
-        (AQ.pending_count_for_keeper ~keeper_name:name > 0);
+        (AQ.pending_count_for_keeper_in_workspace
+           ~base_path:base_dir
+           ~keeper_name:name
+         |> Result.get_ok
+         |> fun count -> count > 0);
       (match aq_resolve ~base_path:base_dir ~id ~decision:AQ.Decision.Approve with
        | Ok () -> approval_id := None
        | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       check bool "resolution removes pending request" false
-        (AQ.pending_count_for_keeper ~keeper_name:name > 0))
+        (AQ.pending_count_for_keeper_in_workspace
+           ~base_path:base_dir
+           ~keeper_name:name
+         |> Result.get_ok
+         |> fun count -> count > 0))
 
 let test_restart_path_emits_attempt_and_started_outcome_metrics () =
   with_restart_launch_noop @@ fun () ->

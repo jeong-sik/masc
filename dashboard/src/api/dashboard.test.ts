@@ -1472,7 +1472,11 @@ describe('fetchDashboardMemory', () => {
 describe('fetchDashboardGate', () => {
   it('requests a forced Gate snapshot when asked', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ approval_queue: [], recent_resolved: [] }), {
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: [],
+      }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -1489,6 +1493,7 @@ describe('fetchDashboardGate', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         approval_queue: [],
+        approval_queue_state: { state: 'ready' },
         recent_resolved: [
           {
             id: 'appr-done',
@@ -1544,6 +1549,7 @@ describe('fetchDashboardGate', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         approval_queue: [],
+        approval_queue_state: { state: 'ready' },
         recent_resolved: [],
         approval_rules: [{
           id: 'rule-1',
@@ -1567,6 +1573,39 @@ describe('fetchDashboardGate', () => {
         created_at: '2026-07-04T00:00:00.000Z',
       }),
     ])
+  })
+
+  it('preserves typed unavailable queue state without fabricating an empty ready queue', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: null,
+        approval_queue_state: {
+          state: 'unavailable',
+          code: 'reset_required',
+          title: 'Gate durable queue unavailable · runtime reset required',
+          operator_detail: 'pending store requires reset',
+          severity: 'bad',
+          icon: '!',
+        },
+        recent_resolved: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGate()
+
+    expect(result.approval_queue).toBeNull()
+    expect(result.approval_queue_state).toEqual({
+      state: 'unavailable',
+      code: 'reset_required',
+      title: 'Gate durable queue unavailable · runtime reset required',
+      operator_detail: 'pending store requires reset',
+      severity: 'bad',
+      icon: '!',
+    })
   })
 
   it('does not retry structured computation timeouts', async () => {
@@ -1600,7 +1639,6 @@ describe('setGateMode', () => {
     changed_at: '2026-07-12T00:00:00Z',
     recovery_status: 'completed',
     recovery_error: null,
-    reopened: 2,
     started: 1,
     queued: 1,
   } as const
@@ -1623,7 +1661,6 @@ describe('setGateMode', () => {
     expect(result).toMatchObject({
       recovery_status: 'completed',
       recovery_error: null,
-      reopened: 2,
       started: 1,
       queued: 1,
     })
@@ -1637,7 +1674,6 @@ describe('setGateMode', () => {
         ...completedResponse,
         recovery_status: 'failed',
         recovery_error: 'judge worker unavailable',
-        reopened: 0,
         started: 0,
         queued: 0,
       },
@@ -1650,7 +1686,6 @@ describe('setGateMode', () => {
         mode: 'manual',
         recovery_status: 'not_requested',
         recovery_error: null,
-        reopened: 0,
         started: 0,
         queued: 0,
         replaced_read_error: 'replaced invalid persisted mode',
@@ -1676,11 +1711,10 @@ describe('setGateMode', () => {
     ['failed recovery without error', {
       ...completedResponse,
       recovery_status: 'failed',
-      reopened: 0,
       started: 0,
       queued: 0,
     }],
-    ['negative count', { ...completedResponse, reopened: -1 }],
+    ['negative count', { ...completedResponse, started: -1 }],
     ['non-zero not-requested outcome', {
       ...completedResponse,
       recovery_status: 'not_requested',
@@ -1704,6 +1738,7 @@ describe('setGateMode', () => {
 describe('dashboard goals decoding', () => {
   it('retains direct keeper references without projecting blocker metadata', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [
         makeRawGoalNode({
           latest_keeper_ref: 'keeper-sangsu',
@@ -1731,6 +1766,7 @@ describe('dashboard goals decoding', () => {
 
   it('decodes explicit phase counts separately from active status', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [makeRawGoalNode()],
       summary: {
         total_goals: 3,
@@ -1755,6 +1791,7 @@ describe('dashboard goals decoding', () => {
 
   it('decodes goal attainment projections on tree payloads', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [
         makeRawGoalNode({
           metric: 'completion_pct',
@@ -1805,6 +1842,7 @@ describe('dashboard goals decoding', () => {
 
   it('falls back to unmeasured goal attainment when payloads are old', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       tree: [
         makeRawGoalNode({
           metric: 'latency',
@@ -1839,6 +1877,7 @@ describe('dashboard goals decoding', () => {
 
   it('retains keeper trust summary and latest event on goal detail payloads', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       goal: makeRawGoalNode(),
       linked_tasks: [],
       linked_keepers: [
@@ -1972,6 +2011,7 @@ describe('dashboard goals decoding', () => {
 
   it('accepts raw runtime_trust approval/execution keys on goal detail payloads', async () => {
     const rawResponse = {
+      approval_queue_state: { state: 'ready' },
       goal: makeRawGoalNode(),
       linked_tasks: [],
       linked_keepers: [

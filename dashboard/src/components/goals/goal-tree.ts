@@ -12,6 +12,8 @@ import {
   goalTreeData as treeData,
   goalTreeError as treeError,
   goalTreeLoading as treeLoading,
+  hydrateGoalTreeError,
+  hydrateGoalTreeObservationError,
   hydrateGoalTreeSnapshot,
 } from '../../goal-tree-state'
 import { workspaceFsmSnapshot } from '../../store'
@@ -273,9 +275,16 @@ async function refreshTree() {
   treeLoading.value = true
   treeError.value = null
   try {
-    hydrateGoalTreeSnapshot(await fetchDashboardGoalsTree())
+    const payload = await fetchDashboardGoalsTree()
+    if (!hydrateGoalTreeSnapshot(payload)) {
+      hydrateGoalTreeObservationError(
+        new Error('Goal Store tree payload was malformed'),
+      )
+    }
   } catch (err) {
-    treeError.value = errorToString(err)
+    if (!hydrateGoalTreeError(err)) {
+      hydrateGoalTreeObservationError(err)
+    }
   } finally {
     treeLoading.value = false
   }
@@ -294,7 +303,12 @@ async function refreshGoalDetail(goalId: string) {
     detailData.value = next
   } catch (err) {
     if (detailRequestSeq !== reqId) return
-    detailError.value = errorToString(err)
+    detailData.value = null
+    if (hydrateGoalTreeError(err)) {
+      detailError.value = treeError.value
+    } else {
+      detailError.value = errorToString(err)
+    }
   } finally {
     if (detailRequestSeq === reqId) detailLoading.value = false
   }

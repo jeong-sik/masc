@@ -30,6 +30,7 @@
   agent_sdk.llm_provider
   eio
   masc_eio_context
+  masc_compaction_trigger
   masc.config
   masc.keeper_registry
   masc.keeper_checkpoint_ref

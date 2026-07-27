@@ -104,7 +104,16 @@ val for_deterministic_subcall
   :  max_tokens:int option
   -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Provider shape shared by MASC's deterministic LLM subcalls (librarian
+(** Provider shape for MASC's deterministic LLM subcalls. One caller today:
+    memory-OS consolidation. The librarian extraction named below moved onto the
+    exact-output lane (keeper_librarian_runtime.ml:638-641 builds an
+    [Exact_output] requirement instead of a subcall), where the provider comes
+    from the lane's admitted target and this shape is not applied — so the
+    paragraph below is the history of the tuning, not a list of its current
+    users. Whether the librarian still needs the suppression on that path is
+    open; nothing in this module can answer it.
+
+    Original note (librarian
     extraction, memory-OS consolidation): no tool choice, no parallel tool
     use, and thinking fully suppressed.
 

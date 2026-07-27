@@ -252,12 +252,6 @@ and handle_transition
   let action_s = Masc_domain.task_action_to_string action in
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
-  let completion_contract =
-    match get_string_list args "completion_contract" with
-    | [] -> None
-    | items -> Some items
-  in
-  let evaluator_runtime = get_string_opt args "evaluator_runtime" in
   let handoff_context =
     parse_handoff_context ~agent_name:ctx.agent_name ~action args
   in
@@ -447,52 +441,6 @@ and handle_transition
       ~tool_name ~start_time
       "Strict task release requires handoff_context.summary"
   else
-  let evidence_refs =
-    match handoff_context with
-    | Some handoff -> handoff.evidence_refs
-    | None -> []
-  in
-  let configured_llm_verdict =
-    if
-      (=) action Masc_domain.Done_action
-      || (=) action Masc_domain.Approve_verification
-      || (=) action Masc_domain.Reject_verification
-    then
-      review_completion_notes
-        ~completion_contract:
-          (match persisted_completion_contract ~task_opt with
-           | Some persisted -> Some persisted
-           | None -> completion_contract)
-        ~evaluator_runtime
-        ~ctx
-        ~task_opt
-        ~task_id
-        ~notes
-        ~evidence_refs
-    else
-      None
-  in
-  let action =
-    match action, configured_llm_verdict with
-    | (Masc_domain.Approve_verification | Masc_domain.Reject_verification),
-      Some { Masc_domain.decision = Masc_domain.Completion_pass; _ } ->
-      Masc_domain.Approve_verification
-    | (Masc_domain.Approve_verification | Masc_domain.Reject_verification),
-      Some { decision = Masc_domain.Completion_reject _; _ } ->
-      Masc_domain.Reject_verification
-    | action,
-      ( None
-      | Some { decision = Masc_domain.Completion_verdict_unavailable _; _ } ) ->
-      action
-    | ( Masc_domain.Claim
-      | Masc_domain.Start
-      | Masc_domain.Done_action
-      | Masc_domain.Cancel
-      | Masc_domain.Release
-      | Masc_domain.Submit_for_verification ),
-      Some { decision = (Masc_domain.Completion_pass | Masc_domain.Completion_reject _); _ } ->
-      action
-  in
   let action_s = Masc_domain.task_action_to_string action in
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
@@ -607,7 +555,6 @@ and handle_transition
       ?expected_version
       ~notes
       ~reason
-      ?configured_llm_verdict
       ?handoff_context
       ?prepare_verification_request
       ?compensate_verification_request

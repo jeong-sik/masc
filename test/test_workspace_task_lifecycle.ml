@@ -4,30 +4,6 @@ module D = Masc_domain
 let owner = "alice"
 let now = "2026-07-13T00:00:00Z"
 
-let pass =
-  { D.decision = D.Completion_pass
-  ; runtime_id = "task-reviewer"
-  ; rationale = None
-  ; evaluated_at = now
-  }
-;;
-
-let reject reason =
-  { D.decision = D.Completion_reject reason
-  ; runtime_id = "task-reviewer"
-  ; rationale = Some reason
-  ; evaluated_at = now
-  }
-;;
-
-let unavailable reason =
-  { D.decision = D.Completion_verdict_unavailable reason
-  ; runtime_id = "task-reviewer"
-  ; rationale = Some reason
-  ; evaluated_at = now
-  }
-;;
-
 let decide ?configured_llm_verdict ~same_agent ~task_status ~action () =
   L.decide
     ~new_verification_id:(fun () -> "vrf-1")
@@ -68,72 +44,38 @@ let expect_error expected = function
   | Ok _ -> failwith "expected lifecycle error"
 ;;
 
-let test_done_requires_configured_llm_pass () =
+let test_done_requires_verification_submission () =
   decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
-  |> expect_error L.Completion_verdict_required;
-  decide
-    ~configured_llm_verdict:(reject "tests missing")
-    ~same_agent:true
-    ~task_status:in_progress
-    ~action:D.Done_action
-    ()
-  |> expect_error (L.Completion_rejected "tests missing");
-  decide
-    ~configured_llm_verdict:(unavailable "runtime unavailable")
-    ~same_agent:true
-    ~task_status:in_progress
-    ~action:D.Done_action
-    ()
-  |> expect_error (L.Completion_verdict_unavailable "runtime unavailable");
-  match
-    decide
-      ~configured_llm_verdict:pass
-      ~same_agent:true
-      ~task_status:in_progress
-      ~action:D.Done_action
-      ()
-  with
-  | Ok { new_status = D.Done _; _ } -> ()
-  | Ok _ | Error _ -> failwith "configured LLM pass must complete owned in-progress task"
+  |> expect_error L.Verification_submission_required
 ;;
 
-let test_claimed_can_complete_after_configured_llm_pass () =
+let test_claimed_done_requires_verification_submission () =
   let claimed = D.Claimed { assignee = owner; claimed_at = now } in
-  match
-    decide
-      ~configured_llm_verdict:pass
-      ~same_agent:true
-      ~task_status:claimed
-      ~action:D.Done_action
-      ()
-  with
-  | Ok { new_status = D.Done _; _ } -> ()
-  | Ok _ | Error _ -> failwith "configured LLM pass must complete an owned claimed task"
+  decide ~same_agent:true ~task_status:claimed ~action:D.Done_action ()
+  |> expect_error L.Verification_submission_required
 ;;
 
 let test_verdict_requires_assigned_winner () =
   decide
-    ~configured_llm_verdict:pass
     ~same_agent:false
     ~task_status:awaiting
     ~action:D.Approve_verification
     ()
   |> expect_error L.Verification_claim_required;
   decide
-    ~configured_llm_verdict:pass
     ~same_agent:false
     ~task_status:(assigned "verifier")
     ~action:D.Approve_verification
     ()
   |> expect_error (L.Verification_assigned_to "verifier");
   (match
-     decide ~configured_llm_verdict:pass ~same_agent:true
+     decide ~same_agent:true
        ~task_status:(assigned "verifier") ~action:D.Approve_verification ()
    with
    | Ok { new_status = D.Done _; _ } -> ()
    | Ok _ | Error _ -> failwith "assigned winner must be able to approve");
   match
-    decide ~configured_llm_verdict:(reject "fix failing test") ~same_agent:true
+    decide ~same_agent:true
       ~task_status:(assigned "verifier") ~action:D.Reject_verification ()
   with
   | Ok { new_status = D.InProgress { assignee; _ }; _ }
@@ -189,8 +131,8 @@ let test_awaiting_claim_has_one_non_producer_winner () =
 ;;
 
 let () =
-  test_done_requires_configured_llm_pass ();
-  test_claimed_can_complete_after_configured_llm_pass ();
+  test_done_requires_verification_submission ();
+  test_claimed_done_requires_verification_submission ();
   test_verdict_requires_assigned_winner ();
   test_awaiting_claim_has_one_non_producer_winner ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

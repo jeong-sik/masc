@@ -76,6 +76,37 @@ let configured_llm_completion_pass : Masc_domain.configured_llm_completion_verdi
   ; evaluated_at = "2026-07-13T00:00:00Z"
   }
 
+let transition_done_r config ~agent_name ~task_id ~notes =
+  let evidence_notes =
+    if String.equal (String.trim notes) ""
+    then "test completion evidence"
+    else notes
+  in
+  match
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  with
+  | Some { task_status = Masc_domain.Done _; _ } ->
+    Workspace.transition_task_r config ~agent_name ~task_id
+      ~action:Masc_domain.Done_action
+      ~configured_llm_verdict:configured_llm_completion_pass
+      ~notes:evidence_notes ()
+  | Some _ | None ->
+    (match
+       Workspace.transition_task_r config ~agent_name ~task_id
+         ~action:Masc_domain.Submit_for_verification ~notes:evidence_notes ()
+     with
+     | Error _ as error -> error
+     | Ok _ ->
+       let verifier = "admin-board-keeper" in
+       (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
+        | Error _ as error -> error
+        | Ok _ ->
+          Workspace.transition_task_r config ~agent_name:verifier ~task_id
+            ~action:Masc_domain.Approve_verification
+            ~notes:("verified: " ^ evidence_notes)
+            ()))
+
 let backlog_recovery_path config =
   Workspace.backlog_path config ^ ".last-good"
 
@@ -232,14 +263,11 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   let _ = Workspace.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
   let _ = Workspace.claim_task config ~agent_name:"nick0cave" ~task_id:"task-001" in
   (match
-     Workspace.transition_task_r
+     transition_done_r
        config
        ~agent_name:"nick0cave"
        ~task_id:"task-001"
-       ~action:Masc_domain.Done_action
-       ~configured_llm_verdict:configured_llm_completion_pass
        ~notes:"terminal in backlog"
-       ()
    with
    | Ok _ -> ()
    | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
@@ -332,12 +360,6 @@ let test_event_log () =
 (* ============================================================ *)
 (* Edge Case & Error Case Tests                                  *)
 (* ============================================================ *)
-
-let transition_done_r config ~agent_name ~task_id ~notes =
-  Workspace.transition_task_r config ~agent_name ~task_id
-    ~action:Masc_domain.Done_action
-    ~configured_llm_verdict:configured_llm_completion_pass
-    ~notes ()
 
 let transition_done config ~agent_name ~task_id ~notes =
   match transition_done_r config ~agent_name ~task_id ~notes with
@@ -1085,6 +1107,10 @@ let test_approve_completion_credits_assignee () =
       Alcotest.(check bool) "submit ok" true
         (match submitted with Ok _ -> true | Error _ -> false);
       Alcotest.(check (list string)) "no done hook before approve" [] !recorded;
+      let _ =
+        Workspace.claim_task_r config ~agent_name:admin_keeper_agent
+          ~task_id:"task-001" ()
+      in
       let approved =
         Workspace.transition_task_r config ~agent_name:admin_keeper_agent
           ~task_id:"task-001" ~action:Masc_domain.Approve_verification
@@ -1105,6 +1131,10 @@ let test_submit_and_approve_rejects_empty_justification () =
     let _ =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Submit_for_verification ~notes:"evidence" ()
+    in
+    let _ =
+      Workspace.claim_task_r config ~agent_name:admin_keeper_agent
+        ~task_id:"task-001" ()
     in
     let approved =
       Workspace.transition_task_r config ~agent_name:admin_keeper_agent
@@ -1127,7 +1157,7 @@ let strict_contract : Masc_domain.task_contract =
   ; links = { operation_id = None; session_id = None }
   }
 
-let test_strict_task_done_requires_and_accepts_llm_verdict () =
+let test_strict_task_done_requires_verification_submission () =
   with_test_env (fun config ->
     let _ =
       Workspace.add_task config ~contract:strict_contract ~title:"Strict Task"
@@ -1135,36 +1165,27 @@ let test_strict_task_done_requires_and_accepts_llm_verdict () =
     in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* The low-level workspace boundary never fabricates a verdict. *)
     let direct =
-      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Done_action ~notes:"done" ()
-    in
-    (match direct with
-     | Error e ->
-       Alcotest.(check bool) "error requires configured LLM verdict" true
-         (str_contains
-            (Masc_domain.masc_error_to_string e)
-            "Configured LLM completion verdict required")
-     | Ok _ -> Alcotest.fail "task completed without configured LLM verdict");
-    let reviewed =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Done_action
         ~configured_llm_verdict:configured_llm_completion_pass
         ~notes:"evidence attached"
         ()
     in
-    Alcotest.(check bool) "configured LLM pass completes task" true
-      (match reviewed with Ok _ -> true | Error _ -> false);
-    Alcotest.(check bool) "task done via configured LLM verdict" true
+    (match direct with
+     | Error e ->
+       Alcotest.(check bool) "error requires verification submission" true
+         (str_contains
+            (Masc_domain.masc_error_to_string e)
+            "must be submitted for verification")
+     | Ok _ -> Alcotest.fail "task bypassed verification submission");
+    Alcotest.(check bool) "task remains nonterminal" true
       (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.Done _; _ } -> true
+       | Some { task_status = Masc_domain.Claimed _; _ } -> true
        | Some _ | None -> false))
 
-let test_default_task_done_unchanged () =
+let test_default_task_done_requires_verification_submission () =
   with_test_env (fun config ->
-    (* Phase A boundary: the auto-filled advisory contract (strict=false)
-       does NOT trip the guard — direct done keeps working fleet-wide. *)
     let _ = Workspace.add_task config ~title:"Default Task" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
@@ -1174,8 +1195,13 @@ let test_default_task_done_unchanged () =
         ~configured_llm_verdict:configured_llm_completion_pass
         ~notes:"done" ()
     in
-    Alcotest.(check bool) "default task direct done ok" true
-      (match direct with Ok _ -> true | Error _ -> false))
+    Alcotest.(check bool) "default task direct done rejected" true
+      (match direct with
+       | Error error ->
+         str_contains
+           (Masc_domain.masc_error_to_string error)
+           "must be submitted for verification"
+       | Ok _ -> false))
 
 let test_audit_orphan_tasks () =
   with_test_env (fun config ->
@@ -1790,10 +1816,10 @@ let () =
 
     (* === RFC-0323 G-1: verification-required done guard === *)
     "verification_guard", [
-      Alcotest.test_case "strict task done requires configured LLM verdict" `Quick
-        test_strict_task_done_requires_and_accepts_llm_verdict;
-      Alcotest.test_case "default task done unchanged" `Quick
-        test_default_task_done_unchanged;
+      Alcotest.test_case "strict task done requires verification submission" `Quick
+        test_strict_task_done_requires_verification_submission;
+      Alcotest.test_case "default task done requires verification submission" `Quick
+        test_default_task_done_requires_verification_submission;
     ];
 
     (* === Board Admin Tests === *)

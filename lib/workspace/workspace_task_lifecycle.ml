@@ -1,11 +1,12 @@
-(** Pure Task lifecycle transition helper. Semantic completion is authorized by
-    a request-local configured-LLM verdict, never by an actor hierarchy. *)
+(** Pure Task lifecycle transition helper. Producers submit completion evidence
+    for verification; the phase-assigned verifier owns the terminal verdict. *)
 
 type invalid =
   | Completion_verdict_required
   | Completion_rejected of string
   | Completion_verdict_unavailable of string
   | Completion_verdict_action_mismatch
+  | Verification_submission_required
   | Verification_claim_required
   | Verification_assigned_to of string
   | Verification_self_claim
@@ -61,15 +62,6 @@ let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
 ;;
 
-let completion_pass = function
-  | None -> Error Completion_verdict_required
-  | Some { Masc_domain.decision = Masc_domain.Completion_pass; _ } -> Ok ()
-  | Some { decision = Masc_domain.Completion_reject reason; _ } ->
-    Error (Completion_rejected reason)
-  | Some { decision = Masc_domain.Completion_verdict_unavailable reason; _ } ->
-    Error (Completion_verdict_unavailable reason)
-;;
-
 let decide
       ~new_verification_id
       ~same_agent
@@ -78,7 +70,7 @@ let decide
       ~task_status
       ~action
       ~now
-      ~configured_llm_verdict
+      ~configured_llm_verdict:_
       ~notes
       ~reason
   =
@@ -129,10 +121,7 @@ let decide
       | Masc_domain.InProgress { assignee; _ } ) ) ->
     if not (same_agent assignee)
     then Error Invalid_transition
-    else
-      let open Result.Syntax in
-      let* () = completion_pass configured_llm_verdict in
-      ok (done_status ~assignee ~now ~notes)
+    else Error Verification_submission_required
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Done_action
     , ( Masc_domain.Todo
@@ -191,8 +180,6 @@ let decide
     if not (same_agent verifier)
     then Error (Verification_assigned_to verifier)
     else
-      let open Result.Syntax in
-      let* () = completion_pass configured_llm_verdict in
       ok
         (Masc_domain.Done
            { assignee
@@ -200,7 +187,8 @@ let decide
            ; notes =
                Some
                  (Printf.sprintf
-                    "Configured LLM approved (vrf:%s)%s"
+                    "Verified by %s (vrf:%s)%s"
+                    verifier
                     verification_id
                     (if String.equal notes "" then "" else " — " ^ notes))
            })
@@ -220,15 +208,7 @@ let decide
         { assignee; phase = Masc_domain.Verifier_assigned { verifier }; _ } ) ->
     if not (same_agent verifier)
     then Error (Verification_assigned_to verifier)
-    else
-      (match configured_llm_verdict with
-       | Some { decision = Masc_domain.Completion_reject _; _ } ->
-         ok (Masc_domain.InProgress { assignee; started_at = now })
-       | Some { decision = Masc_domain.Completion_pass; _ } ->
-         Error Completion_verdict_action_mismatch
-       | Some { decision = Masc_domain.Completion_verdict_unavailable reason; _ } ->
-         Error (Completion_verdict_unavailable reason)
-       | None -> Error Completion_verdict_required)
+    else ok (Masc_domain.InProgress { assignee; started_at = now })
   | ( Masc_domain.Reject_verification
     , ( Masc_domain.Todo
       | Masc_domain.Claimed _

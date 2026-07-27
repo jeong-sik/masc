@@ -790,13 +790,12 @@ let handle_keeper_task_tool_with_outcome
              message)
       | Ok evidence_refs ->
       (* Map keeper vocabulary (`result`) onto MASC domain typed
-         handoff_context.summary so the action=done strict-contract
-         path can read the completion summary directly from a typed
-         field instead of relying on string-blob siblings. *)
+         handoff_context.summary and submit the evidence to the ordinary
+         verifier workflow instead of completing through an internal lane. *)
       let args_for_transition =
         [
           "task_id", `String task_id;
-          "action", `String "done";
+          "action", `String "submit_for_verification";
           "notes", `String result_text;
           ( "handoff_context",
             `Assoc

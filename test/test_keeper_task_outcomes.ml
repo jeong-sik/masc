@@ -32,8 +32,8 @@ let meta_with_active_goals goal_ids =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
-        [ "name", `String "keeper-task-create-test"
-        ; "agent_name", `String "keeper-task-create-test"
+        [ "name", `String "task-create-test"
+        ; "agent_name", `String "keeper-task-create-test-agent"
         ; "trace_id", `String "trace-task-create-test"
         ; ( "active_goal_ids"
           , `List (List.map (fun goal_id -> `String goal_id) goal_ids) )
@@ -204,6 +204,60 @@ let test_done_failed_transition_emits_typed_error () =
             | Some (Outcome.No_progress _) -> "No_progress"
             | Some (Outcome.Error _) -> "Error"))
 
+let test_done_submits_for_ordinary_verification () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "keeper-task-create-test-agent" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Evidence-bearing completion"
+            ~priority:1
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name
+            ~capabilities:[]
+            ());
+       (match
+          Masc.Workspace.claim_task_r
+            config
+            ~agent_name
+            ~task_id:"task-001"
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail
+            ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = meta_with_active_goals [] in
+       ignore
+         (Task.handle_keeper_task_tool
+            ~config
+            ~meta
+            ~name:"keeper_task_done"
+            ~args:
+              (`Assoc
+                [ "task_id", `String "task-001"
+                ; "result", `String "implementation complete"
+                ; "evidence_refs", `List [ `String "commit:abc123" ]
+                ]));
+       match Masc.Workspace.get_tasks_raw config with
+       | [ { task_status = Masc_domain.AwaitingVerification _;
+             handoff_context = Some handoff; _ } ] ->
+         check string "result preserved as summary"
+           "implementation complete" handoff.summary;
+         check (list string) "evidence preserved"
+           [ "commit:abc123" ] handoff.evidence_refs
+       | [ _ ] -> fail "completion did not enter awaiting_verification"
+       | tasks ->
+         failf "expected exactly one persisted task, got %d" (List.length tasks))
+
 let () =
   run "keeper task outcomes"
     [ ( "outcomes"
@@ -223,5 +277,7 @@ let () =
             `Quick test_done_missing_evidence_refs_emits_typed_error
         ; test_case "rejected done (failed transition) emits typed Error (D1)"
             `Quick test_done_failed_transition_emits_typed_error
+        ; test_case "done submits for ordinary verification"
+            `Quick test_done_submits_for_ordinary_verification
         ] )
     ]

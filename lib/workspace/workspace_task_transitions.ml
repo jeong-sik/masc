@@ -137,6 +137,12 @@ let transition_task_outcome_r
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     "Requested verification transition does not match the configured LLM verdict"))
+          | Error Workspace_task_lifecycle.Verification_submission_required ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "Task completion must be submitted for verification; use \
+                     submit_for_verification with evidence"))
           | Error Workspace_task_lifecycle.Verification_claim_required ->
             Error
               (Masc_domain.Task

@@ -9,10 +9,10 @@ let outcome_to_string = function
   | Failed detail -> Printf.sprintf "failed: %s" detail
 ;;
 
-(* The opaque operation identity the filesystem runtime submits to the Gate.
-   Replay only recognizes this one identity; every other approved operation
-   stays with its own producer. *)
-let write_operation = "filesystem_write"
+(* Replay recognizes exactly the identity its producer submits; every other
+   approved operation stays with its own producer. The identity is read from
+   that producer so the literal has one definition. *)
+let write_operation = Keeper_tool_filesystem_runtime.gate_operation
 
 let payload_fields = [ "content"; "old_string"; "new_string"; "replace_all" ]
 

@@ -38,6 +38,11 @@ val handle_read_file_with_outcome :
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
+(** The opaque Gate operation identity this module submits for local writes.
+    Consumers that must recognise the same effect read it here rather than
+    repeating the literal. *)
+val gate_operation : string
+
 val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->

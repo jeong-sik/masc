@@ -1060,6 +1060,11 @@ let check_invariant_sandbox_isolation
          ~sandbox_paths:[ target ])
 ;;
 
+(* The opaque Gate operation identity for every local write this module
+   performs. The Gate never parses it; consumers that must recognise the
+   same effect read it from here instead of repeating the literal. *)
+let gate_operation = "filesystem_write"
+
 let file_write_gate_input
       ~gate_effect
       ~requested_target
@@ -1100,7 +1105,7 @@ let decide_file_write
     ?cycle_grant:gate_grant
     ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
     { keeper_name = meta.name
-    ; operation = "filesystem_write"
+    ; operation = gate_operation
     ; input
     ; base_path = config.Workspace.base_path
     ; causal_context = Option.map (fun current -> current ()) gate_context
@@ -1891,7 +1896,7 @@ let handle_file_write_with_outcome
       Ok
         (Write_deferred
            (Keeper_gate_deferred_payload.create
-              ~operation:"filesystem_write"
+              ~operation:gate_operation
               ~approval_id
               ~reason
               ~context:(`Assoc [ "path", `String target ])

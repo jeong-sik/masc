@@ -1,5 +1,5 @@
 (** Dashboard projection for verification requests — the Mission detail table
-    that surfaces Completion Contract + Required Evidence per
+    that surfaces Completion Contract + Required Artifacts + Submitted Evidence per
     {!Verification_protocol} request.
 
     Consumes {!Verification.list_requests}, which reads
@@ -37,7 +37,10 @@
         "submitted_by":       "keeper-name",
         "approved_by":        "keeper-name" | null,
         "completion_contract": [ "criterion text", ... ],
-        "required_evidence":   [ "evidence description or ref", ... ],
+        "required_artifacts":  [ "required artifact", ... ],
+        "submitted_evidence":  [ "submitted evidence ref", ... ],
+        "evidence_projection_error":
+          "missing/malformed current-schema field ..." | null,
         "verdict":             "pass" | "fail" | "partial" | null,
         "verdict_reason":      "..."
       }

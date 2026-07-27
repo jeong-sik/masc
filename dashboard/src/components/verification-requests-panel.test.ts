@@ -104,7 +104,9 @@ function makeRequest(overrides: Partial<VerificationRequest> = {}): Verification
     submitted_by: 'agent-a',
     approved_by: null,
     completion_contract: [],
-    required_evidence: [],
+    required_artifacts: [],
+    submitted_evidence: [],
+    evidence_projection_error: null,
     verdict: null,
     verdict_reason: '',
     ...overrides,
@@ -282,6 +284,42 @@ describe('VerificationRequestsPanel', () => {
         ),
       ).toBeTruthy()
     })
+  })
+
+  it('renders required artifacts separately from submitted evidence', async () => {
+    setData([
+      makeRequest({
+        required_artifacts: ['artifact://required-contract'],
+        submitted_evidence: ['trace://submitted-runtime-proof'],
+      }),
+    ])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    fireEvent.click(screen.getByText('자세히'))
+    await waitFor(() => {
+      expect(screen.getByText('Required Artifacts')).toBeTruthy()
+      expect(screen.getByText('artifact://required-contract')).toBeTruthy()
+      expect(screen.getByText('Submitted Evidence')).toBeTruthy()
+      expect(screen.getByText('trace://submitted-runtime-proof')).toBeTruthy()
+      expect(screen.queryByText('Required Evidence')).toBeNull()
+    })
+  })
+
+  it('renders missing and malformed evidence projection warnings', () => {
+    setData([
+      makeRequest({
+        evidence_projection_error:
+          'missing current-schema field "required_artifacts"; malformed current-schema field "submitted_evidence": expected an array of strings',
+      }),
+    ])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    expect(screen.getByRole('alert').textContent).toContain(
+      'missing current-schema field "required_artifacts"',
+    )
+    expect(screen.getByRole('alert').textContent).toContain(
+      'malformed current-schema field "submitted_evidence"',
+    )
   })
 })
 

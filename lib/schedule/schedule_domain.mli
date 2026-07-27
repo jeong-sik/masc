@@ -81,6 +81,7 @@ type schedule_request =
 
 type execution_status =
   | Execution_running
+  | Execution_dispatched
   | Execution_succeeded
   | Execution_failed
 

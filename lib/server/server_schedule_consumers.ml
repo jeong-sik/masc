@@ -639,7 +639,8 @@ let dispatch_keeper_wake
     ~keeper_name
     activation_outcome;
   Ok
-    (`Assoc
+    (Schedule_runner.Work_accepted
+       (`Assoc
       ([ "kind", `String keeper_wake_enqueued_kind
        ; "queue", `String keeper_event_queue_label
        ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
@@ -653,7 +654,7 @@ let dispatch_keeper_wake
        ]
        @ keeper_wake_activation_outcome_json_fields activation_outcome
        @ keeper_wake_reaction_ledger_status_json_fields
-           (Some Keeper_wake_reaction_ledger_recorded)))
+           (Some Keeper_wake_reaction_ledger_recorded))))
 ;;
 
 let dispatch config ~now signal request =

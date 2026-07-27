@@ -146,6 +146,18 @@ val complete_running :
     recurring requests advance to the next [Scheduled] occurrence. The matching
     execution attempt is marked [succeeded]. *)
 
+val accept_running :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  ?detail:Yojson.Safe.t ->
+  unit ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Records that a consumer durably accepted asynchronous work. Recurring
+    requests advance to their next [Scheduled] occurrence; one-shot requests
+    remain [Running]. The matching execution remains unfinished with status
+    [Execution_dispatched] until a correlated work-completion path settles it. *)
+
 val fail_running :
   Workspace_utils.config ->
   now:float ->

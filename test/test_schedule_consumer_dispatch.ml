@@ -374,7 +374,7 @@ let test_board_post_schedule_is_rejected_without_mutation () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
-let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
+let test_keeper_wake_consumer_records_dispatch_without_work_success () =
   with_workspace
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
@@ -396,14 +396,21 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
     Yojson.Safe.Util.(runner_counts |> member "wake_enqueued" |> to_int);
   check int "runner wake failed stays zero" 0
     Yojson.Safe.Util.(runner_counts |> member "wake_failed" |> to_int);
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "accepted schedule missing"
+   | Some stored ->
+     check string "one-shot remains running until work completion" "running"
+       (Schedule_domain.schedule_status_to_string stored.status));
   (match
      Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing execution record"
    | Some execution ->
-     check string "execution status" "succeeded"
+     check string "execution status" "dispatched"
        (Schedule_domain.execution_status_to_string execution.status);
+     check (option (float 0.001)) "accepted work is unfinished" None
+       execution.finished_at;
      (match execution.detail with
       | Some detail ->
         let open Yojson.Safe.Util in
@@ -1036,8 +1043,8 @@ let () =
     [ ( "keeper_wake"
       , [ test_case "board post schedule is rejected without mutation" `Quick
             test_board_post_schedule_is_rejected_without_mutation
-        ; test_case "keeper wake enqueues typed stimulus" `Quick
-            test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
+        ; test_case "keeper wake records dispatch without work success" `Quick
+            test_keeper_wake_consumer_records_dispatch_without_work_success
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "keeper wake durable enqueue retries same occurrence" `Quick

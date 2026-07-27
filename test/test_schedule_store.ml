@@ -481,6 +481,41 @@ let test_start_and_complete_persist_execution_record () =
      | _ -> fail "detail missing")
 ;;
 
+let test_accept_running_persists_unfinished_dispatched_execution () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"accepted-1" () in
+  ignore (insert_ok config request);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match
+     accept_running config ~now:203.0 ~schedule_id:request.schedule_id
+       ~detail:(`Assoc [ "kind", `String "consumer.accepted" ])
+       ()
+   with
+   | Ok stored -> check_status "one-shot remains running" Running stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match
+     last_execution_for_schedule
+       (read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "accepted execution missing"
+   | Some execution ->
+     check string "accepted execution is dispatched" "dispatched"
+       (execution_status_to_string execution.status);
+     check (option (float 0.001)) "accepted execution is unfinished" None
+       execution.finished_at);
+  (match recover_running_on_startup config ~now:204.0 with
+   | Ok (_, recovered) ->
+     check int "accepted work is not redispatched after restart" 0 recovered
+   | Error err -> fail (store_error_to_string err))
+;;
+
 let test_fail_due_candidate_records_failed_execution () =
   with_workspace
   @@ fun config ->
@@ -714,6 +749,8 @@ let () =
             test_reschedule_due_cron_advances_to_next_match;
           test_case "start and complete persist execution record" `Quick
             test_start_and_complete_persist_execution_record;
+          test_case "accepted work remains unfinished across restart" `Quick
+            test_accept_running_persists_unfinished_dispatched_execution;
           test_case "startup recovery returns only running schedule to due" `Quick
             test_startup_recovery_returns_only_running_schedule_to_due;
           test_case "fail due candidate records failed execution" `Quick

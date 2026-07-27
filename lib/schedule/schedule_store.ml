@@ -552,6 +552,35 @@ let complete_running config ~now ~schedule_id ?detail () =
         Ok updated)
 ;;
 
+let accept_running config ~now ~schedule_id ?detail () =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      if request.status <> Running then
+        Error Schedule_not_running
+      else
+        let updated =
+          match Schedule_domain.next_due_after ~now request with
+          | Some due_at -> { request with status = Scheduled; due_at }
+          | None -> request
+        in
+        let schedules = replace_schedule state.schedules updated in
+        let* executions =
+          update_latest_running_execution state.executions ~schedule_id
+            (fun execution ->
+               { execution with
+                 status = Execution_dispatched
+               ; detail
+               ; error = None
+               })
+        in
+        let next_state = bump_state state ~schedules ~executions in
+        let* () = write_state config next_state in
+        Ok updated)
+;;
+
 let fail_running config ~now ~schedule_id ~error =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
@@ -607,16 +636,29 @@ let recover_running_on_startup config ~now =
       | (request : schedule_request) :: rest ->
         (match request.status with
          | Running ->
-           let* executions =
-             update_latest_running_execution executions
-               ~schedule_id:request.schedule_id
-               (fail_execution_for_recovery ~now ~reason)
-           in
-           recover
-             ({ request with status = Due } :: schedules_rev)
-             executions
-             (recovered + 1)
-             rest
+           (match
+              last_execution_for_schedule
+                { state with executions }
+                ~schedule_id:request.schedule_id
+            with
+            | Some { status = Execution_dispatched; _ } ->
+              recover (request :: schedules_rev) executions recovered rest
+            | Some { status = Execution_running; _ } ->
+              let* executions =
+                update_latest_running_execution executions
+                  ~schedule_id:request.schedule_id
+                  (fail_execution_for_recovery ~now ~reason)
+              in
+              recover
+                ({ request with status = Due } :: schedules_rev)
+                executions
+                (recovered + 1)
+                rest
+            | Some { status = (Execution_succeeded | Execution_failed); _ }
+            | None ->
+              Error
+                (Invalid_status_transition
+                   "running schedule has no active execution record"))
          | Scheduled | Due | Succeeded | Failed | Cancelled | Expired ->
            recover (request :: schedules_rev) executions recovered rest)
     in

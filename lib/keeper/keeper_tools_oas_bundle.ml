@@ -62,11 +62,22 @@ let make_tool_bundle
   let gate_grant =
     Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
   in
+  let gate_context_provider =
+    Option.map
+      (fun context () -> Keeper_gate_causal_context.snapshot context)
+      gate_context
+  in
   (* RFC-0356: the approval owns its effect. Spend the one-shot grant on the
      payload the Gate approved instead of waiting for the model to re-emit a
      byte-identical call, which it cannot do for large write payloads
      (#25947). Consumption is the durable grant, so a second bundle build in
-     the same cycle replays nothing. *)
+     the same cycle replays nothing.
+
+     Replay carries the same causal context the model-issued path carries: a
+     replay whose re-derived input no longer matches its approval falls back
+     to an ordinary Gate request, and a request without causal context cannot
+     be summarized, which stalls the FIFO drain for every later approval
+     (#25966). *)
   let () =
     match hitl_resolution, gate_grant with
     | ( Some
@@ -82,6 +93,7 @@ let make_tool_bundle
            ~publication_recovery
            ~turn_sandbox_factory
            ?continuation_channel
+           ?gate_context:gate_context_provider
            ~grant
            ~approval_id
            ()
@@ -98,11 +110,6 @@ let make_tool_bundle
            approval_id
            (Keeper_gate_replay.outcome_to_string outcome))
     | _ -> ()
-  in
-  let gate_context_provider =
-    Option.map
-      (fun context () -> Keeper_gate_causal_context.snapshot context)
-      gate_context
   in
   let record_gate_result =
     Option.map

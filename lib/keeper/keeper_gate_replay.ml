@@ -51,6 +51,7 @@ let replay_approved_write
           Keeper_publication_recovery_availability.turn_context)
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ?continuation_channel
+      ?gate_context
       ~(grant : Keeper_gate.cycle_grant)
       ~approval_id
       ()
@@ -77,6 +78,7 @@ let replay_approved_write
             ~meta
             ~publication_recovery
             ?continuation_channel
+            ?gate_context
             ~gate_grant:grant
             ~args
             ()

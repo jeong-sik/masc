@@ -62,6 +62,43 @@ let make_tool_bundle
   let gate_grant =
     Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
   in
+  (* RFC-0356: the approval owns its effect. Spend the one-shot grant on the
+     payload the Gate approved instead of waiting for the model to re-emit a
+     byte-identical call, which it cannot do for large write payloads
+     (#25947). Consumption is the durable grant, so a second bundle build in
+     the same cycle replays nothing. *)
+  let () =
+    match hitl_resolution, gate_grant with
+    | ( Some
+          { Keeper_event_queue.approval_id
+          ; decision = Keeper_event_queue.Hitl_approved
+          ; _
+          }
+      , Some grant ) ->
+      (match
+         Keeper_gate_replay.replay_approved_write
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory
+           ?continuation_channel
+           ~grant
+           ~approval_id
+           ()
+       with
+       | Keeper_gate_replay.Not_applicable -> ()
+       | Keeper_gate_replay.Applied _ as outcome ->
+         Log.Keeper.info
+           "gate replay approval=%s %s"
+           approval_id
+           (Keeper_gate_replay.outcome_to_string outcome)
+       | Keeper_gate_replay.Failed _ as outcome ->
+         Log.Keeper.error
+           "gate replay approval=%s %s"
+           approval_id
+           (Keeper_gate_replay.outcome_to_string outcome))
+    | _ -> ()
+  in
   let gate_context_provider =
     Option.map
       (fun context () -> Keeper_gate_causal_context.snapshot context)

@@ -48,3 +48,17 @@ val update_keeper_toml_field :
 (** Atomically update boolean fields under [\[keeper\]]. *)
 val update_keeper_toml_bool_fields :
   path:string -> (string * bool) list -> (unit, string) result
+
+type toml_edit =
+  | Set of toml_value
+  | Remove
+
+(** Atomically apply typed edits under [[keeper]]. [Remove] is idempotent and
+    deletes the field when present. Comments and unrelated fields survive. *)
+val edit_keeper_toml_fields :
+  path:string -> (string * toml_edit) list -> (unit, string) result
+
+(** Create a new declarative keeper TOML. Refuses to overwrite an existing
+    path. *)
+val create_keeper_toml_file :
+  path:string -> (string * toml_value) list -> (unit, string) result

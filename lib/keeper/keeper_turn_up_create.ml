@@ -24,7 +24,7 @@ let write_initial_meta config meta =
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
-  let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
+  let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
   let now_ts = Time_compat.now () in
   let autoboot_enabled =
@@ -327,6 +327,26 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          Progress.stop_tracking task_id;
          tool_result_error e
        | Ok () ->
+      Progress.Tracker.step tracker ~message:"Writing declarative keeper configuration" ();
+      (match
+         Keeper_turn_up_config_persistence.persist
+           ~config:ctx.config
+           ~parsed:p
+           ~meta
+       with
+       | Error e ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string LifecycleDispatchRejections)
+           ~labels:[("keeper", p.name); ("event", "create_config_persistence")]
+           ();
+         Log.Keeper.error
+           "create_keeper failed: declarative config write error for name=%s: %s"
+           p.name
+           e;
+         Progress.stop_tracking task_id;
+         tool_result_error
+           (Printf.sprintf "declarative keeper config write failed: %s" e)
+       | Ok _ ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_initial_meta ctx.config meta with
       | Error e ->
@@ -367,4 +387,4 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            tool_result_error
              (Printf.sprintf
                 "keeper metadata was created but lane launch failed: %s"
-                (start_keepalive_outcome_to_string rejected))))
+                (start_keepalive_outcome_to_string rejected)))))

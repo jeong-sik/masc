@@ -179,6 +179,25 @@ let update_keeper ?(preserve_prompt_defaults = false)
               err;
             tool_result_error err
           | Ok () ->
+            (match
+               Keeper_turn_up_config_persistence.persist
+                 ~config:ctx.config
+                 ~parsed:p
+                 ~meta:updated
+             with
+             | Error e ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string TurnUpUpdateFailures)
+                 ~labels:
+                   [ ( "keeper", p.name )
+                   ; ( "site"
+                     , Keeper_turn_up_update_failure_site.(to_label Config_persistence)
+                     )
+                   ]
+                 ();
+               tool_result_error
+                 (Printf.sprintf "declarative keeper config write failed: %s" e)
+             | Ok _ ->
             let enqueue_goal_assignment_wakes (meta : keeper_meta) =
               let (_ : string list) =
                 Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
@@ -246,4 +265,4 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   tool_result_error
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected)))))
+                       (start_keepalive_outcome_to_string rejected))))))

@@ -12,6 +12,7 @@ type keeper_profile_defaults = {
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
   active_goal_ids : string list option;
+  max_context_override : int option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
@@ -47,6 +48,7 @@ let empty_keeper_profile_defaults =
     network_mode = None;
     multimodal_policy = None;
     active_goal_ids = None;
+    max_context_override = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
     always_allow = None;

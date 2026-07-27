@@ -6,5 +6,6 @@ type t =
   | Prompt_cap
   | Sandbox_validation
   | Runtime_assignment
+  | Config_persistence
 
 val to_label : t -> string

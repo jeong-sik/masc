@@ -38,6 +38,12 @@ val handle_read_file_with_outcome :
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
+(** Rebuild the write arguments from a recorded Gate input, including the
+    mode the approval carried. [Error] when the recorded effect is one this
+    module cannot reproduce exactly, so a caller replays nothing instead of
+    downgrading the approved semantics. *)
+val replay_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
 (** The opaque Gate operation identity this module submits for local writes.
     Consumers that must recognise the same effect read it here rather than
     repeating the literal. *)

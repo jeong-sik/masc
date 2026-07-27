@@ -14,23 +14,10 @@ let outcome_to_string = function
    that producer so the literal has one definition. *)
 let write_operation = Keeper_tool_filesystem_runtime.gate_operation
 
-let payload_fields = [ "content"; "old_string"; "new_string"; "replace_all" ]
-
-let write_args_of_gate_input input =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "requested_target" fields with
-     | Some (`String target) ->
-       let carried =
-         List.filter_map
-           (fun name ->
-              Option.map (fun value -> name, value) (List.assoc_opt name fields))
-           payload_fields
-       in
-       Ok (`Assoc (("path", `String target) :: carried))
-     | Some _ -> Error "approved Gate input has a non-string requested_target"
-     | None -> Error "approved Gate input has no requested_target")
-  | _ -> Error "approved Gate input is not a JSON object"
+(* The producer owns both the argument schema and the effect encoding, so it
+   owns the inversion; replay only decides whether to spend the grant. *)
+let write_args_of_gate_input =
+  Keeper_tool_filesystem_runtime.replay_args_of_gate_input
 ;;
 
 let summarize_execution (execution : Keeper_tool_execution.t) =

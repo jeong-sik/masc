@@ -16,7 +16,7 @@ let approved_content_input =
   `Assoc
     [ ( "effect"
       , `Assoc
-          [ "kind", `String "atomic_replace_entry"
+          [ "operation", `String "atomic_replace_entry"
           ; ( "target_resource"
             , `Assoc [ "device", `Intlit "16777232"; "inode", `Intlit "94211" ]
             )
@@ -28,7 +28,7 @@ let approved_content_input =
 
 let approved_edit_input =
   `Assoc
-    [ "effect", `Assoc [ "kind", `String "patch_then_atomic_replace_entry" ]
+    [ "effect", `Assoc [ "operation", `String "patch_then_atomic_replace_entry" ]
     ; "requested_target", `String "/playground/executor/repos/masc/b.ml"
     ; "content", `String ""
     ; "old_string", `String "let b = 1"
@@ -44,6 +44,7 @@ let test_content_write () =
     (Ok
        (`Assoc
            [ "path", `String "/playground/executor/repos/masc/a.ml"
+           ; "mode", `String "overwrite"
            ; "content", `String "let a = 1\n"
            ]))
     (Masc.Keeper_gate_replay.write_args_of_gate_input approved_content_input)
@@ -56,6 +57,7 @@ let test_edit_write () =
     (Ok
        (`Assoc
            [ "path", `String "/playground/executor/repos/masc/b.ml"
+           ; "mode", `String "patch"
            ; "content", `String ""
            ; "old_string", `String "let b = 1"
            ; "new_string", `String "let b = 2"
@@ -83,6 +85,44 @@ let test_absent_fields_are_not_invented () =
   | Ok _ -> Alcotest.fail "reconstructed arguments are not an object"
 ;;
 
+(* An approved append must not replay as an overwrite: the mode arg defaults
+   to overwrite, so dropping it would destroy the file the operator approved
+   appending to. *)
+let approved_append_input =
+  `Assoc
+    [ "effect", `Assoc [ "operation", `String "append_pinned_resource" ]
+    ; "requested_target", `String "/playground/executor/repos/masc/log.txt"
+    ; "content", `String "one more line\n"
+    ]
+;;
+
+let test_append_stays_append () =
+  Alcotest.check
+    result_json
+    "append mode survives the round trip"
+    (Ok
+       (`Assoc
+           [ "path", `String "/playground/executor/repos/masc/log.txt"
+           ; "mode", `String "append"
+           ; "content", `String "one more line\n"
+           ]))
+    (Masc.Keeper_gate_replay.write_args_of_gate_input approved_append_input)
+;;
+
+let test_unreproducible_effect_is_rejected () =
+  match
+    Masc.Keeper_gate_replay.write_args_of_gate_input
+      (`Assoc
+          [ "effect", `Assoc [ "operation", `String "create_entry_exclusive" ]
+          ; "requested_target", `String "/playground/executor/new.txt"
+          ; "content", `String "x"
+          ])
+  with
+  | Ok _ ->
+    Alcotest.fail "an effect this module cannot reproduce must not replay"
+  | Error _ -> ()
+;;
+
 let test_missing_target_is_rejected () =
   match
     Masc.Keeper_gate_replay.write_args_of_gate_input
@@ -108,6 +148,11 @@ let () =
             "absent fields stay absent"
             `Quick
             test_absent_fields_are_not_invented
+        ; Alcotest.test_case "append stays append" `Quick test_append_stays_append
+        ; Alcotest.test_case
+            "unreproducible effect rejected"
+            `Quick
+            test_unreproducible_effect_is_rejected
         ; Alcotest.test_case
             "missing target rejected"
             `Quick

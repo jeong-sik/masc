@@ -3172,7 +3172,8 @@ let with_librarian_scopes keeper_ids f =
              ~surface:Exact_flow_scope.Librarian
          with
          | Ok scope -> keeper_id, scope
-         | Error detail -> Alcotest.fail detail
+         | Error detail ->
+           Alcotest.fail (Exact_flow_scope.setup_error_to_string detail)
        in
        f (List.map scope_for keeper_ids))
 ;;

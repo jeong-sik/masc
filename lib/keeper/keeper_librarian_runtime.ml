@@ -194,7 +194,7 @@ type exact_execution_failure =
   | Exact_callback_persistence_failed of string
   | Oas_execution_failed
   | Exact_flow_progress_failed of string
-  | Exact_domain_settlement_failed
+  | Exact_domain_settlement_failed of string
 
 type outward_effect =
   | No_outward_effect
@@ -272,6 +272,11 @@ let exact_setup_error_to_string = function
     Printf.sprintf
       "exact flow preference capacity exhausted capacity=%d"
       capacity
+  (* Distinct from the capacity variant above: no declared capacity was reached,
+     the reservation pool simply had no free slot, so there is no number to
+     report. *)
+  | Exact_flow_snapshot_failed Exact_output.Flow_preference_reservation_exhausted
+    -> "exact flow preference reservation exhausted"
   | Exact_flow_start_failed
       (Exact_output.Flow_id_generation_failed detail) ->
     "exact flow identity allocation failed: " ^ detail
@@ -290,8 +295,8 @@ let extraction_error_to_string = function
       | Oas_execution_failed -> "oas_execution_failed"
       | Exact_flow_progress_failed detail ->
         "flow_progress_failed: " ^ detail
-      | Exact_domain_settlement_failed ->
-        "domain_settlement_failed"
+      | Exact_domain_settlement_failed reason ->
+        "domain_settlement_failed: " ^ reason
     in
     Printf.sprintf
       "librarian exact execution failed outward_effect=%s cause=%s"
@@ -543,6 +548,19 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
+(* The three settlement outcomes mean different things to an operator: a failed
+   durable journal commit, a benign same-disposition race, and a real
+   disposition disagreement. They share one librarian failure because the
+   librarian reacts identically, so the distinction is carried in the reason
+   rather than discarded. *)
+let domain_commit_error_reason = function
+  | Exact_output.Domain_commit_failed cause ->
+    "commit_failed: "
+    ^ Keeper_exact_flow_scope.evidence_commit_error_to_string cause
+  | Exact_output.Domain_settlement_in_progress -> "settlement_in_progress"
+  | Exact_output.Domain_settlement_conflict -> "settlement_conflict"
+;;
+
 let exact_execution_error error =
   let outward_effect =
     match Exact_output.flow_execution_error_generation_dispatch error with
@@ -561,6 +579,20 @@ let exact_execution_error error =
       | Exact_output.Call_id_generation_failed detail -> detail
     in
     Exact_flow_progress_failed ("attempt_start_failed: " ^ detail)
+  | Flow_measurement_start_failed { cause; _ } ->
+    let detail =
+      match cause with
+      | Exact_output.Measurement_operation_id_generation_failed detail -> detail
+      | Exact_output.Measurement_clock_required_for_timeout ->
+        "clock_required_for_timeout"
+    in
+    Exact_flow_progress_failed ("measurement_start_failed: " ^ detail)
+  (* Every guarded callback carries the same cause type regardless of the phase
+     that ran it, and the librarian reacts to the cause rather than the phase,
+     so the measurement callbacks join the arm that already merges dispatch and
+     advance. *)
+  | Flow_before_measurement_dispatch_callback_failed { cause; _ }
+  | Flow_measurement_terminal_callback_failed { cause; _ }
   | Flow_before_dispatch_callback_failed { cause; _ }
   | Flow_before_advance_callback_failed { cause; _ } ->
     (match cause with
@@ -607,7 +639,11 @@ let persist_exact_execution_terminal
          ; "failure_cause", `String "success_ordinal_exhausted"
          ]
      | [] -> Error "success ordinal exhausted without attempt evidence")
+  (* [Flow_measurement_start_failed] carries a candidate visit rather than an
+     attempt receipt, exactly like [Flow_attempt_start_failed]: no attempt was
+     allocated, so there is no receipt to record. *)
   | Flow_attempt_start_failed _
+  | Flow_measurement_start_failed _
   | Flow_candidates_exhausted _ ->
     persist_exact_flow_state
       ~keeper_id
@@ -616,6 +652,8 @@ let persist_exact_execution_terminal
       ~state:"execution_terminal"
       []
   | Flow_attempt_already_started _ -> Ok ()
+  | Flow_before_measurement_dispatch_callback_failed { cause; _ }
+  | Flow_measurement_terminal_callback_failed { cause; _ }
   | Flow_before_dispatch_callback_failed { cause; _ }
   | Flow_before_advance_callback_failed { cause; _ } ->
     (match cause with
@@ -784,13 +822,20 @@ let extract_with_exact_output_classified_unlocked
       (match Keeper_librarian.episode_of_json_result ~generation inp output.output with
        | Ok episode ->
          (match
-            Exact_output.settle_flow_domain success Exact_output.Domain_valid
+            Exact_output.commit_and_settle_flow_domain
+              ~commit:
+                (Keeper_exact_flow_scope.commit_domain_settlement_intent
+                   flow_scope)
+              success
+              Exact_output.Domain_valid
           with
-          | Error _ ->
+          | Error error ->
             Error
               (Exact_execution_failed
                  { outward_effect = Outward_effect_started
-                 ; failure = Exact_domain_settlement_failed
+                 ; failure =
+                     Exact_domain_settlement_failed
+                       (domain_commit_error_reason error)
                  })
           | Ok _ ->
             (match
@@ -806,13 +851,20 @@ let extract_with_exact_output_classified_unlocked
        | Error error ->
          let parse_error = Keeper_librarian.parse_error_to_string error in
          (match
-            Exact_output.settle_flow_domain success Exact_output.Domain_rejected
+            Exact_output.commit_and_settle_flow_domain
+              ~commit:
+                (Keeper_exact_flow_scope.commit_domain_settlement_intent
+                   flow_scope)
+              success
+              Exact_output.Domain_rejected
           with
-          | Error _ ->
+          | Error error ->
             Error
               (Exact_execution_failed
                  { outward_effect = Outward_effect_started
-                 ; failure = Exact_domain_settlement_failed
+                 ; failure =
+                     Exact_domain_settlement_failed
+                       (domain_commit_error_reason error)
                  })
           | Ok _ ->
             (match

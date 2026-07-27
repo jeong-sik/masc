@@ -193,14 +193,18 @@ val turn_event_bus_evidence_detail :
 
 type capacity_refusal =
   | Provider_context_window of { limit_tokens : int option }
+  | Provider_request_body_refusal of { status : int }
   | Serialized_request_body of
       { actual_bytes : int
       ; limit_bytes : int
       }
-(** Why a target refused to serve a request for its size. One closed set for both
-    measured axes: a provider-declared token window and a declared serialized-body
-    byte limit. The units are not interchangeable, so neither axis is expressed in
-    the other's field. *)
+(** Why a target refused to serve a request for its size. One closed set over the
+    two measured axes plus the unmeasured provider refusal: a provider-declared
+    token window, a declared serialized-body byte limit, and a provider that
+    refused the body while declaring neither limit. The units are not
+    interchangeable, so neither axis is expressed in the other's field, and
+    [Provider_request_body_refusal] carries only the transport status because no
+    limit was measured. *)
 
 val capacity_refusal_of_error :
   Agent_sdk.Error.sdk_error ->

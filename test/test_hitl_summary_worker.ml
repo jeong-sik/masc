@@ -160,8 +160,6 @@ let require_executed = function
     fail "registered HITL exact-flow owner stopped before binding an identity"
   | Worker.Exact_rejection_blocked _ ->
     fail "registered HITL exact-flow owner hit a deterministic exact rejection"
-  | Worker.Deferred_unregistered ->
-    fail "registered HITL exact-flow owner was unexpectedly deferred"
 ;;
 
 let visible_after_rename_writer path body =
@@ -441,7 +439,7 @@ let test_flow_order_completion_and_replay () =
          (list string)
          "immutable candidate order"
          [ "hitl-first"; "hitl-second" ]
-         (List.map candidate_id evidence.candidate_snapshot);
+         (List.map candidate_id evidence.declared_candidate_snapshot);
        check
          (list string)
          "admission is deferred until execution"
@@ -582,8 +580,7 @@ let test_cancellation_between_candidates_terminalizes_released_identity () =
          | exception Eio.Cancel.Cancelled observed -> observed
          | Worker.Executed
          | Worker.Identity_unbound_blocked
-         | Worker.Exact_rejection_blocked _
-         | Worker.Deferred_unregistered ->
+         | Worker.Exact_rejection_blocked _ ->
            fail "between-candidate cancellation did not leave the flow"
        in
        check bool
@@ -661,7 +658,7 @@ let test_all_candidates_rejected_before_network () =
          (list string)
          "incapable topology remains frozen"
          [ "hitl-incapable" ]
-         (List.map candidate_id before.candidate_snapshot);
+         (List.map candidate_id before.declared_candidate_snapshot);
        check
          (list string)
          "incapable candidate is not pre-admitted"
@@ -678,9 +675,7 @@ let test_all_candidates_rejected_before_network () =
         | Worker.Executed ->
           fail "identityless candidate exhaustion reported terminal success"
         | Worker.Exact_rejection_blocked _ ->
-          fail "identityless candidate exhaustion reported an exact rejection"
-        | Worker.Deferred_unregistered ->
-          fail "registered owner was reported as unregistered");
+          fail "identityless candidate exhaustion reported an exact rejection");
        check
          (list string)
          "execution records the rejected candidate"
@@ -947,9 +942,7 @@ let test_completion_identity_conflict_stays_deterministic () =
         | Worker.Executed ->
           fail "deterministic completion conflict reported success"
         | Worker.Identity_unbound_blocked ->
-          fail "deterministic completion conflict lost its bound identity"
-        | Worker.Deferred_unregistered ->
-          fail "deterministic completion conflict lost its owner generation");
+          fail "deterministic completion conflict lost its bound identity");
        check bool "rejected completion delivered no summary" false !delivered;
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
@@ -1045,80 +1038,6 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
        | _ -> fail "quarantined owner did not preserve its unbound successor")
 ;;
 
-let test_owner_replacement_during_post_defers_terminal_mutation () =
-  run_eio @@ fun ~sw ~net ~clock ->
-  with_temp_dir "hitl-owner-replacement" @@ fun base_path ->
-  Fun.protect
-    ~finally:Q.For_testing.reset_runtime_state
-    (fun () ->
-       install_queue base_path;
-       Prompt_registry.set_markdown_dir
-         (Masc_test_deps.source_path "config/prompts");
-       let entry = pending_entry ~base_path () in
-       let old_owner =
-         match Masc.Keeper_registry.get ~base_path entry.keeper_name with
-         | Some owner -> owner
-         | None -> fail "HITL owner was not registered"
-       in
-       let replace_owner () =
-         (match Masc.Keeper_registry.unregister_exact old_owner with
-          | Masc.Keeper_registry.Exact_unregistered -> ()
-          | _ -> fail "HITL old owner was not unregistered");
-         let replacement_meta =
-           Masc_test_deps.meta_of_json_fixture
-             (`Assoc
-               [ "name", `String entry.keeper_name
-               ; "trace_id", `String "trace-hitl-owner-replacement"
-               ])
-           |> Result.get_ok
-         in
-         ignore
-           (Masc.Keeper_registry.register_offline
-              ~base_path
-              entry.keeper_name
-              replacement_meta)
-       in
-       let server =
-         F.start_server
-           ~on_request_before_reply:replace_owner
-           ~sw
-           ~net
-           ~clock
-           (F.Reply (F.openai_response (judgment_json "approve")))
-       in
-       publish_lane
-         [ "hitl-owner-replacement" ]
-         (F.resolver_snapshot
-            ~source:"hitl-owner-replacement"
-            [ { id = "hitl-owner-replacement"; base_url = server.base_url } ]);
-       let prepared = prepare_exn entry in
-       (match
-          Worker.For_testing.execute_prepared_flow
-            ~net
-            ~clock
-            ~on_summary:(fun _ ->
-              fail "stale HITL owner delivered a terminal summary")
-            prepared
-        with
-        | Worker.Deferred_unregistered -> ()
-        | Worker.Identity_unbound_blocked ->
-          fail "stale HITL owner was misclassified as identity-unbound"
-        | Worker.Exact_rejection_blocked _ ->
-          fail "stale HITL owner was misclassified as an exact rejection"
-        | Worker.Executed ->
-          fail "stale HITL owner crossed the terminal generation fence");
-       check int "real POST crossed the replacement hook once" 1 (F.post_count server);
-       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
-       | Some
-           { exact_attempt =
-               Q.Exact_bound
-                 { status = Q.Exact_dispatch_uncertain; _ }
-           ; summary_status = Q.Summary_pending
-           ; _
-           } ->
-         ()
-       | _ -> fail "stale HITL result mutated the bound pending summary")
-;;
 
 let test_manual_resolution_race_is_conclusive () =
   run_eio @@ fun ~sw ~net ~clock ->
@@ -1169,8 +1088,6 @@ let test_manual_resolution_race_is_conclusive () =
             ()
         with
         | Ok Worker.Worker_forked -> ()
-        | Ok Worker.Worker_not_forked_owner_unregistered ->
-          fail "registered owner did not fork the HITL worker"
         | Error detail -> fail detail);
        await_condition
          ~clock
@@ -1187,7 +1104,6 @@ let test_manual_resolution_race_is_conclusive () =
            | Some Worker.Terminalization_persistence_uncertain
            | Some Worker.Terminalization_identity_unbound
            | Some Worker.Terminalization_rejected
-           | Some Worker.Owner_unregistered_deferred
            | None -> false);
        check bool
          "manually resolved source left pending queue"
@@ -1295,8 +1211,6 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
                     ()
                 with
                 | Ok Worker.Worker_forked -> ()
-                | Ok Worker.Worker_not_forked_owner_unregistered ->
-                  fail "registered owner did not fork the cancelled HITL worker"
                 | Error detail -> fail detail
               with
               | exception Eio.Cancel.Cancelled observed_payload ->
@@ -1324,7 +1238,6 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
                 | Some Worker.Conclusive_terminalization
                 | Some Worker.Terminalization_persistence_uncertain
                 | Some Worker.Terminalization_rejected
-                | Some Worker.Owner_unregistered_deferred
                 | None -> false);
             check int
               "cancelled before-dispatch callback made no request"
@@ -1501,8 +1414,6 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
                     ()
                 with
                 | Ok Worker.Worker_forked -> ()
-                | Ok Worker.Worker_not_forked_owner_unregistered ->
-                  fail "registered owner did not fork the bound HITL worker"
                 | Error detail -> fail detail
               with
               | exception Eio.Cancel.Cancelled observed_payload ->
@@ -1530,7 +1441,6 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
                 | Some Worker.Conclusive_terminalization
                 | Some Worker.Terminalization_identity_unbound
                 | Some Worker.Terminalization_rejected
-                | Some Worker.Owner_unregistered_deferred
                 | None -> false);
             check int
               "cancellation before dispatch performs no provider POST"
@@ -1557,7 +1467,6 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
        install_queue base_path;
        select_auto_judge_mode base_path;
        let entry = pending_entry ~base_path () in
-       let successor = pending_entry ~input_tag:"successor" ~base_path () in
        (match
           Gate.For_testing.spawn_auto_judge_entry_with_worker
             ~spawn_worker:
@@ -1586,47 +1495,7 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
            } ->
          ()
        | _ -> fail "pre-worker failure lost its durable typed reason");
-       (match
-          Gate.For_testing.spawn_auto_judge_entry_with_worker
-            ~spawn_worker:
-              (fun ~sw:_ ~entry:_ ~on_summary:_ ~on_finish () ->
-                 on_finish Worker.Owner_unregistered_deferred;
-                 Ok Worker.Worker_not_forked_owner_unregistered)
-            successor
-        with
-        | Error detail ->
-          check
-            string
-            "not-forked owner deferral is returned"
-            "Auto Judge worker was not started because its Keeper owner is unregistered"
-            detail
-        | Ok _ ->
-          fail "not-forked owner deferral was reported as a successful start");
-       (match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
-        | Some
-            { exact_attempt = Q.Exact_unbound
-            ; summary_status = Q.Summary_pending
-            ; summary_attempt_disposition =
-                Q.Summary_attempt_pre_worker_unavailable
-                  { reason_code =
-                      Q.Summary_pre_worker_auto_judge_unavailable
-                  ; operator_detail =
-                      "Auto Judge worker was not started because its Keeper owner is unregistered"
-                  }
-            ; _
-            } ->
-          ()
-        | _ ->
-          fail "not-forked owner deferral lost its durable typed reason");
-       let after_deferred =
-         pending_entry ~input_tag:"after-deferred" ~base_path ()
-       in
-       check
-         bool
-         "not-forked owner deferral releases the owner claim"
-         true
-         (Gate.For_testing.claim_auto_judge after_deferred);
-       Gate.For_testing.release_auto_judge after_deferred)
+       ())
 ;;
 
 let test_visible_uncertainty_withholds_production_drain () =
@@ -1803,188 +1672,6 @@ let test_gate_judgment_prompt_comes_from_registry () =
   | Ok prompt -> check bool "prompt is non-empty" true (String.trim prompt <> "")
 ;;
 
-let test_shutdown_drains_inflight_worker_then_retires () =
-  run_eio @@ fun ~sw ~net ~clock ->
-  with_temp_dir "hitl-shutdown-drain" @@ fun base_path ->
-  Fun.protect
-    ~finally:(fun () ->
-      Q.For_testing.reset_runtime_state ();
-      Masc.Keeper_shutdown_finalize.For_testing.reset_completion_handler ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      Masc.Keeper_registry.For_testing.clear ();
-      Masc.Keeper_exact_flow_scope.clear ())
-    (fun () ->
-       install_queue base_path;
-       Prompt_registry.set_markdown_dir
-         (Masc_test_deps.source_path "config/prompts");
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let approval =
-         pending_entry
-           ~keeper_name:"hitl-shutdown-drain-owner"
-           ~base_path
-           ()
-       in
-       let owner =
-         match
-           Masc.Keeper_registry.get
-             ~base_path
-             approval.keeper_name
-         with
-         | Some owner -> owner
-         | None -> fail "HITL shutdown owner was not registered"
-       in
-       (match Masc.Keeper_meta_store.write_meta config owner.meta with
-        | Ok () -> ()
-        | Error detail -> fail detail);
-       let release_response, resolve_release_response = Eio.Promise.create () in
-       let server =
-         F.start_server
-           ~on_request_before_reply:(fun () ->
-             Eio.Promise.await release_response)
-           ~sw
-           ~net
-           ~clock
-           (F.Reply (F.openai_response (judgment_json "approve")))
-       in
-       publish_lane
-         [ "hitl-shutdown-drain" ]
-         (F.resolver_snapshot
-            ~source:"hitl-shutdown-drain"
-            [ { id = "hitl-shutdown-drain"; base_url = server.base_url } ]);
-       let prepared = prepare_exn approval in
-       let summaries = ref 0 in
-       let worker_result, resolve_worker_result = Eio.Promise.create () in
-       Eio.Fiber.fork ~sw (fun () ->
-         let result =
-           try
-             `Returned
-               (Worker.For_testing.execute_prepared_flow
-                  ~net
-                  ~clock
-                  ~on_summary:(fun _ -> incr summaries)
-                  prepared)
-           with
-           | exn -> `Raised exn
-         in
-         Eio.Promise.resolve resolve_worker_result result);
-       F.await_first_request server;
-       let backlog_version =
-         match Masc.Workspace.read_backlog_r config with
-         | Ok backlog -> backlog.version
-         | Error detail -> fail detail
-       in
-       let operation_id =
-         Masc.Keeper_shutdown_types.Operation_id.generate ()
-       in
-       let operation : Masc.Keeper_shutdown_types.t =
-         { schema_version = Masc.Keeper_shutdown_types.schema_version
-         ; revision = 0
-         ; operation_id
-         ; keeper_name = approval.keeper_name
-         ; lane_ownership =
-             Masc.Keeper_shutdown_types.Registered_lane
-               (Masc.Keeper_lane.id owner.lane)
-         ; trace_id = owner.meta.runtime.trace_id
-         ; generation = owner.meta.runtime.nonce
-         ; actor = "operator"
-         ; cleanup_intent =
-             { reason =
-                 Masc.Keeper_shutdown_types.Operator_stop_remove_meta
-             ; remove_session = false
-             }
-         ; turn_disposition =
-             Masc.Keeper_shutdown_types.No_inflight_turn
-         ; expected_backlog_version = backlog_version
-         ; owned_task_ids = []
-         ; join_evidence = None
-         ; phase =
-             Masc.Keeper_shutdown_types.Cleanup_ready
-               { settled_task_ids = []
-               ; pending_confirms_removed = 0
-               }
-         ; created_at = Masc_domain.now_iso ()
-         ; updated_at = Masc_domain.now_iso ()
-         }
-       in
-       (match
-          Masc.Keeper_shutdown_store.persist_new
-            ~config
-            operation
-        with
-        | Ok () -> ()
-        | Error error ->
-          fail
-            (Masc.Keeper_shutdown_store.error_to_string error));
-       let draining =
-         match
-           Masc.Keeper_shutdown_finalize.run
-             ~config
-             ~entry:(Some owner)
-             operation
-         with
-         | Error
-             (Masc.Keeper_shutdown_finalize.Finalization_draining
-                (draining, _)) ->
-           draining
-         | Error error ->
-           fail
-             (Masc.Keeper_shutdown_finalize.error_to_string error)
-         | Ok _ ->
-           fail "in-flight HITL worker skipped the Draining boundary"
-       in
-       Eio.Promise.resolve resolve_release_response ();
-       (match Eio.Promise.await worker_result with
-        | `Returned Worker.Executed -> ()
-        | `Returned Worker.Identity_unbound_blocked ->
-          fail "bound HITL settlement lost its attempt identity"
-        | `Returned (Worker.Exact_rejection_blocked _) ->
-          fail "bound HITL settlement hit a deterministic exact rejection"
-        | `Returned Worker.Deferred_unregistered ->
-          fail "Draining generation rejected its bound HITL settlement"
-        | `Raised exn -> raise exn);
-       let finalized =
-         match
-           Masc.Keeper_shutdown_finalize.run
-             ~config
-             ~entry:(Some owner)
-             draining
-         with
-         | Ok finalized -> finalized
-         | Error error ->
-           fail
-             (Masc.Keeper_shutdown_finalize.error_to_string error)
-       in
-       (match finalized.phase with
-        | Masc.Keeper_shutdown_types.Finalized _ -> ()
-        | _ -> fail "settled HITL shutdown retry did not reach Retired");
-       check int "in-flight worker dispatched once" 1 (F.post_count server);
-       check int "in-flight worker projected one summary" 1 !summaries;
-       check bool
-         "Retired owner left no registry identity"
-         true
-         (Option.is_none
-            (Masc.Keeper_registry.get
-               ~base_path
-               approval.keeper_name));
-       (match
-          Worker.For_testing.execute_prepared_flow
-            ~net
-            ~clock
-            ~on_summary:(fun _ -> incr summaries)
-            prepared
-        with
-        | Worker.Deferred_unregistered -> ()
-        | Worker.Identity_unbound_blocked ->
-          fail "Retired HITL generation was misclassified as identity-unbound"
-        | Worker.Exact_rejection_blocked _ ->
-          fail "Retired HITL generation was misclassified as an exact rejection"
-        | Worker.Executed ->
-          fail "Retired HITL generation redispatched stale work");
-       check int "Retired retry dispatched nothing" 1 (F.post_count server);
-       check int "Retired retry mutated no summary" 1 !summaries)
-;;
-
 let () =
   run
     "Hitl_summary_worker"
@@ -2047,10 +1734,6 @@ let () =
             `Quick
             test_flow_execution_failure_quarantines_and_blocks_owner
         ; test_case
-            "owner replacement during POST defers terminal mutation"
-            `Quick
-            test_owner_replacement_during_post_defers_terminal_mutation
-        ; test_case
             "manual resolution race is conclusive"
             `Quick
             test_manual_resolution_race_is_conclusive
@@ -2082,10 +1765,6 @@ let () =
             "owner FIFO atomic drain is non-sharing"
             `Quick
             test_owner_fifo_atomic_drain_is_nonsharing
-        ; test_case
-            "shutdown drains in-flight worker then retires"
-            `Quick
-            test_shutdown_drains_inflight_worker_then_retires
         ] )
     ]
 ;;

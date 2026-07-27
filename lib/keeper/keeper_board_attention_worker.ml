@@ -13,7 +13,6 @@ type step =
   | Idle
   | Contended of contention
   | Rescan_later of contention
-  | Owner_unregistered_deferred of { candidate_id : string }
   | Judgment_completed of
       { candidate_id : string
       ; owner_wake : Keeper_registry.exact_wakeup_outcome
@@ -30,7 +29,6 @@ type retry_reason =
 
 type drain_outcome =
   | Drained
-  | Owner_generation_deferred of { candidate_id : string }
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
@@ -352,9 +350,6 @@ let reset_contention_rearms scheduler ~keep =
 
 let apply_drain_rearm scheduler = function
   | Drained ->
-    reset_contention_rearms scheduler ~keep:None;
-    None
-  | Owner_generation_deferred _ ->
     reset_contention_rearms scheduler ~keep:None;
     None
   | Retry_later { contention; reason = _ } ->
@@ -824,11 +819,9 @@ let before_advance_failure_reason partition ~cause ~failed ~next =
 ;;
 
 type execution_disposition =
-  | Execution_owner_deferred
   | Execution_blocked of Partition.blocked_reason
 
 let execution_disposition partition = function
-  | Exact_flow.Owner_unregistered_deferred -> Execution_owner_deferred
   | Exact_flow.Flow_already_started _ ->
     Execution_blocked
       (preserve_durable_progress partition Partition.Exact_flow_replayed)
@@ -992,7 +985,6 @@ let settle_existing_consumed
 ;;
 
 let process_pending
-      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -1010,47 +1002,26 @@ let process_pending
   with
   | Error error ->
     (match execution_disposition !latest_partition error with
-     | Execution_owner_deferred ->
-       Ok
-         (Owner_unregistered_deferred
-            { candidate_id = (!latest_partition).candidate_id })
      | Execution_blocked reason ->
-       (match
-          with_current prepared (fun () ->
-            blocked_step
-              ~now:(now ())
-              ~worker_epoch
-              ~base_path
-              !latest_partition
-              reason)
-        with
-        | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-          Ok
-            (Owner_unregistered_deferred
-               { candidate_id = (!latest_partition).candidate_id })
-        | Keeper_exact_flow_scope.Current step -> step))
+       blocked_step
+         ~now:(now ())
+         ~worker_epoch
+         ~base_path
+         !latest_partition
+         reason)
   | Ok judgment ->
-    (match
-       with_current prepared (fun () ->
-         let* projection =
-           complete_projection
-             ~now:(now ())
-             ~worker_epoch
-             ~base_path
-             latest_partition
-             judgment
-         in
-         signal_completion projection)
-     with
-     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-       Ok
-         (Owner_unregistered_deferred
-            { candidate_id = (!latest_partition).candidate_id })
-     | Keeper_exact_flow_scope.Current step -> step)
+    let* projection =
+      complete_projection
+        ~now:(now ())
+        ~worker_epoch
+        ~base_path
+        latest_partition
+        judgment
+    in
+    signal_completion projection
 ;;
 
 let process_claimed
-      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -1085,7 +1056,6 @@ let process_claimed
            | Some (candidate_id, prepared)
              when String.equal candidate_id candidate.candidate_id ->
              process_pending
-               ~with_current
                ~now
                ~worker_epoch
                ~base_path
@@ -1394,7 +1364,6 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
 
 let process_next_with_claim_ready_exact_current
       ~claim_ready_exact
-      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -1427,7 +1396,6 @@ let process_next_with_claim_ready_exact_current
         Candidate.load_candidates ~base_path ~keeper_name
       in
       process_claimed
-        ~with_current
         ~now
         ~worker_epoch
         ~base_path
@@ -1487,10 +1455,6 @@ let process_next_with_claim_ready_exact_current
     claim_selected 3
 ;;
 
-let assume_current _prepared callback =
-  Keeper_exact_flow_scope.Current (callback ())
-;;
-
 let process_next_with_claim_ready_exact
       ~claim_ready_exact
       ~now
@@ -1502,7 +1466,6 @@ let process_next_with_claim_ready_exact
   =
   process_next_with_claim_ready_exact_current
     ~claim_ready_exact
-    ~with_current:assume_current
     ~now
     ~worker_epoch
     ~base_path
@@ -1512,7 +1475,6 @@ let process_next_with_claim_ready_exact
 ;;
 
 let process_next_current
-      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -1522,7 +1484,6 @@ let process_next_current
   =
   process_next_with_claim_ready_exact_current
     ~claim_ready_exact:Partition.claim_ready_exact
-    ~with_current
     ~now
     ~worker_epoch
     ~base_path
@@ -1533,7 +1494,6 @@ let process_next_current
 
 let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
   process_next_current
-    ~with_current:assume_current
     ~now
     ~worker_epoch
     ~base_path
@@ -1550,7 +1510,6 @@ let execute_exact ~clock = Exact_flow.execute ~clock
 
 let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
   process_next_current
-    ~with_current:Exact_flow.with_settlement_generation
     ~now
     ~worker_epoch
     ~base_path
@@ -1707,8 +1666,6 @@ let rec drain_available_with_process ~yield ~process =
     Ok (Retry_later { contention; reason = Exact_claim_contended })
   | Ok (Rescan_later contention) ->
     Ok (Retry_later { contention; reason = Selected_generation_changed })
-  | Ok (Owner_unregistered_deferred { candidate_id }) ->
-    Ok (Owner_generation_deferred { candidate_id })
   | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
     yield ();
     drain_available_with_process ~yield ~process
@@ -1716,7 +1673,6 @@ let rec drain_available_with_process ~yield ~process =
 ;;
 
 let drain_available_current
-      ~with_current
       ~yield
       ~now
       ~worker_epoch
@@ -1729,7 +1685,6 @@ let drain_available_current
     ~yield
     ~process:(fun () ->
       process_next_current
-        ~with_current
         ~now
         ~worker_epoch
         ~base_path
@@ -1748,7 +1703,6 @@ let drain_available
       ~execute
   =
   drain_available_current
-    ~with_current:assume_current
     ~yield
     ~now
     ~worker_epoch
@@ -1824,7 +1778,6 @@ let run
            and drain () =
              match
                drain_available_current
-                 ~with_current:Exact_flow.with_settlement_generation
                  ~yield:Eio.Fiber.yield
                  ~now:Time_compat.now
                  ~worker_epoch
@@ -1833,13 +1786,6 @@ let run
                  ~prepare
                  ~execute
              with
-             | Ok (Owner_generation_deferred { candidate_id }) ->
-               reset_contention_rearms contention_rearms ~keep:None;
-               Log.Keeper.info
-                 ~keeper_name
-                 "board_attention exact owner generation deferred candidate_id=%s; current worker generation exits without partition mutation"
-                 candidate_id;
-               Ok ()
              | Ok outcome ->
                ignore
                  (apply_drain_rearm contention_rearms outcome

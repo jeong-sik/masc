@@ -798,15 +798,7 @@ let remove_entry
   let rec loop () =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
-    | None ->
-      Option.iter
-        (fun expected_entry ->
-           Keeper_exact_flow_scope.release_owner
-             ~base_path
-             ~keeper_name:name
-             ~expected_lane_id:(Keeper_lane.id expected_entry.lane))
-        expected;
-      Entry_missing
+    | None -> Entry_missing
     | Some entry ->
       (match expected with
        | Some expected_entry
@@ -818,12 +810,7 @@ let remove_entry
        | None | Some _ ->
          let updated = StringMap.remove key current in
          if Atomic.compare_and_set registry current updated
-        then (
-           Keeper_exact_flow_scope.release_owner
-             ~base_path
-             ~keeper_name:name
-             ~expected_lane_id:(Keeper_lane.id entry.lane);
-           Entry_removed entry)
+        then Entry_removed entry
          else loop ())
   in
   loop ())

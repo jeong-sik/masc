@@ -48,7 +48,6 @@ type advance_source =
     exists. *)
 
 type 'callback_error execution_error =
-  | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
   | Before_dispatch_persistence_failed of
       { cause : 'callback_error
@@ -102,17 +101,3 @@ val execute :
 (** Cancellation is propagated promptly without protected partition I/O.
     Durable [Bound] or [Advancing] progress is quarantined only by the subsequent
     process-start recovery path. *)
-
-val with_current_generation
-  :  prepared
-  -> (unit -> 'a)
-  -> 'a Keeper_exact_flow_scope.current_boundary
-(** Fence a local durable projection against Keeper owner replacement. The
-    callback must not perform network I/O or re-enter the lifecycle key lock. *)
-
-val with_settlement_generation
-  :  prepared
-  -> (unit -> 'a)
-  -> 'a Keeper_exact_flow_scope.current_boundary
-(** Fence the terminal durable projection of an already-bound attempt. Unlike
-    admission, this remains available while shutdown is draining the owner. *)

@@ -244,8 +244,6 @@ let terminalized_exn = function
     Alcotest.failf "terminalization persistence failed: %s" detail
   | C.Terminalization_invariant_failed detail ->
     Alcotest.failf "terminalization invariant failed: %s" detail
-  | C.Terminalization_owner_unregistered_deferred ->
-    Alcotest.fail "current exact owner unexpectedly deferred terminalization"
 ;;
 
 let captured_observation_exn label = function
@@ -575,7 +573,7 @@ let test_release_failure_blocks_successor () =
   Alcotest.(check int) "release failure prevents successor POST" 0 (F.post_count successor)
 ;;
 
-let test_domain_invalid_output_never_reenters_failover () =
+let test_domain_invalid_output_advances_to_declared_successor () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let invalid = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
@@ -583,53 +581,115 @@ let test_domain_invalid_output_never_reenters_failover () =
   let first_slot = "domain-invalid" in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc domain validation terminal"
+      ~source:"masc domain validation failover"
       [ { id = first_slot; base_url = invalid.base_url }
-      ; { id = "forbidden-domain-successor"; base_url = successor.base_url }
+      ; { id = "declared-domain-successor"; base_url = successor.base_url }
       ]
   in
   let registry =
     publish_exn
-      ~slot_ids:[ first_slot; "forbidden-domain-successor" ]
+      ~slot_ids:[ first_slot; "declared-domain-successor" ]
       snapshot
   in
   let prepared = prepare_exn ~keeper_name:"keeper-domain-invalid" ~registry () in
   let quarantined = ref [] in
+  let events = ref [] in
   let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
+    { before_dispatch =
+        (fun observation ->
+           push_event events ("bind:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
     ; release_before_dispatch =
-        (fun _ -> Alcotest.fail "domain validation is outside OAS advancement")
+        (fun observation ->
+           push_event events ("release:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
     ; quarantine =
         (fun cause observation ->
            quarantined := (cause, observation.slot_id) :: !quarantined;
            Ok C.Fsync_completed)
     }
   in
-  let terminal =
-    match
-      execute_prepared_lane
-        ~keeper_name:"keeper-domain-invalid"
-        ~net
-        ~clock
-        ~exact_execution_guard:guard
-        prepared
-    with
-    | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "domain invalidity returned the wrong failure"
-    | Ok _ -> Alcotest.fail "domain-invalid output unexpectedly succeeded"
-  in
-  Alcotest.(check bool)
-    "domain terminal cause"
-    true
-    (terminal.cause = Keeper_event_queue_state.Domain_invalid_output);
-  Alcotest.(check string) "domain terminal retains bound slot" first_slot terminal.slot_id;
+  (match
+     execute_prepared_lane
+       ~keeper_name:"keeper-domain-invalid"
+       ~net
+       ~clock
+       ~exact_execution_guard:guard
+       prepared
+   with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "declared semantic successor did not complete");
   Alcotest.(check int) "domain-invalid target posts once" 1 (F.post_count invalid);
-  Alcotest.(check int) "domain invalidity never fails over" 0 (F.post_count successor);
+  Alcotest.(check int) "declared successor posts once" 1 (F.post_count successor);
   Alcotest.(check bool)
-    "only bound identity quarantined"
+    "semantic rejection is not terminally quarantined"
     true
-    (List.rev !quarantined
-     = [ Keeper_event_queue_state.Domain_invalid_output, first_slot ])
+    (List.is_empty !quarantined);
+  Alcotest.(check (list string))
+    "semantic successor releases A before binding B"
+    [ "bind:" ^ first_slot
+    ; "release:" ^ first_slot
+    ; "bind:declared-domain-successor"
+    ]
+    (List.rev !events)
+;;
+
+let test_semantic_exhaustion_terminalizes_final_bound () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let first = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
+  let final = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
+  let first_slot = "semantic-exhaustion-first" in
+  let final_slot = "semantic-exhaustion-final" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc semantic exhaustion"
+      [ { id = first_slot; base_url = first.base_url }
+      ; { id = final_slot; base_url = final.base_url }
+      ]
+  in
+  let registry = publish_exn ~slot_ids:[ first_slot; final_slot ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-semantic-exhaustion" ~registry () in
+  let events = ref [] in
+  let guard : C.exact_execution_guard =
+    { before_dispatch =
+        (fun observation ->
+           push_event events ("bind:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun observation ->
+           push_event events ("release:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; quarantine =
+        (fun _ observation ->
+           push_event events ("quarantine:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    }
+  in
+  (match
+     execute_prepared_lane
+       ~keeper_name:"keeper-semantic-exhaustion"
+       ~net
+       ~clock
+       ~exact_execution_guard:guard
+       prepared
+   with
+   | Error (C.Exact_execution_terminal terminal) ->
+     Alcotest.(check bool)
+       "semantic exhaustion is domain-invalid"
+       true
+       (terminal.cause = Keeper_event_queue_state.Domain_invalid_output);
+     Alcotest.(check string) "final bound is terminalized" final_slot terminal.slot_id
+   | Error _ -> Alcotest.fail "semantic exhaustion returned the wrong typed failure"
+   | Ok _ -> Alcotest.fail "semantic exhaustion unexpectedly succeeded");
+  Alcotest.(check (list string))
+    "semantic exhaustion releases A and quarantines B"
+    [ "bind:" ^ first_slot
+    ; "release:" ^ first_slot
+    ; "bind:" ^ final_slot
+    ; "quarantine:" ^ final_slot
+    ]
+    (List.rev !events)
 ;;
 
 let test_final_oas_flow_failure_is_generic_source_terminal () =
@@ -759,120 +819,6 @@ let test_cancellation_preserves_lifecycle_authorized_identity () =
   Alcotest.(check int) "cancellation never dispatches successor" 0 (F.post_count successor)
 ;;
 
-let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  with_temp_dir "masc-two-keeper-flow-scope"
-  @@ fun base_path ->
-  let keeper_a = "keeper-flow-scope-a" in
-  let keeper_b = "keeper-flow-scope-b" in
-  let slot_a = "two-keeper-slot-a" in
-  let slot_b = "two-keeper-slot-b" in
-  let server_a = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let server_b = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc two-keeper exact-flow scope"
-      [ { id = slot_a; base_url = server_a.base_url }
-      ; { id = slot_b; base_url = server_b.base_url }
-      ]
-  in
-  let registry_a = publish_exn ~slot_ids:[ slot_a; slot_b ] snapshot in
-  let prepared_a =
-    prepare_exn
-      ~base_path
-      ~keeper_name:keeper_a
-      ~registry:registry_a
-      ()
-  in
-  let registry_b = publish_exn ~slot_ids:[ slot_b; slot_a ] snapshot in
-  let prepared_b_before =
-    prepare_exn
-      ~base_path
-      ~keeper_name:keeper_b
-      ~registry:registry_b
-      ()
-  in
-  let lease_a = claim_manual_lease ~base_path ~keeper_name:keeper_a in
-  let guard_a =
-    Keeper_heartbeat_loop.For_testing.exact_execution_guard
-      ~base_path
-      ~keeper_name:keeper_a
-      ~lease:lease_a
-  in
-  let completed_a =
-    execute_prepared_lane
-      ~keeper_name:keeper_a
-      ~net
-      ~clock
-      ~exact_execution_guard:guard_a
-      prepared_a
-    |> completed_exn
-  in
-  Keeper_registry.For_testing.unregister ~base_path keeper_b;
-  ensure_registered_keeper ~base_path keeper_b;
-  (match
-     C.execute_prepared_lane
-       ~keeper_name:keeper_b
-       ~net
-       ~clock
-       prepared_b_before
-   with
-   | Error C.Exact_owner_unregistered_deferred -> ()
-   | Error _ ->
-     Alcotest.fail "stale owner generation returned the wrong typed failure"
-   | Ok _ ->
-     Alcotest.fail "stale owner generation crossed re-registration");
-  Alcotest.(check int)
-    "stale owner dispatched nothing"
-    0
-    (F.post_count server_b);
-  let prepared_b_after =
-    prepare_exn
-      ~base_path
-      ~keeper_name:keeper_b
-      ~registry:registry_b
-      ()
-  in
-  Alcotest.(check (list string))
-    "keeper A freezes its declared snapshot"
-    [ slot_a; slot_b ]
-    (C.For_testing.candidate_snapshot_slot_ids prepared_a);
-  Alcotest.(check (list string))
-    "keeper B snapshot prepared before A success stays frozen"
-    [ slot_b; slot_a ]
-    (C.For_testing.candidate_snapshot_slot_ids prepared_b_before);
-  Alcotest.(check (list string))
-    "keeper A success cannot reorder keeper B future snapshot"
-    [ slot_b; slot_a ]
-    (C.For_testing.candidate_snapshot_slot_ids prepared_b_after);
-  let lease_b = claim_manual_lease ~base_path ~keeper_name:keeper_b in
-  let guard_b =
-    Keeper_heartbeat_loop.For_testing.exact_execution_guard
-      ~base_path
-      ~keeper_name:keeper_b
-      ~lease:lease_b
-  in
-  let completed_b =
-    execute_prepared_lane
-      ~keeper_name:keeper_b
-      ~net
-      ~clock
-      ~exact_execution_guard:guard_b
-      prepared_b_after
-    |> completed_exn
-  in
-  let observation_a = C.completed_attempt_observation completed_a in
-  let observation_b = C.completed_attempt_observation completed_b in
-  Alcotest.(check string) "keeper A dispatches its frozen first slot" slot_a observation_a.slot_id;
-  Alcotest.(check string) "keeper B dispatches its frozen first slot" slot_b observation_b.slot_id;
-  Alcotest.(check bool)
-    "keeper attempts do not share call identity"
-    true
-    (not (String.equal observation_a.call_id observation_b.call_id));
-  Alcotest.(check int) "keeper A posts once" 1 (F.post_count server_a);
-  Alcotest.(check int) "keeper B posts once" 1 (F.post_count server_b)
-;;
 
 let test_same_flow_concurrent_loser_mutates_no_queue () =
   run_eio
@@ -1358,8 +1304,7 @@ let test_post_success_commit_claim_blocks_reject () =
    | C.Commit_claim_acquired -> ()
    | C.Commit_claim_in_progress _
    | C.Commit_claim_already_committed
-   | C.Commit_claim_rejected _
-   | C.Commit_claim_owner_unregistered_deferred ->
+   | C.Commit_claim_rejected _ ->
      Alcotest.fail "open post-success disposition did not grant commit claim");
   (match C.mark_post_success_checkpoint_installed terminalizer with
    | Ok () -> ()
@@ -1374,8 +1319,7 @@ let test_post_success_commit_claim_blocks_reject () =
     | C.Terminalized _
     | C.Terminalization_already_committed
     | C.Terminalization_persistence_failed _
-    | C.Terminalization_invariant_failed _
-    | C.Terminalization_owner_unregistered_deferred ->
+    | C.Terminalization_invariant_failed _ ->
       Alcotest.fail "reject crossed an installed commit claim"
   in
   let pending = C.For_testing.post_success_snapshot terminalizer in
@@ -1385,39 +1329,10 @@ let test_post_success_commit_claim_blocks_reject () =
     (pending.phase = C.Phase_installed_pending_valid);
   Alcotest.(check int) "reject settlement has not run" 0 pending.domain_rejected_attempts;
   Alcotest.(check int) "quarantine has not run" 0 !quarantine_calls;
-  let settlement_entered, resolve_settlement_entered =
-    Eio.Promise.create ()
-  in
-  let release_settlement, resolve_release_settlement =
-    Eio.Promise.create ()
-  in
-  let waiter_joined, resolve_waiter_joined = Eio.Promise.create () in
-  let first_result, resolve_first_result = Eio.Promise.create () in
-  let second_result, resolve_second_result = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () ->
-    C.For_testing.settle_post_success_domain_valid_with
-      ~settle:(fun () ->
-        Eio.Promise.resolve resolve_settlement_entered ();
-        Eio.Promise.await release_settlement;
-        Ok ())
-      terminalizer
-    |> Eio.Promise.resolve resolve_first_result);
-  Eio.Promise.await settlement_entered;
-  Eio.Fiber.fork ~sw (fun () ->
-    C.For_testing.settle_post_success_domain_valid_with_wait_hook
-      ~on_wait:(fun () -> Eio.Promise.resolve resolve_waiter_joined ())
-      terminalizer
-    |> Eio.Promise.resolve resolve_second_result);
-  Eio.Promise.await waiter_joined;
-  Eio.Promise.resolve resolve_release_settlement ();
-  (match Eio.Promise.await first_result with
+  (match C.complete_post_success_commit terminalizer with
    | Ok () -> ()
    | Error detail ->
-     Alcotest.failf "first Domain_valid settlement failed: %s" detail);
-  (match Eio.Promise.await second_result with
-   | Ok () -> ()
-   | Error detail ->
-     Alcotest.failf "joined Domain_valid settlement diverged: %s" detail);
+     Alcotest.failf "post-success completion failed: %s" detail);
   Eio.Promise.await completion;
   (match
      C.terminalize_post_success
@@ -1428,8 +1343,7 @@ let test_post_success_commit_claim_blocks_reject () =
    | C.Terminalized _
    | C.Terminalization_commit_in_progress _
    | C.Terminalization_persistence_failed _
-   | C.Terminalization_invariant_failed _
-   | C.Terminalization_owner_unregistered_deferred ->
+   | C.Terminalization_invariant_failed _ ->
      Alcotest.fail "committed checkpoint was downgraded by a later reject");
   let committed = C.For_testing.post_success_snapshot terminalizer in
   Alcotest.(check bool)
@@ -1502,8 +1416,7 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
       incr checkpoint_calls;
       Alcotest.fail "commit acquired after reject claim"
     | C.Commit_claim_already_committed
-    | C.Commit_claim_rejected _
-    | C.Commit_claim_owner_unregistered_deferred ->
+    | C.Commit_claim_rejected _ ->
       Alcotest.fail "reject claimant did not block concurrent commit"
   in
   let claimed = C.For_testing.post_success_snapshot terminalizer in
@@ -1524,8 +1437,7 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
    | C.Commit_claim_acquired
    | C.Commit_claim_in_progress _
    | C.Commit_claim_already_committed
-   | C.Commit_claim_rejected _
-   | C.Commit_claim_owner_unregistered_deferred ->
+   | C.Commit_claim_rejected _ ->
      Alcotest.fail "commit did not observe the canonical rejected disposition");
   Alcotest.(check int) "overlap performs one quarantine" 1 !quarantine_calls;
   Alcotest.(check bool)
@@ -1617,8 +1529,7 @@ let test_post_success_terminalization_failures_preserve_full_binding () =
          | C.Terminalized _
          | C.Terminalization_commit_in_progress _
          | C.Terminalization_already_committed
-         | C.Terminalization_invariant_failed _
-         | C.Terminalization_owner_unregistered_deferred ->
+         | C.Terminalization_invariant_failed _ ->
            Alcotest.fail
              "quarantine persistence failure was not surfaced as typed uncertainty"
        in
@@ -1995,89 +1906,6 @@ let test_visible_sync_uncertainty_seams () =
     ]
 ;;
 
-let test_post_success_owner_replacement_defers_success_projection () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  let keeper_name = "keeper-post-success-owner-replaced" in
-  let slot_id = "post-success-owner-replaced" in
-  let replace_owner = ref (fun () -> ()) in
-  let server =
-    F.start_server
-      ~on_request_before_reply:(fun () -> !replace_owner ())
-      ~sw
-      ~net
-      ~clock
-      (F.Reply valid_response)
-  in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc post-success owner replacement"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry () in
-  let old_entry =
-    match Keeper_registry.get ~base_path:exact_flow_base_path keeper_name with
-    | Some entry -> entry
-    | None -> Alcotest.fail "prepared compaction owner disappeared"
-  in
-  replace_owner :=
-    (fun () ->
-       (match Keeper_registry.unregister_exact old_entry with
-        | Keeper_registry.Exact_unregistered -> ()
-        | _ -> Alcotest.fail "compaction owner was not replaced during POST");
-       ensure_registered_keeper ~base_path:exact_flow_base_path keeper_name);
-  let bind_calls = ref 0 in
-  let release_calls = ref 0 in
-  let quarantine_calls = ref 0 in
-  let guard : C.exact_execution_guard =
-    { before_dispatch =
-        (fun _ ->
-           incr bind_calls;
-           Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun _ ->
-           incr release_calls;
-           Ok C.Fsync_completed)
-    ; quarantine =
-        (fun _ _ ->
-           incr quarantine_calls;
-           Ok C.Fsync_completed)
-    }
-  in
-  (match
-    execute_prepared_lane
-      ~keeper_name
-      ~net
-      ~clock
-      ~exact_execution_guard:guard
-      prepared
-   with
-   | Error C.Exact_owner_unregistered_deferred -> ()
-   | Error _ -> Alcotest.fail "POST replacement returned the wrong terminal"
-   | Ok _ -> Alcotest.fail "replaced compaction owner retained stale success");
-  (match
-     execute_prepared_lane
-       ~keeper_name
-       ~net
-       ~clock
-       ~exact_execution_guard:guard
-       prepared
-   with
-   | Error C.Exact_owner_unregistered_deferred -> ()
-   | Error _ -> Alcotest.fail "stale retry returned the wrong terminal"
-   | Ok _ -> Alcotest.fail "stale retry projected a completed plan");
-  Alcotest.(check int)
-    "real compaction POST crossed replacement exactly once"
-    1
-    (F.post_count server);
-  Alcotest.(check int) "replacement binds one exact identity" 1 !bind_calls;
-  Alcotest.(check int) "replacement releases no stale identity" 0 !release_calls;
-  Alcotest.(check int)
-    "replacement quarantines no stale success"
-    0
-    !quarantine_calls
-;;
 
 let () =
   Alcotest.run
@@ -2128,13 +1956,17 @@ let () =
         ] )
     ; ( "terminal ownership"
       , [ Alcotest.test_case
-            "domain invalidity never reenters failover"
+            "domain invalidity advances to declared successor"
             `Quick
-            test_domain_invalid_output_never_reenters_failover
+            test_domain_invalid_output_advances_to_declared_successor
         ; Alcotest.test_case
             "final OAS failure is generic terminal"
             `Quick
             test_final_oas_flow_failure_is_generic_source_terminal
+        ; Alcotest.test_case
+            "semantic exhaustion terminalizes final bound"
+            `Quick
+            test_semantic_exhaustion_terminalizes_final_bound
         ; Alcotest.test_case
             "cancellation preserves lifecycle-authorized identity"
             `Quick
@@ -2155,20 +1987,12 @@ let () =
             "terminalization failures preserve full binding"
             `Quick
             test_post_success_terminalization_failures_preserve_full_binding
-        ; Alcotest.test_case
-            "owner replacement during POST defers success projection"
-            `Quick
-            test_post_success_owner_replacement_defers_success_projection
         ] )
     ; ( "affinity and non-sharing"
       , [ Alcotest.test_case
             "same-flow loser mutates no queue"
             `Quick
             test_same_flow_concurrent_loser_mutates_no_queue
-        ; Alcotest.test_case
-            "two keepers freeze and isolate future preferences"
-            `Quick
-            test_two_keeper_scopes_freeze_and_do_not_share_preferences
         ] )
     ]
 ;;

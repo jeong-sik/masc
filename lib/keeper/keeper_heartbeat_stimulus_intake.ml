@@ -126,8 +126,6 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
        instead of silently proceeding on its own state. This changes only how
        the turn is described, not whether it runs. *)
     Some Keeper_world_observation.Hitl_resolved_stimulus
-  | Keeper_event_queue.Failure_judgment _ ->
-    Some Keeper_world_observation.Failure_judgment_stimulus
   | Keeper_event_queue.Manual_compaction_requested ->
     Some Keeper_world_observation.Manual_compaction_stimulus
   | Keeper_event_queue.Board_signal _
@@ -203,18 +201,6 @@ let consume_single_heartbeat_stimulus
       "turn entry: goal assignment delivered goal_id=%s assigned_by=%s (keeper=%s)"
       ga.ga_goal_id
       ga.ga_assigned_by
-      meta_after_triage.name;
-    pending_board_events_of_stimulus_result ~meta_after_triage stim
-  | Keeper_event_queue.Failure_judgment fj ->
-    (* RFC-0313 W2: a deterministic turn failure awaits an LLM-boundary
-       verdict. Promote it to a pending observation so the judgment turn does
-       not wake empty — returning [] would silently drop the escalation. *)
-    Log.Keeper.info
-      "turn entry: failure judgment delivered runtime=%s class=%s provenance=%s \
-       (keeper=%s)"
-      fj.fj_runtime_id
-      (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
-      (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
       meta_after_triage.name;
     pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Manual_compaction_requested ->
@@ -324,7 +310,6 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Bg_completed _
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
-  | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Goal_assigned _ ->
     true

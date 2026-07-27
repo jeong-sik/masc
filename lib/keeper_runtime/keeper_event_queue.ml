@@ -67,15 +67,6 @@ type stimulus_payload =
          resolver directly and do not emit this duplicate wake. Mirrors
          [Fusion_completed]/[Bg_completed]: a HITL decision is an async
          completion the waiting keeper must be notified of. *)
-  | Failure_judgment of failure_judgment
-      (* RFC-0313 W2: a turn failure routed [Escalate_judgment] — a
-         deterministic failure class where mechanical retry/rotation cannot
-         change the outcome. Surfaces on the keeper's next turn as prompt
-         input for an LLM-boundary verdict. Follows the
-         [Fusion_completed] precedent: no
-         dedicated turn_reason, so scheduling cooldowns are unchanged and
-         the stable per-(runtime, class) post_id lets queue identity dedup
-         collapse repeats. *)
   | Manual_compaction_requested
   | Goal_assigned of goal_assignment
       (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
@@ -158,16 +149,6 @@ and scheduled_wake = {
   message : string;
 }
 
-and failure_judgment = {
-  fj_runtime_id : string;
-  fj_judgment : Keeper_runtime_failure_route.judgment_class;
-  fj_provenance : Keeper_runtime_failure_route.judgment_provenance;
-  fj_detail : string;
-  (* display-only failure summary for the judgment prompt, bounded by
-     [Keeper_internal_error.cap_blocker_detail] at the producer. Never
-     matched. *)
-}
-
 and goal_assignment = {
   ga_goal_id : string;
   ga_goal_title : string;
@@ -185,15 +166,6 @@ let bg_job_completion_post_id (c : bg_job_completion) =
   else c.bg_board_post_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
-
-let failure_judgment_post_id (fj : failure_judgment) =
-  (* Stable per (runtime, class, typed boundary) so repeats from the same
-     execution boundary collapse under queue identity dedup without merging
-     failures that require materially different judgment context. *)
-  "failure-judgment:" ^ fj.fj_runtime_id ^ ":"
-  ^ Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment
-  ^ ":"
-  ^ Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance
 
 let manual_compaction_post_id = "manual-compaction-request"
 
@@ -243,7 +215,6 @@ let enqueue (queue : t) (s : stimulus) : t =
    (RFC-0313 W2 loop-safety requirement). Exhaustive on purpose: a new
    payload kind must decide its identity fields here at compile time. *)
 let identity_payload = function
-  | Failure_judgment fj -> Failure_judgment { fj with fj_detail = "" }
   | Goal_assigned ga ->
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
@@ -251,13 +222,6 @@ let identity_payload = function
     | Manual_compaction_requested
     ) as payload ->
     payload
-
-let failure_judgment_identity_equal left right =
-  String.equal left.fj_runtime_id right.fj_runtime_id
-  && left.fj_judgment = right.fj_judgment
-  && Keeper_runtime_failure_route.judgment_provenance_same_boundary
-       left.fj_provenance
-       right.fj_provenance
 
 let fusion_terminal_equal left right =
   match left, right with
@@ -287,8 +251,6 @@ let stimulus_identity_equal a b =
   && a.urgency = b.urgency
   &&
   match a.payload, b.payload with
-  | Failure_judgment left, Failure_judgment right ->
-    failure_judgment_identity_equal left right
   | Fusion_completed left, Fusion_completed right ->
     fusion_completion_identity_equal left right
   | _ -> identity_payload a.payload = identity_payload b.payload
@@ -359,7 +321,6 @@ let payload_kind_label = function
   | Schedule_due _ -> "schedule_due"
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
-  | Failure_judgment _ -> "failure_judgment"
   | Manual_compaction_requested -> "manual_compaction_requested"
   | Goal_assigned _ -> "goal_assigned"
 
@@ -367,7 +328,7 @@ let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _ | Bg_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Failure_judgment _ | Manual_compaction_requested | Goal_assigned _ ->
+  | Manual_compaction_requested | Goal_assigned _ ->
     false
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -585,16 +546,6 @@ let payload_to_yojson = function
        | Hitl_approved -> []
        | Hitl_rejected rationale -> [ "rationale", `String rationale ]
        | Hitl_edited input -> [ "edited_input", input ])
-  | Failure_judgment fj ->
-    `Assoc
-      [ "kind", `String "failure_judgment"
-      ; "runtime_id", `String fj.fj_runtime_id
-      ; "judgment_class",
-        `String (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
-      ; ( "provenance"
-        , Keeper_runtime_failure_route.judgment_provenance_to_yojson fj.fj_provenance )
-      ; "detail", `String fj.fj_detail
-      ]
   | Manual_compaction_requested ->
     `Assoc [ "kind", `String "manual_compaction_requested" ]
   | Goal_assigned ga ->
@@ -747,33 +698,6 @@ let payload_of_yojson json =
     in
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
-  | "failure_judgment" ->
-    let* () =
-      exact_fields
-        ~context
-        ~expected:[ "kind"; "runtime_id"; "judgment_class"; "provenance"; "detail" ]
-        fields
-    in
-    let* runtime_id = string_field ~context "runtime_id" fields in
-    let* judgment_label = string_field ~context "judgment_class" fields in
-    let* judgment =
-      match Keeper_runtime_failure_route.judgment_class_of_label judgment_label with
-      | Some judgment -> Ok judgment
-      | None ->
-        Error (Printf.sprintf "unknown failure_judgment class: %s" judgment_label)
-    in
-    let* provenance =
-      let* json = required_field ~context "provenance" fields in
-      Keeper_runtime_failure_route.judgment_provenance_of_yojson json
-    in
-    let* detail = string_field ~context "detail" fields in
-    Ok
-      (Failure_judgment
-         { fj_runtime_id = runtime_id
-         ; fj_judgment = judgment
-         ; fj_provenance = provenance
-         ; fj_detail = detail
-         })
   | "manual_compaction_requested" -> Ok Manual_compaction_requested
   | "goal_assigned" ->
     let* goal_id = string_field ~context "goal_id" fields in

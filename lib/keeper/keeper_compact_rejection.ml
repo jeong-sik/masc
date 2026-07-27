@@ -3,7 +3,6 @@ type compaction_rejection =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
-  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
@@ -24,8 +23,6 @@ let compaction_rejection_to_tag = function
   | Exact_target_selection_failed -> "exact_target_selection_failed"
   | Exact_admission_failed -> "exact_admission_failed"
   | Exact_attempt_start_failed -> "exact_attempt_start_failed"
-  | Exact_owner_unregistered_deferred ->
-    "exact_owner_unregistered_deferred"
   | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
   | Exact_execution_authority_absent -> "exact_execution_authority_absent"
   | Exact_execution_authority_rejected -> "exact_execution_authority_rejected"
@@ -61,8 +58,6 @@ let summarization_rejection = function
     Exact_target_selection_failed
   | Keeper_compaction_llm_summarizer.Exact_admission_failed -> Exact_admission_failed
   | Keeper_compaction_llm_summarizer.Exact_attempt_start_failed -> Exact_attempt_start_failed
-  | Keeper_compaction_llm_summarizer.Exact_owner_unregistered_deferred ->
-    Exact_owner_unregistered_deferred
   | Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable ->
     Exact_execution_context_unavailable
   | Keeper_compaction_llm_summarizer.Exact_execution_authority_absent ->

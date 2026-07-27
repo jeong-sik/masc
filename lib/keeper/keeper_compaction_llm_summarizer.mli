@@ -10,10 +10,6 @@ type completed_plan
 
 type post_success_terminalizer
 
-type 'a post_success_boundary =
-  | Post_success_current of 'a
-  | Post_success_owner_unregistered_deferred
-
 type post_success_terminalization =
   | Terminalized of Keeper_event_queue_state.exact_execution_terminal
   | Terminalization_persistence_failed of
@@ -21,7 +17,6 @@ type post_success_terminalization =
   | Terminalization_commit_in_progress of unit Eio.Promise.t
   | Terminalization_already_committed
   | Terminalization_invariant_failed of string
-  | Terminalization_owner_unregistered_deferred
 
 type post_success_commit_claim =
   | Commit_claim_acquired
@@ -30,16 +25,14 @@ type post_success_commit_claim =
   | Commit_claim_rejected of
       Keeper_event_queue_state.exact_execution_terminal
       * (unit, string) result
-  | Commit_claim_owner_unregistered_deferred
 
 type 'a post_success_commit_boundary =
-  | Post_success_commit_owner_result of 'a
+  | Post_success_commit_result of 'a
   | Post_success_commit_in_progress of unit Eio.Promise.t
   | Post_success_commit_already_committed
   | Post_success_commit_rejected of
       Keeper_event_queue_state.exact_execution_terminal
       * (unit, string) result
-  | Post_success_commit_owner_unregistered_deferred
 
 type post_success_phase_snapshot =
   | Phase_open
@@ -97,7 +90,6 @@ type summarization_failure =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
-  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
@@ -134,7 +126,8 @@ val prepare_lane
     cancellation is a phase-neutral source-bound terminal unless OAS first
     invokes [release_before_dispatch]; MASC never reconstructs dispatch state
     from cancellation or receipt details.
-    Domain-invalid output is terminal and cannot enter OAS failover. *)
+    Domain-invalid output is rejected by the validator and OAS advances to the
+    next caller-declared candidate. Exhaustion is source-terminal. *)
 val execute_prepared_lane
   :  keeper_name:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -171,8 +164,7 @@ val completed_post_success_terminalizer : completed_plan -> post_success_termina
 val claim_post_success_commit :
   post_success_terminalizer -> post_success_commit_claim
 
-(** Pin the exact-flow owner for the whole commit callback without holding the
-    lifecycle key lock. Only the [Open] claimant executes [commit]. *)
+(** Only the [Open] claimant executes [commit]. *)
 val with_post_success_commit :
   post_success_terminalizer ->
   (unit -> 'a) ->
@@ -200,27 +192,18 @@ val terminalize_post_success
     therefore fail-closed against restart replay. A cancelled waiter can retry
     and retrieve the same canonical terminal without repeating quarantine. *)
 
-val settle_post_success_domain_valid
+val complete_post_success_commit
   :  post_success_terminalizer
   -> (unit, string) result
-(** Install the OAS flow preference only after the validated compaction
-    checkpoint is durable. The caller must hold [with_current_post_success]. *)
+(** Complete the existing affine post-success phase after the validated
+    compaction checkpoint is durable. *)
 
 val finish_post_success_commit_failure
   :  post_success_terminalizer
   -> string
   -> (unit, string) result
-(** After durable checkpoint installation, settle or conservatively finalize
+(** After durable checkpoint installation, conservatively finalize
     the affine commit and always release its existing completion waiter. *)
-
-val with_current_post_success
-  :  post_success_terminalizer
-  -> (unit -> 'a)
-  -> 'a post_success_boundary
-(** Fence local checkpoint and projection commits against the exact Keeper
-    generation that produced the completed plan. Already-bound work may finish
-    while that exact generation is Draining; replacement and Retired
-    generations remain deferred. *)
 
 val exact_execution_evidence_slot_id : exact_execution_evidence -> string
 val exact_execution_evidence_call_id : exact_execution_evidence -> string
@@ -249,19 +232,4 @@ module For_testing : sig
   val post_success_snapshot :
     post_success_terminalizer -> post_success_snapshot
 
-  val settle_post_success_domain_valid_with_error :
-    post_success_terminalizer -> string -> (unit, string) result
-
-  val settle_post_success_domain_valid_with_exception :
-    post_success_terminalizer -> exn -> (unit, string) result
-
-  val settle_post_success_domain_valid_with :
-    settle:(unit -> (unit, string) result) ->
-    post_success_terminalizer ->
-    (unit, string) result
-
-  val settle_post_success_domain_valid_with_wait_hook :
-    on_wait:(unit -> unit) ->
-    post_success_terminalizer ->
-    (unit, string) result
 end

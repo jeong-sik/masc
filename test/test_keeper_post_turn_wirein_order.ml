@@ -1278,7 +1278,7 @@ let test_prepare_commit_source_cas () =
 
 let run_post_install_failure
       ~name
-      ?domain_valid_failure
+      ?complete_post_success_commit
       ?(cancel_after_install = false)
       ()
   =
@@ -1377,15 +1377,14 @@ let run_post_install_failure
                    fail "installed commit did not expose its outer waiter")
               | Summarizer.Commit_claim_acquired
               | Summarizer.Commit_claim_already_committed
-              | Summarizer.Commit_claim_rejected _
-              | Summarizer.Commit_claim_owner_unregistered_deferred ->
+              | Summarizer.Commit_claim_rejected _ ->
                 fail "installed commit did not expose its affine waiter");
              if cancel_after_install
              then
                raise
                  (Eio.Cancel.Cancelled
                     (Failure "injected post-install compaction cancellation")))
-           ?domain_valid_failure
+           ?complete_post_success_commit
            ~save_oas_history:(fun ~session_dir:_ _ -> ())
            prepared
        in
@@ -1439,8 +1438,7 @@ let run_post_install_failure
         | Summarizer.Commit_claim_already_committed -> ()
         | Summarizer.Commit_claim_acquired
         | Summarizer.Commit_claim_in_progress _
-        | Summarizer.Commit_claim_rejected _
-        | Summarizer.Commit_claim_owner_unregistered_deferred ->
+        | Summarizer.Commit_claim_rejected _ ->
           fail "closed Domain_valid failure admitted another claimant");
        (match Post_turn.commit_prepared_compaction prepared with
         | Post_turn.Commit_failed { committed = Some _; _ } -> ()
@@ -1455,18 +1453,16 @@ let run_post_install_failure
 let test_post_install_domain_valid_error_resolves_waiters () =
   run_post_install_failure
     ~name:"post-install-domain-valid-error"
-    ~domain_valid_failure:
-      (Post_turn.For_testing.Domain_valid_error
-         "injected Domain_valid settlement error")
+    ~complete_post_success_commit:
+      (fun _ -> Error "injected post-success completion error")
     ()
 ;;
 
 let test_post_install_domain_valid_exception_resolves_waiters () =
   run_post_install_failure
     ~name:"post-install-domain-valid-exception"
-    ~domain_valid_failure:
-      (Post_turn.For_testing.Domain_valid_exception
-         (Failure "injected Domain_valid settlement exception"))
+    ~complete_post_success_commit:
+      (fun _ -> raise (Failure "injected post-success completion exception"))
     ()
 ;;
 
@@ -1797,122 +1793,6 @@ let test_suspended_streak_refuses_reactive_prepare () =
     ]
 ;;
 
-let test_exact_scope_release_defers_until_settlement_pin_leaves () =
-  Eio_main.run @@ fun env ->
-  Masc_test_deps.init_eio_clock env;
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio.Switch.run @@ fun sw ->
-  with_eio_context env sw @@ fun () ->
-  let base_path = Masc_test_deps.setup_test_workspace () in
-  let runtime_snapshot = Runtime.For_testing.snapshot () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_exact_flow_scope.clear ();
-      Runtime.For_testing.restore runtime_snapshot;
-      Masc_test_deps.cleanup_test_workspace base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       init_runtime_fixture ();
-       let meta = make_meta ~name:"scope-pin-release" () in
-       ensure_registered_keeper ~base_path:config.base_path meta;
-       let registered_owner =
-         match
-           Masc.Keeper_registry.get
-             ~base_path:config.base_path
-             meta.name
-         with
-         | Some owner -> owner
-         | None -> fail "scope pin fixture did not retain its owner"
-       in
-       let registered_lane_id () =
-         match
-           Masc.Keeper_registry.get
-             ~base_path:config.base_path
-             meta.name
-         with
-         | Some entry -> Some (Masc.Keeper_lane.id entry.lane)
-         | None -> None
-       in
-       let flow_scope =
-         match
-           Masc.Keeper_exact_flow_scope.for_registered
-             ~registered_lane_id
-             ~base_path:config.base_path
-             ~keeper_name:meta.name
-             ~surface:Masc.Keeper_exact_flow_scope.Compaction
-         with
-         | Ok flow_scope -> flow_scope
-         | Error detail -> failf "scope pin fixture failed: %s" detail
-       in
-       let entered, publish_entered = Eio.Promise.create () in
-       let continue_promise, publish_continue = Eio.Promise.create () in
-       let settlement = ref None in
-       let () =
-         Eio.Fiber.both
-           (fun () ->
-              settlement :=
-                Some
-                  (Masc.Keeper_exact_flow_scope.with_settlement
-                     flow_scope
-                     ~registered_lane_id
-                     (fun () ->
-                        Eio.Promise.resolve publish_entered ();
-                        Eio.Promise.await continue_promise)))
-           (fun () ->
-              Eio.Promise.await entered;
-              (match
-                 Masc.Keeper_registry.unregister_exact registered_owner
-               with
-               | Masc.Keeper_registry.Exact_unregistered -> ()
-               | _ -> fail "scope pin fixture could not replace its owner");
-              let replacement_meta =
-                make_meta ~name:meta.name ()
-              in
-              ignore
-                (Masc.Keeper_registry.register_offline
-                   ~base_path:config.base_path
-                   meta.name
-                   replacement_meta);
-              let replacement_scope =
-                match
-                  Masc.Keeper_exact_flow_scope.for_registered
-                    ~registered_lane_id
-                    ~base_path:config.base_path
-                    ~keeper_name:meta.name
-                    ~surface:Masc.Keeper_exact_flow_scope.Compaction
-                with
-                | Ok replacement_scope -> replacement_scope
-                | Error detail ->
-                  failf "replacement scope allocation failed: %s" detail
-              in
-              (match
-                 Masc.Keeper_exact_flow_scope.with_current
-                   replacement_scope
-                   ~registered_lane_id
-                   (fun () -> ())
-               with
-               | Masc.Keeper_exact_flow_scope.Current () -> ()
-               | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-                 fail "replacement scope was not active");
-              (match
-                 Masc.Keeper_exact_flow_scope.with_settlement
-                   flow_scope
-                   ~registered_lane_id
-                   (fun () -> ())
-               with
-               | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
-               | Masc.Keeper_exact_flow_scope.Current () ->
-                 fail "replaced owner admitted a new settlement pin");
-              Eio.Promise.resolve publish_continue ())
-       in
-       match !settlement with
-       | Some (Masc.Keeper_exact_flow_scope.Current ()) -> ()
-       | Some Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-         fail "release_owner invalidated an already-acquired settlement pin"
-       | None -> fail "settlement pin fiber returned without an outcome")
-;;
-
 let () =
   run "post-turn durability" [
     "durable compaction", [
@@ -1943,8 +1823,6 @@ let () =
         `Quick test_post_dispatch_non_reducing_output_is_quarantined;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
-      test_case "exact scope release waits for settlement pin"
-        `Quick test_exact_scope_release_defers_until_settlement_pin_leaves;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

@@ -134,17 +134,6 @@ let vision_analyze_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-let failure_judgment_output_schema =
-  let fields =
-    [ ( "decision"
-      , enum_schema Keeper_failure_judgment_contract.decision_tokens )
-    ; "guidance", nullable_string_schema
-    ; "rationale", string_schema
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
 let board_attention_judgment_batch_output_schema =
   let item_fields =
     [ "candidate_id", string_schema
@@ -300,8 +289,8 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
    json_object-only provider (Glm/DeepSeek/Kimi) as
    [InvalidConfig "task.anti_rationalization.output_schema"], so the gate
    never ran and every task stayed nonterminal fleet-wide (live incident
-   2026-07-21). Converges with the fusion-judge / failure-judge /
-   consolidation / board-attention / librarian surfaces above: no wire
+   2026-07-21). Converges with the fusion-judge / consolidation /
+   board-attention / librarian surfaces above: no wire
    response format; the tool schema carries the verdict enum SSOT. *)
 let anti_rationalization_reviewer_provider_config = without_response_format
 

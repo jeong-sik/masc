@@ -560,8 +560,7 @@ let cleanup_tracking_exact (entry : registry_entry) =
 
 let clear () =
   Atomic.set registry StringMap.empty;
-  Atomic.set running_count_atomic 0;
-  Keeper_exact_flow_scope.clear ()
+  Atomic.set running_count_atomic 0
 ;;
 
 (* -- Board cursor -------------------------------------------------- *)

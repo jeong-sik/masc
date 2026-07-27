@@ -16,6 +16,7 @@ type t =
       { actual_bytes : int
       ; limit_bytes : int
       }
+  | Request_body_refused_by_provider of { status : int }
   | Serving_input_capacity of serving_input_capacity
   | Manual
 
@@ -25,6 +26,7 @@ let kind_field = "kind"
 let limit_tokens_field = "limit_tokens"
 let actual_bytes_field = "actual_bytes"
 let limit_bytes_field = "limit_bytes"
+let http_status_field = "http_status"
 let reason_field = "reason"
 let input_tokens_field = "input_tokens"
 let accepted_through_field = "accepted_through"
@@ -42,6 +44,7 @@ let wire_field_names =
   ; limit_tokens_field
   ; actual_bytes_field
   ; limit_bytes_field
+  ; http_status_field
   ; reason_field
   ; input_tokens_field
   ; accepted_through_field
@@ -52,6 +55,7 @@ let wire_field_names =
 let to_label = function
   | Provider_overflow _ -> "provider_overflow"
   | Request_body_over_capacity _ -> "request_body_over_capacity"
+  | Request_body_refused_by_provider _ -> "request_body_refused_by_provider"
   | Serving_input_capacity _ -> "serving_input_capacity"
   | Manual -> "manual"
 ;;
@@ -65,6 +69,8 @@ let to_human = function
        | None -> "unknown")
   | Request_body_over_capacity { actual_bytes; limit_bytes } ->
     Printf.sprintf "request_body_over_capacity(%dB>%dB)" actual_bytes limit_bytes
+  | Request_body_refused_by_provider { status } ->
+    Printf.sprintf "request_body_refused_by_provider(status=%d)" status
   | Serving_input_capacity
       (Boundary_unknown { input_tokens; accepted_through; rejected_from }) ->
     Printf.sprintf
@@ -98,6 +104,11 @@ let to_detail_json : t -> Yojson.Safe.t = function
       [ kind_field, `String "request_body_over_capacity"
       ; actual_bytes_field, `Int actual_bytes
       ; limit_bytes_field, `Int limit_bytes
+      ]
+  | Request_body_refused_by_provider { status } ->
+    `Assoc
+      [ kind_field, `String "request_body_refused_by_provider"
+      ; http_status_field, `Int status
       ]
   | Serving_input_capacity
       (Boundary_unknown { input_tokens; accepted_through; rejected_from }) ->
@@ -134,6 +145,8 @@ type decode_error =
   | Invalid_provider_limit
   | Missing_request_body_bytes of string
   | Invalid_request_body_bytes of string
+  | Missing_provider_refusal_status
+  | Invalid_provider_refusal_status
   | Request_body_within_capacity of
       { actual_bytes : int
       ; limit_bytes : int
@@ -170,6 +183,10 @@ let decode_error_to_string = function
     Printf.sprintf "request body over capacity trigger is missing %s" field
   | Invalid_request_body_bytes field ->
     Printf.sprintf "request body over capacity %s must be a positive integer" field
+  | Missing_provider_refusal_status ->
+    "provider request body refusal is missing http_status"
+  | Invalid_provider_refusal_status ->
+    "provider request body refusal http_status must be an HTTP error status"
   | Request_body_within_capacity { actual_bytes; limit_bytes } ->
     Printf.sprintf
       "request body over capacity requires actual_bytes > limit_bytes, got %d and %d"
@@ -242,6 +259,13 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
        if actual_bytes > limit_bytes
        then Ok (Request_body_over_capacity { actual_bytes; limit_bytes })
        else Error (Request_body_within_capacity { actual_bytes; limit_bytes })
+     | Some (`String "request_body_refused_by_provider") ->
+       let* () = reject_unknown_fields [ kind_field; http_status_field ] in
+       (match List.assoc_opt http_status_field fields with
+        | Some (`Int status) when status >= 400 && status <= 599 ->
+          Ok (Request_body_refused_by_provider { status })
+        | None -> Error Missing_provider_refusal_status
+        | Some _ -> Error Invalid_provider_refusal_status)
      | Some (`String "serving_input_capacity") ->
        let* () =
          reject_unknown_fields

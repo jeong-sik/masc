@@ -594,10 +594,6 @@ type hitl_worker_spawner =
   unit ->
   (Hitl_summary_worker.spawn_outcome, string) result
 
-let owner_unregistered_before_start_reason =
-  "Auto Judge worker was not started because its Keeper owner is unregistered"
-;;
-
 let mark_pre_worker_unavailable
       (entry : Keeper_approval_queue.pending_approval)
       ~reason_code
@@ -667,28 +663,6 @@ let rec spawn_claimed_auto_judge_entry_with
          |> durable_pre_worker_unavailable_error reason
          |> Result.error)
   in
-  let persist_owner_unregistered_block () =
-    Eio.Cancel.protect (fun () ->
-      match
-        mark_pre_worker_unavailable
-          entry
-          ~reason_code:
-            Keeper_approval_queue.Summary_pre_worker_auto_judge_unavailable
-          ~operator_detail:owner_unregistered_before_start_reason
-      with
-      | Ok true -> ()
-      | Ok false ->
-        Log.Keeper.error
-          ~keeper_name:entry.keeper_name
-          "Auto Judge owner-unregistered block was not applied approval=%s"
-          entry.id
-      | Error error ->
-        Log.Keeper.error
-          ~keeper_name:entry.keeper_name
-          "Auto Judge owner-unregistered block failed approval=%s error=%s"
-          entry.id
-          (Keeper_approval_queue.exact_attempt_error_to_string error))
-  in
   let start_after_reservation () =
   match Eio_context.get_root_switch_opt () with
   | Some sw ->
@@ -723,41 +697,10 @@ let rec spawn_claimed_auto_judge_entry_with
                  ~keeper_name:entry.keeper_name
                  "Auto Judge owner drain withheld after deterministic exact-attempt rejection approval=%s"
                  entry.id
-             | Hitl_summary_worker.Owner_unregistered_deferred ->
-               persist_owner_unregistered_block ();
-               Keeper_approval_queue.audit_approval_event
-                 ~base_path:entry.audit_base_path
-                 ~event_type:"auto_judge_owner_generation_deferred"
-                 ~id:entry.id
-                 ~keeper_name:entry.keeper_name
-                 ~tool_name:entry.tool_name
-                 ();
-               let wake =
-                 Keeper_registry.wakeup_running
-                   ~intent:Keeper_registry.Hitl_resolution
-                   ~base_path:entry.audit_base_path
-                   entry.keeper_name
-               in
-               let wake_outcome =
-                 match wake with
-                 | Keeper_registry.Signaled -> "signaled"
-                 | Keeper_registry.Deferred_unregistered ->
-                   "deferred_unregistered"
-                 | Keeper_registry.Deferred_not_running _ ->
-                   "deferred_not_running"
-                 | Keeper_registry.Deferred_lifecycle _ ->
-                   "deferred_lifecycle"
-               in
-               Log.Keeper.warn
-                 ~keeper_name:entry.keeper_name
-                 "Auto Judge exact owner generation deferred; durable pending approval retained and owner wake requested approval=%s wake=%s"
-                 entry.id
-                 wake_outcome)
+             )
            ()
        with
        | Ok Hitl_summary_worker.Worker_forked -> Ok Started
-       | Ok Hitl_summary_worker.Worker_not_forked_owner_unregistered ->
-         fail_before_worker ~reason:owner_unregistered_before_start_reason
        | Error reason -> fail_before_worker ~reason
      with
      | Eio.Cancel.Cancelled _ as exn ->

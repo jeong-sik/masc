@@ -3067,9 +3067,9 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                 ~boundary:Keeper_runtime_failure_route.Oas_execution
                 runtime_error
             in
-            (match exact_route with
-             | Keeper_runtime_failure_route.Escalate_judgment
-                 { judgment =
+             (match exact_route with
+             | Keeper_runtime_failure_route.Exhausted_visible_alive
+                 { terminal =
                      Keeper_runtime_failure_route.Terminal_effect_runtime_failure
                  ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _
@@ -3089,8 +3089,8 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  ~boundary:Keeper_runtime_failure_route.Oas_execution
                  transient_terminal_error
              with
-             | Keeper_runtime_failure_route.Escalate_judgment
-                 { judgment =
+             | Keeper_runtime_failure_route.Exhausted_visible_alive
+                 { terminal =
                      Keeper_runtime_failure_route.Terminal_effect_transient_failure
                  ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _

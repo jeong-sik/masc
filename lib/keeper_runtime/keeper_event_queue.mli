@@ -88,9 +88,6 @@ type stimulus_payload =
           unrelated stimulus, no-progress recovery, or the 30-minute approval
           janitor. Blocking approvals resume their resolver directly and do not
           emit this duplicate wake. Mirrors [Fusion_completed]/[Bg_completed]. *)
-  | Failure_judgment of failure_judgment
-      (** RFC-0313 deterministic failure class was rejected/blocked and should
-          produce an LLM-boundary verdict prompt on the keeper lane. *)
   | Manual_compaction_requested
       (** Operator-requested MASC compaction. The tool only enqueues this
           stimulus; the owning Keeper consumes it under its turn slot. *)
@@ -182,18 +179,6 @@ and scheduled_wake = {
     preserves a stable audit correlation to the schedule payload without
     duplicating its raw JSON envelope in the keeper queue. *)
 
-and failure_judgment = {
-  fj_runtime_id : string;
-  fj_judgment : Keeper_runtime_failure_route.judgment_class;
-  fj_provenance : Keeper_runtime_failure_route.judgment_provenance;
-  fj_detail : string;
-}
-(** Payload for [Failure_judgment]. [fj_runtime_id] is the opaque failed
-    binding identity, [fj_judgment] is the routing class, and
-    [fj_provenance] retains the typed execution boundary (including the OAS
-    idle-loop count). [fj_detail] is display/prompt evidence and is never used
-    for routing. *)
-
 and goal_assignment = {
   ga_goal_id : string;
   ga_goal_title : string;
@@ -214,8 +199,6 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
     window. *)
-
-val failure_judgment_post_id : failure_judgment -> post_id
 
 val manual_compaction_post_id : post_id
 

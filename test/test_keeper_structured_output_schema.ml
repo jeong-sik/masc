@@ -55,7 +55,6 @@ let all_provider_native_schema_cases =
   ; "compaction_plan", Keeper_structured_output_schema.compaction_plan_output_schema
   ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
-  ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
   ; ( "board_attention_judgment_batch"
     , Keeper_structured_output_schema.board_attention_judgment_batch_output_schema )
   ]
@@ -344,21 +343,6 @@ let test_anti_rationalization_reviewer_config_strips_preset_schema () =
     (has_no_response_format reviewer)
 ;;
 
-let test_failure_judgment_schema_uses_contract_ssot () =
-  let schema = Keeper_structured_output_schema.failure_judgment_output_schema in
-  check
-    (list string)
-    "failure judgment required fields"
-    [ "decision"; "guidance"; "rationale" ]
-    (required_strings schema);
-  check
-    (list string)
-    "failure judgment decision enum"
-    (List.sort String.compare Keeper_failure_judgment_contract.decision_tokens)
-    (schema |> schema_property "decision" |> enum_strings);
-  check bool "failure judgment verdict is closed" false
-    (allows_additional_properties schema)
-;;
 
 let test_board_attention_batch_schema_uses_contract_ssot () =
   let schema =
@@ -507,10 +491,6 @@ let () =
             "anti-rationalization reviewer config strips a pre-set schema"
             `Quick
             test_anti_rationalization_reviewer_config_strips_preset_schema
-        ; test_case
-            "failure judgment schema uses contract SSOT"
-            `Quick
-            test_failure_judgment_schema_uses_contract_ssot
         ; test_case
             "Board attention batch schema uses contract SSOT"
             `Quick

@@ -38,7 +38,6 @@ type advance_source =
   | Predispatch_rejection of candidate_visit
 
 type 'callback_error execution_error =
-  | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
   | Before_dispatch_persistence_failed of
       { cause : 'callback_error
@@ -56,15 +55,8 @@ type 'callback_error execution_error =
   | Domain_output_invalid of string
   | Domain_settlement_failed
 
-type 'callback_error guarded_callback_error =
-  | Durable_callback_failed of 'callback_error
-  | Owner_generation_unregistered
-
 type prepared =
-  { base_path : string
-  ; keeper_name : string
-  ; flow_scope : Keeper_exact_flow_scope.t
-  ; candidate : Keeper_board_attention_candidate.candidate
+  { candidate : Keeper_board_attention_candidate.candidate
   ; net : Eio_context.eio_net
   ; attempt : Exact_output.flow_attempt
   }
@@ -101,13 +93,7 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let registered_lane_id ~base_path ~keeper_name () =
-  match Keeper_registry.get ~base_path keeper_name with
-  | Some entry -> Some (Keeper_lane.id entry.lane)
-  | None -> None
-;;
-
-let prepare ~base_path ~keeper_name ~net candidate =
+let prepare ~base_path:_ ~keeper_name:_ ~net candidate =
   match
     ( Keeper_board_attention_candidate.resumable_status
         candidate.Keeper_board_attention_candidate.status
@@ -121,64 +107,38 @@ let prepare ~base_path ~keeper_name ~net candidate =
   | Some (Keeper_board_attention_candidate.Resumable_pending _), None ->
     Error Network_unavailable
   | Some (Keeper_board_attention_candidate.Resumable_pending _), Some net ->
-    let* flow_scope =
-      Keeper_exact_flow_scope.for_registered
-        ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
-        ~base_path
-        ~keeper_name
-        ~surface:Keeper_exact_flow_scope.Board_attention
+    let* messages =
+      messages candidate
+      |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
+    in
+    let* registry =
+      Runtime_exact_output_registry.current ()
       |> Result.map_error (fun _ -> Registry_unavailable)
     in
-    let prepare_current () =
-      let* messages =
-        messages candidate
-        |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
-      in
-      let* registry =
-        Runtime_exact_output_registry.current ()
-        |> Result.map_error (fun _ -> Registry_unavailable)
-      in
-      let* resolved =
-        Runtime_exact_output_registry.resolve_lane registry ~lane_id
-        |> Result.map_error (fun _ -> Lane_unavailable)
-      in
-      let* candidates = flow_candidates resolved.selected_slots in
-      match candidates with
-      | [] -> Error Lane_resolved_without_slots
-      | first :: rest ->
-        let requirement =
-          Exact_output.make_output_requirement
-            ~schema:
-              Keeper_structured_output_schema
-              .board_attention_judgment_batch_output_schema
-            ~minimum_guarantee:Exact_output.Json_syntax
-        in
-        let* snapshot =
-          Exact_output.snapshot_flow
-            ~preferences:
-              (Keeper_exact_flow_scope.preference_store flow_scope)
-            ~scope:(Keeper_exact_flow_scope.scope flow_scope)
-            ~first
-            ~rest
-            ~messages
-            requirement
-          |> Result.map_error (fun _ -> Flow_snapshot_failed)
-        in
-        let* attempt =
-          Exact_output.start_flow snapshot
-          |> Result.map_error (fun _ -> Flow_start_failed)
-        in
-        Ok { base_path; keeper_name; flow_scope; candidate; net; attempt }
+    let* resolved =
+      Runtime_exact_output_registry.resolve_lane registry ~lane_id
+      |> Result.map_error (fun _ -> Lane_unavailable)
     in
-    (match
-       Keeper_exact_flow_scope.with_current
-         flow_scope
-         ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
-         prepare_current
-     with
-     | Keeper_exact_flow_scope.Current result -> result
-     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-       Error Registry_unavailable)
+    let* candidates = flow_candidates resolved.selected_slots in
+    (match candidates with
+     | [] -> Error Lane_resolved_without_slots
+     | first :: rest ->
+       let requirement =
+         Exact_output.make_output_requirement
+           ~schema:
+             Keeper_structured_output_schema
+             .board_attention_judgment_batch_output_schema
+           ~minimum_guarantee:Exact_output.Json_syntax
+       in
+       let* snapshot =
+         Exact_output.snapshot_flow ~first ~rest ~messages requirement
+         |> Result.map_error (fun _ -> Flow_snapshot_failed)
+       in
+       let* attempt =
+         Exact_output.start_flow snapshot
+         |> Result.map_error (fun _ -> Flow_start_failed)
+       in
+       Ok { candidate; net; attempt })
 ;;
 
 let string_of_call_id call_id = Exact_output.call_id_to_string call_id
@@ -195,6 +155,21 @@ let attempt_provenance
       Exact_output.receipt_plan_fingerprint attempt.receipt
   ; request_body_sha256 =
       Exact_output.receipt_request_body_sha256 attempt.receipt
+  }
+;;
+
+let attempt_snapshot_provenance
+      (attempt : Exact_output.flow_attempt_snapshot)
+  =
+  { slot_id = attempt.visit.identity.candidate_id
+  ; call_id =
+      attempt.receipt
+      |> Exact_output.generation_receipt_snapshot_call_id
+      |> string_of_call_id
+  ; plan_fingerprint =
+      Exact_output.generation_receipt_snapshot_plan_fingerprint attempt.receipt
+  ; request_body_sha256 =
+      Exact_output.generation_receipt_snapshot_request_body_sha256 attempt.receipt
   }
 ;;
 
@@ -221,7 +196,7 @@ let advance_source_of_failure = function
 ;;
 
 let evidence_provenance (evidence : Exact_output.flow_evidence) =
-  List.map attempt_provenance evidence.attempts
+  List.map attempt_snapshot_provenance evidence.attempts
 ;;
 
 let admitted_candidate candidate_id admissions =
@@ -344,7 +319,6 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
 ;;
 
 type terminal_outcome =
-  | Owner_unregistered
   | Judgment_completed
   | Flow_replayed
   | Before_dispatch_persistence_failure
@@ -354,7 +328,6 @@ type terminal_outcome =
   | Invalid_domain_output
 
 let terminal_outcome_to_string = function
-  | Owner_unregistered -> "owner_unregistered_deferred"
   | Judgment_completed -> "judgment_completed"
   | Flow_replayed -> "flow_replayed"
   | Before_dispatch_persistence_failure -> "before_dispatch_persistence_failure"
@@ -365,7 +338,6 @@ let terminal_outcome_to_string = function
 ;;
 
 let terminal_outcome = function
-  | Error Owner_unregistered_deferred -> Owner_unregistered
   | Ok _ -> Judgment_completed
   | Error (Flow_already_started _) -> Flow_replayed
   | Error (Before_dispatch_persistence_failed _) ->
@@ -387,98 +359,48 @@ let observe_terminal prepared result =
 ;;
 
 let execute_current ?clock ~before_dispatch ~before_advance prepared =
-  let with_current callback =
-    match
-      Keeper_exact_flow_scope.with_current
-        prepared.flow_scope
-        ~registered_lane_id:
-          (registered_lane_id
-             ~base_path:prepared.base_path
-             ~keeper_name:prepared.keeper_name)
-        callback
-    with
-    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-      Error Owner_generation_unregistered
-    | Keeper_exact_flow_scope.Current (Error cause) ->
-      Error (Durable_callback_failed cause)
-    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
-  in
+  let bound = ref None in
   let oas_before_dispatch receipt =
-    with_current (fun () -> before_dispatch (attempt_provenance receipt))
+    let current = attempt_provenance receipt in
+    let* () =
+      match !bound with
+      | None -> Ok ()
+      | Some failed ->
+        before_advance
+          ~failed:(Executed_failure failed)
+          ~next:(candidate_visit receipt.visit)
+    in
+    let* () = before_dispatch current in
+    bound := Some current;
+    Ok ()
   in
   let oas_before_advance ~failed ~next =
-    with_current (fun () ->
+    let* () =
       before_advance
         ~failed:(advance_source_of_failure failed)
-        ~next:(candidate_visit next))
+        ~next:(candidate_visit next)
+    in
+    bound := None;
+    Ok ()
   in
-  let result =
-    match
-      Exact_output.execute_flow_once
-        ~net:prepared.net
-        ?clock
-        ~before_dispatch:oas_before_dispatch
-        ~before_advance:oas_before_advance
-        prepared.attempt
-    with
-    | Ok success ->
-      let judgment = judgment_of_success prepared.candidate success in
-      (match
-         Keeper_exact_flow_scope.with_settlement
-           prepared.flow_scope
-           ~registered_lane_id:
-             (registered_lane_id
-                ~base_path:prepared.base_path
-                ~keeper_name:prepared.keeper_name)
-           (fun () ->
-              match judgment with
-              | Ok judgment ->
-                (match
-                   Exact_output.settle_flow_domain
-                     success
-                     Exact_output.Domain_valid
-                 with
-                 | Ok _ -> Ok judgment
-                 | Error _ -> Error Domain_settlement_failed)
-              | Error error ->
-                ignore
-                  (Exact_output.settle_flow_domain
-                     success
-                     Exact_output.Domain_rejected
-                   : ( Exact_output.domain_settlement_receipt
-                     , Exact_output.domain_settlement_error )
-                       result);
-                Error error)
-       with
-       | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-         Error Owner_unregistered_deferred
-       | Keeper_exact_flow_scope.Current result -> result)
-    | Error (Exact_output.Flow_attempt_already_started evidence) ->
+  let validate flow_success =
+    match judgment_of_success prepared.candidate flow_success with
+    | Ok judgment -> Exact_output.Accept judgment
+    | Error rejection -> Exact_output.Reject_and_advance rejection
+  in
+  let terminal_error = function
+    | Exact_output.Flow_attempt_already_started evidence ->
       Error (Flow_already_started (evidence_provenance evidence))
-    | Error
-        (Exact_output.Flow_before_dispatch_callback_failed
-           { cause = Owner_generation_unregistered; _ }) ->
-      Error Owner_unregistered_deferred
-    | Error
-        (Exact_output.Flow_before_dispatch_callback_failed
-           { cause = Durable_callback_failed cause; evidence; candidate }) ->
+    | Exact_output.Flow_before_dispatch_callback_failed
+        { cause; evidence; candidate } ->
       Error
         (Before_dispatch_persistence_failed
            { cause
            ; current = attempt_provenance candidate
            ; evidence = evidence_provenance evidence
            })
-    | Error
-        (Exact_output.Flow_before_advance_callback_failed
-           { cause = Owner_generation_unregistered; _ }) ->
-      Error Owner_unregistered_deferred
-    | Error
-        (Exact_output.Flow_before_advance_callback_failed
-           { cause = Durable_callback_failed cause
-           ; evidence
-           ; failed
-           ; next
-           }) ->
+    | Exact_output.Flow_before_advance_callback_failed
+        { cause; evidence; failed; next } ->
       Error
         (Before_advance_persistence_failed
            { cause
@@ -486,45 +408,43 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
            ; next = candidate_visit next
            ; evidence = evidence_provenance evidence
            })
-    | Error (Exact_output.Flow_success_ordinal_exhausted evidence)
-    | Error (Exact_output.Flow_attempt_start_failed { evidence; _ })
-    | Error (Exact_output.Flow_candidates_exhausted { evidence; _ }) ->
+    | Exact_output.Flow_attempt_start_failed { evidence; _ }
+    | Exact_output.Flow_measurement_start_failed { evidence; _ }
+    | Exact_output.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
+    | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ }
+    | Exact_output.Flow_candidates_exhausted { evidence; _ }
+    | Exact_output.Flow_exact_execution_failed { evidence; _ } ->
       Error (Exact_execution_failed (evidence_provenance evidence))
+  in
+  let result =
+    match
+      Exact_output.execute_flow_once
+        ~net:prepared.net
+        ?clock
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:oas_before_dispatch
+        ~before_advance:oas_before_advance
+        ~validate
+        prepared.attempt
+    with
+    | Ok success -> Ok success.accepted
+    | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+      terminal_error cause
     | Error
-        (Exact_output.Flow_exact_execution_failed
-           { evidence; candidate = _; cause = _ }) ->
-      Error (Exact_execution_failed (evidence_provenance evidence))
+        (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
+      let rejection =
+        List.fold_left
+          (fun _ rejection -> rejection)
+          rejections.first
+          rejections.rest
+      in
+      Error rejection.rejection
   in
   observe_terminal prepared result;
   result
 ;;
 
-let with_current_generation prepared callback =
-  Keeper_exact_flow_scope.with_current
-    prepared.flow_scope
-    ~registered_lane_id:
-      (registered_lane_id
-         ~base_path:prepared.base_path
-         ~keeper_name:prepared.keeper_name)
-    callback
-;;
-
-let with_settlement_generation prepared callback =
-  Keeper_exact_flow_scope.with_settlement
-    prepared.flow_scope
-    ~registered_lane_id:
-      (registered_lane_id
-         ~base_path:prepared.base_path
-         ~keeper_name:prepared.keeper_name)
-    callback
-;;
-
 let execute ?clock ~before_dispatch ~before_advance prepared =
-  match
-    with_current_generation prepared (fun () -> ())
-  with
-  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-    Error Owner_unregistered_deferred
-  | Keeper_exact_flow_scope.Current () ->
-    execute_current ?clock ~before_dispatch ~before_advance prepared
+  execute_current ?clock ~before_dispatch ~before_advance prepared
 ;;

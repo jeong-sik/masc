@@ -36,10 +36,12 @@ check_boundary() {
   require_once "Exact_output.snapshot_flow"
   require_once "Exact_output.start_flow"
   require_once "Exact_output.execute_flow_once"
-  require_once "Exact_output.settle_flow_domain"
+
+  rg -q --fixed-strings "~validate" "${TARGET}" \
+    || fail "execute_flow_once must require caller-owned semantic validation"
 
   local forbidden_pattern
-  forbidden_pattern='Exact_output\.admit_flow|Exact_output\.admit([^_[:alnum:]]|$)|Exact_output\.(start_attempt|execute_once|receipt_phase|receipt_dispatch_count)|Exact_output\.effect_phase|type admitted_slot|is_before_dispatch_zero|ready_plan'
+  forbidden_pattern='Exact_output\.admit_flow|Exact_output\.admit([^_[:alnum:]]|$)|Exact_output\.(start_attempt|execute_once|receipt_phase|receipt_dispatch_count|execute_flow_once_validated|settle_flow_domain|create_flow_preference_store|make_flow_scope|remove_flow_preference_scope)|Exact_output\.effect_phase|Keeper_exact_flow_scope\.(preference_store|scope)|~preferences:|~scope:|type admitted_slot|is_before_dispatch_zero|ready_plan'
   if rg -n "${forbidden_pattern}" "${TARGET}"; then
     fail "MASC-local exact admission/attempt/receipt control flow is forbidden"
   fi
@@ -131,8 +133,7 @@ self_test() {
 let _ = Exact_output.make_flow_candidate
 let _ = Exact_output.snapshot_flow
 let _ = Exact_output.start_flow
-let _ = Exact_output.execute_flow_once
-let _ = Exact_output.settle_flow_domain
+let _ = Exact_output.execute_flow_once ~validate:ignore
 EOF
   printf '%s\n' 'let _ = ()' >"${adjacent}"
   clean="${fixture}/compaction.ml.clean"

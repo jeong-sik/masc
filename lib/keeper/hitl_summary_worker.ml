@@ -81,10 +81,7 @@ let output_requirement =
 ;;
 
 type prepared_flow =
-  { base_path : string
-  ; keeper_name : string
-  ; flow_scope : Keeper_exact_flow_scope.t
-  ; entry : pending_approval
+  { entry : pending_approval
   ; generated_at : float
   ; attempt : Exact_output.flow_attempt
   }
@@ -113,19 +110,12 @@ let flow_candidates selected_slots =
   loop [] selected_slots
 ;;
 
-let snapshot_resolved_lane
-      ~flow_scope
-      ~messages
-      (resolved : Registry.resolved_lane)
-  =
+let snapshot_resolved_lane ~messages (resolved : Registry.resolved_lane) =
   let* candidates = flow_candidates resolved.selected_slots in
   match candidates with
   | [] -> Error "HITL exact-output lane has no usable candidates"
   | first :: rest ->
     Exact_output.snapshot_flow
-      ~preferences:
-        (Keeper_exact_flow_scope.preference_store flow_scope)
-      ~scope:(Keeper_exact_flow_scope.scope flow_scope)
       ~first
       ~rest
       ~messages
@@ -134,14 +124,9 @@ let snapshot_resolved_lane
       "HITL exact-output flow snapshot failed")
 ;;
 
-let registered_lane_id ~base_path ~keeper_name () =
-  match Keeper_registry.get ~base_path keeper_name with
-  | Some registry_entry ->
-    Some (Keeper_lane.id registry_entry.lane)
-  | None -> None
-;;
-
-let prepare_flow_with_scope ~base_path ~keeper_name ~flow_scope ~(entry : pending_approval) =
+let prepare_flow
+      ~(entry : pending_approval)
+  =
   let* context_bundle =
     build_context_bundle ~entry
     |> Result.map_error context_bundle_error_to_string
@@ -159,47 +144,21 @@ let prepare_flow_with_scope ~base_path ~keeper_name ~flow_scope ~(entry : pendin
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  match
-    Keeper_exact_flow_scope.with_current
-      flow_scope
-      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
-      (fun () ->
-         let* snapshot =
-           snapshot_resolved_lane
-             ~flow_scope
-             ~messages:(messages_for_summary ~system_prompt ~context_bundle)
-             resolved
-         in
-         let* attempt =
-           Exact_output.start_flow snapshot
-           |> Result.map_error (fun _ ->
-             "HITL exact-output flow attempt allocation failed")
-         in
-         Ok
-           { base_path
-           ; keeper_name
-           ; flow_scope
-           ; entry
-           ; generated_at = Time_compat.now ()
-           ; attempt
-           })
-  with
-  | Keeper_exact_flow_scope.Current result -> result
-  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-    Error "HITL exact-output owner generation is no longer registered"
-;;
-
-let prepare_flow ~(entry : pending_approval) =
-  let base_path = entry.audit_base_path in
-  let keeper_name = entry.keeper_name in
-  let* flow_scope =
-    Keeper_exact_flow_scope.for_registered
-      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
-      ~base_path
-      ~keeper_name
-      ~surface:Keeper_exact_flow_scope.Hitl_summary
+  let* snapshot =
+    snapshot_resolved_lane
+      ~messages:(messages_for_summary ~system_prompt ~context_bundle)
+      resolved
   in
-  prepare_flow_with_scope ~base_path ~keeper_name ~flow_scope ~entry
+  let* attempt =
+    Exact_output.start_flow snapshot
+    |> Result.map_error (fun _ ->
+      "HITL exact-output flow attempt allocation failed")
+  in
+  Ok
+    { entry
+    ; generated_at = Time_compat.now ()
+    ; attempt
+    }
 ;;
 
 let snapshot_topology_readiness () =
@@ -209,36 +168,21 @@ let snapshot_topology_readiness () =
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  let preference_store =
-    Exact_output.create_flow_preference_store ~capacity:1
-    |> Result.get_ok
-  in
-  let scope =
-    Exact_output.make_flow_scope ~id:"masc:hitl-readiness"
-    |> Result.get_ok
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      ignore
-        (Exact_output.remove_flow_preference_scope preference_store scope))
-    (fun () ->
-       let* candidates = flow_candidates resolved.selected_slots in
-       match candidates with
-       | [] -> Error "HITL exact-output lane has no usable candidates"
-       | first :: rest ->
-         Exact_output.snapshot_flow
-           ~preferences:preference_store
-           ~scope
-           ~first
-           ~rest
-           ~messages:
-             (messages_for_summary
-                ~system_prompt
-                ~context_bundle:(`Assoc []))
-           output_requirement
-         |> Result.map (fun _ -> ())
-         |> Result.map_error (fun _ ->
-           "HITL exact-output readiness snapshot failed"))
+  let* candidates = flow_candidates resolved.selected_slots in
+  match candidates with
+  | [] -> Error "HITL exact-output lane has no usable candidates"
+  | first :: rest ->
+    Exact_output.snapshot_flow
+      ~first
+      ~rest
+      ~messages:
+        (messages_for_summary
+           ~system_prompt
+           ~context_bundle:(`Assoc []))
+      output_requirement
+    |> Result.map (fun _ -> ())
+    |> Result.map_error (fun _ ->
+      "HITL exact-output readiness snapshot failed")
 ;;
 
 (* ── MASC domain validation ─────────────────────── *)
@@ -443,10 +387,6 @@ let flow_callback_rejection = function
     None
 ;;
 
-type guarded_flow_callback_error =
-  | Durable_flow_callback_failed of flow_callback_error
-  | Owner_generation_unregistered
-
 let before_dispatch ~queue_ops (entry : pending_approval) candidate =
   let identity = exact_identity_of_candidate candidate in
   match bind_exact_attempt queue_ops entry identity with
@@ -497,7 +437,6 @@ exception Exact_terminalization_identity_unbound of string
 exception Cancelled_identity_unbound of exn * Printexc.raw_backtrace
 exception Cancelled_exact_rejected of
   exn * Printexc.raw_backtrace * exact_attempt_rejection
-exception Cancelled_owner_unregistered of exn * Printexc.raw_backtrace
 
 type exact_settlement_error =
   | Exact_settlement_identity_unbound of string
@@ -506,7 +445,6 @@ type exact_settlement_error =
 
 type cancellation_settlement =
   | Cancellation_settled
-  | Cancellation_owner_generation_deferred
   | Cancellation_exact_settlement_failed of exact_settlement_error
   | Cancellation_settlement_raised of string
 
@@ -771,41 +709,33 @@ let success_provenance_matches (flow_success : Exact_output.flow_success) =
        (Exact_output.receipt_target_identity candidate.receipt)
   && same_catalog_generation
        identity.catalog_generation
-       provenance.catalog_generation
-  && same_catalog_evidence identity.catalog_evidence provenance.catalog_evidence
-  && same_target_identity identity.target_identity provenance.target_identity
+       (Exact_output.plan_provenance_catalog_generation provenance)
+  && same_catalog_evidence
+       identity.catalog_evidence
+       (Exact_output.plan_provenance_catalog_evidence provenance)
+  && same_target_identity
+       identity.target_identity
+       (Exact_output.plan_provenance_target_identity provenance)
 ;;
 
 (* ── Flow terminalization ───────────────────────── *)
 
-let handle_success
-      ~queue_ops
-      (prepared : prepared_flow)
-      ~on_summary
-      (flow_success : Exact_output.flow_success)
-  =
-  let entry = prepared.entry in
-  let candidate = Exact_output.flow_success_candidate flow_success in
-  let success = Exact_output.flow_success_output flow_success in
+type semantic_rejection =
+  | Semantic_provenance_mismatch
+  | Semantic_domain_invalid of string
+
+let validate_success (prepared : prepared_flow) flow_success =
   if not (success_provenance_matches flow_success)
-  then (
-    ignore
-      (Exact_output.settle_flow_domain
-         flow_success
-         Exact_output.Domain_rejected
-       : (Exact_output.domain_settlement_receipt, Exact_output.domain_settlement_error) result);
-    record_outcome "exact_provenance_mismatch";
-    quarantine_candidate
-      ~queue_ops
-      entry
-      candidate
-      Exact_flow_execution_failed)
+  then Exact_output.Reject_and_advance Semantic_provenance_mismatch
   else
     let call_id =
-      candidate.receipt
+      flow_success
+      |> Exact_output.flow_success_candidate
+      |> fun candidate -> candidate.receipt
       |> Exact_output.receipt_call_id
       |> Exact_output.call_id_to_string
     in
+    let success = Exact_output.flow_success_output flow_success in
     match
       parse_summary
         ~generated_at:prepared.generated_at
@@ -813,58 +743,76 @@ let handle_success
         success.output
     with
     | Error detail ->
-      ignore
-        (Exact_output.settle_flow_domain
-           flow_success
-           Exact_output.Domain_rejected
-         : (Exact_output.domain_settlement_receipt, Exact_output.domain_settlement_error) result);
-      record_outcome "exact_domain_invalid_output";
-      log_exact_error entry "domain validation" detail;
-      quarantine_candidate
-        ~queue_ops
-        entry
-        candidate
-        Exact_domain_invalid_output
-    | Ok summary ->
-      let identity = exact_identity_of_candidate candidate in
-      (match
-         Exact_output.settle_flow_domain
-           flow_success
-           Exact_output.Domain_valid
-       with
-       | Error _ ->
-         record_outcome "exact_domain_settlement_failed";
-         quarantine_identity
-           ~queue_ops
-           entry
-           identity
-           Exact_flow_execution_failed
-       | Ok _ ->
-         (match complete_exact_attempt queue_ops entry identity summary with
-          | Ok { write_outcome = Fsync_completed; _ } ->
-            record_outcome "ok_summary";
-            on_summary summary
-          | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-            record_outcome "exact_terminal_sync_unconfirmed";
-            signal_terminalization_persistence_failure
-              entry
-              "completion sync"
-              detail
-          | Error error when exact_attempt_source_resolved entry error ->
-            record_outcome "exact_source_resolved"
-          | Error (Exact_attempt_rejected rejection) ->
-            raise (Exact_terminalization_rejected rejection)
-          | Error (Exact_attempt_storage_error error) ->
-            record_outcome "exact_terminal_persistence_failure";
-            log_exact_error
-              entry
-              "completion"
-              (Keeper_approval_queue.storage_error_to_string error);
-            quarantine_identity
-              ~queue_ops
-              entry
-              identity
-              Exact_terminal_persistence_failure))
+      Exact_output.Reject_and_advance (Semantic_domain_invalid detail)
+    | Ok summary -> Exact_output.Accept summary
+;;
+
+let handle_validated_success
+      ~queue_ops
+      (prepared : prepared_flow)
+      ~on_summary
+      (flow_success : Exact_output.flow_success)
+      summary
+  =
+  let entry = prepared.entry in
+  let candidate = Exact_output.flow_success_candidate flow_success in
+  let identity = exact_identity_of_candidate candidate in
+  match complete_exact_attempt queue_ops entry identity summary with
+  | Ok { write_outcome = Fsync_completed; _ } ->
+    record_outcome "ok_summary";
+    on_summary summary
+  | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+    record_outcome "exact_terminal_sync_unconfirmed";
+    signal_terminalization_persistence_failure
+      entry
+      "completion sync"
+      detail
+  | Error error when exact_attempt_source_resolved entry error ->
+    record_outcome "exact_source_resolved"
+  | Error (Exact_attempt_rejected rejection) ->
+    raise (Exact_terminalization_rejected rejection)
+  | Error (Exact_attempt_storage_error error) ->
+    record_outcome "exact_terminal_persistence_failure";
+    log_exact_error
+      entry
+      "completion"
+      (Keeper_approval_queue.storage_error_to_string error);
+    quarantine_identity
+      ~queue_ops
+      entry
+      identity
+      Exact_terminal_persistence_failure
+;;
+
+let last_semantic_rejection
+      (trace : semantic_rejection Exact_output.semantic_rejection_trace)
+  =
+  List.fold_left
+    (fun _ rejection -> rejection)
+    trace.first
+    trace.rest
+;;
+
+let handle_semantic_exhaustion ~queue_ops (prepared : prepared_flow) trace =
+  let rejection = last_semantic_rejection trace in
+  let flow_success = rejection.transport_success in
+  let candidate = Exact_output.flow_success_candidate flow_success in
+  match rejection.rejection with
+  | Semantic_provenance_mismatch ->
+    record_outcome "exact_provenance_mismatch";
+    quarantine_candidate
+      ~queue_ops
+      prepared.entry
+      candidate
+      Exact_flow_execution_failed
+  | Semantic_domain_invalid detail ->
+    record_outcome "exact_domain_invalid_output";
+    log_exact_error prepared.entry "domain validation" detail;
+    quarantine_candidate
+      ~queue_ops
+      prepared.entry
+      candidate
+      Exact_domain_invalid_output
 ;;
 
 let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
@@ -875,27 +823,19 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
       prepared.entry
       ~reason:"HITL exact-output flow attempt was replayed"
       ~cause:Exact_attempt_replay
-  | Exact_output.Flow_success_ordinal_exhausted evidence ->
-    record_outcome "exact_success_ordinal_exhausted";
-    (match List.rev evidence.attempts with
-     | candidate :: _ ->
-       quarantine_candidate
-         ~queue_ops
-         prepared.entry
-         candidate
-         Exact_flow_execution_failed
-     | [] ->
-       settle_current_or_signal
-         ~queue_ops
-         prepared.entry
-         ~reason:"HITL exact-output success ordinal allocation failed"
-         ~cause:Exact_flow_execution_failed)
   | Exact_output.Flow_attempt_start_failed _ ->
     record_outcome "exact_attempt_start_failed";
     settle_current_or_signal
       ~queue_ops
       prepared.entry
       ~reason:"HITL exact-output candidate attempt allocation failed"
+      ~cause:Exact_flow_execution_failed
+  | Exact_output.Flow_measurement_start_failed _ ->
+    record_outcome "exact_measurement_start_failed";
+    settle_current_or_signal
+      ~queue_ops
+      prepared.entry
+      ~reason:"HITL exact-output measurement allocation failed"
       ~cause:Exact_flow_execution_failed
   | Exact_output.Flow_candidates_exhausted _ ->
     record_outcome "exact_candidates_exhausted";
@@ -904,8 +844,21 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
       prepared.entry
       ~reason:"HITL exact-output candidates exhausted before dispatch"
       ~cause:Exact_flow_execution_failed
+  | Exact_output.Flow_before_measurement_dispatch_callback_failed
+      { cause; _ }
+  | Exact_output.Flow_measurement_terminal_callback_failed
+      { cause; _ } ->
+    record_outcome "exact_measurement_callback_failed";
+    (match flow_callback_rejection cause with
+     | Some rejection -> raise (Exact_terminalization_rejected rejection)
+     | None ->
+       settle_current_or_signal
+         ~queue_ops
+         prepared.entry
+         ~reason:(flow_callback_error_to_string cause)
+         ~cause:Exact_terminal_persistence_failure)
   | Exact_output.Flow_before_dispatch_callback_failed
-      { candidate; cause = Durable_flow_callback_failed cause; _ } ->
+      { candidate; cause; _ } ->
     record_outcome "exact_bind_failed";
     (match flow_callback_rejection cause with
      | Some rejection -> raise (Exact_terminalization_rejected rejection)
@@ -916,11 +869,8 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          ~reason:(flow_callback_error_to_string cause)
          ~cause:Exact_terminal_persistence_failure);
     ignore candidate
-  | Exact_output.Flow_before_dispatch_callback_failed
-      { cause = Owner_generation_unregistered; _ } ->
-    ()
   | Exact_output.Flow_before_advance_callback_failed
-      { failed; cause = Durable_flow_callback_failed cause; _ } ->
+      { failed; cause; _ } ->
     record_outcome "exact_release_failed";
     (match flow_callback_rejection cause with
      | Some rejection -> raise (Exact_terminalization_rejected rejection)
@@ -931,9 +881,6 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          ~reason:(flow_callback_error_to_string cause)
          ~cause:Exact_terminal_persistence_failure);
     ignore failed
-  | Exact_output.Flow_before_advance_callback_failed
-      { cause = Owner_generation_unregistered; _ } ->
-    ()
   | Exact_output.Flow_exact_execution_failed { candidate; _ } ->
     record_outcome "exact_execution_failed";
     quarantine_candidate
@@ -947,27 +894,6 @@ type execution_boundary =
   | Executed
   | Identity_unbound_blocked
   | Exact_rejection_blocked of exact_attempt_rejection
-  | Deferred_unregistered
-
-let with_current_generation (prepared : prepared_flow) callback =
-  Keeper_exact_flow_scope.with_current
-    prepared.flow_scope
-    ~registered_lane_id:
-      (registered_lane_id
-         ~base_path:prepared.base_path
-         ~keeper_name:prepared.keeper_name)
-    callback
-;;
-
-let with_settlement_generation (prepared : prepared_flow) callback =
-  Keeper_exact_flow_scope.with_settlement
-    prepared.flow_scope
-    ~registered_lane_id:
-      (registered_lane_id
-         ~base_path:prepared.base_path
-         ~keeper_name:prepared.keeper_name)
-    callback
-;;
 
 let execute_prepared_flow_with_queue_ops_current
       ~queue_ops
@@ -976,56 +902,77 @@ let execute_prepared_flow_with_queue_ops_current
       ~on_summary
       (prepared : prepared_flow)
   =
+  let bound_candidate = ref None in
   let guarded_before_dispatch candidate =
-    match with_current_generation prepared (fun () ->
-      before_dispatch ~queue_ops prepared.entry candidate)
-    with
-    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-      Error Owner_generation_unregistered
-    | Keeper_exact_flow_scope.Current (Error cause) ->
-      Error (Durable_flow_callback_failed cause)
-    | Keeper_exact_flow_scope.Current (Ok ()) ->
-      queue_ops.after_bind ();
-      Ok ()
+    let* () =
+      match !bound_candidate with
+      | None -> Ok ()
+      | Some previous ->
+        let identity = exact_identity_of_candidate previous in
+        (match release_exact_attempt queue_ops prepared.entry identity with
+         | Ok { write_outcome = Fsync_completed; _ } ->
+           bound_candidate := None;
+           Ok ()
+         | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+           Error (Exact_release_sync_unconfirmed detail)
+         | Error error ->
+           Error (Exact_release_failed error))
+    in
+    let* () = before_dispatch ~queue_ops prepared.entry candidate in
+    bound_candidate := Some candidate;
+    queue_ops.after_bind ();
+    Ok ()
   in
   let guarded_before_advance ~failed ~next =
-    match with_current_generation prepared (fun () ->
-      before_advance ~queue_ops prepared.entry ~failed ~next)
-    with
-    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-      Error Owner_generation_unregistered
-    | Keeper_exact_flow_scope.Current (Error cause) ->
-      Error (Durable_flow_callback_failed cause)
-    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
-  in
-  let settle_current_generation callback =
-    match with_settlement_generation prepared callback with
-    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-      Deferred_unregistered
-    | Keeper_exact_flow_scope.Current () -> Executed
+    let* () = before_advance ~queue_ops prepared.entry ~failed ~next in
+    (match failed with
+     | Exact_output.Flow_candidate_rejected _ -> ()
+     | Exact_output.Flow_candidate_execution_failed _ ->
+       bound_candidate := None);
+    Ok ()
   in
   try
     match
       Exact_output.execute_flow_once
         ~net
         ?clock
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_dispatch:guarded_before_dispatch
         ~before_advance:guarded_before_advance
+        ~validate:(validate_success prepared)
         prepared.attempt
     with
     | Ok success ->
-      settle_current_generation (fun () ->
-        handle_success ~queue_ops prepared ~on_summary success)
+      handle_validated_success
+        ~queue_ops
+        prepared
+        ~on_summary
+        success.transport_success
+        success.accepted;
+      Executed
     | Error
-        (Exact_output.Flow_before_dispatch_callback_failed
-           { cause = Owner_generation_unregistered; _ })
+        (Exact_output.Flow_execution_terminal
+           { cause = (Exact_output.Flow_candidates_exhausted _ as cause); _ }) ->
+      (match !bound_candidate with
+       | Some candidate ->
+         record_outcome "exact_domain_invalid_output";
+         quarantine_candidate
+           ~queue_ops
+           prepared.entry
+           candidate
+           Exact_domain_invalid_output
+       | None ->
+         handle_flow_error ~queue_ops prepared cause);
+      Executed
+    | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+      handle_flow_error ~queue_ops prepared cause;
+      Executed
     | Error
-        (Exact_output.Flow_before_advance_callback_failed
-           { cause = Owner_generation_unregistered; _ }) ->
-      Deferred_unregistered
-    | Error error ->
-      settle_current_generation (fun () ->
-        handle_flow_error ~queue_ops prepared error)
+        (Exact_output.Flow_semantic_candidates_exhausted
+           { rejections; _ }) ->
+      handle_semantic_exhaustion ~queue_ops prepared rejections;
+      Executed
   with
   | Eio.Cancel.Cancelled _ as cancellation ->
     let cancellation_backtrace = Printexc.get_raw_backtrace () in
@@ -1045,21 +992,18 @@ let execute_prepared_flow_with_queue_ops_current
       try
         Eio.Cancel.protect
         @@ fun () ->
-        match
-          with_settlement_generation prepared (fun () ->
-            record_outcome "exact_cancellation";
-            settle_current
-              ~queue_ops
-              prepared.entry
-              ~reason:"HITL exact-output flow was cancelled"
-              ~cause:Exact_cancellation)
-        with
-        | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-          Cancellation_owner_generation_deferred
-        | Keeper_exact_flow_scope.Current (Ok ()) ->
+        record_outcome "exact_cancellation";
+        (match
+           settle_current
+             ~queue_ops
+             prepared.entry
+             ~reason:"HITL exact-output flow was cancelled"
+             ~cause:Exact_cancellation
+         with
+        | Ok () ->
           Cancellation_settled
-        | Keeper_exact_flow_scope.Current (Error error) ->
-          Cancellation_exact_settlement_failed error
+        | Error error ->
+          Cancellation_exact_settlement_failed error)
       with
       | exn ->
         Cancellation_settlement_raised
@@ -1098,11 +1042,7 @@ let execute_prepared_flow_with_queue_ops_current
          (Exact_settlement_rejected rejection) ->
        raise
          (Cancelled_exact_rejected
-            (cancellation, cancellation_backtrace, rejection))
-     | Cancellation_owner_generation_deferred ->
-       raise
-         (Cancelled_owner_unregistered
-            (cancellation, cancellation_backtrace)))
+            (cancellation, cancellation_backtrace, rejection)))
   | Exact_terminalization_persistence_failed _ as persistence_failure ->
     raise persistence_failure
   | Exact_terminalization_rejected rejection ->
@@ -1122,19 +1062,15 @@ let execute_prepared_flow_with_queue_ops_current
     let settlement =
       Eio.Cancel.protect
       @@ fun () ->
-      with_settlement_generation prepared (fun () ->
-        settle_current
-          ~queue_ops
-          prepared.entry
-          ~reason:("HITL exact-output worker crashed: " ^ detail)
-          ~cause:Exact_terminal_persistence_failure)
+      settle_current
+        ~queue_ops
+        prepared.entry
+        ~reason:("HITL exact-output worker crashed: " ^ detail)
+        ~cause:Exact_terminal_persistence_failure
     in
     (match settlement with
-     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-       Deferred_unregistered
-     | Keeper_exact_flow_scope.Current (Ok ()) -> Executed
-     | Keeper_exact_flow_scope.Current
-         (Error (Exact_settlement_identity_unbound detail)) ->
+     | Ok () -> Executed
+     | Error (Exact_settlement_identity_unbound detail) ->
        (match persist_identity_unbound prepared.entry with
         | Ok () ->
           record_outcome "exact_identity_unbound";
@@ -1149,14 +1085,12 @@ let execute_prepared_flow_with_queue_ops_current
             prepared.entry
             "identity-unbound observation"
             marker_detail)
-     | Keeper_exact_flow_scope.Current
-         (Error (Exact_settlement_persistence_failed detail)) ->
+     | Error (Exact_settlement_persistence_failed detail) ->
        signal_terminalization_persistence_failure
          prepared.entry
          "crash terminalization persistence"
          detail
-     | Keeper_exact_flow_scope.Current
-         (Error (Exact_settlement_rejected rejection)) ->
+     | Error (Exact_settlement_rejected rejection) ->
        raise (Exact_terminalization_rejected rejection))
 ;;
 
@@ -1167,24 +1101,12 @@ let execute_prepared_flow_with_queue_ops
       ~on_summary
       (prepared : prepared_flow)
   =
-  match
-    Keeper_exact_flow_scope.with_current
-      prepared.flow_scope
-      ~registered_lane_id:
-        (registered_lane_id
-           ~base_path:prepared.base_path
-           ~keeper_name:prepared.keeper_name)
-      (fun () -> ())
-  with
-  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-    Deferred_unregistered
-  | Keeper_exact_flow_scope.Current () ->
-    execute_prepared_flow_with_queue_ops_current
-      ~queue_ops
-      ~net
-      ?clock
-      ~on_summary
-      prepared
+  execute_prepared_flow_with_queue_ops_current
+    ~queue_ops
+    ~net
+    ?clock
+    ~on_summary
+    prepared
 ;;
 
 let execute_prepared_flow ~net ?clock ~on_summary prepared =
@@ -1201,11 +1123,9 @@ type finish_outcome =
   | Terminalization_persistence_uncertain
   | Terminalization_identity_unbound
   | Terminalization_rejected
-  | Owner_unregistered_deferred
 
 type spawn_outcome =
   | Worker_forked
-  | Worker_not_forked_owner_unregistered
 
 let spawn_with
       ~queue_ops
@@ -1222,13 +1142,6 @@ let spawn_with
          ~none:"HITL exact-output flow: Eio net is unavailable"
   in
   match prepare_flow ~entry with
-  | Error _
-    when not
-           (Keeper_registry.is_registered
-              ~base_path:entry.audit_base_path
-              entry.keeper_name) ->
-    on_finish Owner_unregistered_deferred;
-    Ok Worker_not_forked_owner_unregistered
   | Error detail -> Error detail
   | Ok prepared ->
     let clock = Eio_context.get_clock_opt () in
@@ -1246,7 +1159,6 @@ let spawn_with
         | Executed -> `Completed
         | Identity_unbound_blocked -> `Identity_unbound
         | Exact_rejection_blocked rejection -> `Rejected rejection
-        | Deferred_unregistered -> `Owner_unregistered
       with
       | Cancelled_identity_unbound
           (cancellation, cancellation_backtrace) ->
@@ -1256,10 +1168,6 @@ let spawn_with
           (cancellation, cancellation_backtrace, rejection) ->
         `Cancelled_rejected
           (cancellation, cancellation_backtrace, rejection)
-      | Cancelled_owner_unregistered
-          (cancellation, cancellation_backtrace) ->
-        `Cancelled_owner_unregistered
-          (cancellation, cancellation_backtrace)
       | Cancelled_uncertain (cancellation, cancellation_backtrace, detail) ->
         `Cancelled_uncertain
           (cancellation, cancellation_backtrace, detail)
@@ -1288,14 +1196,9 @@ let spawn_with
         (cancellation, cancellation_backtrace, _rejection) ->
       on_finish Terminalization_rejected;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
-    | `Cancelled_owner_unregistered
-        (cancellation, cancellation_backtrace) ->
-      on_finish Owner_unregistered_deferred;
-      Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Identity_unbound ->
       on_finish Terminalization_identity_unbound
     | `Rejected _ -> on_finish Terminalization_rejected
-    | `Owner_unregistered -> on_finish Owner_unregistered_deferred
     | `Uncertain uncertainty ->
       on_finish Terminalization_persistence_uncertain;
       raise uncertainty);

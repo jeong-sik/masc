@@ -512,7 +512,6 @@ let rejection_disposition = function
       (Keeper_event_queue_state.Exact_execution_terminal terminal)
   | Exact_lane_unconfigured ->
     Terminal_no_compaction Keeper_event_queue_state.Exact_lane_unconfigured
-  | Exact_owner_unregistered_deferred -> Owner_generation_deferred
   | Invalid_compaction_plan
   | Exact_target_selection_failed
   | Exact_admission_failed
@@ -608,10 +607,6 @@ let no_compaction_of_uncommitted_prepared
       prepared
       (Commit_completion_failed { error; committed = None });
     Uncommitted_failed error
-  | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
-    Uncommitted_failed
-      (Compaction_rejected
-         Keeper_compact_policy.Exact_owner_unregistered_deferred)
 ;;
 
 let prepare_compaction_admitted
@@ -752,6 +747,7 @@ let prepare_compaction_with
      asked for this one, and refusing it would leave no way to intervene. *)
   | Compaction_trigger.Provider_overflow _
   | Compaction_trigger.Request_body_over_capacity _
+  | Compaction_trigger.Request_body_refused_by_provider _
   | Compaction_trigger.Serving_input_capacity
       (Compaction_trigger.Boundary_unknown _)
   | Compaction_trigger.Serving_input_capacity
@@ -764,6 +760,7 @@ let prepare_compaction_with
          })
   | Compaction_trigger.Provider_overflow _
   | Compaction_trigger.Request_body_over_capacity _
+  | Compaction_trigger.Request_body_refused_by_provider _
   | Compaction_trigger.Serving_input_capacity
       (Compaction_trigger.Boundary_unknown _)
   | Compaction_trigger.Serving_input_capacity
@@ -798,8 +795,8 @@ let prepare_compaction
 
 let commit_prepared_compaction_with
     ?(after_checkpoint_installed = fun () -> ())
-    ?(settle_post_success_domain_valid =
-      Keeper_compaction_llm_summarizer.settle_post_success_domain_valid)
+    ?(complete_post_success_commit =
+      Keeper_compaction_llm_summarizer.complete_post_success_commit)
     ~save_oas_checkpoint_if_source
     (prepared : prepared_compaction)
   : prepared_commit_outcome =
@@ -853,10 +850,6 @@ let commit_prepared_compaction_with
         (_, detail)
     | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
       commit_failure (Checkpoint_candidate_failed detail)
-    | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
-      commit_failure
-        (Compaction_rejected
-           Keeper_compact_policy.Exact_owner_unregistered_deferred)
   in
   let terminalize_claimed cause =
     Keeper_compaction_llm_summarizer.terminalize_claimed_commit
@@ -905,7 +898,7 @@ let commit_prepared_compaction_with
         | Ok () ->
           after_checkpoint_installed ();
           (match
-             settle_post_success_domain_valid post_success_terminalizer
+             complete_post_success_commit post_success_terminalizer
            with
            | Error detail ->
              publish_owner
@@ -1011,11 +1004,7 @@ let commit_prepared_compaction_with
       prepared.post_success_terminalizer
       commit_claimed
   with
-  | Keeper_compaction_llm_summarizer.Post_success_commit_owner_unregistered_deferred ->
-    commit_failure
-      (Compaction_rejected
-         Keeper_compact_policy.Exact_owner_unregistered_deferred)
-  | Keeper_compaction_llm_summarizer.Post_success_commit_owner_result result ->
+  | Keeper_compaction_llm_summarizer.Post_success_commit_result result ->
     result
   | Keeper_compaction_llm_summarizer.Post_success_commit_in_progress _ ->
     Commit_in_progress prepared.commit_waiter
@@ -1032,36 +1021,15 @@ let commit_prepared_compaction prepared =
 ;;
 
 module For_testing = struct
-  type domain_valid_failure =
-    | Domain_valid_error of string
-    | Domain_valid_exception of exn
-
   let commit_prepared_compaction_with_history
         ?after_checkpoint_installed
-        ?domain_valid_failure
+        ?complete_post_success_commit
         ~save_oas_history
         prepared
     =
-    let settle_post_success_domain_valid =
-      match domain_valid_failure with
-      | None ->
-        Keeper_compaction_llm_summarizer.settle_post_success_domain_valid
-      | Some (Domain_valid_error detail) ->
-        (fun terminalizer ->
-           Keeper_compaction_llm_summarizer.For_testing
-           .settle_post_success_domain_valid_with_error
-             terminalizer
-             detail)
-      | Some (Domain_valid_exception exn) ->
-        (fun terminalizer ->
-           Keeper_compaction_llm_summarizer.For_testing
-           .settle_post_success_domain_valid_with_exception
-             terminalizer
-             exn)
-    in
     commit_prepared_compaction_with
       ?after_checkpoint_installed
-      ~settle_post_success_domain_valid
+      ?complete_post_success_commit
       ~save_oas_checkpoint_if_source:
         (Keeper_context_core.For_testing.save_oas_checkpoint_if_source_with_history
            ~save_oas_history)

@@ -60,21 +60,25 @@ check_boundary() {
     "$WORKER" \
     "worker must execute only the affine OAS flow"
   require_pattern \
-    'let guarded_before_dispatch[[:space:]]+candidate[[:space:]]*=[[:space:]]*match[[:space:]]+with_current_generation[[:space:]]+prepared[[:space:]]+\(fun[[:space:]]+\(\)[[:space:]]*->[[:space:]]*before_dispatch[[:space:]]+~queue_ops[[:space:]]+prepared\.entry[[:space:]]+candidate\)' \
+    '~validate([^_[:alnum:]]|$)' \
     "$WORKER" \
-    "guarded before_dispatch must call the durable queue authority inside the owner-generation fence"
+    "worker must provide caller-owned semantic validation"
   require_pattern \
-    'let guarded_before_advance[[:space:]]+~failed[[:space:]]+~next[[:space:]]*=[[:space:]]*match[[:space:]]+with_current_generation[[:space:]]+prepared[[:space:]]+\(fun[[:space:]]+\(\)[[:space:]]*->[[:space:]]*before_advance[[:space:]]+~queue_ops[[:space:]]+prepared\.entry[[:space:]]+~failed[[:space:]]+~next\)' \
+    'before_dispatch[[:space:]]+~queue_ops[[:space:]]+prepared\.entry[[:space:]]+candidate' \
     "$WORKER" \
-    "guarded before_advance must call the durable queue authority inside the owner-generation fence"
+    "guarded before_dispatch must call the durable queue authority directly"
+  require_pattern \
+    'before_advance[[:space:]]+~queue_ops[[:space:]]+prepared\.entry[[:space:]]+~failed[[:space:]]+~next' \
+    "$WORKER" \
+    "guarded before_advance must call the durable queue authority directly"
   require_pattern \
     '~before_dispatch:guarded_before_dispatch' \
     "$WORKER" \
-    "execute_flow_once must use the owner-generation-guarded durable bind callback"
+    "execute_flow_once must use the durable bind callback"
   require_pattern \
     '~before_advance:guarded_before_advance' \
     "$WORKER" \
-    "execute_flow_once must use the owner-generation-guarded durable advance callback"
+    "execute_flow_once must use the durable advance callback"
   require_pattern \
     '~bind:Keeper_approval_queue\.bind_summary_exact_attempt' \
     "$WORKER" \
@@ -136,6 +140,10 @@ check_boundary() {
     'Exact_output\.(admit|start_attempt|execute_once)([^_[:alnum:]]|$)' \
     "$WORKER" \
     "worker must not reconstruct a candidate loop from legacy one-shot APIs"
+  forbid_pattern \
+    'Exact_output\.(execute_flow_once_validated|settle_flow_domain|create_flow_preference_store|make_flow_scope|remove_flow_preference_scope)|Keeper_exact_flow_scope\.(preference_store|scope)|~preferences:|~scope:' \
+    "$WORKER" \
+    "worker must use caller-declared snapshots and the sole validated flow surface"
   forbid_pattern \
     'Exact_output\.(receipt_phase|receipt_dispatch_count)|exact_execution_failed_before_dispatch' \
     "$WORKER" \

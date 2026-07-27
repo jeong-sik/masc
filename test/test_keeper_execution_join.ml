@@ -352,6 +352,37 @@ let test_request_body_too_large_projection_preserves_bounds () =
     (Some 1_048_576)
     (int_of_field (member "limit_bytes" projection.error_detail))
 
+let test_provider_request_body_refusal_projection_preserves_status () =
+  let projection =
+    Error_json.agent_failed_error_projection
+      (Agent_sdk.Error.Api
+         (Agent_sdk.Retry.InvalidRequest
+            { message = "payload too large"
+            ; reason =
+                Agent_sdk.Retry.Request_body_refused_by_provider { status = 413 }
+            }))
+  in
+  check
+    (option string)
+    "typed variant"
+    (Some "invalid_request")
+    (string_of_field (member "variant" projection.error_detail));
+  check
+    (option string)
+    "typed reason"
+    (Some "request_body_refused_by_provider")
+    (string_of_field (member "reason" projection.error_detail));
+  check
+    (option int)
+    "provider refusal status"
+    (Some 413)
+    (int_of_field (member "status" projection.error_detail));
+  check
+    bool
+    "unknown byte limit is not fabricated"
+    true
+    (Option.is_none (member "limit_bytes" projection.error_detail))
+
 let test_input_capacity_projection_preserves_evidence () =
   let constraint_ =
     Llm_provider.Serving_constraint.make
@@ -428,6 +459,8 @@ let () =
             test_authorization_errors_have_typed_projection
         ; test_case "request body size preserves typed bounds" `Quick
             test_request_body_too_large_projection_preserves_bounds
+        ; test_case "provider request body refusal preserves status" `Quick
+            test_provider_request_body_refusal_projection_preserves_status
         ; test_case "input capacity preserves typed evidence" `Quick
             test_input_capacity_projection_preserves_evidence
         ] )

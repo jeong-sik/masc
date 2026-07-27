@@ -1008,214 +1008,12 @@ let test_requeue_and_escalation_are_total () =
     |> require_ok "project retry transition"
   in
   Alcotest.(check (list string)) "retry restored" [ "retry" ] (post_ids (State.pending state));
-  let state, lease = claim_head state in
-  let lease = require_some "escalation lease" lease in
-  let judgment : Queue.failure_judgment =
-    { fj_runtime_id = "runtime-a"
-    ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
-    ; fj_provenance = Keeper_runtime_failure_route.Oas_agent_error
-    ; fj_detail = "deterministic failure"
-    }
-  in
-  let successor =
-    stimulus
-      ~payload:(Queue.Failure_judgment judgment)
-      (Queue.failure_judgment_post_id judgment)
-      3.0
-  in
-  let state, _ =
-    State.settle
-      ~settled_at:3.0
-      ~lease
-      ~settlement:
-        (State.Escalate
-           { reason = State.Failure_judgment_requested
-           ; successor = Some successor
-           })
-      state
-    |> require_ok "atomic judgment successor"
-  in
-  let escalation_receipt =
-    match State.transition_outbox state with
-    | [ entry ] -> entry.receipt
-    | _ -> Alcotest.fail "judgment escalation must create one outbox entry"
-  in
-  let state =
-    State.mark_transition_projected ~transition_id:escalation_receipt.transition_id state
-    |> require_ok "project judgment escalation"
-  in
-  Alcotest.(check (list string))
-    "original consumed and successor pending"
-    [ successor.post_id ]
-    (post_ids (State.pending state));
-  let state, judgment_lease = claim_head state in
-  let judgment_lease = require_some "judgment lease" judgment_lease in
-  let state, _ =
-    State.settle
-      ~settled_at:4.0
-      ~lease:judgment_lease
-      ~settlement:
-        (State.Escalate
-           { reason =
-               State.Failure_judgment_boundary_failed
-                 { detail = "structured judge response violated its contract" }
-           ; successor = None
-           })
-      state
-    |> require_ok "judgment boundary failure escalation"
-  in
   Alcotest.(check int)
-    "judgment boundary failure does not enqueue itself"
-    0
-    (Queue.length (State.pending state));
-  Alcotest.(check int)
-    "only the unprojected transition remains in state"
+    "requeue leaves no duplicate source"
     1
-    (List.length (State.transition_outbox state));
-  let open Yojson.Safe.Util in
-  let boundary_failure_settlement =
-    State.to_yojson state
-    |> member "transition_outbox"
-    |> to_list
-    |> List.rev
-    |> List.hd
-    |> member "receipt"
-    |> member "settlement"
-  in
-  Alcotest.(check string)
-    "judgment boundary failure receipt is an escalation"
-    "escalate"
-    (boundary_failure_settlement |> member "kind" |> to_string);
-  Alcotest.(check string)
-    "judgment boundary failure receipt preserves the typed reason"
-    "failure_judgment_boundary_failed"
-    (boundary_failure_settlement |> member "reason" |> to_string);
-  Alcotest.(check bool)
-    "judgment boundary failure receipt explicitly stores no successor"
-    true
-    (boundary_failure_settlement
-     |> member "successor"
-     |> Yojson.Safe.equal `Null)
+    (Queue.length (State.pending state))
 ;;
 
-let test_judgment_terminal_evidence_is_durable () =
-  List.iter
-    (fun reason ->
-      Alcotest.(check bool)
-        "non-verdict judgment transitions do not request external input"
-        false
-        (State.escalation_reason_requests_external_input reason))
-    [ State.Failure_judgment_requested
-    ; State.Failure_judgment_boundary_failed { detail = "schema drift" }
-    ];
-  Alcotest.(check bool)
-    "explicit external-input verdict remains visible"
-    true
-    (State.escalation_reason_requests_external_input
-       (State.Failure_judgment_external_input_requested
-          { judge_runtime_id = "structured-judge"
-          ; rationale = "Required external input is unavailable."
-          }));
-  let judgment : Queue.failure_judgment =
-    { fj_runtime_id = "failed-runtime"
-    ; fj_judgment = Keeper_runtime_failure_route.Config_mismatch
-    ; fj_provenance = Keeper_runtime_failure_route.Oas_config_error
-    ; fj_detail = "configuration unavailable"
-    }
-  in
-  let source =
-    stimulus
-      ~payload:(Queue.Failure_judgment judgment)
-      (Queue.failure_judgment_post_id judgment)
-      1.0
-  in
-  let state = State.with_pending (queue [ source ]) State.empty in
-  let state, lease = claim_head state in
-  let lease = require_some "external-input judgment lease" lease in
-  let state, _ =
-    State.settle
-      ~settled_at:2.0
-      ~lease
-      ~settlement:
-        (State.Escalate
-           { reason =
-               State.Failure_judgment_external_input_requested
-                 { judge_runtime_id = "structured-judge"
-                 ; rationale = "Required external input is unavailable."
-                 }
-           ; successor = None
-           })
-      state
-    |> require_ok "external-input judgment settlement"
-  in
-  let restored =
-    State.to_yojson state
-    |> State.of_yojson
-    |> require_ok "external-input judgment evidence roundtrip"
-  in
-  (match State.transition_outbox restored with
-   | [ { receipt =
-           { settlement =
-               State.Escalate
-                 { reason =
-                     State.Failure_judgment_external_input_requested
-                       { judge_runtime_id; rationale }
-                 ; successor = None
-                 }
-           ; _
-           }
-       ; _
-       } ] ->
-     Alcotest.(check string)
-       "opaque judge runtime preserved"
-       "structured-judge"
-       judge_runtime_id;
-     Alcotest.(check string)
-       "external-input rationale preserved"
-       "Required external input is unavailable."
-       rationale
-   | _ -> Alcotest.fail "external-input judgment evidence changed during roundtrip");
-  let open Yojson.Safe.Util in
-  let settlement_json =
-    State.to_yojson state
-    |> member "transition_outbox"
-    |> to_list
-    |> List.hd
-    |> member "receipt"
-    |> member "settlement"
-  in
-  Alcotest.(check string)
-    "external-input reason wire label"
-    "failure_judgment_external_input_requested"
-    (settlement_json |> member "reason" |> to_string);
-  Alcotest.(check string)
-    "external-input rationale wire evidence"
-    "Required external input is unavailable."
-    (settlement_json |> member "reason_detail" |> member "rationale" |> to_string);
-  let invalid_state = State.with_pending (queue [ source ]) State.empty in
-  let invalid_state, invalid_lease = claim_head invalid_state in
-  let invalid_lease = require_some "invalid evidence lease" invalid_lease in
-  match
-    State.settle
-      ~settled_at:3.0
-      ~lease:invalid_lease
-      ~settlement:
-        (State.Escalate
-           { reason =
-               State.Failure_judgment_boundary_failed { detail = "" }
-           ; successor = None
-           })
-      invalid_state
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "empty boundary failure evidence committed"
-;;
-
-let lease_for stimulus =
-  let state = State.with_pending (queue [ stimulus ]) State.empty in
-  let _state, lease = claim_head state in
-  require_some "fixture lease" lease
-;;
 
 let turn_failure route : Masc.Keeper_unified_turn.turn_failure =
   { error = Agent_sdk.Error.Internal "deterministic fixture"
@@ -1243,10 +1041,10 @@ let test_failed_cycle_route_mapping () =
        Masc.Keeper_registry_event_queue.Retry_after_observed ->
      ()
    | _ -> Alcotest.fail "observed retry route did not retain the leased work");
-  let judgment_failure =
+  let terminal_failure =
     turn_failure
-      (Keeper_runtime_failure_route.Escalate_judgment
-         { judgment = Keeper_runtime_failure_route.Contract_violation
+      (Keeper_runtime_failure_route.Exhausted_visible_alive
+         { terminal = Keeper_runtime_failure_route.Contract_violation
          ; provenance = Keeper_runtime_failure_route.Oas_agent_error
          ; detail = "fixture contract failure"
          })
@@ -1255,19 +1053,12 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:3.0
        ~compaction_consecutive_failures:0
-       judgment_failure
+       terminal_failure
    with
-   | Masc.Keeper_registry_event_queue.Escalate
-       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
-       ; successor = Some { Queue.payload = Queue.Failure_judgment successor; _ }
-       } ->
-     Alcotest.(check string)
-       "successor keeps exact final runtime"
-       "exact-final-runtime"
-       successor.fj_runtime_id
-   | _ -> Alcotest.fail "deterministic failure did not create one judgment successor");
+   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | _ -> Alcotest.fail "terminal failure did not close its source lease");
   let handled_failure =
-    { judgment_failure with
+    { terminal_failure with
       source_lease_disposition =
         Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling
     }
@@ -1281,7 +1072,7 @@ let test_failed_cycle_route_mapping () =
    | Masc.Keeper_registry_event_queue.Ack -> ()
    | _ -> Alcotest.fail "in-turn handled terminal failure was retried");
   let compacted_failure =
-    { judgment_failure with
+    { terminal_failure with
       source_lease_disposition =
         Masc.Keeper_unified_turn.Requeue_after_context_compaction
           Masc.Keeper_unified_turn.Compaction_committed
@@ -1370,15 +1161,15 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
        (Some
           (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_not_applied
              { meta = cycle_meta (); no_compaction })));
-  let judgment_route =
-    Keeper_runtime_failure_route.Escalate_judgment
-      { judgment = Keeper_runtime_failure_route.Context_overflow
+  let terminal_route =
+    Keeper_runtime_failure_route.Exhausted_visible_alive
+      { terminal = Keeper_runtime_failure_route.Context_overflow
       ; provenance = Keeper_runtime_failure_route.Oas_api_error
       ; detail = "typed provider context overflow"
       }
   in
   let overflow_failure =
-    turn_failure judgment_route
+    turn_failure terminal_route
   in
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
@@ -1386,12 +1177,8 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
       ~compaction_consecutive_failures:0
       overflow_failure
   with
-  | Masc.Keeper_registry_event_queue.Escalate
-      { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
-      ; successor = Some { payload = Queue.Failure_judgment _; _ }
-      } ->
-    ()
-  | _ -> Alcotest.fail "provider overflow no-compaction consumed the source lease"
+  | Masc.Keeper_registry_event_queue.Ack -> ()
+  | _ -> Alcotest.fail "provider overflow terminal did not close the source lease"
 ;;
 
 let test_applied_compaction_settles_followup_atomically () =
@@ -1417,26 +1204,19 @@ let test_applied_compaction_settles_followup_atomically () =
                 Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure }
             }))
   in
-  let judgment_failure =
+  let terminal_failure =
     turn_failure
-      (Keeper_runtime_failure_route.Escalate_judgment
-         { judgment = Keeper_runtime_failure_route.Contract_violation
+      (Keeper_runtime_failure_route.Exhausted_visible_alive
+         { terminal = Keeper_runtime_failure_route.Contract_violation
          ; provenance = Keeper_runtime_failure_route.Oas_agent_error
          ; detail = "post-compaction contract failure"
          })
   in
-  (match settlement judgment_failure with
+  (match settlement terminal_failure with
    | Masc.Keeper_registry_event_queue.Manual_compaction_committed
-       { followup =
-           Keeper_event_queue_state.Compaction_commit_failure_judgment
-             { Queue.payload = Queue.Failure_judgment successor; _ }
-       ; _
-       } ->
-     Alcotest.(check string)
-       "atomic successor keeps exact final runtime"
-       judgment_failure.runtime_id
-       successor.fj_runtime_id
-   | _ -> Alcotest.fail "applied compaction lost its follow-up judgment");
+       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
+     ()
+   | _ -> Alcotest.fail "applied compaction replayed a terminal follow-up");
   let retry_failure =
     turn_failure
       (Keeper_runtime_failure_route.Retry_after_observed
@@ -1633,15 +1413,15 @@ let test_compaction_retry_escalates_after_threshold () =
    requeued unconditionally; the storm ran ~10h and ended only when the
    operator issued keeper_down. *)
 let test_in_lane_compaction_streak_bounds_retries () =
-  let judgment_route =
-    Keeper_runtime_failure_route.Escalate_judgment
-      { judgment = Keeper_runtime_failure_route.Context_overflow
+  let terminal_route =
+    Keeper_runtime_failure_route.Exhausted_visible_alive
+      { terminal = Keeper_runtime_failure_route.Context_overflow
       ; provenance = Keeper_runtime_failure_route.Oas_api_error
       ; detail = "typed provider context overflow"
       }
   in
   let failure disposition =
-    { (turn_failure judgment_route) with source_lease_disposition = disposition }
+    { (turn_failure terminal_route) with source_lease_disposition = disposition }
   in
   let settlement ~streak disposition =
     Masc.Keeper_heartbeat_loop.settlement_of_failure
@@ -1711,15 +1491,11 @@ let test_in_lane_compaction_streak_bounds_retries () =
      Alcotest.fail
        "committed episode at the ceiling requeued instead of escalating as \
         a floor");
-  (* A terminal no-compaction below the ceiling keeps today's route (the
-     judgment successor); at the ceiling the settlement replaces the route,
-     because a context that cannot shrink re-overflows deterministically. *)
+  (* A terminal no-compaction below the ceiling closes its source after the
+     typed failure is recorded; at the ceiling the compaction-specific
+     exhaustion remains an explicit operator-visible escalation. *)
   (match settlement ~streak:0 terminal_no_compaction with
-   | Masc.Keeper_registry_event_queue.Escalate
-       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
-       ; successor = Some { Queue.payload = Queue.Failure_judgment _; _ }
-       } ->
-     ()
+   | Masc.Keeper_registry_event_queue.Ack -> ()
    | _ ->
      Alcotest.fail
        "terminal no-compaction below the ceiling lost its typed failure route");
@@ -1875,9 +1651,9 @@ let test_in_lane_compaction_streak_bounds_retries () =
    untouched. *)
 let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
   let meta = cycle_meta () in
-  let judgment_route =
-    Keeper_runtime_failure_route.Escalate_judgment
-      { judgment = Keeper_runtime_failure_route.Context_overflow
+  let terminal_route =
+    Keeper_runtime_failure_route.Exhausted_visible_alive
+      { terminal = Keeper_runtime_failure_route.Context_overflow
       ; provenance = Keeper_runtime_failure_route.Oas_api_error
       ; detail = "typed provider context overflow"
       }
@@ -1887,7 +1663,7 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
       (Masc.Keeper_heartbeat_loop_cycle.Failed
          { meta
          ; failure =
-             { (turn_failure judgment_route) with
+             { (turn_failure terminal_route) with
                source_lease_disposition = disposition
              }
          })
@@ -1953,15 +1729,15 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
 ;;
 
 let test_transcript_corruption_requires_reset_immediately () =
-  let judgment_route =
-    Keeper_runtime_failure_route.Escalate_judgment
-      { judgment = Keeper_runtime_failure_route.Contract_violation
+  let terminal_route =
+    Keeper_runtime_failure_route.Exhausted_visible_alive
+      { terminal = Keeper_runtime_failure_route.Contract_violation
       ; provenance = Keeper_runtime_failure_route.Oas_agent_error
       ; detail = "typed transcript quarantine"
       }
   in
   let quarantined_failure =
-    { (turn_failure judgment_route) with
+    { (turn_failure terminal_route) with
       source_lease_disposition =
         Masc.Keeper_unified_turn.Pause_after_transcript_corruption
           { detail = "overlapping tool cycle" }
@@ -3451,10 +3227,6 @@ let () =
             `Quick
             test_claim_leases_earliest_ready_without_reordering_skipped_work
         ; Alcotest.test_case "requeue and escalation" `Quick test_requeue_and_escalation_are_total
-        ; Alcotest.test_case
-            "judgment terminal evidence"
-            `Quick
-            test_judgment_terminal_evidence_is_durable
         ; Alcotest.test_case "failed cycle route mapping" `Quick test_failed_cycle_route_mapping
         ; Alcotest.test_case
             "applied compaction settles follow-up atomically"

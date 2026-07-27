@@ -108,12 +108,6 @@ type exact_write_outcome =
     parent sync did not complete. *)
 
 type escalation_reason = Keeper_event_queue_state.escalation_reason =
-  | Failure_judgment_requested
-  | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_external_input_requested of
-      { judge_runtime_id : string
-      ; rationale : string
-      }
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
   | Compaction_exact_output_terminal of
       { source : Keeper_checkpoint_ref.t
@@ -398,7 +392,7 @@ val settle_bound_exact_nonterminal_result :
   settlement:settlement ->
   unit ->
   (settle_result, string) result
-(** Commit only the identity-bound nonterminal Ack/retry/floor/failure-judgment
+(** Commit only the identity-bound nonterminal Ack/retry/floor
     cases. Exact terminal outcomes require durable source preparation and
     [finalize_exact_source_disposition_result]. *)
 

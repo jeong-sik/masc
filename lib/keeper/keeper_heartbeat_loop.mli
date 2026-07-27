@@ -130,11 +130,9 @@ val settlement_of_failure :
   compaction_consecutive_failures:int ->
   Keeper_unified_turn.turn_failure ->
   Keeper_registry_event_queue.settlement
-(** Pure queue disposition for a failed cycle. Retry/rotation requeue and a
-    deterministic failure creates one judgment successor. This mapping is
-    identical when the source lease carried an earlier judgment: the failed
-    action's new typed route remains authoritative rather than being collapsed
-    into a generic judgment failure.
+(** Pure queue disposition for a failed cycle. Retry/rotation requeue.
+    A typed exhausted failure closes the source lease after the existing
+    turn-failure observation is recorded; it never dispatches a second LLM call.
 
     [compaction_consecutive_failures] is the keeper's persisted failure streak
     from [keeper_meta.runtime.compaction_rt]. When the disposition carries an

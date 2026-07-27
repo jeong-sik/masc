@@ -12,8 +12,6 @@ type stimulus_kind =
   | Connector_attention
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
-  | Failure_judgment
-      (* RFC-0313 W2: deterministic turn-failure escalated for LLM judgment. *)
   | Manual_compaction
   | Goal_assigned
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
@@ -45,7 +43,6 @@ let stimulus_kind_to_string = function
   | Schedule_due -> "schedule_due"
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
-  | Failure_judgment -> "failure_judgment"
   | Manual_compaction -> "manual_compaction"
   | Goal_assigned -> "goal_assigned"
 ;;
@@ -62,7 +59,6 @@ let stimulus_kind_of_string = function
   | "schedule_due" -> Some Schedule_due
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
-  | "failure_judgment" -> Some Failure_judgment
   | "manual_compaction" -> Some Manual_compaction
   | "goal_assigned" -> Some Goal_assigned
   | _ -> None
@@ -109,7 +105,6 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Schedule_due _ -> Schedule_due
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
-  | Keeper_event_queue.Failure_judgment _ -> Failure_judgment
   | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
   | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
 ;;
@@ -211,12 +206,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "hitl_resolved approval=%s decision=%s"
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
-  | Keeper_event_queue.Failure_judgment fj ->
-    Printf.sprintf
-      "failure_judgment runtime=%s class=%s provenance=%s"
-      fj.fj_runtime_id
-      (Keeper_runtime_failure_route.judgment_class_label fj.fj_judgment)
-      (Keeper_runtime_failure_route.judgment_provenance_label fj.fj_provenance)
   | Keeper_event_queue.Manual_compaction_requested -> "manual_compaction_requested"
   | Keeper_event_queue.Goal_assigned ga ->
     Printf.sprintf
@@ -239,7 +228,6 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
-    | Keeper_event_queue.Failure_judgment _
     | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Goal_assigned _ -> None
   in
@@ -300,12 +288,6 @@ let reaction_kind_of_settlement = function
   | Keeper_event_queue_state.Manual_compaction_committed
       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
     Event_queue_ack
-  | Keeper_event_queue_state.Manual_compaction_committed
-      { followup =
-          Keeper_event_queue_state.Compaction_commit_failure_judgment _
-      ; _
-      } ->
-    Event_queue_escalated
   | Keeper_event_queue_state.No_compaction _ -> Event_queue_no_compaction
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
   | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
@@ -703,20 +685,12 @@ let reaction_kind_matches_settlement reaction_kind settlement =
   | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
   | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
   | Event_queue_escalated,
-    Keeper_event_queue_state.Manual_compaction_committed
-      { followup =
-          Keeper_event_queue_state.Compaction_commit_failure_judgment _
-      ; _
-      } ->
-    true
-  | Event_queue_escalated,
     Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
     true
   | Turn_started, _
   | Cursor_ack, _
   | Event_queue_ack,
-    ( Keeper_event_queue_state.Manual_compaction_committed _
-    | Keeper_event_queue_state.No_compaction _
+    ( Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
@@ -1021,7 +995,7 @@ let decode_current_row ~keeper_name row =
         Error Non_finite_board_updated_at
       | Board_signal, (Some _ | None)
       | ( Bootstrap | Fusion_completed | Bg_completed | Schedule_due
-        | Connector_attention | Hitl_resolved | Failure_judgment
+        | Connector_attention | Hitl_resolved
         | Manual_compaction | Goal_assigned ),
         _ -> Ok ()
     in
@@ -1377,7 +1351,7 @@ let board_stimulus_token metadata stimulus_kind =
     let post_id = nested_string_field "stimulus" "post_id" metadata.raw in
     Option.map (fun timestamp -> timestamp, post_id) updated_at
   | Bootstrap | Fusion_completed | Bg_completed | Schedule_due
-  | Connector_attention | Hitl_resolved | Failure_judgment
+  | Connector_attention | Hitl_resolved
   | Manual_compaction | Goal_assigned -> None
 ;;
 
@@ -1393,7 +1367,6 @@ let summarize_rows ~keeper_name ~limit rows =
   let event_queue_cancelled_count = ref 0 in
   let event_queue_requeue_count = ref 0 in
   let event_queue_escalation_count = ref 0 in
-  let event_queue_external_input_count = ref 0 in
   let cursor_ack_count = ref 0 in
   let quarantined_row_count = ref 0 in
   let quarantine_reason_counts = Hashtbl.create 8 in
@@ -1457,20 +1430,7 @@ let summarize_rows ~keeper_name ~limit rows =
     | Event_queue_no_compaction, Some _ -> incr event_queue_no_compaction_count
     | Event_queue_cancelled, Some _ -> incr event_queue_cancelled_count
     | Event_queue_requeued, Some _ -> incr event_queue_requeue_count
-    | Event_queue_escalated, Some receipt ->
-      incr event_queue_escalation_count;
-      (match receipt.Keeper_event_queue_state.settlement with
-       | Keeper_event_queue_state.Escalate { reason; _ } ->
-         if Keeper_event_queue_state.escalation_reason_requests_external_input reason
-         then incr event_queue_external_input_count
-       | Keeper_event_queue_state.Ack
-       | Keeper_event_queue_state.Manual_compaction_committed _
-       | Keeper_event_queue_state.No_compaction _
-       | Keeper_event_queue_state.Cancel_accepted _
-       | Keeper_event_queue_state.Transfer_accepted _
-       | Keeper_event_queue_state.Settle_from_source_terminal _
-       | Keeper_event_queue_state.Settle_exact _
-       | Keeper_event_queue_state.Requeue _ -> ())
+    | Event_queue_escalated, Some _ -> incr event_queue_escalation_count
     | Cursor_ack, None -> incr cursor_ack_count
     | Turn_started, Some _
     | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
@@ -1545,7 +1505,6 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "event_queue_cancelled_count", `Int !event_queue_cancelled_count
     ; "event_queue_requeue_count", `Int !event_queue_requeue_count
     ; "event_queue_escalation_count", `Int !event_queue_escalation_count
-    ; "event_queue_external_input_count", `Int !event_queue_external_input_count
     ; "cursor_ack_count", `Int !cursor_ack_count
     ; "quarantined_row_count", `Int !quarantined_row_count
     ; ( "quarantine_reason_counts"
@@ -1581,7 +1540,6 @@ let error_summary ~keeper_name ~limit error =
     ; "event_queue_requeue_count", `Int 0
     ; "event_queue_escalation_count", `Int 0
     ; "cursor_ack_count", `Int 0
-    ; "event_queue_external_input_count", `Int 0
     ; "quarantined_row_count", `Int 0
     ; "quarantine_reason_counts", `List []
     ; "cursor_swept_stimulus_count", `Int 0
@@ -1642,7 +1600,6 @@ let unavailable_fleet_summary_json () =
     ; "event_queue_cancelled_count", `Int 0
     ; "event_queue_requeue_count", `Int 0
     ; "event_queue_escalation_count", `Int 0
-    ; "event_queue_external_input_count", `Int 0
     ; "cursor_ack_count", `Int 0
     ; "quarantined_row_count", `Int 0
     ; "quarantine_reason_counts", `List []
@@ -1840,9 +1797,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       summaries
   in
   let pending_count = total_int "pending_stimulus_count" in
-  let event_queue_external_input_count =
-    total_int "event_queue_external_input_count"
-  in
   let quarantined_row_count = total_int "quarantined_row_count" in
   let row_count = total_int "row_count" in
   let durable_event_queue_discovery_error_count =
@@ -1912,7 +1866,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "event_queue_requeue_count", `Int (total_int "event_queue_requeue_count")
     ; ( "event_queue_escalation_count"
       , `Int (total_int "event_queue_escalation_count") )
-    ; "event_queue_external_input_count", `Int event_queue_external_input_count
     ; "cursor_ack_count", `Int (total_int "cursor_ack_count")
     ; "quarantined_row_count", `Int quarantined_row_count
     ; "quarantine_reason_counts", quarantine_reason_counts

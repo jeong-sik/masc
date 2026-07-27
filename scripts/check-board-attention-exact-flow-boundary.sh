@@ -303,9 +303,17 @@ check_repo_retired_symbols() {
         || fail "masked OCaml retired-symbol scan failed: ${target}"
     fi
   done < <(
-    find "${REPO_ROOT}" \
-      -type d \( -name .git -o -name _build -o -name .worktrees \) -prune -o \
-      -type f \( -name '*.ml' -o -name '*.mli' \) -print0
+    rg -l -0 \
+      --hidden \
+      --no-ignore \
+      --glob '*.ml' \
+      --glob '*.mli' \
+      --glob '!**/.git/**' \
+      --glob '!**/_build/**' \
+      --glob '!**/.worktrees/**' \
+      -- "${pattern}" \
+      "${REPO_ROOT}" \
+      || true
   )
   (( found == 0 )) \
     || fail "retired Board attention symbol remains in OCaml source"
@@ -353,6 +361,7 @@ check_boundary() {
   require_once "Exact_output.snapshot_flow" "${FLOW_ML}"
   require_once "Exact_output.start_flow" "${FLOW_ML}"
   require_once "Exact_output.execute_flow_once" "${FLOW_ML}"
+  require_present "~validate" "${FLOW_ML}"
   require_once "Exact_flow.prepare" "${WORKER_ML}"
   require_once "Exact_flow.execute" "${WORKER_ML}"
   require_once "Partition.bind_before_dispatch" "${WORKER_ML}"
@@ -386,6 +395,9 @@ check_boundary() {
   forbid_pattern \
     'Exact_output\.(admit|admit_target_ref|resolve_target|start_attempt|execute_once|Attempt_already_started|Completion_failed|Not_started|Call_id_generation_failed|receipt_target_identity|receipt_http_status|execution_error_cause)([^_[:alnum:]]|$)' \
     "Board attention must not regain retired exact-output symbols or reconstruct a candidate loop from legacy one-shot APIs"
+  forbid_pattern \
+    'Exact_output\.(execute_flow_once_validated|settle_flow_domain|create_flow_preference_store|make_flow_scope|remove_flow_preference_scope)|Keeper_exact_flow_scope\.(preference_store|scope)|~preferences:|~scope:' \
+    "Board attention must use caller-declared snapshots and the sole validated flow surface"
 
   check_repo_retired_symbols
 

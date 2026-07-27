@@ -152,7 +152,6 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Schedule_due _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Hitl_resolved _
-      | Keeper_event_queue.Failure_judgment _
       | Keeper_event_queue.Manual_compaction_requested
       | Keeper_event_queue.Goal_assigned _ ->
         None)
@@ -172,7 +171,6 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Bootstrap
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Failure_judgment _
        | Keeper_event_queue.Manual_compaction_requested
        | Keeper_event_queue.Goal_assigned _ -> ())
     stimuli
@@ -223,58 +221,9 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 ;;
 
-let failure_judgment_of_stimuli = function
-  | [ { Keeper_event_queue.payload =
-          Keeper_event_queue.Failure_judgment judgment
-      ; _
-      } ] ->
-    Ok (Some judgment)
-  | stimuli ->
-    if
-      List.exists
-        (fun (stimulus : Keeper_event_queue.stimulus) ->
-           match stimulus.payload with
-           | Keeper_event_queue.Failure_judgment _ -> true
-           | Keeper_event_queue.Board_signal _
-           | Keeper_event_queue.Board_attention _
-           | Keeper_event_queue.Fusion_completed _
-           | Keeper_event_queue.Bg_completed _
-           | Keeper_event_queue.Schedule_due _
-           | Keeper_event_queue.Bootstrap
-           | Keeper_event_queue.Connector_attention _
-           | Keeper_event_queue.Hitl_resolved _
-           | Keeper_event_queue.Manual_compaction_requested
-           | Keeper_event_queue.Goal_assigned _ ->
-             false)
-        stimuli
-    then Error "failure judgment must be the sole stimulus in its event queue lease"
-    else Ok None
-;;
-
 let manual_compaction_requested_of_stimuli = function
   | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
   | [] | [ _ ] | _ :: _ :: _ -> false
-;;
-
-let failure_judgment_successor
-      ~arrived_at
-      (failure : Keeper_unified_turn.turn_failure)
-      judgment
-      provenance
-      detail
-  =
-  let payload : Keeper_event_queue.failure_judgment =
-    { fj_runtime_id = failure.runtime_id
-    ; fj_judgment = judgment
-    ; fj_provenance = provenance
-    ; fj_detail = detail
-    }
-  in
-  { Keeper_event_queue.post_id = Keeper_event_queue.failure_judgment_post_id payload
-  ; urgency = Keeper_event_queue.Normal
-  ; arrived_at
-  ; payload = Keeper_event_queue.Failure_judgment payload
-  }
 ;;
 
 let settlement_of_failure
@@ -289,19 +238,8 @@ let settlement_of_failure
         Keeper_registry_event_queue.Retry_after_observed
     | Keeper_runtime_failure_route.Rotate_now _ ->
       Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
-    | Keeper_runtime_failure_route.Escalate_judgment
-        { judgment; provenance; detail } ->
-      Keeper_registry_event_queue.Escalate
-        { reason = Keeper_registry_event_queue.Failure_judgment_requested
-        ; successor =
-            Some
-              (failure_judgment_successor
-                 ~arrived_at:settled_at
-                 failure
-                 judgment
-                 provenance
-                 detail)
-        }
+    | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
+      Keeper_registry_event_queue.Ack
   in
   (* RFC-0351 S0 / #25461: this failure is the
      [compaction_consecutive_failures + 1]-th compaction failure in a row when
@@ -454,7 +392,6 @@ let settlement_of_cycle_outcome
           | Cycle.Skipped _
           | Cycle.Busy _
           | Cycle.Failed _
-          | Cycle.Judgment_settled _
           | Cycle.Manual_compaction_applied _
           | Cycle.Manual_compaction_failed _
           | Cycle.Manual_compaction_not_applied _ )
@@ -467,25 +404,6 @@ let settlement_of_cycle_outcome
   | Some (Cycle.Manual_compaction_applied { receipt; _ } as applied) ->
     let commit = Keeper_manual_compaction.queue_commit_of_applied_receipt receipt in
     (match Cycle.manual_compaction_followup_failure applied with
-     | Some
-         ({ Keeper_unified_turn.source_lease_disposition =
-              Keeper_unified_turn.Follow_failure_route
-          ; route =
-              Keeper_runtime_failure_route.Escalate_judgment
-                { judgment; provenance; detail }
-          ; _
-          } as failure) ->
-       Keeper_registry_event_queue.Manual_compaction_committed
-         { commit
-         ; followup =
-             Keeper_event_queue_state.Compaction_commit_failure_judgment
-               (failure_judgment_successor
-                  ~arrived_at:settled_at
-                  failure
-                  judgment
-                  provenance
-                  detail)
-         }
      | Some _ | None ->
        Keeper_registry_event_queue.Manual_compaction_committed
          { commit
@@ -504,22 +422,6 @@ let settlement_of_cycle_outcome
       ~settled_at
       ~compaction_consecutive_failures
       failure
-  | Some (Cycle.Judgment_settled { outcome; _ }) ->
-    (match outcome with
-     | Cycle.Judgment_boundary_failed { detail } ->
-       Keeper_registry_event_queue.Escalate
-         { reason =
-             Keeper_registry_event_queue.Failure_judgment_boundary_failed
-               { detail }
-         ; successor = None
-         }
-     | Cycle.Judgment_external_input_requested { judge_runtime_id; rationale } ->
-       Keeper_registry_event_queue.Escalate
-         { reason =
-             Keeper_registry_event_queue.Failure_judgment_external_input_requested
-               { judge_runtime_id; rationale }
-         ; successor = None
-         })
   | Some (Cycle.Manual_compaction_failed _) ->
     (* This failure is the [compaction_consecutive_failures + 1]-th in a row for
        this keeper; the counter itself is advanced by the compaction commit path
@@ -587,7 +489,6 @@ let compaction_outcome_of_cycle_outcome = function
       ( Cycle.Cancelled _
       | Cycle.Skipped _
       | Cycle.Busy _
-      | Cycle.Judgment_settled _
       | Cycle.Manual_compaction_not_applied _ )
   | None -> None
 ;;
@@ -785,11 +686,6 @@ let settlement_is_ack = function
   | Keeper_registry_event_queue.Transfer_accepted _ -> true
   | Keeper_registry_event_queue.Settle_from_source_terminal _ -> true
   | Keeper_registry_event_queue.Settle_exact _ -> true
-  | Keeper_registry_event_queue.Manual_compaction_committed
-      { followup =
-          Keeper_event_queue_state.Compaction_commit_failure_judgment _
-      ; _
-      }
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false
@@ -1012,7 +908,6 @@ let run_keepalive_unified_turn
           | Cycle.Cancelled _
           | Cycle.Skipped _
           | Cycle.Busy _
-          | Cycle.Judgment_settled _
           | Cycle.Manual_compaction_failed _
           | Cycle.Manual_compaction_not_applied _
           | Cycle.Manual_compaction_applied _ )
@@ -1155,11 +1050,6 @@ let run_keepalive_unified_turn
       in
       consumed_stimuli := event_intake.consumed_stimuli;
       claimed_lease := event_intake.claimed_lease;
-      let failure_judgment =
-        match failure_judgment_of_stimuli event_intake.consumed_stimuli with
-        | Ok judgment -> judgment
-        | Error message -> raise (Event_queue_settlement_failed message)
-      in
       let manual_compaction_requested =
         manual_compaction_requested_of_stimuli event_intake.consumed_stimuli
       in
@@ -1383,7 +1273,6 @@ let run_keepalive_unified_turn
               ~turn_decision
               ~shared_context
               ~wake
-              ?failure_judgment
               ~manual_compaction_requested
               ()
           in
@@ -1496,7 +1385,6 @@ let run_keepalive_unified_turn
             | Cycle.Cancelled _
             | Cycle.Skipped _
             | Cycle.Busy _
-            | Cycle.Judgment_settled _
             | Cycle.Manual_compaction_applied _
             | Cycle.Manual_compaction_failed _
             | Cycle.Manual_compaction_not_applied _ )
@@ -1510,9 +1398,9 @@ let run_keepalive_unified_turn
           Keeper_meta_contract.mark_transcript_corruption_reset_required
             meta_after_cycle
       in
-      (* Queue ownership follows the typed cycle outcome.  Pending removal,
-         lease removal, an optional judgment successor, and the transition
-         outbox receipt commit in one event-queue.json rename. *)
+      (* Queue ownership follows the typed cycle outcome. Pending removal,
+         lease removal, and the transition outbox receipt commit in one
+         event-queue.json rename. *)
       (if Option.is_none transcript_corruption_commit
        then
          match !claimed_lease with
@@ -1535,36 +1423,7 @@ let run_keepalive_unified_turn
                ()
              | Keeper_unified_turn.Follow_failure_route
              | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
-               (match failure.Keeper_unified_turn.route with
-                | Keeper_runtime_failure_route.Escalate_judgment
-                    { judgment; provenance; detail } ->
-                  let successor =
-                    failure_judgment_successor
-                      ~arrived_at:(Time_compat.now ())
-                      failure
-                      judgment
-                      provenance
-                      detail
-                  in
-                  (match
-                     Keeper_registry_event_queue.enqueue_durable_result
-                       ~base_path:ctx.config.base_path
-                       meta_after_triage.name
-                       successor
-                   with
-                   | Ok () -> ()
-                   | Error message ->
-                     Log.Keeper.error
-                       "registry: unleased failure judgment enqueue failed keeper=%s: %s"
-                       meta_after_triage.name
-                       message;
-                     record_settlement_failure message)
-                | Keeper_runtime_failure_route.Retry_after_observed _
-                | Keeper_runtime_failure_route.Rotate_now _ ->
-                  ()))
-          | Some (Cycle.Judgment_settled _) ->
-            record_settlement_failure
-              "failure judgment completed without an owning event queue lease"
+               ())
           | Some (Cycle.Manual_compaction_failed _) ->
             record_settlement_failure
               "manual compaction failed without an owning event queue lease"

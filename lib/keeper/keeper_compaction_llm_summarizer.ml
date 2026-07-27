@@ -82,10 +82,7 @@ type post_success_phase =
       * (unit, string) result
 
 type post_success_terminalizer =
-  { base_path : string
-  ; keeper_name : string
-  ; flow_scope : Keeper_exact_flow_scope.t
-  ; flow_success : Exact_output.flow_success
+  { keeper_name : string
   ; exact_execution_guard : exact_execution_guard option
   ; attempt_observation : attempt_observation
   ; disposition_mutex : Eio.Mutex.t
@@ -94,10 +91,6 @@ type post_success_terminalizer =
   ; mutable domain_rejected_attempts : int
   }
 
-type 'a post_success_boundary =
-  | Post_success_current of 'a
-  | Post_success_owner_unregistered_deferred
-
 type post_success_terminalization =
   | Terminalized of Keeper_event_queue_state.exact_execution_terminal
   | Terminalization_persistence_failed of
@@ -105,7 +98,6 @@ type post_success_terminalization =
   | Terminalization_commit_in_progress of unit Eio.Promise.t
   | Terminalization_already_committed
   | Terminalization_invariant_failed of string
-  | Terminalization_owner_unregistered_deferred
 
 type post_success_commit_claim =
   | Commit_claim_acquired
@@ -114,16 +106,14 @@ type post_success_commit_claim =
   | Commit_claim_rejected of
       Keeper_event_queue_state.exact_execution_terminal
       * (unit, string) result
-  | Commit_claim_owner_unregistered_deferred
 
 type 'a post_success_commit_boundary =
-  | Post_success_commit_owner_result of 'a
+  | Post_success_commit_result of 'a
   | Post_success_commit_in_progress of unit Eio.Promise.t
   | Post_success_commit_already_committed
   | Post_success_commit_rejected of
       Keeper_event_queue_state.exact_execution_terminal
       * (unit, string) result
-  | Post_success_commit_owner_unregistered_deferred
 
 type post_success_phase_snapshot =
   | Phase_open
@@ -150,7 +140,6 @@ type summarization_failure =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
-  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
@@ -448,10 +437,7 @@ let exact_output_requirement =
 ;;
 
 type prepared_lane =
-  { base_path : string
-  ; keeper_name : string
-  ; flow_scope : Keeper_exact_flow_scope.t
-  ; units : Keeper_compaction_unit.closed_unit list
+  { units : Keeper_compaction_unit.closed_unit list
   ; registry_generation : int64
   ; ordered_slot_ids : string list
   ; flow_attempt : Exact_output.flow_attempt
@@ -542,42 +528,6 @@ let log_terminal_quarantine_failure
   | _ -> ()
 ;;
 
-let with_current_post_success
-      (terminalizer : post_success_terminalizer)
-      callback
-  =
-  match
-    Keeper_exact_flow_scope.with_settlement
-      terminalizer.flow_scope
-      ~registered_lane_id:
-        (fun () ->
-           match
-             Keeper_registry.get
-               ~base_path:terminalizer.base_path
-               terminalizer.keeper_name
-           with
-           | Some entry -> Some (Keeper_lane.id entry.lane)
-           | None -> None)
-      callback
-  with
-  | Keeper_exact_flow_scope.Current value -> Post_success_current value
-  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-    Post_success_owner_unregistered_deferred
-;;
-
-let domain_settlement_error_to_string = function
-  | Exact_output.Domain_already_settled ->
-    "OAS exact flow domain disposition was already settled"
-  | Exact_output.Domain_preference_scope_released ->
-    "OAS exact flow preference scope was released before domain settlement"
-;;
-
-let settle_exact_flow_domain flow_success disposition =
-  Exact_output.settle_flow_domain flow_success disposition
-  |> Result.map (fun _ -> ())
-  |> Result.map_error domain_settlement_error_to_string
-;;
-
 let make_post_success_completion () =
   let waiter, resolver = Eio.Promise.create () in
   { waiter
@@ -620,47 +570,35 @@ let finish_rejection
   Eio.Cancel.protect
   @@ fun () ->
   let result =
-    match
-      settle_exact_flow_domain
-        terminalizer.flow_success
-        Exact_output.Domain_rejected
-    with
-    | Error detail ->
-      Error
-        ("post-success reject claimant could not settle OAS domain: " ^ detail)
-    | Ok () ->
-      let quarantine_result =
-        match terminalizer.exact_execution_guard with
-        | None -> Ok ()
-        | Some _ ->
-          (try
-             match
-               quarantine_exact_execution
-                 ~keeper_name:terminalizer.keeper_name
-                 ~exact_execution_guard:terminalizer.exact_execution_guard
-                 ~cause:terminal.cause
-                 terminalizer.attempt_observation
-             with
-             | Ok Fsync_completed -> Ok ()
-             | Ok (Visible_sync_unconfirmed detail) ->
-               Error
-                 ("post-success exact-execution quarantine sync is unconfirmed: "
-                  ^ detail)
-             | Error detail ->
-               Error
-                 ("post-success exact-execution quarantine failed: " ^ detail)
-           with
-           | exn ->
-             Error
-               ("post-success exact-execution quarantine raised: "
-                ^ Printexc.to_string exn))
-      in
-      (match quarantine_result with
-       | Ok () -> ()
-       | Error detail ->
-         log_terminal_quarantine_failure terminalizer terminal detail);
-      quarantine_result
+    match terminalizer.exact_execution_guard with
+    | None -> Ok ()
+    | Some _ ->
+      (try
+         match
+           quarantine_exact_execution
+             ~keeper_name:terminalizer.keeper_name
+             ~exact_execution_guard:terminalizer.exact_execution_guard
+             ~cause:terminal.cause
+             terminalizer.attempt_observation
+         with
+         | Ok Fsync_completed -> Ok ()
+         | Ok (Visible_sync_unconfirmed detail) ->
+           Error
+             ("post-success exact-execution quarantine sync is unconfirmed: "
+              ^ detail)
+         | Error detail ->
+           Error
+             ("post-success exact-execution quarantine failed: " ^ detail)
+       with
+       | exn ->
+         Error
+           ("post-success exact-execution quarantine raised: "
+            ^ Printexc.to_string exn))
   in
+  (match result with
+   | Ok () -> ()
+   | Error detail ->
+     log_terminal_quarantine_failure terminalizer terminal detail);
   with_disposition terminalizer (fun () ->
     match terminalizer.phase with
     | Reject_claimed (claimed, _) when claimed = terminal ->
@@ -694,33 +632,19 @@ let claim_post_success_commit_current terminalizer =
 ;;
 
 let claim_post_success_commit terminalizer =
-  match
-    with_current_post_success terminalizer (fun () ->
-      claim_post_success_commit_current terminalizer)
-  with
-  | Post_success_current claim -> claim
-  | Post_success_owner_unregistered_deferred ->
-    Commit_claim_owner_unregistered_deferred
+  claim_post_success_commit_current terminalizer
 ;;
 
 let with_post_success_commit terminalizer commit =
-  match
-    with_current_post_success terminalizer (fun () ->
-      match claim_post_success_commit_current terminalizer with
-      | Commit_claim_acquired ->
-        Post_success_commit_owner_result (commit ())
-      | Commit_claim_in_progress waiter ->
-        Post_success_commit_in_progress waiter
-      | Commit_claim_already_committed ->
-        Post_success_commit_already_committed
-      | Commit_claim_rejected (terminal, result) ->
-        Post_success_commit_rejected (terminal, result)
-      | Commit_claim_owner_unregistered_deferred ->
-        Post_success_commit_owner_unregistered_deferred)
-  with
-  | Post_success_current result -> result
-  | Post_success_owner_unregistered_deferred ->
-    Post_success_commit_owner_unregistered_deferred
+  match claim_post_success_commit_current terminalizer with
+  | Commit_claim_acquired ->
+    Post_success_commit_result (commit ())
+  | Commit_claim_in_progress waiter ->
+    Post_success_commit_in_progress waiter
+  | Commit_claim_already_committed ->
+    Post_success_commit_already_committed
+  | Commit_claim_rejected (terminal, result) ->
+    Post_success_commit_rejected (terminal, result)
 ;;
 
 let mark_post_success_checkpoint_installed terminalizer =
@@ -737,87 +661,56 @@ let mark_post_success_checkpoint_installed terminalizer =
       Error "post-success checkpoint installation has no commit claimant")
 ;;
 
-let finalize_installed_commit terminalizer completion result =
-  with_disposition terminalizer (fun () ->
-    match terminalizer.phase with
-    | Installed_pending_valid current when current == completion ->
-      terminalizer.phase <- Committed result
-    | Open
-    | Commit_claimed _
-    | Installed_pending_valid _
-    | Committed _
-    | Reject_claimed _
-    | Rejected _ ->
-      ());
-  completion.resolve ();
-  result
-;;
-
-let settle_post_success_domain_valid_with_failure
-      ?(settle_domain = settle_exact_flow_domain)
-      ?(on_await = fun () -> ())
-      terminalizer
-      ~failure_detail
-  =
-  let role =
+let complete_post_success_commit terminalizer =
+  let completion =
     with_disposition terminalizer (fun () ->
       match terminalizer.phase with
-      | Installed_pending_valid completion
-        when terminalizer.domain_valid_attempts = 0 ->
+      | Installed_pending_valid completion ->
         terminalizer.domain_valid_attempts <-
           terminalizer.domain_valid_attempts + 1;
-        `Own completion
-      | Installed_pending_valid completion ->
-        `Await completion
-      | Committed result -> `Done result
+        terminalizer.phase <- Committed (Ok ());
+        Ok (Some completion)
+      | Committed result -> Result.map (fun () -> None) result
       | Open
       | Commit_claimed _
       | Reject_claimed _
       | Rejected _ ->
-        `Done
-          (Error
-             "post-success Domain_valid settlement has no installed commit claimant"))
+        Error
+          "post-success completion has no installed commit claimant")
   in
-  match role with
-  | `Done result -> result
-  | `Await completion ->
-    on_await ();
-    Eio.Promise.await completion.waiter;
-    with_disposition terminalizer (fun () ->
-      match terminalizer.phase with
-      | Committed result -> result
-      | Open
-      | Commit_claimed _
-      | Installed_pending_valid _
-      | Reject_claimed _
-      | Rejected _ ->
-        Error
-          "post-success Domain_valid waiter completed without canonical commit")
-  | `Own completion ->
-    let result =
-      try
-        settle_domain terminalizer.flow_success Exact_output.Domain_valid
-        |> Result.map_error (fun detail ->
-          "post-success commit claimant could not settle OAS domain: " ^ detail)
-      with
-      | exn ->
-        Error
-          (failure_detail ^ ": " ^ Printexc.to_string exn)
-    in
-    finalize_installed_commit terminalizer completion result
-;;
-
-let settle_post_success_domain_valid terminalizer =
-  settle_post_success_domain_valid_with_failure
-    terminalizer
-    ~failure_detail:"post-success Domain_valid settlement raised"
+  match completion with
+  | Error _ as error -> error
+  | Ok None -> Ok ()
+  | Ok (Some completion) ->
+    completion.resolve ();
+    Ok ()
 ;;
 
 let finish_post_success_commit_failure terminalizer detail =
-  Eio.Cancel.protect (fun () ->
-    settle_post_success_domain_valid_with_failure
-      terminalizer
-      ~failure_detail:detail)
+  Eio.Cancel.protect
+  @@ fun () ->
+  let completion =
+    with_disposition terminalizer (fun () ->
+      match terminalizer.phase with
+      | Installed_pending_valid completion ->
+        terminalizer.domain_valid_attempts <-
+          terminalizer.domain_valid_attempts + 1;
+        terminalizer.phase <- Committed (Error detail);
+        Ok (Some completion)
+      | Committed result -> Result.map (fun () -> None) result
+      | Open
+      | Commit_claimed _
+      | Reject_claimed _
+      | Rejected _ ->
+        Error
+          "post-success failure has no installed commit claimant")
+  in
+  match completion with
+  | Error _ as error -> error
+  | Ok None -> Ok ()
+  | Ok (Some completion) ->
+    completion.resolve ();
+    Error detail
 ;;
 
 let claim_rejection terminalizer ~from_commit cause =
@@ -882,14 +775,8 @@ let terminalize_claimed_commit terminalizer cause =
 ;;
 
 let terminalize_post_success (terminalizer : post_success_terminalizer) cause =
-  match
-    with_current_post_success terminalizer (fun () ->
-      claim_rejection terminalizer ~from_commit:false cause
-      |> finish_claimed_rejection terminalizer)
-  with
-  | Post_success_current terminalization -> terminalization
-  | Post_success_owner_unregistered_deferred ->
-    Terminalization_owner_unregistered_deferred
+  claim_rejection terminalizer ~from_commit:false cause
+  |> finish_claimed_rejection terminalizer
 ;;
 
 let post_success_snapshot terminalizer =
@@ -912,7 +799,7 @@ let post_success_snapshot terminalizer =
 let exact_execution_evidence (flow_success : Exact_output.flow_success) =
   let success = Exact_output.flow_success_output flow_success in
   let provenance = success.provenance in
-  let identity = provenance.target_identity in
+  let identity = Exact_output.plan_provenance_target_identity provenance in
   let observation =
     flow_success
     |> Exact_output.flow_success_candidate
@@ -923,9 +810,13 @@ let exact_execution_evidence (flow_success : Exact_output.flow_success) =
   ; target_identity_fingerprint =
       Exact_output.target_identity_fingerprint identity
   ; catalog_generation_fingerprint =
-      Exact_output.catalog_generation_fingerprint provenance.catalog_generation
+      provenance
+      |> Exact_output.plan_provenance_catalog_generation
+      |> Exact_output.catalog_generation_fingerprint
   ; catalog_evidence_sha256 =
-      Exact_output.catalog_evidence_sha256 provenance.catalog_evidence
+      provenance
+      |> Exact_output.plan_provenance_catalog_evidence
+      |> Exact_output.catalog_evidence_sha256
   ; plan_fingerprint = observation.receipt_plan_fingerprint
   ; receipt_plan_fingerprint = observation.receipt_plan_fingerprint
   ; receipt_request_body_sha256 =
@@ -953,19 +844,12 @@ let make_flow_candidates ~keeper_name selected_slots =
   loop [] selected_slots
 ;;
 
-let registered_lane_id ~base_path ~keeper_name () =
-  match Keeper_registry.get ~base_path keeper_name with
-  | Some entry -> Some (Keeper_lane.id entry.lane)
-  | None -> None
-;;
-
-let prepare_lane_with_scope
-      ~base_path
-      ~flow_scope
+let prepare_lane
+      ~base_path:_
       ~keeper_name
       ~registry
       ~lane_id
-     ~units
+      ~units
   =
   if not (has_eligible_units units)
   then Error Invalid_plan
@@ -998,9 +882,6 @@ let prepare_lane_with_scope
        | first :: rest ->
          (match
             Exact_output.snapshot_flow
-              ~preferences:
-                (Keeper_exact_flow_scope.preference_store flow_scope)
-              ~scope:(Keeper_exact_flow_scope.scope flow_scope)
               ~first
               ~rest
               ~messages
@@ -1025,10 +906,7 @@ let prepare_lane_with_scope
                Error Exact_attempt_start_failed
              | Ok flow_attempt ->
                Ok
-                 { base_path
-                 ; keeper_name
-                 ; flow_scope
-                 ; units
+                 { units
                  ; registry_generation
                  ; ordered_slot_ids =
                      List.map
@@ -1039,35 +917,7 @@ let prepare_lane_with_scope
                  })))
 ;;
 
-let prepare_lane ~base_path ~keeper_name ~registry ~lane_id ~units =
-  let* flow_scope =
-    Keeper_exact_flow_scope.for_registered
-      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
-      ~base_path
-      ~keeper_name
-      ~surface:Keeper_exact_flow_scope.Compaction
-    |> Result.map_error (fun _ -> Exact_execution_context_unavailable)
-  in
-  match
-    Keeper_exact_flow_scope.with_current
-      flow_scope
-      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
-      (fun () ->
-         prepare_lane_with_scope
-           ~base_path
-           ~flow_scope
-           ~keeper_name
-           ~registry
-           ~lane_id
-           ~units)
-  with
-  | Keeper_exact_flow_scope.Current result -> result
-  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-    Error Exact_execution_context_unavailable
-;;
-
 type exact_flow_callback_failure =
-  | Owner_unregistered_deferred
   | Authority_absent
   | Authority_rejected
   | Bind_failed
@@ -1161,7 +1011,6 @@ let release_exact_execution
 ;;
 
 let summarization_failure_of_callback = function
-  | Owner_unregistered_deferred -> Exact_owner_unregistered_deferred
   | Authority_absent -> Exact_execution_authority_absent
   | Authority_rejected -> Exact_execution_authority_rejected
   | Bind_failed -> Exact_execution_bind_failed
@@ -1179,69 +1028,66 @@ let execute_prepared_lane_current
       ?exact_execution_guard
       prepared_lane
   =
-  let with_current callback =
-    Keeper_exact_flow_scope.with_current
-      prepared_lane.flow_scope
-      ~registered_lane_id:
-        (registered_lane_id
-           ~base_path:prepared_lane.base_path
-           ~keeper_name:prepared_lane.keeper_name)
-      callback
-  in
-  let with_settlement callback =
-    Keeper_exact_flow_scope.with_settlement
-      prepared_lane.flow_scope
-      ~registered_lane_id:
-        (registered_lane_id
-           ~base_path:prepared_lane.base_path
-           ~keeper_name:prepared_lane.keeper_name)
-      callback
-  in
   let bound_observation = ref None in
   let before_dispatch candidate =
     let observation = observe_flow_attempt_receipt candidate in
-    match
-      with_current (fun () ->
-        match
-          bind_exact_execution
+    let* () =
+      match !bound_observation with
+      | None -> Ok ()
+      | Some previous ->
+        let* () =
+          release_exact_execution
             ~keeper_name
-            ~before_dispatch_authority
             ~exact_execution_guard
-            observation
-        with
-        | Error _ as error -> error
-        | Ok () ->
-          if
-            Option.is_some exact_execution_guard
-            || Option.is_some before_dispatch_authority
-          then bound_observation := Some observation;
-          Ok ())
-    with
-    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-      Error Owner_unregistered_deferred
-    | Keeper_exact_flow_scope.Current result -> result
+            previous
+        in
+        bound_observation := None;
+        Ok ()
+    in
+    let* () =
+      bind_exact_execution
+        ~keeper_name
+        ~before_dispatch_authority
+        ~exact_execution_guard
+        observation
+    in
+    if
+      Option.is_some exact_execution_guard
+      || Option.is_some before_dispatch_authority
+    then bound_observation := Some observation;
+    Ok ()
   in
   let before_advance ~failed ~next:_ =
-    match
-      with_current (fun () ->
-        match failed with
-        | Exact_output.Flow_candidate_rejected _ -> Ok ()
-        | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
-          let observation = observe_flow_attempt_receipt candidate in
-          (match
-             release_exact_execution
-               ~keeper_name
-               ~exact_execution_guard
-               observation
-           with
-           | Error _ as error -> error
-           | Ok () ->
-             bound_observation := None;
-             Ok ()))
-    with
-    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-      Error Owner_unregistered_deferred
-    | Keeper_exact_flow_scope.Current result -> result
+    match failed with
+    | Exact_output.Flow_candidate_rejected _ -> Ok ()
+    | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
+      let observation = observe_flow_attempt_receipt candidate in
+      let* () =
+        release_exact_execution
+          ~keeper_name
+          ~exact_execution_guard
+          observation
+      in
+      bound_observation := None;
+      Ok ()
+  in
+  let validate flow_success =
+    let success = Exact_output.flow_success_output flow_success in
+    match plan_of_json ~units:prepared_lane.units success.output with
+    | Ok plan -> Exact_output.Accept plan
+    | Error detail ->
+      let observation =
+        flow_success
+        |> Exact_output.flow_success_candidate
+        |> observe_flow_attempt_receipt
+      in
+      Log.Keeper.warn
+        ~keeper_name
+        "compaction exact output violated MASC domain plan slot=%s call_id=%s: %s"
+        observation.slot_id
+        observation.call_id
+        detail;
+      Exact_output.Reject_and_advance detail
   in
   let execution =
     try
@@ -1249,8 +1095,11 @@ let execute_prepared_lane_current
         (Exact_output.execute_flow_once
            ~net
            ?clock
+           ~before_measurement_dispatch:(fun _ -> Ok ())
+           ~on_measurement_terminal:(fun _ -> Ok ())
            ~before_dispatch
            ~before_advance
+           ~validate
            prepared_lane.flow_attempt)
     with
     | Eio.Cancel.Cancelled _ as cancellation ->
@@ -1263,8 +1112,24 @@ let execute_prepared_lane_current
          re-raised. *)
       (match !bound_observation with
        | None -> Printexc.raise_with_backtrace cancellation raw_bt
-       | Some observation ->
-         `Bound_cancellation observation)
+      | Some observation ->
+        `Bound_cancellation observation)
+  in
+  let release_retained_semantic_binding fallback =
+    match !bound_observation with
+    | None -> fallback
+    | Some observation ->
+      (match
+         release_exact_execution
+           ~keeper_name
+           ~exact_execution_guard
+           observation
+       with
+       | Ok () ->
+         bound_observation := None;
+         fallback
+       | Error cause ->
+         Error (summarization_failure_of_callback cause))
   in
   let settle_execution () =
   match execution with
@@ -1281,36 +1146,52 @@ let execute_prepared_lane_current
             ~exact_execution_guard
             ~cause:Keeper_event_queue_state.Exact_execution_cancelled
             observation))
-  | `Flow (Error (Exact_output.Flow_attempt_already_started _)) ->
+  | `Flow
+      (Error
+        (Exact_output.Flow_execution_terminal
+          { cause = Exact_output.Flow_attempt_already_started _; _ })) ->
     Error Exact_flow_already_started
-  | `Flow (Error (Exact_output.Flow_success_ordinal_exhausted _))
-  | `Flow (Error (Exact_output.Flow_attempt_start_failed _))
-  | `Flow (Error (Exact_output.Flow_candidates_exhausted _)) ->
-    Error Exact_attempt_start_failed
   | `Flow
       (Error
-        (Exact_output.Flow_before_dispatch_callback_failed
-          { cause = Owner_unregistered_deferred; _ })) ->
-    Error Exact_owner_unregistered_deferred
+        (Exact_output.Flow_execution_terminal
+          { cause =
+              ( Exact_output.Flow_attempt_start_failed _
+              | Exact_output.Flow_measurement_start_failed _
+              | Exact_output.Flow_candidates_exhausted _ )
+          ; _
+          })) ->
+    release_retained_semantic_binding
+      (Error Exact_attempt_start_failed)
   | `Flow
       (Error
-        (Exact_output.Flow_before_dispatch_callback_failed
-          { cause; _ })) ->
+        (Exact_output.Flow_execution_terminal
+          { cause =
+              ( Exact_output.Flow_before_measurement_dispatch_callback_failed
+                  { cause; _ }
+              | Exact_output.Flow_measurement_terminal_callback_failed
+                  { cause; _ }
+              | Exact_output.Flow_before_dispatch_callback_failed
+                  { cause; _ } )
+          ; _
+          })) ->
     Error (summarization_failure_of_callback cause)
   | `Flow
       (Error
-        (Exact_output.Flow_before_advance_callback_failed
-          { cause = Owner_unregistered_deferred; _ })) ->
-    Error Exact_owner_unregistered_deferred
-  | `Flow
-      (Error
-        (Exact_output.Flow_before_advance_callback_failed
-          { cause; _ })) ->
+        (Exact_output.Flow_execution_terminal
+          { cause =
+              Exact_output.Flow_before_advance_callback_failed
+                { cause; _ }
+          ; _
+          })) ->
     Error (summarization_failure_of_callback cause)
   | `Flow
       (Error
-        (Exact_output.Flow_exact_execution_failed
-          { candidate; _ })) ->
+        (Exact_output.Flow_execution_terminal
+          { cause =
+              Exact_output.Flow_exact_execution_failed
+                { candidate; _ }
+          ; _
+          })) ->
     let observation = observe_flow_attempt_receipt candidate in
     Error
       (Exact_execution_terminal
@@ -1319,68 +1200,59 @@ let execute_prepared_lane_current
             ~exact_execution_guard
             ~cause:Keeper_event_queue_state.Exact_execution_failed
             observation))
-  | `Flow (Ok (flow_success : Exact_output.flow_success)) ->
+  | `Flow
+      (Error
+        (Exact_output.Flow_semantic_candidates_exhausted
+          { rejections; evidence = _ })) ->
+    let rejection =
+      List.fold_left
+        (fun _ rejection -> rejection)
+        rejections.first
+        rejections.rest
+    in
+    let flow_success = rejection.transport_success in
     let observation =
       flow_success
       |> Exact_output.flow_success_candidate
       |> observe_flow_attempt_receipt
     in
-    let success = Exact_output.flow_success_output flow_success in
-    (match plan_of_json ~units:prepared_lane.units success.output with
-     | Error detail ->
-       (match
-          settle_exact_flow_domain
-            flow_success
-            Exact_output.Domain_rejected
-        with
-        | Ok () -> ()
-        | Error detail ->
-          Log.Keeper.error
+    Log.Keeper.warn
+      ~keeper_name
+      "compaction exact semantic candidates exhausted slot=%s call_id=%s: %s"
+      observation.slot_id
+      observation.call_id
+      rejection.rejection;
+    Error
+      (Exact_execution_terminal
+         (terminal_after_quarantine
             ~keeper_name
-            "compaction exact domain rejection settlement failed slot=%s call_id=%s: %s"
-            observation.slot_id
-            observation.call_id
-            detail);
-       Log.Keeper.warn
-         ~keeper_name
-         "compaction exact output violated MASC domain plan slot=%s call_id=%s: %s"
-         observation.slot_id
-         observation.call_id
-         detail;
-       Error
-         (Exact_execution_terminal
-            (terminal_after_quarantine
-               ~keeper_name
-               ~exact_execution_guard
-               ~cause:Keeper_event_queue_state.Domain_invalid_output
-               observation))
-     | Ok plan ->
-       Ok
-         { plan
-         ; exact_execution_evidence = exact_execution_evidence flow_success
-         ; post_success_terminalizer =
-             { base_path = prepared_lane.base_path
-             ; keeper_name
-             ; flow_scope = prepared_lane.flow_scope
-             ; flow_success
-             ; exact_execution_guard
-             ; attempt_observation = observation
-             ; disposition_mutex = Eio.Mutex.create ()
-             ; phase = Open
-             ; domain_valid_attempts = 0
-             ; domain_rejected_attempts = 0
-             }
-         })
-  in
-  let settle () =
-    match with_settlement settle_execution with
-    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-      Error Exact_owner_unregistered_deferred
-    | Keeper_exact_flow_scope.Current result -> result
+            ~exact_execution_guard
+            ~cause:Keeper_event_queue_state.Domain_invalid_output
+            observation))
+  | `Flow (Ok validated) ->
+    let flow_success = validated.transport_success in
+    let observation =
+      flow_success
+      |> Exact_output.flow_success_candidate
+      |> observe_flow_attempt_receipt
+    in
+    Ok
+      { plan = validated.accepted
+      ; exact_execution_evidence = exact_execution_evidence flow_success
+      ; post_success_terminalizer =
+          { keeper_name
+          ; exact_execution_guard
+          ; attempt_observation = observation
+          ; disposition_mutex = Eio.Mutex.create ()
+          ; phase = Open
+          ; domain_valid_attempts = 0
+          ; domain_rejected_attempts = 0
+          }
+      }
   in
   match execution with
-  | `Bound_cancellation _ -> Eio.Cancel.protect settle
-  | `Flow _ -> settle ()
+  | `Bound_cancellation _ -> Eio.Cancel.protect settle_execution
+  | `Flow _ -> settle_execution ()
 ;;
 
 let execute_prepared_lane
@@ -1391,25 +1263,13 @@ let execute_prepared_lane
       ?exact_execution_guard
       prepared_lane
   =
-  match
-    Keeper_exact_flow_scope.with_current
-      prepared_lane.flow_scope
-      ~registered_lane_id:
-        (registered_lane_id
-           ~base_path:prepared_lane.base_path
-           ~keeper_name:prepared_lane.keeper_name)
-      (fun () ->
-         execute_prepared_lane_current
-           ~keeper_name
-           ~net
-           ?clock
-           ?before_dispatch_authority
-           ?exact_execution_guard
-           prepared_lane)
-  with
-  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-    Error Exact_owner_unregistered_deferred
-  | Keeper_exact_flow_scope.Current result -> result
+  execute_prepared_lane_current
+    ~keeper_name
+    ~net
+    ?clock
+    ?before_dispatch_authority
+    ?exact_execution_guard
+    prepared_lane
 ;;
 
 let run_exact
@@ -1537,7 +1397,23 @@ module For_testing = struct
     let evidence : Exact_output.flow_evidence =
       Exact_output.flow_attempt_evidence prepared_lane.flow_attempt
     in
-    List.map observe_flow_attempt_receipt evidence.attempts
+    List.map
+      (fun (candidate : Exact_output.flow_attempt_snapshot) ->
+        let receipt = candidate.receipt in
+        { slot_id = candidate.visit.identity.candidate_id
+        ; call_id =
+            receipt
+            |> Exact_output.generation_receipt_snapshot_call_id
+            |> call_id_to_string
+        ; catalog_generation_fingerprint =
+            candidate.visit.identity.catalog_generation
+            |> Exact_output.catalog_generation_fingerprint
+        ; receipt_plan_fingerprint =
+            Exact_output.generation_receipt_snapshot_plan_fingerprint receipt
+        ; receipt_request_body_sha256 =
+            Exact_output.generation_receipt_snapshot_request_body_sha256 receipt
+        })
+      evidence.attempts
   ;;
 
   let candidate_snapshot_slot_ids prepared_lane =
@@ -1545,37 +1421,10 @@ module For_testing = struct
       Exact_output.flow_attempt_evidence prepared_lane.flow_attempt
     in
     List.map
-      (fun candidate -> candidate.Exact_output.candidate_id)
+      (fun (candidate : Exact_output.flow_candidate_identity) ->
+        candidate.candidate_id)
       evidence.declared_candidate_snapshot
   ;;
 
   let post_success_snapshot = post_success_snapshot
-
-  let settle_post_success_domain_valid_with_error terminalizer detail =
-    settle_post_success_domain_valid_with_failure
-      ~settle_domain:(fun _ _ -> Error detail)
-      terminalizer
-      ~failure_detail:detail
-  ;;
-
-  let settle_post_success_domain_valid_with_exception terminalizer exn =
-    settle_post_success_domain_valid_with_failure
-      ~settle_domain:(fun _ _ -> raise exn)
-      terminalizer
-      ~failure_detail:"injected Domain_valid settlement exception"
-  ;;
-
-  let settle_post_success_domain_valid_with ~settle terminalizer =
-    settle_post_success_domain_valid_with_failure
-      ~settle_domain:(fun _ _ -> settle ())
-      terminalizer
-      ~failure_detail:"injected Domain_valid settlement failed"
-  ;;
-
-  let settle_post_success_domain_valid_with_wait_hook ~on_wait terminalizer =
-    settle_post_success_domain_valid_with_failure
-      ~on_await:on_wait
-      terminalizer
-      ~failure_detail:"concurrent Domain_valid settlement failed"
-  ;;
 end

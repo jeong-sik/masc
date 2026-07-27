@@ -237,6 +237,7 @@ let recover_provider_context_overflow_in_lane
             (match trigger with
              | Compaction_trigger.Provider_overflow { limit_tokens } -> limit_tokens
              | Compaction_trigger.Request_body_over_capacity _
+             | Compaction_trigger.Request_body_refused_by_provider _
              | Compaction_trigger.Serving_input_capacity _
              | Compaction_trigger.Manual ->
                None)
@@ -1334,12 +1335,10 @@ dominant source of the observed CAS race exhaustion after
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
                     ();
-                  (* RFC-0313: route the failure (total over sdk_error), retain
-                     the exact final execution identity, and record failure plus
-                     telemetry here. Queue ownership lives one boundary out:
-                     the heartbeat settles the current lease and, for
-                     [Escalate_judgment], enqueues its typed successor in the
-                     same durable event-queue transaction. *)
+                  (* Route the failure (total over sdk_error), retain the exact
+                     final execution identity, and record typed failure plus
+                     telemetry here. Exhausted failures remain visible without
+                     dispatching a second LLM call. *)
                   let transcript_corruption = transcript_corruption err in
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error

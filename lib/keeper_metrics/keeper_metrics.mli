@@ -11,7 +11,6 @@ type t =
   | TurnScheduled
   | TurnCompleted
   | FailureRoute
-  | FailureJudgmentOutcome
   | IdleSeconds
   | StreamProjectionEventCutoff
   | MetricEmitDropped

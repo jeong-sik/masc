@@ -25,11 +25,5 @@ val prune_flat_jsonl_older_than : days:int -> string -> int
 
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 
-(** Resolve crash-left keeper lifecycle journals before credential projection,
-    autoboot, or request mutation paths. *)
-val startup_recover_keeper_lifecycle_transactions :
-  Mcp_server.server_state ->
-  unit
-
 val startup_migrate_keeper_histories :
   Mcp_server.server_state -> unit

@@ -208,12 +208,6 @@ export const DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA = 'masc.keeper_fleet_operato
 
 export const DASHBOARD_BLOCKED_KEEPER_REASONS = [
   'durable_paused_autoboot_enabled',
-  'lifecycle_authority_unreadable',
-  'lifecycle_authority_invalid',
-  'lifecycle_rollback_capable_authority',
-  'lifecycle_forward_cleanup_authority',
-  'runtime_meta_authority',
-  'lifecycle_revival_transaction_mismatch',
   'meta_read_error',
   'not_bootable',
   'missing_meta',
@@ -241,7 +235,6 @@ export const DASHBOARD_BLOCKED_KEEPER_REASONS = [
 
 export const DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS = [
   'resume_or_leave_paused',
-  'inspect_lifecycle_transaction',
   'repair_keeper_meta_file',
   'add_keeper_toml_or_disable_stale_autoboot_meta',
   'run_keeper_up_or_recreate_meta',
@@ -275,7 +268,6 @@ export interface DashboardBlockedKeeperFact {
   task_status: string | null
   reason: DashboardBlockedKeeperReason
   action: DashboardKeeperFleetOperatorAction
-  lifecycle_admission_reason?: string | null
   operator_action_type: string | null
   operator_tool_name: string | null
   operator_action_confirm_required: boolean | null

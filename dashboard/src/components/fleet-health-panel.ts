@@ -391,9 +391,6 @@ function RuntimeBlockedKeeperFactRow({
           <span>${presentation.label}</span>
         </span>
         <div class="font-mono text-3xs text-[var(--color-fg-muted)]">${presentation.reason}</div>
-        ${presentation.detail
-          ? html`<div class="font-mono text-3xs text-[var(--color-fg-muted)]">${presentation.detail}</div>`
-          : null}
       </td>
       <td class="px-3 py-2 text-[var(--color-fg-secondary)]">${presentation.action}</td>
     </tr>

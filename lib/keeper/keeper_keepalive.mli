@@ -15,8 +15,7 @@ val register_grpc_heartbeat_starter : Keeper_keepalive_signal.grpc_heartbeat_sta
 (** Apply one typed control-plane directive to a Keeper lane. [Wakeup] only
     signals scheduling and never clears an operator pause; paused-work resume
     belongs to [Keeper_paused_work_resume_transaction]. *)
-val process_directive :
-  config:Workspace.config -> agent_name:string -> Keeper_directive.t -> unit
+val process_directive : agent_name:string -> Keeper_directive.t -> unit
 
 (** Test-visible helper for the [current_task_id] sent in gRPC heartbeats.
     This may reconcile registry state against the task backlog before reading
@@ -85,41 +84,13 @@ type start_keepalive_outcome =
   | Keepalive_started of Keeper_registry.registry_entry
   | Keepalive_already_registered of Keeper_registry.registry_entry
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
-  | Keepalive_transaction_admission_denied of
-      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
   | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
 
-type launch_gate
-
-type durable_meta_bootstrap =
-  | Bootstrap_required
-  | Durable_meta_already_committed
-
-(** A dead-revival lane can be forked under durable admission while remaining
-    side-effect-free until its launch journal is confirmed. Settlement is
-    exact-once; commit is idempotent but rejects a previously aborted gate. *)
-val create_launch_gate : unit -> launch_gate
-val commit_launch_gate : launch_gate -> unit
-val abort_launch_gate : launch_gate -> unit
-val launch_gate_is_committed : launch_gate -> bool
-
 val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
-
-(** Launch while the caller continuously holds the matching durable lifecycle
-    admission scope. The permit is rejected after that scope exits. *)
-val start_keepalive_under_admission :
-  ?proactive_warmup_sec:int ->
-  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
-  ?launch_gate:launch_gate ->
-  ?durable_meta_bootstrap:durable_meta_bootstrap ->
-  Keeper_lifecycle_admission.Durable_transaction.permit ->
-  'a context ->
-  keeper_meta ->
-  start_keepalive_outcome
 
 (** Launch one keeper lane and return the exact typed admission/launch
     outcome. Rejections remain logged and observable, but are never collapsed
@@ -127,8 +98,6 @@ val start_keepalive_under_admission :
 val start_keepalive :
   ?proactive_warmup_sec:int ->
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
-  ?launch_gate:launch_gate ->
-  ?durable_meta_bootstrap:durable_meta_bootstrap ->
   'a context ->
   keeper_meta ->
   start_keepalive_outcome

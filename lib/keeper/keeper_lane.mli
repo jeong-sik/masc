@@ -90,9 +90,3 @@ val classify_cancellation_cause : exn -> cancellation_origin
 val exited : t -> exit Eio.Promise.t
 val peek_exit : t -> exit option
 val await_exit : t -> exit
-
-module For_testing : sig
-  (** Reject exactly the next fork in the current fiber context. Later forks,
-      including transaction rollback lanes, use the real scheduler. *)
-  val with_next_fork_failure : exn -> (unit -> 'a) -> 'a
-end

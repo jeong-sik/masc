@@ -122,41 +122,6 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
 
-let startup_recover_keeper_lifecycle_transactions
-      (state : Mcp_server.server_state)
-  =
-  let runtime_meta =
-    Keeper_runtime_meta_transaction.recover_pending
-      (Mcp_server.workspace_config state)
-  in
-  Log.Keeper.info
-    "startup keeper runtime/meta recovery recovered=%d cleared=%d unresolved=%d"
-    runtime_meta.recovered
-    runtime_meta.cleared
-    (List.length runtime_meta.unresolved);
-  List.iter
-    (fun (path, detail) ->
-       Log.Keeper.error
-         "startup keeper runtime/meta recovery unresolved journal=%s detail=%s"
-         path
-         detail)
-    runtime_meta.unresolved;
-  let summary =
-    Keeper_dead_revival_transaction.recover_pending
-      (Mcp_server.workspace_config state)
-  in
-  Log.Keeper.info
-    "startup keeper lifecycle recovery recovered=%d cleared=%d unresolved=%d"
-    summary.recovered
-    summary.cleared
-    (List.length summary.unresolved);
-  List.iter
-    (fun (path, detail) ->
-       Log.Keeper.error
-         "startup keeper lifecycle recovery unresolved journal=%s detail=%s"
-         path
-         detail)
-    summary.unresolved
 
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
   (try

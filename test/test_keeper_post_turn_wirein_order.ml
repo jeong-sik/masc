@@ -300,7 +300,7 @@ let test_manual_compaction_serializes_owner_lane () =
       publish_exact_fixture
         ~source:"post-turn owner-lane compaction"
         exact_server;
-      (match Masc_test_deps.write_current_keeper_meta config meta with
+      (match Masc.Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error detail ->
          Alcotest.failf "keeper meta fixture persist failed: %s" detail);

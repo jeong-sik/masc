@@ -6,10 +6,6 @@
 
 type t
 
-val to_json : t -> Yojson.Safe.t
-val of_json : Yojson.Safe.t -> (t, string) result
-val matches : config:Workspace.config -> keeper_name:string -> t -> bool
-
 type committed =
   | No_shutdown_admission
   | Shutdown_superseded of Keeper_shutdown_types.t

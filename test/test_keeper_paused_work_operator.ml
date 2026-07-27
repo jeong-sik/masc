@@ -197,7 +197,7 @@ let test_inventory_exposes_exact_durable_fences () =
         ; runtime = { meta.runtime with nonce = 17 }
         }
       in
-      Masc_test_deps.write_current_keeper_meta config meta |> require_ok "persist inventory metadata";
+      Keeper_meta_store.write_meta config meta |> require_ok "persist inventory metadata";
       Persistence.update_result ~base_path ~keeper_name (fun pending ->
         Queue.enqueue pending board_source)
       |> require_ok "persist inventory source";

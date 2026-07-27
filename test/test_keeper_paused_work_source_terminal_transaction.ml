@@ -58,7 +58,7 @@ let with_source_terminal_lane f =
          ; runtime = { meta.runtime with nonce = 51 }
          }
        in
-       Masc_test_deps.write_current_keeper_meta config meta |> require_ok "persist Keeper metadata";
+       Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
        let channel =
          Keeper_continuation_channel.dashboard ~thread_id:"thread-terminal-1"
          |> require_ok "construct terminal continuation channel"
@@ -141,7 +141,7 @@ let test_exact_terminal_receipt_settles_once () =
       let resumed = Keeper_meta_contract.mark_resumed meta in
       { resumed with runtime = { resumed.runtime with nonce = 52 } }
     in
-    Masc_test_deps.write_current_keeper_meta config replacement
+    Keeper_meta_store.write_meta config replacement
     |> require_ok "persist replacement owner after settlement";
     let replay =
       Transaction.settle_pending config ~keeper_name request

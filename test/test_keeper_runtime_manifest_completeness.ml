@@ -137,11 +137,15 @@ let test_compaction_evidence_public_projection () =
       ~before_message_count:12
       ~after_message_count:4
       ~summarized_message_count:4
+      ~summarized_unit_count:4
       ~dropped_message_count:8
+      ~normalized_message_count:0
       ~before_tool_use_count:3
       ~after_tool_use_count:3
       ~before_tool_result_count:3
       ~after_tool_result_count:3
+      ~removed_tool_use_count:0
+      ~removed_tool_result_count:0
     |> Result.get_ok
     |> Keeper_compaction_evidence.to_json
   in

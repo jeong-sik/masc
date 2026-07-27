@@ -273,7 +273,6 @@ let semantic_message_json (message : Agent_sdk.Types.message) =
          ; "content_blocks", content_blocks
          ; "name", option_json (fun value -> `String value) message.name
          ; "tool_call_id", option_json (fun value -> `String value) message.tool_call_id
-         ; "metadata", canonical_json (`Assoc message.metadata)
          ])
 
 let semantic_messages_json messages =
@@ -613,6 +612,14 @@ let indices_for_action predicate plan =
 
 let summarized_indices = indices_for_action (function Summarize _ -> true | Keep | Drop -> false)
 let dropped_indices = indices_for_action (function Drop -> true | Keep | Summarize _ -> false)
+let normalized_indices plan =
+  plan.decisions
+  |> List.filter_map (fun decision ->
+    match decision.action with
+    | Keep when source_normalizes decision.source ->
+      Some decision.source.source_index
+    | Keep | Drop | Summarize _ -> None)
+
 let has_changes plan =
   summarized_indices plan <> []
   || dropped_indices plan <> []

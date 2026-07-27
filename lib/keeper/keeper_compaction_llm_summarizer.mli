@@ -216,6 +216,7 @@ val exact_execution_evidence_receipt_request_body_sha256 : exact_execution_evide
 val apply : compaction_plan -> Agent_sdk.Types.message list
 val summarized_indices : compaction_plan -> int list
 val dropped_indices : compaction_plan -> int list
+val normalized_indices : compaction_plan -> int list
 val has_changes : compaction_plan -> bool
 
 module For_testing : sig

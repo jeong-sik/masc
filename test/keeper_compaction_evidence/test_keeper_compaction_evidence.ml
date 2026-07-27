@@ -13,11 +13,15 @@ let evidence : Keeper_compaction_evidence.t =
     ~before_message_count:12
     ~after_message_count:11
     ~summarized_message_count:6
+    ~summarized_unit_count:6
     ~dropped_message_count:1
+    ~normalized_message_count:0
     ~before_tool_use_count:3
     ~after_tool_use_count:3
     ~before_tool_result_count:3
     ~after_tool_result_count:3
+    ~removed_tool_use_count:0
+    ~removed_tool_result_count:0
   |> Result.get_ok
 ;;
 
@@ -66,11 +70,15 @@ let test_projection_and_roundtrip () =
       ; "before_message_count", `Int 12
       ; "after_message_count", `Int 11
       ; "summarized_message_count", `Int 6
+      ; "summarized_unit_count", `Int 6
       ; "dropped_message_count", `Int 1
+      ; "normalized_message_count", `Int 0
       ; "before_tool_use_count", `Int 3
       ; "after_tool_use_count", `Int 3
       ; "before_tool_result_count", `Int 3
       ; "after_tool_result_count", `Int 3
+      ; "removed_tool_use_count", `Int 0
+      ; "removed_tool_result_count", `Int 0
       ]
   in
   Alcotest.check
@@ -92,11 +100,6 @@ let test_rejections () =
     | Error actual -> Alcotest.(check bool) label true (actual = expected)
     | Ok _ -> Alcotest.failf "%s: invalid evidence decoded" label
   in
-  let no_messages =
-    canonical
-    |> replace "summarized_message_count" (`Int 0)
-    |> replace "dropped_message_count" (`Int 0)
-  in
   let duplicate =
     `Assoc (("after_message_count", `Int 11) :: fields canonical)
   in
@@ -112,7 +115,6 @@ let test_rejections () =
     ; ( "not reduced"
       , Invalid_transition (Checkpoint_bytes, 4096, 4096)
       , replace "after_checkpoint_bytes" (`Int 4096) canonical )
-    ; "no messages", No_messages_compacted, no_messages
     ; ( "missing exact field"
       , Invalid_field (Target_identity_fingerprint, Missing)
       , remove "target_identity_fingerprint" canonical )
@@ -154,15 +156,29 @@ let test_rejections () =
     ; ( "tool use count increase"
       , Invalid_transition (Tool_uses, 3, 4)
       , replace "after_tool_use_count" (`Int 4) canonical )
-    ; ( "tool use count decrease"
-      , Invalid_transition (Tool_uses, 3, 2)
-      , replace "after_tool_use_count" (`Int 2) canonical )
+    ; ( "unpaired tool use decrease"
+      , Invalid_tool_protocol_accounting
+          { before_tool_use_count = 3
+          ; after_tool_use_count = 2
+          ; before_tool_result_count = 3
+          ; after_tool_result_count = 3
+          }
+      , canonical
+        |> replace "after_tool_use_count" (`Int 2)
+        |> replace "removed_tool_use_count" (`Int 1) )
     ; ( "tool result count increase"
       , Invalid_transition (Tool_results, 3, 4)
       , replace "after_tool_result_count" (`Int 4) canonical )
-    ; ( "tool result count decrease"
-      , Invalid_transition (Tool_results, 3, 2)
-      , replace "after_tool_result_count" (`Int 2) canonical )
+    ; ( "unpaired tool result decrease"
+      , Invalid_tool_protocol_accounting
+          { before_tool_use_count = 3
+          ; after_tool_use_count = 3
+          ; before_tool_result_count = 3
+          ; after_tool_result_count = 2
+          }
+      , canonical
+        |> replace "after_tool_result_count" (`Int 2)
+        |> replace "removed_tool_result_count" (`Int 1) )
     ; ( "impossible message accounting"
       , Invalid_message_accounting
           { before_message_count = 12
@@ -179,6 +195,87 @@ let test_rejections () =
           ; dropped_message_count = 1
           }
       , inexact_after )
+    ]
+;;
+
+let test_atomic_cycle_and_normalization_accounting () =
+  let create
+        ~before_message_count
+        ~after_message_count
+        ~summarized_message_count
+        ~summarized_unit_count
+        ~dropped_message_count
+        ~normalized_message_count
+        ~before_tool_count
+        ~after_tool_count
+        ~removed_tool_count
+    =
+    Keeper_compaction_evidence.create
+      ~slot_id:"compaction-slot"
+      ~call_id:"call-atomic"
+      ~target_identity_fingerprint:"target-identity"
+      ~catalog_generation_fingerprint:"catalog-generation"
+      ~catalog_evidence_sha256:"catalog-evidence"
+      ~plan_fingerprint:"plan-fingerprint"
+      ~receipt_plan_fingerprint:"plan-fingerprint"
+      ~receipt_request_body_sha256:"request-body"
+      ~before_checkpoint_bytes:4096
+      ~after_checkpoint_bytes:1024
+      ~before_message_count
+      ~after_message_count
+      ~summarized_message_count
+      ~summarized_unit_count
+      ~dropped_message_count
+      ~normalized_message_count
+      ~before_tool_use_count:before_tool_count
+      ~after_tool_use_count:after_tool_count
+      ~before_tool_result_count:before_tool_count
+      ~after_tool_result_count:after_tool_count
+      ~removed_tool_use_count:removed_tool_count
+      ~removed_tool_result_count:removed_tool_count
+  in
+  List.iter
+    (fun (label, result) ->
+      match result with
+      | Ok _ -> ()
+      | Error error ->
+        Alcotest.failf
+          "%s evidence rejected: %s"
+          label
+          (Keeper_compaction_evidence.decode_error_to_string error))
+    [ ( "reasoning normalization"
+      , create
+          ~before_message_count:12
+          ~after_message_count:12
+          ~summarized_message_count:0
+          ~summarized_unit_count:0
+          ~dropped_message_count:0
+          ~normalized_message_count:1
+          ~before_tool_count:3
+          ~after_tool_count:3
+          ~removed_tool_count:0 )
+    ; ( "atomic cycle summary"
+      , create
+          ~before_message_count:12
+          ~after_message_count:10
+          ~summarized_message_count:3
+          ~summarized_unit_count:1
+          ~dropped_message_count:0
+          ~normalized_message_count:0
+          ~before_tool_count:3
+          ~after_tool_count:2
+          ~removed_tool_count:1 )
+    ; ( "atomic cycle drop"
+      , create
+          ~before_message_count:12
+          ~after_message_count:9
+          ~summarized_message_count:0
+          ~summarized_unit_count:0
+          ~dropped_message_count:3
+          ~normalized_message_count:0
+          ~before_tool_count:3
+          ~after_tool_count:2
+          ~removed_tool_count:1 )
     ]
 ;;
 
@@ -212,6 +309,10 @@ let () =
             `Quick
             test_projection_and_roundtrip
         ; Alcotest.test_case "closed rejections" `Quick test_rejections
+        ; Alcotest.test_case
+            "atomic cycle and normalization accounting"
+            `Quick
+            test_atomic_cycle_and_normalization_accounting
         ; Alcotest.test_case
             "legacy pair-repair field rejected"
             `Quick

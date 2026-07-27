@@ -163,12 +163,21 @@ type requested_compaction =
   ; post_success_terminalizer :
       Keeper_compaction_llm_summarizer.post_success_terminalizer
   ; summarized_message_count : int
+  ; summarized_unit_count : int
   ; dropped_message_count : int
+  ; normalized_message_count : int
+  ; removed_tool_use_count : int
+  ; removed_tool_result_count : int
   }
 
 let unit_message_count = function
   | Keeper_compaction_unit.Ordinary_message _ -> 1
   | Keeper_compaction_unit.Closed_tool_cycle messages -> List.length messages
+;;
+
+let messages_of_unit = function
+  | Keeper_compaction_unit.Ordinary_message message -> [ message ]
+  | Keeper_compaction_unit.Closed_tool_cycle messages -> messages
 ;;
 
 let selected_message_count units selected =
@@ -177,6 +186,39 @@ let selected_message_count units selected =
     (fun count index -> count + unit_message_count units.(index))
     0
     selected
+;;
+
+let tool_block_counts messages =
+  let rec count_blocks (uses, results) blocks =
+    List.fold_left
+      (fun (uses, results) -> function
+         | Agent_sdk.Types.ToolUse _ -> uses + 1, results
+         | Agent_sdk.Types.ToolResult { content_blocks; _ } ->
+           let counts = uses, results + 1 in
+           Option.fold ~none:counts ~some:(count_blocks counts) content_blocks
+         | Agent_sdk.Types.Text _
+         | Agent_sdk.Types.Thinking _
+         | Agent_sdk.Types.ReasoningDetails _
+         | Agent_sdk.Types.RedactedThinking _
+         | Agent_sdk.Types.Image _
+         | Agent_sdk.Types.Document _
+         | Agent_sdk.Types.Audio _ ->
+           uses, results)
+      (uses, results)
+      blocks
+  in
+  List.fold_left
+    (fun counts (message : Agent_sdk.Types.message) ->
+       count_blocks counts message.content)
+    (0, 0)
+    messages
+;;
+
+let selected_tool_block_counts units selected =
+  let units = Array.of_list units in
+  selected
+  |> List.concat_map (fun index -> messages_of_unit units.(index))
+  |> tool_block_counts
 ;;
 
 let terminal_rejection terminalizer cause =
@@ -270,6 +312,18 @@ let requested_messages_with_plan
            Keeper_compaction_llm_summarizer.completed_post_success_terminalizer
              completed
          in
+         let summarized_indices =
+           Keeper_compaction_llm_summarizer.summarized_indices plan
+         in
+         let dropped_indices =
+           Keeper_compaction_llm_summarizer.dropped_indices plan
+         in
+         let normalized_indices =
+           Keeper_compaction_llm_summarizer.normalized_indices plan
+         in
+         let removed_tool_use_count, removed_tool_result_count =
+           selected_tool_block_counts units (summarized_indices @ dropped_indices)
+         in
             if not (Keeper_compaction_llm_summarizer.has_changes plan)
             then
               Error
@@ -285,11 +339,16 @@ let requested_messages_with_plan
                 ; summarized_message_count =
                     selected_message_count
                       units
-                      (Keeper_compaction_llm_summarizer.summarized_indices plan)
+                      summarized_indices
+                ; summarized_unit_count = List.length summarized_indices
                 ; dropped_message_count =
                     selected_message_count
                       units
-                      (Keeper_compaction_llm_summarizer.dropped_indices plan)
+                      dropped_indices
+                ; normalized_message_count =
+                    selected_message_count units normalized_indices
+                ; removed_tool_use_count
+                ; removed_tool_result_count
                 }))
 ;;
 
@@ -312,32 +371,6 @@ let requested_messages
       with
       | None -> Error Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable
       | Some summarize -> summarize ~units)
-    messages
-;;
-
-let tool_block_counts messages =
-  let rec count_blocks (uses, results) blocks =
-    List.fold_left
-      (fun (uses, results) -> function
-         | Agent_sdk.Types.ToolUse _ -> uses + 1, results
-         | Agent_sdk.Types.ToolResult { content_blocks; _ } ->
-           let counts = uses, results + 1 in
-           Option.fold ~none:counts ~some:(count_blocks counts) content_blocks
-         | Agent_sdk.Types.Text _
-         | Agent_sdk.Types.Thinking _
-         | Agent_sdk.Types.ReasoningDetails _
-         | Agent_sdk.Types.RedactedThinking _
-         | Agent_sdk.Types.Image _
-         | Agent_sdk.Types.Document _
-         | Agent_sdk.Types.Audio _ ->
-           uses, results)
-      (uses, results)
-      blocks
-  in
-  List.fold_left
-    (fun counts (message : Agent_sdk.Types.message) ->
-       count_blocks counts message.content)
-    (0, 0)
     messages
 ;;
 
@@ -462,11 +495,15 @@ let compact_for_request_typed_with
           ~before_message_count:before_messages
           ~after_message_count:after_messages
           ~summarized_message_count:requested.summarized_message_count
+          ~summarized_unit_count:requested.summarized_unit_count
           ~dropped_message_count:requested.dropped_message_count
+          ~normalized_message_count:requested.normalized_message_count
           ~before_tool_use_count
           ~after_tool_use_count
           ~before_tool_result_count
           ~after_tool_result_count
+          ~removed_tool_use_count:requested.removed_tool_use_count
+          ~removed_tool_result_count:requested.removed_tool_result_count
       with
       | Error error ->
         (match

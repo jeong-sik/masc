@@ -53,7 +53,9 @@ let closed_cycle id =
 
 let provider_cycle id =
   U.Closed_tool_cycle
-    [ message T.Assistant
+    [ message
+        ~metadata:[ "SECRET_CYCLE_METADATA", `String ("metadata:" ^ id) ]
+        T.Assistant
         [ T.Thinking { content = "private-call:" ^ id; signature = Some "signed" }
         ; tool_use id
         ]
@@ -292,6 +294,8 @@ let test_configured_runtime_boundary_preserves_cycle_semantics () =
     ; "SECRET_THINKING"
     ; "private-call:SECRET_TOOL"
     ; "private-final:SECRET_TOOL"
+    ; "SECRET_CYCLE_METADATA"
+    ; "metadata:SECRET_TOOL"
     ; "SECRET_METADATA"
     ]
 

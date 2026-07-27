@@ -229,6 +229,94 @@ let tool_result id =
     ; content_blocks = None
     }
 
+let test_atomic_cycle_and_normalization_cross_evidence_gate () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      init_runtime_fixture ();
+      let run_case ~name ~messages response =
+        let server =
+          Exact_fixture.start_server
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            (Exact_fixture.Reply response)
+        in
+        publish_exact_fixture ~source:name server;
+        let meta = make_meta ~name () in
+        ensure_registered_keeper ~base_path:config.base_path meta;
+        let checkpoint = { (make_checkpoint ()) with messages } in
+        let context =
+          checkpoint |> Masc.Keeper_context_core.context_of_oas_checkpoint
+        in
+        let preparation =
+          Compact_policy.compact_for_request_typed
+            ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+            ~base_path:config.base_path
+            ~meta
+            ~trigger:Compaction_trigger.Manual
+            context
+        in
+        check int (name ^ " dispatches exactly once") 1
+          (Exact_fixture.post_count server);
+        match preparation.decision, preparation.evidence with
+        | Compact_policy.Prepared Compaction_trigger.Manual, Some _ ->
+          (match preparation.post_success_terminalizer with
+           | None -> failf "%s lost its post-success terminalizer" name
+           | Some terminalizer ->
+             (match
+                Summarizer.terminalize_post_success
+                  terminalizer
+                  Keeper_event_queue_state.Domain_invalid_output
+              with
+              | Summarizer.Terminalized _ -> ()
+              | _ -> failf "%s could not close its exact attempt" name))
+        | _ -> failf "%s did not cross the structural evidence gate" name
+      in
+      run_case
+        ~name:"atomic-cycle-evidence"
+        ~messages:
+          [ block_message Agent_sdk.Types.User [ Agent_sdk.Types.Text "prompt" ]
+          ; block_message Agent_sdk.Types.Assistant
+              [ Agent_sdk.Types.Thinking
+                  { content = "private"; signature = None }
+              ; tool_use "atomic"
+              ]
+          ; block_message Agent_sdk.Types.Tool
+              [ Agent_sdk.Types.ToolResult
+                  { tool_use_id = "atomic"
+                  ; content = String.make 4096 'r'
+                  ; outcome = Tool_succeeded
+                  ; json = Some (`Assoc [ "status", `String "done" ])
+                  ; content_blocks = None
+                  }
+              ]
+          ]
+        (exact_response [ compaction_decision ~summary:"done" 1 Schema.compaction_plan_action_summarize ]);
+      run_case
+        ~name:"reasoning-normalization-evidence"
+        ~messages:
+          [ block_message Agent_sdk.Types.User [ Agent_sdk.Types.Text "prompt" ]
+          ; block_message Agent_sdk.Types.Assistant
+              [ Agent_sdk.Types.Thinking
+                  { content = String.make 4096 'p'; signature = None }
+              ; Agent_sdk.Types.Text "visible"
+              ]
+          ]
+        (exact_response [ compaction_decision 1 Schema.compaction_plan_action_keep ]))
+;;
+
 let test_regular_post_turn_does_not_auto_compact () =
   Eio_main.run @@ fun _env ->
   let meta = make_meta () in
@@ -1233,6 +1321,10 @@ let () =
         `Quick test_final_admission_busy_requeues_only_pre_dispatch_no_compaction;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
+      test_case
+        "atomic cycle and normalization cross evidence gate"
+        `Quick
+        test_atomic_cycle_and_normalization_cross_evidence_gate;
       test_case "checkpoint installation auxiliary manifest tags"
         `Quick test_checkpoint_installation_auxiliary_manifest_tags;
       test_case "malformed structure preserves checkpoint"

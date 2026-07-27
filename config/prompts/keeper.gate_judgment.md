@@ -15,9 +15,9 @@ field you were given. If the request belongs to an active Task or Goal, state
 that relationship in the first sentence of the context summary.
 
 `partial_context` reports whether outer-turn context accompanied the request.
-When it is true, the request was raised outside a Keeper turn and no transcript
-exists to attach, so judge the registered operation identity and the complete
-input on their own and name the absent context in the rationale. A true
-`partial_context` is not by itself a reason to return `require_human`.
+When it is true, no outer-turn transcript reached you, so judge the registered
+operation identity and the complete input on their own and name the absent
+context in the rationale. A true `partial_context` is not by itself a reason to
+return `require_human`.
 
 Respond only through the requested structured JSON contract.

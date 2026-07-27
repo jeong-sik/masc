@@ -36,9 +36,11 @@ let record_outcome outcome =
 
 (* The fields that identify a request - keeper, tool, complete input, and
    task/goal linkage - are present on every pending approval. Outer-turn
-   context is an accuracy aid that a request raised outside a Keeper turn
-   structurally cannot carry, so its absence is reported to the judge as
-   [partial_context] instead of ending the attempt. *)
+   context is an accuracy aid that some request paths do not carry, so its
+   absence is reported to the judge as [partial_context] instead of ending
+   the attempt. Which paths drop it is a separate defect class - #25966 and
+   #25968 traced one such path in Gate replay - and this bundle stays
+   judgeable regardless of which one is at fault. *)
 let build_context_bundle ~(entry : pending_approval) =
   let request_identity =
     [ "keeper_name", `String entry.keeper_name

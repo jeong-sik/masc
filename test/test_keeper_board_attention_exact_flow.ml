@@ -536,7 +536,116 @@ let test_domain_terminal_persistence_failure_is_typed () =
       Alcotest.(check int)
         "generation dispatched once before domain commit"
         1
-        (Fixture.post_count server)))
+      (Fixture.post_count server)))
+;;
+
+let test_domain_rejection_persists_block_and_quarantine () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      with_temp_base "board-attention-domain-rejection" @@ fun base_path ->
+      let candidate = candidate "board-attention-domain-rejection" in
+      (match Candidate.record ~base_path candidate with
+       | Candidate.Recorded _ -> ()
+       | Candidate.Duplicate _ ->
+         Alcotest.fail "fresh domain rejection candidate duplicated"
+       | Candidate.Record_error detail -> Alcotest.fail detail);
+      let meta =
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+            [ "name", `String candidate.keeper_name
+            ; "trace_id", `String "trace-board-domain-rejection"
+            ])
+        |> Result.get_ok
+      in
+      ignore
+        (Keeper_registry.register_offline
+           ~base_path
+           candidate.keeper_name
+           meta);
+      let rejected =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:"different-candidate")))
+      in
+      let unused =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      publish_lane
+        [ target "board-attention-domain-rejected" rejected.base_url
+        ; target "board-attention-domain-unused" unused.base_url
+        ];
+      (match
+         Worker.For_testing.process_next_exact
+           ~clock
+           ~net:(Some net)
+           ~now:(fun () -> 3.0)
+           ~worker_epoch:(Partition.Worker_epoch.generate ())
+           ~base_path
+           ~keeper_name:candidate.keeper_name
+       with
+       | Ok
+           (Worker.Partition_blocked
+              { candidate_id
+              ; reason = Partition.Domain_output_invalid _
+              })
+         when String.equal candidate_id candidate.candidate_id ->
+         ()
+       | Ok _ ->
+         Alcotest.fail "domain rejection did not return its durable Blocked state"
+       | Error detail -> Alcotest.fail detail);
+      Alcotest.(check int)
+        "domain-invalid generation dispatched once"
+        1
+        (Fixture.post_count rejected);
+      Alcotest.(check int)
+        "domain rejection never advances"
+        0
+        (Fixture.post_count unused);
+      (match
+         Candidate.load_candidates
+           ~base_path
+           ~keeper_name:candidate.keeper_name
+       with
+       | Ok
+           [ { status =
+                 Candidate.Quarantine
+                   { quarantine =
+                       { failure_category = Candidate.Domain_output_invalid
+                       ; prior_status = Candidate.Resumable_pending _
+                       ; _
+                       }
+                   ; phase = Candidate.Quarantined
+                   }
+             ; _
+             }
+           ] ->
+         ()
+       | Ok _ ->
+         Alcotest.fail
+           "domain rejection did not durably quarantine the pending candidate"
+       | Error detail -> Alcotest.fail detail);
+      match Partition.load ~base_path ~keeper_name:candidate.keeper_name with
+      | Ok
+          [ { state =
+                Partition.Blocked
+                  { reason = Partition.Domain_output_invalid _; _ }
+            ; _
+            }
+          ] ->
+        ()
+      | Ok _ ->
+        Alcotest.fail "domain rejection did not persist one Blocked partition"
+      | Error detail -> Alcotest.fail detail))
 ;;
 
 let test_missing_lane_is_setup_error_without_dispatch () =
@@ -782,6 +891,10 @@ let () =
             "domain terminal persistence failure remains typed"
             `Quick
             test_domain_terminal_persistence_failure_is_typed
+        ; Alcotest.test_case
+            "domain rejection persists Blocked and Quarantine"
+            `Quick
+            test_domain_rejection_persists_block_and_quarantine
         ; Alcotest.test_case
             "missing lane is setup error without dispatch"
             `Quick

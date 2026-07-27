@@ -430,15 +430,7 @@ let peek_when ~ready state =
 ;;
 
 let ack_pending ~(selection : pending_selection) state =
-  if not (Int64.equal selection.source_revision state.revision)
-  then
-    Error
-      (Printf.sprintf
-         "event queue pending revision changed: expected %Ld, current %Ld"
-         selection.source_revision
-         state.revision)
-  else
-    match selection.stimuli with
+  match selection.stimuli with
     | [] -> Error "event queue pending selection must not be empty"
     | _ :: _ :: _ when selection.kind = Single ->
       Error "single event queue pending selection must contain exactly one stimulus"

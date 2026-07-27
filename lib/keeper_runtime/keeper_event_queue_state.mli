@@ -307,6 +307,9 @@ val ack_pending :
   selection:pending_selection ->
   t ->
   (t, string) result
+(** Compare-and-remove the exact immutable selected stimulus snapshot.
+    Unrelated queue revisions and enqueues are allowed; a missing, duplicated,
+    or changed selected identity fails closed. *)
 
 val claim_when :
   claimed_at:float ->

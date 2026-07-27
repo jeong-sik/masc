@@ -63,7 +63,7 @@ let test_failure_without_ack_retains_source () =
     (post_ids (State.pending state))
 ;;
 
-let test_stale_revision_fails_closed () =
+let test_unrelated_enqueue_does_not_invalidate_exact_ack () =
   let source = stimulus "source" 1.0 in
   let state = State.with_pending (queue [ source ]) State.empty in
   let selected = selection state in
@@ -72,12 +72,28 @@ let test_stale_revision_fails_closed () =
     |> State.with_revision 1L
     |> State.with_pending (queue [ source; stimulus "new-source" 2.0 ])
   in
+  let acked =
+    State.ack_pending ~selection:selected changed
+    |> require_ok "unrelated enqueue must not invalidate exact source"
+  in
+  Alcotest.(check (list string))
+    "only unrelated source remains"
+    [ "new-source" ]
+    (post_ids (State.pending acked))
+;;
+
+let test_changed_selected_snapshot_fails_closed () =
+  let source = stimulus "source" 1.0 in
+  let state = State.with_pending (queue [ source ]) State.empty in
+  let selected = selection state in
+  let changed_source = { source with arrived_at = 9.0 } in
+  let changed = State.with_pending (queue [ changed_source ]) state in
   (match State.ack_pending ~selection:selected changed with
    | Error _ -> ()
-   | Ok _ -> Alcotest.fail "stale selection removed pending work");
+   | Ok _ -> Alcotest.fail "changed selected snapshot was acknowledged");
   Alcotest.(check (list string))
-    "all sources retained"
-    [ "source"; "new-source" ]
+    "changed source retained"
+    [ "source" ]
     (post_ids (State.pending changed))
 ;;
 
@@ -141,7 +157,14 @@ let () =
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
         ; Alcotest.test_case "failure retains source" `Quick test_failure_without_ack_retains_source
-        ; Alcotest.test_case "stale revision fails closed" `Quick test_stale_revision_fails_closed
+        ; Alcotest.test_case
+            "unrelated enqueue survives exact ack"
+            `Quick
+            test_unrelated_enqueue_does_not_invalidate_exact_ack
+        ; Alcotest.test_case
+            "changed selected snapshot fails closed"
+            `Quick
+            test_changed_selected_snapshot_fails_closed
         ; Alcotest.test_case "fresh schema only" `Quick test_current_schema_round_trip_and_old_schema_rejection
         ] )
     ; ( "persistence"

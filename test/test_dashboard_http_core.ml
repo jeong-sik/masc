@@ -2084,6 +2084,182 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
+let config_sync_runtime_toml =
+  {|[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let prepare_config_sync_keeper config name =
+  let runtime_path = Filename.concat config.Workspace.base_path "runtime.toml" in
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error error -> fail ("runtime init: " ^ error));
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
+          ; "trace_id", `String (name ^ "-trace")
+          ])
+    with
+    | Error error -> fail ("meta fixture: " ^ error)
+    | Ok meta ->
+      { meta with
+        Masc.Keeper_meta_contract.autoboot_enabled = true
+      ; proactive = { enabled = false }
+      }
+  in
+  match Masc.Keeper_meta_store.write_meta config meta with
+  | Ok () -> ()
+  | Error error -> fail ("write meta: " ^ error)
+
+let write_config_sync_toml config name =
+  let dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  mkdir_p dir;
+  let path = Filename.concat dir (name ^ ".toml") in
+  write_file path
+    "[keeper]\nsandbox_profile = \"local\"\nautoboot_enabled = false\nproactive_enabled = false\n";
+  path
+
+let post_config ~sw ~clock ~state ~name body =
+  let output = Buffer.create 512 in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      Keeper_config_post.handle_keeper_config_post
+        ~sw ~clock state "dashboard-test" (Httpun.Reqd.request reqd) reqd body)
+  in
+  let request =
+    Printf.sprintf "POST /api/v1/keepers/%s/config HTTP/1.1\r\nHost: x\r\n\r\n" name
+  in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+            Buffer.add_string output
+              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+            total + iov.len)
+          0 iovecs
+      in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let body =
+    match List.rev (String.split_on_char '\n' raw) with
+    | body :: _ -> String.trim body
+    | [] -> fail "HTTP response has no body"
+  in
+  raw, Yojson.Safe.from_string body
+
+let test_config_post_restarts_from_atomic_toml () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-success" in
+  prepare_config_sync_keeper config name;
+  let path = write_config_sync_toml config name in
+  ignore
+    (post_config ~sw ~clock:(Eio.Stdenv.clock env)
+       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+       ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|});
+  let parsed = Keeper_toml_loader.parse_toml (In_channel.with_open_bin path In_channel.input_all) in
+  (match parsed with
+   | Error error -> fail error
+   | Ok doc ->
+     check (option bool) "autoboot committed" (Some true)
+       (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled");
+     check (option bool) "proactive committed" (Some true)
+       (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"));
+  check bool "running projection converged" true
+    (match Masc.Keeper_registry.get ~base_path:config.base_path name with
+     | Some entry -> entry.meta.proactive.enabled
+     | None -> false);
+  ignore (Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path name)
+
+let test_config_post_requires_toml () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-no-toml" in
+  prepare_config_sync_keeper config name;
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"proactive_enabled":true}|}
+  in
+  check bool "HTTP 409" true (String.starts_with ~prefix:"HTTP/1.1 409" raw);
+  let open Yojson.Safe.Util in
+  check bool "config not applied" false (json |> member "config_applied" |> to_bool);
+  check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool)
+
+let test_config_post_reports_runtime_sync_failure () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-partial" in
+  prepare_config_sync_keeper config name;
+  let toml_path = write_config_sync_toml config name in
+  Sys.remove (Filename.concat config.base_path "runtime.toml");
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"proactive_enabled":true,"runtime_id":"missing.runtime"}|}
+  in
+  check bool "HTTP 503" true (String.starts_with ~prefix:"HTTP/1.1 503" raw);
+  let open Yojson.Safe.Util in
+  check bool "TOML committed" true (json |> member "config_applied" |> to_bool);
+  check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool);
+  check string "typed failure" "keeper_runtime_sync_failed"
+    (json |> member "error" |> member "code" |> to_string);
+  let doc =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin toml_path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> fail error
+  in
+  check (option bool) "committed TOML is not rolled back" (Some true)
+    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+
+let test_config_post_prevalidates_mixed_request () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-invalid-mixed" in
+  prepare_config_sync_keeper config name;
+  let toml_path = write_config_sync_toml config name in
+  let raw, _ =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"proactive_enabled":true,"allowed_paths":["*"]}|}
+  in
+  check bool "HTTP 400" true (String.starts_with ~prefix:"HTTP/1.1 400" raw);
+  let doc =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin toml_path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> fail error
+  in
+  check (option bool) "activation was not committed" (Some false)
+    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+
 let () =
   run "dashboard_http_core"
     [
@@ -2205,5 +2381,13 @@ let () =
       ( "context-window shrink guard (#25062/#25268)",
         [ test_case "shrink of max_context_override is detected" `Quick
             test_context_shrink_detection;
+          test_case "config POST atomically restarts runtime" `Quick
+            test_config_post_restarts_from_atomic_toml;
+          test_case "activation config requires TOML" `Quick
+            test_config_post_requires_toml;
+          test_case "runtime sync failure preserves commit" `Quick
+            test_config_post_reports_runtime_sync_failure;
+          test_case "mixed invalid request commits nothing" `Quick
+            test_config_post_prevalidates_mixed_request;
         ] );
     ]

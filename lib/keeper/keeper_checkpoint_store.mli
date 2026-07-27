@@ -65,7 +65,11 @@ type save_oas_relation = [ `Cold | `Forward | `Equal ]
     behind the known high watermark. It must not be treated as keeper
     turn failure, pause, or stop. *)
 type save_oas_outcome =
-  | Saved of { relation : save_oas_relation; turn_count : int }
+  | Saved of
+      { relation : save_oas_relation
+      ; turn_count : int
+      ; installed_ref : Keeper_checkpoint_ref.t
+      }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
 (** Save [ckpt] in one locked disk-SSOT transaction. A missing [session_dir]

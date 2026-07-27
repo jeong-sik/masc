@@ -2611,3 +2611,4 @@
 
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
 (include stanzas/test_eio_resource_scope.inc)
+(include stanzas/test_keeper_context_correction.inc)

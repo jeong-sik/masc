@@ -29,9 +29,9 @@ type submit_request_spec =
   ; board_title : string
   ; board_content : string
   ; evidence_fields : (string * Yojson.Safe.t) list
-      (* task-1664: [required_artifacts] / [submitted_evidence] JSON fields
-         spliced next to the flat [evidence_refs] so verifiers can tell the
-         contract's demanded artifacts apart from what the agent submitted. *)
+      (* task-1664: transient required/submitted role split for Board/SSE.
+         Request persistence replaces the raw [submitted_evidence] list with
+         its one typed submit-time snapshot SSOT. *)
   ; submitted_evidence : string list
   }
 
@@ -63,8 +63,9 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     (match task.contract with
      | Some c -> c.completion_contract
      | None -> []) in
-  (* task-1664: derive the typed required/submitted split from the task (the
-     SSOT), and splice it next to the unchanged flat [evidence_refs] field. *)
+  (* task-1664: derive the required/submitted role split from the task SSOT.
+     The submitted strings remain transient here; [create_submit_request]
+     replaces them with the typed persisted snapshot. *)
   let verification_evidence =
     Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
       ~submitted_evidence_refs:evidence_refs

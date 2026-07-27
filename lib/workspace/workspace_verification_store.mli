@@ -64,7 +64,7 @@ val snapshot_submitted_evidence_json :
   Yojson.Safe.t
 (** Materialize submitted evidence once at the producer's submit boundary.
     ["artifact:<relative-path>"] is rooted at the producer's declared sandbox;
-    absolute paths remain accepted only when contained by that same playground.
+    ["note:<text>"] preserves non-file evidence explicitly.
     [content_sha256] covers the bounded UTF-8 content persisted in the
     snapshot, not bytes omitted beyond the projection cap. Bare and absolute
     references are persisted as typed invalid references. *)

@@ -2951,7 +2951,7 @@ let recover_one_locked permit config leaf =
   | Ok (_, _, None) -> Error "journal authority disappeared during recovery"
   | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
   | Ok (_, _, Some (Active_journal journal)) ->
-    let complete_forward_cleanup journal =
+    let complete_forward_cleanup (journal : journal) =
       match forward_cleanup config journal with
       | Ok () ->
         observe
@@ -2964,7 +2964,7 @@ let recover_one_locked permit config leaf =
           ("forward-commit journal cleanup failed: "
            ^ error_to_string error)
     in
-    let recover_forward journal =
+    let recover_forward (journal : journal) =
       match verify_payload config journal with
       | Error failure -> Error (recovery_payload_error failure)
       | Ok payload ->
@@ -2978,7 +2978,7 @@ let recover_one_locked permit config leaf =
            Error ("forward runtime assignment recovery failed: " ^ detail)
          | Ok () -> complete_forward_cleanup journal)
     in
-    let without_live_reservation recover journal =
+    let without_live_reservation recover (journal : journal) =
       match
         Keeper_lifecycle_reservation.current
           ~base_path:config.Workspace.base_path

@@ -224,7 +224,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
         ~default:source_meta.active_goal_ids
         p.profile_defaults.active_goal_ids
   in
-  let allowed_paths_for source_meta =
+  let allowed_paths_for (source_meta : keeper_meta) =
     match p.allowed_paths_opt with
     | Some allowed_paths -> allowed_paths
     | None -> source_meta.allowed_paths

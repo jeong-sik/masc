@@ -2038,7 +2038,7 @@ let test_compaction_failure_advances_streak_without_lease () =
   let config = Masc.Workspace.default_config base_path in
   ignore (Masc.Workspace.init config ~agent_name:None : string);
   let meta = cycle_meta () in
-  Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+  Result.get_ok (Masc_test_deps.write_current_keeper_meta config meta);
   (match
      Masc.Keeper_meta_store.persist_compaction_outcome
        config

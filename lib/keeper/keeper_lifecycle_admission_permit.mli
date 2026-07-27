@@ -6,6 +6,11 @@ val active_permit_scope_key :
 val active_permit_lease_key :
   Keeper_lifecycle_admission_durable_types.permit_lease Eio.Fiber.key
 
+val without_inherited_permit_scope : (unit -> 'a) -> 'a
+(** Mask an admission scope inherited across a fiber fork. The child must
+    perform a fresh durable admission instead of reentering its parent's
+    transaction authority. *)
+
 val with_permit_lifecycle :
   Keeper_lifecycle_admission_durable_types.permit ->
   (Keeper_lifecycle_admission_durable_types.permit_lifecycle -> 'a) ->

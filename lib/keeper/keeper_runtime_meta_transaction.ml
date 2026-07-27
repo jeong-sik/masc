@@ -335,6 +335,15 @@ let recover ?lifecycle_token permit config intent ~prefer =
     let rollback_pair = exact_pair config intent `Rollback in
     let forward_pair = exact_pair config intent `Forward in
     (match rollback_pair, forward_pair with
+     | Ok true, Ok true ->
+       let direction, resolution =
+         match prefer with
+         | `Rollback -> `Rollback, Rolled_back
+         | `Forward -> `Forward, Forward_committed
+       in
+       Result.map
+         (fun () -> resolution)
+         (clear_exact config intent direction)
      | Ok true, _ ->
        Result.map
          (fun () -> Rolled_back)

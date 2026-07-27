@@ -83,7 +83,7 @@ let make_meta ?(paused = false) name =
   | Ok meta -> { meta with paused }
 
 let write_meta_exn config meta =
-  match Keeper_meta_store.write_meta config meta with
+  match Masc_test_deps.write_current_keeper_meta config meta with
   | Ok () -> ()
   | Error err -> fail ("write_meta failed: " ^ err)
 

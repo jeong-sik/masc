@@ -567,7 +567,7 @@ let reserve config intent =
     |> reconcile_publication config expected
 ;;
 
-let clear config intent =
+let clear config (intent : intent) =
   let expected =
     Cleared
       { transaction_id = intent.transaction_id

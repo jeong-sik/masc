@@ -304,7 +304,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config updated_meta with
+      (match Masc_test_deps.write_current_keeper_meta config updated_meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let metrics_store = Keeper_types_support.keeper_metrics_store config keeper_name in
@@ -852,7 +852,7 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
             (Keeper_lifecycle_reservation.release token
               : Keeper_lifecycle_reservation.release_outcome))
         (fun () ->
-          (match Keeper_meta_store.write_meta config persisted with
+          (match Masc_test_deps.write_current_keeper_meta config persisted with
            | Error _ -> ()
            | Ok () -> Alcotest.fail "unowned durable write crossed reservation");
           (match
@@ -2062,7 +2062,7 @@ let test_dead_revival_recovery_forwards_concurrent_launch_commit () =
    | Ok _ -> ()
    | Error error ->
      Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
-  (match Keeper_meta_store.write_meta config candidate with
+  (match Masc_test_deps.write_current_keeper_meta config candidate with
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   let recovery =
@@ -2211,7 +2211,7 @@ let test_dead_revival_launch_payload_damage_forward_cleans damage () =
    | Error error ->
      Alcotest.fail
        (Keeper_dead_revival_transaction.error_to_string error));
-  (match Keeper_meta_store.write_meta config candidate with
+  (match Masc_test_deps.write_current_keeper_meta config candidate with
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   (match
@@ -2428,7 +2428,7 @@ let test_dead_revival_cleanup_pending_recovery
        (Keeper_dead_revival_transaction.error_to_string error));
   (match direction with
    | Forward_cleanup ->
-     (match Keeper_meta_store.write_meta config candidate with
+     (match Masc_test_deps.write_current_keeper_meta config candidate with
       | Ok () -> ()
       | Error detail -> Alcotest.fail detail);
      (match
@@ -2720,7 +2720,7 @@ let test_update_keeper_rebases_intent_after_join_race () =
             ; instructions = "concurrent-preserved"
             }
           in
-          match Keeper_meta_store.write_meta config concurrent with
+          match Masc_test_deps.write_current_keeper_meta config concurrent with
           | Ok () -> ()
           | Error detail -> Alcotest.fail detail)
       in
@@ -3754,7 +3754,7 @@ let test_keeper_lifecycle_transaction_admission_current_schema () =
       instructions = original.instructions ^ "\nblocked ordinary mutation"
     }
   in
-  (match Keeper_meta_store.write_meta config ordinary_candidate with
+  (match Masc_test_deps.write_current_keeper_meta config ordinary_candidate with
    | Error _ -> ()
    | Ok () ->
      Alcotest.fail
@@ -4218,7 +4218,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Masc_test_deps.write_current_keeper_meta config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let digest =

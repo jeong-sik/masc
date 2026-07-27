@@ -1300,26 +1300,33 @@ let start_keepalive_admitted
              ~sw:ctx.sw
              reg.lane
              ~run:(fun lane_sw ->
-        let launch_outcome =
-          match launch_gate with
-          | None -> Launch_gate_committed
-          | Some gate -> Eio.Promise.await gate.outcome
-        in
-        match launch_outcome with
-        | Launch_gate_aborted -> ()
-        | Launch_gate_committed ->
-          let ctx = { ctx with sw = lane_sw } in
-          Option.iter
-            (fun _ -> publish_keeper_started ~live_meta)
-            launch_gate;
-          (* The sidecar is part of this Keeper lane. It cannot outlive the
-             lane's structured-concurrency scope. *)
-          let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
-          (match grpc_close with
-           | Some _ ->
-             Atomic.set reg.grpc_close grpc_close
-           | None -> ());
-          run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
+        Keeper_lifecycle_admission_permit.without_inherited_permit_scope
+          (fun () ->
+             let launch_outcome =
+               match launch_gate with
+               | None -> Launch_gate_committed
+               | Some gate -> Eio.Promise.await gate.outcome
+             in
+             match launch_outcome with
+             | Launch_gate_aborted -> ()
+             | Launch_gate_committed ->
+               let ctx = { ctx with sw = lane_sw } in
+               Option.iter
+                 (fun _ -> publish_keeper_started ~live_meta)
+                 launch_gate;
+               (* The sidecar is part of this Keeper lane. It cannot outlive
+                  the lane's structured-concurrency scope. *)
+               let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
+               (match grpc_close with
+                | Some _ ->
+                  Atomic.set reg.grpc_close grpc_close
+                | None -> ());
+               run_heartbeat_loop
+                 ~proactive_warmup_sec
+                 ctx
+                 live_meta
+                 stop
+                 ~wakeup))
              ~cleanup:cleanup_tracking
          with
          | Ok () -> Keepalive_started reg

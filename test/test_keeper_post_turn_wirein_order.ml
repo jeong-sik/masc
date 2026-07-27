@@ -300,7 +300,7 @@ let test_manual_compaction_serializes_owner_lane () =
       publish_exact_fixture
         ~source:"post-turn owner-lane compaction"
         exact_server;
-      Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+      Result.get_ok (Masc_test_deps.write_current_keeper_meta config meta);
       let owner_entry = Masc.Keeper_registry.For_testing.register ~base_path meta.name meta in
       let peer_entry = Masc.Keeper_registry.For_testing.register ~base_path peer.name peer in
       Atomic.set owner_entry.fiber_wakeup false;

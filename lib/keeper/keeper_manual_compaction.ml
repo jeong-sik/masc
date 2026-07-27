@@ -252,25 +252,26 @@ let append_manifest
             (Keeper_runtime_manifest.with_payload_role
                ~payload_role:Keeper_runtime_manifest.Checkpoint
                (`Assoc
-                 [ "trigger", `String (Compaction_trigger.to_label trigger)
-                 ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-                 ; ( Keeper_compaction_evidence.exact_evidence_key
-                   , Keeper_compaction_evidence.to_json recovery.evidence )
-                 ; ( "checkpoint_installation_schema"
-                   , `String "keeper.checkpoint_installation.v1" )
-                 ; "checkpoint_installation_state", `String "installed"
-                 ; ( "checkpoint_installed_ref"
-                   , checkpoint_ref_to_json installation.installed_ref )
-                 ; ( "checkpoint_installation_auxiliary"
-                   , `List
-                       (List.map
-                          checkpoint_installation_auxiliary_to_json
-                          installation.auxiliary) )
-                 ; ( "compaction_post_install_schema"
-                   , `String "keeper.compaction.post_install.v1" )
-                 ; "compaction_lifecycle", post_install_lifecycle_to_json lifecycle
-                 ; "operator_action_required", `Bool operator_action_required
-                 ]))))
+                 ([ "trigger", `String (Compaction_trigger.to_label trigger)
+                  ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+                  ]
+                  @ Keeper_post_turn.compaction_recovery_evidence_fields
+                      recovery.evidence
+                  @ [ ( "checkpoint_installation_schema"
+                      , `String "keeper.checkpoint_installation.v1" )
+                    ; "checkpoint_installation_state", `String "installed"
+                    ; ( "checkpoint_installed_ref"
+                      , checkpoint_ref_to_json installation.installed_ref )
+                    ; ( "checkpoint_installation_auxiliary"
+                      , `List
+                          (List.map
+                             checkpoint_installation_auxiliary_to_json
+                             installation.auxiliary) )
+                    ; ( "compaction_post_install_schema"
+                      , `String "keeper.compaction.post_install.v1" )
+                    ; "compaction_lifecycle", post_install_lifecycle_to_json lifecycle
+                    ; "operator_action_required", `Bool operator_action_required
+                    ])))))
     ~checkpoint_path
     ()
   |> Keeper_runtime_manifest.append config

@@ -26,15 +26,31 @@ type post_turn_lifecycle =
   ; message_count : int
   }
 
+type deterministic_purge_evidence =
+  { report : Keeper_checkpoint_purge.report
+  ; before_checkpoint_bytes : int
+  ; after_checkpoint_bytes : int
+  }
+
+type compaction_recovery_evidence =
+  | Exact_execution_evidence of Keeper_compaction_evidence.t
+  | Deterministic_purge_evidence of deterministic_purge_evidence
+
 (** Recovered checkpoint after a durably applied explicit compaction request.
     Manual and provider-overflow callers consume the same result. *)
 type compaction_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
   ; checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation
   ; trigger : Compaction_trigger.t
-  ; evidence : Keeper_compaction_evidence.t
+  ; evidence : compaction_recovery_evidence
   ; turn_generation : int
   } [@@warning "-69"]
+
+val compaction_recovery_evidence_fields :
+  compaction_recovery_evidence -> (string * Yojson.Safe.t) list
+(** Closed manifest projection. Exact-output recovery preserves the existing
+    [exact_evidence] field; deterministic recovery uses its own typed schema
+    and never fabricates an LLM slot, call, or plan fingerprint. *)
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -54,8 +70,10 @@ type compaction_recovery_error =
           checkpoint load and the summarizer LLM call — the settlement's
           per-stimulus escalation already stops the retries, and this gate
           stops the one bounded LLM attempt each new stimulus still paid.
-          [Manual] prepares bypass the gate: an operator-committed compaction
-          resets the streak and lifts the suspension. *)
+          [Manual] prepares bypass the gate. The one-shot recovery entrypoint
+          consumes this refusal by attempting the deterministic checkpoint
+          purge under source CAS; it retains [Retry_suspended] when that purge
+          cannot reduce the checkpoint. *)
 
 type prepared_commit_failure =
   { error : compaction_recovery_error
@@ -177,8 +195,10 @@ val no_compaction_of_uncommitted_prepared :
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Composition of {!prepare_compaction} and
-    {!commit_prepared_compaction}; all affine ownership outcomes remain
-    explicit. *)
+    {!commit_prepared_compaction}. A suspended reactive request uses the
+    bounded, no-LLM deterministic purge instead; exact-output and deterministic
+    evidence remain distinct. All affine exact-output ownership outcomes
+    remain explicit. *)
 val recover_latest_checkpoint_for_compaction :
   ?before_dispatch_authority:
     Keeper_compaction_llm_summarizer.before_dispatch_authority ->

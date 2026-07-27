@@ -53,11 +53,21 @@ type post_turn_lifecycle = {
   message_count : int;
 }
 
+type deterministic_purge_evidence =
+  { report : Keeper_checkpoint_purge.report
+  ; before_checkpoint_bytes : int
+  ; after_checkpoint_bytes : int
+  }
+
+type compaction_recovery_evidence =
+  | Exact_execution_evidence of Keeper_compaction_evidence.t
+  | Deterministic_purge_evidence of deterministic_purge_evidence
+
 type compaction_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
   checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation;
   trigger : Compaction_trigger.t;
-  evidence : Keeper_compaction_evidence.t;
+  evidence : compaction_recovery_evidence;
   turn_generation : int;
 }
 
@@ -90,6 +100,31 @@ type prepared_commit_outcome =
   | Already_committed of compaction_recovery
   | Already_rejected of no_compaction
   | Commit_failed of prepared_commit_failure
+
+let compaction_recovery_evidence_fields = function
+  | Exact_execution_evidence evidence ->
+    [ Keeper_compaction_evidence.exact_evidence_key
+    , Keeper_compaction_evidence.to_json evidence
+    ]
+  | Deterministic_purge_evidence
+      { report
+      ; before_checkpoint_bytes
+      ; after_checkpoint_bytes
+      } ->
+    [ ( "deterministic_purge_evidence"
+      , `Assoc
+          [ "schema", `String "keeper.compaction.deterministic_purge.v1"
+          ; "before_checkpoint_bytes", `Int before_checkpoint_bytes
+          ; "after_checkpoint_bytes", `Int after_checkpoint_bytes
+          ; "messages_before", `Int report.messages_before
+          ; "messages_after", `Int report.messages_after
+          ; "duplicates_dropped", `Int report.duplicates_dropped
+          ; "reasoning_blocks_stripped", `Int report.reasoning_blocks_stripped
+          ; "reasoning_messages_dropped", `Int report.reasoning_messages_dropped
+          ; "tool_results_cleared", `Int report.tool_results_cleared
+          ] )
+    ]
+;;
 
 let compaction_recovery_error_to_tag = function
   | Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found ->
@@ -197,8 +232,8 @@ let compaction_recovery_error_to_string = function
   | Retry_suspended { consecutive_failures } ->
     Printf.sprintf
       "compaction retry suspended after %d consecutive failures; reactive \
-       prepare refused before the summarizer call — an operator-committed \
-       manual compaction resets the streak and lifts the suspension"
+       LLM prepare refused before the summarizer call; the one-shot recovery \
+       path may still apply a deterministic checkpoint purge"
       consecutive_failures
 
 (* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
@@ -858,6 +893,21 @@ let commit_prepared_compaction_with
     |> terminalized_outcome
     |> publish_owner
   in
+  let publish_installed_failure recovery detail =
+    let terminal_detail =
+      match
+        Keeper_compaction_llm_summarizer.finish_post_success_commit_failure
+          post_success_terminalizer
+          detail
+      with
+      | Ok () -> detail
+      | Error terminal_detail -> terminal_detail
+    in
+    publish_owner
+      (commit_failure
+         ~committed:recovery
+         (Checkpoint_candidate_failed terminal_detail))
+  in
   let installed_recovery = ref None in
   let commit_claimed () =
     try
@@ -878,7 +928,7 @@ let commit_prepared_compaction_with
          { checkpoint = saved_checkpoint
          ; checkpoint_installation = installation
          ; trigger = prepared_trigger
-         ; evidence
+         ; evidence = Exact_execution_evidence evidence
          ; turn_generation
          }
        in
@@ -901,10 +951,7 @@ let commit_prepared_compaction_with
              complete_post_success_commit post_success_terminalizer
            with
            | Error detail ->
-             publish_owner
-               (commit_failure
-                  ~committed:recovery
-                  (Checkpoint_candidate_failed detail))
+             publish_installed_failure recovery detail
            | Ok () ->
              (try
                 Otel_metric_store.inc_counter
@@ -958,40 +1005,15 @@ let commit_prepared_compaction_with
             "post-install compaction finalization was cancelled: "
             ^ Printexc.to_string exn
           in
-          let terminal_detail =
-            match
-              Keeper_compaction_llm_summarizer
-              .finish_post_success_commit_failure
-                post_success_terminalizer
-                detail
-            with
-            | Ok () -> detail
-            | Error terminal_detail -> terminal_detail
-          in
-          publish_owner
-            (commit_failure
-               ~committed:recovery
-               (Checkpoint_candidate_failed terminal_detail))))
+          publish_installed_failure recovery detail))
     | exn ->
       let detail = Printexc.to_string exn in
       log_keeper_exn ~label:"compaction checkpoint save exception" exn;
       (match !installed_recovery with
        | Some recovery ->
-         let terminal_detail =
-           match
-             Keeper_compaction_llm_summarizer
-             .finish_post_success_commit_failure
-               post_success_terminalizer
-               ("post-install compaction finalization raised: " ^ detail)
-           with
-           | Ok () -> detail
-           | Error terminal_detail -> terminal_detail
-         in
-         publish_owner
-           (commit_failure
-              ~committed:recovery
-              (Checkpoint_candidate_failed
-                 terminal_detail))
+         publish_installed_failure
+           recovery
+           ("post-install compaction finalization raised: " ^ detail)
        | None ->
          Log.Keeper.error
            "compaction checkpoint save exception became terminal: %s"
@@ -1047,6 +1069,141 @@ module For_testing = struct
   ;;
 end
 
+let checkpoint_purge_error_to_string = function
+  | Keeper_checkpoint_purge.Invalid_config detail ->
+    "invalid deterministic purge config: " ^ detail
+  | Keeper_checkpoint_purge.Invalid_input_structure error ->
+    "deterministic purge input structure invalid: "
+    ^ Keeper_compaction_unit.show_structural_error error
+  | Keeper_checkpoint_purge.Invalid_output_structure error ->
+    "deterministic purge output structure invalid: "
+    ^ Keeper_compaction_unit.show_structural_error error
+;;
+
+(* RFC-0351 S1: once reactive LLM compaction is suspended, make one bounded
+   progress attempt with the already-validated deterministic purge. This path
+   has no model dispatch and therefore owns no exact-output slot/call
+   terminalizer. It still uses the canonical checkpoint source CAS and reports
+   its own typed evidence instead of fabricating LLM provenance. *)
+let recover_suspended_checkpoint_with_purge
+      ~base_dir
+      ~(meta : keeper_meta)
+      ~(trigger : Compaction_trigger.t)
+      ~suspended_error
+  : prepared_commit_outcome =
+  let session =
+    create_session
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~base_dir
+  in
+  match
+    Keeper_checkpoint_store.load_oas_with_ref
+      ~session_dir:session.session_dir
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+  with
+  | Error error ->
+    Commit_failed
+      { error = Checkpoint_ref_load_failed error
+      ; committed = None
+      }
+  | Ok (checkpoint, source_ref) ->
+    (match
+       Keeper_checkpoint_purge.purge
+         ~config:Keeper_checkpoint_purge.default_config
+         checkpoint
+     with
+     | Error error ->
+       Commit_failed
+         { error =
+             Checkpoint_candidate_failed
+               (checkpoint_purge_error_to_string error)
+         ; committed = None
+         }
+     | Ok (purged_checkpoint, report) ->
+       let source_context = context_of_oas_checkpoint checkpoint in
+       let purged_context = context_of_oas_checkpoint purged_checkpoint in
+       let before_checkpoint_bytes = serialized_bytes source_context in
+       let after_checkpoint_bytes = serialized_bytes purged_context in
+       if after_checkpoint_bytes >= before_checkpoint_bytes
+       then (
+         Log.Keeper.warn
+           ~keeper_name:meta.name
+           "deterministic compaction recovery produced no reduction \
+            before_bytes=%d after_bytes=%d; retaining retry suspension"
+           before_checkpoint_bytes
+           after_checkpoint_bytes;
+         Commit_failed { error = suspended_error; committed = None })
+       else (
+         let turn_generation =
+           checkpoint_generation checkpoint ~fallback:meta.runtime.nonce
+         in
+         let retry_meta =
+           if turn_generation = meta.runtime.nonce
+           then meta
+           else map_runtime (fun rt -> { rt with nonce = turn_generation }) meta
+         in
+         match
+           save_oas_checkpoint_if_source
+             ~multimodal_policy:retry_meta.multimodal_policy
+             ~keeper_name:retry_meta.name
+             ~session
+             ~agent_name:retry_meta.agent_name
+             ~ctx:purged_context
+             ~generation:turn_generation
+             ~expected_source_ref:source_ref
+         with
+         | Ok
+             ( saved_checkpoint
+             , (Keeper_checkpoint_store.Installed _ as installation) ) ->
+           let recovery =
+             { checkpoint = saved_checkpoint
+             ; checkpoint_installation = installation
+             ; trigger
+             ; evidence =
+                 Deterministic_purge_evidence
+                   { report
+                   ; before_checkpoint_bytes
+                   ; after_checkpoint_bytes
+                   }
+             ; turn_generation
+             }
+           in
+           (try
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string Compactions)
+                ~labels:[ "keeper", retry_meta.name ]
+                ()
+            with
+            | exn ->
+              log_keeper_exn
+                ~label:"deterministic compaction recovery metric emission"
+                exn);
+           Log.Keeper.info
+             ~keeper_name:retry_meta.name
+             "deterministic compaction recovery committed after suspended LLM \
+              retries before_bytes=%d after_bytes=%d messages_before=%d \
+              messages_after=%d"
+             before_checkpoint_bytes
+             after_checkpoint_bytes
+             report.messages_before
+             report.messages_after;
+           Committed recovery
+         | Ok
+             ( _
+             , Keeper_checkpoint_store.Not_installed { cause; _ } ) ->
+           Commit_failed { error = Checkpoint_cas_failed cause; committed = None }
+         | Error (Persistence_error error) ->
+           Commit_failed { error = Checkpoint_cas_failed error; committed = None }
+         | Error (Tool_history_invalid error) ->
+           Commit_failed
+             { error =
+                 Checkpoint_candidate_failed
+                   ("deterministic purge checkpoint structure invalid at save: "
+                    ^ Keeper_compaction_unit.show_structural_error error)
+             ; committed = None
+             }))
+;;
+
 let recover_latest_checkpoint_for_compaction
     ?before_dispatch_authority
     ?exact_execution_guard
@@ -1066,6 +1223,12 @@ let recover_latest_checkpoint_for_compaction
       ~trigger
       ()
   with
+  | Error (Retry_suspended _ as suspended_error) ->
+    recover_suspended_checkpoint_with_purge
+      ~base_dir
+      ~meta
+      ~trigger
+      ~suspended_error
   | Error error -> Commit_failed { error; committed = None }
   | Ok prepared -> commit_prepared_compaction prepared
 ;;

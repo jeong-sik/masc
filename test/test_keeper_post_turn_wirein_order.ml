@@ -1314,6 +1314,145 @@ let test_suspended_streak_refuses_reactive_prepare () =
     ]
 ;;
 
+let test_suspended_recovery_uses_deterministic_purge () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let trace_id = "trace-suspended-deterministic-purge" in
+       let meta =
+         match
+           Masc_test_deps.meta_of_json_fixture
+             (`Assoc
+               [ "name", `String "suspended-deterministic-purge"
+               ; "trace_id", `String trace_id
+               ; "compaction_consecutive_failures", `Int 3
+               ])
+         with
+         | Ok meta -> meta
+         | Error detail -> failf "deterministic purge meta fixture: %s" detail
+       in
+       let checkpoint =
+         { (make_checkpoint ()) with
+           session_id = trace_id
+         ; agent_name = meta.agent_name
+         ; messages =
+             List.init 30 (fun _ ->
+               Agent_sdk.Types.text_message
+                 Agent_sdk.Types.User
+                 "byte-identical duplicate checkpoint message")
+         }
+       in
+       let base_dir = Masc.Keeper_types_profile.session_base_dir config in
+       let session =
+         Masc.Keeper_context_core.create_session
+           ~session_id:trace_id
+           ~base_dir
+       in
+       let context =
+         Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint
+       in
+       (match
+          Masc.Keeper_context_core.save_oas_checkpoint_classified
+            ~multimodal_policy:meta.multimodal_policy
+            ~keeper_name:meta.name
+            ~session
+            ~agent_name:meta.agent_name
+            ~ctx:context
+            ~generation:meta.runtime.nonce
+        with
+        | Ok _ -> ()
+        | Error error ->
+          failf
+            "deterministic purge source fixture failed: %s"
+            (Masc.Keeper_context_core.checkpoint_write_error_to_string
+               ~persistence_error_to_string:(fun detail -> detail)
+               error));
+       let exact_dispatch_authority_calls = ref 0 in
+       let outcome =
+         Post_turn.recover_latest_checkpoint_for_compaction
+           ~before_dispatch_authority:(fun _observation ->
+             incr exact_dispatch_authority_calls;
+             Error "deterministic recovery must not dispatch exact output")
+           ~base_path:config.base_path
+           ~base_dir
+           ~meta
+           ~trigger:
+             (Compaction_trigger.Provider_overflow { limit_tokens = None })
+           ()
+       in
+       check int
+         "suspended deterministic recovery performs no exact-output dispatch"
+         0
+         !exact_dispatch_authority_calls;
+       match outcome with
+       | Post_turn.Committed
+           ({ evidence =
+                Post_turn.Deterministic_purge_evidence
+                  { report
+                  ; before_checkpoint_bytes
+                  ; after_checkpoint_bytes
+                  }
+            ; checkpoint
+            ; checkpoint_installation = Masc.Keeper_checkpoint_store.Installed _
+            ; _
+            } as recovery) ->
+         check bool
+           "deterministic purge strictly reduces checkpoint bytes"
+           true
+           (after_checkpoint_bytes < before_checkpoint_bytes);
+         check bool
+           "deterministic purge drops duplicate messages"
+           true
+           (report.duplicates_dropped > 0);
+         check bool
+           "deterministic purge reduces message count"
+           true
+           (report.messages_after < report.messages_before);
+         check int
+           "committed checkpoint matches purge report"
+           report.messages_after
+           (List.length checkpoint.messages);
+         (match
+            Masc.Keeper_checkpoint_store.load_oas_with_ref
+              ~session_dir:session.session_dir
+              ~session_id:trace_id
+          with
+          | Ok (reloaded, _) ->
+            check bool
+              "source-CAS store contains the committed purged checkpoint"
+              true
+              (reloaded.messages = recovery.checkpoint.messages)
+          | Error error ->
+            failf
+              "committed deterministic purge could not be reloaded: %s"
+              (Post_turn.compaction_recovery_error_to_string
+                 (Post_turn.Checkpoint_ref_load_failed error)))
+       | Post_turn.Committed
+           { evidence = Post_turn.Exact_execution_evidence _; _ } ->
+         fail "suspended recovery fabricated exact-output evidence"
+       | Post_turn.Committed
+           { checkpoint_installation = Masc.Keeper_checkpoint_store.Not_installed _
+           ; _
+           } ->
+         fail "deterministic recovery reported commit without installation"
+       | Post_turn.Commit_in_progress _
+       | Post_turn.Already_committed _
+       | Post_turn.Already_rejected _ ->
+         fail "deterministic recovery returned an impossible ownership outcome"
+       | Post_turn.Commit_failed { error; _ } ->
+         failf
+           "deterministic recovery failed: %s"
+           (Post_turn.compaction_recovery_error_to_string error))
+;;
+
 let () =
   run "post-turn durability" [
     "durable compaction", [
@@ -1346,6 +1485,8 @@ let () =
         `Quick test_post_dispatch_non_reducing_output_is_quarantined;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
+      test_case "suspended recovery uses deterministic purge"
+        `Quick test_suspended_recovery_uses_deterministic_purge;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

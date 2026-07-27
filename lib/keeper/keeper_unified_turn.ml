@@ -514,13 +514,12 @@ let append_provider_overflow_manifest
              (Keeper_runtime_manifest.with_payload_role
                 ~payload_role:Checkpoint
                 (`Assoc
-                  [ "trigger", `String (Compaction_trigger.to_label trigger)
-                  ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-                  ; "requeue_disposition_requested", `Bool true
-                  ; "error", error
-                  ; ( Keeper_compaction_evidence.exact_evidence_key
-                    , Keeper_compaction_evidence.to_json evidence )
-                  ])))
+                  ([ "trigger", `String (Compaction_trigger.to_label trigger)
+                   ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+                   ; "requeue_disposition_requested", `Bool true
+                   ; "error", error
+                   ]
+                   @ Keeper_post_turn.compaction_recovery_evidence_fields evidence))))
         Keeper_runtime_manifest.Context_compacted
     in
     turn_state

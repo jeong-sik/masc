@@ -38,3 +38,12 @@ val handle_goal_transition
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
+
+(** Emit the canonical Goal phase event after a linked verifier-approved task
+    atomically changes an executing Goal to Completed. *)
+val emit_automatic_verifier_goal_completion
+  :  Workspace.config
+  -> agent_name:string
+  -> goal_id:string
+  -> task_id:string
+  -> unit

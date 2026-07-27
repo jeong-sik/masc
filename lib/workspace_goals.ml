@@ -367,3 +367,23 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
         }
       ]
 ;;
+
+let emit_automatic_verifier_goal_completion
+      config
+      ~agent_name
+      ~goal_id
+      ~task_id
+  =
+  let ctx : context = { config; agent_name } in
+  emit_goal_event
+    ctx
+    ~goal_id
+    ~event_type:"goal_phase"
+    ~payload:
+      (`Assoc
+         [ "phase", Goal_phase.to_yojson Goal_phase.Completed
+         ; "actor", `String agent_name
+         ; "source", `String "verifier_approved_task"
+         ; "task_id", `String task_id
+         ])
+;;

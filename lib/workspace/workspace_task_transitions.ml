@@ -583,42 +583,59 @@ let transition_task_outcome_r
           (match action, new_status with
            | Masc_domain.Approve_verification, Masc_domain.Done _
              when completes_task ->
-             let linked_goal_ids =
-               Workspace_goal_index.read_goal_task_links config
-               |> List.filter_map (fun (goal_id, task_ids) ->
-                 if List.mem task_id task_ids then Some goal_id else None)
-             in
-             List.iter
-               (fun goal_id ->
-                 match Goal_store.get_goal config ~goal_id with
-                 | Some
-                     { Goal_store.phase = Goal_phase.Executing
-                     ; metric = Some "verifier_approved_done_tasks"
-                     ; target_value = Some "1"
-                     ; _
-                     } ->
-                   (match
-                      Goal_store.update_goal config ~goal_id (fun goal ->
-                        { goal with
-                          phase = Goal_phase.Completed
-                        ; last_review_note =
-                            Some
-                              (Printf.sprintf
-                                 "Verifier-approved task %s completed the goal."
-                                 task_id)
-                        })
+             (match Workspace_goal_index.read_goal_task_links_r config with
+              | Error e ->
+                Log.TaskState.error
+                  "verifier-approved task committed but Goal links are \
+                   unavailable (task=%s): %s — Goal remains executing and \
+                   requires reconciliation from the durable Approved event"
+                  task_id
+                  e
+              | Ok links ->
+                let linked_goal_ids =
+                  links
+                  |> List.filter_map (fun (goal_id, task_ids) ->
+                    if List.mem task_id task_ids then Some goal_id else None)
+                in
+                List.iter
+                  (fun goal_id ->
+                    let completed = ref false in
+                    match
+                      Goal_store.update_goal config ~goal_id (fun current ->
+                        match current with
+                        | { Goal_store.phase = Goal_phase.Executing
+                          ; metric = Some "verifier_approved_done_tasks"
+                          ; target_value = Some "1"
+                          ; _
+                          } ->
+                          completed := true;
+                          { current with
+                            phase = Goal_phase.Completed
+                          ; last_review_note =
+                              Some
+                                (Printf.sprintf
+                                   "Verifier-approved task %s completed the goal."
+                                   task_id)
+                          }
+                        | _ -> current)
                     with
+                    | Ok _ when !completed ->
+                      Workspace_goals.emit_automatic_verifier_goal_completion
+                        config
+                        ~agent_name
+                        ~goal_id
+                        ~task_id
                     | Ok _ -> ()
                     | Error e ->
-                      Log.TaskState.warn
+                      Log.TaskState.error
                         "verifier-approved task committed but linked Goal update \
-                         failed (task=%s goal=%s): %s"
+                         failed (task=%s goal=%s): %s — Goal remains executing \
+                         and requires reconciliation from the durable Approved \
+                         event"
                         task_id
                         goal_id
                         e)
-                 | Some _
-                 | None -> ())
-               linked_goal_ids
+                  linked_goal_ids)
            | Masc_domain.Claim, _
            | Masc_domain.Start, _
            | Masc_domain.Done_action, _

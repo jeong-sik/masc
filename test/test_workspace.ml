@@ -1143,7 +1143,17 @@ let test_verifier_approval_completes_single_verified_task_goal () =
     Alcotest.(check string)
       "verifier approval completes goal"
       "completed"
-      (Goal_phase.to_string completed_goal.phase))
+      (Goal_phase.to_string completed_goal.phase);
+    let goal_events_path =
+      Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
+    in
+    let goal_events =
+      In_channel.with_open_bin goal_events_path In_channel.input_all
+    in
+    Alcotest.(check bool)
+      "automatic completion emits canonical goal event"
+      true
+      (contains_substring goal_events "\"source\":\"verifier_approved_task\""))
 
 let test_direct_done_does_not_complete_verified_task_goal () =
   with_test_env (fun config ->

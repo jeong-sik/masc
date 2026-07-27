@@ -7,14 +7,16 @@
     payloads, so approved writes were never applied (#25947).
 
     The durable delivery entry already stores the approved input, so the
-    runtime replays that stored payload directly. The canonical input is
-    re-derived at execution, which keeps the pinned resource identity
-    (device/inode) authoritative: a target replaced between approval and
-    replay no longer matches and stays unapplied. *)
+    runtime replays that stored payload directly. For writes, the canonical
+    input is re-derived at execution, which keeps the pinned resource identity
+    (device/inode) authoritative: a target replaced between approval and replay
+    no longer matches and stays unapplied. Network reads replay the exact
+    approved request through the same in-process handler that serves ordinary
+    model-issued calls. *)
 
 type outcome =
   | Not_applicable
-      (** No unconsumed approval, or the approved operation is not a write
+      (** No unconsumed approval, or the approved operation is not an effect
           this module replays. *)
   | Applied of string  (** Opaque human-readable summary of the replay. *)
   | Failed of string
@@ -28,6 +30,33 @@ val outcome_to_string : outcome -> string
     under [path]. Only fields present in the approved input are carried,
     so an approved content write never gains edit fields and vice versa. *)
 val write_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
+type network_read_request = Keeper_tool_in_process_runtime.network_read_request =
+  | Web_search of Yojson.Safe.t
+  | Web_fetch of Yojson.Safe.t
+
+val network_read_request_of_gate_input
+  :  Yojson.Safe.t
+  -> (network_read_request, string) result
+
+(** Spend [grant] on the exact stored effect behind [approval_id].
+
+    Filesystem writes retain the existing revalidation semantics. WebSearch
+    and WebFetch use the stored capability input and return the handler's
+    typed output to the resumed turn. Successful replay consumes the durable
+    one-shot grant, so repeated delivery cannot duplicate the external
+    effect. *)
+val replay_approved_effect :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery:Keeper_publication_recovery_availability.turn_context ->
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  grant:Keeper_gate.cycle_grant ->
+  approval_id:string ->
+  unit ->
+  outcome
 
 (** Replay the approved write behind [approval_id] exactly once.
 
@@ -50,3 +79,5 @@ val replay_approved_write :
   approval_id:string ->
   unit ->
   outcome
+
+val context_for_outcome : approval_id:string -> outcome -> string option

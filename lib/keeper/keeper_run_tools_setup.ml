@@ -90,6 +90,7 @@ let prepare_agent_setup
     { Keeper_tools_oas.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
+    ; gate_replay_context
     }
     =
     Keeper_tools_oas_bundle.make_tool_bundle
@@ -102,6 +103,12 @@ let prepare_agent_setup
       ~gate_context
       ?hitl_resolution
       ()
+  in
+  let dynamic_context =
+    match gate_replay_context with
+    | None -> dynamic_context
+    | Some replay_context ->
+      String.concat "\n\n" [ dynamic_context; replay_context ]
   in
   let tools = keeper_tools in
   let registered_descriptors = Keeper_tool_descriptor.all_descriptors () in

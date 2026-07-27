@@ -184,6 +184,29 @@ let with_external_gate_execution
       blocked.payload
 ;;
 
+type network_read_request =
+  | Web_search of Yojson.Safe.t
+  | Web_fetch of Yojson.Safe.t
+
+let network_read_operation = "network_read"
+
+let network_read_gate_input capability args =
+  `Assoc [ "capability", `String capability; "input", args ]
+;;
+
+let network_read_request_of_gate_input = function
+  | `Assoc fields ->
+    (match List.assoc_opt "capability" fields, List.assoc_opt "input" fields with
+     | Some (`String "web_search"), Some (`Assoc _ as input) -> Ok (Web_search input)
+     | Some (`String "web_fetch"), Some (`Assoc _ as input) -> Ok (Web_fetch input)
+     | Some (`String capability), Some _ ->
+       Error ("unsupported network_read capability: " ^ capability)
+     | Some _, Some _ -> Error "network_read capability must be a string"
+     | None, _ -> Error "network_read approval is missing capability"
+     | _, None -> Error "network_read approval is missing input")
+  | _ -> Error "network_read approval input must be an object"
+;;
+
 let handle_web_search_with_outcome
       ~config
       ~(meta : keeper_meta)
@@ -193,14 +216,14 @@ let handle_web_search_with_outcome
       ~args
       ()
   =
-  let input = `Assoc [ "capability", `String "web_search"; "input", args ] in
+  let input = network_read_gate_input "web_search" args in
   with_external_gate_execution
     ~config
     ~meta
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ~operation:"network_read"
+    ~operation:network_read_operation
     ~input
   @@ fun () ->
   let tool_name = "masc_web_search" in
@@ -222,14 +245,14 @@ let handle_web_fetch_with_outcome
       ~args
       ()
   =
-  let input = `Assoc [ "capability", `String "web_fetch"; "input", args ] in
+  let input = network_read_gate_input "web_fetch" args in
   with_external_gate_execution
     ~config
     ~meta
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ~operation:"network_read"
+    ~operation:network_read_operation
     ~input
   @@ fun () ->
   Tool_misc_web_fetch.handle

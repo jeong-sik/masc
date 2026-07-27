@@ -25,6 +25,7 @@ type tool_bundle =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
+  ; gate_replay_context : string option
   }
 
 (** Tool usage now lives in Keeper_registry (per-entry tool_usage Hashtbl).

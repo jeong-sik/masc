@@ -78,7 +78,7 @@ let make_tool_bundle
      to an ordinary Gate request, and a request without causal context cannot
      be summarized, which stalls the FIFO drain for every later approval
      (#25966). *)
-  let () =
+  let replay_approval_id, gate_replay_outcome =
     match hitl_resolution, gate_grant with
     | ( Some
           { Keeper_event_queue.approval_id
@@ -86,8 +86,8 @@ let make_tool_bundle
           ; _
           }
       , Some grant ) ->
-      (match
-         Keeper_gate_replay.replay_approved_write
+      let outcome =
+        Keeper_gate_replay.replay_approved_effect
            ~config
            ~meta
            ~publication_recovery
@@ -97,7 +97,8 @@ let make_tool_bundle
            ~grant
            ~approval_id
            ()
-       with
+      in
+      (match outcome with
        | Keeper_gate_replay.Not_applicable -> ()
        | Keeper_gate_replay.Applied _ as outcome ->
          Log.Keeper.info
@@ -108,8 +109,15 @@ let make_tool_bundle
          Log.Keeper.error
            "gate replay approval=%s %s"
            approval_id
-           (Keeper_gate_replay.outcome_to_string outcome))
-    | _ -> ()
+           (Keeper_gate_replay.outcome_to_string outcome));
+      Some approval_id, outcome
+    | _ -> None, Keeper_gate_replay.Not_applicable
+  in
+  let gate_replay_context =
+    Option.bind replay_approval_id (fun approval_id ->
+      Keeper_gate_replay.context_for_outcome
+        ~approval_id
+        gate_replay_outcome)
   in
   let record_gate_result =
     Option.map
@@ -241,6 +249,7 @@ let make_tool_bundle
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
   ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
+  ; gate_replay_context
   }
 ;;
 

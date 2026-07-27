@@ -131,7 +131,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          ; "```json"
          ; Yojson.Safe.pretty_to_string request.input
          ; "```"
-         ; "The one-shot authorization belongs to this exact operation and input. Other external effects follow the ordinary Gate independently."
+         ; "The original deferred effect did not execute. The runtime will replay supported stored operations before model dispatch and expose typed replay evidence in system context. If no applied replay evidence is present, call the exact visible tool with the exact input now. Other external effects follow the ordinary Gate independently."
          ]
      | Ok None ->
        Log.Keeper.info

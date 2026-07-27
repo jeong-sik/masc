@@ -13,6 +13,19 @@ val handle_time_now : args:Yojson.Safe.t -> string
 
 val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
+type network_read_request =
+  | Web_search of Yojson.Safe.t
+  | Web_fetch of Yojson.Safe.t
+
+(** Producer-owned Gate identity and inverse codec for WebSearch/WebFetch.
+    Replay must use these instead of maintaining a second copy of the
+    capability schema. *)
+val network_read_operation : string
+
+val network_read_request_of_gate_input
+  :  Yojson.Safe.t
+  -> (network_read_request, string) result
+
 val handle_web_search_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta

@@ -138,6 +138,63 @@ let test_non_object_input_is_rejected () =
   | Error _ -> ()
 ;;
 
+let test_network_read_request_keeps_exact_input () =
+  let input =
+    `Assoc
+      [ "capability", `String "web_search"
+      ; ( "input"
+        , `Assoc
+            [ "query", `String "OpenAI official product announcements"
+            ; "limit", `Int 5
+            ] )
+      ]
+  in
+  match Masc.Keeper_gate_replay.network_read_request_of_gate_input input with
+  | Ok (Masc.Keeper_gate_replay.Web_search actual) ->
+    Alcotest.check
+      json
+      "stored WebSearch input is unchanged"
+      (`Assoc
+         [ "query", `String "OpenAI official product announcements"
+         ; "limit", `Int 5
+         ])
+      actual
+  | Ok (Masc.Keeper_gate_replay.Web_fetch _) ->
+    Alcotest.fail "WebSearch decoded as WebFetch"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_network_read_request_rejects_unknown_capability () =
+  match
+    Masc.Keeper_gate_replay.network_read_request_of_gate_input
+      (`Assoc
+         [ "capability", `String "arbitrary_network_effect"
+         ; "input", `Assoc []
+         ])
+  with
+  | Ok _ -> Alcotest.fail "unknown network capability must not replay"
+  | Error _ -> ()
+;;
+
+let test_applied_context_prevents_duplicate_call () =
+  let context =
+    Masc.Keeper_gate_replay.context_for_outcome
+      ~approval_id:"appr-test"
+      (Masc.Keeper_gate_replay.Applied "{\"status\":\"ok\"}")
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool)
+    "context says effect already executed"
+    true
+    (String_util.contains_substring
+       context
+       "has already executed; do not call it again");
+  Alcotest.(check bool)
+    "context labels replay output untrusted"
+    true
+    (String_util.contains_substring context "untrusted external data")
+;;
+
 let () =
   Alcotest.run
     "keeper_gate_replay"
@@ -161,6 +218,20 @@ let () =
             "non-object rejected"
             `Quick
             test_non_object_input_is_rejected
+        ] )
+    ; ( "network_read"
+      , [ Alcotest.test_case
+            "keeps exact WebSearch input"
+            `Quick
+            test_network_read_request_keeps_exact_input
+        ; Alcotest.test_case
+            "rejects unknown capability"
+            `Quick
+            test_network_read_request_rejects_unknown_capability
+        ; Alcotest.test_case
+            "applied context prevents duplicate call"
+            `Quick
+            test_applied_context_prevents_duplicate_call
         ] )
     ]
 ;;

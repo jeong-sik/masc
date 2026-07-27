@@ -27,6 +27,7 @@ type tool_bundle =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
+  ; gate_replay_context : string option
   }
 
 (** Per-keeper tool usage view from [Keeper_registry]. *)

@@ -83,6 +83,46 @@ let missing_live_task_transition_rejection ~task_list_projection ~tool_name
         bindings and suppressed transition action=%s."
        task_id action_s)
 
+let goal_completion_next_action ~config ~task_id =
+  let tasks = Workspace.get_tasks_raw config in
+  match
+    List.find_opt
+      (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+      tasks
+  with
+  | Some { task_status = Masc_domain.Done _; _ } ->
+    let task_goal_index =
+      Workspace_goal_index.build_task_goal_index_for_config config
+    in
+    (match Stdlib.Hashtbl.find_opt task_goal_index task_id with
+     | Some [ goal_id ] ->
+       (match Goal_store.get_goal config ~goal_id with
+        | Some { phase = Goal_phase.Executing; _ } ->
+          let goal_task_index =
+            Workspace_goal_index.build_goal_task_index_for_config config tasks
+          in
+          if
+            Workspace_goal_index.tasks_for_goal goal_task_index ~goal_id <> []
+            && Workspace_goal_index.open_task_count_for_goal_indexed
+                 goal_task_index
+                 ~goal_id
+               = 0
+          then
+            Some
+              (`Assoc
+                 [ "tool", `String "masc_goal_transition"
+                 ; ( "arguments"
+                   , `Assoc
+                       [ "goal_id", `String goal_id
+                       ; "action", `String "request_complete"
+                       ] )
+                 ; "reason", `String "all_linked_tasks_terminal"
+                 ])
+          else None
+        | Some _ | None -> None)
+     | Some (_ :: _ :: _) | Some [] | None -> None)
+  | Some _ | None -> None
+
 let rec handle_done
       ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
       ~tool_name ~start_time ctx args =
@@ -661,7 +701,25 @@ and handle_transition
    | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
             | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
    | Error _, _ -> ());
-  result_to_response ~tool_name ~start_time result
+  match result, task_list_projection with
+  | Ok message, Tool_capability_projection.Keeper_tasks_list ->
+    (match goal_completion_next_action ~config:ctx.config ~task_id with
+     | Some next_action ->
+       Tool_result.make_ok
+         ~tool_name
+         ~start_time
+         ~data:
+           (`Assoc
+              [ "message", `String message
+              ; "task_id", `String task_id
+              ; "next_action", next_action
+              ])
+         ()
+     | None -> result_to_response ~tool_name ~start_time result)
+  | Error _, Tool_capability_projection.Keeper_tasks_list ->
+    result_to_response ~tool_name ~start_time result
+  | (Ok _ | Error _), Tool_capability_projection.External_masc_tasks ->
+    result_to_response ~tool_name ~start_time result
 
 let handle_update_priority ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in

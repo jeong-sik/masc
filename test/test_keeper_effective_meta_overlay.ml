@@ -146,7 +146,7 @@ let seed_runtime_meta config name =
   match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> Alcotest.fail err
   | Ok meta -> (
-      match Masc_test_deps.write_current_keeper_meta config meta with
+      match Store.write_meta config meta with
       | Ok () -> meta
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
@@ -383,7 +383,7 @@ active_goal_ids = ["goal-masc-improver"]
       active_goal_ids = [ "stale-goal" ];
     }
   in
-  (match Masc_test_deps.write_current_keeper_meta config stale with
+  (match Store.write_meta config stale with
    | Ok () -> ()
    | Error err -> Alcotest.failf "write stale meta failed: %s" err);
   let returned =
@@ -397,13 +397,13 @@ active_goal_ids = ["goal-masc-improver"]
     | `Assoc fields ->
       fields
       |> List.filter_map (fun (key, _) ->
-        if List.mem key Masc.Keeper_meta_json_scrub.config_field_names
-        then Some key
-        else None)
+        if List.mem key Masc.Keeper_meta_json.current_field_names
+        then None
+        else Some key)
     | _ -> Alcotest.fail "expected keeper meta JSON object"
   in
   Alcotest.(check (list string))
-    "disk meta excludes TOML-owned config keys"
+    "disk meta contains only current fields"
     []
     leaked_config_keys;
   Alcotest.(check (option string))
@@ -549,87 +549,47 @@ instructions = "missing sandbox profile"
        ~needle:"sandbox_profile is required"
        (Profile.tool_result_body result))
 
-let test_public_keeper_up_creates_local_playground_without_profile_source () =
+let test_keeper_up_rejects_missing_profile_source () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
-  let name = "fresh-local-keeper" in
-  let rejected_name = "network-mode-keeper" in
+  let name = "nosourceup" in
   let config = Workspace.default_config base in
-  ignore (Workspace.init config ~agent_name:(Some "test-agent"));
-  Masc.Server_startup_state.mark_state_ready
-    ~backend:Masc.Server_startup_state.Filesystem_backend
-  |> Result.get_ok;
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
-  let dispatch args =
-    match
-      !Masc.Keeper_dispatch_ref.dispatch
-        ~config
-        ~agent_name:"test-agent"
-        ~publication_recovery_provider:
-          Masc_test_deps.non_runtime_publication_recovery_provider
-        ~sw
-        ~clock:(Eio.Stdenv.clock env)
-        ~name:"masc_keeper_up"
-        ~args
-        ()
-    with
-    | Some result -> result
-    | None -> Alcotest.fail "public masc_keeper_up dispatch was not registered"
+  let ctx : _ Profile.context =
+    {
+      config;
+      agent_name = "test-agent";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = None;
+      net = None;
+      publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider;
+    }
   in
-  let rejected =
-    dispatch
-      (`Assoc
-        [ "name", `String rejected_name
-        ; "network_mode", `String "none"
-        ])
-  in
+  let result = Turn.handle_keeper_up ctx (`Assoc [ ("name", `String name) ]) in
+  if Profile.tool_result_success result then
+    Alcotest.fail "keeper_up should reject missing TOML/persona source";
   Alcotest.(check bool)
-    "public keeper_up rejects network_mode"
-    false
-    (Profile.tool_result_success rejected);
-  Alcotest.(check bool)
-    "network_mode rejection names the removed field"
+    "keeper_up missing source error names sandbox_profile"
     true
     (contains_substring
-       ~needle:"network_mode"
-       (Profile.tool_result_body rejected));
-  (match Store.read_meta config rejected_name with
-   | Ok None -> ()
-   | Ok (Some _) -> Alcotest.fail "rejected network_mode call persisted a keeper"
-   | Error err -> Alcotest.failf "rejected keeper meta read failed: %s" err);
-  let result = dispatch (`Assoc [ "name", `String name ]) in
-  if not (Profile.tool_result_success result) then
-    Alcotest.failf
-      "public keeper_up failed without a profile source: %s"
-      (Profile.tool_result_body result);
-  (match Store.read_effective_meta config name with
-   | Error err -> Alcotest.failf "effective created keeper meta read failed: %s" err
-   | Ok None -> Alcotest.fail "public keeper_up did not persist the fresh keeper"
-   | Ok (Some meta) ->
-     Alcotest.(check string)
-       "fresh keeper persists local sandbox"
-       "local"
-       (Profile.sandbox_profile_to_string meta.sandbox_profile);
-     Alcotest.(check (list string))
-       "fresh keeper persists no extra allowed paths"
-       []
-       meta.allowed_paths;
-     Alcotest.(check (list string))
-       "empty allowed paths resolves to the keeper playground only"
-       [ Printf.sprintf ".masc/playground/%s/" name ]
-       (Masc.Keeper_alerting_path.effective_write_allowed_paths ~meta));
-  let toml_path =
-    Filename.concat
-      (Filename.concat
-         (Filename.concat (Filename.concat base ".masc") "config")
-         "keepers")
-      (name ^ ".toml")
-  in
-  Alcotest.(check bool)
-    "fresh local keeper requires no compatibility TOML"
-    false
-    (Sys.file_exists toml_path)
+       ~needle:"sandbox_profile is required"
+       (Profile.tool_result_body result))
+
+let test_missing_profile_source_fails_loud () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "nosource" in
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match Store.read_effective_meta config name with
+  | Ok _ -> Alcotest.fail "expected absent TOML/persona source to fail loudly"
+  | Error err ->
+      Alcotest.(check bool)
+        "error names missing sandbox_profile"
+        true
+        (contains_substring ~needle:"sandbox_profile is required" err)
 
 let test_status_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -1257,10 +1217,11 @@ let () =
           Alcotest.test_case
             "keeper_up rejects profile source without sandbox_profile"
             `Quick test_keeper_up_rejects_profile_source_without_sandbox_profile;
+          Alcotest.test_case "keeper_up rejects missing profile source" `Quick
+            test_keeper_up_rejects_missing_profile_source;
           Alcotest.test_case
-            "public keeper_up creates local playground without profile source"
-            `Quick
-            test_public_keeper_up_creates_local_playground_without_profile_source;
+            "missing profile source fails loudly"
+            `Quick test_missing_profile_source_fails_loud;
           Alcotest.test_case "status tracks TOML overlay edits" `Quick
             test_status_tracks_toml_overlay_changes;
           Alcotest.test_case "status reports normalized options"

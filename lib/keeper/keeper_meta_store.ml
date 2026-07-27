@@ -18,34 +18,25 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
     | Ok json ->
-      (match unknown_keeper_meta_keys json with
-       | unknown :: rest ->
-         let unknown = unknown :: rest in
-         warn_unknown_keeper_meta_keys ~path json;
+      (* The unknown-key pre-scan that used to run here is gone: [meta_of_json]
+         now decodes only the exact current shape, so an unknown top-level key
+         is already a decode error rather than something a separate scan has to
+         notice first. Keeping both would report the same drift twice under two
+         different messages. *)
+      (match meta_of_json json with
+       | Ok meta -> Ok (Some meta)
+       | Error e ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
-           ~labels:[("keeper", "aggregate"); ("site", "meta_schema_unknown_keys")]
+           ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
            ();
+         Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
          Error
            (Printf.sprintf
-              "keeper meta schema is incompatible at %s (unknown keys: %s); runtime reset required"
+              "keeper meta invalid current schema at %s; runtime reset \
+               required: %s"
               path
-              (String.concat ", " unknown))
-       | [] ->
-         (match meta_of_json json with
-          | Ok meta -> Ok (Some meta)
-         | Error e ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string MetaReadFailures)
-              ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
-              ();
-            Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
-            Error
-              (Printf.sprintf
-                 "keeper meta invalid current schema at %s; runtime reset \
-                  required: %s"
-                 path
-                 e))))
+              e)))
 ;;
 
 let is_keeper_meta_file f =

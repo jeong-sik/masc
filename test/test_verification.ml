@@ -836,26 +836,32 @@ let test_concurrent_verdict_is_first_writer_wins () =
       | Ok req -> req
       | Error detail -> Alcotest.fail detail
     in
-    let left, right =
-      Eio.Fiber.both
-        (fun () ->
-           V.Internal.submit_verdict
-             ~base_path
-             ~req_id:req.id
-             ~verifier:"verifier-a"
-             ~verdict:V.Pass)
-        (fun () ->
-           V.Internal.submit_verdict
-             ~base_path
-             ~req_id:req.id
-             ~verifier:"verifier-b"
-             ~verdict:(V.Fail "rejected"))
-    in
-    match left, right with
-    | Ok _, Error _ | Error _, Ok _ -> ()
-    | Ok _, Ok _ -> Alcotest.fail "concurrent verdicts both overwrote the receipt"
-    | Error left, Error right ->
-      Alcotest.failf "both concurrent verdicts failed: %s / %s" left right)
+    let left = ref None in
+    let right = ref None in
+    Eio.Fiber.both
+      (fun () ->
+         left :=
+           Some
+             (V.Internal.submit_verdict
+                ~base_path
+                ~req_id:req.id
+                ~verifier:"verifier-a"
+                ~verdict:V.Pass))
+      (fun () ->
+         right :=
+           Some
+             (V.Internal.submit_verdict
+                ~base_path
+                ~req_id:req.id
+                ~verifier:"verifier-b"
+                ~verdict:(V.Fail "rejected")));
+    match !left, !right with
+    | Some (Ok _), Some (Error _) | Some (Error _), Some (Ok _) -> ()
+    | Some (Ok _), Some (Ok _) ->
+      Alcotest.fail "concurrent verdicts both overwrote the receipt"
+    | Some (Error left), Some (Error right) ->
+      Alcotest.failf "both concurrent verdicts failed: %s / %s" left right
+    | None, _ | _, None -> Alcotest.fail "concurrent verdict fiber did not return")
 
 let test_auto_verify () =
   with_temp_dir (fun base_path ->

@@ -3,7 +3,7 @@
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
-import { get, post, type AbortableRequestOptions } from './core'
+import { get, type AbortableRequestOptions } from './core'
 
 // --- Memory Subsystems ---
 

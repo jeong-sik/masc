@@ -8,7 +8,10 @@
 
 import { signal, type Signal } from '@preact/signals'
 import type { KeeperCompactionSnapshot as BackendCompactionSnapshot } from '../../api/dashboard'
-import type { KeeperCompactionReinjectionObservation } from '../../api/dashboard-turn-records'
+import type {
+  KeeperCompactionOutcome,
+  KeeperCompactionReinjectionObservation,
+} from '../../api/dashboard-turn-records'
 
 export interface CompactionSnapshotNumbers {
   readonly tok: number | null
@@ -31,6 +34,8 @@ export interface CompactionSnapshot {
   readonly traceId?: string | null
   readonly keeperTurnId?: number | null
   readonly status?: string | null
+  readonly outcome?: KeeperCompactionOutcome | null
+  readonly cause?: string | null
   readonly detailSource?: string | null
   readonly summarizedCount?: number | null
   readonly droppedCount?: number | null
@@ -115,6 +120,8 @@ function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): Compaction
     traceId: snapshot.trace_id,
     keeperTurnId: snapshot.keeper_turn_id,
     status: snapshot.status,
+    outcome: snapshot.compaction_outcome,
+    cause: snapshot.cause,
     detailSource: snapshot.source,
     summarizedCount: evidence?.summarized_message_count ?? null,
     droppedCount: evidence?.dropped_message_count ?? null,

@@ -121,9 +121,8 @@ let test_is_complete_turn () =
   Alcotest.(check bool) "finished+receipt+checkpoint is complete" true
     (M.is_complete_turn complete)
 
-let test_compaction_evidence_public_projection () =
-  let evidence =
-    Keeper_compaction_evidence.create
+let canonical_compaction_evidence () =
+  Keeper_compaction_evidence.create
       ~slot_id:"compaction-slot"
       ~call_id:"call-01"
       ~target_identity_fingerprint:"target-identity"
@@ -144,17 +143,21 @@ let test_compaction_evidence_public_projection () =
       ~after_tool_result_count:3
     |> Result.get_ok
     |> Keeper_compaction_evidence.to_json
-  in
+;;
+
+let test_compaction_evidence_public_projection () =
+  let evidence = canonical_compaction_evidence () in
   let decision =
     let evidence_with_cross_scope_field =
       match evidence with
       | `Assoc fields -> `Assoc (("error", `String "must-not-leak") :: fields)
       | _ -> Alcotest.fail "canonical compaction evidence must be an object"
     in
-    M.with_payload_role
-      ~payload_role:M.Checkpoint
-      (`Assoc
-        [ "exact_evidence", evidence_with_cross_scope_field ])
+    M.with_compaction_outcome
+      ~compaction_outcome:M.Checkpoint_committed
+      (M.with_payload_role
+         ~payload_role:M.Checkpoint
+         (`Assoc [ "exact_evidence", evidence_with_cross_scope_field ]))
   in
   let json =
     manifest ~event:M.Context_compacted ~decision ~links:(links ())
@@ -179,6 +182,99 @@ let test_compaction_evidence_public_projection () =
     evidence
     (json |> member "decision" |> member "exact_evidence")
 
+let test_current_compaction_evidence_read_boundary () =
+  let evidence = canonical_compaction_evidence () in
+  let row decision =
+    manifest ~event:M.Context_compacted ~decision ~links:(links ())
+    |> M.to_json
+  in
+  let decision compaction_outcome fields =
+    M.with_compaction_outcome
+      ~compaction_outcome
+      (`Assoc fields)
+  in
+  let canonical_row =
+    row
+      (decision
+         M.Checkpoint_committed
+         [ Keeper_compaction_evidence.exact_evidence_key, evidence ])
+  in
+  (match M.of_json canonical_row with
+   | Error detail -> Alcotest.failf "canonical current evidence rejected: %s" detail
+   | Ok restored ->
+     let actual =
+       Yojson.Safe.Util.member
+         Keeper_compaction_evidence.exact_evidence_key
+         restored.decision
+     in
+     Alcotest.check
+       (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal)
+       "Dashboard source is canonical evidence"
+       evidence
+       actual);
+  List.iter
+    (fun (label, outcome, cause) ->
+       let failure_decision =
+         decision outcome [ "error", `String cause ]
+       in
+       match M.of_json (row failure_decision) with
+       | Error detail ->
+         Alcotest.failf "%s current failure outcome rejected: %s" label detail
+       | Ok restored ->
+         let open Yojson.Safe.Util in
+         Alcotest.(check string)
+           (label ^ " outcome retained")
+           (M.compaction_outcome_to_string outcome)
+           (restored.decision
+            |> member M.compaction_outcome_key
+            |> to_string);
+         Alcotest.(check string)
+           (label ^ " cause retained")
+           cause
+           (restored.decision |> member "error" |> to_string))
+    [ ( "retry without checkpoint"
+      , M.Retry_without_checkpoint
+      , "compaction dispatch failed" )
+    ; ( "lifecycle cleanup without checkpoint"
+      , M.Lifecycle_cleanup_failed_without_checkpoint
+      , "lifecycle cleanup failed" )
+    ];
+  let unknown_evidence =
+    match evidence with
+    | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
+    | _ -> Alcotest.fail "canonical evidence must be an object"
+  in
+  List.iter
+    (fun (label, json) ->
+      match M.of_json json with
+      | Ok _ -> Alcotest.failf "%s current evidence was accepted" label
+      | Error _ -> ())
+    [ "missing", row (decision M.Checkpoint_committed [])
+    ; ( "wrong type"
+      , row
+          (decision
+             M.Checkpoint_committed
+             [ Keeper_compaction_evidence.exact_evidence_key
+             , `String "not-an-object"
+             ]) )
+    ; ( "unknown field"
+      , row
+          (decision
+             M.Checkpoint_committed
+             [ Keeper_compaction_evidence.exact_evidence_key
+             , unknown_evidence
+             ]) )
+    ; ( "evidence on retry without checkpoint"
+      , row
+          (decision
+             M.Retry_without_checkpoint
+             [ "error", `String "retry"
+             ; Keeper_compaction_evidence.exact_evidence_key, evidence
+             ]) )
+    ; ( "missing retry cause"
+      , row (decision M.Retry_without_checkpoint []) )
+    ]
+
 let () =
   Alcotest.run "keeper_runtime_manifest_completeness"
     [ ( "completeness"
@@ -193,5 +289,7 @@ let () =
             test_is_complete_turn
         ; Alcotest.test_case "compaction evidence public projection" `Quick
             test_compaction_evidence_public_projection
+        ; Alcotest.test_case "current evidence read boundary" `Quick
+            test_current_compaction_evidence_read_boundary
         ] )
     ]

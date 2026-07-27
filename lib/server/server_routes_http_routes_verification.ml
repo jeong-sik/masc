@@ -14,11 +14,9 @@
       cfg coverage (see {!Dashboard_tla_specs}).
     - [GET /api/v1/verification/tlc-results] — latest observed TLC log
       projection for each clean / buggy cfg.
-    - [POST /api/v1/verification/resolve] — dashboard-initiated approve/reject
-      for a pending verification request. Requires bearer token auth; the
-      verifier identity is derived from the authenticated dashboard actor
-      when present (otherwise the request hint) and
-      namespaced under "operator:" to distinguish from peer-agent verdicts. *)
+
+    Async Task verification is read-only here. Verdicts are issued only by the
+    ordinary Keeper that claimed the Task verifier phase. *)
 
 open Server_auth
 
@@ -28,19 +26,6 @@ let trimmed_query_param req key =
   match Server_utils.query_param req key |> Option.map String.trim with
   | Some v when v <> "" -> Some v
   | _ -> None
-
-let verification_error_json msg : Yojson.Safe.t =
-  `Assoc [("ok", `Bool false); ("error", `String msg)]
-
-(* Compose the operator verifier identity. We always prefix with
-   "operator:" so attribution/audit can distinguish dashboard verdicts
-   from peer-agent verdicts. The actor is canonicalized to the bearer
-   owner for authenticated dashboard requests, then sanitized
-   (alnum + '_' + '-' only). *)
-let verifier_of_request ~base_path request =
-  match sanitized_dashboard_actor_for_request ~base_path request with
-  | Some hint -> "operator:" ^ hint
-  | None -> "operator:dashboard"
 
 let add_routes router =
   router
@@ -79,27 +64,3 @@ let add_routes router =
          let json = Dashboard_tla_specs.tlc_results_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.post "/api/v1/verification/resolve" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_operator_confirm"
-         (fun state req reqd ->
-           Http.Request.read_body_async reqd (fun body_str ->
-             try
-               let args = Yojson.Safe.from_string body_str in
-               let config = (Mcp_server.workspace_config state) in
-               let verifier = verifier_of_request ~base_path:config.base_path req in
-               match
-                 Server_dashboard_http.dashboard_verification_resolve_http_json
-                   ~config ~verifier ~args
-               with
-               | Ok json ->
-                   respond_json_value_with_cors request reqd json
-               | Error message ->
-                   respond_json_value_with_cors
-                     ~status:`Bad_request request reqd
-                     (verification_error_json message)
-             with Yojson.Json_error msg ->
-               respond_json_value_with_cors
-                 ~status:`Bad_request request reqd
-                 (verification_error_json (Printf.sprintf "invalid json: %s" msg))
-           )
-         ) request reqd)

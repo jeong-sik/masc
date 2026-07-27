@@ -32,20 +32,35 @@ let completion_contract_of_criteria (criteria : V.criterion list) : string list 
     | V.Contains _ | V.Not_contains _ | V.Schema_match _ -> None
   ) criteria
 
-(** The Verification_protocol.on_submit_for_verification writes
-    [output = { evidence_refs = [...]; task_title = "..." }]. We read
-    evidence_refs in a tolerant way: missing or malformed -> empty list. *)
-let required_evidence_of_output (output : Yojson.Safe.t) : string list =
+(** Read one required current-schema evidence list. Empty arrays are valid;
+    missing or malformed fields carry a public projection error. No legacy
+    field aliases are consulted and malformed arrays are never partially
+    projected. *)
+let string_list_of_output field (output : Yojson.Safe.t)
+  : string list * string option =
+  let missing () =
+    [], Some (Printf.sprintf "missing current-schema field %S" field)
+  in
+  let malformed detail =
+    ( [],
+      Some (Printf.sprintf
+        "malformed current-schema field %S: %s" field detail) )
+  in
+  let rec strings acc = function
+    | [] -> Some (List.rev acc)
+    | `String value :: rest -> strings (value :: acc) rest
+    | _ -> None
+  in
   match output with
   | `Assoc fields ->
-      (match List.assoc_opt "evidence_refs" fields with
+      (match List.assoc_opt field fields with
        | Some (`List items) ->
-           List.filter_map (function
-             | `String s -> Some s
-             | _ -> None
-           ) items
-       | _ -> [])
-  | _ -> []
+           (match strings [] items with
+            | Some values -> values, None
+            | None -> malformed "expected an array of strings")
+       | Some _ -> malformed "expected an array of strings"
+       | None -> missing ())
+  | _ -> malformed "verification output must be an object"
 
 (* Pull task_title from the submit envelope so the UI detail cell has a
    fallback when contract/evidence/verdict_reason are all empty. Empty
@@ -91,7 +106,7 @@ type status_bucket =
 
 let status_bucket_of_request (req : V.verification_request) : status_bucket =
   match req.status with
-  | V.Pending | V.Assigned _ -> Pending
+  | V.Pending -> Pending
   | V.Completed V.Pass -> Approved
   | V.Completed (V.Fail _ | V.Partial _) -> Rejected
 
@@ -106,8 +121,6 @@ let derive_status_fields (req : V.verification_request)
   match req.status with
   | V.Pending ->
       status_bucket_to_string Pending, None, "", None
-  | V.Assigned _ ->
-      status_bucket_to_string Pending, None, "", None
   | V.Completed V.Pass ->
       status_bucket_to_string Approved, Some "pass", "", req.verifier
   | V.Completed (V.Fail reason) ->
@@ -121,7 +134,19 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     derive_status_fields req
   in
   let contract = completion_contract_of_criteria req.criteria in
-  let evidence = required_evidence_of_output req.output in
+  let required_artifacts, required_artifacts_error =
+    string_list_of_output "required_artifacts" req.output
+  in
+  let submitted_evidence, submitted_evidence_error =
+    string_list_of_output "submitted_evidence" req.output
+  in
+  let evidence_projection_error =
+    [required_artifacts_error; submitted_evidence_error]
+    |> List.filter_map Fun.id
+    |> function
+    | [] -> None
+    | errors -> Some (String.concat "; " errors)
+  in
   let task_title = task_title_of_output req.output in
   let request_kind = request_kind_of_output req.output in
   let request_summary = request_summary_of_output req.output in
@@ -143,8 +168,12 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     ("approved_by", Json_util.string_opt_to_json approved_by);
     ("completion_contract",
      `List (List.map (fun s -> `String s) contract));
-    ("required_evidence",
-     `List (List.map (fun s -> `String s) evidence));
+    ("required_artifacts",
+     `List (List.map (fun s -> `String s) required_artifacts));
+    ("submitted_evidence",
+     `List (List.map (fun s -> `String s) submitted_evidence));
+    ("evidence_projection_error",
+     Json_util.string_opt_to_json evidence_projection_error);
     ("verdict", Json_util.string_opt_to_json verdict_opt);
     ("verdict_reason", `String verdict_reason);
   ]
@@ -235,7 +264,7 @@ let is_rejected (req : V.verification_request) : bool =
   match req.status with
   | V.Completed (V.Fail _) | V.Completed (V.Partial _) -> true
   | V.Completed V.Pass -> false
-  | V.Pending | V.Assigned _ -> false
+  | V.Pending -> false
 
 let bucket_of_status (req : V.verification_request) : string =
   req |> status_bucket_of_request |> status_bucket_to_string

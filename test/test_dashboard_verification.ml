@@ -89,14 +89,26 @@ let test_config_input_override_restores_boot_override () =
     Alcotest.(check (option string)) "boot override restored"
       (Some "before") (Config_boot_overrides.get_opt name))
 
-let create_pending_request ~base_path ~task_id ~worker ~criteria ~evidence =
+let create_pending_request_with_artifacts ~required_artifacts ~base_path ~task_id
+    ~worker ~criteria ~evidence =
   let output = `Assoc [
-    ("evidence_refs", `List (List.map (fun s -> `String s) evidence));
+    ("required_artifacts",
+     `List (List.map (fun s -> `String s) required_artifacts));
+    ("submitted_evidence", `List (List.map (fun s -> `String s) evidence));
     ("task_title", `String (Printf.sprintf "title for %s" task_id));
   ] in
   match V.create_request ~base_path ~task_id ~output ~criteria ~worker () with
   | Ok req -> req
   | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
+
+let create_pending_request ~base_path ~task_id ~worker ~criteria ~evidence =
+  create_pending_request_with_artifacts
+    ~required_artifacts:[]
+    ~base_path
+    ~task_id
+    ~worker
+    ~criteria
+    ~evidence
 
 let member key j = Yojson.Safe.Util.member key j
 
@@ -144,14 +156,18 @@ let test_temp_base_path_overrides_and_restores_env_inputs () =
 
 let test_requests_json_shape () =
   with_temp_base_path (fun base_path ->
-    let _req = create_pending_request ~base_path
+    let _req = create_pending_request_with_artifacts ~base_path
         ~task_id:"task-shape"
         ~worker:"keeper-alpha"
         ~criteria:[
           V.Custom "Must reduce FD leak";
           V.Custom "Must pass integration tests";
         ]
-        ~evidence:["artifacts/lsof.before"; "artifacts/lsof.after"] in
+        ~required_artifacts:[
+          "artifact://required-report";
+          "artifact://required-test-log";
+        ]
+        ~evidence:["trace://submitted-runtime-proof"] in
     let j = D.requests_json ~base_path () in
     (* Envelope: updated_at, total, requests *)
     (match member "updated_at" j with
@@ -199,15 +215,28 @@ let test_requests_json_shape () =
            | _ -> Alcotest.fail "contract entry must be string"
          ) items
      | _ -> Alcotest.fail "completion_contract should be list");
-    (match member "required_evidence" r with
+    (match member "required_artifacts" r with
      | `List items ->
-         Alcotest.(check int) "required_evidence len"
+         Alcotest.(check (list string)) "required artifacts stay distinct"
+           ["artifact://required-report"; "artifact://required-test-log"]
+           (List.map Yojson.Safe.Util.to_string items);
+         Alcotest.(check int) "required_artifacts len"
            2 (List.length items);
          List.iter (function
            | `String _ -> ()
-           | _ -> Alcotest.fail "evidence entry must be string"
+           | _ -> Alcotest.fail "required artifact entry must be string"
          ) items
-     | _ -> Alcotest.fail "required_evidence should be list");
+     | _ -> Alcotest.fail "required_artifacts should be list");
+    (match member "submitted_evidence" r with
+     | `List items ->
+         Alcotest.(check (list string)) "submitted evidence stays distinct"
+           ["trace://submitted-runtime-proof"]
+           (List.map Yojson.Safe.Util.to_string items)
+     | _ -> Alcotest.fail "submitted_evidence should be list");
+    Alcotest.(check bool) "legacy required_evidence alias removed"
+      true (member "required_evidence" r = `Null);
+    Alcotest.(check bool) "valid empty/non-empty evidence has no projection error"
+      true (member "evidence_projection_error" r = `Null);
     (* Pending status (no verifier yet) *)
     (match member "status" r with
      | `String "pending" -> ()
@@ -346,7 +375,8 @@ let test_requests_json_surfaces_conflict_triage_fields () =
   with_temp_base_path (fun base_path ->
     let output =
       `Assoc [
-        ("evidence_refs", `List [`String "ref-A"]);
+        ("required_artifacts", `List [`String "artifact://required-A"]);
+        ("submitted_evidence", `List [`String "trace://submitted-A"]);
         ("task_title", `String "conflict task");
         ("request_kind", `String "conflict_triage");
         ( "request_summary",
@@ -384,6 +414,39 @@ let test_requests_json_surfaces_conflict_triage_fields () =
     (match member "next_action" row with
      | `String "Reconcile board / planning / mutation surfaces before ordinary approval." -> ()
      | _ -> Alcotest.fail "next_action mismatch"))
+
+let test_requests_json_surfaces_evidence_projection_error () =
+  with_temp_base_path (fun base_path ->
+    let output =
+      `Assoc [
+        ("submitted_evidence", `List [
+          `String "trace://must-not-be-partially-projected";
+          `Int 7;
+        ]);
+      ]
+    in
+    let _req =
+      match V.create_request ~base_path ~task_id:"task-malformed-evidence"
+              ~output ~criteria:[] ~worker:"keeper-alpha" () with
+      | Ok req -> req
+      | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
+    in
+    let row =
+      match member "requests" (D.requests_json ~base_path ()) with
+      | `List [row] -> row
+      | _ -> Alcotest.fail "expected one malformed evidence request"
+    in
+    Alcotest.(check (list string)) "missing required artifacts project empty"
+      [] (member "required_artifacts" row |> Yojson.Safe.Util.to_list
+          |> List.map Yojson.Safe.Util.to_string);
+    Alcotest.(check (list string)) "malformed submitted evidence projects empty"
+      [] (member "submitted_evidence" row |> Yojson.Safe.Util.to_list
+          |> List.map Yojson.Safe.Util.to_string);
+    Alcotest.(check string) "missing and malformed fields are distinguished"
+      ("missing current-schema field \"required_artifacts\"; "
+       ^ "malformed current-schema field \"submitted_evidence\": "
+       ^ "expected an array of strings")
+      (member "evidence_projection_error" row |> Yojson.Safe.Util.to_string))
 
 (* ── summary_json ───────────────────────────────────── *)
 
@@ -469,7 +532,7 @@ let test_summary_bucket_counts () =
     let r2 = create_pending_request ~base_path ~task_id:"t-r2"
         ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
     let verdict_of req ~verdict =
-      match V.submit_verdict ~base_path ~req_id:req.V.id
+      match V.Internal.submit_verdict ~base_path ~req_id:req.V.id
               ~verifier:"v" ~verdict with
       | Ok _ -> ()
       | Error e -> Alcotest.fail e
@@ -500,7 +563,7 @@ let test_summary_recent_clamp () =
     (* recent=0 returns empty list even when rejections exist *)
     let r = create_pending_request ~base_path ~task_id:"t"
         ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
-    (match V.submit_verdict ~base_path ~req_id:r.V.id
+    (match V.Internal.submit_verdict ~base_path ~req_id:r.V.id
              ~verifier:"v" ~verdict:(V.Fail "x") with
      | Ok _ -> () | Error e -> Alcotest.fail e);
     let j = D.summary_json ~base_path ~recent:0 () in
@@ -527,6 +590,8 @@ let () =
         test_requests_json_ignores_legacy_root_entries;
       Alcotest.test_case "conflict triage fields" `Quick
         test_requests_json_surfaces_conflict_triage_fields;
+      Alcotest.test_case "evidence projection errors" `Quick
+        test_requests_json_surfaces_evidence_projection_error;
       Alcotest.test_case "fd pressure remains observation-only" `Quick
         test_requests_and_summary_remain_available_after_fd_observation;
     ];

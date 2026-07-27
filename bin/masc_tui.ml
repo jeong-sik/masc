@@ -6,7 +6,7 @@ open Masc_tui_loader
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
-(** Send a message to a keeper via HTTP POST to /api/v1/keepers/chat/stream *)
+(** Send a message through the Keeper chat streaming endpoint. *)
 let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
   try
     let host = Env_config_core.masc_host () in
@@ -17,7 +17,6 @@ let send_keeper_message (state : state) (keeper_name : string) (message : string
           [
             ("name", `String keeper_name);
             ("message", `String message);
-            ("models", `List []);
           ])
     in
     match

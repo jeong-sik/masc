@@ -124,24 +124,44 @@ let make_tool_bundle
   (* Every descriptor-declared model tool is materialized. The turn hook sends
      this exact list to OAS without per-Keeper or per-turn reduction. *)
   let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
-  (* The bundle lives for exactly one Agent run. Its typed terminal-effect
+  (* The bundle lives for exactly one Agent run. Its typed tool-boundary
      state is request-scoped and observed by the OAS tool-boundary probe only
-     after the whole tool batch and checkpoint sink have completed. A proven
-     terminal failure dominates completion regardless of callback order.
-     Failure is sticky so its first diagnostic remains authoritative. *)
+     after the whole tool batch and checkpoint sink have completed. Deferred
+     external effects stop the provider loop until their durable resolution
+     wakes a later turn. A terminal completion supersedes a defer in the same
+     batch; a proven terminal failure dominates every state regardless of
+     callback order. Failure is sticky so its first diagnostic remains
+     authoritative. *)
   let terminal_effect_state = Atomic.make Terminal_effect_open in
-  let mark_terminal_effect_completed () =
+  let mark_external_effect_deferred () =
     ignore
       (Atomic.compare_and_set
          terminal_effect_state
          Terminal_effect_open
-         Terminal_effect_completed)
+         External_effect_deferred)
+  in
+  let mark_terminal_effect_completed () =
+    let rec transition () =
+      match Atomic.get terminal_effect_state with
+      | Terminal_effect_completed | Terminal_effect_failed _ -> ()
+      | (Terminal_effect_open | External_effect_deferred) as current ->
+        if
+          not
+            (Atomic.compare_and_set
+               terminal_effect_state
+               current
+               Terminal_effect_completed)
+        then transition ()
+    in
+    transition ()
   in
   let mark_terminal_effect_failed failure =
     let rec transition () =
       match Atomic.get terminal_effect_state with
       | Terminal_effect_failed _ -> ()
-      | (Terminal_effect_open | Terminal_effect_completed) as current ->
+      | ( Terminal_effect_open
+        | External_effect_deferred
+        | Terminal_effect_completed ) as current ->
         if
           not
             (Atomic.compare_and_set
@@ -185,6 +205,7 @@ let make_tool_bundle
                  ?gate_grant
                  ?record_gate_result
                  ?on_completed
+                 ~on_deferred:mark_external_effect_deferred
                  ?on_failed
                  ~pre_validate_input:(fun input ->
                    match

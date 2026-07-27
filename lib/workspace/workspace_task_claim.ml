@@ -133,6 +133,8 @@ let claim_task_r config ~agent_name ~task_id ()
                   | Workspace_task_lifecycle.Verifier_claim status ->
                     `Claimed_verification, { t with task_status = status } :: acc
                   | Workspace_task_lifecycle.Self_owned -> `Already_mine, t :: acc
+                  | Workspace_task_lifecycle.Self_verification ->
+                    `Self_verification, t :: acc
                   | Workspace_task_lifecycle.Held_by_other holder ->
                     `Claimed_by holder, t :: acc
                   | Workspace_task_lifecycle.Held_terminal status ->
@@ -158,6 +160,11 @@ let claim_task_r config ~agent_name ~task_id ()
                       (Masc_domain.task_status_to_string status)
                       task_id)))
          | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
+         | `Self_verification ->
+           Error
+             (Masc_domain.Task
+                (Masc_domain.Task_error.InvalidState
+                   "Submitting worker cannot claim its own verification request"))
          | `Already_mine ->
            Ok
              (`Existing_claim
@@ -167,9 +174,8 @@ let claim_task_r config ~agent_name ~task_id ()
               The task stays [AwaitingVerification]; [resolve_claim] has bound
               this agent as the verifier in [phase] (Verifier_assigned). Persist
               that status and point the agent at the task. The verifier binding
-              now lives in the task FSM (single authority via [phase]), so the
-              former defer-to-dispatch-loop workaround is gone — no cross-lib
-              call into [Verification.assign_verifier] is needed. *)
+              lives only in the task FSM; the verification request remains
+              Pending until the winner records its terminal verdict. *)
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
            in
@@ -214,9 +220,30 @@ let claim_task_r config ~agent_name ~task_id ()
                ; "task", `String task_id
                ; "ts", `String (now_iso ())
                ]);
+           let evidence_projection =
+             match
+               Workspace_query.verification_evidence_projection
+                 config
+                 ~viewer:agent_name
+                 ~task:claimed_task
+             with
+             | Some projection -> projection
+             | None ->
+               Log.Task.error
+                 ~keeper_name:agent_name
+                 "verification claim committed without an evidence projection (task=%s)"
+                 task_id;
+               Printf.sprintf
+                 "verification_request projection unavailable after assignment for %s; ACTION: stop and report this invariant failure"
+                 task_id
+           in
            Ok
              (`New_claim
-               (Printf.sprintf "%s assigned as verifier for %s" agent_name task_id))
+               (Printf.sprintf
+                  "%s assigned as verifier for %s\n%s"
+                  agent_name
+                  task_id
+                  evidence_projection))
          | `Claimed_ok ->
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks

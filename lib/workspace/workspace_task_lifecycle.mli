@@ -6,6 +6,9 @@ type invalid =
   | Completion_rejected of string
   | Completion_verdict_unavailable of string
   | Completion_verdict_action_mismatch
+  | Verification_claim_required
+  | Verification_assigned_to of string
+  | Verification_self_claim
   | Invalid_transition
 
 type decision =
@@ -17,6 +20,7 @@ type claim_resolution =
   | Worker_claim of Masc_domain.task_status
   | Verifier_claim of Masc_domain.task_status
   | Self_owned
+  | Self_verification
   | Held_by_other of string
   | Held_terminal of Masc_domain.task_status
 

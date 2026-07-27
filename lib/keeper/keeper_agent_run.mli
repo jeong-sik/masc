@@ -35,9 +35,11 @@ type autonomous_yield_request = {
 val terminal_effect_boundary_decision
   :  Keeper_tools_oas.terminal_effect_state
   -> (Runtime_agent.cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
-(** Production boundary projection for terminal Keeper tools. Failed terminal
-    effects retain their typed [Tool_result.tool_failure_class] in the exact
-    structured Keeper error envelope. *)
+(** Production boundary projection for Keeper tool results. Deferred external
+    effects yield the current provider loop so their durable resolution can
+    wake a later turn. Failed terminal effects retain their typed
+    [Tool_result.tool_failure_class] in the exact structured Keeper error
+    envelope. *)
 
 module For_testing : sig
   val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option

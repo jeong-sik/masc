@@ -3,20 +3,17 @@
 //
 // Consumes:
 //   GET /api/v1/verification/requests?task_id=&limit=
-//   POST /api/v1/verification/resolve
 //
 // Pattern mirrors RuntimeConfigPanel: managed async resource + manual
 // refresh + 15s auto-tick. Row expansion uses <details> so we avoid
-// component-local state plumbing for a read-only table. Pending rows
-// expose approve/reject action buttons that call the resolve endpoint;
-// in-flight state is held in a per-row signal map.
+// component-local state plumbing for a read-only table. Async Task verdicts
+// remain exclusively with the Keeper that claimed the verifier phase.
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchVerificationRequests,
-  resolveVerificationRequest,
   type VerificationRequest,
   type VerificationRequestStatus,
   type VerificationRequestVerdict,
@@ -28,8 +25,6 @@ import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
 import { relativeTime } from '../lib/format-time'
-import { errorToString } from '../lib/format-string'
-import { isSubmitEnter } from '../lib/keyboard'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
@@ -80,39 +75,6 @@ const searchQuery = signal('')
 export function __resetVerificationRequestsPanelForTest(): void {
   statusFilter.value = 'all'
   searchQuery.value = ''
-}
-
-// Per-request mutation state. Signal-valued Map avoids component-local
-// state plumbing: the row reads `rowActions.value.get(request_id)` and the
-// action handler mutates a new Map to preserve signal identity semantics.
-//
-// State machine:
-//   idle
-//     → confirm-approve    (first click on 승인)
-//     → compose-reject     (first click on 반려)
-//   confirm-approve
-//     → pending(approve)   (click 확정)
-//     → idle               (click 취소)
-//   compose-reject
-//     → pending(reject)    (submit with reason)
-//     → idle               (click 취소)
-//   pending
-//     → idle               (on success)
-//     → error              (on failure; user can retry from idle)
-type RowActionState =
-  | { kind: 'idle' }
-  | { kind: 'confirm-approve' }
-  | { kind: 'compose-reject'; reason: string }
-  | { kind: 'pending'; decision: 'approve' | 'reject' }
-  | { kind: 'error'; message: string }
-
-const rowActions = signal<ReadonlyMap<string, RowActionState>>(new Map())
-
-function setRowAction(requestId: string, state: RowActionState): void {
-  const next = new Map(rowActions.value)
-  if (state.kind === 'idle') next.delete(requestId)
-  else next.set(requestId, state)
-  rowActions.value = next
 }
 
 const FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
@@ -180,134 +142,6 @@ function verdictTone(v: VerificationRequestVerdict): 'ok' | 'warn' | 'bad' {
   }
 }
 
-// ── Action handler ────────────────────────────────────
-
-async function submitResolve(
-  row: VerificationRequest,
-  decision: 'approve' | 'reject',
-  reason: string,
-  refresh: () => void,
-): Promise<void> {
-  setRowAction(row.request_id, { kind: 'pending', decision })
-  try {
-    await resolveVerificationRequest({
-      task_id: row.task_id,
-      verification_id: row.request_id,
-      decision,
-      reason,
-    })
-    setRowAction(row.request_id, { kind: 'idle' })
-    refresh()
-  } catch (err) {
-    const message = errorToString(err)
-    setRowAction(row.request_id, { kind: 'error', message })
-  }
-}
-
-// ── Row actions (approve/reject UI) ───────────────────
-
-// BTN_SECONDARY uses fg-primary (more emphasis) — the naming inverts
-// the convention but is preserved since it's a deliberate visual choice
-// for the cancel/reject actions in this panel. Btn default variant uses
-// fg-secondary, so this constant stays until a tone variant ships.
-const BTN_SECONDARY =
-  'v2-workspace-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
-
-function RowActions({
-  row,
-  state,
-  refresh,
-}: {
-  row: VerificationRequest
-  state: RowActionState
-  refresh: () => void
-}) {
-  const requestId = row.request_id
-
-  if (state.kind === 'pending') {
-    return html`
-      <span class="text-2xs text-[var(--color-fg-muted)]">
-        ${state.decision === 'approve' ? '승인 중…' : '반려 중…'}
-      </span>
-    `
-  }
-
-  if (state.kind === 'confirm-approve') {
-    return html`
-      <div class="flex items-center gap-1 flex-wrap">
-        <span class="text-2xs text-[var(--color-fg-secondary)]">승인 확정?</span>
-        <${Btn}
-          size="sm"
-          class="v2-workspace-action"
-          onClick=${() => void submitResolve(row, 'approve', '', refresh)}
-        >예<//>
-        <button
-          class=${BTN_SECONDARY}
-          onClick=${() => setRowAction(requestId, { kind: 'idle' })}
-        >취소</button>
-      </div>
-    `
-  }
-
-  if (state.kind === 'compose-reject') {
-    const reason = state.reason
-    const canSubmit = reason.trim().length > 0
-    return html`
-      <div class="flex items-center gap-1 flex-wrap">
-        <${TextInput}
-          type="text"
-          class="!px-2 !py-1 !text-2xs w-50"
-          placeholder="반려 사유 (필수)"
-          ariaLabel="반려 사유"
-          value=${reason}
-          autoFocus
-          onInput=${(e: Event) => setRowAction(requestId, {
-            kind: 'compose-reject',
-            reason: (e.target as HTMLInputElement).value,
-          })}
-          onKeyDown=${(e: KeyboardEvent) => {
-            if (isSubmitEnter(e) && canSubmit) {
-              void submitResolve(row, 'reject', reason.trim(), refresh)
-            } else if (e.key === 'Escape') {
-              setRowAction(requestId, { kind: 'idle' })
-            }
-          }}
-        />
-        <${Btn}
-          size="sm"
-          class="v2-workspace-action"
-          disabled=${!canSubmit}
-          onClick=${() => void submitResolve(row, 'reject', reason.trim(), refresh)}
-        >확정<//>
-        <button
-          class=${BTN_SECONDARY}
-          onClick=${() => setRowAction(requestId, { kind: 'idle' })}
-        >취소</button>
-      </div>
-    `
-  }
-
-  // idle or error — show primary action buttons; error surfaces retry hint
-  return html`
-    <div class="flex items-center gap-1 flex-wrap">
-      <${Btn}
-        size="sm"
-        class="v2-workspace-action"
-        onClick=${() => setRowAction(requestId, { kind: 'confirm-approve' })}
-      >승인<//>
-      <button
-        class=${BTN_SECONDARY}
-        onClick=${() => setRowAction(requestId, { kind: 'compose-reject', reason: '' })}
-      >반려</button>
-      ${state.kind === 'error'
-        ? html`<span class="text-3xs text-[var(--text-bad)]" title=${state.message}>
-            실패 · 다시 시도
-          </span>`
-        : null}
-    </div>
-  `
-}
-
 function DetailLabel({ children }: { children: unknown }) {
   return html`
     <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
@@ -318,24 +152,23 @@ function DetailLabel({ children }: { children: unknown }) {
 
 // ── Row ───────────────────────────────────────────────
 
-function VerificationRow({
-  row,
-  refresh,
-}: { row: VerificationRequest; refresh: () => void }) {
+function VerificationRow({ row }: { row: VerificationRequest }) {
   const hasContract = row.completion_contract.length > 0
-  const hasEvidence = row.required_evidence.length > 0
+  const hasRequiredArtifacts = row.required_artifacts.length > 0
+  const hasSubmittedEvidence = row.submitted_evidence.length > 0
+  const hasEvidenceProjectionError = row.evidence_projection_error != null
   const hasTaskTitle = row.task_title !== ''
   const hasRequestSummary = row.request_summary !== ''
   const hasNextAction = row.next_action != null && row.next_action !== ''
   const hasDetails =
     hasContract ||
-    hasEvidence ||
+    hasRequiredArtifacts ||
+    hasSubmittedEvidence ||
+    hasEvidenceProjectionError ||
     hasTaskTitle ||
     hasRequestSummary ||
     hasNextAction ||
     row.verdict_reason !== ''
-  const actionState = rowActions.value.get(row.request_id) ?? { kind: 'idle' as const }
-
   return html`
     <tr class="v2-workspace-row border-b border-[var(--color-border-default)] last:border-b-0 align-top">
       <td class="py-2 pr-2">
@@ -370,21 +203,17 @@ function VerificationRow({
             <//>`
           : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
       </td>
-      <td class="py-2 pr-2">
-        ${row.status === 'pending'
-          ? html`
-              ${row.request_kind === 'conflict_triage'
-                ? html`
-                    <div class="mb-1 text-3xs text-[var(--text-bad)]">
-                      일반 merged-PR 승인 금지 · triage 우선
-                    </div>
-                  `
-                : null}
-              <${RowActions} row=${row} state=${actionState} refresh=${refresh} />
-            `
-          : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
-      </td>
       <td class="py-2">
+        ${hasEvidenceProjectionError
+          ? html`
+              <div
+                role="alert"
+                class="mb-1 text-3xs text-[var(--text-bad)]"
+              >
+                Evidence projection error: ${row.evidence_projection_error}
+              </div>
+            `
+          : null}
         ${hasDetails
           ? html`
               <details class="text-2xs">
@@ -426,12 +255,22 @@ function VerificationRow({
                         </div>
                       `
                     : null}
-                  ${hasEvidence
+                  ${hasRequiredArtifacts
                     ? html`
                         <div>
-                          <${DetailLabel}>Required Evidence</${DetailLabel}>
+                          <${DetailLabel}>Required Artifacts</${DetailLabel}>
                           <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
-                            ${row.required_evidence.map((e) => html`<li><code>${e}</code></li>`)}
+                            ${row.required_artifacts.map((artifact) => html`<li><code>${artifact}</code></li>`)}
+                          </ul>
+                        </div>
+                      `
+                    : null}
+                  ${hasSubmittedEvidence
+                    ? html`
+                        <div>
+                          <${DetailLabel}>Submitted Evidence</${DetailLabel}>
+                          <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
+                            ${row.submitted_evidence.map((evidence) => html`<li><code>${evidence}</code></li>`)}
                           </ul>
                         </div>
                       `
@@ -458,11 +297,9 @@ function VerificationRow({
 function RequestsTable({
   requests,
   totalBeforeFilter,
-  refresh,
 }: {
   requests: readonly VerificationRequest[]
   totalBeforeFilter: number
-  refresh: () => void
 }) {
   if (requests.length === 0) {
     const hasFilter = statusFilter.value !== 'all' || searchQuery.value.trim() !== ''
@@ -491,7 +328,6 @@ function RequestsTable({
             <${ThLeft}>승인자</${ThLeft}>
             <${ThLeft}>생성</${ThLeft}>
             <${ThLeft}>판정</${ThLeft}>
-            <${ThLeft}>액션</${ThLeft}>
             <th scope="col" class="text-left py-1">세부</th>
           </tr>
         </thead>
@@ -500,7 +336,6 @@ function RequestsTable({
             (row) => html`<${VerificationRow}
               key=${row.request_id}
               row=${row}
-              refresh=${refresh}
             />`,
           )}
         </tbody>
@@ -523,7 +358,7 @@ export function VerificationRequestsPanel() {
     }
   }, [resource])
 
-  // Deep-link support: task-detail-overlay renders a "검증에 개입" link with
+  // Deep-link support: task-detail-overlay renders a read-only "검증 보기" link with
   // ?task=<id> so operators land on this panel pre-filtered to the pending
   // request they came from. Treat the URL as a one-shot hint — write the
   // task id into the shared search signal once on mount (and whenever the
@@ -546,12 +381,6 @@ export function VerificationRequestsPanel() {
         : rows.filter((r) => r.status === statusFilter.value)
     return filterVerificationRequests(byStatus, searchQuery.value)
   }, [rows, statusFilter.value, searchQuery.value])
-
-  // UX hint: when requests exist but none are pending, the 액션 column is
-  // empty by design (approve/reject only apply to pending rows). Surface the
-  // reason so operators don't read "—" as a broken control.
-  const pendingCount = rows.filter((r) => r.status === 'pending').length
-  const showNoPendingHint = rows.length > 0 && pendingCount === 0
 
   return html`
     <div class="v2-workspace-surface flex flex-col gap-4">
@@ -604,24 +433,11 @@ export function VerificationRequestsPanel() {
         ? html`<${LoadingState}>검증 요청 불러오는 중...<//>`
         : null}
 
-      ${showNoPendingHint
-        ? html`
-            <div
-              role="note"
-              class="v2-workspace-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
-            >
-              검증 대기(pending) 요청이 없어 액션 컬럼이 비어 있습니다. 승인/반려 버튼은
-              <code class="text-[var(--color-fg-secondary)]">pending</code> 상태에서만 표시됩니다.
-            </div>
-          `
-        : null}
-
       <${SectionCard} label="검증 요청">
         ${data
           ? html`<${RequestsTable}
               requests=${filtered}
               totalBeforeFilter=${data.requests.length}
-              refresh=${() => void loadData(resource)}
             />`
           : null}
       <//>

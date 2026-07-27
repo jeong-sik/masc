@@ -24,6 +24,7 @@ let make_keeper_tool_handler
       ?gate_grant
       ?record_gate_result
       ?on_completed
+      ?on_deferred
       ?on_failed
       ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
@@ -44,6 +45,8 @@ let make_keeper_tool_handler
     (match result with
      | Tool_result.Completed _ ->
        Option.iter (fun completed -> completed ()) on_completed
+     | Tool_result.Deferred _ ->
+       Option.iter (fun deferred -> deferred ()) on_deferred
      | Tool_result.Failed { class_; message; _ } ->
        let effect_disposition =
          Option.value
@@ -61,7 +64,7 @@ let make_keeper_tool_handler
                  ; diagnostic = message
                  })
             on_failed)
-     | Tool_result.Deferred _ -> ());
+    );
     result
   in
   fun ?oas_invocation raw_input ->

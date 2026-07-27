@@ -568,6 +568,8 @@ type compaction_snapshot_item =
   ; saved_tokens : int option
   ; compaction_id : string option
   ; compaction_source : string option
+  ; compaction_outcome : string option
+  ; cause : string option
   ; status : string
   ; links : Yojson.Safe.t
   ; exact_evidence : Yojson.Safe.t option
@@ -597,6 +599,8 @@ let compaction_snapshot_item_json (item : compaction_snapshot_item) =
     ; "saved_tokens", Json_util.int_opt_to_json item.saved_tokens
     ; "compaction_id", Json_util.string_opt_to_json item.compaction_id
     ; "compaction_source", Json_util.string_opt_to_json item.compaction_source
+    ; "compaction_outcome", Json_util.string_opt_to_json item.compaction_outcome
+    ; "cause", Json_util.string_opt_to_json item.cause
     ; "status", `String item.status
     ; "links", item.links
     ; ( "exact_evidence"
@@ -767,6 +771,8 @@ let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest
          ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
          ; compaction_source =
              compaction_snapshot_clock_string row.decision "compaction_source"
+         ; compaction_outcome = None
+         ; cause = None
          ; status = row.status
          ; links = compaction_snapshot_links_json row.links
          ; exact_evidence = None
@@ -800,6 +806,8 @@ let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest
             ; saved_tokens = None
             ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
             ; compaction_source
+            ; compaction_outcome = None
+            ; cause = None
             ; status = row.status
             ; links = compaction_snapshot_links_json row.links
             ; exact_evidence = None
@@ -845,6 +853,11 @@ let compaction_context_snapshot_json
          ; saved_tokens = compaction_saved_tokens before_tokens after_tokens
          ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
          ; compaction_source
+         ; compaction_outcome =
+             Json_util.get_string
+               row.decision
+               Keeper_runtime_manifest.compaction_outcome_key
+         ; cause = Json_util.get_string row.decision "error"
          ; status = row.status
          ; links = compaction_snapshot_links_json row.links
          ; exact_evidence =
@@ -908,6 +921,8 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
              ; saved_tokens = compaction_saved_tokens before_tokens after_tokens
              ; compaction_id = None
              ; compaction_source = None
+             ; compaction_outcome = None
+             ; cause = None
              ; status = "latest"
              ; links = `Assoc []
              ; exact_evidence = None

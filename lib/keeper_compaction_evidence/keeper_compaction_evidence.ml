@@ -68,6 +68,12 @@ type decode_error =
       ; summarized_message_count : int
       ; dropped_message_count : int
       }
+  | Invalid_tool_protocol_accounting of
+      { before_tool_use_count : int
+      ; after_tool_use_count : int
+      ; before_tool_result_count : int
+      ; after_tool_result_count : int
+      }
   | No_messages_compacted
 
 let field_name = function
@@ -171,20 +177,34 @@ let decode_error_to_string = function
       after_message_count
       summarized_message_count
       dropped_message_count
+  | Invalid_tool_protocol_accounting
+      { before_tool_use_count
+      ; after_tool_use_count
+      ; before_tool_result_count
+      ; after_tool_result_count
+      } ->
+    Printf.sprintf
+      "invalid_tool_protocol_accounting:uses=%d->%d:results=%d->%d"
+      before_tool_use_count
+      after_tool_use_count
+      before_tool_result_count
+      after_tool_result_count
   | No_messages_compacted -> "no_messages_compacted"
 ;;
 
 let ( let* ) = Result.bind
 
-let message_accounting_is_exact
+let message_accounting_is_structurally_possible
       ~before_message_count
       ~after_message_count
       ~summarized_message_count
       ~dropped_message_count
   =
+  let removed_message_count = before_message_count - after_message_count in
   summarized_message_count <= before_message_count
   && dropped_message_count <= before_message_count - summarized_message_count
-  && after_message_count = before_message_count - dropped_message_count
+  && removed_message_count >= dropped_message_count
+  && removed_message_count <= dropped_message_count + summarized_message_count
 ;;
 
 let decode_nonblank_string fields field =
@@ -280,21 +300,30 @@ let create
          Error
            (Invalid_transition
               (Messages, before_message_count, after_message_count))
-       else if after_tool_use_count <> before_tool_use_count
+       else if after_tool_use_count > before_tool_use_count
        then
          Error
            (Invalid_transition
               (Tool_uses, before_tool_use_count, after_tool_use_count))
-       else if after_tool_result_count <> before_tool_result_count
+       else if after_tool_result_count > before_tool_result_count
        then
          Error
            (Invalid_transition
               (Tool_results, before_tool_result_count, after_tool_result_count))
-       else if summarized_message_count = 0 && dropped_message_count = 0
-       then Error No_messages_compacted
+       else if
+         before_tool_use_count - after_tool_use_count
+         <> before_tool_result_count - after_tool_result_count
+       then
+         Error
+           (Invalid_tool_protocol_accounting
+              { before_tool_use_count
+              ; after_tool_use_count
+              ; before_tool_result_count
+              ; after_tool_result_count
+              })
        else if
          not
-           (message_accounting_is_exact
+           (message_accounting_is_structurally_possible
               ~before_message_count
               ~after_message_count
               ~summarized_message_count

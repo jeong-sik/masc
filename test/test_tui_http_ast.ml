@@ -36,6 +36,16 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
+let test_keeper_chat_omits_removed_model_args () =
+  let module_path = "bin/masc_tui.ml" in
+  check int "TUI keeper chat has no removed models field" 0
+    (Ast_grep.count_string_literals ~module_path ~needle:"models");
+  check int "TUI still targets the keeper chat stream" 1
+    (Ast_grep.count_string_literals
+       ~module_path
+       ~needle:"/api/v1/keepers/chat/stream")
+;;
+
 let test_planning_constructors_do_not_collide () =
   let module_path = "bin/masc_tui_types.ml" in
   let planning_mode_constructors =
@@ -159,6 +169,10 @@ let () =
           "http client does not own TUI env contract"
           `Quick
           test_http_client_does_not_own_tui_env_contract;
+        test_case
+          "keeper chat omits removed model args"
+          `Quick
+          test_keeper_chat_omits_removed_model_args;
         test_case
           "planning constructors do not collide"
           `Quick

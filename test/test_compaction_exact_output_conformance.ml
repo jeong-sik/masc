@@ -26,7 +26,6 @@ open Masc
 module C = Keeper_compaction_llm_summarizer
 module F = Compaction_exact_output_fixture
 module P = Keeper_event_queue_persistence
-module Q = Keeper_event_queue
 module Recovery = Keeper_exact_disposition_recovery
 module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema

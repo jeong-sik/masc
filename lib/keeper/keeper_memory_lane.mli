@@ -25,10 +25,12 @@
     retry. Each lane now has its own mutex and its own budget; ordering within a
     lane is unchanged.
 
-    The per-keeper, per-lane reservation bound is controlled by
-    [MASC_KEEPER_MEMORY_LANE_MAX_PENDING] (default [2]). Submission outcomes
-    are counted under [masc_keeper_memory_lane_*] and per-keeper pending /
-    in-flight gauges are exported, all labelled by [lane]. *)
+    The deterministic per-keeper reservation bound is controlled by
+    [MASC_KEEPER_MEMORY_LANE_MAX_PENDING] (default [2]). Librarian work instead
+    has a fixed process-local bound of one running unit plus one overwriteable
+    latest snapshot. Submission outcomes are counted under
+    [masc_keeper_memory_lane_*]; per-keeper pending, in-flight, and
+    latest-pending gauges are exported, all labelled by [lane]. *)
 
 type lane =
   | Deterministic
@@ -36,19 +38,24 @@ type lane =
           permanent, so it must not queue behind provider-backed work. *)
   | Librarian
       (** Provider-backed episode extraction. Holds its lane across the round
-          trip; a drop is retried on the next due turn by its own cadence. *)
+          trip. Saturated submissions replace the queued latest snapshot, so
+          cleanup remains reliably eventual without blocking the Keeper turn. *)
 
 type outcome =
   | Submitted
-      (** Forked onto the keeper's lane and serialized behind its mutex. *)
+      (** Accepted as the running unit or the queued latest snapshot. *)
+  | Coalesced
+      (** The Librarian lane already had one running and one latest unit. The
+          prior latest snapshot was replaced atomically by this newer immutable
+          snapshot. Deterministic submissions never return this outcome. *)
   | Ran_inline
       (** Executor switch not initialized; the unit ran synchronously in the
           caller so no work is lost (tests, or startup before {!init}). A
           raising unit is contained and emits a metric instead of escaping. *)
   | Dropped
-      (** The keeper's lane was saturated (pending at the bound); the unit was
-          discarded. Memory extraction is best-effort, so saturation drops
-          rather than blocking the turn. The drop is counted, never silent. *)
+      (** The executor switch could not own the unit, or the deterministic lane
+          was saturated. Librarian saturation returns {!Coalesced}, not
+          [Dropped]. The drop is counted, never silent. *)
 
 val init : sw:Eio.Switch.t -> unit
 (** Record the long-lived switch that owns detached memory fibers. Call once at
@@ -61,11 +68,12 @@ val submit
   -> (unit -> unit)
   -> outcome
 (** [submit ~base_path ~keeper_name ~lane f] runs [f] on [keeper_name]'s [lane].
-    When the executor switch is set, [f] is forked and serialized behind that
-    keeper's mutex; over the pending bound it is dropped and counted. When the
-    executor is not initialized, [f] runs inline and any exception is contained
-    and counted rather than escaping. The bound, outcomes, and per-keeper
-    pending/in-flight state are exported as metrics. *)
+    With an executor switch, deterministic work retains the bounded serialized
+    submission policy. Librarian work uses a non-blocking latest-wins drain:
+    one running unit plus one overwriteable latest snapshot. When the executor
+    is not initialized, [f] runs inline and any exception is contained and
+    counted rather than escaping. Outcomes and per-keeper state are exported as
+    metrics. *)
 
 module For_testing : sig
   val reset : unit -> unit

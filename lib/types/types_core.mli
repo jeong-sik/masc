@@ -91,8 +91,8 @@ type configured_llm_completion_verdict =
   }
 [@@deriving show, yojson]
 
-(* RFC-0220: verification sub-state folded into [task_status] (was a separate
-   request_status store) so the illegal Todo+Pending pair is unrepresentable. *)
+(* RFC-0220: verifier assignment lives only in [task_status]. Verification
+   requests store evidence and terminal verdicts, not assignment. *)
 type verification_phase =
   | Awaiting_verifier
   | Verifier_assigned of { verifier : string }
@@ -115,8 +115,8 @@ type task_status =
 (** RFC-0220 §3.5: [task_status] of an [AwaitingVerification] obligation once
     [verifier] has claimed it as its satisfier — status preserved, verifier
     recorded in [phase]. Single construction authority shared by [decide] and
-    both claim writers. Advisory binding: records who is verifying, not who is
-    permitted to (any non-submitter may still approve/reject). *)
+    both claim writers. Authoritative binding: only the recorded verifier may
+    inspect submitted evidence and issue the terminal verdict. *)
 val bind_verifier
   :  verifier:string
   -> assignee:string

@@ -70,6 +70,7 @@ module For_testing : sig
           ( Keeper_compaction_llm_summarizer.completed_plan
           , Keeper_compaction_llm_summarizer.summarization_failure )
             result)
+    -> ?expected_after_message_count_override:int
     -> summarized_message_count_override:int
     -> meta:Keeper_meta_contract.keeper_meta
     -> trigger:Compaction_trigger.t

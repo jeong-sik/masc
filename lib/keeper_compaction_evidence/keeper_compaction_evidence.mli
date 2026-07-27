@@ -70,6 +70,12 @@ type decode_error =
       ; summarized_message_count : int
       ; dropped_message_count : int
       }
+  | Invalid_tool_protocol_accounting of
+      { before_tool_use_count : int
+      ; after_tool_use_count : int
+      ; before_tool_result_count : int
+      ; after_tool_result_count : int
+      }
   | No_messages_compacted
 
 val decode_error_to_string : decode_error -> string
@@ -102,11 +108,12 @@ val create
   -> after_tool_result_count:int
   -> (t, decode_error) result
 (** Construct evidence through the same closed validation boundary used by
-    persisted JSON restoration. Message accounting is exact:
-    [after = before - dropped]. Every summarized source message is replaced in
-    place by exactly one summary message, so summarization changes bytes without
-    changing message cardinality. Tool-use and tool-result counts must remain
-    exactly equal because tool-bearing units are protected from compaction. *)
+    persisted JSON restoration. This persisted shape is an observability
+    projection, not restart execution authority. The pre-persist compaction
+    gate separately compares applied-plan accounting with the serialized
+    checkpoint exactly. Here, message reduction must remain structurally
+    possible for the summarized/dropped source counts, ToolUse/ToolResult counts
+    cannot increase, and their removal counts must match. *)
 
 val to_json : t -> Yojson.Safe.t
 (** Self-contained structural and exact-execution evidence projection. *)
@@ -116,5 +123,6 @@ val of_json : Yojson.Safe.t -> (t, decode_error) result
     object. Unknown, duplicate, missing, malformed, blank, mismatched, or
     objectively impossible evidence is rejected explicitly; no external
     provenance labels or historical shape are inferred or migrated.
-    [Checkpoint_bytes] must strictly reduce, message accounting must be exact,
-    and ToolUse/ToolResult counts must remain equal. *)
+    [Checkpoint_bytes] must strictly reduce, message accounting must remain
+    structurally possible, and ToolUse/ToolResult removal counts must remain
+    equal. *)

@@ -390,7 +390,9 @@ function RuntimeBlockedKeeperFactRow({
           <${Icon} size=${14} aria-hidden="true" />
           <span>${presentation.label}</span>
         </span>
-        <div class="font-mono text-3xs text-[var(--color-fg-muted)]">${presentation.reason}</div>
+        <div class="font-mono text-3xs text-[var(--color-fg-muted)]">
+          ${presentation.reason} · ${presentation.executionTruth} · ${presentation.nonExecutableCause}
+        </div>
       </td>
       <td class="px-3 py-2 text-[var(--color-fg-secondary)]">${presentation.action}</td>
     </tr>

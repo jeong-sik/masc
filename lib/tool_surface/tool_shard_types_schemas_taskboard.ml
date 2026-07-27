@@ -4,7 +4,9 @@ let taskboard_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_tasks_list"
     ; description =
         "List tasks on the MASC backlog. Returns task_id, title, status, assignee, and \
-         priority for each task. Use to see what work is available or in progress."
+         priority for each task. For awaiting_verification, follow the rendered \
+         keeper_task_claim action before inspecting evidence; never Read producer \
+         sandbox paths directly."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -87,7 +89,10 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_task_claim"
     ; description =
         "Claim MASC backlog work. With no task_id, claims the next eligible \
-         unclaimed todo task that matches your capabilities. With task_id, claims \
+         unclaimed todo or awaiting_verification task that matches your capabilities. \
+         Claiming awaiting_verification atomically binds you in the Task FSM; only \
+         that winner receives the typed submitted_evidence snapshot and may issue the \
+         verdict. Never Read producer sandbox paths directly. With task_id, claims \
          that exact task when a user, mention, board item, or keeper_tasks_list row \
          identifies it. If you already own another Claimed/InProgress task, finish \
          it with keeper_task_done or explicitly release it first; keeper_task_claim \

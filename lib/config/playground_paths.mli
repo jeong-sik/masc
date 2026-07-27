@@ -40,6 +40,25 @@ val bundle_paths : string -> string list
 (** All three bundle subdirs in canonical order:
     [\[bundle_root; mind_path; repos_path\]]. *)
 
+type playground_file_path =
+  { keeper_name : string
+  ; relative_path : string
+  }
+
+val parse_playground_file_path
+  :  base_path:string
+  -> abs_path:string
+  -> playground_file_path option
+(** Parse an absolute path below a local or Docker keeper playground.
+
+    Accepted layouts:
+    - [.masc/playground/<keeper>/<relative_path>]
+    - [.masc/playground/docker/<keeper>/<relative_path>]
+
+    Empty relative paths and [.] / [..] segments are rejected. This is a
+    structural parser only; callers enforcing an I/O boundary must pass
+    realpath-resolved inputs and separately check the filesystem kind. *)
+
 val parse_playground_repo_path
   :  base_path:string
   -> abs_path:string

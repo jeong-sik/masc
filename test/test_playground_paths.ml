@@ -164,6 +164,38 @@ let test_parse_playground_repo_path () =
     None
     (parse "workspace/repo/.masc/playground/sangsu/repos/masc/lib/foo.ml")
 
+let test_parse_playground_file_path () =
+  let base_path = "/tmp/masc-base" in
+  let parse rel =
+    PP.parse_playground_file_path
+      ~base_path
+      ~abs_path:(Filename.concat base_path rel)
+  in
+  let parsed keeper_name relative_path =
+    Some PP.{ keeper_name; relative_path }
+  in
+  check bool "local playground artifact"
+    true
+    (parse ".masc/playground/executor/artifact.txt"
+     = parsed "executor" "artifact.txt");
+  check bool "docker playground artifact"
+    true
+    (parse ".masc/playground/docker/executor/artifact.txt"
+     = parsed "executor" "artifact.txt");
+  check bool "nested artifact"
+    true
+    (parse ".masc/playground/docker/executor/mind/report.txt"
+     = parsed "executor" "mind/report.txt");
+  check bool "outside playground rejected"
+    true
+    (parse "workspace/report.txt" = None);
+  check bool "dot-dot segment rejected"
+    true
+    (parse ".masc/playground/executor/../other/secret.txt" = None);
+  check bool "bundle root alone rejected"
+    true
+    (parse ".masc/playground/executor" = None)
+
 let () =
   run "Playground_paths"
     [
@@ -190,5 +222,6 @@ let () =
       ]);
       ("parse", [
         test_case "parse playground repo path" `Quick test_parse_playground_repo_path;
+        test_case "parse playground file path" `Quick test_parse_playground_file_path;
       ]);
     ]

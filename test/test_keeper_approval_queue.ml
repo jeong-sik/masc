@@ -18,7 +18,6 @@ let check_rearm label expected = function
 
 module Gate = Masc.Keeper_gate
 module Registry_queue = Masc.Keeper_registry_event_queue
-module Queue_state = Keeper_event_queue_state
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    reproduces its unit projection over [resolve_with_policy] so these
@@ -94,21 +93,6 @@ let drop_resolution ~base_path ~keeper_name resolution =
   | Error reason -> Alcotest.fail reason
 ;;
 
-let lease_for_resolution (resolution : Keeper_event_queue.hitl_resolution) =
-  let stimulus : Keeper_event_queue.stimulus =
-    { post_id = Keeper_event_queue.hitl_resolution_post_id resolution
-    ; urgency = Keeper_event_queue.Immediate
-    ; arrived_at = 1.0
-    ; payload = Keeper_event_queue.Hitl_resolved resolution
-    }
-  in
-  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
-  let state = Queue_state.with_pending pending Queue_state.empty in
-  match Queue_state.claim_when ~claimed_at:2.0 ~ready:(fun _ -> true) state with
-  | Ok (_, Some lease) -> lease
-  | Ok (_, None) -> Alcotest.fail "approved resolution was not claimed"
-  | Error reason -> Alcotest.fail reason
-;;
 
 let submit_with_context
       ?turn_id
@@ -1020,20 +1004,15 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          | Some grant -> grant
          | None -> Alcotest.fail "approved resolution did not create a cycle grant"
        in
-       let lease = lease_for_resolution resolution in
-       (match
-          Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
-            ~base_path
-            ~settled_at:3.0
-            ~stop_requested:false
-            ~compaction_consecutive_failures:0
-            ~lease
-            None
-        with
-        | Masc.Keeper_registry_event_queue.Requeue
-            Masc.Keeper_registry_event_queue.Turn_not_scheduled ->
-          ()
-        | _ -> Alcotest.fail "unscheduled grant wake was not requeued");
+       (* The two lease-settlement assertions that used to sit here and below
+          checked that a wake producing no cycle outcome requeued the lease
+          instead of acknowledging it, so the grant's stimulus was not dropped.
+          #25969 replaced claim/settle with peek/ack: nothing computes a
+          settlement any more, and "no turn ran" is expressed by not calling
+          [ack_pending] at all. That PR deleted the same class of assertion
+          from test_keeper_event_queue_state_v2.ml but left these two, which is
+          why this executable stopped compiling. The property now belongs to
+          the peek/ack intake path rather than to this file; see #25980. *)
        let request ~input ~task_id ~goal_ids : Gate.request =
          { keeper_name
          ; operation = "external-effect"
@@ -1095,19 +1074,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow ->
           Alcotest.fail "one-shot grant was consumed more than once");
-       (match
-          Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
-            ~base_path
-            ~settled_at:4.0
-            ~stop_requested:false
-            ~compaction_consecutive_failures:0
-            ~lease
-            None
-        with
-        | Masc.Keeper_registry_event_queue.Requeue
-            Masc.Keeper_registry_event_queue.Turn_not_scheduled ->
-          ()
-        | _ -> Alcotest.fail "unscheduled consumed grant wake was not requeued");
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in
        (match AQ.approved_resolution_state ~base_path ~id:approval_id with

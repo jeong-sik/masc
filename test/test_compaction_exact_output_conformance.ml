@@ -26,6 +26,7 @@ open Masc
 module C = Keeper_compaction_llm_summarizer
 module F = Compaction_exact_output_fixture
 module P = Keeper_event_queue_persistence
+module Q = Keeper_event_queue
 module Recovery = Keeper_exact_disposition_recovery
 module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
@@ -66,11 +67,83 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
 
-(* claim_manual_lease, persisted_checkpoint_source_exn, and
-   settle_terminal_disposition_result used to live here. They existed only to
-   drive the durable exact-execution guard removed above (a claimed lease to
-   bind it to, a checkpoint source and a terminal disposition to settle
-   against), so none of the surviving cases call them. *)
+let claim_manual_lease ~base_path ~keeper_name =
+  let stimulus : Q.stimulus =
+    { post_id = "manual-compaction"
+    ; urgency = Q.Immediate
+    ; arrived_at = 1.0
+    ; payload = Q.Manual_compaction_requested
+    }
+  in
+  (match
+     P.update_checked_result
+       ~base_path
+       ~keeper_name
+       (fun pending -> Ok (Q.enqueue pending stimulus))
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "manual stimulus persist failed: %s" detail);
+  match
+    P.claim_when_result
+      ~base_path
+      ~keeper_name
+      ~claimed_at:2.0
+      ~ready:(fun _ -> true)
+      ()
+  with
+  | Ok (Some lease) -> lease
+  | Ok None -> Alcotest.fail "manual lease was not claimed"
+  | Error detail -> Alcotest.failf "manual lease claim failed: %s" detail
+;;
+
+let persisted_checkpoint_source_exn trace_id =
+  match Keeper_id.Trace_id.of_string trace_id with
+  | Error detail -> Alcotest.failf "checkpoint source trace id failed: %s" detail
+  | Ok trace_id ->
+    (match
+       Keeper_checkpoint_ref.of_persisted
+         ~trace_id
+         ~generation:1
+         ~turn_count:1
+         ~sha256:(String.make 64 'a')
+     with
+     | Ok source -> source
+     | Error _ -> Alcotest.fail "persisted checkpoint source ref failed")
+;;
+
+let settle_terminal_disposition_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~source
+      ~(terminal : P.exact_execution_terminal)
+      ~settled_at
+  =
+  let disposition =
+    match
+      P.prepare_exact_source_disposition_result
+        ~base_path
+        ~keeper_name
+        ~lease
+        ~source
+        ~terminal
+        ~semantic:P.Exact_no_compaction
+        ~prepared_at:settled_at
+        ()
+    with
+    | Error detail -> Alcotest.failf "terminal disposition preparation failed: %s" detail
+    | Ok (_, P.Visible_sync_unconfirmed detail) ->
+      Alcotest.failf "terminal disposition preparation durability unknown: %s" detail
+    | Ok (disposition, P.Fsync_completed) -> disposition
+  in
+  P.finalize_exact_source_disposition_result
+    ~base_path
+    ~keeper_name
+    ~settled_at
+    ~lease
+    ~disposition_id:disposition.disposition_id
+    ()
+;;
 
 let execute_prepared_lane
       ~keeper_name
@@ -884,6 +957,15 @@ let () =
             "release failure blocks successor"
             `Quick
             test_release_failure_blocks_successor
+        ; Alcotest.test_case
+            "heartbeat guard binds before POST"
+            `Quick
+        ; Alcotest.test_case
+            "post-success restart stays fenced at most once"
+            `Quick
+        ; Alcotest.test_case
+            "visible sync uncertainty seams fail closed"
+            `Quick
         ] )
     ; ( "terminal ownership"
       , [ Alcotest.test_case
@@ -903,9 +985,23 @@ let () =
             `Quick
             test_cancellation_preserves_lifecycle_authorized_identity
         ; Alcotest.test_case
+            "terminalization is canonical and durable"
+            `Quick
+        ; Alcotest.test_case
             "commit claim blocks reject after install"
             `Quick
             test_post_success_commit_claim_blocks_reject
+        ; Alcotest.test_case
+            "terminalization overlap is affine and durable"
+            `Quick
+        ; Alcotest.test_case
+            "terminalization failures preserve full binding"
+            `Quick
+        ] )
+    ; ( "affinity and non-sharing"
+      , [ Alcotest.test_case
+            "same-flow loser mutates no queue"
+            `Quick
         ] )
     ]
 ;;

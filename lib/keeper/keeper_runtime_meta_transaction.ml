@@ -477,18 +477,16 @@ let recover ?lifecycle_token permit config (intent : Journal.intent) ~prefer =
 ;;
 
 let complete_forward ?lifecycle_token permit config intent =
-  recover
-    ?lifecycle_token
-    permit
-    config
-    intent
-    ~prefer:`Forward
-  |> Result.bind (function
-    | Forward_committed -> Ok ()
-    | Rolled_back ->
-      Error
-        (Metadata_convergence_failed
-           "committed transaction unexpectedly recovered by rollback"))
+  (* [Result.bind] takes the result first, unlike [Result.map_error] used
+     elsewhere in this file, so it cannot be piped into the same way. *)
+  Result.bind
+    (recover ?lifecycle_token permit config intent ~prefer:`Forward)
+    (function
+      | Forward_committed -> Ok ()
+      | Rolled_back ->
+        Error
+          (Metadata_convergence_failed
+             "committed transaction unexpectedly recovered by rollback"))
 ;;
 
 let recover_leaf config leaf =

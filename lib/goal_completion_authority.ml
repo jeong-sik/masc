@@ -109,6 +109,10 @@ let run_reviewer ~config ~runtime_id ~prompt =
         (match Goal_completion_contract.parse_verdict_from_json args with
          | Ok verdict ->
            verdict_ref := Some verdict;
+           Log.Workspace.info
+             "Goal completion verdict accepted runtime=%s verdict=%s"
+             runtime_id
+             (Goal_completion_contract.verdict_constructor_name verdict);
            Tool_result.ok
              ~tool_name:name
              ~start_time

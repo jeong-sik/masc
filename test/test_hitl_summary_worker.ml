@@ -1168,7 +1168,9 @@ let test_manual_resolution_race_is_conclusive () =
             ~on_finish:(fun outcome -> finish_outcome := Some outcome)
             ()
         with
-        | Ok () -> ()
+        | Ok Worker.Worker_forked -> ()
+        | Ok Worker.Worker_not_forked_owner_unregistered ->
+          fail "registered owner did not fork the HITL worker"
         | Error detail -> fail detail);
        await_condition
          ~clock
@@ -1292,7 +1294,9 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
                     ~on_finish:(fun outcome -> finish_outcome := Some outcome)
                     ()
                 with
-                | Ok () -> ()
+                | Ok Worker.Worker_forked -> ()
+                | Ok Worker.Worker_not_forked_owner_unregistered ->
+                  fail "registered owner did not fork the cancelled HITL worker"
                 | Error detail -> fail detail
               with
               | exception Eio.Cancel.Cancelled observed_payload ->
@@ -1496,7 +1500,9 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
                     ~on_finish:(fun outcome -> finish_outcome := Some outcome)
                     ()
                 with
-                | Ok () -> ()
+                | Ok Worker.Worker_forked -> ()
+                | Ok Worker.Worker_not_forked_owner_unregistered ->
+                  fail "registered owner did not fork the bound HITL worker"
                 | Error detail -> fail detail
               with
               | exception Eio.Cancel.Cancelled observed_payload ->
@@ -1580,12 +1586,47 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
            } ->
          ()
        | _ -> fail "pre-worker failure lost its durable typed reason");
+       (match
+          Gate.For_testing.spawn_auto_judge_entry_with_worker
+            ~spawn_worker:
+              (fun ~sw:_ ~entry:_ ~on_summary:_ ~on_finish () ->
+                 on_finish Worker.Owner_unregistered_deferred;
+                 Ok Worker.Worker_not_forked_owner_unregistered)
+            successor
+        with
+        | Error detail ->
+          check
+            string
+            "not-forked owner deferral is returned"
+            "Auto Judge worker was not started because its Keeper owner is unregistered"
+            detail
+        | Ok _ ->
+          fail "not-forked owner deferral was reported as a successful start");
+       (match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
+        | Some
+            { exact_attempt = Q.Exact_unbound
+            ; summary_status = Q.Summary_pending
+            ; summary_attempt_disposition =
+                Q.Summary_attempt_pre_worker_unavailable
+                  { reason_code =
+                      Q.Summary_pre_worker_auto_judge_unavailable
+                  ; operator_detail =
+                      "Auto Judge worker was not started because its Keeper owner is unregistered"
+                  }
+            ; _
+            } ->
+          ()
+        | _ ->
+          fail "not-forked owner deferral lost its durable typed reason");
+       let after_deferred =
+         pending_entry ~input_tag:"after-deferred" ~base_path ()
+       in
        check
          bool
-         "pre-worker failure releases the owner claim"
+         "not-forked owner deferral releases the owner claim"
          true
-         (Gate.For_testing.claim_auto_judge successor);
-       Gate.For_testing.release_auto_judge successor)
+         (Gate.For_testing.claim_auto_judge after_deferred);
+       Gate.For_testing.release_auto_judge after_deferred)
 ;;
 
 let test_visible_uncertainty_withholds_production_drain () =

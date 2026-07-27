@@ -2226,6 +2226,11 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
         | Ok false -> Alcotest.fail "operator rearm did not change blocked row"
         | Error error ->
           Alcotest.fail (AQ.exact_attempt_error_to_string error));
+       let reserved_entry = pending_entry_exn id in
+       check_rearm
+         "in-flight start reservation cannot be reserved again"
+         false
+         (reserve_retry_exact ~base_path reserved_entry);
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
         | Some
             { summary_status = AQ.Summary_pending

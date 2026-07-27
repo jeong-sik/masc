@@ -543,9 +543,47 @@ let ready_auto_judges_for_owner
   | Some _ | None -> []
 ;;
 
+type auto_judge_drain_blocker =
+  | Drain_owner_active of string
+  | Drain_fifo_predecessor of string
+  | Drain_entry_changed of string
+  | Drain_entry_missing of string
+  | Drain_start_failed of string * string
+  | Drain_mode_manual
+  | Drain_mode_always_allow
+
+let auto_judge_drain_blocker_to_string = function
+  | Drain_owner_active approval_id ->
+    Printf.sprintf
+      "Auto Judge retry could not start because approval %s owns the active worker"
+      approval_id
+  | Drain_fifo_predecessor approval_id ->
+    Printf.sprintf
+      "Auto Judge retry could not start because approval %s is first in FIFO"
+      approval_id
+  | Drain_entry_changed approval_id ->
+    Printf.sprintf
+      "Auto Judge retry could not start because approval %s changed before worker start"
+      approval_id
+  | Drain_entry_missing approval_id ->
+    Printf.sprintf
+      "Auto Judge retry could not start because approval %s is no longer pending"
+      approval_id
+  | Drain_start_failed (approval_id, reason) ->
+    Printf.sprintf
+      "Auto Judge retry could not start because approval %s failed before worker start: %s"
+      approval_id
+      reason
+  | Drain_mode_manual ->
+    "Auto Judge retry could not start because Gate mode changed to manual"
+  | Drain_mode_always_allow ->
+    "Auto Judge retry could not start because Gate mode changed to always_allow"
+;;
+
 type auto_judge_drain_outcome =
   { started_id : string option
   ; failures : (string * string) list
+  ; blocker : auto_judge_drain_blocker option
   }
 
 type hitl_worker_spawner =
@@ -554,7 +592,11 @@ type hitl_worker_spawner =
   on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
   on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
   unit ->
-  (unit, string) result
+  (Hitl_summary_worker.spawn_outcome, string) result
+
+let owner_unregistered_before_start_reason =
+  "Auto Judge worker was not started because its Keeper owner is unregistered"
+;;
 
 let mark_pre_worker_unavailable
       (entry : Keeper_approval_queue.pending_approval)
@@ -625,6 +667,28 @@ let rec spawn_claimed_auto_judge_entry_with
          |> durable_pre_worker_unavailable_error reason
          |> Result.error)
   in
+  let persist_owner_unregistered_block () =
+    Eio.Cancel.protect (fun () ->
+      match
+        mark_pre_worker_unavailable
+          entry
+          ~reason_code:
+            Keeper_approval_queue.Summary_pre_worker_auto_judge_unavailable
+          ~operator_detail:owner_unregistered_before_start_reason
+      with
+      | Ok true -> ()
+      | Ok false ->
+        Log.Keeper.error
+          ~keeper_name:entry.keeper_name
+          "Auto Judge owner-unregistered block was not applied approval=%s"
+          entry.id
+      | Error error ->
+        Log.Keeper.error
+          ~keeper_name:entry.keeper_name
+          "Auto Judge owner-unregistered block failed approval=%s error=%s"
+          entry.id
+          (Keeper_approval_queue.exact_attempt_error_to_string error))
+  in
   let start_after_reservation () =
   match Eio_context.get_root_switch_opt () with
   | Some sw ->
@@ -660,6 +724,7 @@ let rec spawn_claimed_auto_judge_entry_with
                  "Auto Judge owner drain withheld after deterministic exact-attempt rejection approval=%s"
                  entry.id
              | Hitl_summary_worker.Owner_unregistered_deferred ->
+               persist_owner_unregistered_block ();
                Keeper_approval_queue.audit_approval_event
                  ~base_path:entry.audit_base_path
                  ~event_type:"auto_judge_owner_generation_deferred"
@@ -690,7 +755,9 @@ let rec spawn_claimed_auto_judge_entry_with
                  wake_outcome)
            ()
        with
-       | Ok () -> Ok Started
+       | Ok Hitl_summary_worker.Worker_forked -> Ok Started
+       | Ok Hitl_summary_worker.Worker_not_forked_owner_unregistered ->
+         fail_before_worker ~reason:owner_unregistered_before_start_reason
        | Error reason -> fail_before_worker ~reason
      with
      | Eio.Cancel.Cancelled _ as exn ->
@@ -775,19 +842,26 @@ and retry_auto_judge_entry
        with
        | Error reason -> Error (reblock reason)
        | Ok outcome ->
-         (match List.assoc_opt entry.id outcome.failures, outcome.started_id with
-          | Some reason, _ -> Error (reblock reason)
-          | None, Some id when String.equal id entry.id -> Ok Retry_started
-          | None, Some started_id ->
+         (match
+            List.assoc_opt entry.id outcome.failures,
+            outcome.started_id,
+            outcome.blocker
+          with
+          | Some reason, _, _ -> Error (reblock reason)
+          | None, Some id, _ when String.equal id entry.id ->
+            Ok Retry_started
+          | None, Some started_id, _ ->
             Error
               (reblock
                  (Printf.sprintf
                     "Auto Judge retry could not start because earlier approval %s acquired the owner"
                     started_id))
-          | None, None ->
+          | None, None, Some blocker ->
+            Error (reblock (auto_judge_drain_blocker_to_string blocker))
+          | None, None, None ->
             Error
               (reblock
-                 "Auto Judge retry could not start because the owner is active or the approval is not first in FIFO"))
+                 "Auto Judge retry drain completed without a start or blocker"))
      with
      | Eio.Cancel.Cancelled _ as exn ->
        let backtrace = Printexc.get_raw_backtrace () in
@@ -843,8 +917,12 @@ and drain_auto_judge_owner_queue
       ~keeper_name
       ()
   =
-  let rec loop failures = function
-    | [] -> { started_id = None; failures = List.rev failures }
+  let rec loop failures blocker = function
+    | [] ->
+      { started_id = None
+      ; failures = List.rev failures
+      ; blocker
+      }
     | entry :: rest ->
       let start_result =
         match reserved_id with
@@ -855,28 +933,60 @@ and drain_auto_judge_owner_queue
       in
       (match start_result with
        | Ok Started ->
-         { started_id = Some entry.id; failures = List.rev failures }
+         { started_id = Some entry.id
+         ; failures = List.rev failures
+         ; blocker = None
+         }
        | Ok Skipped ->
          (match active_auto_judge_for_owner ~base_path ~keeper_name with
-          | Some _ -> { started_id = None; failures = List.rev failures }
-          | None -> loop failures rest)
+          | Some active_id ->
+            { started_id = None
+            ; failures = List.rev failures
+            ; blocker = Some (Drain_owner_active active_id)
+            }
+          | None ->
+            loop
+              failures
+              (Some (Drain_entry_changed entry.id))
+              rest)
        | Error reason ->
          Log.Keeper.error
            ~keeper_name
            "Auto Judge owner drain failed approval=%s: %s"
            entry.id
            reason;
-         loop ((entry.id, reason) :: failures) rest)
+         loop
+           ((entry.id, reason) :: failures)
+           (Some (Drain_start_failed (entry.id, reason)))
+           rest)
   in
   Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
   |> Result.map (fun entries ->
-    entries
-    |> ready_auto_judges_for_owner
-         ?exclude_id
-         ?reserved_id
-         ~base_path
-         ~keeper_name
-    |> loop [])
+    let selected =
+      ready_auto_judges_for_owner
+        ?exclude_id
+        ?reserved_id
+        ~base_path
+        ~keeper_name
+        entries
+    in
+    let blocker =
+      match reserved_id, selected with
+      | Some reserved_id, [] ->
+        (match
+           earliest_auto_judge_for_owner
+             ?exclude_id
+             ~base_path
+             ~keeper_name
+             entries
+         with
+         | None -> Some (Drain_entry_missing reserved_id)
+         | Some entry when String.equal entry.id reserved_id ->
+           Some (Drain_entry_changed entry.id)
+         | Some entry -> Some (Drain_fifo_predecessor entry.id))
+      | _ -> None
+    in
+    loop [] blocker selected)
 
 and drain_auto_judge_owner
       ?exclude_id
@@ -894,8 +1004,18 @@ and drain_auto_judge_owner
       ~keeper_name
       ()
     |> Result.map_error Keeper_approval_queue.storage_error_to_string
-  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
-    Ok { started_id = None; failures = [] }
+  | Ok Keeper_gate_mode.Manual ->
+    Ok
+      { started_id = None
+      ; failures = []
+      ; blocker = Some Drain_mode_manual
+      }
+  | Ok Keeper_gate_mode.Always_allow ->
+    Ok
+      { started_id = None
+      ; failures = []
+      ; blocker = Some Drain_mode_always_allow
+      }
   | Error detail ->
     Log.Keeper.error
       ~keeper_name

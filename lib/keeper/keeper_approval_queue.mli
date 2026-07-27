@@ -478,7 +478,8 @@ val reserve_summary_attempt_retry :
     start reservation. No intermediate ready row is persisted. The
     caller-observed row identity, exact attempt, and disposition must still
     match atomically. A restart-classified released binding returns to unbound
-    in the same write. Terminal exact quarantine is never retried. *)
+    in the same write. An existing start reservation is not retryable.
+    Terminal exact quarantine is never retried. *)
 
 val pending_count_for_keeper_in_workspace :
   base_path:string -> keeper_name:string -> (int, storage_error) result

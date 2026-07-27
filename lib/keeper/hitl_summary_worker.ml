@@ -1203,6 +1203,10 @@ type finish_outcome =
   | Terminalization_rejected
   | Owner_unregistered_deferred
 
+type spawn_outcome =
+  | Worker_forked
+  | Worker_not_forked_owner_unregistered
+
 let spawn_with
       ~queue_ops
       ~prepare_flow
@@ -1224,7 +1228,7 @@ let spawn_with
               ~base_path:entry.audit_base_path
               entry.keeper_name) ->
     on_finish Owner_unregistered_deferred;
-    Ok ()
+    Ok Worker_not_forked_owner_unregistered
   | Error detail -> Error detail
   | Ok prepared ->
     let clock = Eio_context.get_clock_opt () in
@@ -1295,7 +1299,7 @@ let spawn_with
     | `Uncertain uncertainty ->
       on_finish Terminalization_persistence_uncertain;
       raise uncertainty);
-    Ok ()
+    Ok Worker_forked
 ;;
 
 let spawn =

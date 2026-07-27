@@ -29,13 +29,17 @@ type finish_outcome =
   | Terminalization_rejected
   | Owner_unregistered_deferred
 
+type spawn_outcome =
+  | Worker_forked
+  | Worker_not_forked_owner_unregistered
+
 val spawn
   :  sw:Eio.Switch.t
   -> entry:Keeper_approval_queue.pending_approval
   -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
   -> on_finish:(finish_outcome -> unit)
   -> unit
-  -> (unit, string) result
+  -> (spawn_outcome, string) result
 (** Freeze and admit the whole ordered flow before forking. The production OAS
     callbacks bind/release the real candidate receipt in the durable approval
     queue. A summary reaches [on_summary] only after domain validation, exact
@@ -145,7 +149,7 @@ module For_testing : sig
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
     -> on_finish:(finish_outcome -> unit)
     -> unit
-    -> (unit, string) result
+    -> (spawn_outcome, string) result
   (** Dependency injection over the same [spawn_with] lifecycle used by
       production [spawn]; the worker does not depend on test-only queue APIs. *)
 

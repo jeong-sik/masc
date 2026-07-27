@@ -2628,7 +2628,13 @@ let reserve_summary_attempt_retry
                  summary_status = Summary_pending
                ; summary_attempt_disposition = reserved
                }
-           | Summary_attempt_pre_worker_unavailable _, Exact_unbound,
+           | Summary_attempt_pre_worker_unavailable
+               { reason_code =
+                   ( Summary_pre_worker_auto_judge_unavailable
+                   | Summary_pre_worker_mode_state_invalid )
+               ; _
+               },
+             Exact_unbound,
              (Summary_not_requested | Summary_pending) ->
              Some
                { entry with

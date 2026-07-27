@@ -188,7 +188,7 @@ module For_testing : sig
     on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
     on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
     unit ->
-    (unit, string) result
+    (Hitl_summary_worker.spawn_outcome, string) result
 
   val spawn_auto_judge_entry_with_worker
     :  spawn_worker:hitl_worker_spawner

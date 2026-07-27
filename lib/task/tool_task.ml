@@ -91,15 +91,20 @@ let goal_completion_next_action ~config ~task_id =
       tasks
   with
   | Some { task_status = Masc_domain.Done _; _ } ->
+    let goal_task_links =
+      Workspace_goal_index.read_goal_task_links config
+    in
     let task_goal_index =
-      Workspace_goal_index.build_task_goal_index_for_config config
+      Workspace_goal_index.build_task_goal_index ~goal_task_links ()
     in
     (match Stdlib.Hashtbl.find_opt task_goal_index task_id with
      | Some [ goal_id ] ->
        (match Goal_store.get_goal config ~goal_id with
         | Some { phase = Goal_phase.Executing; _ } ->
           let goal_task_index =
-            Workspace_goal_index.build_goal_task_index_for_config config tasks
+            Workspace_goal_index.build_goal_task_index
+              ~goal_task_links
+              tasks
           in
           if
             Workspace_goal_index.tasks_for_goal goal_task_index ~goal_id <> []

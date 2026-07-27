@@ -237,6 +237,7 @@ let recover_provider_context_overflow_in_lane
             (match trigger with
              | Compaction_trigger.Provider_overflow { limit_tokens } -> limit_tokens
              | Compaction_trigger.Request_body_over_capacity _
+             | Compaction_trigger.Request_body_refused_by_provider _
              | Compaction_trigger.Serving_input_capacity _
              | Compaction_trigger.Manual ->
                None)

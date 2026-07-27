@@ -407,6 +407,7 @@ type capacity_refusal =
       { actual_bytes : int
       ; limit_bytes : int
       }
+  | Provider_request_body_refusal of { status : int }
 
 type capacity_non_compaction =
   | Serving_evidence_not_yet_valid of
@@ -437,6 +438,12 @@ let capacity_transition_of_error
     Compact_next_cycle
       (Compaction_trigger.Request_body_over_capacity
          { actual_bytes; limit_bytes })
+  | Agent_sdk.Error.Api
+      (InvalidRequest
+         { reason = Request_body_refused_by_provider { status }; _ })
+    ->
+    Compact_next_cycle
+      (Compaction_trigger.Request_body_refused_by_provider { status })
   | Agent_sdk.Error.Api
       (InputCapacity
          { reason =
@@ -517,6 +524,9 @@ let capacity_refusal_of_error
       (Compaction_trigger.Request_body_over_capacity { actual_bytes; limit_bytes })
     ->
     Some (Serialized_request_body { actual_bytes; limit_bytes })
+  | Compact_next_cycle
+      (Compaction_trigger.Request_body_refused_by_provider { status }) ->
+    Some (Provider_request_body_refusal { status })
   | Compact_next_cycle (Compaction_trigger.Serving_input_capacity _)
   | Compact_next_cycle Compaction_trigger.Manual
   | Capacity_non_compacting _
@@ -534,7 +544,10 @@ let context_overflow_event_of_error
   match capacity_refusal_of_error err with
   | Some (Provider_context_window { limit_tokens }) ->
     Some (Keeper_state_machine.Context_overflow_detected { limit_tokens })
-  | Some (Serialized_request_body _) | None -> None
+  | Some (Serialized_request_body _)
+  | Some (Provider_request_body_refusal _)
+  | None ->
+    None
 
 (* Prefix that tags a [last_compaction_decision] value as a provider-overflow
    recovery failure. Kept as a named binding so the observability regression test

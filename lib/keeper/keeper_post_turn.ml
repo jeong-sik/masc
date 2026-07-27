@@ -752,6 +752,7 @@ let prepare_compaction_with
      asked for this one, and refusing it would leave no way to intervene. *)
   | Compaction_trigger.Provider_overflow _
   | Compaction_trigger.Request_body_over_capacity _
+  | Compaction_trigger.Request_body_refused_by_provider _
   | Compaction_trigger.Serving_input_capacity
       (Compaction_trigger.Boundary_unknown _)
   | Compaction_trigger.Serving_input_capacity
@@ -764,6 +765,7 @@ let prepare_compaction_with
          })
   | Compaction_trigger.Provider_overflow _
   | Compaction_trigger.Request_body_over_capacity _
+  | Compaction_trigger.Request_body_refused_by_provider _
   | Compaction_trigger.Serving_input_capacity
       (Compaction_trigger.Boundary_unknown _)
   | Compaction_trigger.Serving_input_capacity

@@ -197,10 +197,10 @@ type capacity_refusal =
       { actual_bytes : int
       ; limit_bytes : int
       }
-(** Why a target refused to serve a request for its size. One closed set for both
-    measured axes: a provider-declared token window and a declared serialized-body
-    byte limit. The units are not interchangeable, so neither axis is expressed in
-    the other's field. *)
+  | Provider_request_body_refusal of { status : int }
+(** Why a target refused to serve a request for its size. The closed set keeps
+    measured token and byte bounds separate from a provider refusal whose only
+    typed evidence is an HTTP status. Missing measurements are never invented. *)
 
 val capacity_refusal_of_error :
   Agent_sdk.Error.sdk_error ->

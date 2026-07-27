@@ -34,6 +34,11 @@ type t =
           refusal says nothing about the provider's token window, so folding it
           into [limit_tokens] would have to report [None] — an unknown limit for
           a limit that is known exactly. *)
+  | Request_body_refused_by_provider of { status : int }
+      (** The provider explicitly refused the serialized request for its size.
+          [status] is preserved from the HTTP response. Unlike
+          {!Request_body_over_capacity}, neither the request bytes nor a byte
+          limit are known, so this constructor must not fabricate either one. *)
   | Serving_input_capacity of serving_input_capacity
       (** OAS exhausted admission candidates and returned a measured token
           boundary. Only [Boundary_unknown] and [Input_rejected] can construct
@@ -69,6 +74,8 @@ type decode_error =
   | Invalid_provider_limit
   | Missing_request_body_bytes of string
   | Invalid_request_body_bytes of string
+  | Missing_provider_refusal_status
+  | Invalid_provider_refusal_status
   | Request_body_within_capacity of
       { actual_bytes : int
       ; limit_bytes : int

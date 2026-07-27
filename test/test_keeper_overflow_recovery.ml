@@ -37,6 +37,7 @@ let test_provider_overflow_trigger_roundtrip () =
     ; Compaction_trigger.Provider_overflow { limit_tokens = None }
     ; Compaction_trigger.Request_body_over_capacity
         { actual_bytes = 1_048_577; limit_bytes = 1_048_576 }
+    ; Compaction_trigger.Request_body_refused_by_provider { status = 413 }
     ; Compaction_trigger.Serving_input_capacity
         (Compaction_trigger.Boundary_unknown
            { input_tokens = 524_299

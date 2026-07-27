@@ -305,7 +305,9 @@ describe('refreshDashboard bootstrap', () => {
 
     expect(goalTreeState.goalTreeData.value).toBeNull()
     expect(store.lastGoalsRefreshAt.value).toBeNull()
-    expect(goalTreeState.goalTreeError.value).toBe('Goal Store tree payload was malformed')
+    expect(goalTreeState.goalTreeError.value).toBe(
+      '! Gate observation unavailable: Goal Store tree payload was malformed',
+    )
     expect(goalTreeState.goalTreeLoading.value).toBe(false)
     expect(toastMocks.showToast).toHaveBeenCalledWith(
       '목표 데이터를 일부 불러오지 못했습니다',

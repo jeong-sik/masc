@@ -403,7 +403,7 @@ describe('normalizeKeeperApprovalQueueItem', () => {
         reason_code: 'auto_judge_unavailable',
         operator_detail: 'Auto Judge unavailable: server root switch is not installed',
       },
-      summary_status: { status: 'pending' },
+      summary_status: 'pending',
     })
 
     expect(result!.summary_attempt_disposition).toEqual({
@@ -419,7 +419,7 @@ describe('normalizeKeeperApprovalQueueItem', () => {
           reason_code: 'unknown',
           operator_detail: 'lost authority',
         },
-        summary_status: { status: 'pending' },
+        summary_status: 'pending',
       }),
     ).toBeNull()
   })

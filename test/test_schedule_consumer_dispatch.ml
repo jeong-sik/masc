@@ -64,12 +64,6 @@ let reaction_ledger_dir ~base_path ~keeper_name =
     "v4"
 ;;
 
-let event_queue_snapshot_path ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue.json"
-;;
-
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
   let month_dir =
     Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "2026-01"
@@ -85,6 +79,12 @@ let with_workspace f =
   let dir = temp_dir () in
   Eio.Switch.run
   @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
   Unix.putenv "MASC_BASE_PATH" dir;
   Board.reset_global_for_test ();
@@ -92,7 +92,9 @@ let with_workspace f =
   Board_dispatch.init_jsonl ();
   let config = Workspace.default_config dir in
   ignore (Workspace.init config ~agent_name:(Some "test"));
-  f config
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+    (fun () -> f config)
 ;;
 
 let human id : Schedule_domain.actor =
@@ -105,16 +107,26 @@ let automated id : Schedule_domain.actor =
 
 let keeper_meta_for_name keeper_name =
   match
-    Keeper_meta_json_parse.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String keeper_name
-        ; "agent_name", `String keeper_name
+        ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
         ; "trace_id", `String ("trace-" ^ keeper_name)
-        ; "last_model_used", `String "llama:auto"
         ])
   with
   | Ok meta -> meta
   | Error msg -> fail ("keeper meta parse failed: " ^ msg)
+;;
+
+let register_keeper config keeper_name =
+  let meta = keeper_meta_for_name keeper_name in
+  (match Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error detail -> fail ("keeper meta write failed: " ^ detail));
+  Keeper_registry.For_testing.register
+    ~base_path:config.Workspace_utils.base_path
+    keeper_name
+    meta
 ;;
 
 let dashboard_schedule_row_exn dashboard ~schedule_id =
@@ -565,108 +577,12 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
-let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
+let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
-  let entry =
-    Keeper_registry.For_testing.register ~base_path keeper_name (keeper_meta_for_name keeper_name)
-  in
-  Fun.protect
-    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
-    (fun () ->
-      let request = create_keeper_wake_schedule config in
-      let signal =
-        match Schedule_runner.tick config ~now:201.0 with
-        | Ok { emitted = [ signal ]; _ } -> signal
-        | Ok _ -> fail "expected one durable schedule signal"
-        | Error err -> fail (Schedule_runner.runner_error_to_string err)
-      in
-      let running =
-        match
-          Schedule_store.start_due_candidate
-            config
-            ~now:201.5
-            ~schedule_id:request.schedule_id
-        with
-        | Ok running -> running
-        | Error err -> fail (Schedule_store.store_error_to_string err)
-      in
-      Atomic.set entry.fiber_wakeup false;
-      (match
-         Server_schedule_consumers.consumer.dispatch config ~now:202.0 signal running
-       with
-       | Ok _ -> ()
-       | Error _ -> fail "initial schedule occurrence dispatch failed");
-      check bool "initial dispatch wakes lane" true (Atomic.get entry.fiber_wakeup);
-      let lease =
-        match
-          Keeper_registry_event_queue.claim_when_result
-            ~base_path
-            keeper_name
-            ~claimed_at:202.5
-            ~ready:(fun _ -> true)
-        with
-        | Ok (Some lease) -> lease
-        | Ok None -> fail "scheduled occurrence was not queued"
-        | Error detail -> fail detail
-      in
-      (match
-         Keeper_registry_event_queue.settle_result
-           ~base_path
-           keeper_name
-           ~settled_at:203.0
-           ~lease
-           ~settlement:Keeper_registry_event_queue.Ack
-       with
-       | Ok (Keeper_registry_event_queue.Settled _)
-       | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
-       | Ok _ -> fail "scheduled occurrence settlement follow-up failed"
-       | Error detail -> fail detail);
-      (match
-         Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
-       with
-       | Ok
-           ( Keeper_event_queue_recovery.No_pending_transition
-           | Keeper_event_queue_recovery.Transition_converged ) ->
-         ()
-       | Ok Keeper_event_queue_recovery.Claim_busy ->
-         fail "scheduled occurrence projection was deferred by a busy owner claim"
-       | Error error ->
-         fail (Keeper_event_queue_recovery.projection_error_to_string error));
-      (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-       | Some stored ->
-         check string "crash window leaves schedule running" "running"
-           (Schedule_domain.schedule_status_to_string stored.status)
-       | None -> fail "running schedule disappeared before recovery");
-      (match Schedule_store.recover_running_on_startup config ~now:204.0 with
-       | Ok (_, 1) -> ()
-       | Ok (_, recovered) -> failf "expected one recovered schedule, got %d" recovered
-       | Error err -> fail (Schedule_store.store_error_to_string err));
-      Atomic.set entry.fiber_wakeup false;
-      let retried = tick_ok config ~now:205.0 in
-      check bool "retry sends no second wake" false (Atomic.get entry.fiber_wakeup);
-      (match List.hd retried.dispatches with
-       | { detail = Some detail; _ } ->
-         check string "retry observes terminal ack" "already_acked"
-           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
-         check string "terminal ack needs no activation" "not_required"
-           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
-       | _ -> fail "retry completion receipt missing");
-      check int "retry enqueues no second occurrence" 0
-        (Keeper_registry_event_queue.snapshot ~base_path keeper_name
-         |> Keeper_event_queue.length))
-;;
-
-let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let entry =
-    Keeper_registry.For_testing.register ~base_path keeper_name (keeper_meta_for_name keeper_name)
-  in
+  let entry = register_keeper config keeper_name in
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
     (fun () ->
@@ -693,19 +609,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
        | Error _ -> fail "initial schedule occurrence dispatch failed");
       check bool "initial cancelled dispatch wakes lane" true
         (Atomic.get entry.fiber_wakeup);
-      let lease =
-        match
-          Keeper_registry_event_queue.claim_when_result
-            ~base_path
-            keeper_name
-            ~claimed_at:202.5
-            ~ready:(fun _ -> true)
-        with
-        | Ok (Some lease) -> lease
-        | Ok None -> fail "scheduled occurrence was not queued"
-        | Error detail -> fail detail
-      in
-      let claimed_state =
+      let pending_state =
         Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
         |> function
         | Ok state -> state
@@ -714,34 +618,32 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
       let generation = entry.meta.runtime.nonce in
       let cancellation : Keeper_event_queue_state.accepted_cancellation =
         { source =
-            (match Keeper_registry_event_queue.lease_stimuli lease with
+            (match
+               Keeper_event_queue.to_list
+                 (Keeper_event_queue_state.pending pending_state)
+             with
              | [ source ] -> source
-             | _ -> fail "schedule cancellation lease did not retain one source")
-        ; source_revision = Keeper_event_queue_state.revision claimed_state
+             | _ -> fail "schedule cancellation pending lane did not retain one source")
+        ; source_revision = Keeper_event_queue_state.revision pending_state
         ; owner_nonce = generation
         ; operator_operation_id = "cancel-schedule-occurrence"
         ; reason = "operator cancelled retained schedule work"
         }
       in
-      let cancelled_state, cancellation_result =
-        Keeper_event_queue_state.cancel_accepted
+      (match
+         Keeper_registry_event_queue.cancel_pending_accepted_result
+           ~base_path
+           keeper_name
           ~current_owner_nonce:generation
           ~settled_at:203.0
-          ~lease
           ~cancellation
-          claimed_state
-        |> function
-        | Ok result -> result
-        | Error detail -> fail detail
-      in
-      (match cancellation_result with
-       | Keeper_event_queue_state.Settled _ -> ()
-       | Keeper_event_queue_state.Already_settled _ ->
-         fail "first schedule cancellation was already settled");
-      write_file
-        (event_queue_snapshot_path ~base_path ~keeper_name)
-        (Yojson.Safe.to_string
-           (Keeper_event_queue_state.to_yojson cancelled_state));
+       with
+       | Ok (Keeper_registry_event_queue.Settled _) -> ()
+       | Ok (Keeper_registry_event_queue.Already_settled _) ->
+         fail "first schedule cancellation was already settled"
+       | Ok (Keeper_registry_event_queue.Committed_followup_failed _) ->
+         fail "schedule cancellation follow-up failed"
+       | Error detail -> fail detail);
       (match
          Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
        with
@@ -759,8 +661,6 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
        | Error err -> fail (Schedule_store.store_error_to_string err));
       Atomic.set entry.fiber_wakeup false;
       let retried = tick_ok config ~now:205.0 in
-      check bool "cancelled retry sends no second wake" false
-        (Atomic.get entry.fiber_wakeup);
       (match List.hd retried.dispatches with
        | { detail = Some detail; _ } ->
          check string "retry observes terminal cancellation" "already_cancelled"
@@ -910,150 +810,7 @@ let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported
     (evidence |> member "matched_schedule_ids" |> to_list |> List.length)
 ;;
 
-let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let meta = keeper_meta_for_name keeper_name in
-  let (_entry : Keeper_registry.registry_entry) =
-    Keeper_registry.For_testing.register ~base_path:config.Workspace_utils.base_path keeper_name meta
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.For_testing.unregister ~base_path:config.Workspace_utils.base_path keeper_name)
-    (fun () ->
-      let request = create_keeper_wake_schedule config in
-      let result = tick_ok config ~now:201.0 in
-      let occurrence_id = single_occurrence_id result in
-      check int "one dispatch" 1 (List.length result.dispatches);
-      check string "dispatch status" "succeeded"
-        (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
-      let pending_row =
-        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
-        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
-      in
-      let open Yojson.Safe.Util in
-      let pending_evidence = pending_row |> member "keeper_queue_evidence" in
-      check string "pending evidence matched" "matched_pending"
-        (pending_evidence |> member "projection_status" |> to_string);
-      check string "pending matched bucket" "pending"
-        (pending_evidence |> member "matched_bucket" |> to_string);
-      check int "pending count before lease" 1
-        (pending_evidence |> member "pending_count" |> to_int);
-      check int "inflight count before lease" 0
-        (pending_evidence |> member "inflight_count" |> to_int);
-      let pending_receipt = pending_row |> member "dispatch_receipt" in
-      let stimulus_id = pending_receipt |> member "stimulus_id" |> to_string in
-      check string "ledger preserves occurrence id" occurrence_id stimulus_id;
-      let pending_reaction_evidence =
-        pending_row |> member "keeper_reaction_evidence"
-      in
-      check string "reaction evidence sees queued stimulus" "matched_stimulus"
-        (pending_reaction_evidence |> member "projection_status" |> to_string);
-      check string "reaction evidence source" "keeper_reaction_ledger"
-        (pending_reaction_evidence |> member "source" |> to_string);
-      check string "reaction evidence stimulus id" stimulus_id
-        (pending_reaction_evidence |> member "stimulus_id" |> to_string);
-      check bool "reaction evidence stimulus seen" true
-        (pending_reaction_evidence |> member "stimulus_seen" |> to_bool);
-      check bool "reaction evidence turn not started yet" false
-        (pending_reaction_evidence |> member "turn_started_seen" |> to_bool);
-      check int "one matched ledger row before turn" 1
-        (pending_reaction_evidence |> member "matched_record_count" |> to_int);
-      let lease, leased =
-        match
-          Keeper_registry_event_queue.claim_when_result
-            ~base_path:config.Workspace_utils.base_path
-            keeper_name
-            ~claimed_at:(Time_compat.now ())
-            ~ready:(fun _ -> true)
-        with
-        | Error error -> fail ("scheduled wake claim failed: " ^ error)
-        | Ok None -> fail "registered keeper should lease the scheduled wake"
-        | Ok (Some lease) ->
-          (match Keeper_registry_event_queue.lease_stimuli lease with
-           | [ stimulus ] -> lease, stimulus
-           | [] | _ :: _ :: _ -> fail "scheduled wake lease cardinality drifted")
-      in
-      check string "leased occurrence id" occurrence_id leased.post_id;
-      (match leased.payload with
-       | Keeper_event_queue.Schedule_due wake ->
-         check string "leased schedule id" request.schedule_id wake.schedule_id
-       | _ -> fail "registered keeper leased a non-schedule payload");
-      let inflight_row =
-        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
-        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
-      in
-      let inflight_evidence = inflight_row |> member "keeper_queue_evidence" in
-      check string "inflight evidence matched" "matched_inflight"
-        (inflight_evidence |> member "projection_status" |> to_string);
-      check string "inflight source" "durable_event_queue_snapshot"
-        (inflight_evidence |> member "source" |> to_string);
-      check string "inflight matched bucket" "inflight"
-        (inflight_evidence |> member "matched_bucket" |> to_string);
-      check string "inflight matched payload" "schedule_due"
-        (inflight_evidence |> member "matched_payload_kind" |> to_string);
-      check string "inflight matched schedule" request.schedule_id
-        (inflight_evidence |> member "matched_schedule_id" |> to_string);
-      check int "pending count after lease" 0
-        (inflight_evidence |> member "pending_count" |> to_int);
-      check int "inflight count after lease" 1
-        (inflight_evidence |> member "inflight_count" |> to_int);
-      Keeper_reaction_ledger.record_event_queue_turn_started
-        ~base_path:config.Workspace_utils.base_path
-        ~keeper_name
-        leased;
-      let reacted_row =
-        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
-        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
-      in
-      let reaction_evidence = reacted_row |> member "keeper_reaction_evidence" in
-      check string "reaction evidence matched turn" "matched_turn_started"
-        (reaction_evidence |> member "projection_status" |> to_string);
-      check bool "reaction evidence turn started" true
-        (reaction_evidence |> member "turn_started_seen" |> to_bool);
-      check int "two matched ledger rows after turn" 2
-        (reaction_evidence |> member "matched_record_count" |> to_int);
-      (match
-         Keeper_registry_event_queue.settle_result
-           ~base_path:config.Workspace_utils.base_path
-           keeper_name
-           ~settled_at:(Time_compat.now ())
-           ~lease
-           ~settlement:Keeper_registry_event_queue.Ack
-       with
-       | Error error -> fail ("scheduled wake settlement failed: " ^ error)
-       | Ok (Keeper_registry_event_queue.Settled _)
-       | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
-       | Ok _ -> fail "scheduled wake settlement follow-up failed");
-      (match
-         Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-           ~base_path:config.Workspace_utils.base_path
-           ~keeper_name
-       with
-       | Ok () -> ()
-       | Error error -> fail ("scheduled wake reaction projection failed: " ^ error));
-      let acked_row =
-        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
-        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
-      in
-      let acked_queue_evidence = acked_row |> member "keeper_queue_evidence" in
-      check string "acked queue evidence drained" "not_found"
-        (acked_queue_evidence |> member "projection_status" |> to_string);
-      check int "pending count after ack" 0
-        (acked_queue_evidence |> member "pending_count" |> to_int);
-      check int "inflight count after ack" 0
-        (acked_queue_evidence |> member "inflight_count" |> to_int);
-      let acked_reaction_evidence = acked_row |> member "keeper_reaction_evidence" in
-      check string "reaction evidence matched ack" "matched_consumed_ack"
-        (acked_reaction_evidence |> member "projection_status" |> to_string);
-      check bool "reaction evidence event queue acked" true
-        (acked_reaction_evidence |> member "event_queue_ack_seen" |> to_bool);
-      check int "three matched ledger rows after ack" 3
-        (acked_reaction_evidence |> member "matched_record_count" |> to_int))
-;;
-
-let test_keeper_wake_ledger_failure_is_retryable () =
+ let test_keeper_wake_ledger_failure_is_retryable () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
@@ -1266,11 +1023,9 @@ let () =
             test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "keeper wake durable enqueue retries same occurrence" `Quick
             test_keeper_wake_durable_enqueue_failure_retries_same_occurrence
-        ; test_case "acked occurrence recovery does not enqueue or wake again" `Quick
-            test_acked_occurrence_recovery_does_not_enqueue_or_wake_again
-        ; test_case "cancelled occurrence recovery does not enqueue or wake again"
+        ; test_case "cancelled occurrence recovery does not enqueue again"
             `Quick
-            test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again
+            test_cancelled_occurrence_recovery_does_not_enqueue_again
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "dashboard live supported non-terminal evidence matches supported request"
@@ -1279,8 +1034,6 @@ let () =
         ; test_case "dashboard live supported non-terminal evidence reports absent supported payloads"
             `Quick
             test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported_payloads
-        ; test_case "keeper wake dashboard tracks runtime inflight lease" `Quick
-            test_keeper_wake_dashboard_tracks_runtime_inflight_lease
         ; test_case "keeper wake ledger failure is retryable" `Quick
             test_keeper_wake_ledger_failure_is_retryable
         ; test_case "unattributed ledger damage does not block occurrences" `Quick

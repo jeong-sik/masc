@@ -47,13 +47,9 @@ val spawn
 module For_testing : sig
   val system_prompt : unit -> (string, string) result
 
-  type context_bundle_error = Exact_request_context_unavailable
-
   val build_context_bundle
     :  entry:Keeper_approval_queue.pending_approval
-    -> (Yojson.Safe.t, context_bundle_error) result
-
-  val context_bundle_error_to_string : context_bundle_error -> string
+    -> Yojson.Safe.t
 
   val messages_for_summary
     :  system_prompt:string

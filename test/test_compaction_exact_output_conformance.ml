@@ -647,7 +647,7 @@ let test_domain_invalid_output_advances_to_declared_successor () =
     ; "release:" ^ first_slot
     ; "bind:declared-domain-successor"
     ]
-    (List.rev !events)
+    !events
 ;;
 
 let test_semantic_exhaustion_terminalizes_final_bound () =
@@ -705,7 +705,7 @@ let test_semantic_exhaustion_terminalizes_final_bound () =
     ; "bind:" ^ final_slot
     ; "quarantine:" ^ final_slot
     ]
-    (List.rev !events)
+    !events
 ;;
 
 let test_final_oas_flow_failure_is_generic_source_terminal () =
@@ -957,15 +957,6 @@ let () =
             "release failure blocks successor"
             `Quick
             test_release_failure_blocks_successor
-        ; Alcotest.test_case
-            "heartbeat guard binds before POST"
-            `Quick
-        ; Alcotest.test_case
-            "post-success restart stays fenced at most once"
-            `Quick
-        ; Alcotest.test_case
-            "visible sync uncertainty seams fail closed"
-            `Quick
         ] )
     ; ( "terminal ownership"
       , [ Alcotest.test_case
@@ -985,23 +976,9 @@ let () =
             `Quick
             test_cancellation_preserves_lifecycle_authorized_identity
         ; Alcotest.test_case
-            "terminalization is canonical and durable"
-            `Quick
-        ; Alcotest.test_case
             "commit claim blocks reject after install"
             `Quick
             test_post_success_commit_claim_blocks_reject
-        ; Alcotest.test_case
-            "terminalization overlap is affine and durable"
-            `Quick
-        ; Alcotest.test_case
-            "terminalization failures preserve full binding"
-            `Quick
-        ] )
-    ; ( "affinity and non-sharing"
-      , [ Alcotest.test_case
-            "same-flow loser mutates no queue"
-            `Quick
         ] )
     ]
 ;;

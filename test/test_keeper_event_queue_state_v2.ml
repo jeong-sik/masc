@@ -1026,6 +1026,9 @@ let turn_failure route : Masc.Keeper_unified_turn.turn_failure =
   ; runtime_id = "exact-final-runtime"
   ; route
   ; source_lease_disposition = Masc.Keeper_unified_turn.Follow_failure_route
+    (* This helper feeds the failure-route mapping assertions, which never
+       exercise runtime failover; a lane here would assert nothing. *)
+  ; deferred_runtime_lane = None
   }
 ;;
 

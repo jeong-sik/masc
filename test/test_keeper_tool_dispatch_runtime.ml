@@ -3105,6 +3105,9 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               ; route = exact_route
               ; source_lease_disposition =
                   Masc.Keeper_unified_turn.Follow_failure_route
+                (* Settlement is asserted off the exact route; this case has no
+                   successor runtime, so the failover lane is absent. *)
+              ; deferred_runtime_lane = None
               }
             in
             match

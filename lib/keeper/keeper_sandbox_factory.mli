@@ -11,14 +11,13 @@
     values via [Keeper_turn_sandbox_runtime.container_cwd_of_host].
 
     Background: pre-PR-3b, [keeper_tools_oas.make_tool_bundle] inspected
-    [meta.sandbox_profile] eagerly at turn-start.  With the factory the
-    runtime decision is evaluated per call site, never at turn-start, and
-    the memo prevents the cold-start-every-call pattern that lingered after
-    PR-3.  Resolution also refreshes the keeper's current registry meta so
-    a turn-start factory cannot keep using stale sandbox fields after the
-    registry has reconciled TOML/runtime overlays.  The declared sandbox
-    profile remains the execution contract: [Local] resolves to [None] even
-    when DockerPlayground is enabled.
+    [meta.sandbox_profile] eagerly at turn-start.  The factory still creates
+    runtimes lazily at each call site, but freezes its construction meta so
+    path resolution and dispatch use one sandbox profile for the whole turn.
+    Registry reconciliation takes effect on the next turn; consulting it
+    mid-turn can otherwise route a Docker-scoped cwd through Local dispatch.
+    The declared sandbox profile remains the execution contract: [Local]
+    resolves to [Local_profile] even when DockerPlayground is enabled.
 
     The dependency on {!Keeper_sandbox_docker} stays acyclic:
     [keeper_sandbox_docker] only consumes [Keeper_turn_sandbox_runtime.t]
@@ -46,12 +45,12 @@ val resolve :
   cwd:string ->
   resolve_result
 (** Returns [Runtime runtime] when {!Keeper_sandbox_runner.effective_sandbox_profile}
-    yields [Docker] for the current registry meta, falling back to the
-    construction meta when the keeper is not registered. [in_playground] is
+    yields [Docker] for the construction meta. [in_playground] is
     derived from [cwd] vs the keeper's playground root for runtime workspace
     reuse only. Memoizes per [(in_playground, network_mode, host_root, image)]
     so subsequent compatible calls reuse the same container without crossing
-    sandbox-profile or image drift.
+    sandbox-profile or image drift. Registry changes are observed by the next
+    turn's factory, never midway through the current turn.
 
     [Local_profile] is returned when the effective sandbox profile is [Local].
     [No_factory] is only produced by {!resolve_opt}. *)

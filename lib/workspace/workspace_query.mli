@@ -89,6 +89,15 @@ val list_tasks :
     a bounded read-only projection of the request's submitted evidence.
     Other callers receive request metadata only. *)
 
+val verification_evidence_projection :
+  config ->
+  viewer:string ->
+  task:Masc_domain.task ->
+  string option
+(** Return the same persisted verification evidence projection used by
+    [list_tasks] for one AwaitingVerification task. Claim responses use this
+    after the task-phase verifier binding commits. *)
+
 (** Return recent messages as a formatted string. *)
 val get_messages : config -> since_seq:int -> limit:int -> string
 

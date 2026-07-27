@@ -20,6 +20,7 @@ type evidence_read_failure =
   | Evidence_missing
   | Evidence_not_regular_file
   | Evidence_outside_worker_playground
+  | Evidence_invalid_reference
   | Evidence_invalid_utf8
   | Evidence_symbolic_link
   | Evidence_changed_during_read
@@ -32,6 +33,7 @@ type submitted_evidence_item =
       ; content : string
       ; bytes : int
       ; truncated : bool
+      ; content_sha256 : string
       }
   | Evidence_artifact_unreadable of
       { reference : string
@@ -56,10 +58,139 @@ let evidence_read_failure_to_string = function
   | Evidence_missing -> "missing"
   | Evidence_not_regular_file -> "not_regular_file"
   | Evidence_outside_worker_playground -> "outside_worker_playground"
+  | Evidence_invalid_reference -> "invalid_reference"
   | Evidence_invalid_utf8 -> "invalid_utf8"
   | Evidence_symbolic_link -> "symbolic_link"
   | Evidence_changed_during_read -> "changed_during_read"
   | Evidence_read_error detail -> "read_error:" ^ detail
+
+let evidence_read_failure_of_string = function
+  | "missing" -> Ok Evidence_missing
+  | "not_regular_file" -> Ok Evidence_not_regular_file
+  | "outside_worker_playground" -> Ok Evidence_outside_worker_playground
+  | "invalid_reference" -> Ok Evidence_invalid_reference
+  | "invalid_utf8" -> Ok Evidence_invalid_utf8
+  | "symbolic_link" -> Ok Evidence_symbolic_link
+  | "changed_during_read" -> Ok Evidence_changed_during_read
+  | raw when String.starts_with ~prefix:"read_error:" raw ->
+    Ok
+      (Evidence_read_error
+         (String.sub raw 11 (String.length raw - 11)))
+  | raw -> Error (Printf.sprintf "unknown evidence read failure %S" raw)
+
+let content_sha256 content =
+  Digestif.SHA256.(digest_string content |> to_hex)
+
+let submitted_evidence_item_to_yojson = function
+  | Evidence_note note ->
+    `Assoc [ "kind", `String "note"; "content", `String note ]
+  | Evidence_artifact
+      { reference; content; bytes; truncated; content_sha256 } ->
+    `Assoc
+      [ "kind", `String "artifact"
+      ; "reference", `String reference
+      ; "content", `String content
+      ; "bytes", `Int bytes
+      ; "truncated", `Bool truncated
+      ; "content_sha256", `String content_sha256
+      ]
+  | Evidence_artifact_unreadable { reference; reason } ->
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reference", `String reference
+      ; "reason", `String (evidence_read_failure_to_string reason)
+      ]
+
+let submitted_evidence_item_of_yojson = function
+  | `Assoc fields ->
+    let string_field key =
+      match List.assoc_opt key fields with
+      | Some (`String value) -> Ok value
+      | Some value ->
+        Error
+          (Printf.sprintf
+             "submitted evidence snapshot field %s must be a string, got %s"
+             key
+             (Json_util.excerpt value))
+      | None ->
+        Error
+          (Printf.sprintf
+             "submitted evidence snapshot is missing string field %s"
+             key)
+    in
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "note") ->
+       Result.map (fun note -> Evidence_note note) (string_field "content")
+     | Some (`String "artifact") ->
+       let open Result.Syntax in
+       let* reference = string_field "reference" in
+       let* content = string_field "content" in
+       let* expected_content_sha256 = string_field "content_sha256" in
+       let* bytes =
+         match List.assoc_opt "bytes" fields with
+         | Some (`Int value) when value >= 0 -> Ok value
+         | Some value ->
+           Error
+             (Printf.sprintf
+                "submitted evidence snapshot bytes must be a non-negative integer, got %s"
+                (Json_util.excerpt value))
+         | None -> Error "submitted evidence snapshot is missing bytes"
+       in
+       let* truncated =
+         match List.assoc_opt "truncated" fields with
+         | Some (`Bool value) -> Ok value
+         | Some value ->
+           Error
+             (Printf.sprintf
+                "submitted evidence snapshot truncated must be a boolean, got %s"
+                (Json_util.excerpt value))
+         | None -> Error "submitted evidence snapshot is missing truncated"
+       in
+       let content_bytes = String.length content in
+       if
+         not
+           (String.equal
+              expected_content_sha256
+              (content_sha256 content))
+       then
+         Error
+           "submitted evidence snapshot content_sha256 does not match persisted content"
+       else if truncated && bytes <= content_bytes
+       then
+         Error
+           "truncated submitted evidence snapshot must report more source bytes than persisted content"
+       else if (not truncated) && bytes <> content_bytes
+       then
+         Error
+           "non-truncated submitted evidence snapshot bytes must equal persisted content length"
+       else
+         Ok
+           (Evidence_artifact
+              { reference
+              ; content
+              ; bytes
+              ; truncated
+              ; content_sha256 = expected_content_sha256
+              })
+     | Some (`String "artifact_unreadable") ->
+       let open Result.Syntax in
+       let* reference = string_field "reference" in
+       let* reason_raw = string_field "reason" in
+       let* reason = evidence_read_failure_of_string reason_raw in
+       Ok (Evidence_artifact_unreadable { reference; reason })
+     | Some (`String kind) ->
+       Error (Printf.sprintf "unknown submitted evidence snapshot kind %S" kind)
+     | Some value ->
+       Error
+         (Printf.sprintf
+            "submitted evidence snapshot kind must be a string, got %s"
+            (Json_util.excerpt value))
+     | None -> Error "submitted evidence snapshot is missing kind")
+  | value ->
+    Error
+      (Printf.sprintf
+         "submitted evidence snapshot item must be an object, got %s"
+         (Json_util.excerpt value))
 
 let project_root_of_base_path base_path =
   if Filename.basename base_path = Common.masc_dirname then
@@ -216,7 +347,7 @@ let load_request_header base_path req_id =
   else
     Error (Printf.sprintf "Verification %s not found" req_id)
 
-let submitted_evidence_of_request_json = function
+let submitted_evidence_snapshot_of_request_json = function
   | `Assoc fields ->
     (match List.assoc_opt "output" fields with
      | Some (`Assoc output_fields) ->
@@ -224,20 +355,19 @@ let submitted_evidence_of_request_json = function
         | Some (`List values) ->
           let rec collect acc = function
             | [] -> Ok (List.rev acc)
-            | `String value :: rest -> collect (value :: acc) rest
-            | value :: _ ->
-              Error
-                (Printf.sprintf
-                   "submitted_evidence must contain only strings, got %s"
-                   (Json_util.excerpt value))
+            | value :: rest ->
+              (match submitted_evidence_item_of_yojson value with
+               | Ok item -> collect (item :: acc) rest
+               | Error _ as error -> error)
           in
           collect [] values
         | Some other ->
           Error
             (Printf.sprintf
-               "submitted_evidence must be a list, got %s"
+               "submitted_evidence must be a typed snapshot list, got %s"
                (Json_util.excerpt other))
-        | None -> Error "verification request output has no submitted_evidence")
+        | None ->
+          Error "verification request output has no submitted_evidence")
      | Some other ->
        Error
          (Printf.sprintf
@@ -260,9 +390,9 @@ let load_request_for_evidence base_path req_id =
       match request_header_of_yojson json with
       | Error detail -> Error detail
       | Ok request ->
-        (match submitted_evidence_of_request_json json with
+        (match submitted_evidence_snapshot_of_request_json json with
          | Error detail -> Error detail
-         | Ok evidence -> Ok (request, evidence))
+         | Ok snapshot -> Ok (request, snapshot))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -348,55 +478,82 @@ let read_regular_file_prefix ~ownership_root path =
      | Utf8_incomplete_at _ | Utf8_invalid ->
        Error Evidence_invalid_utf8)
 
-let inspect_artifact_reference ~base_path ~worker reference =
-  let canonical_base =
-    try Ok (Unix.realpath (project_root_of_base_path base_path)) with
-    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Evidence_missing
-    | exn -> Error (Evidence_read_error (Printexc.to_string exn))
-  in
-  let canonical_target =
-    try Ok (Unix.realpath reference) with
-    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Evidence_missing
-    | exn -> Error (Evidence_read_error (Printexc.to_string exn))
-  in
-  match canonical_base, canonical_target with
-  | Error reason, _ | _, Error reason ->
-    Evidence_artifact_unreadable { reference; reason }
-  | Ok canonical_base, Ok canonical_target ->
-    (match
-       Playground_paths.parse_playground_file_path
-         ~base_path:canonical_base
-         ~abs_path:canonical_target
-     with
-     | Some parsed
-       when String.equal
-              parsed.Playground_paths.keeper_name
-              (Playground_paths.sanitize_keeper_name worker) ->
-       let relative_suffix = "/" ^ parsed.relative_path in
-       let ownership_root =
-         String.sub
-           canonical_target
-           0
-           (String.length canonical_target - String.length relative_suffix)
-       in
-       (match
-          read_regular_file_prefix
-            ~ownership_root
-            canonical_target
-        with
-        | Error reason ->
-          Evidence_artifact_unreadable { reference; reason }
-        | Ok (content, bytes, truncated) ->
-          Evidence_artifact { reference; content; bytes; truncated })
+let artifact_reference_prefix = "artifact:"
+let note_reference_prefix = "note:"
+
+let strip_prefix ~prefix value =
+  if String.starts_with ~prefix value
+  then
+    Some
+      (String.sub
+         value
+         (String.length prefix)
+         (String.length value - String.length prefix))
+  else None
+
+let valid_producer_relative_path path =
+  Filename.is_relative path
+  && not (String.equal path "")
+  && (String.split_on_char '/' path
+      |> List.for_all (fun segment ->
+        not
+          (String.equal segment ""
+           || String.equal segment "."
+           || String.equal segment "..")))
+
+let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_path =
+  if not (valid_producer_relative_path relative_path)
+  then Evidence_artifact_unreadable { reference; reason = Evidence_invalid_reference }
+  else
+    let project_root = project_root_of_base_path base_path in
+    let ownership_root =
+      Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path:project_root
+        ~agent_name:worker
+      |> Env_config_core.strip_trailing_slashes
+    in
+    let target = Filename.concat ownership_root relative_path in
+    match read_regular_file_prefix ~ownership_root target with
+    | Error reason ->
+      Evidence_artifact_unreadable { reference; reason }
+    | Ok (content, bytes, truncated) ->
+      Evidence_artifact
+        { reference
+        ; content
+        ; bytes
+        ; truncated
+        ; content_sha256 = content_sha256 content
+        }
+
+let snapshot_submitted_evidence_item ~base_path ~worker reference =
+  match strip_prefix ~prefix:artifact_reference_prefix reference with
+  | Some relative_path ->
+    inspect_producer_relative_artifact
+      ~base_path
+      ~worker
+      ~reference
+      relative_path
+  | None ->
+    (match strip_prefix ~prefix:note_reference_prefix reference with
+     | Some note when not (String.equal (String.trim note) "") ->
+       Evidence_note note
      | Some _ | None ->
        Evidence_artifact_unreadable
-         { reference; reason = Evidence_outside_worker_playground })
+         { reference; reason = Evidence_invalid_reference })
+
+let snapshot_submitted_evidence_json ~base_path ~worker references =
+  `List
+    (List.map
+       (fun reference ->
+         snapshot_submitted_evidence_item ~base_path ~worker reference
+         |> submitted_evidence_item_to_yojson)
+       references)
 
 let inspect_submitted_evidence ~base_path ~request_id ~task_id ~task_worker
     ~task_verifier ~viewer =
   match load_request_for_evidence base_path request_id with
   | Error reason -> Evidence_unavailable { request_id; reason }
-  | Ok (request, evidence_refs) ->
+  | Ok (request, snapshot) ->
     (match request.status with
      | `Completed _ ->
        Evidence_unavailable
@@ -409,19 +566,7 @@ let inspect_submitted_evidence ~base_path ~request_id ~task_id ~task_worker
           when String.equal request.task_id task_id
                && String.equal request.worker task_worker
                && String.equal task_verifier viewer ->
-          let items =
-            List.map
-              (fun reference ->
-                 if Filename.is_relative reference then
-                   Evidence_note reference
-                 else
-                   inspect_artifact_reference
-                     ~base_path
-                     ~worker:request.worker
-                     reference)
-              evidence_refs
-          in
-          Evidence_available { request; items }
+          Evidence_available { request; items = snapshot }
         | Some _ | None -> Evidence_metadata_only { request; viewer }))
 
 let list_request_headers base_path =

@@ -41,7 +41,7 @@ let schemas : Masc_domain.tool_schema list = [
       "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
 Completion must be submitted for an assigned verifier's approve/reject verdict. \
-submit_for_verification creates an asynchronous review state; any worker may bind it for scheduling, but actor identity never authorizes approve/reject. \
+submit_for_verification creates an asynchronous review state; any non-producer may race to claim it, but only the committed phase-assigned distinct verifier may approve/reject. \
 To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \

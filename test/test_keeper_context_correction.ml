@@ -69,7 +69,11 @@ let install_marker checkpoint marker =
 let provenance slot_id =
   Correction.
     { slot_id; call_id = "call"; plan_fingerprint = "plan";
-      request_body_sha256 = "request" }
+      request_body_sha256 = "request"; response_body_sha256 = "response";
+      http_status = Some 200; provider_trace_fingerprint = Some "trace";
+      catalog_generation_fingerprint = "generation";
+      catalog_evidence_sha256 = "catalog";
+      target_identity_fingerprint = "target" }
 ;;
 
 let expect_candidate marker checkpoint =
@@ -209,8 +213,74 @@ let test_empty_semantic_output_does_not_advance_marker () =
   | _ -> Alcotest.fail "empty semantic output accepted"
 ;;
 
+let test_terminal_json_preserves_typed_detail_and_oas_receipt () =
+  let raw = checkpoint ~messages:[ message Agent_sdk.Types.User "u" ] () in
+  let raw_ref = checkpoint_ref raw in
+  let preserved =
+    Correction.Preserved
+      { checkpoint = raw
+      ; raw_ref
+      ; reason = Correction.Exact_flow_failed
+      ; detail =
+          Some
+            (`Assoc
+               [ "kind", `String "execution_terminal"
+               ; "cause",
+                 `Assoc [ "kind", `String "flow_exact_execution_failed" ]
+               ])
+      }
+    |> Correction.outcome_to_json
+  in
+  let typed_terminal_kind =
+    match preserved with
+    | `Assoc fields ->
+      (match List.assoc_opt "detail" fields with
+       | Some (`Assoc detail) ->
+         (match List.assoc_opt "kind" detail with
+          | Some (`String value) -> value
+          | _ -> Alcotest.fail "terminal detail kind missing")
+       | _ -> Alcotest.fail "terminal detail missing")
+    | _ -> Alcotest.fail "terminal outcome is not an object"
+  in
+  Alcotest.(check string)
+    "typed terminal kind"
+    "execution_terminal"
+    typed_terminal_kind;
+  let applied =
+    Correction.Applied
+      { checkpoint = raw
+      ; raw_ref
+      ; installed_ref = raw_ref
+      ; provenance = provenance "opaque-slot"
+      }
+    |> Correction.outcome_to_json
+  in
+  let receipt_string name =
+    match applied with
+    | `Assoc fields ->
+      (match List.assoc_opt "receipt" fields with
+       | Some (`Assoc receipt) ->
+         (match List.assoc_opt name receipt with
+          | Some (`String value) -> value
+          | _ -> Alcotest.failf "receipt field missing: %s" name)
+       | _ -> Alcotest.fail "receipt missing")
+    | _ -> Alcotest.fail "applied outcome is not an object"
+  in
+  Alcotest.(check string)
+    "opaque slot receipt"
+    "opaque-slot"
+    (receipt_string "slot_id");
+  Alcotest.(check string)
+    "response body receipt"
+    "response"
+    (receipt_string "response_body_sha256")
+;;
+
 let test_executor_never_runs_inline () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   Testing.reset_executor ();
+  Correction.init ~sw;
   let ran = ref false in
   let outcome =
     Correction.submit
@@ -218,47 +288,97 @@ let test_executor_never_runs_inline () =
       ~keeper_name:"keeper"
       (fun () -> ran := true)
   in
-  Alcotest.(check bool) "unavailable" true
-    (outcome = Correction.Unavailable);
-  Alcotest.(check bool) "not inline" false !ran
+  Alcotest.(check bool) "submitted" true
+    (outcome = Correction.Submitted);
+  Alcotest.(check bool) "not inline" false !ran;
+  let clock = Eio.Stdenv.clock env in
+  Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+    while not !ran do Eio.Fiber.yield () done)
 ;;
 
-let test_executor_coalesces_and_releases () =
+let test_executor_coalesces_latest_trailing_edge () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Testing.reset_executor ();
   Correction.init ~sw;
+  let started = ref false in
+  let middle_runs = ref 0 in
+  let latest_runs = ref 0 in
   let release_p, release_u = Eio.Promise.create () in
   let first =
     Correction.submit
       ~base_path:"/tmp/context-correction"
       ~keeper_name:"keeper"
-      (fun () -> Eio.Promise.await release_p)
+      (fun () ->
+         started := true;
+         Eio.Promise.await release_p)
   in
-  Eio.Fiber.yield ();
-  let second =
+  let clock = Eio.Stdenv.clock env in
+  Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+    while not !started do Eio.Fiber.yield () done);
+  let middle =
     Correction.submit
       ~base_path:"/tmp/context-correction"
       ~keeper_name:"keeper"
-      (fun () -> ())
+      (fun () -> incr middle_runs)
+  in
+  let latest =
+    Correction.submit
+      ~base_path:"/tmp/context-correction"
+      ~keeper_name:"keeper"
+      (fun () -> incr latest_runs)
   in
   Alcotest.(check bool) "submitted" true (first = Correction.Submitted);
-  Alcotest.(check bool) "coalesced" true (second = Correction.Coalesced);
+  Alcotest.(check bool) "middle coalesced" true
+    (middle = Correction.Coalesced);
+  Alcotest.(check bool) "latest coalesced" true
+    (latest = Correction.Coalesced);
+  Alcotest.(check bool) "trailing edge pending" true
+    (Testing.pending
+       ~base_path:"/tmp/context-correction"
+       ~keeper_name:"keeper");
   Eio.Promise.resolve release_u ();
-  let clock = Eio.Stdenv.clock env in
   Eio.Time.with_timeout_exn clock 1.0 (fun () ->
     while
       Testing.in_flight
         ~base_path:"/tmp/context-correction"
         ~keeper_name:"keeper"
     do Eio.Fiber.yield () done);
-  let third =
+  Alcotest.(check int) "superseded middle not run" 0 !middle_runs;
+  Alcotest.(check int) "latest run once" 1 !latest_runs
+;;
+
+let test_stale_switch_cannot_clear_new_generation () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun root_sw ->
+  Testing.reset_executor ();
+  let old_ready_p, old_ready_u = Eio.Promise.create () in
+  let release_old_p, release_old_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw:root_sw (fun () ->
+    Eio.Switch.run @@ fun old_sw ->
+    Correction.init ~sw:old_sw;
+    Eio.Promise.resolve old_ready_u ();
+    Eio.Promise.await release_old_p);
+  Eio.Promise.await old_ready_p;
+  let old_generation = Testing.executor_generation () in
+  Correction.init ~sw:root_sw;
+  let new_generation = Testing.executor_generation () in
+  Alcotest.(check bool) "generation advanced" true
+    (old_generation <> new_generation);
+  Eio.Promise.resolve release_old_u ();
+  Eio.Fiber.yield ();
+  let ran = ref false in
+  let submitted =
     Correction.submit
       ~base_path:"/tmp/context-correction"
       ~keeper_name:"keeper"
-      (fun () -> ())
+      (fun () -> ran := true)
   in
-  Alcotest.(check bool) "released" true (third = Correction.Submitted)
+  Alcotest.(check bool) "new executor remains installed" true
+    (submitted = Correction.Submitted);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+    while not !ran do Eio.Fiber.yield () done)
 ;;
 
 let () =
@@ -290,13 +410,21 @@ let () =
             `Quick
             test_empty_semantic_output_does_not_advance_marker
         ; Alcotest.test_case
+            "terminal evidence is typed"
+            `Quick
+            test_terminal_json_preserves_typed_detail_and_oas_receipt
+        ; Alcotest.test_case
             "executor never inline"
             `Quick
             test_executor_never_runs_inline
         ; Alcotest.test_case
-            "executor coalesces and releases"
+            "executor latest trailing edge"
             `Quick
-            test_executor_coalesces_and_releases
+            test_executor_coalesces_latest_trailing_edge
+        ; Alcotest.test_case
+            "stale switch cannot clear new generation"
+            `Quick
+            test_stale_switch_cannot_clear_new_generation
         ] )
     ]
 ;;

@@ -231,7 +231,7 @@ let finalize
     ~post_turn_t0
     ~runtime_id_string
     ~history_messages
-    ~context_correction_start
+    ~context_correction_resume_checkpoint
     ~pre_turn_working_context
     ~prompt_metrics
     ~ctx_composition
@@ -309,7 +309,7 @@ let finalize
        | Ok (patched, replay_suffix_pruned) ->
          let patched =
            Keeper_context_correction.prepare_raw_checkpoint
-             ~start:context_correction_start
+             ~resume_checkpoint:context_correction_resume_checkpoint
              patched
          in
          (match
@@ -412,11 +412,23 @@ let finalize
                   ~timeout_s:90.0
                   ~keeper_name:meta.name
                   ~session_dir:session.session_dir
-                  ~start:context_correction_start
-                  ~history_messages
                   ~raw_checkpoint
                   ~raw_ref
               in
+              append_manifest
+                ~site:"context_correction_terminal"
+                ~keeper_turn_id:manifest_keeper_turn_id
+                ~oas_turn_count:result.turns
+                ~status:"context_correction_terminal"
+                ~checkpoint_path:
+                  (Keeper_checkpoint_store.oas_checkpoint_path
+                     ~session_dir:session.session_dir
+                     ~session_id:raw_checkpoint.session_id)
+                ~decision:
+                  (Keeper_runtime_manifest.with_payload_role
+                     ~payload_role:Checkpoint
+                     (Keeper_context_correction.outcome_to_json outcome))
+                Keeper_runtime_manifest.Checkpoint_saved;
               Log.Keeper.info
                 ~keeper_name:meta.name
                 "context correction terminal %s"
@@ -427,7 +439,10 @@ let finalize
          ~site:"context_correction_scheduled"
          ~keeper_turn_id:manifest_keeper_turn_id
          ~oas_turn_count:result.turns
-         ~decision:(Keeper_context_correction.submission_to_json submission)
+         ~decision:
+           (Keeper_runtime_manifest.with_payload_role
+              ~payload_role:Checkpoint
+              (Keeper_context_correction.submission_to_json submission))
          Keeper_runtime_manifest.Checkpoint_saved
      | _ -> ());
     (* Retired proof-ledger evaluation is absent. Task completion judgment is

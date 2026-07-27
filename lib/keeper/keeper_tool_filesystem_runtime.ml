@@ -1173,6 +1173,19 @@ let decide_file_write
     }
 ;;
 
+let confined_write_is_keeper_playground
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      confined
+  =
+  let normalized path =
+    Keeper_alerting_path.normalize_path_for_check_stripped path
+  in
+  String.equal
+    (normalized (Keeper_alerting_path.confined_root confined))
+    (normalized (Keeper_sandbox.host_root_abs_of_meta ~config meta))
+;;
+
 type file_write_attempt =
   | Write_succeeded of string
   | Write_deferred of Keeper_gate_deferred_payload.t
@@ -1939,46 +1952,54 @@ let handle_file_write_with_outcome
   let content = Safe_ops.json_string ~default:"" "content" args in
   let mode_raw = Safe_ops.json_string ~default:"overwrite" "mode" args in
   let mode_opt = fs_write_mode_of_string_opt mode_raw in
-  let after_gate ~target ~input continue =
-    match
-      decide_file_write
-        ~config
-        ~meta
-        ?continuation_channel
-        ?gate_context
-        ?gate_grant
-        ~input
-        ()
-    with
-    | Keeper_gate.Deferred { approval_id; reason } ->
-      Ok
-        (Write_deferred
-           (Keeper_gate_deferred_payload.create
-              ~operation:gate_operation
-              ~approval_id
-              ~reason
-              ~context:(`Assoc [ "path", `String target ])
-              ()))
-    | Keeper_gate.Unavailable reason ->
-      Ok
-        (Write_failed
-           { payload =
-               error_json
-                 ~fields:
-                   [ "path", `String target
-                   ; "error", `String "gate_unavailable"
-                   ; "gate_reason"
-                   , `String (Keeper_gate.unavailable_reason_to_string reason)
-                   ]
-                 "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
-           ; class_ = Tool_result.Runtime_failure
-           })
-    | Keeper_gate.Allow authorization ->
+  let after_gate ~confined ~target ~input continue =
+    if confined_write_is_keeper_playground ~config ~meta confined
+    then (
       Log.Keeper.info
         ~keeper_name:meta.name
-        "external effect authorized operation=filesystem_write source=%s"
-        (Keeper_gate.authorization_source_to_string authorization.source);
-      continue ()
+        "internal playground write authorized by confined capability path=%s"
+        target;
+      continue ())
+    else
+      match
+        decide_file_write
+          ~config
+          ~meta
+          ?continuation_channel
+          ?gate_context
+          ?gate_grant
+          ~input
+          ()
+      with
+      | Keeper_gate.Deferred { approval_id; reason } ->
+        Ok
+          (Write_deferred
+             (Keeper_gate_deferred_payload.create
+                ~operation:gate_operation
+                ~approval_id
+                ~reason
+                ~context:(`Assoc [ "path", `String target ])
+                ()))
+      | Keeper_gate.Unavailable reason ->
+        Ok
+          (Write_failed
+             { payload =
+                 error_json
+                   ~fields:
+                     [ "path", `String target
+                     ; "error", `String "gate_unavailable"
+                     ; "gate_reason"
+                     , `String (Keeper_gate.unavailable_reason_to_string reason)
+                     ]
+                   "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
+             ; class_ = Tool_result.Runtime_failure
+             })
+      | Keeper_gate.Allow authorization ->
+        Log.Keeper.info
+          ~keeper_name:meta.name
+          "external effect authorized operation=filesystem_write source=%s"
+          (Keeper_gate.authorization_source_to_string authorization.source);
+        continue ()
   in
   let protect_write ~target f =
     try f () with
@@ -2049,7 +2070,7 @@ let handle_file_write_with_outcome
            ; class_ = Tool_result.Runtime_failure
            })
   in
-  let finish_content_write ~target ~mode_label ~gate_effect write =
+  let finish_content_write ~confined ~target ~mode_label ~gate_effect write =
     let input =
       file_write_gate_input
         ~gate_effect
@@ -2057,7 +2078,7 @@ let handle_file_write_with_outcome
         ~content
         ()
     in
-    after_gate ~target ~input
+    after_gate ~confined ~target ~input
     @@ fun () ->
     protect_write ~target
     @@ fun () ->
@@ -2196,6 +2217,7 @@ let handle_file_write_with_outcome
           Keeper_alerting_path.atomic_replace_recovery_target projection
         in
         finish_content_write
+          ~confined
           ~target
           ~mode_label
           ~gate_effect
@@ -2254,6 +2276,7 @@ let handle_file_write_with_outcome
             |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
           in
           finish_content_write
+            ~confined
             ~target
             ~mode_label
             ~gate_effect
@@ -2326,6 +2349,7 @@ let handle_file_write_with_outcome
                          Keeper_alerting_path.path_effect_projection_error_to_string
                   in
                   finish_content_write
+                    ~confined
                     ~target
                     ~mode_label
                     ~gate_effect
@@ -2392,7 +2416,7 @@ let handle_file_write_with_outcome
                     ~replace_all
                     ()
                 in
-                after_gate ~target ~input
+                after_gate ~confined ~target ~input
                 @@ fun () ->
                 protect_write ~target
                 @@ fun () ->

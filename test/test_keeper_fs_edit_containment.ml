@@ -77,14 +77,14 @@ let make_meta name =
   let json =
     `Assoc
       [ "name", `String name
-      ; "agent_name", `String ("agent-" ^ name)
+      ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
       ; "trace_id", `String ("trace-" ^ name)
-      ; "sandbox_profile", `String "docker"
-      ; "always_allow", `Bool true
+      ; "always_allow", `Bool false
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta ->
+    { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker }
   | Error e -> Alcotest.fail e
 ;;
 
@@ -112,7 +112,7 @@ let setup f =
     (fun () ->
        Keeper_registry.For_testing.clear ();
        let config = Workspace.default_config base in
-       let meta = { (make_meta "tester") with always_allow = Some true } in
+       let meta = make_meta "tester" in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
        let (_registered : Keeper_registry.registry_entry) =
@@ -138,7 +138,7 @@ let parse_ok raw =
   parse raw |> Json.member "ok" |> Json.to_bool_option |> Option.value ~default:false
 ;;
 
-let test_docker_write_allows_explicit_root () =
+let test_docker_write_defers_explicit_root () =
   setup
   @@ fun ~config ~meta ~playground:_ ~publication_recovery ->
   let meta = { meta with allowed_paths = [ config.base_path ] } in
@@ -158,11 +158,11 @@ let test_docker_write_allows_explicit_root () =
             ])
       ()
   in
-  if not (parse_ok raw) then Alcotest.failf "expected ok response, got: %s" raw;
-  Alcotest.(check string) "content landed" "must not land" (Fs_compat.load_file path)
+  Alcotest.(check bool) "write deferred" false (parse_ok raw);
+  Alcotest.(check bool) "content did not land" false (Sys.file_exists path)
 ;;
 
-let test_docker_write_allows_playground () =
+let test_docker_write_allows_playground_without_gate () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "mind/allowed.txt" in
@@ -185,18 +185,80 @@ let test_docker_write_allows_playground () =
   Alcotest.(check string) "content landed" "allowed" (Fs_compat.load_file path)
 ;;
 
+let test_docker_write_rejects_playground_symlink_escape () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let outside = Filename.concat config.base_path "outside" in
+  ensure_dir outside;
+  let link = Filename.concat playground "escape" in
+  Unix.symlink outside link;
+  let escaped = Filename.concat link "escaped.txt" in
+  let raw =
+    handle_file_write
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+            [ "path", `String escaped
+            ; "mode", `String "overwrite"
+            ; "content", `String "must not escape"
+            ])
+      ()
+  in
+  Alcotest.(check bool) "escape rejected" false (parse_ok raw);
+  Alcotest.(check bool)
+    "outside file absent"
+    false
+    (Sys.file_exists (Filename.concat outside "escaped.txt"))
+;;
+
+let test_docker_write_rejects_parent_traversal () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let escaped = Filename.concat playground "../escaped.txt" in
+  let raw =
+    handle_file_write
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+            [ "path", `String escaped
+            ; "mode", `String "overwrite"
+            ; "content", `String "must not escape"
+            ])
+      ()
+  in
+  Alcotest.(check bool) "traversal rejected" false (parse_ok raw);
+  Alcotest.(check bool)
+    "traversal file absent"
+    false
+    (Sys.file_exists escaped)
+;;
+
 let () =
   Alcotest.run
     "Keeper_fs_edit_containment"
     [ ( "fs_edit"
       , [ Alcotest.test_case
-            "docker write allows explicit root outside playground"
+            "docker write defers explicit root outside playground"
             `Quick
-            test_docker_write_allows_explicit_root
+            test_docker_write_defers_explicit_root
         ; Alcotest.test_case
-            "docker write allows playground"
+            "docker write allows playground without gate"
             `Quick
-            test_docker_write_allows_playground
+            test_docker_write_allows_playground_without_gate
+        ; Alcotest.test_case
+            "docker write rejects playground symlink escape"
+            `Quick
+            test_docker_write_rejects_playground_symlink_escape
+        ; Alcotest.test_case
+            "docker write rejects parent traversal"
+            `Quick
+            test_docker_write_rejects_parent_traversal
         ] )
     ]
 ;;

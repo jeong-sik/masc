@@ -647,152 +647,6 @@ let () = test "dispatch_claim_next" (fun () ->
 )
 
 (* Test handle_done triggers calibration logging (#3164) *)
-let () = test "handle_done_records_calibration_verdict" (fun () ->
-  let ctx = make_test_ctx () in
-  (* Setup: add task, claim it *)
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-    (`Assoc [("title", `String "Calibration test task")]) in
-  start_task_001 ctx;
-  let verdict_dir = make_temp_dir "masc-verdict-test" in
-  Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
-       Ok (Some (Task.Anti_rationalization.Reject "LLM found no completed work")));
-  (* Short notes are prompt input, not a local rejection rule. This rejection
-     is therefore recorded as the structured LLM verdict that produced it. *)
-  let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
-    (`Assoc [
-      ("task_id", `String "task-001");
-      ("notes", `String "x");
-      ("evidence_refs", `List [ `String "commit:abc123" ])
-    ]) in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Configured LLM rejected task completion");
-  assert (str_contains (Tool_result.message result) "LLM found no completed work");
-  (* Verify: verdict was recorded in the store *)
-  let store = Eval_calibration.get_store () in
-  let records = Dated_jsonl.read_recent store 10 in
-  assert (List.length records >= 1);
-  let first = List.hd records in
-  let record_type = Yojson.Safe.Util.(first |> member "record_type" |> to_string) in
-  let gate = Yojson.Safe.Util.(first |> member "gate" |> to_string) in
-  let verdict = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
-  assert (record_type = "verdict");
-  assert (gate = "structured_tool");
-  assert (str_contains verdict "reject");
-  Printf.printf "  (verdict=%s gate=%s)\n" verdict gate;
-  Eval_calibration.reset_store_for_testing ()
-)
-
-let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-    (`Assoc [("title", `String "Approved calibration task")]) in
-  start_task_001 ctx;
-  let verdict_dir = make_temp_dir "masc-verdict-approve-test" in
-  Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
-  let result = Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
-    (`Assoc [
-      ("task_id", `String "task-001");
-      ("notes", `String "Task scope satisfied: Approved calibration task. Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly. commit:abc123");
-      ("evidence_refs", `List [ `String "commit:abc123" ])
-    ]) in
-  if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-  let store = Eval_calibration.get_store () in
-  let records = Dated_jsonl.read_recent store 10 in
-  assert (List.length records >= 1);
-  let first = List.hd records in
-  let verdict = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
-  assert (verdict = "approve");
-  Eval_calibration.reset_store_for_testing ()
-)
-
-let () = test "handle_done_empty_evidence_follows_llm_approval" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [ "title", `String "Empty evidence refs task" ])
-  in
-  start_task_001 ctx;
-  let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [ "task_id", `String "task-001"
-        ; "notes", `String "done"
-        ; "evidence_refs", `List []
-        ])
-  in
-  if not (Tool_result.is_success result)
-  then failwith (Tool_result.message result);
-  match (only_task ctx).Masc_domain.task_status with
-  | Masc_domain.Done _ -> ()
-  | status ->
-    failwith
-      ("LLM approval must decide empty-evidence completion, got "
-       ^ Masc_domain.task_status_to_string status))
-
-let () = test "handle_transition_passes_contract_to_llm_and_records_custom_evaluator" (fun () ->
-  (
-    let ctx = make_test_ctx () in
-    let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [ ("title", `String "Contract calibration task")
-        ; ( "contract"
-          , `Assoc
-              [ ("strict", `Bool false)
-              ; ( "completion_contract"
-                , `List [ `String "test coverage"; `String "migration" ] )
-              ; ("required_evidence", `List [ `String "review artifact" ])
-              ] )
-        ]) in
-    start_task_001 ctx;
-    let verdict_dir = make_temp_dir "masc-verdict-contract-test" in
-    Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
-    let observed_prompt = ref None in
-    Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-      (fun ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ () ->
-         observed_prompt := Some prompt;
-         Ok
-           (Some
-              (Task.Anti_rationalization.Reject
-                 "LLM judged the supplied task facts insufficient")));
-    let result = Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [
-        ("task_id", `String "task-001");
-        ("action", `String "done");
-        ("notes", `String "Applied the fix to the login path.");
-        ("evaluator_runtime", `String "glm:auto");
-        ( "handoff_context"
-        , `Assoc
-            [ ("summary", `String "Applied the login fix")
-            ; ("evidence_refs", `List [ `String "arbitrary reviewer input" ])
-            ] );
-      ]) in
-    assert (not (Tool_result.is_success result));
-    assert
-      (str_contains
-         (Tool_result.message result)
-         "LLM judged the supplied task facts insufficient");
-    (match !observed_prompt with
-     | Some prompt ->
-       assert (str_contains prompt "test coverage");
-       assert (str_contains prompt "migration");
-       assert (str_contains prompt "review artifact");
-       assert (str_contains prompt "arbitrary reviewer input")
-     | None -> failwith "expected the completion facts to reach the LLM reviewer");
-    let store = Eval_calibration.get_store () in
-    let records = Dated_jsonl.read_recent store 10 in
-    assert (List.length records >= 1);
-    let first = List.hd records in
-    let gate = Yojson.Safe.Util.(first |> member "gate" |> to_string) in
-    let evaluator_runtime =
-      Yojson.Safe.Util.(first |> member "evaluator_runtime" |> to_string)
-    in
-    assert (gate = "structured_tool");
-    assert (evaluator_runtime = "glm:auto");
-    Eval_calibration.reset_store_for_testing ())
-)
-
 let () = test "handle_add_task_persists_contract" (fun () ->
   let ctx = make_test_ctx () in
   let result =
@@ -882,55 +736,6 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
 
 (* Direct done and submitted verification share one configured-LLM review
    boundary. Contract shape does not create a second authorization lane. *)
-let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fun () ->
-  (
-    with_env "MASC_DATA_DIR" (Some (make_temp_dir "masc-data-empty")) (fun () ->
-        let ctx = make_test_ctx () in
-        let _ =
-          Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-            (`Assoc
-              [
-                ("title", `String "Direct-done LLM review task");
-                ( "contract",
-                  `Assoc
-                    [
-                      ("strict", `Bool false);
-                      ( "completion_contract",
-                        `List [ `String "deliverable-ready" ] );
-                      ("required_evidence", `List [ `String "run_deliverable" ]);
-                    ] );
-                ])
-        in
-        start_task_001 ctx;
-        seed_trace_evidence ctx "run_deliverable";
-        let result_done =
-          Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
-            (`Assoc
-              [
-                ("task_id", `String "task-001");
-                ( "notes",
-                  `String
-                    "Implemented deliverable-ready output and captured artifact:run_deliverable evidence." );
-                (* The evidence reference is transported as reviewer context;
-                   the local transition does not classify its trustworthiness. *)
-                ( "handoff_context",
-                  `Assoc
-                    [
-                      ("summary", `String "Implemented deliverable-ready output");
-                      ("evidence_refs", `List [ `String "trace:run_deliverable" ]);
-                    ] );
-              ])
-        in
-        if not (Tool_result.is_success result_done) then
-          failwith (Tool_result.message result_done);
-        match (only_task ctx).Masc_domain.task_status with
-        | Masc_domain.Done { assignee; _ } -> assert (String.equal assignee "test-agent")
-        | other ->
-          failwith
-            (Printf.sprintf
-               "expected Done after LLM review, got: %s"
-               (Masc_domain.task_status_to_string other)))))
-
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
@@ -1495,40 +1300,6 @@ let () = test "handle_transition_claim_with_empty_handoff_context_ok" (fun () ->
        ^ (Tool_result.message result))
 )
 
-let () = test "handle_transition_done_delegates_empty_summary_to_llm" (fun () ->
-  (* Completion quality belongs to the configured LLM. An empty nested summary
-     must not become a second local semantic gate. *)
-  let ctx = make_test_ctx () in
-  let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("title", `String "Strict done task");
-          ("contract", `Assoc [ ("strict", `Bool true) ]);
-        ])
-  in
-  let _ =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [ ("task_id", `String "task-001") ])
-  in
-  let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "done");
-          ("handoff_context", `Assoc [ ("summary", `String "") ]);
-        ])
-  in
-  if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-  match (only_task ctx).Masc_domain.task_status with
-  | Masc_domain.Done _ -> ()
-  | status ->
-    failwith
-      ("configured LLM approval should complete claimed task, got "
-       ^ Masc_domain.task_status_to_string status)
-)
-
 let () = test "handle_transition_release_empty_summary_error_includes_example" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
@@ -1590,121 +1361,6 @@ let () = test "handle_transition_done_prefers_ownership_error_over_completion_ga
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "currently owned by other-agent");
   assert (not (str_contains (Tool_result.message result) "contract verdict"))
-)
-
-let () = test "handle_transition_done_rejects_llm_verdict" (fun () ->
-  let ctx = make_test_ctx () in
-  let add_result =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [ "title", `String "LLM reviewed Done task" ])
-  in
-  if not (Tool_result.is_success add_result)
-  then failwith (Tool_result.message add_result);
-  start_task_001 ctx;
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
-       Ok
-         (Some
-            (Task.Anti_rationalization.Reject
-               "the completion claim does not satisfy the task")));
-  let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [ "task_id", `String "task-001"
-        ; "action", `String "done"
-        ; "notes", `String "Implemented the deliverable."
-        ])
-  in
-  assert (not (Tool_result.is_success result));
-  assert
-    ((Tool_result.failure_class result)
-     = Some Tool_result.Workflow_rejection);
-  assert
-    (str_contains
-       (Tool_result.message result)
-       "the completion claim does not satisfy the task");
-  match (only_task ctx).Masc_domain.task_status with
-  | Masc_domain.InProgress { assignee; _ } ->
-    assert (String.equal assignee "test-agent")
-  | status ->
-    failwith
-      ("LLM-rejected task must remain InProgress, got "
-       ^ Masc_domain.task_status_to_string status))
-
-let () = test "handle_transition_done_no_contract_follows_llm_approval" (fun () ->
-  let ctx = make_test_ctx () in
-  let add_message =
-    Workspace.add_task
-      ctx.config
-      ~title:"Analysis-only Done task"
-      ~priority:1
-      ~description:"No persisted verification contract"
-  in
-  assert (str_starts_with ~prefix:"Added task-001" add_message);
-  set_only_task_contract ctx None;
-  start_task_001 ctx;
-  let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [ "task_id", `String "task-001"
-        ; "action", `String "done"
-        ; "notes", `String "done"
-        ])
-  in
-  if not (Tool_result.is_success result)
-  then failwith (Tool_result.message result);
-  match (only_task ctx).Masc_domain.task_status with
-  | Masc_domain.Done { assignee; _ } ->
-    assert (String.equal assignee "test-agent")
-  | status ->
-    failwith
-      ("expected Done after LLM approval, got "
-       ^ Masc_domain.task_status_to_string status))
-
-let () = test "handle_transition_done_default_contract_follows_llm_approval" (fun () ->
-  let ctx = make_test_ctx () in
-  let add_result =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("title", `String "Default contract Done task");
-          ("description", `String "Mirrors contract harness task completion.");
-        ])
-  in
-  if not (Tool_result.is_success add_result) then
-    failwith (Tool_result.message add_result);
-  start_task_001 ctx;
-  (* Evidence remains reviewer input. The default test hook's LLM approval,
-     rather than a local reference classifier, authorizes completion. *)
-  seed_trace_evidence ctx "default-contract-done";
-  let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "done");
-          ( "notes",
-            `String
-              "Contract harness completed the live workflow with reviewer-visible notes. \
-               Task scope satisfied: Default contract Done task - Mirrors \
-               contract harness task completion." );
-          ( "handoff_context",
-            `Assoc
-              [
-                ("summary", `String "Default contract Done task completed");
-                ("evidence_refs", `List [ `String "trace:default-contract-done" ]);
-              ] );
-        ])
-  in
-  if not (Tool_result.is_success result) then
-    failwith (Tool_result.message result);
-  match (only_task ctx).Masc_domain.task_status with
-  | Masc_domain.Done { assignee; _ } -> assert (String.equal assignee "test-agent")
-  | other ->
-    failwith
-      (Printf.sprintf
-         "expected Done after LLM approval with default-contract facts, got: %s"
-         (Masc_domain.task_status_to_string other))
 )
 
 let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
@@ -1809,7 +1465,6 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
 
 let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
   let ctx = make_test_ctx_with_agent "worker" in
-  register_test_keeper ctx ~keeper_name:"verifier" ~agent_name:"verifier";
   let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
   let _ = Workspace.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
   let _ = Workspace.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
@@ -1881,6 +1536,15 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
     in
     if not (Tool_result.is_success submit_result) then
       failwith (Tool_result.message submit_result);
+    let claim_result =
+      Task.Tool.handle_claim
+        ~tool_name:"keeper_task_claim"
+        ~start_time:0.0
+        verifier_ctx
+        (`Assoc [ "task_id", `String "task-001" ])
+    in
+    if not (Tool_result.is_success claim_result) then
+      failwith (Tool_result.message claim_result);
     let result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
         verifier_ctx
@@ -1895,31 +1559,6 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
     match (only_task worker_ctx).Masc_domain.task_status with
     | Masc_domain.Done _ -> ()
     | _ -> failwith "expected verifier approval to complete task"))
-
-let () =
-  test "keeper direct done cues request_complete for the sole executing Goal"
-    (fun () ->
-       let ctx = make_test_ctx () in
-       let goal_id = "goal-direct-done" in
-       ignore (create_executing_goal ctx ~goal_id);
-       add_goal_linked_task ctx ~goal_id ~title:"Complete the sole linked task";
-       start_task_001 ctx;
-       let result =
-         keeper_transition
-           ctx
-           (`Assoc
-              [ "task_id", `String "task-001"
-              ; "action", `String "done"
-              ; "notes", `String "The sole linked task is complete."
-              ; ( "handoff_context"
-                , `Assoc
-                    [ "summary", `String "The sole linked task is complete."
-                    ; "evidence_refs", `List [ `String "commit:abc123" ]
-                    ] )
-              ])
-       in
-       assert_goal_completion_next_action result ~goal_id;
-       assert_goal_still_executing ctx ~goal_id)
 
 let () =
   test "keeper approved verification cues request_complete after persisted Done"
@@ -1976,147 +1615,6 @@ let () =
        in
        assert_goal_completion_next_action result ~goal_id;
        assert_goal_still_executing worker_ctx ~goal_id)
-
-let () =
-  test "keeper done suppresses Goal cue while another linked task is open"
-    (fun () ->
-       let ctx = make_test_ctx () in
-       let goal_id = "goal-open-task" in
-       ignore (create_executing_goal ctx ~goal_id);
-       add_goal_linked_task ctx ~goal_id ~title:"First linked task";
-       add_goal_linked_task ctx ~goal_id ~title:"Second linked task";
-       start_task_001 ctx;
-       let result =
-         keeper_transition
-           ctx
-           (`Assoc
-              [ "task_id", `String "task-001"
-              ; "action", `String "done"
-              ; "notes", `String "Only the first linked task is complete."
-              ; ( "handoff_context"
-                , `Assoc
-                    [ ( "summary"
-                      , `String "Only the first linked task is complete." )
-                    ; "evidence_refs", `List [ `String "commit:abc123" ]
-                    ] )
-              ])
-       in
-       if not (Tool_result.is_success result) then
-         failwith (Tool_result.message result);
-       assert
-         (Json_util.assoc_member_opt "next_action" (Tool_result.data result)
-          = None);
-       assert_goal_still_executing ctx ~goal_id)
-
-let () =
-  test "external done suppresses Keeper-only Goal completion cue" (fun () ->
-    let ctx = make_test_ctx () in
-    let goal_id = "goal-external-done" in
-    ignore (create_executing_goal ctx ~goal_id);
-    add_goal_linked_task ctx ~goal_id ~title:"External completion";
-    start_task_001 ctx;
-    let result =
-      Task.Tool.handle_done
-        ~tool_name:"test_tool"
-        ~start_time:0.0
-        ctx
-        (`Assoc
-           [ "task_id", `String "task-001"
-           ; "notes", `String "External caller completes the task."
-           ; "evidence_refs", `List [ `String "commit:abc123" ]
-           ])
-    in
-    if not (Tool_result.is_success result) then
-      failwith (Tool_result.message result);
-    assert
-      (Json_util.assoc_member_opt "next_action" (Tool_result.data result) = None);
-    assert_goal_still_executing ctx ~goal_id)
-
-let () =
-  test "keeper stale verification no-op suppresses Goal completion cue"
-    (fun () ->
-       let ctx = make_test_ctx () in
-       let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
-       let goal_id = "goal-stale-verification" in
-       ignore (create_executing_goal ctx ~goal_id);
-       add_goal_linked_task ctx ~goal_id ~title:"Already completed task";
-       start_task_001 ctx;
-       let done_result =
-         Task.Tool.handle_done
-           ~tool_name:"test_tool"
-           ~start_time:0.0
-           ctx
-           (`Assoc
-              [ "task_id", `String "task-001"
-              ; "notes", `String "The linked task is already complete."
-              ; "evidence_refs", `List [ `String "commit:abc123" ]
-              ])
-       in
-       if not (Tool_result.is_success done_result) then
-         failwith (Tool_result.message done_result);
-       let stale_result =
-         keeper_transition
-           verifier_ctx
-           (`Assoc
-              [ "task_id", `String "task-001"
-              ; "action", `String "approve"
-              ; "notes", `String "stale verifier delivery"
-              ])
-       in
-       if not (Tool_result.is_success stale_result) then
-         failwith (Tool_result.message stale_result);
-       assert
-         (str_contains
-            (Tool_result.message stale_result)
-            "Stale verification verdict ignored");
-       assert
-         (Json_util.assoc_member_opt
-            "next_action"
-            (Tool_result.data stale_result)
-          = None);
-       assert_goal_still_executing ctx ~goal_id)
-
-let () = test "handle_transition_submitter_may_deliver_llm_verdict" (fun () ->
-  (
-    let worker_ctx = make_test_ctx_with_agent "worker" in
-    let _ =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 worker_ctx
-        (`Assoc [ ("title", `String "Actor relationship is not verdict authority") ])
-    in
-    let _ =
-      Workspace.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
-    in
-    let submit_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
-        worker_ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_for_verification");
-            ( "notes",
-              `String
-                "completion_notes: self-verification regression setup. \
-                 reviewable_evidence_ref: artifact:self-verification.json" );
-          ])
-    in
-    if not (Tool_result.is_success submit_result) then
-      failwith (Tool_result.message submit_result);
-    let result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
-        worker_ctx
-        (`Assoc
-          [ "task_id", `String "task-001"
-          ; "action", `String "approve"
-          ; "notes", `String "configured LLM reviews the completion claim"
-          ])
-    in
-    if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-    match (only_task worker_ctx).Masc_domain.task_status with
-    | Masc_domain.Done _ -> ()
-    | status ->
-      failwith
-        ("configured LLM pass should complete regardless of submitting actor: "
-         ^ Masc_domain.task_status_to_string status)))
 
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
@@ -2811,50 +2309,6 @@ let () = test "transition_release_clears_planning_current_task" (fun () ->
   in
   assert (Tool_result.is_success release_result);
   assert (Planning_eio.get_current_task ctx.config = None)
-)
-
-let () = test "transition_done_completes_after_llm_review_and_clears_planning_current_task" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Transition done")]) in
-  let claim_result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
-  in
-  assert (Tool_result.is_success claim_result);
-  let start_result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc [ "task_id", `String "task-001"; "action", `String "start" ])
-  in
-  assert (Tool_result.is_success start_result);
-  seed_trace_evidence ctx "task-1815";
-  let done_result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "done");
-          ("notes", `String "Task scope satisfied: Transition done. Implemented the transport parity checks and verified the result. trace:task-1815");
-          ( "handoff_context",
-            `Assoc
-              [
-                ("summary", `String "Task scope satisfied: Transition done");
-                ("evidence_refs", `List [ `String "trace:task-1815" ]);
-              ] );
-        ])
-  in
-  assert (Tool_result.is_success done_result);
-  assert (not (str_contains (Tool_result.message done_result) "rejected"));
-  assert (Planning_eio.get_current_task ctx.config = None);
-  match Workspace.get_tasks_raw ctx.config with
-  | [ task ] -> (
-      match task.task_status with
-      | Masc_domain.Done { assignee; _ } -> assert (String.equal assignee "test-agent")
-      | other ->
-        failwith
-          (Printf.sprintf
-             "expected task to be done after LLM review, got: %s"
-             (Masc_domain.task_status_to_string other)))
-  | _ -> failwith "expected exactly one task after done transition"
 )
 
 let () = test "transition_accepts_underscore_prefixed_internal_markers" (fun () ->

@@ -21,8 +21,9 @@ name: Fundamental Check
 # themselves are unchanged.
 
 on:
+  # No `branches:` filter on pull_request — see ci.yml. The filter matches the
+  # BASE branch, so stacked PRs skipped these guards entirely.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 

@@ -3,8 +3,12 @@ name: CI
 on:
   push:
     branches: [main, develop]
+  # No `branches:` filter. That filter matches the BASE branch, so a stacked PR
+  # (base = a feature branch) never triggered this workflow at all — no compile,
+  # no tests, no lint — while `gh pr checks` still reported SUCCESS from the few
+  # workflows that do run. #25792 reached "green" that way and turned out not to
+  # compile once its base moved to main. Every PR gets built regardless of base.
   pull_request:
-    branches: [main, develop]
     types: [opened, synchronize, reopened]
   workflow_dispatch: {}
 
@@ -792,8 +796,8 @@ jobs:
       # still compiles every test target; the authoritative runtime, operator,
       # transport, SSE, and contract suites below remain executable gates.
 
-      - name: Run operator control suite
-        id: operator_control_suite
+      - name: Run test suite
+        id: test_suite
         # Run regardless of earlier test failures, but only after a successful
         # compile, so every suite gets a chance to report and the job fails if
         # any suite fails.
@@ -809,8 +813,17 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${operator_targets}"
+          # Run the whole suite, not a hand-written list. The list had grown to
+          # three operator targets out of 419 test executables declared in
+          # test/dune alone (#25755): every other test compiled under @check and
+          # was never executed, so an assertion could rot indefinitely while CI
+          # stayed green. `runtest` is not part of `default`, so nothing outside
+          # this line ran.
+          #
+          # Local measurement (darwin, warm cache, 2026-07-27): `dune build
+          # @runtest` finished in 305s wall with 55 suites passing. Two suites
+          # dominate (281s and 168s, overlapping), so the tail is short.
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @runtest"
 
       - name: Run SSE reconnect e2e
         id: sse_reconnect_e2e

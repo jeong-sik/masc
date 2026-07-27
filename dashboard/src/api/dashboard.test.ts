@@ -528,7 +528,7 @@ describe('keeper tool telemetry fetchers', () => {
         scan_truncated: false,
         items: [
           {
-            id: 'manifest:trace-a:event_bus_correlated:2026-06-26T03:03:00Z',
+            id: 'manifest:trace-a:context_compacted:2026-06-26T03:03:00Z',
             keeper: 'keeper-alpha',
             ts_iso: '2026-06-26T03:03:00Z',
             ts_unix: 1_782_444_580,
@@ -542,8 +542,10 @@ describe('keeper tool telemetry fetchers', () => {
             after_tokens: 120000,
             saved_tokens: 90000,
             compaction_id: 'cmp-42',
-            compaction_source: 'event_bus',
-            status: 'observed',
+            compaction_source: 'provider_overflow',
+            compaction_outcome: 'checkpoint_committed',
+            cause: 'compaction completion dispatch failed',
+            status: 'retryable_failure',
             links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
             exact_evidence: {
               before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
@@ -573,7 +575,9 @@ describe('keeper tool telemetry fetchers', () => {
             saved_tokens: null,
             compaction_id: null,
             compaction_source: 'pre_dispatch_hygiene',
-            status: 'compacted',
+            compaction_outcome: 'retry_without_checkpoint',
+            cause: 'compaction dispatch failed',
+            status: 'retryable_failure',
             links: {},
             exact_evidence: null,
             reinjection_observation: {
@@ -597,11 +601,45 @@ describe('keeper tool telemetry fetchers', () => {
             saved_tokens: 90000,
             compaction_id: 'cmp-43',
             compaction_source: 'event_bus',
-            status: 'observed',
+            compaction_outcome: 'checkpoint_committed',
+            cause: 'lifecycle cleanup failed',
+            status: 'lifecycle_cleanup_failed',
             links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
             exact_evidence: {
               before_checkpoint_bytes: 2048, after_checkpoint_bytes: 512,
               before_message_count: 9, after_message_count: 3,
+              summarized_message_count: 4, dropped_message_count: 1,
+              before_tool_use_count: 2, after_tool_use_count: 1,
+              before_tool_result_count: 2, after_tool_result_count: 1,
+            },
+            reinjection_observation: {
+              state: 'not_linked', keeper_turn_id: null,
+              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
+            },
+          },
+          {
+            id: 'manifest:trace-contradictory:context_compacted:2026-06-26T04:05:00Z',
+            keeper: 'keeper-alpha',
+            ts_iso: '2026-06-26T04:05:00Z',
+            ts_unix: null,
+            trace_id: 'trace-contradictory',
+            keeper_turn_id: 15,
+            source: 'runtime_manifest',
+            trigger: 'provider_overflow',
+            runtime_id: 'oas-seoul-1',
+            display_runtime: 'oas-seoul-1',
+            before_tokens: null,
+            after_tokens: null,
+            saved_tokens: null,
+            compaction_id: 'cmp-contradictory',
+            compaction_source: 'provider_overflow',
+            compaction_outcome: 'retry_without_checkpoint',
+            cause: 'compaction dispatch failed',
+            status: 'retryable_failure',
+            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+            exact_evidence: {
+              before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
+              before_message_count: 8, after_message_count: 3,
               summarized_message_count: 4, dropped_message_count: 1,
               before_tool_use_count: 2, after_tool_use_count: 1,
               before_tool_result_count: 2, after_tool_result_count: 1,
@@ -633,6 +671,13 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.items[1]?.runtime_id).toBeNull()
     expect(result.items[1]?.links.checkpoint_path).toBeNull()
     expect(result.items[0]?.exact_evidence?.before_checkpoint_bytes).toBe(4096)
+    expect(result.items[0]?.compaction_outcome).toBe('checkpoint_committed')
+    expect(result.items[0]?.cause).toBe('compaction completion dispatch failed')
+    expect(result.items[2]?.compaction_outcome).toBe('checkpoint_committed')
+    expect(result.items[2]?.exact_evidence?.before_checkpoint_bytes).toBe(2048)
+    expect(result.items[2]?.cause).toBe('lifecycle cleanup failed')
+    expect(result.items).toHaveLength(3)
+    expect(result.items.some(item => item.trace_id === 'trace-contradictory')).toBe(false)
   })
 })
 

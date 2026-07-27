@@ -615,6 +615,51 @@ type parsed_row = {
   links : links;
 }
 
+let canonicalize_compaction_evidence ~event_wire decision =
+  let evidence_key = Keeper_compaction_evidence.exact_evidence_key in
+  let evidence_required =
+    String.equal event_wire (event_kind_to_string Context_compacted)
+  in
+  match decision with
+  | `Assoc fields ->
+    (match List.filter (fun (key, _) -> String.equal key evidence_key) fields with
+     | [] when evidence_required ->
+       Error
+         (Printf.sprintf
+            "field \"decision.%s\" is required for current context_compacted rows"
+            evidence_key)
+     | [] -> Ok decision
+     | [ _, evidence_json ] ->
+       (match Keeper_compaction_evidence.of_json evidence_json with
+        | Error error ->
+          Error
+            (Printf.sprintf
+               "field \"decision.%s\" is invalid: %s"
+               evidence_key
+               (Keeper_compaction_evidence.decode_error_to_string error))
+        | Ok evidence ->
+          let canonical = Keeper_compaction_evidence.to_json evidence in
+          Ok
+            (`Assoc
+               (List.map
+                  (fun (key, value) ->
+                     if String.equal key evidence_key
+                     then key, canonical
+                     else key, value)
+                  fields)))
+     | _ ->
+       Error
+         (Printf.sprintf
+            "field \"decision.%s\" must appear exactly once"
+            evidence_key))
+  | _ when evidence_required ->
+    Error
+      (Printf.sprintf
+         "field \"decision.%s\" is required for current context_compacted rows"
+         evidence_key)
+  | _ -> Ok decision
+;;
+
 let parse_row = function
   | `Assoc fields -> (
       let ( >>= ) result f =
@@ -640,6 +685,8 @@ let parse_row = function
             optional_string "runtime_id" fields >>= fun runtime_id ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
+            canonicalize_compaction_evidence ~event_wire decision
+            >>= fun decision ->
             field "links" fields >>= fun links_json ->
             links_of_json links_json >>= fun links ->
             Ok

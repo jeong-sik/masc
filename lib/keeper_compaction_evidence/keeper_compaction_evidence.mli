@@ -14,15 +14,11 @@ type t =
   ; before_message_count : int
   ; after_message_count : int
   ; summarized_message_count : int
-  ; summarized_unit_count : int
   ; dropped_message_count : int
-  ; normalized_message_count : int
   ; before_tool_use_count : int
   ; after_tool_use_count : int
   ; before_tool_result_count : int
   ; after_tool_result_count : int
-  ; removed_tool_use_count : int
-  ; removed_tool_result_count : int
   }
 
 type field =
@@ -39,15 +35,11 @@ type field =
   | Before_message_count
   | After_message_count
   | Summarized_message_count
-  | Summarized_unit_count
   | Dropped_message_count
-  | Normalized_message_count
   | Before_tool_use_count
   | After_tool_use_count
   | Before_tool_result_count
   | After_tool_result_count
-  | Removed_tool_use_count
-  | Removed_tool_result_count
 
 type field_error =
   | Missing
@@ -76,9 +68,7 @@ type decode_error =
       { before_message_count : int
       ; after_message_count : int
       ; summarized_message_count : int
-      ; summarized_unit_count : int
       ; dropped_message_count : int
-      ; normalized_message_count : int
       }
   | Invalid_tool_protocol_accounting of
       { before_tool_use_count : int
@@ -111,27 +101,19 @@ val create
   -> before_message_count:int
   -> after_message_count:int
   -> summarized_message_count:int
-  -> summarized_unit_count:int
   -> dropped_message_count:int
-  -> normalized_message_count:int
   -> before_tool_use_count:int
   -> after_tool_use_count:int
   -> before_tool_result_count:int
   -> after_tool_result_count:int
-  -> removed_tool_use_count:int
-  -> removed_tool_result_count:int
   -> (t, decode_error) result
 (** Construct evidence through the same closed validation boundary used by
-    persisted JSON restoration. Every dropped source message disappears.
-    Summarizing one atomic source unit removes zero or more of its source
-    messages and emits exactly one Assistant summary, so the total removed
-    message count is exact:
-    [after = before - dropped - summarized_messages + summarized_units]. A
-    reasoning-normalizing Keep is recorded separately and may strictly reduce
-    checkpoint bytes without changing message cardinality. Tool-use and
-    tool-result removals are derived from the original whole-unit dispositions;
-    actual after counts must equal those exact removals, and the two removal
-    counts must match. *)
+    persisted JSON restoration. This persisted shape is an observability
+    projection, not restart execution authority. The pre-persist compaction
+    gate separately compares applied-plan accounting with the serialized
+    checkpoint exactly. Here, message reduction must remain structurally
+    possible for the summarized/dropped source counts, ToolUse/ToolResult counts
+    cannot increase, and their removal counts must match. *)
 
 val to_json : t -> Yojson.Safe.t
 (** Self-contained structural and exact-execution evidence projection. *)
@@ -142,5 +124,5 @@ val of_json : Yojson.Safe.t -> (t, decode_error) result
     objectively impossible evidence is rejected explicitly; no external
     provenance labels or historical shape are inferred or migrated.
     [Checkpoint_bytes] must strictly reduce, message accounting must remain
-    equal the original source-unit disposition, and ToolUse/ToolResult removal
-    counts must remain equal. *)
+    structurally possible, and ToolUse/ToolResult removal counts must remain
+    equal. *)

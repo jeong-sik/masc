@@ -163,11 +163,14 @@ type requested_compaction =
   ; post_success_terminalizer :
       Keeper_compaction_llm_summarizer.post_success_terminalizer
   ; summarized_message_count : int
-  ; summarized_unit_count : int
   ; dropped_message_count : int
-  ; normalized_message_count : int
-  ; removed_tool_use_count : int
-  ; removed_tool_result_count : int
+  ; plan_accounting : plan_accounting
+  }
+
+and plan_accounting =
+  { expected_after_message_count : int
+  ; expected_after_tool_use_count : int
+  ; expected_after_tool_result_count : int
   }
 
 let unit_message_count = function
@@ -212,13 +215,6 @@ let tool_block_counts messages =
        count_blocks counts message.content)
     (0, 0)
     messages
-;;
-
-let selected_tool_block_counts units selected =
-  let units = Array.of_list units in
-  selected
-  |> List.concat_map (fun index -> messages_of_unit units.(index))
-  |> tool_block_counts
 ;;
 
 let terminal_rejection terminalizer cause =
@@ -318,11 +314,11 @@ let requested_messages_with_plan
          let dropped_indices =
            Keeper_compaction_llm_summarizer.dropped_indices plan
          in
-         let normalized_indices =
-           Keeper_compaction_llm_summarizer.normalized_indices plan
+         let messages =
+           Keeper_compaction_llm_summarizer.apply plan @ protected_suffix
          in
-         let removed_tool_use_count, removed_tool_result_count =
-           selected_tool_block_counts units (summarized_indices @ dropped_indices)
+         let expected_after_tool_use_count, expected_after_tool_result_count =
+           tool_block_counts messages
          in
             if not (Keeper_compaction_llm_summarizer.has_changes plan)
             then
@@ -332,23 +328,22 @@ let requested_messages_with_plan
                    Keeper_event_queue_state.Domain_invalid_output)
             else
               Ok
-                { messages =
-                    Keeper_compaction_llm_summarizer.apply plan @ protected_suffix
+                { messages
                 ; exact_execution_evidence
                 ; post_success_terminalizer
                 ; summarized_message_count =
                     selected_message_count
                       units
                       summarized_indices
-                ; summarized_unit_count = List.length summarized_indices
                 ; dropped_message_count =
                     selected_message_count
                       units
                       dropped_indices
-                ; normalized_message_count =
-                    selected_message_count units normalized_indices
-                ; removed_tool_use_count
-                ; removed_tool_result_count
+                ; plan_accounting =
+                    { expected_after_message_count = List.length messages
+                    ; expected_after_tool_use_count
+                    ; expected_after_tool_result_count
+                    }
                 }))
 ;;
 
@@ -471,40 +466,60 @@ let compact_for_request_typed_with
       let after_tool_use_count, after_tool_result_count =
         tool_block_counts (messages_of_context compacted_ctx)
       in
-      match
+      let evidence_result =
         let exact = requested.exact_execution_evidence in
-        Keeper_compaction_evidence.create
-          ~slot_id:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_slot_id exact)
-          ~call_id:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_call_id exact)
-          ~target_identity_fingerprint:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_target_identity_fingerprint exact)
-          ~catalog_generation_fingerprint:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_catalog_generation_fingerprint exact)
-          ~catalog_evidence_sha256:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_catalog_evidence_sha256 exact)
-          ~plan_fingerprint:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_plan_fingerprint exact)
-          ~receipt_plan_fingerprint:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_receipt_plan_fingerprint exact)
-          ~receipt_request_body_sha256:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_receipt_request_body_sha256 exact)
-          ~before_checkpoint_bytes:before_bytes
-          ~after_checkpoint_bytes:after_bytes
-          ~before_message_count:before_messages
-          ~after_message_count:after_messages
-          ~summarized_message_count:requested.summarized_message_count
-          ~summarized_unit_count:requested.summarized_unit_count
-          ~dropped_message_count:requested.dropped_message_count
-          ~normalized_message_count:requested.normalized_message_count
-          ~before_tool_use_count
-          ~after_tool_use_count
-          ~before_tool_result_count
-          ~after_tool_result_count
-          ~removed_tool_use_count:requested.removed_tool_use_count
-          ~removed_tool_result_count:requested.removed_tool_result_count
-      with
+        let accounting = requested.plan_accounting in
+        if after_messages <> accounting.expected_after_message_count
+        then
+          Error
+            (Keeper_compaction_evidence.Invalid_transition
+               ( Keeper_compaction_evidence.Messages
+               , accounting.expected_after_message_count
+               , after_messages ))
+        else if after_tool_use_count <> accounting.expected_after_tool_use_count
+        then
+          Error
+            (Keeper_compaction_evidence.Invalid_transition
+               ( Keeper_compaction_evidence.Tool_uses
+               , accounting.expected_after_tool_use_count
+               , after_tool_use_count ))
+        else if after_tool_result_count <> accounting.expected_after_tool_result_count
+        then
+          Error
+            (Keeper_compaction_evidence.Invalid_transition
+               ( Keeper_compaction_evidence.Tool_results
+               , accounting.expected_after_tool_result_count
+               , after_tool_result_count ))
+        else
+          Keeper_compaction_evidence.create
+            ~slot_id:
+              (Keeper_compaction_llm_summarizer.exact_execution_evidence_slot_id exact)
+            ~call_id:
+              (Keeper_compaction_llm_summarizer.exact_execution_evidence_call_id exact)
+            ~target_identity_fingerprint:
+              (Keeper_compaction_llm_summarizer.exact_execution_evidence_target_identity_fingerprint exact)
+            ~catalog_generation_fingerprint:
+              (Keeper_compaction_llm_summarizer.exact_execution_evidence_catalog_generation_fingerprint exact)
+            ~catalog_evidence_sha256:
+              (Keeper_compaction_llm_summarizer.exact_execution_evidence_catalog_evidence_sha256 exact)
+            ~plan_fingerprint:
+              (Keeper_compaction_llm_summarizer.exact_execution_evidence_plan_fingerprint exact)
+            ~receipt_plan_fingerprint:
+              (Keeper_compaction_llm_summarizer.exact_execution_evidence_receipt_plan_fingerprint exact)
+            ~receipt_request_body_sha256:
+              (Keeper_compaction_llm_summarizer.exact_execution_evidence_receipt_request_body_sha256 exact)
+            ~before_checkpoint_bytes:before_bytes
+            ~after_checkpoint_bytes:after_bytes
+            ~before_message_count:before_messages
+            ~after_message_count:after_messages
+            ~summarized_message_count:requested.summarized_message_count
+            ~dropped_message_count:requested.dropped_message_count
+            ~before_tool_use_count
+            ~after_tool_use_count
+            ~before_tool_result_count
+            ~after_tool_result_count
+      in
+      match evidence_result with
       | Error error ->
         (match
            Keeper_compaction_llm_summarizer.terminalize_post_success
@@ -569,6 +584,7 @@ let compact_for_request_typed
 module For_testing = struct
   let compact_for_request_typed_with_accounting
         ~plan_for_units
+        ?expected_after_message_count_override
         ~summarized_message_count_override
         ~meta
         ~trigger
@@ -577,7 +593,16 @@ module For_testing = struct
     let requested_messages messages =
       requested_messages_with_plan ~plan_for_units messages
       |> Result.map (fun requested ->
-        { requested with summarized_message_count = summarized_message_count_override })
+        let plan_accounting =
+          match expected_after_message_count_override with
+          | None -> requested.plan_accounting
+          | Some expected_after_message_count ->
+            { requested.plan_accounting with expected_after_message_count }
+        in
+        { requested with
+          summarized_message_count = summarized_message_count_override
+        ; plan_accounting
+        })
     in
     compact_for_request_typed_with ~requested_messages ~meta ~trigger ctx
   ;;

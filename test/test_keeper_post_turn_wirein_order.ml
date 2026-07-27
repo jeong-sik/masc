@@ -1043,7 +1043,8 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
       let preparation =
         Compact_policy.For_testing.compact_for_request_typed_with_accounting
           ~plan_for_units
-          ~summarized_message_count_override:(-1)
+          ~expected_after_message_count_override:0
+          ~summarized_message_count_override:1
           ~meta
           ~trigger:Compaction_trigger.Manual
           context
@@ -1054,12 +1055,14 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
        | Compact_policy.Rejected
            ( Manual
            , Invalid_structural_evidence
-               ( Keeper_compaction_evidence.Invalid_field
-                   (Keeper_compaction_evidence.Summarized_message_count, Negative_integer)
+               ( Keeper_compaction_evidence.Invalid_transition
+                   (Keeper_compaction_evidence.Messages, 0, observed_after_message_count)
                , { cause = Keeper_event_queue_state.Invalid_structural_evidence
                  ; slot_id
                  ; call_id
                  } ) ) ->
+         check bool "observed count is not the injected expectation" true
+           (observed_after_message_count > 0);
          check bool "invalid evidence terminal retains slot" true
            (String.trim slot_id <> "");
          check bool "invalid evidence terminal retains call" true
@@ -1337,7 +1340,7 @@ let () =
         `Quick test_post_install_domain_valid_exception_resolves_waiters;
       test_case "post-install cancellation returns committed failure"
         `Quick test_post_install_cancellation_returns_committed_failure;
-      test_case "invalid structural evidence is post-dispatch terminal"
+      test_case "ephemeral plan accounting mismatch is post-dispatch terminal"
         `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
       test_case "non-reducing output is quarantined"
         `Quick test_post_dispatch_non_reducing_output_is_quarantined;

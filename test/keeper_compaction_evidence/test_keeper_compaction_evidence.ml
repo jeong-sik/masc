@@ -13,15 +13,11 @@ let evidence : Keeper_compaction_evidence.t =
     ~before_message_count:12
     ~after_message_count:11
     ~summarized_message_count:6
-    ~summarized_unit_count:6
     ~dropped_message_count:1
-    ~normalized_message_count:0
     ~before_tool_use_count:3
     ~after_tool_use_count:3
     ~before_tool_result_count:3
     ~after_tool_result_count:3
-    ~removed_tool_use_count:0
-    ~removed_tool_result_count:0
   |> Result.get_ok
 ;;
 
@@ -70,15 +66,11 @@ let test_projection_and_roundtrip () =
       ; "before_message_count", `Int 12
       ; "after_message_count", `Int 11
       ; "summarized_message_count", `Int 6
-      ; "summarized_unit_count", `Int 6
       ; "dropped_message_count", `Int 1
-      ; "normalized_message_count", `Int 0
       ; "before_tool_use_count", `Int 3
       ; "after_tool_use_count", `Int 3
       ; "before_tool_result_count", `Int 3
       ; "after_tool_result_count", `Int 3
-      ; "removed_tool_use_count", `Int 0
-      ; "removed_tool_result_count", `Int 0
       ]
   in
   Alcotest.check
@@ -106,7 +98,6 @@ let test_rejections () =
   let impossible_accounting =
     replace "summarized_message_count" (`Int 999) canonical
   in
-  let inexact_after = replace "after_message_count" (`Int 10) canonical in
   List.iter
     (fun (label, expected, json) -> check label expected json)
     [ ( "negative"
@@ -163,9 +154,7 @@ let test_rejections () =
           ; before_tool_result_count = 3
           ; after_tool_result_count = 3
           }
-      , canonical
-        |> replace "after_tool_use_count" (`Int 2)
-        |> replace "removed_tool_use_count" (`Int 1) )
+      , replace "after_tool_use_count" (`Int 2) canonical )
     ; ( "tool result count increase"
       , Invalid_transition (Tool_results, 3, 4)
       , replace "after_tool_result_count" (`Int 4) canonical )
@@ -176,49 +165,15 @@ let test_rejections () =
           ; before_tool_result_count = 3
           ; after_tool_result_count = 2
           }
-      , canonical
-        |> replace "after_tool_result_count" (`Int 2)
-        |> replace "removed_tool_result_count" (`Int 1) )
+      , replace "after_tool_result_count" (`Int 2) canonical )
     ; ( "impossible message accounting"
       , Invalid_message_accounting
           { before_message_count = 12
           ; after_message_count = 11
           ; summarized_message_count = 999
-          ; summarized_unit_count = 6
           ; dropped_message_count = 1
-          ; normalized_message_count = 0
           }
       , impossible_accounting )
-    ; ( "inexact after count"
-      , Invalid_message_accounting
-          { before_message_count = 12
-          ; after_message_count = 10
-          ; summarized_message_count = 6
-          ; summarized_unit_count = 6
-          ; dropped_message_count = 1
-          ; normalized_message_count = 0
-          }
-      , inexact_after )
-    ; ( "summarized units cannot disappear"
-      , Invalid_message_accounting
-          { before_message_count = 12
-          ; after_message_count = 11
-          ; summarized_message_count = 6
-          ; summarized_unit_count = 0
-          ; dropped_message_count = 1
-          ; normalized_message_count = 0
-          }
-      , replace "summarized_unit_count" (`Int 0) canonical )
-    ; ( "normalization count stays within untouched sources"
-      , Invalid_message_accounting
-          { before_message_count = 12
-          ; after_message_count = 11
-          ; summarized_message_count = 6
-          ; summarized_unit_count = 6
-          ; dropped_message_count = 1
-          ; normalized_message_count = 6
-          }
-      , replace "normalized_message_count" (`Int 6) canonical )
     ]
 ;;
 
@@ -227,12 +182,9 @@ let test_atomic_cycle_and_normalization_accounting () =
         ~before_message_count
         ~after_message_count
         ~summarized_message_count
-        ~summarized_unit_count
         ~dropped_message_count
-        ~normalized_message_count
         ~before_tool_count
         ~after_tool_count
-        ~removed_tool_count
     =
     Keeper_compaction_evidence.create
       ~slot_id:"compaction-slot"
@@ -248,15 +200,11 @@ let test_atomic_cycle_and_normalization_accounting () =
       ~before_message_count
       ~after_message_count
       ~summarized_message_count
-      ~summarized_unit_count
       ~dropped_message_count
-      ~normalized_message_count
       ~before_tool_use_count:before_tool_count
       ~after_tool_use_count:after_tool_count
       ~before_tool_result_count:before_tool_count
       ~after_tool_result_count:after_tool_count
-      ~removed_tool_use_count:removed_tool_count
-      ~removed_tool_result_count:removed_tool_count
   in
   List.iter
     (fun (label, result) ->
@@ -272,34 +220,25 @@ let test_atomic_cycle_and_normalization_accounting () =
           ~before_message_count:12
           ~after_message_count:12
           ~summarized_message_count:0
-          ~summarized_unit_count:0
           ~dropped_message_count:0
-          ~normalized_message_count:1
           ~before_tool_count:3
-          ~after_tool_count:3
-          ~removed_tool_count:0 )
+          ~after_tool_count:3 )
     ; ( "atomic cycle summary"
       , create
           ~before_message_count:12
           ~after_message_count:10
           ~summarized_message_count:3
-          ~summarized_unit_count:1
           ~dropped_message_count:0
-          ~normalized_message_count:0
           ~before_tool_count:3
-          ~after_tool_count:2
-          ~removed_tool_count:1 )
+          ~after_tool_count:2 )
     ; ( "atomic cycle drop"
       , create
           ~before_message_count:12
           ~after_message_count:9
           ~summarized_message_count:0
-          ~summarized_unit_count:0
           ~dropped_message_count:3
-          ~normalized_message_count:0
           ~before_tool_count:3
-          ~after_tool_count:2
-          ~removed_tool_count:1 )
+          ~after_tool_count:2 )
     ]
 ;;
 

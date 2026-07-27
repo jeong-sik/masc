@@ -3890,6 +3890,28 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
         ~compaction_source:"provider_overflow"
         ()
     in
+    let exact_evidence =
+      `Assoc
+        [ "slot_id", `String "compaction-slot"
+        ; "call_id", `String "call-dashboard"
+        ; "target_identity_fingerprint", `String "target-identity"
+        ; "catalog_generation_fingerprint", `String "catalog-generation"
+        ; "catalog_evidence_sha256", `String "catalog-evidence"
+        ; "plan_fingerprint", `String "plan-fingerprint"
+        ; "receipt_plan_fingerprint", `String "plan-fingerprint"
+        ; "receipt_request_body_sha256", `String "request-body"
+        ; "before_checkpoint_bytes", `Int 4096
+        ; "after_checkpoint_bytes", `Int 1024
+        ; "before_message_count", `Int 8
+        ; "after_message_count", `Int 3
+        ; "summarized_message_count", `Int 4
+        ; "dropped_message_count", `Int 1
+        ; "before_tool_use_count", `Int 2
+        ; "after_tool_use_count", `Int 1
+        ; "before_tool_result_count", `Int 2
+        ; "after_tool_result_count", `Int 1
+        ]
+    in
     let decision =
       Runtime_manifest.with_clock_refs
         ~clock_refs
@@ -3899,19 +3921,7 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
               [ "trigger", `String "provider_overflow"
               ; "before_tokens", `Int 210_000
               ; "after_tokens", `Int 120_000
-              ; ( "exact_evidence"
-                , `Assoc
-                    [ "before_checkpoint_bytes", `Int 4096
-                    ; "after_checkpoint_bytes", `Int 1024
-                    ; "before_message_count", `Int 8
-                    ; "after_message_count", `Int 3
-                    ; "summarized_message_count", `Int 4
-                    ; "dropped_message_count", `Int 1
-                    ; "before_tool_use_count", `Int 2
-                    ; "after_tool_use_count", `Int 1
-                    ; "before_tool_result_count", `Int 2
-                    ; "after_tool_result_count", `Int 1
-                    ] )
+              ; "exact_evidence", exact_evidence
               ]))
     in
     let row =
@@ -3995,6 +4005,11 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
     Alcotest.(check int) "before" 210_000 (json_int_field "item" item "before_tokens");
     Alcotest.(check int) "after" 120_000 (json_int_field "item" item "after_tokens");
     Alcotest.(check int) "saved" 90_000 (json_int_field "item" item "saved_tokens");
+    Alcotest.check
+      (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal)
+      "canonical exact evidence"
+      exact_evidence
+      (List.assoc "exact_evidence" item);
     Alcotest.(check string)
       "compaction id"
       "cmp-42"

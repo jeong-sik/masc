@@ -12,15 +12,11 @@ type t =
   ; before_message_count : int
   ; after_message_count : int
   ; summarized_message_count : int
-  ; summarized_unit_count : int
   ; dropped_message_count : int
-  ; normalized_message_count : int
   ; before_tool_use_count : int
   ; after_tool_use_count : int
   ; before_tool_result_count : int
   ; after_tool_result_count : int
-  ; removed_tool_use_count : int
-  ; removed_tool_result_count : int
   }
 
 type field =
@@ -37,15 +33,11 @@ type field =
   | Before_message_count
   | After_message_count
   | Summarized_message_count
-  | Summarized_unit_count
   | Dropped_message_count
-  | Normalized_message_count
   | Before_tool_use_count
   | After_tool_use_count
   | Before_tool_result_count
   | After_tool_result_count
-  | Removed_tool_use_count
-  | Removed_tool_result_count
 
 type field_error =
   | Missing
@@ -74,9 +66,7 @@ type decode_error =
       { before_message_count : int
       ; after_message_count : int
       ; summarized_message_count : int
-      ; summarized_unit_count : int
       ; dropped_message_count : int
-      ; normalized_message_count : int
       }
   | Invalid_tool_protocol_accounting of
       { before_tool_use_count : int
@@ -100,15 +90,11 @@ let field_name = function
   | Before_message_count -> "before_message_count"
   | After_message_count -> "after_message_count"
   | Summarized_message_count -> "summarized_message_count"
-  | Summarized_unit_count -> "summarized_unit_count"
   | Dropped_message_count -> "dropped_message_count"
-  | Normalized_message_count -> "normalized_message_count"
   | Before_tool_use_count -> "before_tool_use_count"
   | After_tool_use_count -> "after_tool_use_count"
   | Before_tool_result_count -> "before_tool_result_count"
   | After_tool_result_count -> "after_tool_result_count"
-  | Removed_tool_use_count -> "removed_tool_use_count"
-  | Removed_tool_result_count -> "removed_tool_result_count"
 ;;
 
 let exact_fields =
@@ -129,15 +115,11 @@ let integer_fields =
   ; Before_message_count
   ; After_message_count
   ; Summarized_message_count
-  ; Summarized_unit_count
   ; Dropped_message_count
-  ; Normalized_message_count
   ; Before_tool_use_count
   ; After_tool_use_count
   ; Before_tool_result_count
   ; After_tool_result_count
-  ; Removed_tool_use_count
-  ; Removed_tool_result_count
   ]
 ;;
 
@@ -187,19 +169,14 @@ let decode_error_to_string = function
       { before_message_count
       ; after_message_count
       ; summarized_message_count
-      ; summarized_unit_count
       ; dropped_message_count
-      ; normalized_message_count
       } ->
     Printf.sprintf
-      "invalid_message_accounting:before=%d:after=%d:summarized=%d:\
-       summarized_units=%d:dropped=%d:normalized=%d"
+      "invalid_message_accounting:before=%d:after=%d:summarized=%d:dropped=%d"
       before_message_count
       after_message_count
       summarized_message_count
-      summarized_unit_count
       dropped_message_count
-      normalized_message_count
   | Invalid_tool_protocol_accounting
       { before_tool_use_count
       ; after_tool_use_count
@@ -217,27 +194,17 @@ let decode_error_to_string = function
 
 let ( let* ) = Result.bind
 
-let message_accounting_is_exact
+let message_accounting_is_structurally_possible
       ~before_message_count
       ~after_message_count
       ~summarized_message_count
-      ~summarized_unit_count
       ~dropped_message_count
-      ~normalized_message_count
   =
+  let removed_message_count = before_message_count - after_message_count in
   summarized_message_count <= before_message_count
-  && summarized_unit_count <= summarized_message_count
-  && Bool.equal
-       (summarized_message_count = 0)
-       (summarized_unit_count = 0)
   && dropped_message_count <= before_message_count - summarized_message_count
-  && normalized_message_count
-     <= before_message_count - summarized_message_count - dropped_message_count
-  && after_message_count
-     = before_message_count
-       - dropped_message_count
-       - summarized_message_count
-       + summarized_unit_count
+  && removed_message_count >= dropped_message_count
+  && removed_message_count <= dropped_message_count + summarized_message_count
 ;;
 
 let decode_nonblank_string fields field =
@@ -281,15 +248,11 @@ let create
       ~before_message_count
       ~after_message_count
       ~summarized_message_count
-      ~summarized_unit_count
       ~dropped_message_count
-      ~normalized_message_count
       ~before_tool_use_count
       ~after_tool_use_count
       ~before_tool_result_count
       ~after_tool_result_count
-      ~removed_tool_use_count
-      ~removed_tool_result_count
   =
   let values =
     [ Before_checkpoint_bytes, before_checkpoint_bytes
@@ -297,15 +260,11 @@ let create
     ; Before_message_count, before_message_count
     ; After_message_count, after_message_count
     ; Summarized_message_count, summarized_message_count
-    ; Summarized_unit_count, summarized_unit_count
     ; Dropped_message_count, dropped_message_count
-    ; Normalized_message_count, normalized_message_count
     ; Before_tool_use_count, before_tool_use_count
     ; After_tool_use_count, after_tool_use_count
     ; Before_tool_result_count, before_tool_result_count
     ; After_tool_result_count, after_tool_result_count
-    ; Removed_tool_use_count, removed_tool_use_count
-    ; Removed_tool_result_count, removed_tool_result_count
     ]
   in
   match List.find_opt (fun (_, value) -> value < 0) values with
@@ -341,31 +300,19 @@ let create
          Error
            (Invalid_transition
               (Messages, before_message_count, after_message_count))
-       else if removed_tool_use_count > before_tool_use_count
-       then
-         Error
-           (Invalid_transition
-              (Tool_uses, before_tool_use_count, removed_tool_use_count))
-       else if removed_tool_result_count > before_tool_result_count
-       then
-         Error
-           (Invalid_transition
-              (Tool_results, before_tool_result_count, removed_tool_result_count))
-       else if
-         after_tool_use_count <> before_tool_use_count - removed_tool_use_count
+       else if after_tool_use_count > before_tool_use_count
        then
          Error
            (Invalid_transition
               (Tool_uses, before_tool_use_count, after_tool_use_count))
-       else if
-         after_tool_result_count
-         <> before_tool_result_count - removed_tool_result_count
+       else if after_tool_result_count > before_tool_result_count
        then
          Error
            (Invalid_transition
               (Tool_results, before_tool_result_count, after_tool_result_count))
        else if
-         removed_tool_use_count <> removed_tool_result_count
+         before_tool_use_count - after_tool_use_count
+         <> before_tool_result_count - after_tool_result_count
        then
          Error
            (Invalid_tool_protocol_accounting
@@ -375,28 +322,19 @@ let create
               ; after_tool_result_count
               })
        else if
-         summarized_unit_count = 0
-         && dropped_message_count = 0
-         && normalized_message_count = 0
-       then Error No_messages_compacted
-       else if
          not
-           (message_accounting_is_exact
+           (message_accounting_is_structurally_possible
               ~before_message_count
               ~after_message_count
               ~summarized_message_count
-              ~summarized_unit_count
-              ~dropped_message_count
-              ~normalized_message_count)
+              ~dropped_message_count)
        then
          Error
            (Invalid_message_accounting
               { before_message_count
               ; after_message_count
               ; summarized_message_count
-              ; summarized_unit_count
               ; dropped_message_count
-              ; normalized_message_count
               })
        else
          Ok
@@ -413,15 +351,11 @@ let create
            ; before_message_count
            ; after_message_count
            ; summarized_message_count
-           ; summarized_unit_count
            ; dropped_message_count
-           ; normalized_message_count
            ; before_tool_use_count
            ; after_tool_use_count
            ; before_tool_result_count
            ; after_tool_result_count
-           ; removed_tool_use_count
-           ; removed_tool_result_count
            })
 ;;
 
@@ -451,15 +385,11 @@ let of_json = function
     let* before_message_count = integer Before_message_count in
     let* after_message_count = integer After_message_count in
     let* summarized_message_count = integer Summarized_message_count in
-    let* summarized_unit_count = integer Summarized_unit_count in
     let* dropped_message_count = integer Dropped_message_count in
-    let* normalized_message_count = integer Normalized_message_count in
     let* before_tool_use_count = integer Before_tool_use_count in
     let* after_tool_use_count = integer After_tool_use_count in
     let* before_tool_result_count = integer Before_tool_result_count in
     let* after_tool_result_count = integer After_tool_result_count in
-    let* removed_tool_use_count = integer Removed_tool_use_count in
-    let* removed_tool_result_count = integer Removed_tool_result_count in
     create
       ~slot_id
       ~call_id
@@ -474,15 +404,11 @@ let of_json = function
       ~before_message_count
       ~after_message_count
       ~summarized_message_count
-      ~summarized_unit_count
       ~dropped_message_count
-      ~normalized_message_count
       ~before_tool_use_count
       ~after_tool_use_count
       ~before_tool_result_count
       ~after_tool_result_count
-      ~removed_tool_use_count
-      ~removed_tool_result_count
   | _ -> Error Expected_object
 ;;
 
@@ -501,14 +427,10 @@ let to_json evidence =
     ; "before_message_count", `Int evidence.before_message_count
     ; "after_message_count", `Int evidence.after_message_count
     ; "summarized_message_count", `Int evidence.summarized_message_count
-    ; "summarized_unit_count", `Int evidence.summarized_unit_count
     ; "dropped_message_count", `Int evidence.dropped_message_count
-    ; "normalized_message_count", `Int evidence.normalized_message_count
     ; "before_tool_use_count", `Int evidence.before_tool_use_count
     ; "after_tool_use_count", `Int evidence.after_tool_use_count
     ; "before_tool_result_count", `Int evidence.before_tool_result_count
     ; "after_tool_result_count", `Int evidence.after_tool_result_count
-    ; "removed_tool_use_count", `Int evidence.removed_tool_use_count
-    ; "removed_tool_result_count", `Int evidence.removed_tool_result_count
     ]
 ;;

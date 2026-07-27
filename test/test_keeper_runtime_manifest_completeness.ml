@@ -121,9 +121,8 @@ let test_is_complete_turn () =
   Alcotest.(check bool) "finished+receipt+checkpoint is complete" true
     (M.is_complete_turn complete)
 
-let test_compaction_evidence_public_projection () =
-  let evidence =
-    Keeper_compaction_evidence.create
+let canonical_compaction_evidence () =
+  Keeper_compaction_evidence.create
       ~slot_id:"compaction-slot"
       ~call_id:"call-01"
       ~target_identity_fingerprint:"target-identity"
@@ -137,18 +136,17 @@ let test_compaction_evidence_public_projection () =
       ~before_message_count:12
       ~after_message_count:4
       ~summarized_message_count:4
-      ~summarized_unit_count:4
       ~dropped_message_count:8
-      ~normalized_message_count:0
       ~before_tool_use_count:3
       ~after_tool_use_count:3
       ~before_tool_result_count:3
       ~after_tool_result_count:3
-      ~removed_tool_use_count:0
-      ~removed_tool_result_count:0
     |> Result.get_ok
     |> Keeper_compaction_evidence.to_json
-  in
+;;
+
+let test_compaction_evidence_public_projection () =
+  let evidence = canonical_compaction_evidence () in
   let decision =
     let evidence_with_cross_scope_field =
       match evidence with
@@ -183,6 +181,53 @@ let test_compaction_evidence_public_projection () =
     evidence
     (json |> member "decision" |> member "exact_evidence")
 
+let test_current_compaction_evidence_read_boundary () =
+  let evidence = canonical_compaction_evidence () in
+  let row decision =
+    manifest ~event:M.Context_compacted ~decision ~links:(links ())
+    |> M.to_json
+  in
+  let canonical_row =
+    row (`Assoc [ Keeper_compaction_evidence.exact_evidence_key, evidence ])
+  in
+  (match M.of_json canonical_row with
+   | Error detail -> Alcotest.failf "canonical current evidence rejected: %s" detail
+   | Ok restored ->
+     let actual =
+       Yojson.Safe.Util.member
+         Keeper_compaction_evidence.exact_evidence_key
+         restored.decision
+     in
+     Alcotest.check
+       (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal)
+       "Dashboard source is canonical evidence"
+       evidence
+       actual);
+  let unknown_evidence =
+    match evidence with
+    | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
+    | _ -> Alcotest.fail "canonical evidence must be an object"
+  in
+  List.iter
+    (fun (label, json) ->
+      match M.of_json json with
+      | Ok _ -> Alcotest.failf "%s current evidence was accepted" label
+      | Error _ -> ())
+    [ "missing", row (`Assoc [])
+    ; ( "wrong type"
+      , row
+          (`Assoc
+             [ Keeper_compaction_evidence.exact_evidence_key
+             , `String "not-an-object"
+             ]) )
+    ; ( "unknown field"
+      , row
+          (`Assoc
+             [ Keeper_compaction_evidence.exact_evidence_key
+             , unknown_evidence
+             ]) )
+    ]
+
 let () =
   Alcotest.run "keeper_runtime_manifest_completeness"
     [ ( "completeness"
@@ -197,5 +242,7 @@ let () =
             test_is_complete_turn
         ; Alcotest.test_case "compaction evidence public projection" `Quick
             test_compaction_evidence_public_projection
+        ; Alcotest.test_case "current evidence read boundary" `Quick
+            test_current_compaction_evidence_read_boundary
         ] )
     ]

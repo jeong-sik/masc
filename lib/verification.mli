@@ -28,7 +28,6 @@ val verdict_of_yojson : Yojson.Safe.t -> (verdict, string) result
 
 type request_status =
   | Pending
-  | Assigned of string
   | Completed of verdict
 
 type verification_request = {
@@ -76,15 +75,8 @@ val create_request :
   output:Yojson.Safe.t ->
   criteria:criterion list ->
   worker:string ->
-  ?verifier:string ->
   ?request_id:string ->
   unit ->
-  (verification_request, string) result
-
-val assign_verifier :
-  base_path:string ->
-  req_id:string ->
-  verifier:string ->
   (verification_request, string) result
 
 val submit_verdict :
@@ -98,11 +90,6 @@ val auto_verify :
   base_path:string ->
   req_id:string ->
   (verification_request, string) result
-
-val pending_for_agent :
-  base_path:string ->
-  agent:string ->
-  verification_request list
 
 (** {1 Attribution envelope (Layer 1)}
 
@@ -140,4 +127,4 @@ val evidence_of_request : verification_request -> Yojson.Safe.t
 val attribution_of_request : verification_request -> Attribution.t option
 (** Returns [Some attribution] when the request carries a [Completed]
     verdict (origin derived from criteria, standard evidence shape).
-    [None] for [Pending] / [Assigned] — there is no verdict yet. *)
+    [None] for [Pending] — there is no verdict yet. *)

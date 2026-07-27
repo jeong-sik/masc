@@ -322,19 +322,21 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
             ])
       ~criteria:[ V.Custom "inspect artifact" ]
       ~worker:"keeper-executor-agent"
-      ~verifier:"keeper-verifier-agent"
       ()
   with
-  | Ok request ->
-    (match
-       V.assign_verifier
-         ~base_path
-         ~req_id:request.id
-         ~verifier:"keeper-verifier-agent"
-     with
-     | Ok assigned -> assigned
-     | Error detail -> Alcotest.fail detail)
+  | Ok request -> request
   | Error detail -> Alcotest.fail detail
+
+let inspect_evidence ?(task_id = "task-001")
+    ?(task_worker = "keeper-executor-agent") ~base_path ~request_id
+    ~task_verifier ~viewer () =
+  VS.inspect_submitted_evidence
+    ~base_path
+    ~request_id
+    ~task_id
+    ~task_worker
+    ~task_verifier
+    ~viewer
 
 let test_submitted_evidence_inspection_is_assigned_and_contained () =
   with_eio_temp_dir (fun base_path ->
@@ -349,11 +351,12 @@ let test_submitted_evidence_inspection_is_assigned_and_contained () =
     let request_id = "vrf-evidence-inspection" in
     ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
     (match
-       VS.inspect_submitted_evidence
+       inspect_evidence
          ~base_path
          ~request_id
          ~task_verifier:(Some "keeper-verifier-agent")
          ~viewer:"keeper-verifier-agent"
+         ()
      with
      | VS.Evidence_available
          { items =
@@ -368,11 +371,12 @@ let test_submitted_evidence_inspection_is_assigned_and_contained () =
          content
      | _ -> Alcotest.fail "expected assigned verifier evidence projection");
     match
-      VS.inspect_submitted_evidence
+      inspect_evidence
         ~base_path
         ~request_id
         ~task_verifier:(Some "keeper-verifier-agent")
         ~viewer:"keeper-sangsu-agent"
+        ()
     with
     | VS.Evidence_metadata_only _ -> ()
     | _ -> Alcotest.fail "non-assigned keeper must receive metadata only")
@@ -390,11 +394,12 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
     let request_id = "vrf-cross-playground" in
     ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
     match
-      VS.inspect_submitted_evidence
+      inspect_evidence
         ~base_path
         ~request_id
         ~task_verifier:(Some "keeper-verifier-agent")
         ~viewer:"keeper-verifier-agent"
+        ()
     with
     | VS.Evidence_available
         { items =
@@ -421,11 +426,12 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
     let request_id = "vrf-bounded-evidence" in
     ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
     match
-      VS.inspect_submitted_evidence
+      inspect_evidence
         ~base_path
         ~request_id
         ~task_verifier:(Some "keeper-verifier-agent")
         ~viewer:"keeper-verifier-agent"
+        ()
     with
     | VS.Evidence_available
         { items =
@@ -455,11 +461,12 @@ let test_submitted_evidence_rejects_malformed_utf8 () =
     let request_id = "vrf-malformed-evidence" in
     ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
     match
-      VS.inspect_submitted_evidence
+      inspect_evidence
         ~base_path
         ~request_id
         ~task_verifier:(Some "keeper-verifier-agent")
         ~viewer:"keeper-verifier-agent"
+        ()
     with
     | VS.Evidence_available
         { items =
@@ -490,11 +497,12 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
          ~request_id:symlink_request_id
          ~artifact_path:symlink_path);
     (match
-       VS.inspect_submitted_evidence
+       inspect_evidence
          ~base_path
          ~request_id:symlink_request_id
          ~task_verifier:(Some "keeper-verifier-agent")
          ~viewer:"keeper-verifier-agent"
+         ()
      with
      | VS.Evidence_available
          { items =
@@ -514,11 +522,12 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
          ~request_id:fifo_request_id
          ~artifact_path:fifo_path);
     match
-      VS.inspect_submitted_evidence
+      inspect_evidence
         ~base_path
         ~request_id:fifo_request_id
         ~task_verifier:(Some "keeper-verifier-agent")
         ~viewer:"keeper-verifier-agent"
+        ()
     with
     | VS.Evidence_available
         { items =
@@ -538,7 +547,7 @@ let test_changed_during_read_maps_to_typed_unreadable_reason () =
        (Fs_compat.Filesystem_identity_changed { path = "artifact.txt" })
      |> VS.evidence_read_failure_to_string)
 
-let test_submitted_evidence_requires_task_and_request_assignment () =
+let test_submitted_evidence_requires_exact_task_assignment_identity () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
       Filename.concat
@@ -562,7 +571,6 @@ let test_submitted_evidence_requires_task_and_request_assignment () =
                 ])
           ~criteria:[ V.Custom "inspect artifact" ]
           ~worker:"keeper-executor-agent"
-          ~verifier:"keeper-verifier-agent"
           ()
       with
       | Ok request -> request
@@ -572,37 +580,50 @@ let test_submitted_evidence_requires_task_and_request_assignment () =
       | VS.Evidence_metadata_only _ -> ()
       | _ -> Alcotest.fail label
     in
-    check_metadata_only
-      "Pending request must not expose bytes"
-      (VS.inspect_submitted_evidence
+    (match
+       inspect_evidence
          ~base_path
          ~request_id:pending.id
          ~task_verifier:(Some "keeper-verifier-agent")
-         ~viewer:"keeper-verifier-agent");
-    let assigned =
-      match
-        V.assign_verifier
-          ~base_path
-          ~req_id:pending.id
-          ~verifier:"keeper-verifier-agent"
-      with
-      | Ok request -> request
-      | Error detail -> Alcotest.fail detail
-    in
+         ~viewer:"keeper-verifier-agent"
+         ()
+     with
+     | VS.Evidence_available _ -> ()
+     | _ -> Alcotest.fail "Pending evidence must be available to the Task phase winner");
+    check_metadata_only
+      "task id mismatch must not expose bytes"
+      (inspect_evidence
+         ~task_id:"task-other"
+         ~base_path
+         ~request_id:pending.id
+         ~task_verifier:(Some "keeper-verifier-agent")
+         ~viewer:"keeper-verifier-agent"
+         ());
+    check_metadata_only
+      "producer mismatch must not expose bytes"
+      (inspect_evidence
+         ~task_worker:"keeper-other-agent"
+         ~base_path
+         ~request_id:pending.id
+         ~task_verifier:(Some "keeper-verifier-agent")
+         ~viewer:"keeper-verifier-agent"
+         ());
     check_metadata_only
       "task phase verifier mismatch must not expose bytes"
-      (VS.inspect_submitted_evidence
+      (inspect_evidence
          ~base_path
-         ~request_id:assigned.id
+         ~request_id:pending.id
          ~task_verifier:(Some "keeper-sangsu-agent")
-         ~viewer:"keeper-verifier-agent");
+         ~viewer:"keeper-verifier-agent"
+         ());
     check_metadata_only
       "unassigned task phase must not expose bytes"
-      (VS.inspect_submitted_evidence
+      (inspect_evidence
          ~base_path
-         ~request_id:assigned.id
+         ~request_id:pending.id
          ~task_verifier:None
-         ~viewer:"keeper-verifier-agent"))
+         ~viewer:"keeper-verifier-agent"
+         ()))
 
 let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
   with_eio_temp_dir (fun base_path ->
@@ -634,9 +655,7 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
                  { assignee = "keeper-executor-agent"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
-                 ; phase =
-                     Masc_domain.Verifier_assigned
-                       { verifier = "keeper-verifier-agent" }
+                 ; phase = Masc_domain.Awaiting_verifier
                  }
            })
         backlog.tasks
@@ -644,6 +663,44 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
     W.write_backlog
       config
       { backlog with tasks; version = backlog.version + 1 };
+    let unassigned =
+      W.list_tasks config ~verification_viewer:"keeper-verifier-agent"
+    in
+    Alcotest.(check bool)
+      "unassigned row prescribes claim"
+      true
+      (contains_substring unassigned
+         "ACTION: keeper_task_claim task_id=task-001");
+    Alcotest.(check bool)
+      "unassigned row forbids producer-path read"
+      true
+      (contains_substring unassigned "do not Read producer paths");
+    (match
+       W.claim_task_r config ~agent_name:"keeper-executor-agent" ~task_id:"task-001" ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "producer must not claim its own verification");
+    (match
+       W.claim_task_r config ~agent_name:"keeper-verifier-agent" ~task_id:"task-001" ()
+     with
+     | Ok _ -> ()
+     | Error err ->
+       Alcotest.fail
+         ("verifier claim failed: " ^ Masc_domain.masc_error_to_string err));
+    (match
+       W.claim_task_r config ~agent_name:"keeper-sangsu-agent" ~task_id:"task-001" ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "second verifier stole the assignment");
+    let request =
+      match V.load_request base_path request_id with
+      | Ok request -> request
+      | Error detail -> Alcotest.fail detail
+    in
+    Alcotest.(check bool)
+      "request remains pending after Task-phase claim"
+      true
+      (match request.status with V.Pending -> true | V.Completed _ -> false);
     let assigned =
       W.list_tasks
         config
@@ -666,33 +723,15 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
       "other keeper keeps request metadata"
       true
       (contains_substring other request_id);
+    Alcotest.(check bool)
+      "other keeper is told to skip"
+      true
+      (contains_substring other "ACTION: skip");
     let external_projection = W.list_tasks config in
     Alcotest.(check bool)
       "external task list receives no content"
       false
       (contains_substring external_projection "full-cycle-evidence"))
-
-let test_assign_verifier () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:`Null ~criteria:[] ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-        match V.assign_verifier ~base_path ~req_id:req.id ~verifier:"codex" with
-        | Error e -> Alcotest.fail e
-        | Ok updated ->
-            Alcotest.(check bool) "assigned" true
-              (match updated.status with V.Assigned "codex" -> true | _ -> false))
-
-let test_assign_verifier_cross_agent_fail () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:`Null ~criteria:[] ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-        match V.assign_verifier ~base_path ~req_id:req.id ~verifier:"claude" with
-        | Error _ -> ()
-        | Ok _ -> Alcotest.fail "cross-agent violation should fail")
 
 let test_submit_verdict () =
   with_temp_dir (fun base_path ->
@@ -711,7 +750,7 @@ let test_submit_verdict () =
             Alcotest.(check (option string)) "verifier recorded"
               (Some "codex") updated.verifier)
 
-let test_submit_verdict_overwrites_unassigned_verifier () =
+let test_submit_verdict_persists_verifier () =
   with_temp_dir (fun base_path ->
     match V.create_request ~base_path ~task_id:"t1"
         ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
@@ -724,6 +763,34 @@ let test_submit_verdict_overwrites_unassigned_verifier () =
         | Ok updated ->
             Alcotest.(check (option string)) "verifier persisted"
               (Some "operator:dashboard") updated.verifier)
+
+let test_submit_verdict_cannot_overwrite_terminal_receipt () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"t1"
+        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+      (match
+         V.submit_verdict ~base_path ~req_id:req.id ~verifier:"codex"
+           ~verdict:V.Pass
+       with
+       | Error e -> Alcotest.fail e
+       | Ok _ -> ());
+      (match
+         V.submit_verdict ~base_path ~req_id:req.id ~verifier:"gemini"
+           ~verdict:(V.Fail "overwrite")
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "terminal verification receipt was overwritten");
+      match V.load_request base_path req.id with
+      | Error e -> Alcotest.fail e
+      | Ok final ->
+        Alcotest.(check bool)
+          "first terminal verdict survives"
+          true
+          (match final.status, final.verifier with
+           | V.Completed V.Pass, Some "codex" -> true
+           | _ -> false))
 
 let test_auto_verify () =
   with_temp_dir (fun base_path ->
@@ -774,19 +841,6 @@ let test_generate_id_no_collisions () =
     seen := StringSet.add id !seen
   done;
   Alcotest.(check int) "all 10k ids unique" n (StringSet.cardinal !seen)
-
-let test_pending_for_agent () =
-  with_temp_dir (fun base_path ->
-    let _ = V.create_request ~base_path ~task_id:"t1"
-        ~output:`Null ~criteria:[] ~worker:"claude" () in
-    let _ = V.create_request ~base_path ~task_id:"t2"
-        ~output:`Null ~criteria:[] ~worker:"codex" ~verifier:"gemini" () in
-    (* codex should see t1 (not own work), not t2 (assigned to gemini) *)
-    let pending = V.pending_for_agent ~base_path ~agent:"codex" in
-    Alcotest.(check int) "codex sees 1 pending" 1 (List.length pending);
-    (* claude should not see t1 (own work) *)
-    let pending_claude = V.pending_for_agent ~base_path ~agent:"claude" in
-    Alcotest.(check int) "claude sees 0 (own work filtered)" 0 (List.length pending_claude))
 
 (* --- Attribution conversion tests --- *)
 
@@ -841,7 +895,7 @@ let test_attribution_of_request_derives_origin () =
     (* Build a request with a Custom criterion and a Completed Pass verdict. *)
     match V.create_request ~base_path ~task_id:"t2" ~output:`Null
             ~criteria:[ V.Contains "hello"; V.Custom "must be kind" ]
-            ~worker:"claude" ~verifier:"codex" () with
+            ~worker:"claude" () with
     | Error e -> Alcotest.fail ("create failed: " ^ e)
     | Ok req ->
       let completed = { req with status = V.Completed V.Pass } in
@@ -907,18 +961,17 @@ let () =
         test_submitted_evidence_rejects_symlink_escape_and_fifo;
       Alcotest.test_case "submitted evidence race remains typed" `Quick
         test_changed_during_read_maps_to_typed_unreadable_reason;
-      Alcotest.test_case "submitted evidence requires exact assignment" `Quick
-        test_submitted_evidence_requires_task_and_request_assignment;
+      Alcotest.test_case "submitted evidence requires exact assignment identity" `Quick
+        test_submitted_evidence_requires_exact_task_assignment_identity;
       Alcotest.test_case "keeper task projection assigned verifier only" `Quick
         test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier;
-      Alcotest.test_case "assign verifier" `Quick test_assign_verifier;
-      Alcotest.test_case "cross-agent assign fail" `Quick test_assign_verifier_cross_agent_fail;
       Alcotest.test_case "submit verdict" `Quick test_submit_verdict;
       Alcotest.test_case "submit verdict persists verifier" `Quick
-        test_submit_verdict_overwrites_unassigned_verifier;
+        test_submit_verdict_persists_verifier;
+      Alcotest.test_case "submit verdict terminal non-overwrite" `Quick
+        test_submit_verdict_cannot_overwrite_terminal_receipt;
       Alcotest.test_case "auto verify" `Quick test_auto_verify;
       Alcotest.test_case "auto verify custom fails" `Quick test_auto_verify_with_custom_fails;
-      Alcotest.test_case "pending for agent" `Quick test_pending_for_agent;
     ];
     "attribution", [
       Alcotest.test_case "origin=Det for rule-based criteria" `Quick

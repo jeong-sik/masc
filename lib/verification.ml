@@ -133,7 +133,6 @@ type verification_request = {
 
 and request_status =
   | Pending
-  | Assigned of string    (** Verifier agent name *)
   | Completed of verdict
 [@@deriving show]
 
@@ -141,8 +140,6 @@ and request_status =
 
 let request_status_to_yojson = function
   | Pending -> `Assoc [("status", `String "pending")]
-  | Assigned agent ->
-      `Assoc [("status", `String "assigned"); ("verifier", `String agent)]
   | Completed v ->
       let base = verdict_to_yojson v in
       (match base with
@@ -153,20 +150,6 @@ let request_status_of_yojson = function
   | `Assoc fields ->
       (match List.assoc_opt "status" fields with
        | Some (`String "pending") -> Ok Pending
-       | Some (`String "assigned") ->
-           (match List.assoc_opt "verifier" fields with
-            | Some (`String a) -> Ok (Assigned a)
-            | other ->
-                let got =
-                  match other with
-                  | Some j -> Printf.sprintf "got %s" (Json_util.excerpt j)
-                  | None -> "field missing"
-                in
-                Error
-                  (Printf.sprintf
-                     "assigned status requires 'verifier' string field \
-                      (%s)"
-                     got))
        | Some (`String "completed") ->
            let* v = verdict_of_yojson (`Assoc fields) in
            Ok (Completed v)
@@ -178,8 +161,7 @@ let request_status_of_yojson = function
            in
            Error
              (Printf.sprintf
-                "unknown 'status' (expected one of: pending | assigned \
-                 | completed; %s)"
+                "unknown 'status' (expected one of: pending | completed; %s)"
                 got))
   | other ->
       Error
@@ -267,7 +249,7 @@ let request_of_yojson = function
            (Json_util.excerpt other))
 
 let request_status_is_actionable = function
-  | Pending | Assigned _ -> true
+  | Pending -> true
   | Completed _ -> false
 
 let request_is_actionable (req : verification_request) =
@@ -523,7 +505,7 @@ let list_requests base_path =
 
 (** High-level API *)
 
-let create_request ~base_path ~task_id ~output ~criteria ~worker ?verifier ?request_id () =
+let create_request ~base_path ~task_id ~output ~criteria ~worker ?request_id () =
   let id = match request_id with Some rid -> rid | None -> generate_id () in
   let req = {
     id;
@@ -531,32 +513,28 @@ let create_request ~base_path ~task_id ~output ~criteria ~worker ?verifier ?requ
     output;
     criteria;
     worker;
-    verifier;
+    verifier = None;
     created_at = Time_compat.now ();
     status = Pending;
   } in
   let* _req_id = save_request base_path req in
   Ok req
 
-let assign_verifier ~base_path ~req_id ~verifier =
-  let* req = load_request base_path req_id in
-  let* () = validate_cross_agent ~worker:req.worker ~verifier in
-  let updated = { req with status = Assigned verifier; verifier = Some verifier } in
-  let* _req_id = save_request base_path updated in
-  Ok updated
-
 let submit_verdict ~base_path ~req_id ~verifier ~verdict =
   let* req = load_request base_path req_id in
-  let* () = validate_cross_agent ~worker:req.worker ~verifier in
-  (* Persist the verifier into the record, not just validate it.
-     Before this fix callers that skipped [assign_verifier] left
-     [req.verifier = None] forever, which surfaced as "approved
-     without approver" in the dashboard projection. *)
-  let updated =
-    { req with status = Completed verdict; verifier = Some verifier }
-  in
-  let* _req_id = save_request base_path updated in
-  Ok updated
+  match req.status with
+  | Completed _ ->
+    Error
+      (Printf.sprintf
+         "Verification %s is already completed; terminal verdict cannot be overwritten"
+         req_id)
+  | Pending ->
+    let* () = validate_cross_agent ~worker:req.worker ~verifier in
+    let updated =
+      { req with status = Completed verdict; verifier = Some verifier }
+    in
+    let* _req_id = save_request base_path updated in
+    Ok updated
 
 (* Marker verifier recorded when auto_verify transitions a request to
    Completed without a human/LLM judge. Keeps approved_by non-null in the
@@ -566,30 +544,29 @@ let auto_verifier_marker = "auto"
 
 let auto_verify ~base_path ~req_id =
   let* req = load_request base_path req_id in
-  let has_custom = List.exists (function Custom _ -> true | Schema_match _ | Contains _ | Not_contains _ -> false) req.criteria in
-  if has_custom then
-    Error "Cannot auto-verify: custom criteria require agent judgment"
-  else
-    let verdict = evaluate_all req.output req.criteria in
-    let verifier =
-      match req.verifier with
-      | Some _ as v -> v
-      | None -> Some auto_verifier_marker
+  match req.status with
+  | Completed _ -> Error "Verification request already has a terminal verdict"
+  | Pending ->
+    let has_custom =
+      List.exists
+        (function
+          | Custom _ -> true
+          | Schema_match _ | Contains _ | Not_contains _ -> false)
+        req.criteria
     in
-    let updated = { req with status = Completed verdict; verifier } in
-    let* _req_id = save_request base_path updated in
-    Ok updated
-
-let pending_for_agent ~base_path ~agent =
-  list_requests base_path
-  |> List.filter (fun req ->
-      match req.status with
-      | Pending ->
-          (match req.verifier with
-           | Some v -> String.equal v agent
-           | None -> not (String.equal req.worker agent))
-      | Assigned v -> String.equal v agent
-      | Completed _ -> false)
+    if has_custom then
+      Error "Cannot auto-verify: custom criteria require agent judgment"
+    else
+      let verdict = evaluate_all req.output req.criteria in
+      let updated =
+        {
+          req with
+          status = Completed verdict;
+          verifier = Some auto_verifier_marker;
+        }
+      in
+      let* _req_id = save_request base_path updated in
+      Ok updated
 
 (* --- Attribution envelope conversion (Layer 1) ---
    Verification is hybrid: Schema_match / Contains / Not_contains are Det
@@ -641,7 +618,7 @@ let evidence_of_request (req : verification_request) : Yojson.Safe.t =
 
 let attribution_of_request (req : verification_request) : Attribution.t option =
   match req.status with
-  | Pending | Assigned _ -> None
+  | Pending -> None
   | Completed verdict ->
     let origin = origin_of_criteria req.criteria in
     let evidence = evidence_of_request req in

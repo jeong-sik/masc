@@ -292,6 +292,7 @@ let claim_next_r
           | Workspace_task_lifecycle.Worker_claim _
           | Workspace_task_lifecycle.Verifier_claim _ -> true
           | Workspace_task_lifecycle.Self_owned
+          | Workspace_task_lifecycle.Self_verification
           | Workspace_task_lifecycle.Held_by_other _
           | Workspace_task_lifecycle.Held_terminal _ -> false
         in
@@ -372,6 +373,7 @@ let claim_next_r
              | Workspace_task_lifecycle.Worker_claim s
              | Workspace_task_lifecycle.Verifier_claim s -> s
              | Workspace_task_lifecycle.Self_owned
+             | Workspace_task_lifecycle.Self_verification
              | Workspace_task_lifecycle.Held_by_other _
              | Workspace_task_lifecycle.Held_terminal _ ->
                Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () }

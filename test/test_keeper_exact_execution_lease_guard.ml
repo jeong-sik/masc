@@ -715,133 +715,16 @@ let test_stale_finalize_preserves_active_successor () =
     (List.length (State.transition_outbox after_retry))
 ;;
 
-let test_cancellation_surfaces_only_after_terminal_settlement () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  with_temp_dir "masc-exact-lease-cancel" @@ fun base_path ->
-  let keeper_name = "exact_cancel_guard" in
-  let slot_id = "slot-cancel" in
-  let call_id = "call-cancel" in
-  let plan_fingerprint = "plan-cancel" in
-  let request_body_sha256 = String.make 64 'c' in
-  let lease, terminal =
-    bind_and_quarantine
-      ~base_path
-      ~keeper_name
-      ~cause:P.Exact_execution_cancelled
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-  in
-  let settlement : P.settlement =
-    P.No_compaction
-      { source = source_ref ()
-      ; reason = P.Exact_execution_terminal terminal
-      }
-  in
-  let progress, resolve_progress = Eio.Promise.create () in
-  let release, resolve_release = Eio.Promise.create () in
-  let result, resolve_result = Eio.Promise.create () in
-  let finalized = Atomic.make false in
-  let prepare_entered = Atomic.make false in
-  let progress_resolved = Atomic.make false in
-  let release_attempts = Atomic.make 0 in
-  let release_resolved = Atomic.make false in
-  let resolve_progress_once progress =
-    if Atomic.compare_and_set progress_resolved false true
-    then Eio.Promise.resolve resolve_progress progress
-  in
-  let resolve_release_once () =
-    ignore (Atomic.fetch_and_add release_attempts 1);
-    if Atomic.compare_and_set release_resolved false true
-    then Eio.Promise.resolve resolve_release ()
-  in
-  Eio.Fiber.fork ~sw (fun () ->
-    let outcome =
-      try
-        Eio.Cancel.sub (fun cancel_context ->
-          (match
-             Masc.Keeper_heartbeat_loop.For_testing.settle_claimed_lease_exact
-               ~after_exact_disposition_prepare:(fun () ->
-                 Atomic.set prepare_entered true;
-                 resolve_progress_once (`Prepare_entered cancel_context);
-                 Eio.Promise.await release)
-               ~base_path
-               ~keeper_name
-               ~settled_at:7.0
-               ~lease
-               ~settlement
-               ()
-           with
-           | Ok
-               ( P.Settled _
-               | P.Already_settled _ ) ->
-             Atomic.set finalized true
-           | Ok (P.Committed_followup_failed { detail; _ }) ->
-             failwith detail
-           | Error detail -> failwith detail);
-          Masc.Keeper_heartbeat_loop.For_testing.check_cancellation_after_exact_terminal_settlement
-            settlement;
-          Returned)
-      with
-      | Eio.Cancel.Cancelled _ -> Cancellation_observed
-      | exn -> Raised (Printexc.to_string exn)
-    in
-    if not (Atomic.get prepare_entered)
-    then resolve_progress_once (`Worker_finished outcome);
-    Eio.Promise.resolve resolve_result outcome);
-  let worker_finished_early =
-    Fun.protect
-      ~finally:resolve_release_once
-      (fun () ->
-         match Eio.Promise.await progress with
-         | `Worker_finished outcome -> Some outcome
-         | `Prepare_entered cancel_context ->
-           Eio.Cancel.cancel cancel_context Exit;
-           Alcotest.(check bool)
-             "settlement is still protected"
-             false
-             (Atomic.get finalized);
-           (match P.exact_execution_binding_result ~base_path ~keeper_name with
-            | Ok (Some { status = P.Disposition_prepared _; _ }) -> ()
-            | Ok _ ->
-              Alcotest.fail "cancellation barrier was not after durable prepare"
-            | Error detail ->
-              Alcotest.failf
-                "prepared cancellation binding load failed: %s"
-                detail);
-           None)
-  in
-  Alcotest.(check bool)
-    "release resolver settled exactly once"
-    true
-    (Atomic.get release_resolved);
-  Alcotest.(check int)
-    "release resolver invoked exactly once"
-    1
-    (Atomic.get release_attempts);
-  (match worker_finished_early with
-   | None -> ()
-   | Some Cancellation_observed ->
-     Alcotest.fail "worker observed cancellation before durable prepare"
-   | Some Returned -> Alcotest.fail "worker returned before durable prepare"
-   | Some (Raised detail) ->
-     Alcotest.failf "worker failed before durable prepare: %s" detail);
-  (match Eio.Promise.await result with
-   | Cancellation_observed -> ()
-   | Returned -> Alcotest.fail "post-settlement cancellation check did not propagate"
-   | Raised detail -> Alcotest.failf "cancellation proof raised: %s" detail);
-  Alcotest.(check bool) "terminal settlement finalized first" true (Atomic.get finalized);
-  let state = require_loaded_state "post-cancellation finalization" ~base_path ~keeper_name in
-  check_no_active_lease "post-cancellation finalization" state;
-  check_no_exact_binding "post-cancellation finalization" state;
-  check_no_pending "post-cancellation finalization" state;
-  ignore (require_single_exact_outbox "post-cancellation finalization" state);
-  match P.prepare_registration_result ~base_path ~keeper_name ~settled_at:8.0 () with
-  | Ok pending -> Alcotest.(check bool) "settled cancellation never requeues" true (Q.is_empty pending)
-  | Error detail -> Alcotest.failf "post-terminal registration failed: %s" detail
-;;
+(* [test_cancellation_surfaces_only_after_terminal_settlement] used to live
+   here. It drove Keeper_heartbeat_loop.For_testing.settle_claimed_lease_exact
+   under an Eio cancellation and proved that the cancellation surfaced only
+   after the terminal settlement had been finalized durably, that the lease and
+   exact binding were gone, and that a settled cancellation never requeued.
+   #25969 replaced claim/settle with peek/ack and removed both
+   settle_claimed_lease_exact and
+   check_cancellation_after_exact_terminal_settlement, so the subject of the
+   test no longer exists and it cannot compile. Restating the property against
+   the peek/ack intake path is tracked in #25980. *)
 
 let () =
   Alcotest.run
@@ -877,12 +760,6 @@ let () =
             "stale finalize preserves active successor"
             `Quick
             test_stale_finalize_preserves_active_successor
-        ] )
-    ; ( "cancellation"
-      , [ Alcotest.test_case
-            "cancellation surfaces only after terminal settlement"
-            `Quick
-            test_cancellation_surfaces_only_after_terminal_settlement
         ] )
     ]
 ;;

@@ -739,10 +739,14 @@ let run_keepalive_unified_turn
                ~keeper_name:meta_after_triage.name
                (connector_attention_event_ids_of_stimuli !consumed_stimuli)
            | Error message -> record_settlement_failure message);
-      (* RFC-0351 S0 / #25461: advance the compaction streak the settlement above
-         just read. Ordering still holds — [settlement_of_cycle_outcome] reads the
-         streak from [meta_after_triage] before this stamp, so requeue-vs-escalate
-         still decides on the count before this failure.
+      (* RFC-0351 S0 / #25461: advance the compaction streak the ceiling reads.
+         The ceiling now lives at the trigger, not at lease settlement:
+         [Keeper_post_turn] asks [Keeper_meta_contract.compaction_retry_suspended]
+         and refuses to prepare a compaction once the streak reaches
+         [compaction_retry_escalation_threshold]. Stamping after that read keeps
+         the decision on the count before this failure. (#25969 removed
+         [settlement_of_cycle_outcome], which applied the same ceiling by
+         escalating the lease settlement instead.)
 
          Hoisted out of the [Some lease] branch. A failure has to consume retry
          budget whether or not the cycle happened to own an event-queue lease.

@@ -377,7 +377,6 @@ type auto_judge_start_outcome =
 
 type auto_judge_retry_outcome =
   | Retry_started
-  | Retry_queued
   | Retry_skipped
 
 module Auto_judge_owner = struct
@@ -779,7 +778,16 @@ and retry_auto_judge_entry
          (match List.assoc_opt entry.id outcome.failures, outcome.started_id with
           | Some reason, _ -> Error (reblock reason)
           | None, Some id when String.equal id entry.id -> Ok Retry_started
-          | None, (Some _ | None) -> Ok Retry_queued)
+          | None, Some started_id ->
+            Error
+              (reblock
+                 (Printf.sprintf
+                    "Auto Judge retry could not start because earlier approval %s acquired the owner"
+                    started_id))
+          | None, None ->
+            Error
+              (reblock
+                 "Auto Judge retry could not start because the owner is active or the approval is not first in FIFO"))
      with
      | Eio.Cancel.Cancelled _ as exn ->
        let backtrace = Printexc.get_raw_backtrace () in
@@ -1059,25 +1067,17 @@ let retry_blocked_auto_judge
           Error
             ("approval summary is not blocked or is already active: "
              ^ approval_id)
-        | Ok Retry_queued ->
+        | Ok Retry_started ->
           Log.Keeper.info
             ~keeper_name:entry.keeper_name
-         "auto judge operator retry queued approval=%s operation=%s actor=%s"
-         entry.id
-         entry.tool_name
-         requested_by;
-       Ok ()
-     | Ok Retry_started ->
-       Log.Keeper.info
-         ~keeper_name:entry.keeper_name
-         "auto judge operator retry started approval=%s operation=%s actor=%s"
-         entry.id
-         entry.tool_name
-         requested_by;
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string HitlSummaryOutcomes)
-         ~labels:[ "outcome", "operator_retry_started" ]
-         ();
+            "auto judge operator retry started approval=%s operation=%s actor=%s"
+            entry.id
+            entry.tool_name
+            requested_by;
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string HitlSummaryOutcomes)
+            ~labels:[ "outcome", "operator_retry_started" ]
+            ();
        Keeper_approval_queue.audit_approval_event
          ~base_path:entry.audit_base_path
          ~event_type:"auto_judge_operator_retry_started"

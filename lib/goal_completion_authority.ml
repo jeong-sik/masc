@@ -11,7 +11,11 @@ type failure =
       { reason : string
       ; evaluator_runtime : string
       }
-  | Unavailable of
+  | Evaluator_unavailable of
+      { reason : string
+      ; evaluator_runtime : string
+      }
+  | Evidence_unavailable of
       { reason : string
       ; evaluator_runtime : string
       }
@@ -154,6 +158,26 @@ let conditional_failure = function
   | Goal_store.Goal_persistence_failed message -> Persistence_failed message
 ;;
 
+let persist_current_failure ~config ~goal_id ~failure ~reason outcome =
+  match
+    Goal_store.record_completion_review_failure_current
+      config
+      ~goal_id
+      ~failure
+      ~review_note:reason
+      ~reviewed_at:(Masc_domain.now_iso ())
+  with
+  | Ok _ -> Error outcome
+  | Error Goal_store.Goal_not_found ->
+    Error (Conflict (reason ^ "; Goal no longer exists"))
+  | Error Goal_store.Goal_snapshot_changed ->
+    Error (Conflict (reason ^ "; Goal is already completed"))
+  | Error (Goal_store.Goal_persistence_failed persistence_reason) ->
+    Error
+      (Persistence_failed
+         (reason ^ "; failed to persist completion failure: " ^ persistence_reason))
+;;
+
 let persist_failed_review ~config ~expected ~failure ~reason outcome =
   match
     Goal_store.record_completion_review_failure_if_unchanged
@@ -164,7 +188,25 @@ let persist_failed_review ~config ~expected ~failure ~reason outcome =
       ~reviewed_at:(Masc_domain.now_iso ())
   with
   | Ok _ -> Error outcome
-  | Error error -> Error (conditional_failure error)
+  | Error Goal_store.Goal_snapshot_changed ->
+    let conflict_reason =
+      "Goal changed during completion review; stale verdict was not applied"
+    in
+    persist_current_failure
+      ~config
+      ~goal_id:expected.id
+      ~failure:Goal_store.Review_snapshot_changed
+      ~reason:conflict_reason
+      (Conflict conflict_reason)
+  | Error Goal_store.Goal_not_found ->
+    Error (conditional_failure Goal_store.Goal_not_found)
+  | Error (Goal_store.Goal_persistence_failed message) ->
+    persist_current_failure
+      ~config
+      ~goal_id:expected.id
+      ~failure:Goal_store.Completion_persistence_failed
+      ~reason:message
+      (Persistence_failed message)
 ;;
 
 let request_completion
@@ -186,27 +228,34 @@ let request_completion
     persist_failed_review
       ~config
       ~expected
-      ~failure:Goal_store.Unavailable
+      ~failure:Goal_store.Current_evidence_unavailable
       ~reason
-      (Unavailable { reason; evaluator_runtime = "unresolved" })
+      (Evidence_unavailable { reason; evaluator_runtime = "unresolved" })
   | Ok snapshot ->
     (match evaluator_route (), build_prompt snapshot with
-     | Error reason, _ | _, Error reason ->
+     | Error reason, _ ->
        persist_failed_review
          ~config
          ~expected
-         ~failure:Goal_store.Unavailable
+         ~failure:Goal_store.Evaluator_unavailable
          ~reason
-         (Unavailable { reason; evaluator_runtime = "unresolved" })
+         (Evaluator_unavailable { reason; evaluator_runtime = "unresolved" })
+     | _, Error reason ->
+       persist_failed_review
+         ~config
+         ~expected
+         ~failure:Goal_store.Current_evidence_unavailable
+         ~reason
+         (Evidence_unavailable { reason; evaluator_runtime = "unresolved" })
      | Ok evaluator_runtime, Ok prompt ->
        (match run_reviewer ~config ~runtime_id:evaluator_runtime ~prompt with
         | Error reason ->
           persist_failed_review
             ~config
             ~expected
-            ~failure:Goal_store.Unavailable
+            ~failure:Goal_store.Evaluator_unavailable
             ~reason
-            (Unavailable { reason; evaluator_runtime })
+            (Evaluator_unavailable { reason; evaluator_runtime })
         | Ok (Goal_completion_contract.Reject reason) ->
           persist_failed_review
             ~config
@@ -227,9 +276,24 @@ let request_completion
           (match Goal_state_internal.commit_completed ~config seal with
            | Ok goal -> Ok { goal; evaluator_runtime; reviewed_at }
            | Error (Goal_state_internal.Snapshot_changed message) ->
-             Error (Conflict message)
+             persist_current_failure
+               ~config
+               ~goal_id:expected.id
+               ~failure:Goal_store.Review_snapshot_changed
+               ~reason:message
+               (Conflict message)
            | Error (Goal_state_internal.Current_evidence_unavailable message) ->
-             Error (Unavailable { reason = message; evaluator_runtime })
+             persist_current_failure
+               ~config
+               ~goal_id:expected.id
+               ~failure:Goal_store.Current_evidence_unavailable
+               ~reason:message
+               (Evidence_unavailable { reason = message; evaluator_runtime })
            | Error (Goal_state_internal.Persistence_failed message) ->
-             Error (Persistence_failed message))))
+             persist_current_failure
+               ~config
+               ~goal_id:expected.id
+               ~failure:Goal_store.Completion_persistence_failed
+               ~reason:message
+               (Persistence_failed message))))
 ;;

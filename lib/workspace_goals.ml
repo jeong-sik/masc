@@ -186,14 +186,44 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
   let path =
     Filename.concat (Workspace_utils.masc_dir ctx.config) "goal_events.jsonl"
   in
-  Fs_compat.append_jsonl
-    path
-    (`Assoc
-       [ "ts", `String (Masc_domain.now_iso ())
-       ; "goal_id", `String goal_id
-       ; "event_type", `String event_type
-       ; "payload", payload
-       ])
+  try
+    Fs_compat.append_jsonl
+      path
+      (`Assoc
+         [ "ts", `String (Masc_domain.now_iso ())
+         ; "goal_id", `String goal_id
+         ; "event_type", `String event_type
+         ; "payload", payload
+         ])
+  with
+  | exn ->
+    Log.Workspace.warn
+      "Goal event append failed goal_id=%s event_type=%s err=%s"
+      goal_id
+      event_type
+      (Printexc.to_string exn)
+;;
+
+let emit_goal_completion_failure
+      (ctx : context)
+      ~goal_id
+      ~failure
+      ~reason
+      ~evaluator_runtime
+  =
+  emit_goal_event
+    ctx
+    ~goal_id
+    ~event_type:"goal_completion_failed"
+    ~payload:
+      (`Assoc
+         [ "actor", `String ctx.agent_name
+         ; ( "failure"
+           , `String (Goal_store.completion_review_failure_to_string failure) )
+         ; "reason", `String reason
+         ; ( "evaluator_runtime"
+           , Json_util.string_opt_to_json evaluator_runtime )
+         ])
 ;;
 
 let conditional_goal_error_result
@@ -264,16 +294,49 @@ let handle_goal_completion_request
       "Goal completion remains nonterminal goal_id=%s outcome=rejected evaluator_runtime=%s"
       goal.id
       evaluator_runtime;
+    emit_goal_completion_failure
+      ctx
+      ~goal_id:goal.id
+      ~failure:Goal_store.Rejected
+      ~reason
+      ~evaluator_runtime:(Some evaluator_runtime);
     error_result_typed
       ~tool_name
       ~start_time
       ~code:Precondition_failed
       ("Configured runtime rejected Goal completion: " ^ reason)
-  | Error (Goal_completion_authority.Unavailable { reason; evaluator_runtime }) ->
+  | Error
+      (Goal_completion_authority.Evaluator_unavailable
+         { reason; evaluator_runtime }) ->
     Log.Workspace.warn
-      "Goal completion remains nonterminal goal_id=%s outcome=unavailable evaluator_runtime=%s"
+      "Goal completion remains nonterminal goal_id=%s outcome=evaluator_unavailable evaluator_runtime=%s"
       goal.id
       evaluator_runtime;
+    emit_goal_completion_failure
+      ctx
+      ~goal_id:goal.id
+      ~failure:Goal_store.Evaluator_unavailable
+      ~reason
+      ~evaluator_runtime:(Some evaluator_runtime);
+    error_result_typed
+      ~class_:Tool_result.Transient_error
+      ~tool_name
+      ~start_time
+      ~code:Precondition_failed
+      (reason ^ "; Goal remains nonterminal")
+  | Error
+      (Goal_completion_authority.Evidence_unavailable
+         { reason; evaluator_runtime }) ->
+    Log.Workspace.warn
+      "Goal completion remains nonterminal goal_id=%s outcome=evidence_unavailable evaluator_runtime=%s"
+      goal.id
+      evaluator_runtime;
+    emit_goal_completion_failure
+      ctx
+      ~goal_id:goal.id
+      ~failure:Goal_store.Current_evidence_unavailable
+      ~reason
+      ~evaluator_runtime:(Some evaluator_runtime);
     error_result_typed
       ~class_:Tool_result.Transient_error
       ~tool_name
@@ -281,12 +344,30 @@ let handle_goal_completion_request
       ~code:Precondition_failed
       (reason ^ "; Goal remains nonterminal")
   | Error (Goal_completion_authority.Conflict reason) ->
+    Log.Workspace.warn
+      "Goal completion remains nonterminal goal_id=%s outcome=snapshot_changed"
+      goal.id;
+    emit_goal_completion_failure
+      ctx
+      ~goal_id:goal.id
+      ~failure:Goal_store.Review_snapshot_changed
+      ~reason
+      ~evaluator_runtime:None;
     error_result_typed
       ~tool_name
       ~start_time
       ~code:Conflict
       reason
   | Error (Goal_completion_authority.Persistence_failed reason) ->
+    Log.Workspace.warn
+      "Goal completion remains nonterminal goal_id=%s outcome=persistence_failed"
+      goal.id;
+    emit_goal_completion_failure
+      ctx
+      ~goal_id:goal.id
+      ~failure:Goal_store.Completion_persistence_failed
+      ~reason
+      ~evaluator_runtime:None;
     error_result_typed
       ~class_:Tool_result.Runtime_failure
       ~tool_name

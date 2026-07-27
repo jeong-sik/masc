@@ -120,9 +120,14 @@ val completion_receipt_to_yojson : completion_receipt -> Yojson.Safe.t
 
 type completion_review_failure =
   | Rejected
-  | Unavailable
+  | Evaluator_unavailable
+  | Review_snapshot_changed
+  | Current_evidence_unavailable
+  | Completion_persistence_failed
 (** Typed reason why the most recent completion attempt remained nonterminal.
     The detailed durable explanation remains in [last_review_note]. *)
+
+val completion_review_failure_to_string : completion_review_failure -> string
 
 type goal = {
   id : string;
@@ -221,6 +226,17 @@ val record_completion_review_failure_if_unchanged :
   (goal, conditional_update_error) result
 (** Persists a failed completion review without exposing a generic goal-record
     mutation callback. *)
+
+val record_completion_review_failure_current :
+  Workspace_utils.config ->
+  goal_id:string ->
+  failure:completion_review_failure ->
+  review_note:string ->
+  reviewed_at:string ->
+  (goal, conditional_update_error) result
+(** Under the Goal-store lock, records why the current nonterminal Goal could
+    not complete. It preserves the current phase and business fields and
+    refuses to attach failure metadata to an already-completed Goal. *)
 
 type delete_goal_outcome =
   | Deleted

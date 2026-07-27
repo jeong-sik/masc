@@ -77,6 +77,45 @@ let test_multiple_deletes_each_bump () =
   check int "empty" 0 (List.length state.goals)
 ;;
 
+let test_current_completion_failure_preserves_goal () =
+  with_workspace @@ fun config ->
+  let original =
+    { (make_goal "g-current-failure" "preserve me") with
+      phase = Goal_phase.paused
+    ; priority = 5
+    }
+  in
+  write_fixture config 7 [ original ];
+  let reviewed_at = iso_now () in
+  let updated =
+    match
+      Goal_store.record_completion_review_failure_current
+        config
+        ~goal_id:original.id
+        ~failure:Goal_store.Review_snapshot_changed
+        ~review_note:"current evidence changed"
+        ~reviewed_at
+    with
+    | Ok goal -> goal
+    | Error error -> fail (Goal_store.conditional_update_error_to_string error)
+  in
+  check bool "phase preserved" true (Goal_phase.is_paused updated.phase);
+  check string "title preserved" original.title updated.title;
+  check int "priority preserved" original.priority updated.priority;
+  check (option string) "review note persisted"
+    (Some "current evidence changed")
+    updated.last_review_note;
+  check (option string) "review timestamp persisted"
+    (Some reviewed_at)
+    updated.last_review_at;
+  check (option string) "typed failure persisted"
+    (Some "snapshot_changed")
+    (Option.map
+       Goal_store.completion_review_failure_to_string
+       updated.completion_review_failure);
+  check int "state version advanced" 8 (Goal_store.read_state config).version
+;;
+
 let test_delete_nonexistent_does_not_bump () =
   with_workspace @@ fun config ->
   write_fixture config 42 [ make_goal "exists" "one goal" ];
@@ -423,6 +462,10 @@ let () =
     [ ( "store"
       , [ test_case "delete bumps version" `Quick test_delete_goal_bumps_version
         ; test_case "multiple deletes bump" `Quick test_multiple_deletes_each_bump
+        ; test_case
+            "current completion failure preserves goal"
+            `Quick
+            test_current_completion_failure_preserves_goal
         ; test_case "missing delete no bump" `Quick test_delete_nonexistent_does_not_bump
         ; test_case "delete prunes links" `Quick test_delete_goal_prunes_links
         ; test_case "unknown field rejected" `Quick test_unknown_goal_field_is_rejected

@@ -15,7 +15,11 @@ type failure =
       { reason : string
       ; evaluator_runtime : string
       }
-  | Unavailable of
+  | Evaluator_unavailable of
+      { reason : string
+      ; evaluator_runtime : string
+      }
+  | Evidence_unavailable of
       { reason : string
       ; evaluator_runtime : string
       }

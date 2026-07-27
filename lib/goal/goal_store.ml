@@ -186,7 +186,27 @@ type completion_receipt =
 
 type completion_review_failure =
   | Rejected
-  | Unavailable
+  | Evaluator_unavailable
+  | Review_snapshot_changed
+  | Current_evidence_unavailable
+  | Completion_persistence_failed
+
+let completion_review_failure_to_string = function
+  | Rejected -> "rejected"
+  | Evaluator_unavailable -> "evaluator_unavailable"
+  | Review_snapshot_changed -> "snapshot_changed"
+  | Current_evidence_unavailable -> "evidence_unavailable"
+  | Completion_persistence_failed -> "persistence_failed"
+;;
+
+let completion_review_failure_of_string = function
+  | "rejected" -> Some Rejected
+  | "evaluator_unavailable" -> Some Evaluator_unavailable
+  | "snapshot_changed" -> Some Review_snapshot_changed
+  | "evidence_unavailable" -> Some Current_evidence_unavailable
+  | "persistence_failed" -> Some Completion_persistence_failed
+  | _ -> None
+;;
 
 type goal = {
   id : string;
@@ -276,8 +296,8 @@ and goal_to_yojson (goal : goal) =
       ( "completion_review_failure"
       , match goal.completion_review_failure with
         | None -> `Null
-        | Some Rejected -> `String "rejected"
-        | Some Unavailable -> `String "unavailable" );
+        | Some failure ->
+          `String (completion_review_failure_to_string failure) );
       ( "completion_receipt"
       , match goal.completion_receipt with
         | None -> `Null
@@ -486,12 +506,17 @@ and goal_of_yojson = function
           let completion_review_failure =
             match Json_util.assoc_member_opt "completion_review_failure" json with
             | None | Some `Null -> Ok None
-            | Some (`String "rejected") -> Ok (Some Rejected)
-            | Some (`String "unavailable") -> Ok (Some Unavailable)
+            | Some (`String value) ->
+              (match completion_review_failure_of_string value with
+               | Some failure -> Ok (Some failure)
+               | None ->
+                 Error
+                   "goal_of_yojson: completion_review_failure has an invalid \
+                    current-schema value")
             | Some _ ->
               Error
-                "goal_of_yojson: completion_review_failure must be rejected or \
-                 unavailable"
+                "goal_of_yojson: completion_review_failure must be a string or \
+                 null"
           in
           (match
              ( phase
@@ -719,7 +744,10 @@ let validate_goal_json = function
     in
     let* () =
       match List.assoc "completion_review_failure" fields with
-      | `Null | `String "rejected" | `String "unavailable" -> Ok ()
+      | `Null -> Ok ()
+      | `String value
+        when Option.is_some (completion_review_failure_of_string value) ->
+        Ok ()
       | _ -> Error "Goal completion_review_failure has an invalid value"
     in
     let receipt = List.assoc "completion_receipt" fields in
@@ -997,6 +1025,43 @@ let record_completion_review_failure_if_unchanged
     ; completion_review_failure = Some failure
     ; completion_receipt = None
     })
+;;
+
+let record_completion_review_failure_current
+      config
+      ~goal_id
+      ~failure
+      ~review_note
+      ~reviewed_at
+  =
+  Workspace_utils.with_file_lock config (goals_path config) (fun () ->
+    let state = read_state config in
+    match find_goal state.goals goal_id with
+    | None -> Error Goal_not_found
+    | Some current when Phase.is_completed current.phase ->
+      Error Goal_snapshot_changed
+    | Some current ->
+      let updated_goal =
+        { current with
+          updated_at = reviewed_at
+        ; last_review_note = Some review_note
+        ; last_review_at = Some reviewed_at
+        ; completion_review_failure = Some failure
+        ; completion_receipt = None
+        }
+      in
+      (match validate_generic_goal_mutation ~before:current updated_goal with
+       | Error msg -> Error (Goal_persistence_failed msg)
+       | Ok () ->
+         let next_state =
+           { version = state.version + 1
+           ; updated_at = reviewed_at
+           ; goals = replace_goal state.goals updated_goal
+           }
+         in
+         (match write_state_unchecked config next_state with
+          | Ok () -> Ok updated_goal
+          | Error msg -> Error (Goal_persistence_failed msg))))
 ;;
 
 type delete_goal_outcome =

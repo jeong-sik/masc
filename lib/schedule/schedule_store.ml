@@ -350,6 +350,22 @@ let last_execution_for_schedule state ~schedule_id =
   | execution :: _ -> Some execution
 ;;
 
+let execution_matches_occurrence
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+      (execution : execution_record) =
+  String.equal execution.schedule_id schedule_id
+  && Float.equal execution.due_at due_at
+  && String.equal execution.payload_digest payload_digest
+;;
+
+let execution_for_occurrence state ~schedule_id ~due_at ~payload_digest =
+  List.find_opt
+    (execution_matches_occurrence ~schedule_id ~due_at ~payload_digest)
+    state.executions
+;;
+
 let update_latest_running_execution executions ~schedule_id update =
   let rec loop acc = function
     | [] ->
@@ -359,6 +375,29 @@ let update_latest_running_execution executions ~schedule_id update =
     | (execution : execution_record) :: rest
       when String.equal execution.schedule_id schedule_id
            && execution.status = Execution_running ->
+      Ok (List.rev_append acc (update execution :: rest))
+    | execution :: rest -> loop (execution :: acc) rest
+  in
+  loop [] executions
+;;
+
+let update_occurrence_execution
+      executions
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+      update =
+  let rec loop acc = function
+    | [] ->
+      Error
+        (Invalid_status_transition
+           "schedule occurrence has no matching execution record")
+    | execution :: rest
+      when execution_matches_occurrence
+             ~schedule_id
+             ~due_at
+             ~payload_digest
+             execution ->
       Ok (List.rev_append acc (update execution :: rest))
     | execution :: rest -> loop (execution :: acc) rest
   in
@@ -558,8 +597,17 @@ let accept_running config ~now ~schedule_id ?detail () =
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if request.status <> Running then
-        Error Schedule_not_running
+      if request.status <> Running
+      then (
+        match last_execution_for_schedule state ~schedule_id with
+        | Some
+            { status =
+                (Execution_dispatched | Execution_succeeded | Execution_failed)
+            ; _
+            } ->
+          Ok request
+        | Some { status = Execution_running; _ } | None ->
+          Error Schedule_not_running)
       else
         let updated =
           match Schedule_domain.next_due_after ~now request with
@@ -579,6 +627,147 @@ let accept_running config ~now ~schedule_id ?detail () =
         let next_state = bump_state state ~schedules ~executions in
         let* () = write_state config next_state in
         Ok updated)
+;;
+
+let request_matches_occurrence
+      (request : schedule_request)
+      ~due_at
+      ~payload_digest =
+  Float.equal request.due_at due_at
+  && String.equal
+       (Schedule_domain.payload_digest request.payload)
+       payload_digest
+;;
+
+let advance_current_recurring_occurrence
+      ~now
+      (request : schedule_request)
+      ~due_at
+      ~payload_digest =
+  if
+    request.status = Running
+    && request_matches_occurrence request ~due_at ~payload_digest
+  then
+    match Schedule_domain.next_due_after ~now request with
+    | Some next_due_at -> { request with status = Scheduled; due_at = next_due_at }
+    | None -> request
+  else request
+;;
+
+let complete_dispatched_occurrence
+      config
+      ~now
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+      ?detail
+      () =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match
+      find_schedule state schedule_id,
+      execution_for_occurrence state ~schedule_id ~due_at ~payload_digest
+    with
+    | None, _ -> Error Schedule_not_found
+    | Some _, None ->
+      Error
+        (Invalid_status_transition
+           "schedule occurrence has no matching execution record")
+    | Some request, Some { status = Execution_succeeded; _ } -> Ok request
+    | Some _, Some { status = Execution_failed; _ } ->
+      Error
+        (Invalid_status_transition
+           "failed schedule occurrence cannot become succeeded")
+    | Some request, Some { status = (Execution_running | Execution_dispatched); _ } ->
+      let updated =
+        match request.recurrence with
+        | One_shot
+          when request.status = Running
+               && request_matches_occurrence request ~due_at ~payload_digest ->
+          { request with status = Succeeded }
+        | One_shot -> request
+        | Interval _ | Daily _ | Cron _ ->
+          advance_current_recurring_occurrence
+            ~now
+            request
+            ~due_at
+            ~payload_digest
+      in
+      let schedules = replace_schedule state.schedules updated in
+      let* executions =
+        update_occurrence_execution
+          state.executions
+          ~schedule_id
+          ~due_at
+          ~payload_digest
+          (fun execution ->
+             { execution with
+               status = Execution_succeeded
+             ; finished_at = Some now
+             ; detail
+             ; error = None
+             })
+      in
+      let next_state = bump_state state ~schedules ~executions in
+      let* () = write_state config next_state in
+      Ok updated)
+;;
+
+let fail_dispatched_occurrence
+      config
+      ~now
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+      ~error =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match
+      find_schedule state schedule_id,
+      execution_for_occurrence state ~schedule_id ~due_at ~payload_digest
+    with
+    | None, _ -> Error Schedule_not_found
+    | Some _, None ->
+      Error
+        (Invalid_status_transition
+           "schedule occurrence has no matching execution record")
+    | Some request, Some { status = Execution_failed; _ } -> Ok request
+    | Some _, Some { status = Execution_succeeded; _ } ->
+      Error
+        (Invalid_status_transition
+           "succeeded schedule occurrence cannot become failed")
+    | Some request, Some { status = (Execution_running | Execution_dispatched); _ } ->
+      let updated =
+        match request.recurrence with
+        | One_shot
+          when request.status = Running
+               && request_matches_occurrence request ~due_at ~payload_digest ->
+          { request with status = Failed }
+        | One_shot -> request
+        | Interval _ | Daily _ | Cron _ ->
+          advance_current_recurring_occurrence
+            ~now
+            request
+            ~due_at
+            ~payload_digest
+      in
+      let schedules = replace_schedule state.schedules updated in
+      let* executions =
+        update_occurrence_execution
+          state.executions
+          ~schedule_id
+          ~due_at
+          ~payload_digest
+          (fun execution ->
+             { execution with
+               status = Execution_failed
+             ; finished_at = Some now
+             ; error = Some error
+             })
+      in
+      let next_state = bump_state state ~schedules ~executions in
+      let* () = write_state config next_state in
+      Ok updated)
 ;;
 
 let fail_running config ~now ~schedule_id ~error =

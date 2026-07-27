@@ -191,6 +191,104 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
     stimuli
 ;;
 
+type scheduled_work_terminal =
+  | Scheduled_work_succeeded
+  | Scheduled_work_failed of string
+
+let scheduled_work_terminal_of_cycle_outcome = function
+  | Cycle.Completed _
+  | Cycle.Manual_compaction_applied _
+  | Cycle.Manual_compaction_not_applied _ ->
+    Some Scheduled_work_succeeded
+  | Cycle.Failed { failure; _ } ->
+    (match failure.Keeper_unified_turn.source_lease_disposition with
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling
+     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
+       Some
+         (Scheduled_work_failed
+            (Agent_sdk.Error.to_string failure.Keeper_unified_turn.error))
+     | Keeper_unified_turn.Follow_failure_route
+     | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
+     | Keeper_unified_turn.Requeue_after_context_compaction _
+     | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
+       None)
+  | Cycle.Cancelled _
+  | Cycle.Skipped _
+  | Cycle.Busy _
+  | Cycle.Manual_compaction_failed _ ->
+    None
+;;
+
+let persist_scheduled_work_terminal
+      ~ctx
+      ~keeper_name
+      ~cycle_outcome
+      stimuli =
+  match scheduled_work_terminal_of_cycle_outcome cycle_outcome with
+  | None -> Ok ()
+  | Some terminal ->
+    let now = Time_compat.now () in
+    let rec loop = function
+      | [] -> Ok ()
+      | (stimulus : Keeper_event_queue.stimulus) :: rest ->
+        (match stimulus.payload with
+         | Keeper_event_queue.Schedule_due wake ->
+           let detail =
+             `Assoc
+               [ "kind", `String "keeper.turn_terminal"
+               ; "keeper_name", `String keeper_name
+               ; "occurrence_id", `String stimulus.post_id
+               ; ( "outcome"
+                 , `String
+                     (match terminal with
+                      | Scheduled_work_succeeded -> "succeeded"
+                      | Scheduled_work_failed _ -> "failed") )
+               ]
+           in
+           let result =
+             match terminal with
+             | Scheduled_work_succeeded ->
+               Schedule_store.complete_dispatched_occurrence
+                 ctx.config
+                 ~now
+                 ~schedule_id:wake.schedule_id
+                 ~due_at:wake.due_at
+                 ~payload_digest:wake.payload_digest
+                 ~detail
+                 ()
+             | Scheduled_work_failed error ->
+               Schedule_store.fail_dispatched_occurrence
+                 ctx.config
+                 ~now
+                 ~schedule_id:wake.schedule_id
+                 ~due_at:wake.due_at
+                 ~payload_digest:wake.payload_digest
+                 ~error
+           in
+           (match result with
+            | Ok _ -> loop rest
+            | Error err ->
+              Error
+                (Printf.sprintf
+                   "schedule occurrence terminal commit failed schedule_id=%s \
+                    occurrence_id=%s: %s"
+                   wake.schedule_id
+                   stimulus.post_id
+                   (Schedule_store.store_error_to_string err)))
+         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _
+         | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Bg_completed _
+         | Keeper_event_queue.Bootstrap
+         | Keeper_event_queue.Connector_attention _
+         | Keeper_event_queue.Hitl_resolved _
+         | Keeper_event_queue.Manual_compaction_requested
+         | Keeper_event_queue.Goal_assigned _ ->
+           loop rest)
+    in
+    loop stimuli
+;;
+
 let mark_connector_attention_ignored_after_turn ~base_path ~keeper_name event_ids =
   match event_ids with
   | [] -> ()
@@ -699,6 +797,22 @@ let run_keepalive_unified_turn
           None
       in
       let meta_after_cycle = meta_after_cycle in
+      let scheduled_work_terminal_committed =
+        match !cycle_outcome_ref with
+        | None -> true
+        | Some cycle_outcome ->
+          (match
+             persist_scheduled_work_terminal
+               ~ctx
+               ~keeper_name:meta_after_triage.name
+               ~cycle_outcome
+               !consumed_stimuli
+           with
+           | Ok () -> true
+           | Error message ->
+             record_settlement_failure message;
+             false)
+      in
       (* Pending remains the authority throughout execution. Remove only an
          exact selection whose turn completed or handled its source locally. *)
       (if Option.is_none transcript_corruption_commit
@@ -731,7 +845,7 @@ let run_keepalive_unified_turn
            | None ->
              false
          in
-         if should_ack
+         if should_ack && scheduled_work_terminal_committed
          then
            match
              Keeper_registry_event_queue.ack_pending_result

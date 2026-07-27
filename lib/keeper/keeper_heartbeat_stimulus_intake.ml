@@ -333,7 +333,70 @@ let heartbeat_event_intake
       keeper_name
       ~ready:(stimulus_ready_for_intake ~base_path)
   in
-  let pending_selection = select_pending () in
+  let schedule_selection_already_terminal selection =
+    match
+      selection.Keeper_registry_event_queue.kind,
+      selection.Keeper_registry_event_queue.stimuli
+    with
+    | Keeper_event_queue_persistence.Single,
+      [ { Keeper_event_queue.payload = Schedule_due wake; _ } ] ->
+      (match Schedule_store.read_state_result ctx.config with
+       | Error err ->
+         Error
+           ("schedule terminal reconciliation read failed: "
+            ^ Schedule_store.read_error_to_string err)
+       | Ok state ->
+         (match
+            Schedule_store.execution_for_occurrence
+              state
+              ~schedule_id:wake.schedule_id
+              ~due_at:wake.due_at
+              ~payload_digest:wake.payload_digest
+          with
+          | Some
+              { Schedule_domain.status =
+                  ( Schedule_domain.Execution_succeeded
+                  | Schedule_domain.Execution_failed )
+              ; _
+              } ->
+            Ok true
+          | Some
+              { Schedule_domain.status =
+                  ( Schedule_domain.Execution_running
+                  | Schedule_domain.Execution_dispatched )
+              ; _
+              }
+          | None ->
+            Ok false))
+    | Keeper_event_queue_persistence.Single, _
+    | Keeper_event_queue_persistence.Board_batch, _ ->
+      Ok false
+  in
+  let rec select_pending_after_terminal_reconciliation () =
+    match select_pending () with
+    | Error _ as error -> error
+    | Ok None as empty -> empty
+    | Ok (Some selection) ->
+      (match schedule_selection_already_terminal selection with
+       | Error message -> Error message
+       | Ok false -> Ok (Some selection)
+       | Ok true ->
+         (match
+            Keeper_registry_event_queue.ack_pending_result
+              ~base_path
+              keeper_name
+              ~selection
+          with
+          | Error message ->
+            Error ("schedule terminal reconciliation ack failed: " ^ message)
+          | Ok () ->
+            Log.Keeper.info
+              "turn entry: acknowledged already-terminal scheduled occurrence \
+               without duplicate turn keeper=%s"
+              keeper_name;
+            select_pending_after_terminal_reconciliation ()))
+  in
+  let pending_selection = select_pending_after_terminal_reconciliation () in
   let queued_observations, consumed_stimuli, pending_selection, event_queue_claim_error =
     match pending_selection with
     | Error message ->

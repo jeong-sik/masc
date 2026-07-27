@@ -92,7 +92,7 @@ let prompt_sha256 prompt =
   Digestif.SHA256.digest_string prompt |> Digestif.SHA256.to_hex
 ;;
 
-let run_reviewer ~config ~runtime_id ~prompt =
+let run_reviewer ~(config : Workspace_utils.config) ~runtime_id ~prompt =
   let verdict_ref = ref None in
   let protocol_error_ref = ref None in
   let dispatch ~name ~args =

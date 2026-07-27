@@ -95,7 +95,7 @@ let evidence_from_current
 
 let capture_snapshot
       ~config
-      ~goal
+      ~(goal : Goal_store.goal)
       ~state_version
       ~completion_claim
       ~requesting_agent

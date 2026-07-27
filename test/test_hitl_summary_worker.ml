@@ -287,19 +287,55 @@ let test_context_bundle_is_exact () =
   with_temp_dir "hitl-context" @@ fun base_path ->
   install_queue base_path;
   let entry = pending_entry ~base_path () in
-  match Worker.For_testing.build_context_bundle ~entry with
-  | Error error -> fail (Worker.For_testing.context_bundle_error_to_string error)
-  | Ok bundle ->
-    let open Yojson.Safe.Util in
-    check yojson "exact input" entry.input (bundle |> member "input");
-    check yojson
-      "exact outer-turn context"
-      (Option.get entry.request_context)
-      (bundle |> member "request_context");
-    check yojson "no derived classification" `Null (bundle |> member "classification")
+  let bundle = Worker.For_testing.build_context_bundle ~entry in
+  let open Yojson.Safe.Util in
+  check yojson "exact input" entry.input (bundle |> member "input");
+  check yojson
+    "exact outer-turn context"
+    (Option.get entry.request_context)
+    (bundle |> member "request_context");
+  check yojson
+    "context availability is stated"
+    (`String "present")
+    (bundle |> member "request_context_availability");
+  check yojson "no derived classification" `Null (bundle |> member "classification")
 ;;
 
-let test_missing_context_is_terminal_before_admission () =
+(* A producer that captured no causal context still yields a judgeable
+   bundle: refusing here parks the entry at the FIFO head and stalls every
+   later approval (#25966). *)
+let test_context_bundle_without_request_context () =
+  with_temp_dir "hitl-context-absent" @@ fun base_path ->
+  install_queue base_path;
+  let entry = pending_entry ~base_path () in
+  let entry =
+    { entry with Q.request_context = None }
+  in
+  let bundle = Worker.For_testing.build_context_bundle ~entry in
+  let open Yojson.Safe.Util in
+  check yojson "exact input survives" entry.input (bundle |> member "input");
+  check yojson
+    "keeper identity survives"
+    (`String entry.keeper_name)
+    (bundle |> member "keeper_name");
+  check yojson
+    "operation identity survives"
+    (`String entry.tool_name)
+    (bundle |> member "tool_name");
+  check yojson
+    "absence is stated, not inferred"
+    (`String "absent")
+    (bundle |> member "request_context_availability");
+  check yojson "context is null" `Null (bundle |> member "request_context")
+;;
+
+(* Absent causal context no longer blocks admission: the flow is prepared
+   from the Keeper, operation identity, and complete concrete input, with the
+   absence stated in the bundle. Refusing here parked the entry at the FIFO
+   head and stalled every later approval (#25966). Preparation may still fail
+   for reasons unrelated to context (prompt or registry unavailable in this
+   fixture), so only the context-unavailable failure is excluded. *)
+let test_missing_context_still_admits_a_flow () =
   with_temp_dir "hitl-missing-context" @@ fun base_path ->
   install_queue base_path;
   let entry = pending_entry ~base_path () in
@@ -307,12 +343,12 @@ let test_missing_context_is_terminal_before_admission () =
     Worker.For_testing.prepare_flow
       ~entry:{ entry with request_context = None }
   with
-  | Ok _ -> fail "missing exact context admitted an OAS flow"
+  | Ok _ -> ()
   | Error detail ->
-    check string
-      "stable failure"
-      "HITL summary: exact outer-turn request context is unavailable"
-      detail
+    check bool
+      "failure is not the context-unavailable refusal"
+      false
+      (Astring.String.is_infix ~affix:"request context is unavailable" detail)
 ;;
 
 let test_schema_is_closed_nonhierarchical_contract () =
@@ -1680,9 +1716,13 @@ let () =
         ; test_case "invalid judgment fails loud" `Quick test_invalid_judgment_fails_loud
         ; test_case "exact context bundle" `Quick test_context_bundle_is_exact
         ; test_case
-            "missing context fails before admission"
+            "context bundle without request context"
             `Quick
-            test_missing_context_is_terminal_before_admission
+            test_context_bundle_without_request_context
+        ; test_case
+            "missing context still admits a flow"
+            `Quick
+            test_missing_context_still_admits_a_flow
         ; test_case
             "closed nonhierarchical schema"
             `Quick

@@ -34,28 +34,30 @@ let record_outcome outcome =
 
 (* ── Immutable MASC request ─────────────────────── *)
 
-type context_bundle_error = Exact_request_context_unavailable
-
-let context_bundle_error_to_string = function
-  | Exact_request_context_unavailable ->
-    "HITL summary: exact outer-turn request context is unavailable"
-;;
-
+(* The judgment subject is the request itself: the Keeper, the opaque
+   operation identity, and the complete concrete input are always present.
+   The outer-turn causal context is enrichment a producer may not have
+   captured, so its absence is stated in the bundle rather than refusing to
+   judge — a refusal parks the entry at the head of the FIFO drain and stalls
+   every later approval (#25966). *)
 let build_context_bundle ~(entry : pending_approval) =
-  match entry.request_context with
-  | None -> Error Exact_request_context_unavailable
-  | Some request_context ->
-    Ok
-      (`Assoc
-         [ "keeper_name", `String entry.keeper_name
-         ; "tool_name", `String entry.tool_name
-         ; "turn_id", Json_util.int_opt_to_json entry.turn_id
-         ; "task_id", Json_util.string_opt_to_json entry.task_id
-         ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-         ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
-         ; "input", entry.input
-         ; "request_context", request_context
-         ])
+  let request_context_availability =
+    match entry.request_context with
+    | Some _ -> "present"
+    | None -> "absent"
+  in
+  `Assoc
+    [ "keeper_name", `String entry.keeper_name
+    ; "tool_name", `String entry.tool_name
+    ; "turn_id", Json_util.int_opt_to_json entry.turn_id
+    ; "task_id", Json_util.string_opt_to_json entry.task_id
+    ; "goal_id", Json_util.string_opt_to_json entry.goal_id
+    ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
+    ; "input", entry.input
+    ; "request_context_availability", `String request_context_availability
+    ; ( "request_context"
+      , Option.value entry.request_context ~default:`Null )
+    ]
 ;;
 
 let message role text = Agent_sdk.Types.text_message role text
@@ -127,10 +129,7 @@ let snapshot_resolved_lane ~messages (resolved : Registry.resolved_lane) =
 let prepare_flow
       ~(entry : pending_approval)
   =
-  let* context_bundle =
-    build_context_bundle ~entry
-    |> Result.map_error context_bundle_error_to_string
-  in
+  let context_bundle = build_context_bundle ~entry in
   let* system_prompt =
     system_prompt ()
     |> Result.map_error (fun detail ->
@@ -1212,9 +1211,6 @@ let spawn =
 ;;
 
 module For_testing = struct
-  type nonrec context_bundle_error = context_bundle_error =
-    | Exact_request_context_unavailable
-
   type nonrec prepared_flow = prepared_flow
   type nonrec exact_transition = exact_transition
   type nonrec exact_completion_transition = exact_completion_transition
@@ -1222,7 +1218,6 @@ module For_testing = struct
   type nonrec exact_queue_ops = exact_queue_ops
 
   let build_context_bundle = build_context_bundle
-  let context_bundle_error_to_string = context_bundle_error_to_string
   let messages_for_summary = messages_for_summary
   let parse_summary = parse_summary
   let prepare_flow = prepare_flow

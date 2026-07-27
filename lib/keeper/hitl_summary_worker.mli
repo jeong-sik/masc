@@ -47,13 +47,12 @@ val spawn
 module For_testing : sig
   val system_prompt : unit -> (string, string) result
 
-  type context_bundle_error = Exact_request_context_unavailable
-
+  (** The bundle always builds. [request_context_availability] states whether
+      the outer-turn causal context was captured; the Keeper, operation
+      identity, and complete concrete input are always present. *)
   val build_context_bundle
     :  entry:Keeper_approval_queue.pending_approval
-    -> (Yojson.Safe.t, context_bundle_error) result
-
-  val context_bundle_error_to_string : context_bundle_error -> string
+    -> Yojson.Safe.t
 
   val messages_for_summary
     :  system_prompt:string

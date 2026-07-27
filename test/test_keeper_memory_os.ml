@@ -3976,6 +3976,39 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       ~status:"lifecycle_cleanup_failed"
       ~compaction_outcome:Runtime_manifest.Lifecycle_cleanup_failed_without_checkpoint
       ~error:"lifecycle cleanup failed";
+    let append_committed_with_cause ~ts ~status ~error =
+      Runtime_manifest.make
+        ~ts
+        ~keeper_name:keeper_id
+        ~trace_id
+        ~keeper_turn_id:12
+        ~event:Runtime_manifest.Context_compacted
+        ~runtime_id:"oas-seoul-1"
+        ~status
+        ~decision:
+          (Runtime_manifest.with_clock_refs
+             ~clock_refs
+             (Runtime_manifest.with_compaction_outcome
+                ~compaction_outcome:Runtime_manifest.Checkpoint_committed
+                (Runtime_manifest.with_payload_role
+                   ~payload_role:Runtime_manifest.Checkpoint
+                   (`Assoc
+                      [ "trigger", `String "provider_overflow"
+                      ; "error", `String error
+                      ; "exact_evidence", exact_evidence
+                      ]))))
+        ~checkpoint_path:"/checkpoint/trace.json"
+        ()
+      |> append
+    in
+    append_committed_with_cause
+      ~ts:"2026-06-26T03:03:30Z"
+      ~status:"retryable_failure"
+      ~error:"compaction completion dispatch failed";
+    append_committed_with_cause
+      ~ts:"2026-06-26T03:03:40Z"
+      ~status:"lifecycle_cleanup_failed"
+      ~error:"lifecycle cleanup failed after checkpoint";
     let receipt event decision =
       Runtime_manifest.make
         ~ts:"2026-06-26T03:04:00Z"
@@ -4003,7 +4036,7 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       "schema"
       "keeper.compaction_snapshots.v1"
       (json_string_field "compaction_snapshots" top "schema");
-    Alcotest.(check int) "count" 3 (json_int_field "compaction_snapshots" top "count");
+    Alcotest.(check int) "count" 5 (json_int_field "compaction_snapshots" top "count");
     Alcotest.(check int)
       "read errors"
       0
@@ -4032,7 +4065,24 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       | Some item -> item
       | None -> Alcotest.failf "missing compaction outcome %s" expected
     in
-    let item = find_outcome "checkpoint_committed" in
+    let find_status_outcome expected_status expected_outcome =
+      match
+        List.find_opt
+          (fun item ->
+             String.equal expected_status (json_string_field "item" item "status")
+             && String.equal
+                  expected_outcome
+                  (json_string_field "item" item "compaction_outcome"))
+          items
+      with
+      | Some item -> item
+      | None ->
+        Alcotest.failf
+          "missing compaction status/outcome %s/%s"
+          expected_status
+          expected_outcome
+    in
+    let item = find_status_outcome "observed" "checkpoint_committed" in
     Alcotest.(check string)
       "source"
       "runtime_manifest"
@@ -4063,7 +4113,7 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
          Alcotest.(check string)
            (outcome ^ " failure cause")
            cause
-           (json_string_field "item" failed "failure_cause");
+           (json_string_field "item" failed "cause");
          Alcotest.check
            (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal)
            (outcome ^ " has no exact evidence")
@@ -4072,6 +4122,26 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       [ "retry_without_checkpoint", "compaction dispatch failed"
       ; ( "lifecycle_cleanup_failed_without_checkpoint"
         , "lifecycle cleanup failed" )
+      ];
+    List.iter
+      (fun (status, cause) ->
+         let committed = find_status_outcome status "checkpoint_committed" in
+         Alcotest.(check string)
+           (status ^ " cause")
+           cause
+           (json_string_field "item" committed "cause");
+         Alcotest.(check string)
+           (status ^ " outcome")
+           "checkpoint_committed"
+           (json_string_field "item" committed "compaction_outcome");
+         Alcotest.check
+           (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal)
+           (status ^ " retains exact evidence")
+           exact_evidence
+           (List.assoc "exact_evidence" committed))
+      [ "retryable_failure", "compaction completion dispatch failed"
+      ; ( "lifecycle_cleanup_failed"
+        , "lifecycle cleanup failed after checkpoint" )
       ];
     Alcotest.(check string)
       "compaction id"

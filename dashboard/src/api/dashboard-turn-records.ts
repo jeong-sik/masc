@@ -281,7 +281,7 @@ export type KeeperCompactionSnapshot = {
   readonly compaction_id: string | null
   readonly compaction_source: string | null
   readonly compaction_outcome: KeeperCompactionOutcome | null
-  readonly failure_cause: string | null
+  readonly cause: string | null
   readonly status: string
   readonly links: KeeperCompactionSnapshotLinks
   readonly exact_evidence: KeeperCompactionExactEvidence | null
@@ -654,16 +654,16 @@ function decodeCompactionOutcome(raw: unknown): KeeperCompactionOutcome | null |
 function compactionOutcomeContractIsValid(
   outcome: KeeperCompactionOutcome | null,
   evidence: KeeperCompactionExactEvidence | null,
-  failureCause: string | null,
+  cause: string | null,
 ): boolean {
   switch (outcome) {
     case null:
-      return evidence === null && failureCause === null
+      return evidence === null && cause === null
     case 'checkpoint_committed':
-      return evidence !== null && failureCause === null
+      return evidence !== null && (cause === null || Boolean(cause.trim()))
     case 'retry_without_checkpoint':
     case 'lifecycle_cleanup_failed_without_checkpoint':
-      return evidence === null && Boolean(failureCause?.trim())
+      return evidence === null && Boolean(cause?.trim())
   }
 }
 
@@ -680,17 +680,17 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
   const compactionSource = asNullableString(raw.compaction_source)
   const exactEvidence = decodeCompactionExactEvidence(raw.exact_evidence)
   const compactionOutcome = decodeCompactionOutcome(raw.compaction_outcome)
-  const failureCause =
-    raw.failure_cause === null ? null : asString(raw.failure_cause)
+  const cause =
+    raw.cause === null ? null : asString(raw.cause)
   const reinjectionObservation =
     decodeCompactionReinjectionObservation(raw.reinjection_observation)
   if (
     exactEvidence === undefined
     || compactionOutcome === undefined
-    || failureCause === undefined
+    || cause === undefined
     || reinjectionObservation === undefined
   ) return null
-  if (!compactionOutcomeContractIsValid(compactionOutcome, exactEvidence, failureCause)) return null
+  if (!compactionOutcomeContractIsValid(compactionOutcome, exactEvidence, cause)) return null
   return {
     id,
     keeper,
@@ -708,7 +708,7 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
     compaction_id: asNullableString(raw.compaction_id),
     compaction_source: compactionSource,
     compaction_outcome: compactionOutcome,
-    failure_cause: failureCause,
+    cause: cause,
     status,
     links: decodeKeeperCompactionSnapshotLinks(raw.links),
     exact_evidence: exactEvidence,

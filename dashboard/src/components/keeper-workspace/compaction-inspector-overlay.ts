@@ -500,8 +500,8 @@ export function CompactionInspectorOverlay({
           ${outcomePresentation
             ? html`<div class="cmp-trigger"><span class="sub-k">결과</span><strong style=${{ color: outcomePresentation.color }}>${outcomePresentation.label}</strong></div>`
             : null}
-          ${ev.failureCause
-            ? html`<div class="cmp-trigger"><span class="sub-k">실패 원인</span><span class="mono" style=${{ color: 'var(--color-status-err)' }}>${ev.failureCause}</span></div>`
+          ${ev.cause
+            ? html`<div class="cmp-trigger"><span class="sub-k">원인</span><span class="mono" style=${{ color: 'var(--color-status-err)' }}>${ev.cause}</span></div>`
             : null}
           ${ev.reinjection
             ? html`<div class="cmp-trigger"><span class="sub-k">재주입 관측</span><span class="mono">${ev.reinjection.state} · load=${ev.reinjection.checkpoint_loaded_receipts} · inject=${ev.reinjection.context_injected_receipts}</span></div>`

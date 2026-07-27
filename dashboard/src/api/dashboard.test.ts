@@ -544,8 +544,8 @@ describe('keeper tool telemetry fetchers', () => {
             compaction_id: 'cmp-42',
             compaction_source: 'provider_overflow',
             compaction_outcome: 'checkpoint_committed',
-            failure_cause: null,
-            status: 'observed',
+            cause: 'compaction completion dispatch failed',
+            status: 'retryable_failure',
             links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
             exact_evidence: {
               before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
@@ -576,7 +576,7 @@ describe('keeper tool telemetry fetchers', () => {
             compaction_id: null,
             compaction_source: 'pre_dispatch_hygiene',
             compaction_outcome: 'retry_without_checkpoint',
-            failure_cause: 'compaction dispatch failed',
+            cause: 'compaction dispatch failed',
             status: 'retryable_failure',
             links: {},
             exact_evidence: null,
@@ -602,8 +602,8 @@ describe('keeper tool telemetry fetchers', () => {
             compaction_id: 'cmp-43',
             compaction_source: 'event_bus',
             compaction_outcome: 'checkpoint_committed',
-            failure_cause: null,
-            status: 'observed',
+            cause: 'lifecycle cleanup failed',
+            status: 'lifecycle_cleanup_failed',
             links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
             exact_evidence: {
               before_checkpoint_bytes: 2048, after_checkpoint_bytes: 512,
@@ -634,7 +634,7 @@ describe('keeper tool telemetry fetchers', () => {
             compaction_id: 'cmp-contradictory',
             compaction_source: 'provider_overflow',
             compaction_outcome: 'retry_without_checkpoint',
-            failure_cause: 'compaction dispatch failed',
+            cause: 'compaction dispatch failed',
             status: 'retryable_failure',
             links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
             exact_evidence: {
@@ -671,6 +671,11 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.items[1]?.runtime_id).toBeNull()
     expect(result.items[1]?.links.checkpoint_path).toBeNull()
     expect(result.items[0]?.exact_evidence?.before_checkpoint_bytes).toBe(4096)
+    expect(result.items[0]?.compaction_outcome).toBe('checkpoint_committed')
+    expect(result.items[0]?.cause).toBe('compaction completion dispatch failed')
+    expect(result.items[2]?.compaction_outcome).toBe('checkpoint_committed')
+    expect(result.items[2]?.exact_evidence?.before_checkpoint_bytes).toBe(2048)
+    expect(result.items[2]?.cause).toBe('lifecycle cleanup failed')
     expect(result.items).toHaveLength(3)
     expect(result.items.some(item => item.trace_id === 'trace-contradictory')).toBe(false)
   })

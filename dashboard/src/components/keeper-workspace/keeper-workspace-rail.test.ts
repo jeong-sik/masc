@@ -108,7 +108,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
           compaction_id: 'cmp-42',
           compaction_source: 'event_bus',
           compaction_outcome: 'checkpoint_committed',
-          failure_cause: null,
+          cause: null,
           status: 'observed',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
           exact_evidence: {
@@ -945,7 +945,7 @@ describe('KeeperWorkspaceRail', () => {
           compaction_id: 'cmp-failed',
           compaction_source: 'provider_overflow',
           compaction_outcome: 'retry_without_checkpoint',
-          failure_cause: 'compaction dispatch failed',
+          cause: 'compaction dispatch failed',
           status: 'retryable_failure',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
           exact_evidence: null,
@@ -967,6 +967,8 @@ describe('KeeperWorkspaceRail', () => {
 
     await waitFor(() => expect(container.textContent).toContain('체크포인트 없이 재시도'))
     expect(container.textContent).toContain('compaction dispatch failed')
+    expect(container.textContent).toContain('원인')
+    expect(container.textContent).not.toContain('실패 원인')
     expect(container.textContent).not.toContain('체크포인트 커밋 완료')
   })
 
@@ -1001,7 +1003,7 @@ describe('KeeperWorkspaceRail', () => {
           compaction_id: null,
           compaction_source: 'pre_dispatch_hygiene',
           compaction_outcome: null,
-          failure_cause: null,
+          cause: null,
           status: 'compacted',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
           exact_evidence: null,
@@ -1119,7 +1121,7 @@ describe('KeeperWorkspaceRail', () => {
         compaction_id: 'cmp-old',
         compaction_source: 'event_bus',
         compaction_outcome: null,
-        failure_cause: null,
+        cause: null,
         status: 'observed',
         links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
         exact_evidence: null,

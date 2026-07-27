@@ -35,7 +35,7 @@ export interface CompactionSnapshot {
   readonly keeperTurnId?: number | null
   readonly status?: string | null
   readonly outcome?: KeeperCompactionOutcome | null
-  readonly failureCause?: string | null
+  readonly cause?: string | null
   readonly detailSource?: string | null
   readonly summarizedCount?: number | null
   readonly droppedCount?: number | null
@@ -121,7 +121,7 @@ function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): Compaction
     keeperTurnId: snapshot.keeper_turn_id,
     status: snapshot.status,
     outcome: snapshot.compaction_outcome,
-    failureCause: snapshot.failure_cause,
+    cause: snapshot.cause,
     detailSource: snapshot.source,
     summarizedCount: evidence?.summarized_message_count ?? null,
     droppedCount: evidence?.dropped_message_count ?? null,

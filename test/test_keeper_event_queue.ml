@@ -1189,7 +1189,6 @@ let () =
           [ "name", `String keeper_name
           ; "agent_name", `String keeper_name
           ; "trace_id", `String trace_id
-          ; "last_model_used", `String "llama:auto"
           ])
     with
     | Ok meta -> meta

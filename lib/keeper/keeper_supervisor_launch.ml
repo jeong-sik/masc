@@ -705,12 +705,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_m
 (* Phase 4 reconciliation extracted to
    [Keeper_supervisor_reconcile_keepalive] (godfile decomp).
    publish_lifecycle + supervise_keepalive injected to avoid cycle. *)
-let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ context)
-  =
+let reconcile_keepalive_keepers (ctx : _ context) =
   Keeper_supervisor_reconcile_keepalive.reconcile_keepalive_keepers
     ~publish_lifecycle
     ~supervise_keepalive
-    ~load_or_materialize_keeper_meta
     ctx
 ;;
 

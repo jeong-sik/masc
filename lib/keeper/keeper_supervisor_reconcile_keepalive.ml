@@ -14,7 +14,6 @@ let immediate_warmup_sec = 0
 let reconcile_keepalive_keepers
       ~publish_lifecycle
       ~supervise_keepalive
-      ~load_or_materialize_keeper_meta
   (ctx : _ context)
   =
   let base_path = ctx.config.base_path in
@@ -30,12 +29,6 @@ let reconcile_keepalive_keepers
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[ "keeper", name; "operation", operation ]
-      ()
-  in
-  let inc_materialization_failure ~name =
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string KeeperMaterializationFailures)
-      ~labels:[ "keeper", name; "operation", "reconcile_materialize" ]
       ()
   in
   List.iter
@@ -99,25 +92,10 @@ let reconcile_keepalive_keepers
         reconcile_meta meta
       | Ok (Some _) -> ()
       | Ok None ->
-        (match load_or_materialize_keeper_meta ctx name with
-         | Ok (Some meta) when not meta.paused ->
-           if Keeper_registry.is_registered ~base_path meta.name
-           then
-             Log.Keeper.info
-               "%s: materialized durable keeper during reconcile"
-             meta.name
-           else reconcile_meta meta
-         | Ok (Some _) -> ()
-         | Ok None ->
-           Log.Keeper.debug
-             "reconcile: configured keeper %s has no materialized meta"
-             name
-         | Error err ->
-           inc_materialization_failure ~name;
-           Log.Keeper.warn
-             "reconcile: materialize missing keeper meta failed for %s: %s"
-             name
-             err)
+        Log.Keeper.warn
+          "reconcile: current metadata disappeared for %s; domain work remains \
+           blocked and explicit runtime reset is required"
+          name
       | Error err ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ObservationQueryFailures)

@@ -33,12 +33,16 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
         in
-        let visible =
-          candidate_names
-          |> List.filter_map (fun name ->
-               keeper_list_row_json ~runtime_class:"keeper" config name
-               |> Option.map (fun row -> name, row))
-          |> take limit
+        let rec collect_visible remaining acc = function
+          | _ when remaining = 0 -> List.rev acc
+          | [] -> List.rev acc
+          | name :: rest ->
+            (match keeper_list_row_json ~runtime_class:"keeper" config name with
+             | None -> collect_visible remaining acc rest
+             | Some row ->
+               collect_visible (remaining - 1) ((name, row) :: acc) rest)
+        in
+        let visible = collect_visible limit [] candidate_names in
         in
         let names = List.map fst visible in
         let rows = List.map snd visible in

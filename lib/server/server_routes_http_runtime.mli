@@ -268,7 +268,8 @@ module For_testing : sig
   (** Returns [(interval_sec, timeout_sec, ttl_sec)] for full-health refresh. *)
 end
 
-val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list
+val keeper_fleet_runtime_resolution_fields :
+  config:Workspace.config -> unit -> (string * Yojson.Safe.t) list
 (** [keeper_fleet_runtime_resolution_fields ()] returns the health/fleet
     safety subset projected into [/api/v1/dashboard/shell]'s
     [runtime_resolution].  It intentionally flattens
@@ -286,7 +287,7 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     Otel_metric_store. *)
 
 val keeper_fleet_runtime_resolution_light_fields :
-  unit -> (string * Yojson.Safe.t) list
+  config:Workspace.config -> unit -> (string * Yojson.Safe.t) list
 (** Like {!keeper_fleet_runtime_resolution_fields}, but omits the
     reaction-ledger JSONL scan for the [/api/v1/dashboard/shell?light=true]
     header hot path.  It keeps [keeper_turn_admission] because admission

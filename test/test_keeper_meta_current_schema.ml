@@ -79,6 +79,30 @@ let test_current_writer_roundtrip_and_keyset () =
   expect_current "writer roundtrip" (Keeper_meta_json.meta_to_json meta)
 ;;
 
+let test_current_writer_rejects_non_finite_values () =
+  let meta =
+    match Keeper_meta_json_parse.meta_of_json (current_json ()) with
+    | Ok meta -> meta
+    | Error detail -> Alcotest.fail detail
+  in
+  let invalid =
+    { meta with
+      runtime =
+        { meta.runtime with
+          usage =
+            { meta.runtime.usage with total_cost_usd = Float.nan }
+        }
+    }
+  in
+  match Keeper_meta_json.current_write_json invalid with
+  | Error detail ->
+    check bool
+      "write-side non-finite rejection is current-schema classified"
+      true
+      (Astring.String.is_infix ~affix:"must be finite" detail)
+  | Ok _ -> Alcotest.fail "current writer accepted a non-finite value"
+;;
+
 let test_every_current_field_is_required () =
   List.iter
     (fun key ->
@@ -140,6 +164,8 @@ let () =
             test_nullability_is_exact
         ; test_case "outside fields share one classification" `Quick
             test_every_outside_field_has_one_classification
+        ; test_case "writer rejects non-finite values" `Quick
+            test_current_writer_rejects_non_finite_values
         ] )
     ]
 ;;

@@ -30,15 +30,12 @@ val pending_hitl_approval_keeper_names : Workspace.config -> string list
     chat stalls without changing approval/resume behavior. *)
 
 val sweep_and_recover :
-     load_or_materialize_keeper_meta:
-       ('a context -> string -> (keeper_meta option, string) result)
-  -> 'a context
+  'a context
   -> unit
 (** Scan all supervised keepers in [Keeper_registry]. Detect zombies
-    (resolved Promise), restart without a failure-derived delay, and materialize configured keepalive
-    keepers through the required callback. Called periodically by the
-    keeper supervisor loop. Failure observations never rewrite [paused]; a
-    crashed fiber follows the ordinary per-Keeper restart path. *)
+    (resolved Promise), restart without a failure-derived delay, and reconcile
+    only valid current keepers. Missing/invalid current metadata blocks domain
+    work without stopping the supervisor observation loop. *)
 
 (** {1 Pure Helpers (exposed for testing)} *)
 

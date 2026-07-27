@@ -600,10 +600,15 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       keeper_board_event_collection_health_json
   in
   let execution_snapshot =
-    match server_state with
-    | Some state ->
-      keeper_execution_snapshot (Mcp_server.workspace_config state)
-    | None -> empty_keeper_execution_snapshot
+    match server_state, current_meta_discovery with
+    | Some state, Some discovery ->
+      keeper_execution_snapshot
+        ~current_meta_discovery:discovery
+        (Mcp_server.workspace_config state)
+    | None, None
+    | Some _, None
+    | None, Some _ ->
+      empty_keeper_execution_snapshot
   in
   let keeper_event_queue_json =
     compute_section ~name:"keeper_event_queue" ?section_timings_ref

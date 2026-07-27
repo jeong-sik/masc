@@ -2216,7 +2216,9 @@ let runtime_resolution_json (config : Workspace.config) =
             ~resolved_base_commit ~upstream_status ~source_mismatch )
       ; "gate_hitl", gate_hitl_json ()
       ]
-      @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
+      @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields
+          ~config
+          () )
 ;;
 
 let light_runtime_resolution_json (config : Workspace.config) =
@@ -2237,7 +2239,9 @@ let light_runtime_resolution_json (config : Workspace.config) =
     | None -> false
   in
   let fleet_fields =
-    Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ()
+    Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields
+      ~config
+      ()
   in
   let fleet_safety =
     match List.assoc_opt "keeper_fleet_safety" fleet_fields with

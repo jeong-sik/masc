@@ -14,88 +14,95 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
      multimodal_policy are persisted as the effective runtime snapshot so
      dashboards, checkpoint writers, and meta readers do not see a blank or
      downgraded keeper between TOML load and prompt render. *)
-  `Assoc
-    [ "name", `String m.name
-    ; "agent_name", `String m.agent_name
-    ; ( "persona"
+  object_of_field_values
+    [ Name, `String m.name
+    ; Agent_name, `String m.agent_name
+    ; ( Persona
       , match m.persona with
         | Some s -> `String s
         | None -> `Null )
-    ; "instructions", `String m.instructions
-    ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
-    ; "multimodal_policy", `String (multimodal_policy_to_string m.multimodal_policy)
-    ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
-    ; "generation", `Int rt.nonce
-    ; "last_handoff_ts", `Float rt.last_handoff_ts
-    ; "created_at", `String m.created_at
-    ; "updated_at", `String m.updated_at
-    ; "total_turns", `Int rt.usage.total_turns
-    ; "total_input_tokens", `Int rt.usage.total_input_tokens
-    ; "total_output_tokens", `Int rt.usage.total_output_tokens
-    ; "total_tokens", `Int rt.usage.total_tokens
-    ; "total_cost_usd", `Float rt.usage.total_cost_usd
-    ; "last_turn_ts", `Float rt.usage.last_turn_ts
-    ; "last_input_tokens", `Int rt.usage.last_input_tokens
-    ; "last_output_tokens", `Int rt.usage.last_output_tokens
-    ; "last_total_tokens", `Int rt.usage.last_total_tokens
-    ; "last_latency_ms", `Int rt.usage.last_latency_ms
-    ; "compaction_count", `Int rt.compaction_rt.count
-    ; "last_compaction_ts", `Float rt.compaction_rt.last_ts
-    ; "last_compaction_before_tokens", `Int rt.compaction_rt.last_before_tokens
-    ; "last_compaction_after_tokens", `Int rt.compaction_rt.last_after_tokens
-    ; ( "compaction_consecutive_failures"
+    ; Instructions, `String m.instructions
+    ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
+    ; Multimodal_policy, `String (multimodal_policy_to_string m.multimodal_policy)
+    ; Trace_history, `List (List.map (fun s -> `String s) rt.trace_history)
+    ; Generation, `Int rt.nonce
+    ; Last_handoff_ts, `Float rt.last_handoff_ts
+    ; Created_at, `String m.created_at
+    ; Updated_at, `String m.updated_at
+    ; Total_turns, `Int rt.usage.total_turns
+    ; Total_input_tokens, `Int rt.usage.total_input_tokens
+    ; Total_output_tokens, `Int rt.usage.total_output_tokens
+    ; Total_tokens, `Int rt.usage.total_tokens
+    ; Total_cost_usd, `Float rt.usage.total_cost_usd
+    ; Last_turn_ts, `Float rt.usage.last_turn_ts
+    ; Last_input_tokens, `Int rt.usage.last_input_tokens
+    ; Last_output_tokens, `Int rt.usage.last_output_tokens
+    ; Last_total_tokens, `Int rt.usage.last_total_tokens
+    ; Last_latency_ms, `Int rt.usage.last_latency_ms
+    ; Compaction_count, `Int rt.compaction_rt.count
+    ; Last_compaction_ts, `Float rt.compaction_rt.last_ts
+    ; Last_compaction_before_tokens, `Int rt.compaction_rt.last_before_tokens
+    ; Last_compaction_after_tokens, `Int rt.compaction_rt.last_after_tokens
+    ; ( Compaction_consecutive_failures
       , `Int rt.compaction_rt.consecutive_failures )
-    ; "proactive_count_total", `Int rt.proactive_rt.count_total
-    ; "last_proactive_ts", `Float rt.proactive_rt.last_ts
-    ; "proactive_visible_count_total", `Int rt.proactive_rt.visible_count_total
-    ; "last_visible_proactive_ts", `Float rt.proactive_rt.last_visible_ts
-    ; ( "last_proactive_outcome"
+    ; Proactive_count_total, `Int rt.proactive_rt.count_total
+    ; Last_proactive_ts, `Float rt.proactive_rt.last_ts
+    ; Proactive_visible_count_total, `Int rt.proactive_rt.visible_count_total
+    ; Last_visible_proactive_ts, `Float rt.proactive_rt.last_visible_ts
+    ; ( Last_proactive_outcome
       , `String (proactive_cycle_outcome_to_string rt.proactive_rt.last_outcome) )
-    ; "last_proactive_reason", `String rt.proactive_rt.last_reason
-    ; "last_proactive_preview", `String rt.proactive_rt.last_preview
-    ; "consecutive_noop_count", `Int rt.proactive_rt.consecutive_noop_count
-    ; "last_compaction_check_ts", `Float rt.compaction_rt.last_check_ts
-    ; ( "last_compaction_decision"
+    ; Last_proactive_reason, `String rt.proactive_rt.last_reason
+    ; Last_proactive_preview, `String rt.proactive_rt.last_preview
+    ; Consecutive_noop_count, `Int rt.proactive_rt.consecutive_noop_count
+    ; Last_compaction_check_ts, `Float rt.compaction_rt.last_check_ts
+    ; ( Last_compaction_decision
       , `String (compaction_runtime_decision_to_string rt.compaction_rt.last_decision)
       )
-    ; "active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids)
-    ; "last_autonomous_action_at", `String rt.last_autonomous_action_at
-    ; "autonomous_action_count", `Int rt.autonomous_action_count
-    ; "autonomous_turn_count", `Int rt.autonomous_turn_count
-    ; "autonomous_text_turn_count", `Int rt.autonomous_text_turn_count
-    ; "autonomous_tool_turn_count", `Int rt.autonomous_tool_turn_count
-    ; "board_reactive_turn_count", `Int rt.board_reactive_turn_count
-    ; "mention_reactive_turn_count", `Int rt.mention_reactive_turn_count
-    ; "noop_turn_count", `Int rt.noop_turn_count
-    ; ( "message_scope_ack_id"
+    ; Active_goal_ids, `List (List.map (fun s -> `String s) m.active_goal_ids)
+    ; Last_autonomous_action_at, `String rt.last_autonomous_action_at
+    ; Autonomous_action_count, `Int rt.autonomous_action_count
+    ; Autonomous_turn_count, `Int rt.autonomous_turn_count
+    ; Autonomous_text_turn_count, `Int rt.autonomous_text_turn_count
+    ; Autonomous_tool_turn_count, `Int rt.autonomous_tool_turn_count
+    ; Board_reactive_turn_count, `Int rt.board_reactive_turn_count
+    ; Mention_reactive_turn_count, `Int rt.mention_reactive_turn_count
+    ; Noop_turn_count, `Int rt.noop_turn_count
+    ; ( Message_scope_ack_id
       , match rt.message_scope_ack_id with
         | Some id -> `String id
         | None -> `Null )
-    ; ( "last_blocker"
+    ; ( Last_blocker
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info
         | None -> `Null )
-    ; ( "last_runtime_attempt"
+    ; ( Last_runtime_attempt
       , match rt.last_runtime_attempt with
         | Some record -> runtime_attempt_record_to_json record
         | None -> `Null )
-    ; "paused", `Bool m.paused
-    ; ( "latched_reason"
+    ; Paused, `Bool m.paused
+    ; ( Latched_reason
       , match m.latched_reason with
         | Some reason -> Keeper_latched_reason.Stable.to_yojson reason
         | None -> `Null )
-    ; ( "current_task_id"
+    ; ( Current_task_id
       , Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id) )
-    ; ( "keeper_id"
+    ; ( Keeper_id
       , match m.keeper_id with
         | Some uid -> Keeper_id.uid_to_yojson uid
         | None -> `Null )
-    ; "oas_env", `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
-    ; "meta_version", `Int m.meta_version
+    ; Oas_env, `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
+    ; Meta_version, `Int m.meta_version
     ]
 ;;
 
 include Keeper_meta_json_parse
+
+let current_write_json meta =
+  let json = meta_to_json meta in
+  match meta_of_json json with
+  | Ok _ -> Ok json
+  | Error detail -> Error detail
+;;
 
 let canonical_keeper_meta_key_names = current_field_names

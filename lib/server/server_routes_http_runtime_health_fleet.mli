@@ -22,6 +22,8 @@ val keeper_event_queue_health_json :
   Yojson.Safe.t
 
 val keeper_fleet_runtime_resolution_base_fields :
+  config:Workspace.config ->
+  current_meta_discovery:Keeper_meta_store.current_meta_discovery ->
   ?meta_scan:Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan ->
   ?include_reaction_ledger:bool ->
   unit ->
@@ -37,7 +39,7 @@ val runtime_truth_json :
   Yojson.Safe.t
 
 val keeper_fleet_runtime_resolution_fields :
-  unit -> (string * Yojson.Safe.t) list
+  config:Workspace.config -> unit -> (string * Yojson.Safe.t) list
 
 val keeper_fleet_runtime_resolution_light_fields :
-  unit -> (string * Yojson.Safe.t) list
+  config:Workspace.config -> unit -> (string * Yojson.Safe.t) list

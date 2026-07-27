@@ -14,62 +14,191 @@ let invalid_currentf format =
     format
 ;;
 
-let current_field_names =
-  [ "name"
-  ; "agent_name"
-  ; "persona"
-  ; "instructions"
-  ; "trace_id"
-  ; "multimodal_policy"
-  ; "trace_history"
-  ; "generation"
-  ; "last_handoff_ts"
-  ; "created_at"
-  ; "updated_at"
-  ; "total_turns"
-  ; "total_input_tokens"
-  ; "total_output_tokens"
-  ; "total_tokens"
-  ; "total_cost_usd"
-  ; "last_turn_ts"
-  ; "last_input_tokens"
-  ; "last_output_tokens"
-  ; "last_total_tokens"
-  ; "last_latency_ms"
-  ; "compaction_count"
-  ; "last_compaction_ts"
-  ; "last_compaction_before_tokens"
-  ; "last_compaction_after_tokens"
-  ; "compaction_consecutive_failures"
-  ; "proactive_count_total"
-  ; "last_proactive_ts"
-  ; "proactive_visible_count_total"
-  ; "last_visible_proactive_ts"
-  ; "last_proactive_outcome"
-  ; "last_proactive_reason"
-  ; "last_proactive_preview"
-  ; "consecutive_noop_count"
-  ; "last_compaction_check_ts"
-  ; "last_compaction_decision"
-  ; "active_goal_ids"
-  ; "last_autonomous_action_at"
-  ; "autonomous_action_count"
-  ; "autonomous_turn_count"
-  ; "autonomous_text_turn_count"
-  ; "autonomous_tool_turn_count"
-  ; "board_reactive_turn_count"
-  ; "mention_reactive_turn_count"
-  ; "noop_turn_count"
-  ; "message_scope_ack_id"
-  ; "last_blocker"
-  ; "last_runtime_attempt"
-  ; "paused"
-  ; "latched_reason"
-  ; "current_task_id"
-  ; "keeper_id"
-  ; "oas_env"
-  ; "meta_version"
+type field =
+  | Name
+  | Agent_name
+  | Persona
+  | Instructions
+  | Trace_id
+  | Multimodal_policy
+  | Trace_history
+  | Generation
+  | Last_handoff_ts
+  | Created_at
+  | Updated_at
+  | Total_turns
+  | Total_input_tokens
+  | Total_output_tokens
+  | Total_tokens
+  | Total_cost_usd
+  | Last_turn_ts
+  | Last_input_tokens
+  | Last_output_tokens
+  | Last_total_tokens
+  | Last_latency_ms
+  | Compaction_count
+  | Last_compaction_ts
+  | Last_compaction_before_tokens
+  | Last_compaction_after_tokens
+  | Compaction_consecutive_failures
+  | Proactive_count_total
+  | Last_proactive_ts
+  | Proactive_visible_count_total
+  | Last_visible_proactive_ts
+  | Last_proactive_outcome
+  | Last_proactive_reason
+  | Last_proactive_preview
+  | Consecutive_noop_count
+  | Last_compaction_check_ts
+  | Last_compaction_decision
+  | Active_goal_ids
+  | Last_autonomous_action_at
+  | Autonomous_action_count
+  | Autonomous_turn_count
+  | Autonomous_text_turn_count
+  | Autonomous_tool_turn_count
+  | Board_reactive_turn_count
+  | Mention_reactive_turn_count
+  | Noop_turn_count
+  | Message_scope_ack_id
+  | Last_blocker
+  | Last_runtime_attempt
+  | Paused
+  | Latched_reason
+  | Current_task_id
+  | Keeper_id
+  | Oas_env
+  | Meta_version
+
+let all_fields =
+  [ Name
+  ; Agent_name
+  ; Persona
+  ; Instructions
+  ; Trace_id
+  ; Multimodal_policy
+  ; Trace_history
+  ; Generation
+  ; Last_handoff_ts
+  ; Created_at
+  ; Updated_at
+  ; Total_turns
+  ; Total_input_tokens
+  ; Total_output_tokens
+  ; Total_tokens
+  ; Total_cost_usd
+  ; Last_turn_ts
+  ; Last_input_tokens
+  ; Last_output_tokens
+  ; Last_total_tokens
+  ; Last_latency_ms
+  ; Compaction_count
+  ; Last_compaction_ts
+  ; Last_compaction_before_tokens
+  ; Last_compaction_after_tokens
+  ; Compaction_consecutive_failures
+  ; Proactive_count_total
+  ; Last_proactive_ts
+  ; Proactive_visible_count_total
+  ; Last_visible_proactive_ts
+  ; Last_proactive_outcome
+  ; Last_proactive_reason
+  ; Last_proactive_preview
+  ; Consecutive_noop_count
+  ; Last_compaction_check_ts
+  ; Last_compaction_decision
+  ; Active_goal_ids
+  ; Last_autonomous_action_at
+  ; Autonomous_action_count
+  ; Autonomous_turn_count
+  ; Autonomous_text_turn_count
+  ; Autonomous_tool_turn_count
+  ; Board_reactive_turn_count
+  ; Mention_reactive_turn_count
+  ; Noop_turn_count
+  ; Message_scope_ack_id
+  ; Last_blocker
+  ; Last_runtime_attempt
+  ; Paused
+  ; Latched_reason
+  ; Current_task_id
+  ; Keeper_id
+  ; Oas_env
+  ; Meta_version
   ]
+
+let field_name = function
+  | Name -> "name"
+  | Agent_name -> "agent_name"
+  | Persona -> "persona"
+  | Instructions -> "instructions"
+  | Trace_id -> "trace_id"
+  | Multimodal_policy -> "multimodal_policy"
+  | Trace_history -> "trace_history"
+  | Generation -> "generation"
+  | Last_handoff_ts -> "last_handoff_ts"
+  | Created_at -> "created_at"
+  | Updated_at -> "updated_at"
+  | Total_turns -> "total_turns"
+  | Total_input_tokens -> "total_input_tokens"
+  | Total_output_tokens -> "total_output_tokens"
+  | Total_tokens -> "total_tokens"
+  | Total_cost_usd -> "total_cost_usd"
+  | Last_turn_ts -> "last_turn_ts"
+  | Last_input_tokens -> "last_input_tokens"
+  | Last_output_tokens -> "last_output_tokens"
+  | Last_total_tokens -> "last_total_tokens"
+  | Last_latency_ms -> "last_latency_ms"
+  | Compaction_count -> "compaction_count"
+  | Last_compaction_ts -> "last_compaction_ts"
+  | Last_compaction_before_tokens -> "last_compaction_before_tokens"
+  | Last_compaction_after_tokens -> "last_compaction_after_tokens"
+  | Compaction_consecutive_failures -> "compaction_consecutive_failures"
+  | Proactive_count_total -> "proactive_count_total"
+  | Last_proactive_ts -> "last_proactive_ts"
+  | Proactive_visible_count_total -> "proactive_visible_count_total"
+  | Last_visible_proactive_ts -> "last_visible_proactive_ts"
+  | Last_proactive_outcome -> "last_proactive_outcome"
+  | Last_proactive_reason -> "last_proactive_reason"
+  | Last_proactive_preview -> "last_proactive_preview"
+  | Consecutive_noop_count -> "consecutive_noop_count"
+  | Last_compaction_check_ts -> "last_compaction_check_ts"
+  | Last_compaction_decision -> "last_compaction_decision"
+  | Active_goal_ids -> "active_goal_ids"
+  | Last_autonomous_action_at -> "last_autonomous_action_at"
+  | Autonomous_action_count -> "autonomous_action_count"
+  | Autonomous_turn_count -> "autonomous_turn_count"
+  | Autonomous_text_turn_count -> "autonomous_text_turn_count"
+  | Autonomous_tool_turn_count -> "autonomous_tool_turn_count"
+  | Board_reactive_turn_count -> "board_reactive_turn_count"
+  | Mention_reactive_turn_count -> "mention_reactive_turn_count"
+  | Noop_turn_count -> "noop_turn_count"
+  | Message_scope_ack_id -> "message_scope_ack_id"
+  | Last_blocker -> "last_blocker"
+  | Last_runtime_attempt -> "last_runtime_attempt"
+  | Paused -> "paused"
+  | Latched_reason -> "latched_reason"
+  | Current_task_id -> "current_task_id"
+  | Keeper_id -> "keeper_id"
+  | Oas_env -> "oas_env"
+  | Meta_version -> "meta_version"
+;;
+
+let current_field_names = List.map field_name all_fields
+
+let object_of_field_values field_values =
+  let supplied = List.map fst field_values in
+  if supplied <> all_fields
+  then
+    invalid_arg
+      "Keeper_meta_json_current_schema.object_of_field_values: field sequence \
+       differs from the closed current schema"
+  else
+    `Assoc
+      (List.map
+         (fun (field, value) -> field_name field, value)
+         field_values)
+;;
 
 let find_duplicate fields =
   let rec loop seen = function

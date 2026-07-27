@@ -13,13 +13,10 @@ open Keeper_execution
 open Keeper_turn_up_args
 
 
-(* #9749: bootstrap can race a heartbeat/supervisor meta write after
-   crash recovery. Retry on CAS conflict while keeping heartbeat-owned
-   cursors from disk. *)
+(* Fresh Keeper creation is the only current-meta create authority. It never
+   merges with or replaces a concurrently-created identity. *)
 let write_initial_meta config meta =
-  write_meta_with_merge
-    ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-    config meta
+  create_meta config meta
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
@@ -363,7 +360,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
-        let launch_outcome = start_keepalive ctx meta in
+        let launch_outcome =
+          start_keepalive ctx { meta with meta_version = 1 }
+        in
         (match launch_outcome with
          | Keepalive_started _ ->
         Progress.Tracker.complete tracker ~message:"Keeper created" ();

@@ -513,7 +513,7 @@ let empty_keeper_execution_snapshot =
   { owners = []; executable_names = [] }
 ;;
 
-let keeper_execution_snapshot config =
+let keeper_execution_snapshot ~current_meta_discovery config =
   let base_path = config.Workspace.base_path in
   let registry_names =
     Keeper_registry.all ~base_path ()
@@ -524,15 +524,29 @@ let keeper_execution_snapshot config =
       ~base_path
     |> fun discovery -> discovery.keeper_names
   in
-  let owner_names = sorted_unique_strings (registry_names @ queue_names) in
+  let owner_names =
+    sorted_unique_strings
+      (registry_names @ queue_names @ current_meta_discovery.keeper_names)
+  in
   let owners =
     List.map
       (fun keeper_name ->
         let meta_result =
-          match Keeper_meta_store.read_effective_meta config keeper_name with
-          | Ok (Some meta) -> Ok meta
-          | Ok None -> Error "durable keeper metadata missing"
-          | Error detail -> Error detail
+          match List.assoc_opt keeper_name current_meta_discovery.metas with
+          | Some meta -> Ok meta
+          | None ->
+            (match
+               List.find_opt
+                 (fun
+                   (unavailable : Keeper_meta_store.current_meta_unavailable)
+                 ->
+                   String.equal unavailable.keeper_name keeper_name)
+                 current_meta_discovery.unavailable
+             with
+             | Some unavailable ->
+               Error
+                 (Keeper_meta_store.current_meta_unavailable_message unavailable)
+             | None -> Error "durable keeper metadata missing from current observation")
         in
         let admission =
           Keeper_turn_admission.snapshot_for ~base_path ~keeper_name

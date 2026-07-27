@@ -62,7 +62,11 @@ let current_meta_unavailable_to_yojson unavailable =
     ; ( "reason"
       , `String (current_meta_unavailable_reason_to_string unavailable.reason) )
     ; "detail", `String unavailable.detail
-    ; "reset_required", `Bool (unavailable.reason = Invalid_current)
+    ; ( "reset_required"
+      , `Bool
+          (match unavailable.reason with
+           | Invalid_current | Missing_current -> true
+           | Read_failed | Discovery_failed -> false) )
     ]
 ;;
 
@@ -78,7 +82,12 @@ let current_meta_unavailable_collection_to_yojson observation =
       unavailable
   in
   let reset_required =
-    List.exists (fun item -> item.reason = Invalid_current) unavailable
+    List.exists
+      (fun item ->
+         match item.reason with
+         | Invalid_current | Missing_current -> true
+         | Read_failed | Discovery_failed -> false)
+      unavailable
   in
   `Assoc
     [ "schema", `String "masc.keeper_current_meta_unavailable.v1"
@@ -108,7 +117,7 @@ let current_meta_unavailable ~path ~reason ~detail:_ =
     | Invalid_current ->
       "keeper current metadata does not match the current schema; runtime reset required"
     | Read_failed -> "keeper current metadata could not be read"
-    | Missing_current -> "keeper current metadata is missing"
+    | Missing_current -> "keeper current metadata is missing; runtime reset required"
     | Discovery_failed -> "keeper current metadata directory could not be listed"
   in
   { keeper_name; path_identity; reason; detail }
@@ -331,7 +340,7 @@ let current_meta_unavailable_facts config =
   (discover_current_meta config).unavailable
 ;;
 
-let discover_configured_keepers config ~include_missing:_ =
+let discover_configured_keepers config =
   configured_keeper_names config
   |> List.fold_left
        (fun discovery name ->
@@ -365,9 +374,7 @@ let discover_configured_keepers config ~include_missing:_ =
 ;;
 
 let discover_keepalive_keepers config =
-  discover_configured_keepers
-    config
-    ~include_missing:declarative_autoboot_enabled_by_default
+  discover_configured_keepers config
 ;;
 
 let discover_persistent_agents config =
@@ -465,14 +472,21 @@ type runtime_sync =
   | Defer_runtime_sync
 
 let persist_meta_internal ~runtime_sync config path persisted =
-  let json = meta_to_json persisted in
-  match Keeper_fs.save_json_atomic path json with
-  | Ok () ->
-    (match runtime_sync with
-     | Sync_runtime -> Atomic.get runtime_meta_write_sync_hook_atomic config persisted
-     | Defer_runtime_sync -> ());
-    Ok ()
-  | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
+  match current_write_json persisted with
+  | Error detail ->
+    Error
+      (Printf.sprintf
+         "refusing invalid current keeper metadata for %s: %s"
+         persisted.name
+         detail)
+  | Ok json ->
+    (match Keeper_fs.save_json_atomic path json with
+     | Ok () ->
+       (match runtime_sync with
+        | Sync_runtime -> Atomic.get runtime_meta_write_sync_hook_atomic config persisted
+        | Defer_runtime_sync -> ());
+       Ok ()
+     | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg))
 ;;
 
 let persist_meta config path persisted =
@@ -486,6 +500,8 @@ type write_meta_error =
       ; actual : int
       }
   | Lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Current_missing of { keeper_name : string }
+  | Current_already_exists of { keeper_name : string }
   | Read_failed of string
   | Persist_failed of string
   | Invariant_violation of
@@ -506,6 +522,12 @@ let write_meta_error_to_string = function
     Printf.sprintf
       "keeper lifecycle transaction reserved metadata mutation: %s"
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  | Current_missing { keeper_name } ->
+    Printf.sprintf
+      "current keeper metadata is missing for %s; runtime reset required"
+      keeper_name
+  | Current_already_exists { keeper_name } ->
+    Printf.sprintf "current keeper metadata already exists for %s" keeper_name
   | Read_failed detail | Persist_failed detail -> detail
 ;;
 
@@ -558,7 +580,7 @@ let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_me
                     ; actual = existing.meta_version
                     })
              else persist { m with meta_version = m.meta_version + 1 }
-           | Ok None -> persist { m with meta_version = 1 }
+           | Ok None -> Error (Current_missing { keeper_name = m.name })
            | Error msg ->
              Error
                (Read_failed
@@ -566,6 +588,56 @@ let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_me
                      "failed to read existing meta for CAS %s: %s"
                      path
                      msg))))
+;;
+
+let create_meta_typed config (m : Keeper_meta_contract.keeper_meta) =
+  let path = keeper_meta_path config m.name in
+  if m.meta_version <> 0
+  then
+    Error
+      (Invariant_violation
+         { keeper_name = m.name
+         ; detail = "fresh current metadata must start at meta_version zero"
+         })
+  else
+    match current_write_json m with
+    | Error detail ->
+      Error (Invariant_violation { keeper_name = m.name; detail })
+    | Ok _ ->
+      Keeper_lifecycle_reservation.with_key_lock
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:m.name
+        (fun () ->
+           match
+             Keeper_lifecycle_reservation.authorize
+               ~base_path:config.Workspace.base_path
+               ~keeper_name:m.name
+               ()
+           with
+           | Error owner -> Error (Lifecycle_reserved owner)
+           | Ok () ->
+             File_lock_eio.with_mutex path (fun () ->
+               match read_meta_file_path path with
+               | Ok None ->
+                 persist_meta_internal
+                   ~runtime_sync:Sync_runtime
+                   config
+                   path
+                   { m with meta_version = 1 }
+                 |> Result.map_error (fun error -> Persist_failed error)
+               | Ok (Some _) ->
+                 Error (Current_already_exists { keeper_name = m.name })
+               | Error msg ->
+                 Error
+                   (Read_failed
+                      (Printf.sprintf
+                         "failed to establish fresh current meta authority for %s: %s"
+                         path
+                         msg))))
+;;
+
+let create_meta config m =
+  create_meta_typed config m |> Result.map_error write_meta_error_to_string
 ;;
 
 let write_meta config m =
@@ -601,7 +673,13 @@ let write_meta_with_merge_internal
     match write_meta_typed ?lifecycle_token config caller with
     | Ok () -> Ok ()
     | Error error when n >= max_retries -> Error (write_meta_error_to_string error)
-    | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _ | Invariant_violation _) as error) ->
+    | Error
+        (( Lifecycle_reserved _
+         | Current_missing _
+         | Current_already_exists _
+         | Read_failed _
+         | Persist_failed _
+         | Invariant_violation _ ) as error) ->
       Error (write_meta_error_to_string error)
     | Error (Version_conflict _) ->
       (match read_meta_file_path path with
@@ -619,8 +697,11 @@ let write_meta_with_merge_internal
            latest.meta_version;
          attempt (n + 1) (merge ~latest ~caller)
        | Ok None ->
-         (* Disk file vanished between attempts; fall back to fresh write. *)
-         attempt (n + 1) { caller with meta_version = 0 }
+         Error
+           (Printf.sprintf
+              "current keeper metadata disappeared during CAS retry for %s; \
+               runtime reset required"
+              caller.name)
        | Error read_msg ->
          Error (Printf.sprintf "write_meta retry: failed to re-read for CAS: %s" read_msg))
   in

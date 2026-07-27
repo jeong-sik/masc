@@ -47,61 +47,62 @@ let fixture_trace_id name =
 ;;
 
 let current_meta_json_fixture ?(name = "fixture") () : Yojson.Safe.t =
-  `Assoc
-    [ "name", `String name
-    ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
-    ; "persona", `Null
-    ; "instructions", `String ""
-    ; "trace_id", `String (fixture_trace_id name)
-    ; "multimodal_policy", `String "inherit"
-    ; "trace_history", `List []
-    ; "generation", `Int 0
-    ; "last_handoff_ts", `Float 0.0
-    ; "created_at", `String "2026-01-01T00:00:00Z"
-    ; "updated_at", `String "2026-01-01T00:00:00Z"
-    ; "total_turns", `Int 0
-    ; "total_input_tokens", `Int 0
-    ; "total_output_tokens", `Int 0
-    ; "total_tokens", `Int 0
-    ; "total_cost_usd", `Float 0.0
-    ; "last_turn_ts", `Float 0.0
-    ; "last_input_tokens", `Int 0
-    ; "last_output_tokens", `Int 0
-    ; "last_total_tokens", `Int 0
-    ; "last_latency_ms", `Int 0
-    ; "compaction_count", `Int 0
-    ; "last_compaction_ts", `Float 0.0
-    ; "last_compaction_before_tokens", `Int 0
-    ; "last_compaction_after_tokens", `Int 0
-    ; "compaction_consecutive_failures", `Int 0
-    ; "proactive_count_total", `Int 0
-    ; "last_proactive_ts", `Float 0.0
-    ; "proactive_visible_count_total", `Int 0
-    ; "last_visible_proactive_ts", `Float 0.0
-    ; "last_proactive_outcome", `String "unknown"
-    ; "last_proactive_reason", `String ""
-    ; "last_proactive_preview", `String ""
-    ; "consecutive_noop_count", `Int 0
-    ; "last_compaction_check_ts", `Float 0.0
-    ; "last_compaction_decision", `String "uninitialized"
-    ; "active_goal_ids", `List []
-    ; "last_autonomous_action_at", `String ""
-    ; "autonomous_action_count", `Int 0
-    ; "autonomous_turn_count", `Int 0
-    ; "autonomous_text_turn_count", `Int 0
-    ; "autonomous_tool_turn_count", `Int 0
-    ; "board_reactive_turn_count", `Int 0
-    ; "mention_reactive_turn_count", `Int 0
-    ; "noop_turn_count", `Int 0
-    ; "message_scope_ack_id", `Null
-    ; "last_blocker", `Null
-    ; "last_runtime_attempt", `Null
-    ; "paused", `Bool false
-    ; "latched_reason", `Null
-    ; "current_task_id", `Null
-    ; "keeper_id", `Null
-    ; "oas_env", `Assoc []
-    ; "meta_version", `Int 0
+  let open Keeper_meta_json_current_schema in
+  object_of_field_values
+    [ Name, `String name
+    ; Agent_name, `String ("keeper-" ^ name ^ "-agent")
+    ; Persona, `Null
+    ; Instructions, `String ""
+    ; Trace_id, `String (fixture_trace_id name)
+    ; Multimodal_policy, `String "inherit"
+    ; Trace_history, `List []
+    ; Generation, `Int 0
+    ; Last_handoff_ts, `Float 0.0
+    ; Created_at, `String "2026-01-01T00:00:00Z"
+    ; Updated_at, `String "2026-01-01T00:00:00Z"
+    ; Total_turns, `Int 0
+    ; Total_input_tokens, `Int 0
+    ; Total_output_tokens, `Int 0
+    ; Total_tokens, `Int 0
+    ; Total_cost_usd, `Float 0.0
+    ; Last_turn_ts, `Float 0.0
+    ; Last_input_tokens, `Int 0
+    ; Last_output_tokens, `Int 0
+    ; Last_total_tokens, `Int 0
+    ; Last_latency_ms, `Int 0
+    ; Compaction_count, `Int 0
+    ; Last_compaction_ts, `Float 0.0
+    ; Last_compaction_before_tokens, `Int 0
+    ; Last_compaction_after_tokens, `Int 0
+    ; Compaction_consecutive_failures, `Int 0
+    ; Proactive_count_total, `Int 0
+    ; Last_proactive_ts, `Float 0.0
+    ; Proactive_visible_count_total, `Int 0
+    ; Last_visible_proactive_ts, `Float 0.0
+    ; Last_proactive_outcome, `String "unknown"
+    ; Last_proactive_reason, `String ""
+    ; Last_proactive_preview, `String ""
+    ; Consecutive_noop_count, `Int 0
+    ; Last_compaction_check_ts, `Float 0.0
+    ; Last_compaction_decision, `String "uninitialized"
+    ; Active_goal_ids, `List []
+    ; Last_autonomous_action_at, `String ""
+    ; Autonomous_action_count, `Int 0
+    ; Autonomous_turn_count, `Int 0
+    ; Autonomous_text_turn_count, `Int 0
+    ; Autonomous_tool_turn_count, `Int 0
+    ; Board_reactive_turn_count, `Int 0
+    ; Mention_reactive_turn_count, `Int 0
+    ; Noop_turn_count, `Int 0
+    ; Message_scope_ack_id, `Null
+    ; Last_blocker, `Null
+    ; Last_runtime_attempt, `Null
+    ; Paused, `Bool false
+    ; Latched_reason, `Null
+    ; Current_task_id, `Null
+    ; Keeper_id, `Null
+    ; Oas_env, `Assoc []
+    ; Meta_version, `Int 0
     ]
 
 (** Closed fixture builder for the current in-memory [keeper_meta] contract.

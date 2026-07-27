@@ -1827,13 +1827,13 @@ let run_heartbeat_loop
       Eio_guard.fair_yield ();
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
-      let disk_meta_opt, new_meta_mtime =
+      let disk_meta_opt, new_meta_mtime, current_meta_unavailable =
         match read_meta_if_changed ctx.config m.name ~last_mtime:!last_meta_mtime with
-        | Ok (Some (latest, new_mtime)) -> Some latest, Some new_mtime
-        | Ok None -> None, None
+        | Ok (Some (latest, new_mtime)) -> Some latest, Some new_mtime, None
+        | Ok None -> None, None, None
         | Error unavailable ->
           Log.Keeper.error
-            "%s: heartbeat stopped on %s"
+            "%s: heartbeat domain work blocked; lifecycle observation continues: %s"
             m.name
             (Keeper_meta_store.current_meta_unavailable_message unavailable);
           let cause =
@@ -1853,7 +1853,7 @@ let run_heartbeat_loop
             (Some
                (Keeper_registry.Current_meta_unavailable
                   { path_identity = unavailable.path_identity; cause }));
-          raise Keeper_registry.Keeper_fiber_crash
+          None, None, Some unavailable
       in
       Option.iter (fun new_mtime -> last_meta_mtime := new_mtime) new_meta_mtime;
       let meta_current =
@@ -1863,9 +1863,16 @@ let run_heartbeat_loop
           ~disk_meta_opt
       in
       let meta_current =
-        match repair_identity_drift_for_keepalive ~ctx meta_current with
-        | Some repaired -> repaired
-        | None -> meta_current
+        match current_meta_unavailable with
+        | Some _ ->
+          (* Keep lifecycle observation alive while current metadata blocks
+             domain admission. This synthetic pause never enters the registry
+             or persistence authority. *)
+          { meta_current with paused = true; latched_reason = None }
+        | None ->
+          (match repair_identity_drift_for_keepalive ~ctx meta_current with
+           | Some repaired -> repaired
+           | None -> meta_current)
       in
       (* Sync disk meta to registry so dashboard reads live values.  #5364.
          When disk meta is unchanged we still prefer the registry copy because
@@ -1877,7 +1884,7 @@ let run_heartbeat_loop
         | Some entry -> entry.meta
         | None -> m
       in
-      if meta_current != registry_meta
+      if Option.is_none current_meta_unavailable && meta_current != registry_meta
       then
         Keeper_registry.update_meta
           ~base_path:ctx.config.base_path
@@ -1889,11 +1896,14 @@ let run_heartbeat_loop
       let meta_current =
         (* Phase 1: sync presence and emit heartbeat metric *)
         let meta_current =
-          sync_keeper_presence
-            ~ctx
-            ~meta_current
-            ~consecutive_failures
-            ~last_successful_heartbeat_ts
+          match current_meta_unavailable with
+          | Some _ -> meta_current
+          | None ->
+            sync_keeper_presence
+              ~ctx
+              ~meta_current
+              ~consecutive_failures
+              ~last_successful_heartbeat_ts
         in
         if !consecutive_failures > 0
         then

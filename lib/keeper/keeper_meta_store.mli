@@ -88,8 +88,8 @@ val discover_current_meta : Workspace.config -> current_meta_discovery
 val current_meta_unavailable_facts :
   Workspace.config -> current_meta_unavailable list
 
-(** Default autoboot policy when a keeper has TOML config but no
-    persisted JSON yet. *)
+(** Default autoboot policy for a current Keeper that already has durable
+    metadata. Missing current metadata is never materialized by discovery. *)
 val declarative_autoboot_enabled_by_default : Workspace.config -> string -> bool
 val effective_autoboot_enabled :
   Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> bool
@@ -136,22 +136,24 @@ val read_meta_if_changed :
   last_mtime:float ->
   ((Keeper_meta_contract.keeper_meta * float) option, current_meta_unavailable) result
 
-(** Atomic write of [persisted] to [path]; runs the
-    [runtime_meta_write_sync_hook] on success. *)
-val persist_meta :
-  Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
+(** Create a genuinely fresh current row. [m.meta_version] must be zero and the
+    canonical path must not exist. This is the only public metadata creation
+    authority; ordinary writers cannot recreate an operator-removed row. *)
+val create_meta :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  (unit, string) result
 
-(** Persist [m] with a CAS bump on [meta_version]: the write is rejected
-    if the on-disk version has moved since [m] was read. There is no force
-    / bypass path — cumulative usage counters are a monotone invariant
-    (RFC-0225 §3.2, RFC-0237), so callers that lost a race must resolve the
-    conflict through {!write_meta_with_merge}, not overwrite the disk. *)
+(** Update an existing [m] with a CAS bump on [meta_version]: the write is
+    rejected when the canonical current row is missing, or if the on-disk
+    version has moved since [m] was read. There is no create, force, or bypass
+    path through this surface. *)
 val write_meta :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
 
-(** Lifecycle-owner variant of [write_meta]. The opaque reservation token is
+(** Lifecycle-owner update variant of [write_meta]. The opaque reservation token is
     checked against the same BasePath/name key before entering the per-path
     CAS critical section. *)
 val write_meta_for_lifecycle :

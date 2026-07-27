@@ -47,8 +47,7 @@ let pending_hitl_approval_keeper_names config =
   pending_hitl_approval_counts config |> List.map fst
 ;;
 
-let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
-  =
+let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let dead_ttl_sec = Runtime_params.get Runtime_settings.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
@@ -328,5 +327,5 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
     restart_list;
   (* Reconcile LAST — only orphaned durable keepers. A paused Keeper remains
      durable until an operator explicitly resumes, stops, or removes it. *)
-  reconcile_keepalive_keepers ~load_or_materialize_keeper_meta ctx
+  reconcile_keepalive_keepers ctx
 ;;

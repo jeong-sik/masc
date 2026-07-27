@@ -115,11 +115,13 @@ type keeper_execution_snapshot = {
 }
 val empty_keeper_execution_snapshot : keeper_execution_snapshot
 val keeper_execution_snapshot :
-  Workspace.config -> keeper_execution_snapshot
+  current_meta_discovery:Keeper_meta_store.current_meta_discovery ->
+  Workspace.config ->
+  keeper_execution_snapshot
 (** Canonical per-owner execution projection for one route assembly. Every
-    owner is classified once from current effective durable metadata, registry
-    runtime facts, and shutdown admission. Metadata read failure is retained as
-    that owner's typed [Unknown]. *)
+    owner is classified once from the supplied current durable observation,
+    registry runtime facts, and shutdown admission. Metadata failure is retained
+    as that owner's typed [Unknown] without a second filesystem read. *)
 val owner_execution_truth :
   keeper_execution_snapshot ->
   keeper_name:string ->

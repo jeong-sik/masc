@@ -173,6 +173,101 @@ let test_meta_version_must_be_nonnegative () =
     | Ok _ -> Alcotest.fail "negative meta version unexpectedly decoded")
 ;;
 
+let test_generation_must_be_nonnegative () =
+  let json =
+    Masc_test_deps.current_meta_json_fixture ~name:"negative-generation" ()
+    |> replace_field "generation" (`Int (-1))
+  in
+  with_temp_json json (fun path ->
+    match Keeper_meta_store.read_meta_file_path_current path with
+    | Error { reason = Keeper_meta_store.Invalid_current; _ } -> ()
+    | Error _ -> Alcotest.fail "negative generation had the wrong typed reason"
+    | Ok _ -> Alcotest.fail "negative generation unexpectedly decoded")
+;;
+
+let test_meta_version_must_remain_incrementable () =
+  let json =
+    Masc_test_deps.current_meta_json_fixture ~name:"max-version" ()
+    |> replace_field "meta_version" (`Int max_int)
+  in
+  with_temp_json json (fun path ->
+    match Keeper_meta_store.read_meta_file_path_current path with
+    | Error { reason = Keeper_meta_store.Invalid_current; _ } -> ()
+    | Error _ -> Alcotest.fail "max meta version had the wrong typed reason"
+    | Ok _ -> Alcotest.fail "max meta version unexpectedly decoded")
+;;
+
+let test_latch_violation_keeps_reset_required_classification () =
+  let json =
+    Masc_test_deps.current_meta_json_fixture ~name:"latch-classification" ()
+    |> replace_field "latched_reason" (`String "dead_tombstone")
+    |> replace_field "paused" (`Bool false)
+  in
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error detail ->
+    check bool
+      "latch violation has current-schema prefix"
+      true
+      (Astring.String.is_prefix
+         ~affix:"invalid current keeper meta:"
+         detail);
+    check bool
+      "latch violation requires reset"
+      true
+      (Astring.String.is_infix ~affix:"runtime reset required" detail)
+  | Ok _ -> Alcotest.fail "latch violation unexpectedly decoded"
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun child -> remove_tree (Filename.concat path child));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let test_stale_update_cannot_recreate_missing_current () =
+  Eio_main.run
+  @@ fun _env ->
+  let base_path = Filename.temp_file "keeper-current-create-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "current-meta-test"));
+       let meta =
+         match
+           Masc_test_deps.current_meta_json_fixture ~name:"create-authority" ()
+           |> Keeper_meta_json_parse.meta_of_json
+         with
+         | Ok meta -> meta
+         | Error detail -> Alcotest.fail detail
+       in
+       (match Keeper_meta_store.create_meta config meta with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       let persisted =
+         match Keeper_meta_store.read_meta config meta.name with
+         | Ok (Some persisted) -> persisted
+         | Ok None -> Alcotest.fail "fresh current row disappeared"
+         | Error detail -> Alcotest.fail detail
+       in
+       let path = Keeper_types_profile.keeper_meta_path config meta.name in
+       Sys.remove path;
+       (match Keeper_meta_store.write_meta config persisted with
+        | Error detail ->
+          check bool
+            "missing-current update is reset-required"
+            true
+            (Astring.String.is_infix ~affix:"runtime reset required" detail)
+        | Ok () -> Alcotest.fail "stale update recreated missing current metadata");
+       check bool "current row remains absent" false (Sys.file_exists path))
+;;
+
 let () =
   run
     "keeper_meta_current_unavailable"
@@ -189,6 +284,14 @@ let () =
             test_agent_name_must_match_canonical_identity
         ; test_case "meta version is nonnegative" `Quick
             test_meta_version_must_be_nonnegative
+        ; test_case "generation is nonnegative" `Quick
+            test_generation_must_be_nonnegative
+        ; test_case "meta version remains incrementable" `Quick
+            test_meta_version_must_remain_incrementable
+        ; test_case "latch violation keeps reset-required classification" `Quick
+            test_latch_violation_keeps_reset_required_classification
+        ; test_case "stale update cannot recreate missing current" `Quick
+            test_stale_update_cannot_recreate_missing_current
         ] )
     ]
 ;;

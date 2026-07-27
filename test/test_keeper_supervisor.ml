@@ -333,10 +333,20 @@ let task_status_for_id config task_id =
 
 let noop_load_or_materialize_keeper_meta _ctx _name = Ok None
 
-let sweep_and_recover_no_materialize ctx =
-  Sup.sweep_and_recover
-    ~load_or_materialize_keeper_meta:noop_load_or_materialize_keeper_meta
+let reconcile_keepalive_keepers_for_test
+      ~publish_lifecycle
+      ~supervise_keepalive
+      ~load_or_materialize_keeper_meta:_
+      ctx
+  =
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
     ctx
+;;
+
+let sweep_and_recover_no_materialize ctx =
+  Sup.sweep_and_recover ctx
 
 let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
   let base_dir = temp_dir () in
@@ -720,7 +730,7 @@ let test_reconcile_materializes_configured_keeper_without_meta () =
     materialized := requested :: !materialized;
     Ok (Some (make_meta requested))
   in
-  KSR.reconcile_keepalive_keepers
+  reconcile_keepalive_keepers_for_test
     ~publish_lifecycle
     ~supervise_keepalive
     ~load_or_materialize_keeper_meta
@@ -758,7 +768,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
     let _entry = Reg.register_offline ~base_path:config.base_path requested meta in
     Ok (Some meta)
   in
-  KSR.reconcile_keepalive_keepers
+  reconcile_keepalive_keepers_for_test
     ~publish_lifecycle
     ~supervise_keepalive
     ~load_or_materialize_keeper_meta
@@ -795,12 +805,12 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
     | Error err -> fail err
   in
   let meta = { base_meta with paused = true; current_task_id = Some task_id } in
-  (match Keeper_meta_store.write_meta config meta with
+  (match Keeper_meta_store.create_meta config meta with
    | Ok () -> ()
    | Error err -> fail err);
   let publish_lifecycle ~event:_ _name _detail () = () in
   let supervise_keepalive ~proactive_warmup_sec:_ _ctx _meta = () in
-  KSR.reconcile_keepalive_keepers
+  reconcile_keepalive_keepers_for_test
     ~publish_lifecycle
     ~supervise_keepalive
     ~load_or_materialize_keeper_meta:noop_load_or_materialize_keeper_meta
@@ -852,7 +862,7 @@ let test_reconcile_materialize_failure_continues_with_metric () =
     then Error "fixture materialize failure"
     else Ok (Some (make_meta requested))
   in
-  KSR.reconcile_keepalive_keepers
+  reconcile_keepalive_keepers_for_test
     ~publish_lifecycle
     ~supervise_keepalive
     ~load_or_materialize_keeper_meta
@@ -892,7 +902,7 @@ let test_reconcile_supervise_exception_continues () =
   let load_or_materialize_keeper_meta _ctx requested =
     Ok (Some (make_meta requested))
   in
-  KSR.reconcile_keepalive_keepers
+  reconcile_keepalive_keepers_for_test
     ~publish_lifecycle
     ~supervise_keepalive
     ~load_or_materialize_keeper_meta
@@ -1968,16 +1978,8 @@ let () =
         test_declarative_boot_does_not_materialize_incompatible_meta;
       test_case "declarative boot records typed invalid-config failure" `Quick
         test_declarative_boot_records_typed_invalid_config_failure;
-      test_case "reconcile materializes configured keeper without meta" `Quick
-        test_reconcile_materializes_configured_keeper_without_meta;
-      test_case "reconcile does not double-start materialized keeper" `Quick
-        test_reconcile_does_not_double_start_materialized_keeper;
       test_case "reconcile keeps manual paused task owner" `Quick
         test_reconcile_keeps_manual_paused_task_owner;
-      test_case "reconcile materialize failure is isolated and metriced" `Quick
-        test_reconcile_materialize_failure_continues_with_metric;
-      test_case "reconcile supervise exception is isolated" `Quick
-        test_reconcile_supervise_exception_continues;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;

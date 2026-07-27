@@ -201,17 +201,15 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ~owner_lifecycle
 
 let keeper_fleet_runtime_resolution_base_fields
+    ~config
+    ~current_meta_discovery
     ?meta_scan
     ?(include_reaction_ledger = true)
     () =
   let base_path = runtime_base_path_opt () in
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
-  let server_state = current_server_state_opt () in
   let execution_snapshot =
-    match server_state with
-    | Some state ->
-      keeper_execution_snapshot (Mcp_server.workspace_config state)
-    | None -> empty_keeper_execution_snapshot
+    keeper_execution_snapshot ~current_meta_discovery config
   in
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
@@ -262,17 +260,9 @@ let keeper_fleet_runtime_resolution_base_fields
     ; "disk_observation", disk_observation
     ; "keeper_fleet_safety", fleet_safety
     ; ( "keeper_current_meta_unavailable"
-      , match server_state with
-        | Some state ->
-          state
-          |> Mcp_server.workspace_config
-          |> Keeper_meta_store.discover_current_meta
-          |> fun discovery ->
-          Keeper_meta_store.current_meta_unavailable_collection_to_yojson
-            (Keeper_meta_store.Current_meta_observed discovery.unavailable)
-        | None ->
-          Keeper_meta_store.current_meta_unavailable_collection_to_yojson
-            Keeper_meta_store.Current_meta_observation_unavailable )
+      , Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+          (Keeper_meta_store.Current_meta_observed
+             current_meta_discovery.unavailable) )
     ; "keeper_turn_admission", keeper_turn_admission_health_json ()
     ; "keeper_board_event_collection", keeper_board_event_collection_health_json ()
     ]
@@ -342,23 +332,37 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
     ]
 ;;
 
-let keeper_fleet_runtime_resolution_fields () =
-  keeper_fleet_runtime_resolution_base_fields ()
+let keeper_fleet_runtime_resolution_fields ~config () =
+  let current_meta_discovery =
+    Keeper_meta_store.discover_current_meta config
+  in
+  let meta_scan =
+    keeper_fleet_meta_scan
+      ~current_meta_discovery
+      config
+  in
+  keeper_fleet_runtime_resolution_base_fields
+    ~config
+    ~current_meta_discovery
+    ~meta_scan
+    ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
 
-let keeper_fleet_runtime_resolution_light_fields () =
+let keeper_fleet_runtime_resolution_light_fields ~config () =
+  let current_meta_discovery =
+    Keeper_meta_store.discover_current_meta config
+  in
   let meta_scan =
-    match current_server_state_opt () with
-    | Some state ->
-      Some
-        (keeper_fleet_meta_scan
-           ~include_paused_details:false
-           (Mcp_server.workspace_config state))
-    | None -> None
+    keeper_fleet_meta_scan
+      ~include_paused_details:false
+      ~current_meta_discovery
+      config
   in
   keeper_fleet_runtime_resolution_base_fields
-    ?meta_scan
+    ~config
+    ~current_meta_discovery
+    ~meta_scan
     ~include_reaction_ledger:false
     ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]

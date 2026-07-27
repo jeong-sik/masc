@@ -562,7 +562,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
           };
       }
   in
-  (match Keeper_meta_store.write_meta config seeded with
+  (match Keeper_meta_store.create_meta config seeded with
   | Ok () -> ()
   | Error err -> Alcotest.fail err);
   let persisted_seed = read_meta "seeded tombstone" in
@@ -766,7 +766,7 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
         | Ok meta -> meta
         | Error detail -> Alcotest.fail detail
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.create_meta config meta with
        | Ok () -> ()
        | Error detail -> Alcotest.fail detail);
       let persisted =
@@ -879,7 +879,7 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
           ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
           }
       in
-      (match Keeper_meta_store.write_meta config original_seed with
+      (match Keeper_meta_store.create_meta config original_seed with
        | Ok () -> ()
        | Error detail -> Alcotest.fail detail);
       let original =
@@ -1008,7 +1008,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.create_meta config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       Dated_jsonl.append
@@ -1162,7 +1162,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.create_meta config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let digest =

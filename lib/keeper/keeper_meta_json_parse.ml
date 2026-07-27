@@ -361,6 +361,8 @@ let decode_current_meta fields =
   let* meta_version = int_field fields "meta_version" in
   if not (validate_name name)
   then invalidf "name is invalid: %S" name
+  else if nonce < 0
+  then invalidf "generation must be nonnegative"
   else if
     not
       (String.equal
@@ -371,6 +373,8 @@ let decode_current_meta fields =
   then invalidf "trace_id is invalid: %S" trace_id_raw
   else if meta_version < 0
   then invalidf "meta_version must be nonnegative"
+  else if meta_version = max_int
+  then invalidf "meta_version must remain incrementable"
   else
     let usage : usage_metrics =
       { total_turns
@@ -471,7 +475,7 @@ let meta_of_json json =
        | Ok meta ->
          (match Keeper_meta_contract.terminal_latch_pause_violation meta with
           | None -> Ok meta
-          | Some detail -> Error detail))
+          | Some detail -> invalidf "%s" detail))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> invalidf "decoder raised: %s" (Printexc.to_string exn)

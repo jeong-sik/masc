@@ -69,13 +69,6 @@ let contains_warning result =
 
 let contains_error = contains_problem_result
 
-let configured_llm_completion_pass : Masc_domain.configured_llm_completion_verdict =
-  { decision = Masc_domain.Completion_pass
-  ; runtime_id = "workspace-test-reviewer"
-  ; rationale = None
-  ; evaluated_at = "2026-07-13T00:00:00Z"
-  }
-
 let transition_done_r config ~agent_name ~task_id ~notes =
   let evidence_notes =
     if String.equal (String.trim notes) ""
@@ -89,7 +82,6 @@ let transition_done_r config ~agent_name ~task_id ~notes =
   | Some { task_status = Masc_domain.Done _; _ } ->
     Workspace.transition_task_r config ~agent_name ~task_id
       ~action:Masc_domain.Done_action
-      ~configured_llm_verdict:configured_llm_completion_pass
       ~notes:evidence_notes ()
   | Some _ | None ->
     (match
@@ -1113,8 +1105,7 @@ let test_approve_completion_credits_assignee () =
       in
       let approved =
         Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-          ~task_id:"task-001" ~action:Masc_domain.Approve_verification
-          ~configured_llm_verdict:configured_llm_completion_pass ()
+          ~task_id:"task-001" ~action:Masc_domain.Approve_verification ()
       in
       Alcotest.(check bool) "approve ok" true
         (match approved with Ok _ -> true | Error _ -> false);
@@ -1139,7 +1130,7 @@ let test_submit_and_approve_rejects_empty_justification () =
     let approved =
       Workspace.transition_task_r config ~agent_name:admin_keeper_agent
         ~task_id:"task-001" ~action:Masc_domain.Approve_verification
-        ~configured_llm_verdict:configured_llm_completion_pass ~notes:"   " ()
+        ~notes:"   " ()
     in
     Alcotest.(check bool) "approve transition ok" true
       (match approved with Ok _ -> true | Error _ -> false))
@@ -1168,7 +1159,6 @@ let test_strict_task_done_requires_verification_submission () =
     let direct =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Done_action
-        ~configured_llm_verdict:configured_llm_completion_pass
         ~notes:"evidence attached"
         ()
     in
@@ -1192,7 +1182,6 @@ let test_default_task_done_requires_verification_submission () =
     let direct =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Done_action
-        ~configured_llm_verdict:configured_llm_completion_pass
         ~notes:"done" ()
     in
     Alcotest.(check bool) "default task direct done rejected" true

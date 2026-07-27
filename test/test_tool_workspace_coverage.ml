@@ -44,12 +44,23 @@ let set_current_task_ok config ~task_id =
   | Error msg -> failwith msg
 ;;
 
-let completion_pass : Masc_domain.configured_llm_completion_verdict =
-  { decision = Masc_domain.Completion_pass
-  ; runtime_id = "test-completion-reviewer"
-  ; rationale = Some "workspace status fixture approval"
-  ; evaluated_at = Masc_domain.now_iso ()
-  }
+let complete_task config ~agent_name ~task_id ~notes =
+  match
+    Workspace.transition_task_r config ~agent_name ~task_id
+      ~action:Masc_domain.Submit_for_verification ~notes ()
+  with
+  | Error error -> failwith (Masc_domain.masc_error_to_string error)
+  | Ok _ ->
+    let verifier = "admin-board-keeper" in
+    (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
+     | Error error -> failwith (Masc_domain.masc_error_to_string error)
+     | Ok _ ->
+       match
+         Workspace.transition_task_r config ~agent_name:verifier ~task_id
+           ~action:Masc_domain.Approve_verification ~notes:("verified: " ^ notes) ()
+       with
+       | Ok _ -> ()
+       | Error error -> failwith (Masc_domain.masc_error_to_string error))
 ;;
 
 let with_env name value_opt f =
@@ -325,18 +336,7 @@ let () =
     let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
     let _ = Workspace.add_task ctx.config ~title:"Done Task" ~priority:2 ~description:"" in
     ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-    (match
-       Workspace.transition_task_r
-         ctx.config
-         ~agent_name:"test-agent"
-         ~task_id:"task-001"
-         ~action:Masc_domain.Done_action
-         ~notes:"ok"
-         ~configured_llm_verdict:completion_pass
-         ()
-     with
-     | Ok _ -> ()
-     | Error err -> failwith (Masc_domain.masc_error_to_string err));
+    complete_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~notes:"ok";
     let args = `Assoc [] in
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
     | Some r ->
@@ -404,18 +404,7 @@ let () =
       Workspace.add_task ctx.config ~title:"Completed elsewhere" ~priority:2 ~description:""
     in
     ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-    (match
-       Workspace.transition_task_r
-         ctx.config
-         ~agent_name:"test-agent"
-         ~task_id:"task-001"
-         ~action:Masc_domain.Done_action
-         ~notes:"ok"
-         ~configured_llm_verdict:completion_pass
-         ()
-     with
-     | Ok _ -> ()
-     | Error err -> failwith (Masc_domain.masc_error_to_string err));
+    complete_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~notes:"ok";
     let actual_name = actual_test_agent_name ctx.config in
     write_agent_state ctx.config actual_name (fun agent ->
       { agent with

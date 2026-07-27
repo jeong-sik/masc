@@ -28,7 +28,6 @@ let transition_task_outcome_r
       ?(notes = "")
       ?(reason = "")
       ?handoff_context
-      ?configured_llm_verdict
       ()
   : transition_outcome Masc_domain.masc_result
   =
@@ -68,10 +67,8 @@ let transition_task_outcome_r
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
-        (* Task completion evidence is judged by the configured LLM reviewer
-           at the Task boundary. The workspace FSM owns only lifecycle and
-           identity invariants; it does not infer completion quality from the
-           presence or shape of evidence fields. *)
+        (* The workspace FSM owns lifecycle and identity invariants. Completion
+           evidence is submitted for an assigned verifier's terminal verdict. *)
         let* () =
           (match action, task.task_status with
           | Masc_domain.Claim, Masc_domain.Todo ->
@@ -108,35 +105,10 @@ let transition_task_outcome_r
               ~task_status:task.task_status
               ~action
               ~now
-              ~configured_llm_verdict
               ~notes
               ~reason
           with
           | Ok decision -> Ok decision
-          | Error Workspace_task_lifecycle.Completion_verdict_required ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "Configured LLM completion verdict required; task remains nonterminal"))
-          | Error (Workspace_task_lifecycle.Completion_rejected rejection) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf
-                       "Configured LLM rejected task completion: %s"
-                       rejection)))
-          | Error (Workspace_task_lifecycle.Completion_verdict_unavailable reason) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf
-                       "Configured LLM completion verifier unavailable: %s; task remains nonterminal"
-                       reason)))
-          | Error Workspace_task_lifecycle.Completion_verdict_action_mismatch ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "Requested verification transition does not match the configured LLM verdict"))
           | Error Workspace_task_lifecycle.Verification_submission_required ->
             Error
               (Masc_domain.Task
@@ -187,8 +159,7 @@ let transition_task_outcome_r
                  action=claim first, then action=release once you own it."
               | Masc_domain.Todo, (Masc_domain.Done_action | Masc_domain.Cancel) ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
-                 action=claim; action=done then invokes the configured LLM \
-                 completion reviewer."
+                 action=claim, then submit completion evidence for verification."
               | Masc_domain.Todo, Masc_domain.Start ->
                 " Remediation: task is still in 'todo'. Call masc_transition \
                  action=claim first — start needs ownership."
@@ -214,9 +185,7 @@ let transition_task_outcome_r
                  keeper_task_claim for unclaimed work."
               | Masc_domain.InProgress _, Masc_domain.Start ->
                 " Remediation: task is already in_progress. Valid actions from \
-                 in_progress: done (configured LLM review), release, cancel, or \
-                 submit_for_verification when an asynchronous review lane was \
-                 explicitly requested."
+                 in_progress: submit_for_verification, release, or cancel."
               | Masc_domain.Done _, _ ->
                 " Remediation: task is already in a terminal state (done). To \
                  re-run this work, create a new task with predecessor_task_id \
@@ -498,7 +467,6 @@ let transition_task_outcome_r
                ~from_status:task.task_status
                ~to_status:new_status
                ~action:action_s
-               ?configured_llm_verdict
                ?assignee:(Masc_domain.task_assignee_of_status task.task_status)
                ?notes:(trim_opt (Some notes))
                ?reason:(trim_opt (Some reason))
@@ -629,7 +597,6 @@ let transition_task_outcome_r
                  ?notes:(if notes = "" then None else Some notes)
                  ?reason:(if reason = "" then None else Some reason)
                  ?duration_ms
-                 ?configured_llm_verdict
                  ());
           (* RFC-0323 G-3: done hooks (relation/hebbian) fire for
              every transition that PRODUCES Done — Done via
@@ -683,7 +650,6 @@ let transition_task_r
       ?notes
       ?reason
       ?handoff_context
-      ?configured_llm_verdict
       ()
   : string Masc_domain.masc_result
   =
@@ -699,7 +665,6 @@ let transition_task_r
     ?notes
     ?reason
     ?handoff_context
-    ?configured_llm_verdict
     ()
   |> Result.map (fun outcome -> outcome.message)
 ;;

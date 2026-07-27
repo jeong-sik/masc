@@ -26,8 +26,7 @@ let classify_contract_state (contract : Masc_domain.task_contract option) =
   | Some _ -> "with_contract"
 ;;
 
-(* Completion path is descriptive telemetry only. Both paths require the same
-   configured-LLM verdict at the Workspace transition boundary. *)
+(* Completion path is descriptive telemetry only. *)
 let classify_completion_path ~(action : Masc_domain.task_action) =
   match action with
   | Masc_domain.Approve_verification -> "via_verification"
@@ -287,8 +286,7 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
     Exhaustive [match] over [Masc_domain.task_status]: adding a 7th constructor
     will fail to compile. Each branch lists actions that
     [transition_task_r]'s match-arms accept for that status — keep this
-    in sync if you add new transitions there. Completion actions still require
-    a request-local configured-LLM verdict at execution time. *)
+    in sync if you add new transitions there. *)
 let valid_next_actions_for_status
   : Masc_domain.task_status -> Masc_domain.task_action list
   = function
@@ -339,7 +337,6 @@ let task_transition_details
       ?notes
       ?reason
       ?duration_ms
-      ?configured_llm_verdict
       ()
   =
   let optional_field name = function
@@ -352,10 +349,7 @@ let task_transition_details
      ]
      @ optional_field "notes" (Option.map (fun value -> `String value) notes)
      @ optional_field "reason" (Option.map (fun value -> `String value) reason)
-     @ optional_field "duration_ms" (Option.map (fun value -> `Int value) duration_ms)
-     @ optional_field
-         "configured_llm_verdict"
-         (Option.map Masc_domain.configured_llm_completion_verdict_to_yojson configured_llm_verdict))
+     @ optional_field "duration_ms" (Option.map (fun value -> `Int value) duration_ms))
 ;;
 
 let observe_task_transition
@@ -402,7 +396,6 @@ let transition_log_event
       ?reason
       ?duration_ms
       ?handoff_context
-      ?configured_llm_verdict
       ?assignee
       ?(now = now_iso ())
       ()
@@ -431,9 +424,6 @@ let transition_log_event
      @ optional_field "notes" (Option.map (fun v -> `String v) notes)
      @ optional_field "reason" (Option.map (fun v -> `String v) reason)
      @ optional_field "duration_ms" (Option.map (fun v -> `Int v) duration_ms)
-     @ optional_field
-         "configured_llm_verdict"
-         (Option.map Masc_domain.configured_llm_completion_verdict_to_yojson configured_llm_verdict)
      @ optional_field
          "handoff_context"
          (Option.map Masc_domain.task_handoff_context_to_yojson handoff_context))

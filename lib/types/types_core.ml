@@ -235,20 +235,6 @@ type task_action =
   | Reject_verification
 [@@deriving show]
 
-type configured_llm_completion_decision =
-  | Completion_pass
-  | Completion_reject of string
-  | Completion_verdict_unavailable of string
-[@@deriving show, yojson]
-
-type configured_llm_completion_verdict =
-  { decision : configured_llm_completion_decision
-  ; runtime_id : string
-  ; rationale : string option
-  ; evaluated_at : string
-  }
-[@@deriving show, yojson]
-
 let task_action_of_string s =
   match String.lowercase_ascii s with
   | "claim" -> Ok Claim

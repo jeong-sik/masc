@@ -2,10 +2,6 @@
     for verification; the phase-assigned verifier owns the terminal verdict. *)
 
 type invalid =
-  | Completion_verdict_required
-  | Completion_rejected of string
-  | Completion_verdict_unavailable of string
-  | Completion_verdict_action_mismatch
   | Verification_submission_required
   | Verification_claim_required
   | Verification_assigned_to of string
@@ -70,7 +66,6 @@ let decide
       ~task_status
       ~action
       ~now
-      ~configured_llm_verdict:_
       ~notes
       ~reason
   =
@@ -221,17 +216,6 @@ let decide
 let valid_next_actions ~same_agent ~task_status =
   let same_agent_pred _ = same_agent in
   let try_action action =
-    let decision =
-      match action with
-      | Masc_domain.Reject_verification -> Masc_domain.Completion_reject "preview"
-      | Masc_domain.Claim
-      | Masc_domain.Start
-      | Masc_domain.Done_action
-      | Masc_domain.Cancel
-      | Masc_domain.Release
-      | Masc_domain.Submit_for_verification
-      | Masc_domain.Approve_verification -> Masc_domain.Completion_pass
-    in
     match
       decide
         ~new_verification_id:(fun () -> "")
@@ -241,13 +225,6 @@ let valid_next_actions ~same_agent ~task_status =
         ~task_status
         ~action
         ~now:""
-        ~configured_llm_verdict:
-          (Some
-             { Masc_domain.decision
-             ; runtime_id = "preview"
-             ; rationale = None
-             ; evaluated_at = ""
-             })
         ~notes:""
         ~reason:""
     with

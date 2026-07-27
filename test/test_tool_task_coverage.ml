@@ -1821,17 +1821,19 @@ let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
       ~action:Masc_domain.Start
       ()
   in
-  let configured_llm_verdict =
-    { Masc_domain.decision = Masc_domain.Completion_pass
-    ; runtime_id = "task-reviewer"
-    ; rationale = None
-    ; evaluated_at = Masc_domain.now_iso ()
-    }
-  in
-  let done_result =
+  let submitted =
     Workspace.transition_task_r ctx.config ~agent_name:"worker"
-      ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"complete"
-      ~configured_llm_verdict ()
+      ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ~notes:"complete" ()
+  in
+  (match submitted with
+   | Ok _ -> ()
+   | Error err -> failwith (Masc_domain.masc_error_to_string err));
+  (match Workspace.claim_task_r ctx.config ~agent_name:"verifier" ~task_id:"task-001" () with
+   | Ok _ -> ()
+   | Error err -> failwith (Masc_domain.masc_error_to_string err));
+  let done_result =
+    Workspace.transition_task_r ctx.config ~agent_name:"verifier"
+      ~task_id:"task-001" ~action:Masc_domain.Approve_verification ~notes:"complete" ()
   in
   (match done_result with
    | Ok _ -> ()
@@ -2935,17 +2937,17 @@ let () = test "handle_done_already_done_guidance" (fun () ->
     Workspace.transition_task_r ctx.config ~agent_name:"other-agent"
       ~task_id:"task-001" ~action:Masc_domain.Start ()
   in
-  let configured_llm_verdict =
-    { Masc_domain.decision = Masc_domain.Completion_pass
-    ; runtime_id = "task-reviewer"
-    ; rationale = None
-    ; evaluated_at = Masc_domain.now_iso ()
-    }
-  in
   let _ =
     Workspace.transition_task_r ctx.config ~agent_name:"other-agent"
-      ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"done"
-      ~configured_llm_verdict ()
+      ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ~notes:"done" ()
+  in
+  let _ =
+    Workspace.claim_task_r ctx.config ~agent_name:"admin-board-keeper"
+      ~task_id:"task-001" ()
+  in
+  let _ =
+    Workspace.transition_task_r ctx.config ~agent_name:"admin-board-keeper"
+      ~task_id:"task-001" ~action:Masc_domain.Approve_verification ~notes:"done" ()
   in
   let result =
     Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])

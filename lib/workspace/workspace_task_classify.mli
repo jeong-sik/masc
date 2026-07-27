@@ -141,7 +141,6 @@ val task_transition_details
   -> ?notes:string
   -> ?reason:string
   -> ?duration_ms:int
-  -> ?configured_llm_verdict:Masc_domain.configured_llm_completion_verdict
   -> unit
   -> Yojson.Safe.t
 
@@ -173,7 +172,6 @@ val transition_log_event
   -> ?reason:string
   -> ?duration_ms:int
   -> ?handoff_context:Masc_domain.task_handoff_context
-  -> ?configured_llm_verdict:Masc_domain.configured_llm_completion_verdict
   -> ?assignee:string
   -> ?now:string
   -> unit

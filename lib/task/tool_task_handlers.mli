@@ -58,16 +58,6 @@ val client_side_transition_gate_error :
 
 val sync_planning_current_task_with_owned_task : context -> unit
 val sync_owner_current_task_binding : context -> unit
-val review_completion_notes :
-  completion_contract:string list option ->
-  evaluator_runtime:string option ->
-  ctx:context ->
-  task_opt:Masc_domain.task option ->
-  task_id:string ->
-  notes:string ->
-  evidence_refs:string list ->
-  Masc_domain.configured_llm_completion_verdict option
-
 val handle_add_task :
   ?created_by:string ->
   tool_name:string ->

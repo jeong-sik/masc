@@ -179,7 +179,5 @@ let transition_known_args =
     "reason";
     "expected_version";
     "agent_name";
-    "completion_contract";
-    "evaluator_runtime";
     "handoff_context";
   ]

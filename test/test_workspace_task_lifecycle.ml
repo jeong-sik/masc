@@ -4,7 +4,7 @@ module D = Masc_domain
 let owner = "alice"
 let now = "2026-07-13T00:00:00Z"
 
-let decide ?configured_llm_verdict ~same_agent ~task_status ~action () =
+let decide ~same_agent ~task_status ~action () =
   L.decide
     ~new_verification_id:(fun () -> "vrf-1")
     ~same_agent:(fun _ -> same_agent)
@@ -13,7 +13,6 @@ let decide ?configured_llm_verdict ~same_agent ~task_status ~action () =
     ~task_status
     ~action
     ~now
-    ~configured_llm_verdict
     ~notes:"evidence at /tmp/proof"
     ~reason:""
 ;;

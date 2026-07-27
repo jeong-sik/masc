@@ -1,18 +1,9 @@
-(** Tool_task_completion_review — completion-notes review helpers and
-    verification-evidence projections for task tools.
+(** Tool_task_completion_review — verification-evidence projections for task
+    tools.
 
-    Pure helpers (no IO, no [context]). The [Tool_task] facade composes
-    these with context-bound side effects (Sse.broadcast,
-    Eval_calibration record, anti-rationalization invocation).
+    Pure helpers (no IO, no [context]).
 
     @since God file decomposition — extracted from tool_task.ml *)
-
-let persisted_completion_contract ~(task_opt : Masc_domain.task option) =
-  match task_opt with
-  | Some ({ contract = Some contract; _ } : Masc_domain.task)
-    when Stdlib.List.length contract.completion_contract > 0 ->
-      Some contract.completion_contract
-  | Some _ | None -> None
 
 (* RFC-0337 decision 4: shared element-level predicate for evidence-ref
    boundary checks. The masc_transition handoff boundary rejects entries

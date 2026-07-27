@@ -283,7 +283,7 @@ describe('ApprovalsSurface', () => {
     expect(container.textContent).toContain('Human 판단 필요')
   }, 20000)
 
-  it('rearms typed blocked Auto Judge states only after an explicit operator click', async () => {
+  it('rearms only operator-retryable typed Auto Judge states after an explicit click', async () => {
     const { ApprovalsSurface, retryGateAutoJudge } = await loadSurface([
       queueItem({
         id: 'appr-retry',
@@ -305,6 +305,16 @@ describe('ApprovalsSurface', () => {
         },
       }),
       queueItem({
+        id: 'appr-start-reserved',
+        summary_status: { status: 'not_requested' },
+        exact_attempt: { state: 'unbound' },
+        summary_attempt_disposition: {
+          code: 'pre_worker_unavailable',
+          reason_code: 'start_reserved',
+          operator_detail: 'Exact attempt start is already reserved',
+        },
+      }),
+      queueItem({
         id: 'appr-recovery',
         summary_status: { status: 'pending' },
         exact_attempt: releasedRecoveryAttempt('appr-recovery'),
@@ -323,6 +333,10 @@ describe('ApprovalsSurface', () => {
     expect(container.textContent).toContain('durability 확인 필요')
     expect(container.textContent).toContain('Gate mode 상태 불가')
     expect(container.textContent).toContain('Gate mode state could not be read')
+    expect(container.textContent).toContain('exact identity 예약됨')
+    expect(
+      container.querySelector('[data-approval-id="appr-start-reserved"] .ap-act.retry'),
+    ).toBeNull()
     container
       .querySelector<HTMLButtonElement>('[data-approval-id="appr-retry"] .ap-act.retry')
       ?.click()

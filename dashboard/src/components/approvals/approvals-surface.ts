@@ -255,15 +255,21 @@ function summaryRearmExpectation(
 ): KeeperAutoJudgeRearmExpectation | null {
   const disposition = item.summary_attempt_disposition
   const exactAttempt = item.exact_attempt
+  const preWorkerRearmable =
+    disposition.code === 'pre_worker_unavailable'
+    && (
+      disposition.reason_code === 'auto_judge_unavailable'
+      || disposition.reason_code === 'mode_state_invalid'
+    )
   const summaryRearmable =
     item.summary_status.status === 'pending'
     || (
-      disposition.code === 'pre_worker_unavailable'
+      preWorkerRearmable
       && item.summary_status.status === 'not_requested'
     )
   if (!summaryRearmable) return null
   if (disposition.code === 'pre_worker_unavailable') {
-    return exactAttempt.state === 'unbound'
+    return preWorkerRearmable && exactAttempt.state === 'unbound'
       ? {
           input_hash: item.input_hash,
           sequence: item.sequence,

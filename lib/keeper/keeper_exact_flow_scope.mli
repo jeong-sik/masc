@@ -8,6 +8,26 @@ type surface =
 
 type t
 
+type evidence_commit_error = Keeper_exact_flow_evidence_journal.commit_error
+
+type setup_error =
+  | Owner_not_registered of { keeper_name : string }
+  | Owner_draining of { keeper_name : string }
+  | Evidence_recovery_blocked of
+      { surface : surface
+      ; cause : Keeper_exact_flow_evidence_journal.load_error
+      }
+  | Scope_identity_invalid of { surface : surface }
+
+type release_error =
+  | Retirement_deferred
+  | Retirement_commit_failed of
+      { surface : surface
+      ; cause : evidence_commit_error
+      }
+  | Retirement_in_progress of { surface : surface }
+  | Retirement_conflict of { surface : surface }
+
 type 'a current_boundary =
   | Current of 'a
   | Owner_unregistered_deferred
@@ -22,10 +42,22 @@ val for_registered
   -> base_path:string
   -> keeper_name:string
   -> surface:surface
-  -> (t, string) result
+  -> (t, setup_error) result
+
+val setup_error_to_string : setup_error -> string
+val release_error_to_string : release_error -> string
+val evidence_commit_error_to_string : evidence_commit_error -> string
 
 val preference_store : t -> Agent_sdk.Exact_output.flow_preference_store
 val scope : t -> Agent_sdk.Exact_output.flow_scope
+
+val commit_domain_settlement_intent
+  :  t
+  -> Agent_sdk.Exact_output.domain_settlement_intent
+  -> (unit, evidence_commit_error) result
+(** Durable callback for every domain terminal on this exact owner/surface.
+    The encoded current OAS intent is committed to the same journal used by
+    startup recovery. *)
 
 val with_current
   :  t
@@ -64,7 +96,10 @@ val release_owner
   :  base_path:string
   -> keeper_name:string
   -> expected_lane_id:Keeper_lane.Id.t
-  -> unit
-(** Retire only the exact registry generation that was removed. *)
+  -> (unit, release_error) result
+(** Retire only the exact registry generation that was removed. Every reserved
+    surface commits its current OAS retirement intent before OAS releases the
+    scope. A pinned owner returns [Retirement_deferred] and remains alive until
+    the last pin runs the same durable retirement boundary. *)
 
 val clear : unit -> unit

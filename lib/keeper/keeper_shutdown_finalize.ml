@@ -604,16 +604,19 @@ let begin_exact_retirement ~base_path operation entry =
 ;;
 
 let unregister_retired_exact ~base_path operation entry =
+  let release expected_lane_id =
+    Keeper_exact_flow_scope.release_owner
+      ~base_path
+      ~keeper_name:operation.keeper_name
+      ~expected_lane_id
+    |> Result.map_error Keeper_exact_flow_scope.release_error_to_string
+  in
   match operation.lane_ownership, entry with
   | Dormant_meta, None -> Ok false
   | Dormant_meta, Some _ ->
     Error "dormant Keeper operation found a registered lane before finalization"
   | Registered_lane expected_lane_id, None ->
-    Keeper_exact_flow_scope.release_owner
-      ~base_path
-      ~keeper_name:operation.keeper_name
-      ~expected_lane_id;
-    Ok false
+    Result.map (fun () -> false) (release expected_lane_id)
   | Registered_lane expected_lane_id, Some entry ->
     if
       not
@@ -625,11 +628,7 @@ let unregister_retired_exact ~base_path operation entry =
       (match Keeper_registry.unregister_exact entry with
        | Keeper_registry.Exact_unregistered
        | Keeper_registry.Exact_entry_missing ->
-         Keeper_exact_flow_scope.release_owner
-           ~base_path
-           ~keeper_name:operation.keeper_name
-           ~expected_lane_id;
-         Ok true
+         Result.map (fun () -> true) (release expected_lane_id)
      | Keeper_registry.Exact_entry_replaced ->
        Error "Keeper registry lane was replaced during finalization"
      | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->

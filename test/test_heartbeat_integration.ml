@@ -2631,7 +2631,8 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
                   ~surface:Masc.Keeper_exact_flow_scope.Hitl_summary
               with
               | Ok scope -> scope
-              | Error detail -> fail detail
+              | Error detail ->
+                fail (Masc.Keeper_exact_flow_scope.setup_error_to_string detail)
             in
             let approval_id =
               install_pending_summary

@@ -1774,7 +1774,10 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
              ~surface:Masc.Keeper_exact_flow_scope.Compaction
          with
          | Ok flow_scope -> flow_scope
-         | Error detail -> failf "scope pin fixture failed: %s" detail
+         | Error detail ->
+           failf
+             "scope pin fixture failed: %s"
+             (Masc.Keeper_exact_flow_scope.setup_error_to_string detail)
        in
        let entered, publish_entered = Eio.Promise.create () in
        let continue_promise, publish_continue = Eio.Promise.create () in
@@ -1815,7 +1818,9 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
                 with
                 | Ok replacement_scope -> replacement_scope
                 | Error detail ->
-                  failf "replacement scope allocation failed: %s" detail
+                  failf
+                    "replacement scope allocation failed: %s"
+                    (Masc.Keeper_exact_flow_scope.setup_error_to_string detail)
               in
               (match
                  Masc.Keeper_exact_flow_scope.with_current

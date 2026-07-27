@@ -784,49 +784,62 @@ let remove_entry
       ~base_path
       name
   =
-  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-  match
-    Keeper_lifecycle_reservation.authorize
-      ?token:lifecycle_token
+  let result, release_lane =
+    Keeper_lifecycle_reservation.with_key_lock
       ~base_path
       ~keeper_name:name
-      ()
-  with
-  | Error owner -> Entry_lifecycle_reserved owner
-  | Ok () ->
-  let key = registry_key ~base_path name in
-  let rec loop () =
-    let current = Atomic.get registry in
-    match StringMap.find_opt key current with
-    | None ->
-      Option.iter
-        (fun expected_entry ->
-           Keeper_exact_flow_scope.release_owner
+      (fun () ->
+         match
+           Keeper_lifecycle_reservation.authorize
+             ?token:lifecycle_token
              ~base_path
              ~keeper_name:name
-             ~expected_lane_id:(Keeper_lane.id expected_entry.lane))
-        expected;
-      Entry_missing
-    | Some entry ->
-      (match expected with
-       | Some expected_entry
-         when not
-                (Keeper_lane.Id.equal
-                   (Keeper_lane.id entry.lane)
-                   (Keeper_lane.id expected_entry.lane)) ->
-         Entry_replaced
-       | None | Some _ ->
-         let updated = StringMap.remove key current in
-         if Atomic.compare_and_set registry current updated
-        then (
-           Keeper_exact_flow_scope.release_owner
-             ~base_path
-             ~keeper_name:name
-             ~expected_lane_id:(Keeper_lane.id entry.lane);
-           Entry_removed entry)
-         else loop ())
+             ()
+         with
+         | Error owner -> Entry_lifecycle_reserved owner, None
+         | Ok () ->
+           let key = registry_key ~base_path name in
+           let rec loop () =
+             let current = Atomic.get registry in
+             match StringMap.find_opt key current with
+             | None ->
+               ( Entry_missing
+               , Option.map
+                   (fun expected_entry -> Keeper_lane.id expected_entry.lane)
+                   expected )
+             | Some entry ->
+               (match expected with
+                | Some expected_entry
+                  when not
+                         (Keeper_lane.Id.equal
+                            (Keeper_lane.id entry.lane)
+                            (Keeper_lane.id expected_entry.lane)) ->
+                  Entry_replaced, None
+                | None | Some _ ->
+                  let updated = StringMap.remove key current in
+                  if Atomic.compare_and_set registry current updated
+                  then Entry_removed entry, Some (Keeper_lane.id entry.lane)
+                  else loop ())
+           in
+           loop ())
   in
-  loop ())
+  Option.iter
+    (fun expected_lane_id ->
+       match
+         Keeper_exact_flow_scope.release_owner
+           ~base_path
+           ~keeper_name:name
+           ~expected_lane_id
+       with
+       | Ok () -> ()
+       | Error cause ->
+         Log.Keeper.error
+           "registry: exact-flow owner retirement remains blocked name=%s base_path=%s cause=%s"
+           name
+           base_path
+           (Keeper_exact_flow_scope.release_error_to_string cause))
+    release_lane;
+  result
 ;;
 
 let finish_unregistration entry =

@@ -1,10 +1,31 @@
 module Exact_output = Agent_sdk.Exact_output
+module Evidence_journal = Keeper_exact_flow_evidence_journal
 
 type surface =
   | Compaction
   | Board_attention
   | Hitl_summary
   | Librarian
+
+type evidence_commit_error = Evidence_journal.commit_error
+
+type setup_error =
+  | Owner_not_registered of { keeper_name : string }
+  | Owner_draining of { keeper_name : string }
+  | Evidence_recovery_blocked of
+      { surface : surface
+      ; cause : Evidence_journal.load_error
+      }
+  | Scope_identity_invalid of { surface : surface }
+
+type release_error =
+  | Retirement_deferred
+  | Retirement_commit_failed of
+      { surface : surface
+      ; cause : evidence_commit_error
+      }
+  | Retirement_in_progress of { surface : surface }
+  | Retirement_conflict of { surface : surface }
 
 type librarian_execution_slot =
   { mutable capacity : int
@@ -30,6 +51,8 @@ type owner_state =
 
 type t =
   { owner : owner_state
+  ; surface : surface
+  ; evidence_journal : Evidence_journal.t
   ; preference_store : Exact_output.flow_preference_store
   ; scope : Exact_output.flow_scope
   }
@@ -51,6 +74,8 @@ type owner =
   ; librarian : t
   }
 
+let ( let* ) = Result.bind
+
 let surface_label = function
   | Compaction -> "compaction"
   | Board_attention -> "board_attention"
@@ -58,27 +83,90 @@ let surface_label = function
   | Librarian -> "librarian"
 ;;
 
+let setup_error_to_string = function
+  | Owner_not_registered { keeper_name } ->
+    Printf.sprintf "exact-flow owner is not registered: keeper=%s" keeper_name
+  | Owner_draining { keeper_name } ->
+    Printf.sprintf "exact-flow owner is draining: keeper=%s" keeper_name
+  | Evidence_recovery_blocked { surface; cause } ->
+    Printf.sprintf
+      "exact-flow evidence recovery blocked: surface=%s cause=%s"
+      (surface_label surface)
+      (Evidence_journal.load_error_to_string cause)
+  | Scope_identity_invalid { surface } ->
+    Printf.sprintf "exact-flow scope identity is invalid: surface=%s" (surface_label surface)
+;;
+
+let evidence_commit_error_to_string = Evidence_journal.commit_error_to_string
+
+let release_error_to_string = function
+  | Retirement_deferred -> "exact-flow retirement is waiting for bound work"
+  | Retirement_commit_failed { surface; cause } ->
+    Printf.sprintf
+      "exact-flow retirement commit failed: surface=%s cause=%s"
+      (surface_label surface)
+      (evidence_commit_error_to_string cause)
+  | Retirement_in_progress { surface } ->
+    Printf.sprintf
+      "exact-flow retirement is already in progress: surface=%s"
+      (surface_label surface)
+  | Retirement_conflict { surface } ->
+    Printf.sprintf
+      "exact-flow retirement conflicted: surface=%s"
+      (surface_label surface)
+;;
+
+let owners : (string, owner) Hashtbl.t = Hashtbl.create 16
+let owners_mu = Stdlib.Mutex.create ()
+
+let owner_key ~base_path ~keeper_name =
+  Keeper_registry_types.registry_key ~base_path keeper_name
+;;
+
+let owner_fingerprint state surface =
+  String.concat
+    "\000"
+    [ state.base_path
+    ; state.keeper_name
+    ; Keeper_lane.Id.to_string state.lane_id
+    ; surface_label surface
+    ]
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
 let create_scope state surface =
-  let owner_fingerprint =
-    String.concat
-      "\000"
-      [ state.base_path
-      ; state.keeper_name
-      ; Keeper_lane.Id.to_string state.lane_id
-      ; surface_label surface
-      ]
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
+  let* evidence_journal, preference_store, recovery_origin =
+    Evidence_journal.recover
+      ~base_path:state.base_path
+      ~keeper_name:state.keeper_name
+      ~keeper_generation:(Keeper_lane.Id.to_string state.lane_id)
+      ~surface:(surface_label surface)
+      ~concurrent_scope_budget:1
+    |> Result.map_error (fun cause -> Evidence_recovery_blocked { surface; cause })
   in
-  let preference_store =
-    Exact_output.create_flow_preference_store ~capacity:1
-    |> Result.get_ok
+  (match recovery_origin with
+   | Evidence_journal.Fresh_start ->
+     Log.Keeper.warn
+       "exact-flow current evidence was absent; initialized explicit fresh state keeper=%s generation=%s surface=%s journal=%s"
+       state.keeper_name
+       (Keeper_lane.Id.to_string state.lane_id)
+       (surface_label surface)
+       (Evidence_journal.path evidence_journal)
+   | Evidence_journal.Recovered { evidence_count } ->
+     Log.Keeper.info
+       "exact-flow recovered authenticated current evidence keeper=%s generation=%s surface=%s evidence_count=%d journal=%s"
+       state.keeper_name
+       (Keeper_lane.Id.to_string state.lane_id)
+       (surface_label surface)
+       evidence_count
+       (Evidence_journal.path evidence_journal));
+  let* scope =
+    Exact_output.make_flow_scope ~id:("masc:" ^ owner_fingerprint state surface)
+    |> Result.map_error (fun Exact_output.Blank_flow_scope_id ->
+      Scope_identity_invalid { surface })
   in
-  let scope =
-    Exact_output.make_flow_scope ~id:("masc:" ^ owner_fingerprint)
-    |> Result.get_ok
-  in
-  { owner = state; preference_store; scope }
+  Ok { owner = state; surface; evidence_journal; preference_store; scope }
 ;;
 
 let create_owner ~base_path ~keeper_name ~lane_id =
@@ -94,12 +182,11 @@ let create_owner ~base_path ~keeper_name ~lane_id =
     ; librarian_execution_slot_mu = Eio.Mutex.create ()
     }
   in
-  { state
-  ; compaction = create_scope state Compaction
-  ; board_attention = create_scope state Board_attention
-  ; hitl_summary = create_scope state Hitl_summary
-  ; librarian = create_scope state Librarian
-  }
+  let* compaction = create_scope state Compaction in
+  let* board_attention = create_scope state Board_attention in
+  let* hitl_summary = create_scope state Hitl_summary in
+  let* librarian = create_scope state Librarian in
+  Ok { state; compaction; board_attention; hitl_summary; librarian }
 ;;
 
 let surface_scope owner = function
@@ -109,57 +196,105 @@ let surface_scope owner = function
   | Librarian -> owner.librarian
 ;;
 
-let owners : (string, owner) Hashtbl.t = Hashtbl.create 16
-let owners_mu = Stdlib.Mutex.create ()
-
-let owner_key ~base_path ~keeper_name =
-  Keeper_registry_types.registry_key ~base_path keeper_name
+let commit_domain_settlement_intent scope intent =
+  match Evidence_journal.commit_domain_settlement scope.evidence_journal intent with
+  | Ok () -> Ok ()
+  | Error cause as error ->
+    Log.Keeper.error
+      "exact-flow domain evidence commit blocked keeper=%s generation=%s surface=%s cause=%s"
+      scope.owner.keeper_name
+      (Keeper_lane.Id.to_string scope.owner.lane_id)
+      (surface_label scope.surface)
+      (evidence_commit_error_to_string cause);
+    error
 ;;
 
 let release_scope scope =
-  ignore
-    (Exact_output.remove_flow_preference_scope
-       scope.preference_store
-       scope.scope)
+  match
+    Exact_output.commit_and_retire_flow_preference_scope
+      ~commit:(Evidence_journal.commit_scope_retirement scope.evidence_journal)
+      scope.preference_store
+      scope.scope
+  with
+  | Ok _ | Error Exact_output.Flow_preference_scope_not_reserved -> Ok ()
+  | Error (Exact_output.Flow_preference_retirement_commit_failed cause) ->
+    Error (Retirement_commit_failed { surface = scope.surface; cause })
+  | Error Exact_output.Flow_preference_retirement_in_progress ->
+    Error (Retirement_in_progress { surface = scope.surface })
+  | Error Exact_output.Flow_preference_retirement_conflict ->
+    Error (Retirement_conflict { surface = scope.surface })
 ;;
 
 let release_owner_scopes owner =
-  release_scope owner.compaction;
-  release_scope owner.board_attention;
-  release_scope owner.hitl_summary;
+  let* () = release_scope owner.compaction in
+  let* () = release_scope owner.board_attention in
+  let* () = release_scope owner.hitl_summary in
   release_scope owner.librarian
 ;;
 
+let remove_owner_binding owner =
+  let key =
+    owner_key
+      ~base_path:owner.state.base_path
+      ~keeper_name:owner.state.keeper_name
+  in
+  Stdlib.Mutex.protect owners_mu (fun () ->
+    match Hashtbl.find_opt owners key with
+    | Some current when current == owner -> Hashtbl.remove owners key
+    | Some _ | None -> ())
+;;
+
+let finish_owner_retirement owner =
+  match release_owner_scopes owner with
+  | Ok () ->
+    Stdlib.Mutex.protect owner.state.boundary_mu (fun () ->
+      Atomic.set owner.state.phase Retired);
+    remove_owner_binding owner;
+    Ok ()
+  | Error cause as error ->
+    Log.Keeper.error
+      "exact-flow owner retirement blocked keeper=%s generation=%s cause=%s"
+      owner.state.keeper_name
+      (Keeper_lane.Id.to_string owner.state.lane_id)
+      (release_error_to_string cause);
+    error
+;;
+
 let retire_owner owner =
-  let release_now =
+  let action =
     Stdlib.Mutex.protect owner.state.boundary_mu (fun () ->
       match Atomic.get owner.state.phase with
-      | Retired -> false
+      | Retired -> `Released
       | Active
       | Draining ->
-        Atomic.set owner.state.phase Retired;
+        Atomic.set owner.state.phase Draining;
         if owner.state.boundary_users = 0
-        then true
+        then `Release_now
         else (
-          owner.state.deferred_release <-
-            Some (fun () -> release_owner_scopes owner);
-          false))
+          if Option.is_none owner.state.deferred_release
+          then
+            owner.state.deferred_release <-
+              Some (fun () -> ignore (finish_owner_retirement owner));
+          `Deferred))
   in
-  if release_now then release_owner_scopes owner
+  match action with
+  | `Released -> Ok `Released
+  | `Deferred -> Ok `Deferred
+  | `Release_now -> Result.map (fun () -> `Released) (finish_owner_retirement owner)
+;;
+
+let note_retirement_result = function
+  | Ok _ -> ()
+  | Error cause ->
+    Log.Keeper.error
+      "exact-flow detached owner remains blocked: %s"
+      (release_error_to_string cause)
 ;;
 
 let for_registered ~registered_lane_id ~base_path ~keeper_name ~surface =
   let key = owner_key ~base_path ~keeper_name in
-  let unavailable () =
-    Printf.sprintf
-      "exact-flow owner is not registered: keeper=%s"
-      keeper_name
-  in
-  let draining () =
-    Printf.sprintf
-      "exact-flow owner is draining: keeper=%s"
-      keeper_name
-  in
+  let unavailable () = Owner_not_registered { keeper_name } in
+  let draining () = Owner_draining { keeper_name } in
   let initial =
     Keeper_lifecycle_reservation.with_key_lock
       ~base_path
@@ -182,47 +317,57 @@ let for_registered ~registered_lane_id ~base_path ~keeper_name ~surface =
                `Create lane_id))
   in
   match initial with
-  | `Error detail -> Error detail
+  | `Error cause -> Error cause
   | `Existing owner -> Ok (surface_scope owner surface)
   | `Create lane_id ->
-    let candidate = create_owner ~base_path ~keeper_name ~lane_id in
-    let installed =
-      Keeper_lifecycle_reservation.with_key_lock
-        ~base_path
-        ~keeper_name
-        (fun () ->
-           match registered_lane_id () with
-           | Some current_lane_id
-             when Keeper_lane.Id.equal current_lane_id lane_id ->
-             Stdlib.Mutex.protect owners_mu (fun () ->
-               match Hashtbl.find_opt owners key with
-               | Some owner
-                 when Atomic.get owner.state.phase = Active
-                      && Keeper_lane.Id.equal owner.state.lane_id lane_id ->
-                 `Existing owner
-               | Some owner
-                 when Keeper_lane.Id.equal owner.state.lane_id lane_id ->
-                 `Error (draining ())
-               | Some stale ->
-                 Hashtbl.replace owners key candidate;
-                 `Installed (candidate, Some stale)
-               | None ->
-                 Hashtbl.add owners key candidate;
-                 `Installed (candidate, None))
-           | Some _
-           | None ->
-             `Error (unavailable ()))
-    in
-    (match installed with
-     | `Existing owner ->
-       retire_owner candidate;
-       Ok (surface_scope owner surface)
-     | `Installed (owner, stale) ->
-       Option.iter retire_owner stale;
-       Ok (surface_scope owner surface)
-     | `Error detail ->
-       retire_owner candidate;
-       Error detail)
+    (match create_owner ~base_path ~keeper_name ~lane_id with
+     | Error cause ->
+       Log.Keeper.error
+         "exact-flow owner recovery blocked while Keeper lifecycle remains registered keeper=%s generation=%s cause=%s"
+         keeper_name
+         (Keeper_lane.Id.to_string lane_id)
+         (setup_error_to_string cause);
+       Error cause
+     | Ok candidate ->
+       let installed =
+         Keeper_lifecycle_reservation.with_key_lock
+           ~base_path
+           ~keeper_name
+           (fun () ->
+              match registered_lane_id () with
+              | Some current_lane_id
+                when Keeper_lane.Id.equal current_lane_id lane_id ->
+                Stdlib.Mutex.protect owners_mu (fun () ->
+                  match Hashtbl.find_opt owners key with
+                  | Some owner
+                    when Atomic.get owner.state.phase = Active
+                         && Keeper_lane.Id.equal owner.state.lane_id lane_id ->
+                    `Existing owner
+                  | Some owner
+                    when Keeper_lane.Id.equal owner.state.lane_id lane_id ->
+                    `Error (draining ())
+                  | Some stale ->
+                    Hashtbl.replace owners key candidate;
+                    `Installed (candidate, Some stale)
+                  | None ->
+                    Hashtbl.add owners key candidate;
+                    `Installed (candidate, None))
+              | Some _
+              | None ->
+                `Error (unavailable ()))
+       in
+       match installed with
+       | `Existing owner ->
+         retire_owner candidate |> note_retirement_result;
+         Ok (surface_scope owner surface)
+       | `Installed (owner, stale) ->
+         Option.iter
+           (fun stale -> retire_owner stale |> note_retirement_result)
+           stale;
+         Ok (surface_scope owner surface)
+       | `Error cause ->
+         retire_owner candidate |> note_retirement_result;
+         Error cause)
 ;;
 
 let preference_store scope = scope.preference_store
@@ -333,18 +478,23 @@ let begin_retirement ~base_path ~keeper_name ~expected_lane_id =
 
 let release_owner ~base_path ~keeper_name ~expected_lane_id =
   let key = owner_key ~base_path ~keeper_name in
-  let removed =
+  let owner =
     Stdlib.Mutex.protect owners_mu (fun () ->
       match Hashtbl.find_opt owners key with
       | Some owner
         when Keeper_lane.Id.equal owner.state.lane_id expected_lane_id ->
-        Hashtbl.remove owners key;
         Some owner
       | Some _
       | None ->
         None)
   in
-  Option.iter retire_owner removed
+  match owner with
+  | None -> Ok ()
+  | Some owner ->
+    (match retire_owner owner with
+     | Ok `Released -> Ok ()
+     | Ok `Deferred -> Error Retirement_deferred
+     | Error _ as error -> error)
 ;;
 
 let clear () =
@@ -354,5 +504,7 @@ let clear () =
       Hashtbl.reset owners;
       removed)
   in
-  List.iter retire_owner removed
+  List.iter
+    (fun owner -> retire_owner owner |> note_retirement_result)
+    removed
 ;;

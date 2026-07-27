@@ -198,6 +198,7 @@ let prepare_flow ~(entry : pending_approval) =
       ~base_path
       ~keeper_name
       ~surface:Keeper_exact_flow_scope.Hitl_summary
+    |> Result.map_error Keeper_exact_flow_scope.setup_error_to_string
   in
   prepare_flow_with_scope ~base_path ~keeper_name ~flow_scope ~entry
 ;;
@@ -209,36 +210,35 @@ let snapshot_topology_readiness () =
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  let preference_store =
-    Exact_output.create_flow_preference_store ~capacity:1
-    |> Result.get_ok
+  let* preference_store =
+    Exact_output.recover_flow_preferences
+      ~concurrent_scope_budget:1
+      ~evidence:[]
+    |> Result.map_error (fun _ ->
+      "HITL topology probe could not recover its independent empty preference store")
   in
-  let scope =
+  let* scope =
     Exact_output.make_flow_scope ~id:"masc:hitl-readiness"
-    |> Result.get_ok
+    |> Result.map_error (fun Exact_output.Blank_flow_scope_id ->
+      "HITL topology probe scope identity is invalid")
   in
-  Fun.protect
-    ~finally:(fun () ->
-      ignore
-        (Exact_output.remove_flow_preference_scope preference_store scope))
-    (fun () ->
-       let* candidates = flow_candidates resolved.selected_slots in
-       match candidates with
-       | [] -> Error "HITL exact-output lane has no usable candidates"
-       | first :: rest ->
-         Exact_output.snapshot_flow
-           ~preferences:preference_store
-           ~scope
-           ~first
-           ~rest
-           ~messages:
-             (messages_for_summary
-                ~system_prompt
-                ~context_bundle:(`Assoc []))
-           output_requirement
-         |> Result.map (fun _ -> ())
-         |> Result.map_error (fun _ ->
-           "HITL exact-output readiness snapshot failed"))
+  let* candidates = flow_candidates resolved.selected_slots in
+  match candidates with
+  | [] -> Error "HITL exact-output lane has no usable candidates"
+  | first :: rest ->
+    Exact_output.snapshot_flow
+      ~preferences:preference_store
+      ~scope
+      ~first
+      ~rest
+      ~messages:
+        (messages_for_summary
+           ~system_prompt
+           ~context_bundle:(`Assoc []))
+      output_requirement
+    |> Result.map (fun _ -> ())
+    |> Result.map_error (fun _ ->
+      "HITL exact-output readiness snapshot failed")
 ;;
 
 (* ── MASC domain validation ─────────────────────── *)

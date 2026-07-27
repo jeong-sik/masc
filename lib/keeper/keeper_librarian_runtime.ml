@@ -888,7 +888,9 @@ let resolve_flow_scope ~base_path ~keeper_id =
     ~keeper_name:keeper_id
     ~surface:Keeper_exact_flow_scope.Librarian
   |> Result.map_error (fun detail ->
-    Exact_setup_failed (Exact_owner_unavailable detail))
+    Exact_setup_failed
+      (Exact_owner_unavailable
+         (Keeper_exact_flow_scope.setup_error_to_string detail)))
 ;;
 
 let extract_with_flow_scope_classified

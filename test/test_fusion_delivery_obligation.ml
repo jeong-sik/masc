@@ -2,6 +2,16 @@ open Alcotest
 open Masc
 
 module Obligation = Fusion_delivery_obligation
+module Event_queue_persistence_source = Keeper_event_queue_persistence
+module Keeper_event_queue_persistence = struct
+  include Event_queue_persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> fail detail
+  ;;
+end
 
 let () = Mirage_crypto_rng_unix.use_default ()
 

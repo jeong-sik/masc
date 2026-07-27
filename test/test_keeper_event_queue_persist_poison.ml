@@ -12,6 +12,17 @@
     that the owner's cooperative gate remains usable; a different BasePath
     cannot accidentally make the assertion pass through lock isolation. *)
 
+module Event_queue_persistence_source = Keeper_event_queue_persistence
+module Keeper_event_queue_persistence = struct
+  include Event_queue_persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
+
 let rec rm_rf path =
   if Sys.file_exists path
   then

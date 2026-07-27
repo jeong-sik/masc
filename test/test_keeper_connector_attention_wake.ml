@@ -9,6 +9,16 @@
 open Alcotest
 module WO = Masc.Keeper_world_observation
 module A = Masc.Keeper_external_attention
+module Event_queue_persistence_source = Keeper_event_queue_persistence
+module Keeper_event_queue_persistence = struct
+  include Event_queue_persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> fail detail
+  ;;
+end
 
 let contains ~needle haystack =
   let nl = String.length needle in

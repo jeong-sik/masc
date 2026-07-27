@@ -26,10 +26,7 @@ let compaction_rejection_to_tag = function
   | Exact_owner_unregistered_deferred ->
     "exact_owner_unregistered_deferred"
   | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
-  (* The absent case names the lease. An operator reading only
-     "guard absent" has no way to reach the stimulus lease that decides it. *)
-  | Exact_execution_guard_absent ->
-    "exact_execution_guard_absent_no_stimulus_lease"
+  | Exact_execution_guard_absent -> "exact_execution_guard_absent"
   | Exact_execution_bind_failed -> "exact_execution_bind_failed"
   | Exact_flow_already_started -> "exact_flow_already_started"
   | Exact_execution_terminal terminal ->

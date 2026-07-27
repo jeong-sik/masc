@@ -1,6 +1,15 @@
 module Queue = Keeper_event_queue
 module State = Keeper_event_queue_state
-module Persistence = Keeper_event_queue_persistence
+module Persistence_source = Keeper_event_queue_persistence
+module Persistence = struct
+  include Persistence_source
+
+  let load_pending ~base_path ~keeper_name =
+    match load_pending_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
 
 let require_ok label = function
   | Ok value -> value

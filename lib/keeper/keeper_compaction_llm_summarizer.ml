@@ -1061,6 +1061,7 @@ let prepare_lane ~base_path ~keeper_name ~registry ~lane_id ~units =
 
 type exact_flow_callback_failure =
   | Owner_unregistered_deferred
+  | Guard_absent
   | Bind_failed
   | Bind_sync_unconfirmed of Keeper_event_queue_state.exact_execution_terminal
   | Release_failed of Keeper_event_queue_state.exact_execution_terminal
@@ -1078,7 +1079,7 @@ let bind_exact_execution
       "compaction exact durable execution guard is unavailable slot=%s call_id=%s"
       observation.slot_id
       observation.call_id;
-    Error Bind_failed
+    Error Guard_absent
   | Some guard ->
     (match guard.before_dispatch observation with
      | Ok Fsync_completed -> Ok ()
@@ -1145,6 +1146,7 @@ let release_exact_execution
 
 let summarization_failure_of_callback = function
   | Owner_unregistered_deferred -> Exact_owner_unregistered_deferred
+  | Guard_absent -> Exact_execution_guard_absent
   | Bind_failed -> Exact_execution_bind_failed
   | Bind_sync_unconfirmed terminal
   | Release_failed terminal
@@ -1365,17 +1367,17 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
         (registered_lane_id
            ~base_path:prepared_lane.base_path
            ~keeper_name:prepared_lane.keeper_name)
-      (fun () -> ())
+      (fun () ->
+         execute_prepared_lane_current
+           ~keeper_name
+           ~net
+           ?clock
+           ?exact_execution_guard
+           prepared_lane)
   with
   | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
     Error Exact_owner_unregistered_deferred
-  | Keeper_exact_flow_scope.Current () ->
-    execute_prepared_lane_current
-      ~keeper_name
-      ~net
-      ?clock
-      ?exact_execution_guard
-      prepared_lane
+  | Keeper_exact_flow_scope.Current result -> result
 ;;
 
 let run_exact

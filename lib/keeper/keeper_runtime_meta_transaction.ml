@@ -233,7 +233,7 @@ let recover_created_meta permit config (intent : Journal.intent) target =
   let* witness =
     Keeper_lifecycle_nonce.recover_exact
       permit
-      ~base_path:config.Workspace.base_path
+      config
       ~keeper_id:intent.keeper_name
       ~source:None
       ~target:target_identity

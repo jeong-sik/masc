@@ -132,6 +132,15 @@ module Durable_transaction : sig
   (** The point read and callback execute under the same per-Keeper durable
       authority lock used by revival and recovery. *)
 
+  val with_recovery_lifecycle_admission :
+    Workspace.config ->
+    keeper_name:string ->
+    transaction_id:string ->
+    (permit -> 'a) ->
+    'a admission_result
+  (** Acquire the ordinary per-Keeper durable authority lock, then admit only
+      the exact current-schema journal transaction discovered by recovery. *)
+
   val inspect : Workspace.config -> keeper_name:string -> projection
   (** Backend-safe projection containing no journal payload or credential data. *)
 

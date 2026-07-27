@@ -263,8 +263,18 @@ if command -v opam >/dev/null 2>&1; then
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
   if [[ -n "${pin_line}" ]]; then
     installed_pin_source="$(extract_opam_pin_source "${pin_line}")"
+    installed_pin_ref="$(
+      sed -nE 's/.*\(at ([0-9a-f]{40})\).*/\1/p' <<<"${pin_line}"
+    )"
     case "${installed_pin_source}" in
       "${expected_opam_pin_source}")
+        ;;
+      "git+${OAS_AGENT_SDK_URL}")
+        if [[ "${installed_pin_ref}" != "${OAS_AGENT_SDK_SHA}" ]]; then
+          echo "agent_sdk pin checkout is ${installed_pin_ref:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2
+          echo "repair: bash scripts/opam-pin-external-deps.sh" >&2
+          exit 1
+        fi
         ;;
       git+file://*|file://*)
         local_pin_path="$(local_pin_path_from_source "${installed_pin_source}")"

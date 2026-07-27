@@ -379,7 +379,12 @@ function RuntimeBlockedKeeperFactRow({
       data-testid=${`keeper-fleet-operator-fact-${index}`}
       data-tone=${presentation.tone}
     >
-      <td class="px-3 py-2 font-mono text-[var(--color-fg-primary)]">${presentation.keeper}</td>
+      <td class="px-3 py-2 font-mono text-[var(--color-fg-primary)]">
+        ${presentation.keeper}
+        ${presentation.taskId
+          ? html`<div class="font-mono text-3xs text-[var(--color-fg-muted)]">${presentation.taskId}</div>`
+          : null}
+      </td>
       <td class=${`px-3 py-2 ${toneClass}`}>
         <span class="inline-flex items-center gap-1.5">
           <${Icon} size=${14} aria-hidden="true" />

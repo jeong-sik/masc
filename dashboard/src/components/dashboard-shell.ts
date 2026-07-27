@@ -265,7 +265,8 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   if (!fleetSafety) return null
   const fleet = fleetSafety.keeper_fleet_safety
   if (fleet?.status === 'ok') return null
-  const fact = keeperFleetOperatorFacts(fleet)[0] ?? CURRENT_KEEPER_FLEET_FACT_INVALID
+  const facts = keeperFleetOperatorFacts(fleet)
+  const fact = facts[0] ?? CURRENT_KEEPER_FLEET_FACT_INVALID
   const presentation = keeperFleetOperatorFactPresentation(fact, fleet?.status)
   return {
     key: 'fleet-liveness-risk',
@@ -298,8 +299,13 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
         : null,
       fleet?.blocker ? `blocker=${fleet.blocker}` : null,
       `keeper=${presentation.keeper}`,
+      presentation.taskId ? `task=${presentation.taskId}` : null,
       `reason=${presentation.reason}`,
       presentation.detail ? `detail=${presentation.detail}` : null,
+      // One chip speaks for the whole fleet, so it has to say when it is
+      // showing the most severe of several blocked keepers rather than the
+      // only one.
+      facts.length > 1 ? `blocked_keeper_fact_count=${facts.length}` : null,
       `operator_action=${presentation.action}`,
     ].filter((item): item is string => item != null).join(', '),
     tone: presentation.tone,

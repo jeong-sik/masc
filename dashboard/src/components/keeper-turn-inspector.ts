@@ -927,6 +927,8 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">fsm.state</span><span class="v">n/a</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
         <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>
+        <span class="k">cache read tokens</span><span class="v">${record.cache_read_input_tokens?.toLocaleString() ?? '미상'}</span>
+        <span class="k">cache write tokens</span><span class="v">${record.cache_creation_input_tokens?.toLocaleString() ?? '미상'}</span>
         <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}% / ${record.context_window?.toLocaleString() ?? '미상'}` : '미상'}</span>
         <span class="k">keeper turn</span><span class="v">T${record.absolute_turn}</span>
         <span class="k">agent subturns</span><span class="v">${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}</span>

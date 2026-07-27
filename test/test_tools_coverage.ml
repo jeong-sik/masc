@@ -606,7 +606,7 @@ let test_masc_keeper_up_schema () =
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "omits sandbox_profile" false
+          Alcotest.(check bool) "has sandbox_profile" true
             (List.mem_assoc "sandbox_profile" props);
           Alcotest.(check bool) "omits network_mode" false
             (List.mem_assoc "network_mode" props);

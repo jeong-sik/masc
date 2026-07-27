@@ -69,7 +69,8 @@ let make_meta ?(name = "keeper-exec-tools") () =
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String name);
+          ( "agent_name"
+          , `String (Masc.Keeper_identity.keeper_agent_name name) );
           ("trace_id", `String "keeper-exec-tools-trace");
           ("allowed_paths", `List [ `String "*" ]);
         ])
@@ -101,6 +102,15 @@ let with_exec_fixture
           ~proc_mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env);
       let config = Masc.Workspace.default_config dir in
+      (match
+         Masc.Keeper_approval_queue.install_persistence
+           ~base_path:config.base_path
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail
+           ("Gate persistence fixture failed: "
+            ^ Masc.Keeper_approval_queue.install_error_to_string error));
       let meta =
         let meta = { (make_meta ()) with allowed_paths = [ config.base_path ] } in
         if always_allow then { meta with always_allow = Some true } else meta
@@ -2221,6 +2231,102 @@ let test_manual_gate_defers_web_tools_before_network () =
                 [ search; fetch ];
               check int "Manual Gate executes no WebFetch callback" 0 !fetch_calls)))
 
+let test_approved_web_search_grant_executes_exact_request () =
+  with_exec_fixture "keeper_tool_dispatch_approved_web_search"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      (match
+         Masc.Keeper_gate_mode.set
+           config
+           ~actor:"test"
+           Masc.Keeper_gate_mode.Manual
+       with
+       | Ok _ -> ()
+       | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+      let input = `Assoc [ "query", `String "hourly scheduled search" ] in
+      let first =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~name:"WebSearch"
+          ~input
+          ()
+      in
+      (match first.disposition with
+       | Tool_result.Deferred () -> ()
+       | Tool_result.Completed () | Tool_result.Failed _ ->
+         fail "approval-gated WebSearch did not defer before execution");
+      let approval_id =
+        match
+          Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+            ~base_path:config.base_path
+        with
+        | Ok [ entry ] -> entry.id
+        | Ok entries ->
+          failf "expected one pending WebSearch approval, got %d" (List.length entries)
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+      in
+      (match
+         Masc.Keeper_approval_queue.resolve_with_policy
+           ~base_path:config.base_path
+           ~id:approval_id
+           ~decision:Masc.Keeper_approval_queue.Decision.Approve
+           ~source:Masc.Keeper_approval_queue.Auto_judge
+           ()
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+      let resolution : Keeper_event_queue.hitl_resolution =
+        { approval_id
+        ; decision = Keeper_event_queue.Hitl_approved
+        ; channel =
+            Keeper_continuation_channel.unrouted
+              "approved WebSearch test"
+        }
+      in
+      let grant =
+        match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+        | Some grant -> grant
+        | None -> fail "approved WebSearch resolution did not create a grant"
+      in
+      Masc.Tool_misc.with_web_search_simulation_for_test
+        ~outcomes:
+          [ ( "duckduckgo"
+            , `Hits
+                [ ( "Scheduled result"
+                  , "https://example.com/scheduled"
+                  , "approved exact WebSearch"
+                  )
+                ] )
+          ]
+        (fun () ->
+          let second =
+            KET.execute_keeper_tool_call_with_outcome
+              ~config
+              ~meta
+              ~publication_recovery
+              ~ctx_work
+              ~gate_grant:grant
+              ~name:"WebSearch"
+              ~input
+              ()
+          in
+          check string "approved WebSearch executes" "success"
+            (outcome_label second.disposition));
+      match
+        Masc.Keeper_approval_queue.approved_resolution_state
+          ~base_path:config.base_path
+          ~id:approval_id
+      with
+      | Ok Masc.Keeper_approval_queue.Resolution_consumed -> ()
+      | Ok Masc.Keeper_approval_queue.Resolution_unconsumed ->
+        fail "approved WebSearch did not consume its one-shot grant"
+      | Error error ->
+        fail (Masc.Keeper_approval_queue.grant_error_to_string error))
+
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
 
@@ -2714,6 +2820,8 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Ok _ -> fail "handler-level invalid terminal input unexpectedly succeeded");
        (match bundle.terminal_effect_state () with
         | Masc.Keeper_tools_oas.Terminal_effect_open -> ()
+        | Masc.Keeper_tools_oas.External_effect_deferred ->
+          fail "invalid terminal input unexpectedly deferred an external effect"
         | Masc.Keeper_tools_oas.Terminal_effect_completed ->
           fail "invalid terminal input completed the terminal effect"
         | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
@@ -2733,6 +2841,8 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
         | Masc.Keeper_tools_oas.Terminal_effect_open ->
           fail "corrected terminal input left the terminal effect open"
+        | Masc.Keeper_tools_oas.External_effect_deferred ->
+          fail "corrected terminal input unexpectedly deferred an external effect"
         | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
           fail "corrected terminal input failed the terminal effect");
        let chat_path =
@@ -2758,6 +2868,8 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        | Masc.Keeper_tools_oas.Terminal_effect_failed _ -> ()
        | Masc.Keeper_tools_oas.Terminal_effect_open ->
          fail "later failure reopened the completed terminal effect"
+       | Masc.Keeper_tools_oas.External_effect_deferred ->
+         fail "later failure unexpectedly became an external defer"
        | Masc.Keeper_tools_oas.Terminal_effect_completed ->
          fail "later failure was hidden by the completed terminal effect")
 ;;
@@ -2842,6 +2954,101 @@ let with_openai_tool_call_server ~tool_name ~tool_input f =
   let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
   let result = f ~sw ~net ~base_url in
   result, !provider_call_count
+;;
+
+let test_deferred_web_search_yields_before_provider_retry () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "deferred_web_search_yield"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+       let bundle =
+         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let runtime_result, provider_call_count =
+         with_openai_tool_call_server
+           ~tool_name:"WebSearch"
+           ~tool_input:
+             (`Assoc [ "query", `String "hourly scheduled search" ])
+         @@ fun ~sw ~net ~base_url ->
+         let provider_cfg =
+           Llm_provider.Provider_config.make
+             ~kind:Llm_provider.Provider_config.OpenAI_compat
+             ~model_id:"deferred-effect-model"
+             ~base_url
+             ~api_key:"test-key"
+             ~request_path:"/chat/completions"
+             ~tool_stream:false
+             ()
+         in
+         let runtime_config =
+           Runtime_agent.default_config
+             ~name:"deferred-effect-runtime"
+             ~provider_cfg
+             ~system_prompt:"Search for the requested tool."
+             ~tools:bundle.tools
+         in
+         Runtime_agent.run_blocks
+           ~sw
+           ~net
+           ~config:runtime_config
+           ~cooperative_yield_probe:(fun _boundary ->
+             Masc.Keeper_agent_run.terminal_effect_boundary_decision
+               (bundle.terminal_effect_state ()))
+           [ Agent_sdk.Types.Text "search for the tool" ]
+       in
+       check int
+         "deferred effect stops before a second provider call"
+         1
+         provider_call_count;
+       (match
+          Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+            ~base_path:config.base_path
+        with
+        | Ok [ { tool_name = "network_read"; _ } ] -> ()
+        | Ok entries ->
+          failf
+            "deferred WebSearch produced %d unexpected approval rows"
+            (List.length entries)
+        | Error error ->
+          fail
+            (Masc.Keeper_approval_queue.storage_error_to_string error));
+       (match runtime_result with
+        | Ok
+            { Runtime_agent.stop_reason =
+                Runtime_agent.Yielded_to_durable_stimulus _
+            ; _
+            } ->
+          ()
+        | Ok result ->
+          failf
+            "deferred effect returned stop_reason=%s"
+            (Masc.Keeper_execution_receipt_types.stop_reason_to_string
+               result.Runtime_agent.stop_reason)
+        | Error error ->
+          failf
+            "deferred effect failed instead of yielding: %s"
+            (Agent_sdk.Error.to_string error));
+       match bundle.terminal_effect_state () with
+       | Masc.Keeper_tools_oas.External_effect_deferred -> ()
+       | Masc.Keeper_tools_oas.Terminal_effect_open ->
+         fail "deferred effect was not observed at the tool boundary"
+       | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+         fail "deferred effect became terminal completion"
+       | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+         fail "deferred effect became terminal failure")
 ;;
 
 let test_surface_post_append_failure_does_not_complete_terminal_effect () =
@@ -2930,12 +3137,15 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  (contains_substring failure.diagnostic chat_path)
              | Masc.Keeper_tools_oas.Terminal_effect_open ->
                fail "failed surface delivery left the terminal effect open"
+             | Masc.Keeper_tools_oas.External_effect_deferred ->
+               fail "failed surface delivery became an external defer"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                fail "failed surface delivery set terminal completion");
             let first_terminal_failure =
               match terminal_state with
               | Masc.Keeper_tools_oas.Terminal_effect_failed failure -> failure
               | Masc.Keeper_tools_oas.Terminal_effect_open
+              | Masc.Keeper_tools_oas.External_effect_deferred
               | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                 fail "failed surface delivery lost its terminal failure"
             in
@@ -2961,6 +3171,8 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  (failure = first_terminal_failure)
              | Masc.Keeper_tools_oas.Terminal_effect_open ->
                fail "later success reopened the failed terminal effect"
+             | Masc.Keeper_tools_oas.External_effect_deferred ->
+               fail "later success changed failure into an external defer"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                fail "later success overwrote the failed terminal effect");
             Unix.unlink chat_path;
@@ -3051,6 +3263,8 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  (contains_substring failure.diagnostic chat_path)
              | Masc.Keeper_tools_oas.Terminal_effect_open ->
                fail "runtime terminal failure was not recorded"
+             | Masc.Keeper_tools_oas.External_effect_deferred ->
+               fail "runtime terminal failure became an external defer"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                fail "runtime terminal failure became completion");
             check int
@@ -3156,6 +3370,8 @@ let () =
         test_public_masc_web_fetch_reaches_localhost_after_gate;
       test_case "Manual Gate defers web tools before network" `Quick
         test_manual_gate_defers_web_tools_before_network;
+      test_case "approved WebSearch grant executes exact request" `Quick
+        test_approved_web_search_grant_executes_exact_request;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "Manual Gate defers tool_execute before process" `Quick
@@ -3174,6 +3390,8 @@ let () =
         test_malformed_json_looking_success_stays_success;
       test_case "only typed producer failure is failure" `Quick
         test_only_typed_producer_failure_is_failure;
+      test_case "deferred WebSearch yields before provider retry" `Quick
+        test_deferred_web_search_yields_before_provider_retry;
       test_case "invalid surface input stays correction-capable" `Quick
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick

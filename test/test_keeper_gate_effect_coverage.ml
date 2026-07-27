@@ -408,8 +408,17 @@ let test_voice_effect_defers_without_gating_local_reads () =
       ()
   in
   expect_deferred "microphone/STT effect defers before execution" listen;
-  check int "one exact voice effect is pending" 1 (List.length (Keeper_approval_queue.list_pending_entries ()));
-  (match Keeper_approval_queue.list_pending_entries () with
+  let pending_entries () =
+    match
+      Keeper_approval_queue.list_pending_entries_for_workspace
+        ~base_path:config.base_path
+    with
+    | Ok entries -> entries
+    | Error error ->
+      fail (Keeper_approval_queue.storage_error_to_string error)
+  in
+  check int "one exact voice effect is pending" 1 (List.length (pending_entries ()));
+  (match pending_entries () with
    | [ pending ] ->
      check string "request belongs to the calling Keeper" meta.name pending.keeper_name;
      check string "opaque operation is preserved" "keeper_voice_listen" pending.tool_name;
@@ -427,7 +436,7 @@ let test_voice_effect_defers_without_gating_local_reads () =
   check int
     "local read creates no second Gate request"
     1
-    (List.length (Keeper_approval_queue.list_pending_entries ()))
+    (List.length (pending_entries ()))
 ;;
 
 let () =

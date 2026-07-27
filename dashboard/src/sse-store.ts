@@ -55,7 +55,10 @@ import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-n
 import { operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
 import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
 import { isRecord } from './lib/type-guards'
-import { hydrateGoalTreeSnapshot } from './goal-tree-state'
+import {
+  hydrateGoalTreeObservationError,
+  hydrateGoalTreeSnapshot,
+} from './goal-tree-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
@@ -843,8 +846,10 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
       if (record.planning) {
         hydratePlanningSnapshot(record.planning as DashboardPlanningResponse)
       }
-      if (record.tree) {
-        hydrateGoalTreeSnapshot(record.tree)
+      if (record.tree && !hydrateGoalTreeSnapshot(record.tree)) {
+        hydrateGoalTreeObservationError(
+          new Error('Goal Store SSE tree payload was malformed'),
+        )
       }
       return
     }

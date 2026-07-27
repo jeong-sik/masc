@@ -18,12 +18,20 @@ exception Exact_terminalization_persistence_failed of string
 
 type execution_boundary =
   | Executed
+  | Identity_unbound_blocked
+  | Exact_rejection_blocked of Keeper_approval_queue.exact_attempt_rejection
   | Deferred_unregistered
 
 type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
+  | Terminalization_identity_unbound
+  | Terminalization_rejected
   | Owner_unregistered_deferred
+
+type spawn_outcome =
+  | Worker_forked
+  | Worker_not_forked_owner_unregistered
 
 val spawn
   :  sw:Eio.Switch.t
@@ -31,7 +39,7 @@ val spawn
   -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
   -> on_finish:(finish_outcome -> unit)
   -> unit
-  -> (unit, string) result
+  -> (spawn_outcome, string) result
 (** Freeze and admit the whole ordered flow before forking. The production OAS
     callbacks bind/release the real candidate receipt in the durable approval
     queue. A summary reaches [on_summary] only after domain validation, exact
@@ -74,37 +82,76 @@ module For_testing : sig
     -> prepared_flow
     -> execution_boundary
 
-  type strict_snapshot_writer =
-    Keeper_approval_queue.For_testing.strict_snapshot_writer
+  type exact_transition =
+    id:string
+    -> input_hash:string
+    -> sequence:int
+    -> slot_id:string
+    -> call_id:string
+    -> plan_fingerprint:string
+    -> request_body_sha256:string
+    -> ( Keeper_approval_queue.exact_attempt_transition
+       , Keeper_approval_queue.exact_attempt_error )
+       result
 
-  val execute_prepared_flow_with_writers
-    :  ?bind_writer:strict_snapshot_writer
-    -> ?release_writer:strict_snapshot_writer
-    -> ?complete_writer:strict_snapshot_writer
-    -> ?quarantine_writer:strict_snapshot_writer
+  type exact_completion_transition =
+    id:string
+    -> input_hash:string
+    -> sequence:int
+    -> slot_id:string
+    -> call_id:string
+    -> plan_fingerprint:string
+    -> request_body_sha256:string
+    -> summary:Keeper_approval_queue.hitl_context_summary
+    -> ( Keeper_approval_queue.exact_attempt_transition
+       , Keeper_approval_queue.exact_attempt_error )
+       result
+
+  type exact_quarantine_transition =
+    id:string
+    -> input_hash:string
+    -> sequence:int
+    -> slot_id:string
+    -> call_id:string
+    -> plan_fingerprint:string
+    -> request_body_sha256:string
+    -> cause:Keeper_approval_queue.exact_attempt_quarantine_cause
+    -> ( Keeper_approval_queue.exact_attempt_transition
+       , Keeper_approval_queue.exact_attempt_error )
+       result
+
+  type exact_queue_ops
+
+  val make_exact_queue_ops
+    :  ?bind:exact_transition
+    -> ?release_before_dispatch:exact_transition
+    -> ?complete:exact_completion_transition
+    -> ?quarantine:exact_quarantine_transition
     -> ?after_bind:(unit -> unit)
+    -> unit
+    -> exact_queue_ops
+
+  val execute_prepared_flow_with_queue_ops
+    :  queue_ops:exact_queue_ops
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     -> ?clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
     -> prepared_flow
     -> execution_boundary
-  (** The same production callbacks with only the queue's strict atomic writer
-      replaced, so durability-uncertainty tests exercise the real OAS flow. *)
+  (** The production flow with explicit durable queue transition authority.
+      Tests can replace one transition while every other transition remains the
+      ordinary production operation. *)
 
-  val spawn_with_writers
-    :  ?bind_writer:strict_snapshot_writer
-    -> ?release_writer:strict_snapshot_writer
-    -> ?complete_writer:strict_snapshot_writer
-    -> ?quarantine_writer:strict_snapshot_writer
-    -> ?after_bind:(unit -> unit)
+  val spawn_with_queue_ops
+    :  queue_ops:exact_queue_ops
     -> sw:Eio.Switch.t
     -> entry:Keeper_approval_queue.pending_approval
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
     -> on_finish:(finish_outcome -> unit)
     -> unit
-    -> (unit, string) result
+    -> (spawn_outcome, string) result
   (** Dependency injection over the same [spawn_with] lifecycle used by
-      production [spawn]; only strict queue writers differ. *)
+      production [spawn]; the worker does not depend on test-only queue APIs. *)
 
   val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
   val success_provenance_matches : Agent_sdk.Exact_output.flow_success -> bool

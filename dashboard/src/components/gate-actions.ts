@@ -6,7 +6,7 @@ import {
   setGateMode,
 } from '../api/dashboard-gate'
 import type { SetGateModeResponse } from '../api/dashboard-gate'
-import type { GateMode } from '../types'
+import type { GateMode, KeeperAutoJudgeRearmExpectation } from '../types'
 import { refreshGate } from './gate-refresh'
 import {
   gateApprovalActing,
@@ -38,11 +38,14 @@ export async function respondToKeeperApproval(
   }
 }
 
-export async function retryKeeperAutoJudge(id: string) {
+export async function retryKeeperAutoJudge(
+  id: string,
+  expected: KeeperAutoJudgeRearmExpectation,
+) {
   if (!id) return
   gateApprovalActing.value = id
   try {
-    await retryGateAutoJudge(id)
+    await retryGateAutoJudge(id, expected)
     showToast('Auto Judge를 한 번 다시 요청했습니다', 'success')
     await refreshGate({ force: true })
   } catch (err) {
@@ -82,8 +85,7 @@ function showGateModeSaved(result: SetGateModeResponse): void {
     case 'completed':
       showToast(
         `${saved} · Auto Judge backlog recovery 요청 처리 완료`
-        + ` (reopened ${result.reopened.toLocaleString()},`
-        + ` started ${result.started.toLocaleString()},`
+        + ` (started ${result.started.toLocaleString()},`
         + ` queued ${result.queued.toLocaleString()})`,
         'success',
       )

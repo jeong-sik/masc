@@ -223,27 +223,61 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       id: 'q-1',
       keeper_name: 'janitor',
       tool_name: 'shell_exec',
+      input_hash: 'a'.repeat(64),
       requested_at: 1_776_427_200,
       waiting_s: 30,
+      sequence: 7,
+      turn_id: null,
+      task_id: null,
+      goal_id: null,
+      goal_ids: [],
       input: { cmd: 'ls' },
       input_preview: 'ls -la',
+      summary_status: 'not_requested',
+      exact_attempt: { state: 'unbound' },
+      summary_attempt_disposition: { code: 'ready' },
     })
     expect(result!.id).toBe('q-1')
     expect(result!.keeper_name).toBe('janitor')
     expect(result!.tool_name).toBe('shell_exec')
     expect(result!.waiting_s).toBe(30)
     expect(result!.input_preview).toBe('ls -la')
+    expect(result!.exact_attempt).toEqual({ state: 'unbound' })
+    expect(result!.summary_attempt_disposition).toEqual({ code: 'ready' })
   })
 
   const baseItem = {
     id: 'q-summary',
     keeper_name: 'janitor',
     tool_name: 'shell_exec',
+    input_hash: 'a'.repeat(64),
+    sequence: 3,
+    requested_at: 1_776_427_200,
+    waiting_s: 30,
+    turn_id: null,
+    task_id: null,
+    goal_id: null,
+    goal_ids: [],
+    exact_attempt: { state: 'unbound' },
+    summary_attempt_disposition: { code: 'ready' },
   }
 
   it('parses an available summary into the typed union', () => {
     const result = normalizeKeeperApprovalQueueItem({
       ...baseItem,
+      exact_attempt: {
+        state: 'bound',
+        approval_id: baseItem.id,
+        input_hash: baseItem.input_hash,
+        sequence: baseItem.sequence,
+        slot_id: 'slot-available',
+        call_id: 'run-9',
+        plan_fingerprint: 'plan-available',
+        request_body_sha256: 'b'.repeat(64),
+        status: 'completed',
+        quarantine_cause: null,
+      },
+      summary_attempt_disposition: { code: 'settled' },
       summary_status: {
         status: 'available',
         summary: {
@@ -281,30 +315,230 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     ).toEqual({ status: 'not_requested' })
   })
 
-  it('parses a failed status with retryable flag', () => {
+  it('parses only the current terminal failed status', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-failed',
+          call_id: 'call-failed',
+          plan_fingerprint: 'plan-failed',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'quarantined',
+          quarantine_cause: 'flow_execution_failed',
+        },
+        summary_attempt_disposition: { code: 'settled' },
+        summary_status: {
+          status: 'failed',
+          reason: 'Auto Judge exact attempt quarantined: flow_execution_failed',
+          retryable: false,
+        },
+      })!.summary_status,
+    ).toEqual({
+      status: 'failed',
+      reason: 'Auto Judge exact attempt quarantined: flow_execution_failed',
+    })
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-failed',
+          call_id: 'call-failed',
+          plan_fingerprint: 'plan-failed',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'quarantined',
+          quarantine_cause: 'flow_execution_failed',
+        },
+        summary_attempt_disposition: { code: 'settled' },
+        summary_status: {
+          status: 'failed',
+          reason: 'Auto Judge exact attempt quarantined: cancellation',
+          retryable: false,
+        },
+      }),
+    ).toBeNull()
     expect(
       normalizeKeeperApprovalQueueItem({
         ...baseItem,
         summary_status: { status: 'failed', reason: 'provider down', retryable: true },
-      })!.summary_status,
-    ).toEqual({ status: 'failed', reason: 'provider down', retryable: true })
+      }),
+    ).toBeNull()
   })
 
-  it('returns null summary_status for absent or malformed shapes (no fabricated state)', () => {
-    expect(normalizeKeeperApprovalQueueItem(baseItem)!.summary_status).toBeNull()
+  it('parses exact attempt and blocked disposition without defaults', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      ...baseItem,
+      exact_attempt: {
+        state: 'bound',
+        approval_id: baseItem.id,
+        input_hash: baseItem.input_hash,
+        sequence: 3,
+        slot_id: 'slot-3',
+        call_id: 'call-3',
+        plan_fingerprint: 'plan-3',
+        request_body_sha256: 'b'.repeat(64),
+        status: 'released_recovery_required',
+        quarantine_cause: null,
+      },
+      summary_attempt_disposition: {
+        code: 'persistence_uncertain',
+        operator_detail: 'Exact-output terminalization durability is not confirmed.',
+      },
+      summary_status: 'pending',
+    })
+    expect(result!.exact_attempt).toMatchObject({
+      state: 'bound',
+      slot_id: 'slot-3',
+      status: 'released_recovery_required',
+    })
+    expect(result!.summary_attempt_disposition).toEqual({
+      code: 'persistence_uncertain',
+      operator_detail: 'Exact-output terminalization durability is not confirmed.',
+    })
+  })
+
+  it('preserves the exact durable pre-worker block code and detail', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      ...baseItem,
+      summary_attempt_disposition: {
+        code: 'pre_worker_unavailable',
+        reason_code: 'auto_judge_unavailable',
+        operator_detail: 'Auto Judge unavailable: server root switch is not installed',
+      },
+      summary_status: 'pending',
+    })
+
+    expect(result!.summary_attempt_disposition).toEqual({
+      code: 'pre_worker_unavailable',
+      reason_code: 'auto_judge_unavailable',
+      operator_detail: 'Auto Judge unavailable: server root switch is not installed',
+    })
     expect(
-      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'garbage' })!.summary_status,
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_attempt_disposition: {
+          code: 'pre_worker_unavailable',
+          reason_code: 'unknown',
+          operator_detail: 'lost authority',
+        },
+        summary_status: 'pending',
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects unknown queue-row authority fields', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: 'pending',
+        summary_attempt_authority: 'ready',
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects restart-only exact states from in-flight rows', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-restart-only',
+          call_id: 'call-restart-only',
+          plan_fingerprint: 'plan-restart-only',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'released_recovery_required',
+          quarantine_cause: null,
+        },
+        summary_attempt_disposition: { code: 'in_flight' },
+        summary_status: 'pending',
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects absent or malformed current queue state without fabricating defaults', () => {
+    expect(normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: undefined })).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'garbage' }),
     ).toBeNull()
     expect(
-      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: { status: 'weird' } })!
-        .summary_status,
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: { status: 'weird' } }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-old-summary',
+          call_id: 'run-old-summary',
+          plan_fingerprint: 'plan-old-summary',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'completed',
+          quarantine_cause: null,
+        },
+        summary_attempt_disposition: { code: 'settled' },
+        summary_status: {
+          status: 'available',
+          summary: {
+            summary_version: 1,
+            generated_at: 1_783_123_200,
+            model_run_id: 'run-old-summary',
+            context_summary: 'Old schema.',
+            key_questions: [],
+            judgment: 'require_human',
+            rationale: 'Old schema.',
+          },
+        },
+      }),
     ).toBeNull()
     // available with an empty summary body carries no operator value -> null
     expect(
       normalizeKeeperApprovalQueueItem({
         ...baseItem,
         summary_status: { status: 'available', summary: { context_summary: '  ' } },
-      })!.summary_status,
+      }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: {
+          status: 'failed',
+          reason: 'summary generation failed',
+          retryable: false,
+          unknown_status_field: true,
+        },
+      }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: {
+          status: 'available',
+          summary: {
+            summary_version: 2,
+            generated_at: 1_783_123_200,
+            model_run_id: 'run-summary-drift',
+            context_summary: 'Current summary.',
+            key_questions: [],
+            judgment: 'require_human',
+            rationale: 'Current rationale.',
+            unknown_summary_field: true,
+          },
+        },
+      }),
     ).toBeNull()
   })
 })

@@ -996,7 +996,15 @@ export function SideRail({
   const currentSection = currentSectionForRoute(route.value)
   // Open keeper-approval count for the Approvals nav badge. Same signal the
   // Approvals/Command surfaces read, so the badge tracks resolutions live.
-  const openApprovals = gateData.value?.approval_queue?.length ?? 0
+  const approvalQueueState = gateData.value?.approval_queue_state
+  const approvalQueueUnavailable =
+    approvalQueueState && approvalQueueState.state !== 'ready'
+      ? approvalQueueState
+      : null
+  const openApprovals =
+    approvalQueueState?.state === 'ready'
+      ? gateData.value?.approval_queue?.length ?? null
+      : null
   const settingsSurface = DASHBOARD_SURFACES.find(surface => surface.id === 'settings')
   const visibleSurfaces = primaryOnly
     ? PRIMARY_DASHBOARD_SURFACES.filter(surface => surface.id !== 'settings')
@@ -1047,11 +1055,23 @@ export function SideRail({
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
                 >
-                  <span class="nav-icon ${surface.id === 'approvals' && openApprovals > 0 ? 'relative' : ''}" aria-hidden="true">
+                  <span class="nav-icon ${surface.id === 'approvals' && (approvalQueueUnavailable || (openApprovals !== null && openApprovals > 0)) ? 'relative' : ''}" aria-hidden="true">
                     <${SurfaceIcon} icon=${surface.icon} size=${15} />
-                    ${surface.id === 'approvals' && openApprovals > 0 ? html`<span class="ap-nav-dot"></span>` : null}
+                    ${surface.id === 'approvals' && approvalQueueUnavailable
+                      ? html`<span
+                          class="ap-nav-badge"
+                          data-severity=${approvalQueueUnavailable.severity}
+                          title=${`${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail}`}
+                        >${approvalQueueUnavailable.icon}</span>`
+                      : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
+                        ? html`<span class="ap-nav-dot"></span>`
+                        : null}
                   </span>
-                  <span class="sr-only">${surface.label}${surface.id === 'approvals' && openApprovals > 0 ? ` (${openApprovals} 대기)` : ''}</span>
+                  <span class="sr-only">${surface.label}${surface.id === 'approvals' && approvalQueueUnavailable
+                    ? ` (${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail})`
+                    : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
+                      ? ` (${openApprovals} 대기)`
+                      : ''}</span>
                 <//>
               `
             }
@@ -1070,9 +1090,16 @@ export function SideRail({
                   <div class="nav-label flex-1 min-w-0">
                     <div class="truncate font-mono text-[var(--fs-11)] font-semibold uppercase leading-4 tracking-[var(--track-caps)] ${isSurfaceActive ? 'text-[var(--select)]' : ''}">${surface.label}</div>
                   </div>
-                  ${surface.id === 'approvals' && openApprovals > 0
-                    ? html`<span class="ap-nav-badge" data-testid="approvals-nav-badge" title=${`${openApprovals}건 승인 대기`}>${openApprovals}</span>`
-                    : null}
+                  ${surface.id === 'approvals' && approvalQueueUnavailable
+                    ? html`<span
+                        class="ap-nav-badge"
+                        data-testid="approvals-nav-unavailable"
+                        data-severity=${approvalQueueUnavailable.severity}
+                        title=${`${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail}`}
+                      >${approvalQueueUnavailable.icon}</span>`
+                    : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
+                      ? html`<span class="ap-nav-badge" data-testid="approvals-nav-badge" title=${`${openApprovals}건 승인 대기`}>${openApprovals}</span>`
+                      : null}
                 <//>
 
                 ${sections.length > 1 ? html`

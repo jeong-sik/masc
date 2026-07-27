@@ -369,7 +369,13 @@ function ChatHeader({
   const tone = keeperStatusTone(keeper)
   const pill = statePillTone(tone)
   const live = phasePulse(keeper.lifecycle_phase)
-  const pendingApprovalCount = keeperPendingApprovals(keeper.name).length
+  const pendingApprovals = keeperPendingApprovals(keeper.name)
+  const pendingApprovalCount = pendingApprovals?.length ?? null
+  const approvalQueueState = gateData.value?.approval_queue_state
+  const approvalQueueUnavailable =
+    approvalQueueState && approvalQueueState.state !== 'ready'
+      ? approvalQueueState
+      : null
 
   // Single-row header: identity + status + actions only. Runtime / model /
   // throughput / scope live in the context rail (ThroughputSection) — the
@@ -394,7 +400,23 @@ function ChatHeader({
       <div class="kw-chat-id">
         <div class="kw-chat-name-row">
           <h2 class="kw-chat-name">${keeper.koreanName ?? keeper.name}</h2>
-          ${pendingApprovalCount > 0
+          ${approvalQueueUnavailable
+            ? html`
+                <button
+                  type="button"
+                  class="kw-pending-approval-link"
+                  title=${approvalQueueUnavailable.operator_detail}
+                  aria-label=${`${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail}`}
+                  data-testid="keeper-approval-queue-unavailable"
+                  onClick=${() => navigate('approvals')}
+                >
+                  <${Pill}
+                    tone=${approvalQueueUnavailable.severity}
+                    dot=${approvalQueueUnavailable.severity}
+                  >${approvalQueueUnavailable.icon} ${approvalQueueUnavailable.title}</${Pill}>
+                </button>
+              `
+            : pendingApprovalCount !== null && pendingApprovalCount > 0
             ? html`
                 <button
                   type="button"
@@ -491,8 +513,9 @@ function TurnInspectorDrawer({
 // queue — when it is empty while approval_queue has items, the cue stayed
 // blank and the operator saw no HITL signal inside the chat surface.
 function keeperPendingApprovals(keeperName: string) {
-  const queue = gateData.value?.approval_queue ?? []
-  return queue.filter((a) => a.keeper_name === keeperName)
+  if (gateData.value?.approval_queue_state?.state !== 'ready') return null
+  const queue = gateData.value.approval_queue
+  return queue?.filter((a) => a.keeper_name === keeperName) ?? null
 }
 
 export function KeeperWorkspaceChat({

@@ -977,6 +977,42 @@ let test_corrupt_pending_confirms_is_read_error () =
   | _first :: _second :: _rest -> fail "expected one global waiting row, got multiple"
 ;;
 
+let test_unavailable_pending_approval_store_is_read_error () =
+  with_workspace
+  @@ fun config ->
+  let error : Masc.Keeper_approval_queue.storage_error =
+    { path = "keeper_gate_pending.json"
+    ; reason = "current snapshot requires runtime reset"
+    }
+  in
+  let json =
+    Server_keeper_waiting_inventory.For_testing.dashboard_json_with_pending_reader
+      ~read_pending:(fun ~base_path:_ -> Error error)
+      config
+  in
+  check string
+    "pending approval state"
+    "unavailable"
+    U.(json |> member "pending_approval_state" |> member "state" |> to_string);
+  check string
+    "pending approval recovery"
+    "reset_required"
+    U.(json |> member "pending_approval_state" |> member "code" |> to_string);
+  match U.(json |> member "global_waiting_on" |> to_list) with
+  | [ row ] ->
+    check string "source" "read_error" (json_string_member "source" row);
+    check string
+      "waiting_on"
+      "keeper_gate_pending_store"
+      (json_string_member "waiting_on" row);
+    check string
+      "next action"
+      "reset_runtime_state"
+      (json_string_member "next_action" row)
+  | rows ->
+    failf "expected one pending-store read error row, got %d" (List.length rows)
+;;
+
 let () =
   run "keeper_waiting_inventory"
     [ ( "dashboard_json"
@@ -1012,6 +1048,8 @@ let () =
             test_goal_pending_confirm_id_collision_stays_global
         ; test_case "corrupt pending confirms is read_error" `Quick
             test_corrupt_pending_confirms_is_read_error
+        ; test_case "unavailable pending approval store is read_error" `Quick
+            test_unavailable_pending_approval_store_is_read_error
         ] )
     ]
 ;;

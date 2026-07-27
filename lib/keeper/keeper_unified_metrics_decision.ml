@@ -78,8 +78,17 @@ let append_decision_record
   let runtime_contract =
     Keeper_runtime_contract.runtime_observability_contract_json ~config meta
   in
-  let pending_approval_count =
-    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+  let approval_queue_state, pending_approval_count =
+    match
+      Keeper_approval_queue.pending_count_for_keeper_in_workspace
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+    with
+    | Ok count ->
+      Keeper_approval_queue.approval_queue_ready_state_json, `Int count
+    | Error error ->
+      ( Keeper_approval_queue.approval_queue_unavailable_state_json error
+      , `Null )
   in
   let turn_mode =
     match turn_mode, result with
@@ -130,7 +139,8 @@ let append_decision_record
         ("terminal_reason_source", `String terminal_reason.source);
         ("provider_context", provider_context_json ~meta result);
         ("tool_surface", tool_surface_json result);
-        ("pending_approval_count", `Int pending_approval_count);
+        ("approval_queue_state", approval_queue_state);
+        ("pending_approval_count", pending_approval_count);
         ( "channel",
           `String
             (Keeper_world_observation.channel_to_string

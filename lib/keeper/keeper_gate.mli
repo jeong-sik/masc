@@ -49,9 +49,33 @@ type decision =
       }
   | Unavailable of unavailable_reason
 
+type auto_judge_completion_rejection =
+  | Completion_not_found
+  | Completion_key_mismatch
+  | Completion_invalid_identity
+  | Completion_summary_not_pending
+  | Completion_unbound_state
+  | Completion_disposition_conflict
+  | Completion_identity_conflict
+  | Completion_status_conflict
+  | Completion_provenance_mismatch
+  | Completion_content_conflict
+
+type auto_judge_resume_failure_code =
+  | Resume_worker_start_failed
+  | Resume_identity_unbound
+  | Resume_completion_persistence_uncertain
+  | Resume_completion_rejected of auto_judge_completion_rejection
+  | Resume_judgment_resolution_failed
+  | Resume_exact_state_not_completed
+
+val auto_judge_resume_failure_code_to_string :
+  auto_judge_resume_failure_code -> string
+
 type auto_judge_resume_failure =
   { approval_id : string
-  ; reason : string
+  ; code : auto_judge_resume_failure_code
+  ; operator_detail : string
   }
 
 type auto_judge_resume_report =
@@ -60,6 +84,7 @@ type auto_judge_resume_report =
   ; finalized_ids : string list
   ; skipped_ids : string list
   ; failures : auto_judge_resume_failure list
+  ; queue_error : Keeper_approval_queue.storage_error option
   }
 
 (** Mutable only to serialize consumption inside one Keeper cycle. The durable
@@ -88,8 +113,8 @@ val decide :
     [(base_path, keeper_name)] owner evaluates only its oldest entry.
     Failed, quarantined, released, uncertain, or otherwise ineligible oldest
     state is a FIFO barrier: recovery never activates a later same-owner entry.
-    Completion drains only that owner's FIFO. Decisive
-    persisted unbound output retains its legacy direct-finalization behavior.
+    Completion drains only that owner's FIFO. Decisive output without an exact
+    attempt identity is retained pending and recorded as a recovery failure.
     Completed exact output is first idempotently strict-rewritten with the same
     identity and summary; only [Keeper_approval_queue.Fsync_completed] permits
     Gate finalization. Visible unconfirmed or failed rewrites leave the approval
@@ -101,24 +126,28 @@ val decide :
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
-val retry_failed_auto_judge :
-  base_path:string -> requested_by:string -> string -> (unit, string) result
-(** Explicitly retry one failed Auto Judge summary. The stored [retryable]
-    classification is diagnostic only; operator authority controls this state
-    transition. The approval must belong to the authenticated workspace exactly.
-    No cadence, restart hook, or retry budget calls it. *)
+val retry_blocked_auto_judge :
+  base_path:string ->
+  requested_by:string ->
+  expected_input_hash:string ->
+  expected_sequence:int ->
+  expected_exact_attempt:Keeper_approval_queue.exact_attempt_state ->
+  expected_disposition:Keeper_approval_queue.summary_attempt_disposition ->
+  string ->
+  (unit, string) result
+(** Explicitly rearm one typed blocked Auto Judge summary. The configured Gate
+    mode, authenticated workspace, non-blank operator identity, and exact
+    approval row identity must all match. No cadence or restart hook calls it. *)
 
 type operator_recovery_report =
-  { reopened_ids : string list
-  ; started_ids : string list
+  { started_ids : string list
   ; queued : int
   }
 
-(** Reopen recoverable request-local judgments after an explicit operator
-    selection of Auto Judge, then activate one FIFO drain for each Keeper owner
-    with eligible unbound work in the workspace. Restart-classified released
-    work is first durably reset to unbound; every other exact-bound entry
-    remains operator-visible but is never queued. *)
+(** After an explicit operator selection of Auto Judge, activate one FIFO drain
+    for each Keeper owner with eligible current-schema work in the workspace.
+    Exact-bound entries remain operator-visible but are never reconstructed or
+    reopened. *)
 val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 
@@ -159,7 +188,7 @@ module For_testing : sig
     on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
     on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
     unit ->
-    (unit, string) result
+    (Hitl_summary_worker.spawn_outcome, string) result
 
   val spawn_auto_judge_entry_with_worker
     :  spawn_worker:hitl_worker_spawner

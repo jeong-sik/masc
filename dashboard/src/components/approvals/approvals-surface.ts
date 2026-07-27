@@ -19,7 +19,9 @@ import type {
   GateDecisionSource,
   GateMode,
   HitlContextSummary,
-  HitlSummaryStatus,
+  KeeperAutoJudgeRearmExpectation,
+  KeeperExactAttemptState,
+  KeeperSummaryAttemptDisposition,
 } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
@@ -194,6 +196,11 @@ function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
 }
 
 function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: string; value: string }> {
+  const disposition = item.summary_attempt_disposition.code
+  const exact =
+    item.exact_attempt.state === 'bound'
+      ? `${item.exact_attempt.slot_id} · ${item.exact_attempt.status}`
+      : item.exact_attempt.state
   return [
     { label: '키퍼', value: item.keeper_name },
     { label: '작업', value: item.tool_name },
@@ -203,6 +210,8 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
     { label: '턴', value: typeof item.turn_id === 'number' ? `turn ${item.turn_id}` : null },
     { label: '요청시각', value: compactText(item.requested_at) },
     { label: '입력', value: compactText(item.input_preview) || '입력 미리보기 없음' },
+    { label: 'Auto Judge', value: disposition },
+    { label: 'Exact attempt', value: exact },
   ].filter((row): row is { label: string; value: string } => Boolean(row.value))
 }
 
@@ -235,18 +244,116 @@ function renderAvailableSummary(summary: HitlContextSummary) {
   `
 }
 
-function approvalSummaryBlock(status: HitlSummaryStatus | null | undefined) {
-  if (!status) return null
+function exactAttemptLabel(attempt: KeeperExactAttemptState): string {
+  return attempt.state === 'unbound'
+    ? 'exact identity unbound'
+    : `exact ${attempt.slot_id} · ${attempt.status}`
+}
+
+function summaryRearmExpectation(
+  item: KeeperApprovalQueueItem,
+): KeeperAutoJudgeRearmExpectation | null {
+  const disposition = item.summary_attempt_disposition
+  const exactAttempt = item.exact_attempt
+  const preWorkerRearmable =
+    disposition.code === 'pre_worker_unavailable'
+    && (
+      disposition.reason_code === 'auto_judge_unavailable'
+      || disposition.reason_code === 'mode_state_invalid'
+    )
+  const summaryRearmable =
+    item.summary_status.status === 'pending'
+    || (
+      preWorkerRearmable
+      && item.summary_status.status === 'not_requested'
+    )
+  if (!summaryRearmable) return null
+  if (disposition.code === 'pre_worker_unavailable') {
+    return preWorkerRearmable && exactAttempt.state === 'unbound'
+      ? {
+          input_hash: item.input_hash,
+          sequence: item.sequence,
+          exact_attempt: exactAttempt,
+          summary_attempt_disposition: disposition,
+        }
+      : null
+  }
+  if (disposition.code === 'identity_unbound') {
+    return exactAttempt.state === 'unbound'
+      ? {
+          input_hash: item.input_hash,
+          sequence: item.sequence,
+          exact_attempt: exactAttempt,
+          summary_attempt_disposition: disposition,
+        }
+      : null
+  }
+  if (
+    disposition.code !== 'persistence_uncertain'
+    || (
+      exactAttempt.state === 'bound'
+      && exactAttempt.status !== 'released_recovery_required'
+    )
+  ) return null
+  return {
+    input_hash: item.input_hash,
+    sequence: item.sequence,
+    exact_attempt: exactAttempt,
+    summary_attempt_disposition: disposition,
+  }
+}
+
+function blockedSummaryAttempt(
+  disposition:
+    Extract<
+      KeeperSummaryAttemptDisposition,
+      { code: 'identity_unbound' | 'persistence_uncertain' | 'pre_worker_unavailable' }
+    >,
+  exactAttempt: KeeperExactAttemptState,
+) {
+  const label = disposition.code === 'identity_unbound'
+    ? 'Auto Judge 중단 · exact identity 미결합'
+    : disposition.code === 'persistence_uncertain'
+      ? 'Auto Judge 중단 · durability 확인 필요'
+      : disposition.reason_code === 'start_reserved'
+        ? 'Auto Judge 시작 · exact identity 예약됨'
+        : disposition.reason_code === 'mode_state_invalid'
+          ? 'Auto Judge 중단 · Gate mode 상태 불가'
+          : 'Auto Judge 중단 · 시작 불가'
+  return html`
+    <div
+      class="ap-summary ap-summary-failed"
+      data-testid="approval-summary"
+      data-summary-state=${disposition.code}
+    >
+      <span class="ap-summary-label">${label}</span>
+      <span class="ap-summary-reason">${disposition.operator_detail}</span>
+      <span class="ap-summary-reason mono">${exactAttemptLabel(exactAttempt)}</span>
+    </div>
+  `
+}
+
+function approvalSummaryBlock(item: KeeperApprovalQueueItem) {
+  const status = item.summary_status
+  const disposition = item.summary_attempt_disposition
+  const exactAttempt = item.exact_attempt
+  if (
+    disposition.code === 'identity_unbound'
+    || disposition.code === 'persistence_uncertain'
+    || disposition.code === 'pre_worker_unavailable'
+  ) {
+    return blockedSummaryAttempt(disposition, exactAttempt)
+  }
   switch (status.status) {
     case 'not_requested':
       return null
     case 'pending':
       return html`<div class="ap-summary ap-summary-pending" data-testid="approval-summary" data-summary-state="pending">
-        <span class="ap-summary-label">🧭 컨텍스트 요약 생성 중…</span>
+        <span class="ap-summary-label">${disposition.code === 'ready' ? '컨텍스트 요약 재개 대기' : '컨텍스트 요약 생성 중…'}</span>
       </div>`
     case 'failed':
       return html`<div class="ap-summary ap-summary-failed" data-testid="approval-summary" data-summary-state="failed">
-        <span class="ap-summary-label">컨텍스트 요약 실패 · ${status.retryable ? '수동 재시도 가능' : '재시도 불가'}</span>
+        <span class="ap-summary-label">컨텍스트 요약 terminal 실패 · Human 판단 필요</span>
         ${status.reason ? html`<span class="ap-summary-reason">${status.reason}</span>` : null}
       </div>`
     case 'available':
@@ -272,6 +379,7 @@ function ApprovalCard({
   const busy = actingId === item.id
   const anyBusy = Boolean(actingId)
   const title = approvalTitle(item)
+  const rearmExpectation = summaryRearmExpectation(item)
 
   return html`
     <article
@@ -297,7 +405,7 @@ function ApprovalCard({
         </div>
         <h3 class="ap-title">${title}</h3>
         <p class="ap-detail">Keeper lane은 계속 진행하며 이 요청만 판단을 기다립니다.</p>
-        ${approvalSummaryBlock(item.summary_status)}
+        ${approvalSummaryBlock(item)}
         <div class="ap-req">
           <${AgentAvatar} name=${item.keeper_name} size="sm" />
           <div class="ap-req-body">
@@ -326,14 +434,14 @@ function ApprovalCard({
           </div>
         </div>
         <div class="ap-actions">
-          ${item.summary_status?.status === 'failed' && item.summary_status.retryable
+          ${rearmExpectation
             ? html`<button
                 type="button"
                 class="ap-act retry"
-                onClick=${() => void retryKeeperAutoJudge(item.id)}
-                title="자동 반복 없이 Auto Judge를 정확히 한 번 다시 요청합니다"
+                onClick=${() => void retryKeeperAutoJudge(item.id, rearmExpectation)}
+                title="durable blocked state를 operator CAS로 한 번 재개합니다"
                 disabled=${anyBusy}
-              >${busy ? '요청 중…' : 'Auto Judge 재시도'}</button>`
+              >${busy ? '요청 중…' : 'Auto Judge 재개'}</button>`
             : null}
           <button
             type="button"
@@ -526,7 +634,12 @@ export function ApprovalsSurface() {
     }
   }, [])
 
-  const items = gateData.value?.approval_queue ?? []
+  const items = gateData.value?.approval_queue ?? null
+  const approvalQueueState = gateData.value?.approval_queue_state
+  const queueUnavailable =
+    approvalQueueState && approvalQueueState.state !== 'ready'
+      ? approvalQueueState
+      : null
   const resolvedItems = gateData.value?.recent_resolved ?? []
   const rules = gateData.value?.approval_rules ?? []
   const error = gateError.value
@@ -536,9 +649,11 @@ export function ApprovalsSurface() {
   const firstLoad = gateLoading.value && gateData.value === null
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<ApprovalsView>('queue')
-  const selectedItem = items.find(item => item.id === selectedId) ?? items[0] ?? null
+  const selectedItem =
+    items?.find(item => item.id === selectedId) ?? items?.[0] ?? null
 
   const stats = useMemo(() => {
+    if (items === null) return null
     const longest = items.reduce((max, i) => Math.max(max, i.waiting_s ?? 0), 0)
     const keepers = new Set(items.map(i => i.keeper_name)).size
     return { longest, keepers }
@@ -564,7 +679,7 @@ export function ApprovalsSurface() {
                 aria-selected=${view === 'queue'}
                 onClick=${() => setView('queue')}
               >
-                큐${items.length > 0 ? html`<span class="ap-viewbtn-n mono">${items.length}</span>` : null}
+                큐${items && items.length > 0 ? html`<span class="ap-viewbtn-n mono">${items.length}</span>` : null}
               </button>
               <button
                 type="button"
@@ -573,18 +688,33 @@ export function ApprovalsSurface() {
                 onClick=${() => setView('history')}
               >이력</button>
             </div>
-            ${view === 'queue' && items.length > 0
+            ${view === 'queue' && items && items.length > 0 && stats
               ? html`<span class="ap-sla mono" title="가장 오래 대기 중인 건">최장 대기 ${apAge(stats.longest)}</span>`
               : null}
           </div>
         </header>
 
         ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
+        ${queueUnavailable
+          ? html`
+              <div
+                class=${`ap-error sev-${queueUnavailable.severity}`}
+                role="alert"
+                data-testid="approvals-queue-unavailable"
+                data-severity=${queueUnavailable.severity}
+              >
+                <strong><span aria-hidden="true">${queueUnavailable.icon}</span> ${queueUnavailable.title}</strong>
+                <span>${queueUnavailable.operator_detail}</span>
+              </div>
+            `
+          : null}
 
         ${firstLoad
           ? html`<${LoadingState}>Gate 큐 불러오는 중...<//>`
           : view === 'history'
             ? html`<${ApHistory} items=${resolvedItems} />`
+          : queueUnavailable || items === null
+            ? null
           : html`
         <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
           <div class="ov-kpi">
@@ -593,7 +723,7 @@ export function ApprovalsSurface() {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">관련 Keeper</div>
-            <div class="ov-kpi-v" data-testid="gate-kpi-keepers">${stats.keepers}</div>
+            <div class="ov-kpi-v" data-testid="gate-kpi-keepers">${stats?.keepers}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">Always 규칙</div>
@@ -626,7 +756,7 @@ export function ApprovalsSurface() {
               </div>
             `
           : null}
-        ${items.length === 0 && !error
+        ${items.length === 0 && !error && !queueUnavailable
           ? html`
               <div class="ap-clear" data-testid="approvals-empty">
                 <div class="ico">${'✓'}</div>
@@ -637,7 +767,7 @@ export function ApprovalsSurface() {
           : null}
       `}
       </div>
-      ${!firstLoad ? html`
+      ${!firstLoad && !queueUnavailable && items !== null ? html`
         <${ApAside}
           openCount=${items.length}
           resolvedItems=${resolvedItems}

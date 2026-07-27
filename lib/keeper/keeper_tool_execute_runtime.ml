@@ -516,6 +516,7 @@ let handle_tool_execute_typed
             Keeper_gate.decide
               ?cycle_grant:gate_grant
               ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
+              (* DET-OK: persisted optional policy; absence deterministically fails closed. *)
               gate_request
           with
           | Keeper_gate.Deferred { approval_id; reason } ->

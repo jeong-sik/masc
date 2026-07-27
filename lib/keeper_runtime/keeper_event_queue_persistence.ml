@@ -608,41 +608,9 @@ let load_result ~base_path ~keeper_name =
   load_with_projection ~projection:replay_queue ~base_path ~keeper_name
 ;;
 
-let unavailable_projection_exn ~keeper_name message =
-  Failure
-    (Printf.sprintf
-       "event queue state unavailable keeper=%s: %s"
-       keeper_name
-       message)
-;;
-
-let load ~base_path ~keeper_name =
-  match load_result ~base_path ~keeper_name with
-  | Error message -> raise (unavailable_projection_exn ~keeper_name message)
-  | Ok queue ->
-    if not (Keeper_event_queue.is_empty queue)
-    then
-      Log.Keeper.info
-        "event_queue_snapshot: restored %s for keeper=%s"
-        (Keeper_event_queue.summary queue)
-        keeper_name;
-    queue
-;;
-
-let load_pending ~base_path ~keeper_name =
-  match load_with_projection ~projection:State.pending ~base_path ~keeper_name with
-  | Ok queue -> queue
-  | Error message -> raise (unavailable_projection_exn ~keeper_name message)
-;;
-
 let load_pending_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.pending
 ;;
-
-type snapshot_pair =
-  { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
-  }
 
 type snapshot_pair_with_errors =
   { pending : Keeper_event_queue.t
@@ -691,11 +659,6 @@ let load_snapshot_pair_with_errors ~base_path ~keeper_name =
     ; inflight = Keeper_event_queue.empty
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
-;;
-
-let load_snapshot_pair ~base_path ~keeper_name =
-  let snapshot = load_snapshot_pair_with_errors ~base_path ~keeper_name in
-  { pending = snapshot.pending; inflight = snapshot.inflight }
 ;;
 
 type snapshot_discovery =

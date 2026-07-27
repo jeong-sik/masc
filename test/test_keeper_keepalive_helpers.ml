@@ -434,10 +434,13 @@ let persist_and_register_board_lane config meta =
 ;;
 
 let board_queue_length config keeper_name =
-  Keeper_registry_event_queue.snapshot
-    ~base_path:config.Workspace.base_path
-    keeper_name
-  |> Keeper_event_queue.length
+  match
+    Keeper_registry_event_queue.snapshot_result
+      ~base_path:config.Workspace.base_path
+      keeper_name
+  with
+  | Ok queue -> Keeper_event_queue.length queue
+  | Error detail -> fail ("event queue snapshot failed: " ^ detail)
 ;;
 
 let board_attention_count config keeper_name =

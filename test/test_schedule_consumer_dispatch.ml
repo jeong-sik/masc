@@ -1,6 +1,17 @@
 open Alcotest
 open Masc
 
+module Registry_event_queue_source = Keeper_registry_event_queue
+module Keeper_registry_event_queue = struct
+  include Registry_event_queue_source
+
+  let snapshot ~base_path keeper_name =
+    match snapshot_result ~base_path keeper_name with
+    | Ok queue -> queue
+    | Error detail -> fail detail
+  ;;
+end
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let temp_dir () =

@@ -447,6 +447,104 @@ let capacity_refusal_of_error (err : Agent_sdk.Error.sdk_error) : capacity_refus
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> None
 
+type capacity_non_compaction =
+  | Serving_evidence_not_yet_valid of
+      { now_unix_s : int
+      ; checked_at_unix_s : int
+      }
+  | Serving_evidence_expired of
+      { now_unix_s : int
+      ; expires_at_unix_s : int
+      }
+  | Token_measurement_unavailable of
+      { protocol : Llm_provider.Input_token_count.protocol }
+
+type capacity_transition =
+  | Not_capacity
+  | Compact_next_cycle of Compaction_trigger.t
+  | Capacity_non_compacting of capacity_non_compaction
+
+let capacity_transition_of_error
+    (err : Agent_sdk.Error.sdk_error) : capacity_transition =
+  match err with
+  | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
+    Compact_next_cycle
+      (Compaction_trigger.Provider_overflow { limit_tokens = limit })
+  | Agent_sdk.Error.Api
+      (InvalidRequest
+         { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
+    ->
+    Compact_next_cycle
+      (Compaction_trigger.Request_body_over_capacity
+         { actual_bytes; limit_bytes })
+  | Agent_sdk.Error.Api
+      (InputCapacity
+         { reason =
+             Serving_constraint_rejected
+               (Llm_provider.Serving_constraint.Boundary_unknown
+                  { input_tokens; accepted_through; rejected_from })
+         ; _
+         })
+    ->
+    Compact_next_cycle
+      (Compaction_trigger.Serving_input_capacity
+         (Compaction_trigger.Boundary_unknown
+            { input_tokens; accepted_through; rejected_from }))
+  | Agent_sdk.Error.Api
+      (InputCapacity
+         { reason =
+             Serving_constraint_rejected
+               (Llm_provider.Serving_constraint.Input_rejected
+                  { input_tokens; accepted_through; rejected_from })
+         ; _
+         })
+    ->
+    Compact_next_cycle
+      (Compaction_trigger.Serving_input_capacity
+         (Compaction_trigger.Input_rejected
+            { input_tokens; accepted_through; rejected_from }))
+  | Agent_sdk.Error.Api
+      (InputCapacity
+         { reason =
+             Serving_constraint_rejected
+               (Llm_provider.Serving_constraint.Evidence_not_yet_valid
+                  { now_unix_s; checked_at_unix_s })
+         ; _
+         })
+    ->
+    Capacity_non_compacting
+      (Serving_evidence_not_yet_valid { now_unix_s; checked_at_unix_s })
+  | Agent_sdk.Error.Api
+      (InputCapacity
+         { reason =
+             Serving_constraint_rejected
+               (Llm_provider.Serving_constraint.Evidence_expired
+                  { now_unix_s; expires_at_unix_s })
+         ; _
+         })
+    ->
+    Capacity_non_compacting
+      (Serving_evidence_expired { now_unix_s; expires_at_unix_s })
+  | Agent_sdk.Error.Api
+      (InputCapacity { reason = Token_measurement_unavailable protocol; _ }) ->
+    Capacity_non_compacting (Token_measurement_unavailable { protocol })
+  | Agent_sdk.Error.Api
+      (InvalidRequest { reason = Json_parse_error | Unknown_invalid_request; _ })
+  | Agent_sdk.Error.Api
+      ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
+      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
+      | Timeout _ )
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ ->
+    Not_capacity
+;;
+
 (* Projection for the two token-axis call sites. Both publish
    reason="provider_context_overflow" and the [Sdk_context_window_exceeded]
    blocker class (keeper_unified_turn_execution.ml:485-509), labels that would be

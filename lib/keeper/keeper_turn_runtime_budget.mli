@@ -209,6 +209,33 @@ val capacity_refusal_of_error :
     enumerated, so adding one forces a decision here instead of returning [None]
     by default. *)
 
+type capacity_non_compaction =
+  | Serving_evidence_not_yet_valid of
+      { now_unix_s : int
+      ; checked_at_unix_s : int
+      }
+  | Serving_evidence_expired of
+      { now_unix_s : int
+      ; expires_at_unix_s : int
+      }
+  | Token_measurement_unavailable of
+      { protocol : Llm_provider.Input_token_count.protocol }
+
+type capacity_transition =
+  | Not_capacity
+  | Compact_next_cycle of Compaction_trigger.t
+  | Capacity_non_compacting of capacity_non_compaction
+(** Provider-neutral transition input for the durable compaction lane.
+    [Compact_next_cycle] preserves the measured token or byte axis.
+    Future/expired serving evidence and unavailable token measurement remain
+    typed non-compacting facts; they are never guessed into a capacity limit. *)
+
+val capacity_transition_of_error :
+  Agent_sdk.Error.sdk_error ->
+  capacity_transition
+(** Total classifier over typed SDK errors. This function does not inspect
+    rendered error prose and does not select a provider, model, or failover. *)
+
 val context_overflow_event_of_error :
   Agent_sdk.Error.sdk_error ->
   Keeper_state_machine.event option

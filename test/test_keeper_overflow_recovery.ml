@@ -37,8 +37,68 @@ let test_provider_overflow_trigger_roundtrip () =
     ; Compaction_trigger.Provider_overflow { limit_tokens = None }
     ; Compaction_trigger.Request_body_over_capacity
         { actual_bytes = 1_048_577; limit_bytes = 1_048_576 }
+    ; Compaction_trigger.Serving_input_capacity
+        (Compaction_trigger.Boundary_unknown
+           { input_tokens = 524_299
+           ; accepted_through = 524_298
+           ; rejected_from = None
+           })
+    ; Compaction_trigger.Serving_input_capacity
+        (Compaction_trigger.Input_rejected
+           { input_tokens = 524_300
+           ; accepted_through = 524_298
+           ; rejected_from = 524_299
+           })
     ; Compaction_trigger.Manual
     ]
+;;
+
+let test_capacity_request_codec_and_identity () =
+  let request : Keeper_event_queue.capacity_compaction_request =
+    { ccr_trigger =
+        Compaction_trigger.Serving_input_capacity
+          (Compaction_trigger.Input_rejected
+             { input_tokens = 524_300
+             ; accepted_through = 524_298
+             ; rejected_from = 524_299
+             })
+    }
+  in
+  let encoded = Keeper_event_queue.capacity_compaction_request_to_yojson request in
+  let decoded =
+    match Keeper_event_queue.capacity_compaction_request_of_yojson encoded with
+    | Ok decoded -> decoded
+    | Error detail -> failf "capacity compaction request did not decode: %s" detail
+  in
+  check
+    bool
+    "request identity round-trips"
+    true
+    (Keeper_event_queue.capacity_compaction_request_identity_equal
+       request
+       decoded);
+  check
+    string
+    "stable post id round-trips"
+    (Keeper_event_queue.capacity_compaction_request_post_id request)
+    (Keeper_event_queue.capacity_compaction_request_post_id decoded);
+  let different =
+    { Keeper_event_queue.ccr_trigger =
+        Compaction_trigger.Serving_input_capacity
+          (Compaction_trigger.Boundary_unknown
+             { input_tokens = 524_300
+             ; accepted_through = 524_298
+             ; rejected_from = Some 524_299
+             })
+    }
+  in
+  check
+    bool
+    "different typed evidence has different identity"
+    false
+    (Keeper_event_queue.capacity_compaction_request_identity_equal
+       request
+       different)
 ;;
 
 let test_request_body_over_capacity_rejects_non_refusals () =
@@ -277,6 +337,8 @@ let () =
     "overflow-lifecycle",
     [ test_case "provider overflow trigger codec" `Quick
         test_provider_overflow_trigger_roundtrip;
+      test_case "capacity request codec and identity" `Quick
+        test_capacity_request_codec_and_identity;
       test_case "retired trigger kinds rejected" `Quick
         test_retired_trigger_kinds_are_rejected;
       test_case "request body over capacity rejects non-refusals" `Quick

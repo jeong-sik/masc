@@ -24,6 +24,16 @@ let input_capacity constraint_ reason =
        ; reason = Agent_sdk.Retry.Serving_constraint_rejected reason
        })
 
+let measurement_unavailable constraint_ =
+  Agent_sdk.Error.Api
+    (InputCapacity
+       { message = "token measurement unavailable"
+       ; constraint_
+       ; reason =
+           Agent_sdk.Retry.Token_measurement_unavailable
+             Llm_provider.Input_token_count.Anthropic_messages_count_tokens
+       })
+
 let test_is_context_overflow_only_for_overflow_errors () =
   check
     bool
@@ -134,6 +144,67 @@ let test_byte_axis_is_a_capacity_refusal () =
   | Some _ | None -> fail "the context window axis regressed"
 ;;
 
+let test_typed_capacity_transition_preserves_axes () =
+  let constraint_ = serving_constraint () in
+  let boundary =
+    input_capacity
+      constraint_
+      (Llm_provider.Serving_constraint.Boundary_unknown
+         { input_tokens = 524_299
+         ; accepted_through = 524_298
+         ; rejected_from = None
+         })
+  in
+  (match Budget.capacity_transition_of_error boundary with
+   | Budget.Compact_next_cycle
+       (Compaction_trigger.Serving_input_capacity
+          (Compaction_trigger.Boundary_unknown
+             { input_tokens = 524_299
+             ; accepted_through = 524_298
+             ; rejected_from = None
+             })) ->
+     ()
+   | _ -> fail "typed serving boundary did not become a token-capacity trigger");
+  match
+    Budget.capacity_transition_of_error
+      (request_body_too_large
+         ~actual_bytes:2_000_000
+         ~limit_bytes:1_048_576)
+  with
+  | Budget.Compact_next_cycle
+      (Compaction_trigger.Request_body_over_capacity
+         { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }) ->
+    ()
+  | _ -> fail "serialized byte provenance was not preserved"
+;;
+
+let test_unusable_capacity_evidence_is_non_compacting () =
+  let constraint_ = serving_constraint () in
+  (match
+     Budget.capacity_transition_of_error
+       (input_capacity
+          constraint_
+          (Llm_provider.Serving_constraint.Evidence_expired
+             { now_unix_s = 200; expires_at_unix_s = 199 }))
+   with
+   | Budget.Capacity_non_compacting
+       (Budget.Serving_evidence_expired
+          { now_unix_s = 200; expires_at_unix_s = 199 }) ->
+     ()
+   | _ -> fail "expired serving evidence became compactable");
+  match
+    Budget.capacity_transition_of_error
+      (measurement_unavailable constraint_)
+  with
+  | Budget.Capacity_non_compacting
+      (Budget.Token_measurement_unavailable
+         { protocol =
+             Llm_provider.Input_token_count.Anthropic_messages_count_tokens
+         }) ->
+    ()
+  | _ -> fail "measurement-unavailable became compactable"
+;;
+
 (* The projection feeding the cascade path publishes
    reason="provider_context_overflow" and the Sdk_context_window_exceeded blocker
    class, so admitting a byte refusal there would label it as a window exceedance. *)
@@ -172,6 +243,14 @@ let () =
             "declared-byte refusal is a capacity refusal"
             `Quick
             test_byte_axis_is_a_capacity_refusal
+        ; test_case
+            "typed capacity transition preserves axes"
+            `Quick
+            test_typed_capacity_transition_preserves_axes
+        ; test_case
+            "unusable capacity evidence is non-compacting"
+            `Quick
+            test_unusable_capacity_evidence_is_non_compacting
         ; test_case
             "event projection admits only the token axis"
             `Quick

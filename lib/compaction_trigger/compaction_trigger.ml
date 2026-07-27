@@ -1,9 +1,22 @@
+type serving_input_capacity =
+  | Boundary_unknown of
+      { input_tokens : int
+      ; accepted_through : int
+      ; rejected_from : int option
+      }
+  | Input_rejected of
+      { input_tokens : int
+      ; accepted_through : int
+      ; rejected_from : int
+      }
+
 type t =
   | Provider_overflow of { limit_tokens : int option }
   | Request_body_over_capacity of
       { actual_bytes : int
       ; limit_bytes : int
       }
+  | Serving_input_capacity of serving_input_capacity
   | Manual
 
 (* Field names are the wire contract for [of_detail_json]; naming them once keeps
@@ -14,6 +27,7 @@ let limit_bytes_field = "limit_bytes"
 let to_label = function
   | Provider_overflow _ -> "provider_overflow"
   | Request_body_over_capacity _ -> "request_body_over_capacity"
+  | Serving_input_capacity _ -> "serving_input_capacity"
   | Manual -> "manual"
 ;;
 
@@ -26,6 +40,22 @@ let to_human = function
        | None -> "unknown")
   | Request_body_over_capacity { actual_bytes; limit_bytes } ->
     Printf.sprintf "request_body_over_capacity(%dB>%dB)" actual_bytes limit_bytes
+  | Serving_input_capacity
+      (Boundary_unknown { input_tokens; accepted_through; rejected_from }) ->
+    Printf.sprintf
+      "serving_input_capacity(boundary_unknown,input=%d,accepted=%d,rejected=%s)"
+      input_tokens
+      accepted_through
+      (match rejected_from with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+  | Serving_input_capacity
+      (Input_rejected { input_tokens; accepted_through; rejected_from }) ->
+    Printf.sprintf
+      "serving_input_capacity(input_rejected,input=%d,accepted=%d,rejected=%d)"
+      input_tokens
+      accepted_through
+      rejected_from
   | Manual -> "manual"
 ;;
 
@@ -44,6 +74,27 @@ let to_detail_json : t -> Yojson.Safe.t = function
       ; actual_bytes_field, `Int actual_bytes
       ; limit_bytes_field, `Int limit_bytes
       ]
+  | Serving_input_capacity
+      (Boundary_unknown { input_tokens; accepted_through; rejected_from }) ->
+    `Assoc
+      [ "kind", `String "serving_input_capacity"
+      ; "reason", `String "boundary_unknown"
+      ; "input_tokens", `Int input_tokens
+      ; "accepted_through", `Int accepted_through
+      ; ( "rejected_from"
+        , match rejected_from with
+          | Some value -> `Int value
+          | None -> `Null )
+      ]
+  | Serving_input_capacity
+      (Input_rejected { input_tokens; accepted_through; rejected_from }) ->
+    `Assoc
+      [ "kind", `String "serving_input_capacity"
+      ; "reason", `String "input_rejected"
+      ; "input_tokens", `Int input_tokens
+      ; "accepted_through", `Int accepted_through
+      ; "rejected_from", `Int rejected_from
+      ]
   | Manual -> `Assoc [ "kind", `String "manual" ]
 ;;
 
@@ -61,6 +112,17 @@ type decode_error =
   | Request_body_within_capacity of
       { actual_bytes : int
       ; limit_bytes : int
+      }
+  | Missing_serving_capacity_field of string
+  | Invalid_serving_capacity_field of string
+  | Serving_capacity_not_over_limit of
+      { input_tokens : int
+      ; accepted_through : int
+      }
+  | Invalid_serving_capacity_boundary of
+      { input_tokens : int
+      ; accepted_through : int
+      ; rejected_from : int option
       }
 
 let decode_error_to_string = function
@@ -84,6 +146,24 @@ let decode_error_to_string = function
       "request body over capacity requires actual_bytes > limit_bytes, got %d and %d"
       actual_bytes
       limit_bytes
+  | Missing_serving_capacity_field field ->
+    Printf.sprintf "serving input capacity trigger is missing %s" field
+  | Invalid_serving_capacity_field field ->
+    Printf.sprintf "serving input capacity trigger has invalid %s" field
+  | Serving_capacity_not_over_limit { input_tokens; accepted_through } ->
+    Printf.sprintf
+      "serving input capacity requires input_tokens > accepted_through, got %d and %d"
+      input_tokens
+      accepted_through
+  | Invalid_serving_capacity_boundary
+      { input_tokens; accepted_through; rejected_from } ->
+    Printf.sprintf
+      "serving input capacity rejected_from must be greater than accepted_through and no greater than input_tokens, got input=%d accepted=%d rejected=%s"
+      input_tokens
+      accepted_through
+      (match rejected_from with
+       | Some value -> string_of_int value
+       | None -> "missing")
 ;;
 
 let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
@@ -128,6 +208,64 @@ let of_detail_json (json : Yojson.Safe.t) : (t, decode_error) result =
        if actual_bytes > limit_bytes
        then Ok (Request_body_over_capacity { actual_bytes; limit_bytes })
        else Error (Request_body_within_capacity { actual_bytes; limit_bytes })
+     | Some (`String "serving_input_capacity") ->
+       let* () =
+         reject_unknown_fields
+           [ "kind"; "reason"; "input_tokens"; "accepted_through"; "rejected_from" ]
+       in
+       let integer_field ~positive field =
+         match List.assoc_opt field fields with
+         | Some (`Int value) when if positive then value > 0 else value >= 0 ->
+           Ok value
+         | None -> Error (Missing_serving_capacity_field field)
+         | Some _ -> Error (Invalid_serving_capacity_field field)
+       in
+       let* input_tokens = integer_field ~positive:true "input_tokens" in
+       let* accepted_through = integer_field ~positive:false "accepted_through" in
+       let* reason =
+         match List.assoc_opt "reason" fields with
+         | Some (`String value) -> Ok value
+         | None -> Error (Missing_serving_capacity_field "reason")
+         | Some _ -> Error (Invalid_serving_capacity_field "reason")
+       in
+       let* rejected_from =
+         match List.assoc_opt "rejected_from" fields with
+         | Some `Null -> Ok None
+         | Some (`Int value) when value > 0 -> Ok (Some value)
+         | None -> Error (Missing_serving_capacity_field "rejected_from")
+         | Some _ -> Error (Invalid_serving_capacity_field "rejected_from")
+       in
+       if input_tokens <= accepted_through
+       then Error (Serving_capacity_not_over_limit { input_tokens; accepted_through })
+       else
+         let boundary_valid =
+           match rejected_from with
+           | None -> true
+           | Some value ->
+             value > accepted_through && value <= input_tokens
+         in
+         if not boundary_valid
+         then
+           Error
+             (Invalid_serving_capacity_boundary
+                { input_tokens; accepted_through; rejected_from })
+         else
+           (match reason, rejected_from with
+            | "boundary_unknown", rejected_from ->
+              Ok
+                (Serving_input_capacity
+                   (Boundary_unknown
+                      { input_tokens; accepted_through; rejected_from }))
+            | "input_rejected", Some rejected_from ->
+              Ok
+                (Serving_input_capacity
+                   (Input_rejected
+                      { input_tokens; accepted_through; rejected_from }))
+            | "input_rejected", None ->
+              Error
+                (Invalid_serving_capacity_boundary
+                   { input_tokens; accepted_through; rejected_from = None })
+            | _, _ -> Error (Invalid_serving_capacity_field "reason"))
      | Some (`String "manual") ->
        let* () = reject_unknown_fields [ "kind" ] in
        Ok Manual

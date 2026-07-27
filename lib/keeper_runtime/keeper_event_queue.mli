@@ -201,6 +201,26 @@ and goal_assignment = {
 }
 (** Payload for [Goal_assigned]. *)
 
+type capacity_compaction_request = {
+  ccr_trigger : Compaction_trigger.t;
+}
+(** Current-schema request value for the next-cycle compaction lane. It is not
+    yet a queue payload: this pure contract lets the producer and consumer
+    share one strict codec and identity before runtime wiring lands. *)
+
+val capacity_compaction_request_to_yojson :
+  capacity_compaction_request -> Yojson.Safe.t
+
+val capacity_compaction_request_of_yojson :
+  Yojson.Safe.t -> (capacity_compaction_request, string) result
+
+val capacity_compaction_request_identity_equal :
+  capacity_compaction_request -> capacity_compaction_request -> bool
+
+val capacity_compaction_request_post_id :
+  capacity_compaction_request -> post_id
+(** Stable identity derived only from the typed trigger detail. Display prose,
+    runtime identity, provider, and model do not participate. *)
 
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always

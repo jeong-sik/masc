@@ -390,6 +390,56 @@ let attempt_receipt_json (attempt : Exact_output.flow_attempt_receipt) =
     ]
 ;;
 
+let receipt_snapshot_json
+      (receipt : Exact_output.generation_receipt_snapshot)
+  =
+  `Assoc
+    [ ( "call_id"
+      , `String
+          (Exact_output.call_id_to_string
+             (Exact_output.generation_receipt_snapshot_call_id receipt)) )
+    ; ( "phase"
+      , `String
+          (effect_phase_to_string
+             (Exact_output.generation_receipt_snapshot_phase receipt)) )
+    ; ( "dispatch_count"
+      , `Int
+          (Exact_output.generation_receipt_snapshot_dispatch_count receipt) )
+    ; ( "http_status"
+      , match Exact_output.generation_receipt_snapshot_http_status receipt with
+        | Some status -> `Int status
+        | None -> `Null )
+    ; ( "plan_fingerprint"
+      , `String
+          (Exact_output.generation_receipt_snapshot_plan_fingerprint receipt) )
+    ; ( "request_body_sha256"
+      , `String
+          (Exact_output.generation_receipt_snapshot_request_body_sha256 receipt) )
+    ; ( "catalog_generation"
+      , `String
+          (Exact_output.catalog_generation_fingerprint
+             (Exact_output.generation_receipt_snapshot_catalog_generation
+                receipt)) )
+    ; ( "catalog_evidence_sha256"
+      , `String
+          (Exact_output.catalog_evidence_sha256
+             (Exact_output.generation_receipt_snapshot_catalog_evidence
+                receipt)) )
+    ; ( "target_identity"
+      , `String
+          (Exact_output.target_identity_fingerprint
+             (Exact_output.generation_receipt_snapshot_target_identity
+                receipt)) )
+    ]
+;;
+
+let attempt_snapshot_json (attempt : Exact_output.flow_attempt_snapshot) =
+  `Assoc
+    [ "candidate_id", `String attempt.visit.identity.candidate_id
+    ; "receipt", receipt_snapshot_json attempt.receipt
+    ]
+;;
+
 let exact_flow_state_dir ~keeper_id =
   Keeper_memory_os_io.facts_path ~keeper_id
   |> Filename.dirname
@@ -495,9 +545,9 @@ let flow_candidates selected_slots =
 
 let exact_execution_error error =
   let outward_effect =
-    match Exact_output.flow_execution_error_outward_dispatch error with
-    | Exact_output.No_outward_dispatch -> No_outward_effect
-    | Exact_output.Outward_dispatch_started -> Outward_effect_started
+    match Exact_output.flow_execution_error_generation_dispatch error with
+    | Exact_output.No_generation_dispatch -> No_outward_effect
+    | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
   let failure =
     match error with
@@ -553,7 +603,7 @@ let persist_exact_execution_terminal
          ~trace_id
          ~generation
          ~state:"execution_terminal"
-         [ "candidate", attempt_receipt_json candidate
+         [ "candidate", attempt_snapshot_json candidate
          ; "failure_cause", `String "success_ordinal_exhausted"
          ]
      | [] -> Error "success ordinal exhausted without attempt evidence")

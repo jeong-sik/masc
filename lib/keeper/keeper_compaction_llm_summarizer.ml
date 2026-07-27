@@ -471,6 +471,26 @@ let observe_flow_attempt_receipt
   }
 ;;
 
+let observe_flow_attempt_snapshot
+      (candidate : Exact_output.flow_attempt_snapshot)
+  =
+  let receipt = candidate.receipt in
+  let identity = candidate.visit.identity in
+  { slot_id = identity.candidate_id
+  ; call_id =
+      receipt
+      |> Exact_output.generation_receipt_snapshot_call_id
+      |> call_id_to_string
+  ; catalog_generation_fingerprint =
+      identity.catalog_generation
+      |> Exact_output.catalog_generation_fingerprint
+  ; receipt_plan_fingerprint =
+      Exact_output.generation_receipt_snapshot_plan_fingerprint receipt
+  ; receipt_request_body_sha256 =
+      Exact_output.generation_receipt_snapshot_request_body_sha256 receipt
+  }
+;;
+
 let terminal_of_observation cause (observation : attempt_observation) =
   Keeper_event_queue_state.
     { cause
@@ -1485,7 +1505,7 @@ module For_testing = struct
     let evidence : Exact_output.flow_evidence =
       Exact_output.flow_attempt_evidence prepared_lane.flow_attempt
     in
-    List.map observe_flow_attempt_receipt evidence.attempts
+    List.map observe_flow_attempt_snapshot evidence.attempts
   ;;
 
   let candidate_snapshot_slot_ids prepared_lane =

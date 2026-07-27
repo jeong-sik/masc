@@ -198,6 +198,21 @@ let attempt_provenance
   }
 ;;
 
+let attempt_snapshot_provenance
+      (attempt : Exact_output.flow_attempt_snapshot)
+  =
+  { slot_id = attempt.visit.identity.candidate_id
+  ; call_id =
+      attempt.receipt
+      |> Exact_output.generation_receipt_snapshot_call_id
+      |> string_of_call_id
+  ; plan_fingerprint =
+      Exact_output.generation_receipt_snapshot_plan_fingerprint attempt.receipt
+  ; request_body_sha256 =
+      Exact_output.generation_receipt_snapshot_request_body_sha256 attempt.receipt
+  }
+;;
+
 let candidate_visit (visit : Exact_output.flow_candidate_visit) =
   let identity = visit.identity in
   { flow_id = Exact_output.flow_id_to_string visit.flow_id
@@ -221,7 +236,7 @@ let advance_source_of_failure = function
 ;;
 
 let evidence_provenance (evidence : Exact_output.flow_evidence) =
-  List.map attempt_provenance evidence.attempts
+  List.map attempt_snapshot_provenance evidence.attempts
 ;;
 
 let admitted_candidate candidate_id admissions =

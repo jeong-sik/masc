@@ -403,6 +403,7 @@ let turn_event_bus_evidence_detail
 
 type capacity_refusal =
   | Provider_context_window of { limit_tokens : int option }
+  | Provider_request_body_refusal of { status : int }
   | Serialized_request_body of
       { actual_bytes : int
       ; limit_bytes : int
@@ -421,6 +422,9 @@ let capacity_refusal_of_error (err : Agent_sdk.Error.sdk_error) : capacity_refus
       (InvalidRequest { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
     ->
     Some (Serialized_request_body { actual_bytes; limit_bytes })
+  | Agent_sdk.Error.Api
+      (InvalidRequest { reason = Request_body_refused_by_provider { status }; _ }) ->
+    Some (Provider_request_body_refusal { status })
   | Agent_sdk.Error.Api
       (InvalidRequest { reason = Json_parse_error | Unknown_invalid_request; _ }) ->
     (* A malformed request is a defect in what was built, not a size the target
@@ -457,7 +461,9 @@ let context_overflow_event_of_error
   match capacity_refusal_of_error err with
   | Some (Provider_context_window { limit_tokens }) ->
     Some (Keeper_state_machine.Context_overflow_detected { limit_tokens })
-  | Some (Serialized_request_body _) | None -> None
+  | Some (Provider_request_body_refusal _ | Serialized_request_body _)
+  | None ->
+    None
 
 (* Prefix that tags a [last_compaction_decision] value as a provider-overflow
    recovery failure. Kept as a named binding so the observability regression test

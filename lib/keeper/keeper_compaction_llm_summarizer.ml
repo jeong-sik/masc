@@ -8,10 +8,24 @@ module Int_set = Set.Make (Int)
 module Int_map = Map.Make (Int)
 module String_set = Set.Make (String)
 
+type assistant_text_source =
+  { normalized_message : Agent_sdk.Types.message
+  ; text_blocks : string list
+  ; reasoning_discarded : bool
+  }
+
+type closed_tool_cycle_source =
+  { source_messages : Agent_sdk.Types.message list
+  ; semantic_json : Yojson.Safe.t
+  }
+
+type eligible_payload =
+  | Assistant_text of assistant_text_source
+  | Closed_tool_cycle of closed_tool_cycle_source
+
 type eligible_source =
   { source_index : int
-  ; message : Agent_sdk.Types.message
-  ; text_blocks : string list
+  ; payload : eligible_payload
   }
 
 type action =
@@ -158,24 +172,170 @@ let messages_of_unit = function
   | Keeper_compaction_unit.Ordinary_message message -> [ message ]
   | Keeper_compaction_unit.Closed_tool_cycle messages -> messages
 
-let text_blocks blocks =
-  List.fold_right
-    (fun block texts ->
-      match block, texts with
-      | Agent_sdk.Types.Text text, Some texts -> Some (text :: texts)
-      | ( Agent_sdk.Types.Thinking _
-        | Agent_sdk.Types.ReasoningDetails _
-        | Agent_sdk.Types.RedactedThinking _
-        | Agent_sdk.Types.ToolUse _
-        | Agent_sdk.Types.ToolResult _
-        | Agent_sdk.Types.Image _
-        | Agent_sdk.Types.Document _
-        | Agent_sdk.Types.Audio _ )
-        , _ ->
-        None
-      | _, None -> None)
-    blocks
-    (Some [])
+let canonical_json =
+  let rec canonicalize = function
+    | `Assoc fields ->
+      `Assoc
+        (fields
+         |> List.map (fun (key, value) -> key, canonicalize value)
+         |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+    | `List values -> `List (List.map canonicalize values)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      value
+  in
+  canonicalize
+
+let option_json project = function
+  | None -> `Null
+  | Some value -> project value
+
+let tool_failure_kind_string = function
+  | Agent_sdk.Types.Validation_error -> "validation_error"
+  | Agent_sdk.Types.Recoverable_tool_error -> "recoverable_tool_error"
+  | Agent_sdk.Types.Non_retryable_tool_error -> "non_retryable_tool_error"
+  | Agent_sdk.Types.Reported_tool_error -> "reported_tool_error"
+  | Agent_sdk.Types.Unattributed_tool_error -> "unattributed_tool_error"
+
+let tool_error_class_string = function
+  | Agent_sdk.Types.Transient -> "transient"
+  | Agent_sdk.Types.Deterministic -> "deterministic"
+  | Agent_sdk.Types.Unknown -> "unknown"
+
+let tool_result_outcome_json = function
+  | Agent_sdk.Types.Tool_succeeded -> `Assoc [ "kind", `String "succeeded" ]
+  | Agent_sdk.Types.Tool_failed { failure_kind; error_class } ->
+    `Assoc
+      [ "kind", `String "failed"
+      ; "failure_kind", `String (tool_failure_kind_string failure_kind)
+      ; ( "error_class"
+        , option_json (fun value -> `String (tool_error_class_string value)) error_class )
+      ]
+
+type semantic_projection_error =
+  | Unsupported_media
+
+let rec semantic_content_blocks_json blocks =
+  let rec loop projected_rev = function
+    | [] -> Ok (`List (List.rev projected_rev))
+    | Agent_sdk.Types.Text text :: rest ->
+      loop
+        (`Assoc [ "type", `String "text"; "text", `String text ] :: projected_rev)
+        rest
+    | ( Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.ReasoningDetails _
+      | Agent_sdk.Types.RedactedThinking _ )
+      :: rest ->
+      loop projected_rev rest
+    | Agent_sdk.Types.ToolUse { id; name; input } :: rest ->
+      loop
+        (`Assoc
+           [ "type", `String "tool_use"
+           ; "id", `String id
+           ; "name", `String name
+           ; "input", canonical_json input
+           ]
+         :: projected_rev)
+        rest
+    | Agent_sdk.Types.ToolResult
+        { tool_use_id; content; outcome; json; content_blocks }
+      :: rest ->
+      (match semantic_optional_content_blocks_json content_blocks with
+       | Error _ as error -> error
+       | Ok content_blocks_json ->
+         loop
+           (`Assoc
+              [ "type", `String "tool_result"
+              ; "tool_use_id", `String tool_use_id
+              ; "content", `String content
+              ; "outcome", tool_result_outcome_json outcome
+              ; "json", option_json canonical_json json
+              ; "content_blocks", content_blocks_json
+              ]
+            :: projected_rev)
+           rest)
+    | (Agent_sdk.Types.Image _ | Agent_sdk.Types.Document _ | Agent_sdk.Types.Audio _)
+      :: _ ->
+      Error Unsupported_media
+  in
+  loop [] blocks
+
+and semantic_optional_content_blocks_json = function
+  | None -> Ok `Null
+  | Some blocks -> semantic_content_blocks_json blocks
+
+let semantic_message_json (message : Agent_sdk.Types.message) =
+  match semantic_content_blocks_json message.content with
+  | Error _ as error -> error
+  | Ok content_blocks ->
+    Ok
+      (`Assoc
+         [ "role", `String (Agent_sdk.Types.role_to_string message.role)
+         ; "content_blocks", content_blocks
+         ; "name", option_json (fun value -> `String value) message.name
+         ; "tool_call_id", option_json (fun value -> `String value) message.tool_call_id
+         ; "metadata", canonical_json (`Assoc message.metadata)
+         ])
+
+let semantic_messages_json messages =
+  let rec loop projected_rev = function
+    | [] -> Ok (`List (List.rev projected_rev))
+    | message :: rest ->
+      (match semantic_message_json message with
+       | Error _ as error -> error
+       | Ok projected -> loop (projected :: projected_rev) rest)
+  in
+  loop [] messages
+
+let assistant_text_source message blocks =
+  let rec loop text_blocks_rev reasoning_discarded = function
+    | [] ->
+      let text_blocks = List.rev text_blocks_rev in
+      if List.exists (fun text -> String.trim text <> "") text_blocks
+      then
+        Some
+          { normalized_message =
+              { message with
+                content = List.map (fun text -> Agent_sdk.Types.Text text) text_blocks
+              }
+          ; text_blocks
+          ; reasoning_discarded
+          }
+      else None
+    | Agent_sdk.Types.Text text :: rest ->
+      loop (text :: text_blocks_rev) reasoning_discarded rest
+    | ( Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.ReasoningDetails _
+      | Agent_sdk.Types.RedactedThinking _ )
+      :: rest ->
+      loop text_blocks_rev true rest
+    | ( Agent_sdk.Types.ToolUse _
+      | Agent_sdk.Types.ToolResult _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ )
+      :: _ ->
+      None
+  in
+  loop [] false blocks
+
+let cycle_has_tool_protocol messages =
+  let has_tool_use =
+    List.exists
+      (fun (message : Agent_sdk.Types.message) ->
+        List.exists
+          (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
+          message.content)
+      messages
+  in
+  let has_tool_result =
+    List.exists
+      (fun (message : Agent_sdk.Types.message) ->
+        List.exists
+          (function Agent_sdk.Types.ToolResult _ -> true | _ -> false)
+          message.content)
+      messages
+  in
+  has_tool_use && has_tool_result
 
 let eligible_source source_index = function
   | Keeper_compaction_unit.Ordinary_message
@@ -185,11 +345,18 @@ let eligible_source source_index = function
        ; tool_call_id = None
        ; metadata = []
        } as message) ->
-    (match text_blocks content with
-     | Some (_ :: _ as text_blocks)
-       when List.exists (fun text -> String.trim text <> "") text_blocks ->
-       Some { source_index; message; text_blocks }
-     | Some [] | Some (_ :: _) | None -> None)
+    (match assistant_text_source message content with
+     | Some source -> Some { source_index; payload = Assistant_text source }
+     | None -> None)
+  | Keeper_compaction_unit.Closed_tool_cycle messages
+    when cycle_has_tool_protocol messages ->
+    (match Keeper_compaction_unit.validate messages, semantic_messages_json messages with
+     | Ok (), Ok semantic_json ->
+       Some
+         { source_index
+         ; payload = Closed_tool_cycle { source_messages = messages; semantic_json }
+         }
+     | Error _, _ | _, Error _ -> None)
   | Keeper_compaction_unit.Ordinary_message _
   | Keeper_compaction_unit.Closed_tool_cycle _ ->
     None
@@ -205,25 +372,36 @@ let eligible_units_json sources =
   `List
     (List.map
        (fun source ->
-         `Assoc
-           [ Schema.compaction_plan_field_unit_index, `Int source.source_index
-           ; "role", `String (Agent_sdk.Types.role_to_string source.message.role)
-           ; "text_blocks", `List (List.map (fun text -> `String text) source.text_blocks)
-           ])
+         match source.payload with
+         | Assistant_text { text_blocks; _ } ->
+           `Assoc
+             [ Schema.compaction_plan_field_unit_index, `Int source.source_index
+             ; "kind", `String "assistant_text"
+             ; "role", `String "assistant"
+             ; "text_blocks", `List (List.map (fun text -> `String text) text_blocks)
+             ]
+         | Closed_tool_cycle { semantic_json; _ } ->
+           `Assoc
+             [ Schema.compaction_plan_field_unit_index, `Int source.source_index
+             ; "kind", `String "closed_tool_cycle"
+             ; "messages", semantic_json
+             ])
        sources)
 
 let messages_for_plan ~units =
   let sources = eligible_sources units in
   let system =
-    "You compact only the explicitly supplied eligible Assistant text units. \
+    "You compact only the explicitly supplied atomic eligible units. \
      Return exactly one decision for every supplied unit_index and do not \
-     invent indices. keep preserves the source verbatim. summarize replaces \
-     that unit in place with its faithful summary. drop is valid only when the \
+     invent indices. Each closed_tool_cycle contains a complete ordered tool \
+     request/result protocol and must be decided as one indivisible unit. keep \
+     preserves the source unit. summarize replaces that whole unit in place \
+     with one faithful Assistant memory. drop is valid only when the whole \
      unit contributes no state, decision, evidence, constraint, unresolved \
      work, or outcome. For keep and drop, summary must be null. For summarize, \
-     summary must be a non-empty string. Do not infer recency policy, merge \
-     units, relocate facts, invent facts, or include markdown fences. Respond \
-     with a single JSON object and no other text."
+     summary must be a non-empty string. Do not split tool cycles, infer \
+     recency policy, merge units, relocate facts, invent facts, or include \
+     markdown fences. Respond with a single JSON object and no other text."
   in
   let user =
     Printf.sprintf
@@ -351,6 +529,12 @@ let parse_decisions ~sources decisions_json =
   in
   parse Int_set.empty [] decisions_json
 
+let source_normalizes = function
+  | { payload = Assistant_text { reasoning_discarded = true; _ }; _ } -> true
+  | { payload = Assistant_text { reasoning_discarded = false; _ }; _ }
+  | { payload = Closed_tool_cycle _; _ } ->
+    false
+
 let plan_of_json ~units json =
   let sources = eligible_sources units in
   if sources = []
@@ -379,7 +563,7 @@ let plan_of_json ~units json =
          (fun decision ->
            match decision.action with
            | Drop | Summarize _ -> true
-           | Keep -> false)
+           | Keep -> source_normalizes decision.source)
          decisions
     then Ok ()
     else Error "plan keeps every eligible unit without changing any"
@@ -413,13 +597,14 @@ let apply (plan : compaction_plan) =
   |> List.mapi (fun idx unit_ -> idx, unit_)
   |> List.concat_map (fun (idx, unit_) ->
     match Int_map.find_opt idx decisions with
-    | None | Some { action = Keep; _ } -> messages_of_unit unit_
+    | None -> messages_of_unit unit_
+    | Some { source = { payload = Assistant_text source; _ }; action = Keep } ->
+      [ source.normalized_message ]
+    | Some { source = { payload = Closed_tool_cycle source; _ }; action = Keep } ->
+      source.source_messages
     | Some { action = Drop; _ } -> []
-    | Some { source; action = Summarize summary } ->
-      [ { source.message with
-          content = [ Agent_sdk.Types.Text summary ]
-        }
-      ])
+    | Some { action = Summarize summary; _ } ->
+      [ message Agent_sdk.Types.Assistant summary ])
 
 let indices_for_action predicate plan =
   plan.decisions
@@ -428,7 +613,15 @@ let indices_for_action predicate plan =
 
 let summarized_indices = indices_for_action (function Summarize _ -> true | Keep | Drop -> false)
 let dropped_indices = indices_for_action (function Drop -> true | Keep | Summarize _ -> false)
-let has_changes plan = summarized_indices plan <> [] || dropped_indices plan <> []
+let has_changes plan =
+  summarized_indices plan <> []
+  || dropped_indices plan <> []
+  || List.exists
+       (fun decision ->
+         match decision.action with
+         | Keep -> source_normalizes decision.source
+         | Drop | Summarize _ -> false)
+       plan.decisions
 
 let exact_output_requirement =
   Exact_output.make_output_requirement

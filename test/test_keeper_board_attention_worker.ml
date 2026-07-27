@@ -316,7 +316,6 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
    | W.Idle
    | W.Contended _
    | W.Rescan_later _
-   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "worker exact callback chain did not complete");
@@ -371,10 +370,7 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        "typed setup failure stops the lifecycle"
        "Board attention exact setup unavailable before claim: network context unavailable"
        detail
-   | Ok
-       ( W.Drained
-       | W.Owner_generation_deferred _
-       | W.Retry_later _ ) ->
+   | Ok (W.Drained | W.Retry_later _) ->
      Alcotest.fail "setup-unavailable drain returned normally");
   Alcotest.(check int) "one setup attempt" 1 !calls;
   Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
@@ -451,7 +447,6 @@ let test_claim_generation_change_discards_without_sibling_selection () =
    | W.Contended _ ->
      Alcotest.fail "changed generation reported quiescent or same-generation contention"
    | W.Judgment_completed _
-   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "claim retry exhaustion produced a terminal step");
@@ -555,7 +550,6 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
    | W.Idle
    | W.Rescan_later _
    | W.Judgment_completed _
-   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "exact claim exhaustion reported quiescent or terminal");
@@ -718,7 +712,6 @@ let test_rescan_later_reaches_delayed_run_rearm () =
        true
        (P.Generation.equal contention.generation observed.generation)
    | W.Drained
-   | W.Owner_generation_deferred _
    | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
      Alcotest.fail "changed selection did not reach typed delayed rescan");
   Alcotest.(check int) "no same-turn rescan" 1 !process_calls;
@@ -1568,7 +1561,6 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Contended _
    | W.Rescan_later _
    | W.Judgment_completed _
-   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "blocked partition was exposed before authorization");
@@ -1683,7 +1675,6 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Idle
    | W.Contended _
    | W.Rescan_later _
-   | W.Owner_unregistered_deferred _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "authorized manual requeue did not complete its exact judgment");

@@ -161,8 +161,10 @@ let parsed_field_key_names =
     Keys outside this set under [[keeper]] (or any other table) are silently
     ignored by the loader, which historically let dead config accumulate
     (e.g. legacy [legacy_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
-    uses this list to surface drift on boot, symmetric with
-    [warn_unknown_keeper_meta_keys] on the JSON side.
+    uses this list to surface drift on boot. The JSON side no longer has a
+    symmetric warning: [Keeper_meta_json.meta_of_json] decodes only the exact
+    current shape, so an unknown persisted key is a decode error there rather
+    than a warning.
 
     Must be kept in sync with [parsed_field_key_names] — the assertion below
     catches drift at compile time. *)

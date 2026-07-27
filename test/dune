@@ -2002,9 +2002,7 @@
 
 (include stanzas/test_keeper_memory_bank_consolidation_provenance.inc)
 
-(include stanzas/test_keeper_meta_canonical_seed.inc)
-
-(include stanzas/test_keeper_meta_unknown_keys_warn.inc)
+(include stanzas/test_keeper_meta_current_keyset.inc)
 
 (include stanzas/test_keeper_mutex_coverage.inc)
 
@@ -2566,7 +2564,7 @@
 
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
-(include stanzas/test_keeper_meta_json_config_toml_only.inc)
+(include stanzas/test_keeper_meta_current_schema.inc)
 
 (include stanzas/test_keeper_compact_recovery_tool_surface.inc)
 

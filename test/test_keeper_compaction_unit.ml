@@ -304,6 +304,129 @@ let test_quarantine_orphan_keeps_valid_prefix () =
   check_exact "orphan protected under quarantine" [ orphan ] output.protected_suffix
 ;;
 
+(* RFC-0240 §2.4 / §5.4. A tool cycle left open by process death is the state
+   checkpoint persistence stores on purpose; before [close_open_tail] nothing
+   closed it, so provider admission rejected the history on every reload and the
+   lane latched permanently (2026-07-27: four keepers). *)
+
+let require_closure = function
+  | Ok closure -> closure
+  | Error _ -> Alcotest.fail "expected the open tail to close"
+
+let appended_results closure ~before =
+  let rec drop n = function
+    | rest when n <= 0 -> rest
+    | _ :: rest -> drop (n - 1) rest
+    | [] -> []
+  in
+  drop (List.length before) closure.U.messages
+
+(* [T.ToolResult]'s payload is an inline record, so it cannot escape the
+   constructor; copy the fields into a view the assertions can hold. *)
+type closer_view =
+  { closer_tool_use_id : string
+  ; closer_content : string
+  ; closer_outcome : T.tool_result_outcome
+  ; closer_json : Yojson.Safe.t option
+  ; closer_content_blocks : T.content_block list option
+  }
+
+let interrupted_block = function
+  | ({ role = T.Tool
+     ; content = [ T.ToolResult { tool_use_id; content; outcome; json; content_blocks } ]
+     ; tool_call_id = None
+     ; _
+     } : T.message) ->
+    { closer_tool_use_id = tool_use_id
+    ; closer_content = content
+    ; closer_outcome = outcome
+    ; closer_json = json
+    ; closer_content_blocks = content_blocks
+    }
+  | _ -> Alcotest.fail "closer is not a single-result Tool message"
+
+let test_close_open_tail_makes_transcript_dispatchable () =
+  let before =
+    [ message T.Assistant [ use "call-a"; use "call-b" ] ]
+  in
+  let closure = require_closure (U.close_open_tail before) in
+  check_exact
+    "both open ids are closed"
+    [ "call-a"; "call-b" ]
+    closure.U.closed_tool_use_ids;
+  check_exact
+    "one closer appended per open id"
+    2
+    (List.length (appended_results closure ~before));
+  check_exact "prefix is preserved byte-exact" before
+    (List.filteri (fun i _ -> i < List.length before) closure.U.messages);
+  match U.validate_provider_transcript closure.U.messages with
+  | Ok () -> ()
+  | Error error ->
+    Alcotest.failf
+      "closed tail still rejected by provider admission: %s"
+      (U.show_provider_transcript_error error)
+
+let test_close_open_tail_closes_only_missing_ids () =
+  (* One result already landed before the crash; only the other is synthesized. *)
+  let before =
+    [ message T.Assistant [ use "call-a"; use "call-b" ]
+    ; message T.Tool [ result "call-b" ]
+    ]
+  in
+  let closure = require_closure (U.close_open_tail before) in
+  check_exact "only the unresolved id closes" [ "call-a" ] closure.U.closed_tool_use_ids;
+  let appended = appended_results closure ~before in
+  check_exact "exactly one closer" 1 (List.length appended);
+  let r = interrupted_block (List.hd appended) in
+  check_exact "closer targets the unresolved id" "call-a" r.closer_tool_use_id;
+  match U.validate_provider_transcript closure.U.messages with
+  | Ok () -> ()
+  | Error error ->
+    Alcotest.failf
+      "partially recovered cycle still rejected: %s"
+      (U.show_provider_transcript_error error)
+
+let test_close_open_tail_is_identity_when_already_closed () =
+  let closed =
+    [ message T.Assistant [ use "call-a"; use "call-b" ]
+    ; message T.Tool [ result "call-b"; result "call-a" ]
+    ; text T.User "already dispatchable"
+    ]
+  in
+  let closure = require_closure (U.close_open_tail closed) in
+  check_exact "nothing was closed" [] closure.U.closed_tool_use_ids;
+  check_exact "history is returned unchanged" closed closure.U.messages
+
+let test_close_open_tail_preserves_structural_error () =
+  (* A ToolResult with no preceding ToolUse does not parse. That is genuine
+     corruption, not an interrupted call, and must keep latching. *)
+  let unparseable = [ message T.Tool [ result "call-ghost" ] ] in
+  match U.close_open_tail unparseable with
+  | Ok _ -> Alcotest.fail "unparseable history must not be closed"
+  | Error (U.Orphan_tool_result { tool_use_id = "call-ghost"; _ }) -> ()
+  | Error error ->
+    Alcotest.failf "wrong structural error: %s" (U.show_structural_error error)
+
+let test_close_open_tail_never_fabricates_success () =
+  let before = [ message T.Assistant [ use "call-a" ] ] in
+  let closure = require_closure (U.close_open_tail before) in
+  let r = interrupted_block (List.hd (appended_results closure ~before)) in
+  check_exact "content is the SSOT interrupted body"
+    U.interrupted_tool_result_content r.closer_content;
+  check_exact "no structured payload is invented" None r.closer_json;
+  check_exact "no content blocks are invented" None r.closer_content_blocks;
+  (* The execution boundary died without recording provenance, so the outcome
+     must say exactly that — not Tool_succeeded, and not a provider-reported
+     failure the provider never reported. *)
+  match r.closer_outcome with
+  | T.Tool_failed { failure_kind = T.Unattributed_tool_error; error_class = Some T.Unknown }
+    -> ()
+  | outcome ->
+    Alcotest.failf
+      "interrupted call must be unattributed-unknown, got: %s"
+      (T.show_tool_result_outcome outcome)
+
 let test_provider_admission_requires_closed_tool_cycle () =
   let closed =
     [ message T.Assistant [ use "call-a"; use "call-b" ]
@@ -425,5 +548,15 @@ let () =
             test_provider_admission_requires_closed_tool_cycle
         ; Alcotest.test_case "provider admission quarantines overlap" `Quick
             test_provider_admission_quarantines_malformed_overlap
+        ; Alcotest.test_case "close_open_tail makes an interrupted turn dispatchable"
+            `Quick test_close_open_tail_makes_transcript_dispatchable
+        ; Alcotest.test_case "close_open_tail closes only the missing ids" `Quick
+            test_close_open_tail_closes_only_missing_ids
+        ; Alcotest.test_case "close_open_tail is identity on a closed history" `Quick
+            test_close_open_tail_is_identity_when_already_closed
+        ; Alcotest.test_case "close_open_tail keeps unparseable history latched" `Quick
+            test_close_open_tail_preserves_structural_error
+        ; Alcotest.test_case "close_open_tail never fabricates success" `Quick
+            test_close_open_tail_never_fabricates_success
         ] )
     ]

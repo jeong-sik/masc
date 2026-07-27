@@ -92,3 +92,30 @@ val validate
 val validate_provider_transcript
   :  Agent_sdk.Types.message list
   -> (unit, provider_transcript_error) result
+
+val interrupted_tool_result_content : string
+(** SSOT for the body of a synthesized closer. States that the call was issued,
+    that no result was recorded, and that whether it took effect is unknown —
+    masc has no per-tool-call settlement authority to consult. *)
+
+type tail_closure =
+  { messages : Agent_sdk.Types.message list
+  ; closed_tool_use_ids : string list
+        (** Empty when the history was already dispatchable. *)
+  }
+
+val close_open_tail
+  :  Agent_sdk.Types.message list
+  -> (tail_closure, structural_error) result
+(** Close the in-flight tool cycle that checkpoint persistence deliberately
+    preserves, so a history interrupted by process death becomes dispatchable
+    again instead of latching the lane. Appends one [ToolResult] per unresolved
+    [ToolUse] id, carrying {!interrupted_tool_result_content} and an
+    [Unattributed_tool_error] outcome.
+
+    This is completion, not repair: the appended block records what recovery
+    knows exactly (this id was issued, no result was recorded) rather than
+    guessing at a corrupt artifact. A history that fails to parse returns its
+    [structural_error] unchanged and must keep latching — only the open tail is
+    recoverable. On [Ok], {!validate_provider_transcript} of [messages]
+    returns [Ok ()]. *)

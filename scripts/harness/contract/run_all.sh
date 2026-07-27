@@ -23,7 +23,9 @@ export MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
 export MCP_TOKEN="${MCP_TOKEN:-}"
 export MASC_CONTRACT_VERIFIER_API_KEY="${MASC_CONTRACT_VERIFIER_API_KEY:-contract-verifier-fixture-key}"
 HARNESS_ADMIN_AGENT="${MASC_HARNESS_ADMIN_AGENT:-contract-harness-admin}"
+HARNESS_VERIFIER_AGENT="${MASC_HARNESS_VERIFIER_AGENT:-contract-harness-verifier}"
 export MCP_AGENT_NAME="${MCP_AGENT_NAME:-$HARNESS_ADMIN_AGENT}"
+export MCP_VERIFIER_AGENT_NAME="${MCP_VERIFIER_AGENT_NAME:-$HARNESS_VERIFIER_AGENT}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 export CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-80}"
@@ -274,6 +276,20 @@ export MCP_TOKEN
 unset MCP_AUTH_TOKEN
 unset MASC_ADMIN_TOKEN
 echo "[bootstrap] auth_token=workspace-local admin token minted"
+
+if ! MCP_VERIFIER_TOKEN="$(
+  harness_mint_admin_token "$SERVER_EXE" "$PORT" "$BASE_PATH" \
+    "$HARNESS_VERIFIER_AGENT"
+)"; then
+  echo "FAIL: failed to mint contract harness verifier token" >&2
+  exit 1
+fi
+if [[ -z "$MCP_VERIFIER_TOKEN" ]]; then
+  echo "FAIL: contract harness verifier token is empty" >&2
+  exit 1
+fi
+export MCP_VERIFIER_TOKEN
+echo "[bootstrap] verifier_auth_token=workspace-local admin token minted"
 
 SERVER_PID="$(harness_start_server "$SERVER_EXE" "$PORT" "$BASE_PATH" "$LOG_FILE")"
 if ! harness_wait_for_health "$PORT" 25; then

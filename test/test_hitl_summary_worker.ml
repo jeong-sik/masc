@@ -658,7 +658,7 @@ let test_all_candidates_rejected_before_network () =
          (list string)
          "incapable topology remains frozen"
          [ "hitl-incapable" ]
-         (List.map candidate_id before.candidate_snapshot);
+         (List.map candidate_id before.declared_candidate_snapshot);
        check
          (list string)
          "incapable candidate is not pre-admitted"
@@ -809,6 +809,7 @@ let test_visible_completion_blocks_gate_delivery () =
             [ { id = "hitl-visible-completion"; base_url = server.base_url } ]);
        select_auto_judge_mode base_path;
        let entry = pending_entry ~base_path () in
+       let successor = pending_entry ~input_tag:"successor" ~base_path () in
        let delivered = ref false in
        (match
           Worker.For_testing.execute_prepared_flow_with_queue_ops
@@ -1466,7 +1467,6 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
        install_queue base_path;
        select_auto_judge_mode base_path;
        let entry = pending_entry ~base_path () in
-       let successor = pending_entry ~input_tag:"successor" ~base_path () in
        (match
           Gate.For_testing.spawn_auto_judge_entry_with_worker
             ~spawn_worker:

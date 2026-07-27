@@ -3,7 +3,6 @@
 type request = Keeper_paused_work_operator_request.t =
   | Resume_owner of Keeper_paused_work_resume_transaction.request
   | Cancel_pending of Keeper_paused_work_cancellation_transaction.pending_request
-  | Cancel_active_lease of Keeper_paused_work_cancellation_transaction.request
   | Transfer_owner of
       { to_keeper : string
       ; request : Keeper_paused_work_transfer_transaction.request

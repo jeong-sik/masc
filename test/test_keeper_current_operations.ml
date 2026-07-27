@@ -10,27 +10,10 @@ let ok_projection = function Ok value -> value | Error _ -> fail "projection fai
 let stimulus id at = { Q.post_id = id; urgency = Normal; arrived_at = at; payload = Bootstrap }
 let queue xs = List.fold_left Q.enqueue Q.empty xs
 
-let test_event_queue_exact_state () =
-  let first = stimulus "wake-1" 1.0 and second = stimulus "wake-2" 2.0 in
-  let state = S.empty |> S.with_pending (queue [ first; second ]) |> S.with_revision 17L in
-  let state, lease = S.claim_when ~claimed_at:3.0 ~ready:(fun _ -> true) state |> ok in
-  let lease = Option.get lease in
-  (match O.project_event_queue_state ~keeper_name:"keeper-a" state with
-   | [ { source = Event_queue_lease { revision; lease = projected }; _ }
-     ; { source = Event_queue_pending { stimulus = pending; _ }; _ } ] ->
-     check string "lease id" lease.lease_id projected.lease_id;
-     check int64 "revision" 17L revision;
-     check string "pending identity" second.post_id pending.post_id
-   | operations -> failf "unexpected operation count=%d" (List.length operations));
-  let state, _ = S.settle ~settled_at:4.0 ~lease ~settlement:S.Ack state |> ok in
-  match O.project_event_queue_state ~keeper_name:"keeper-a" state with
-  | [ { source = Event_queue_pending _; _ }
-    ; ({ source = Event_queue_outbox { entry; _ }; _ } as operation) ] ->
-    check string "transition" "lease:1:ack" entry.receipt.transition_id;
-    check string "render is exact JSON"
-      (O.to_yojson operation |> Yojson.Safe.to_string) (O.render operation)
-  | operations -> failf "unexpected outbox operation count=%d" (List.length operations)
-;;
+(* [test_event_queue_exact_state] drove S.claim_when -> project -> S.settle and
+   asserted the Event_queue_lease projection and the resulting outbox receipt.
+   #25969 moved production to peek/ack; claim_when, settle and the
+   Event_queue_lease source are gone, so the case has no subject. *)
 
 let test_async_active_and_unavailable () =
   let entry : A.entry =
@@ -101,8 +84,7 @@ let test_terminal_async_entry_is_not_current () =
 let () =
   run "keeper_current_operations"
     [ "projection",
-      [ test_case "event queue exact state" `Quick test_event_queue_exact_state
-      ; test_case "async active and unavailable" `Quick test_async_active_and_unavailable
+      [ test_case "async active and unavailable" `Quick test_async_active_and_unavailable
       ; test_case "terminal async is not current" `Quick
           test_terminal_async_entry_is_not_current
       ] ]

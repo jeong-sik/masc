@@ -10,7 +10,6 @@ module Request = Keeper_paused_work_operator_request
 type request = Request.t =
   | Resume_owner of Resume.request
   | Cancel_pending of Cancellation.pending_request
-  | Cancel_active_lease of Cancellation.request
   | Transfer_owner of
       { to_keeper : string
       ; request : Transfer.request
@@ -52,10 +51,6 @@ let execute config ~keeper_name = function
     |> Result.map_error (fun error -> Resume_rejected error)
   | Cancel_pending request ->
     Cancellation.cancel_pending config ~keeper_name request
-    |> Result.map (fun success -> Cancelled success)
-    |> Result.map_error (fun error -> Cancellation_rejected error)
-  | Cancel_active_lease request ->
-    Cancellation.cancel config ~keeper_name request
     |> Result.map (fun success -> Cancelled success)
     |> Result.map_error (fun error -> Cancellation_rejected error)
   | Transfer_owner { to_keeper; request } ->
@@ -385,7 +380,6 @@ let inventory_json config ~keeper_name =
     |> Result.map_error (fun detail -> Inventory_queue_read_failed detail)
   in
   let pending = Queue_state.pending state |> Queue.to_list in
-  let active_lease = Queue_state.active_lease state in
   let pause_kind = Keeper_activation_readiness.pause_kind meta in
   Ok
     (`Assoc
@@ -406,10 +400,12 @@ let inventory_json config ~keeper_name =
             [ "revision", `Intlit (Int64.to_string (Queue_state.revision state))
             ; "pending_count", `Int (List.length pending)
             ; "pending", `List (List.map pending_item_to_yojson pending)
-            ; ( "active_lease"
-              , match active_lease with
-                | None -> `Null
-                | Some lease -> Queue_state.lease_to_yojson lease )
+              (* "active_lease" was reported here. It read
+                 [Queue_state.active_lease], which has answered [None] -- and so
+                 rendered `Null -- since #25969 moved production to peek/ack and
+                 left [State.of_yojson] restoring no leases. The field is
+                 dropped rather than pinned to null so the wire stops describing
+                 a concept the queue no longer has. *)
             ; ( "transition_outbox_count"
               , `Int (List.length (Queue_state.transition_outbox state)) )
             ] )

@@ -9,7 +9,6 @@ module Source_terminal = Keeper_paused_work_source_terminal_transaction
 type t =
   | Resume_owner of Resume.request
   | Cancel_pending of Cancellation.pending_request
-  | Cancel_active_lease of Cancellation.request
   | Transfer_owner of
       { to_keeper : string
       ; request : Transfer.request
@@ -107,40 +106,6 @@ let parse_cancel_pending = function
   | _ -> Error "pending cancel_accepted request fields are not exact"
 ;;
 
-let parse_cancel_active_lease = function
-  | [ ("lease", lease_json)
-    ; ("operation", `String "cancel_accepted")
-    ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
-    ; ("reason", `String reason)
-    ; ("schema", `String request_schema)
-    ; ("settled_at", settled_at_json)
-    ; ("source_revision", source_revision_json)
-    ; ("source_state", `String "active_lease")
-    ]
-    when String.equal request_schema schema ->
-    let* lease = Queue_state.lease_of_yojson lease_json in
-    let* source_revision = int64_of_yojson "source_revision" source_revision_json in
-    let* source_revision = nonnegative_int64 "source_revision" source_revision in
-    let* settled_at = finite_float_of_yojson "settled_at" settled_at_json in
-    let* operator_operation_id =
-      nonblank "operator_operation_id" operator_operation_id
-    in
-    let* reason = nonblank "reason" reason in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
-    Ok
-      (Cancel_active_lease
-         Cancellation.
-           { source_revision
-           ; owner_nonce
-           ; lease
-           ; operator_operation_id
-           ; reason
-           ; settled_at
-           })
-  | _ -> Error "active-lease cancel_accepted request fields are not exact"
-;;
-
 let parse_transfer = function
   | [ ("continuation_binding", continuation_binding_json)
     ; ("operation", `String "transfer_owner")
@@ -233,7 +198,10 @@ let of_yojson = function
      | Some (`String "cancel_accepted"), Some (`String "pending") ->
        parse_cancel_pending fields
      | Some (`String "cancel_accepted"), Some (`String "active_lease") ->
-       parse_cancel_active_lease fields
+       (* The active-lease arm required an operator-supplied lease that
+          [settle_committed] then had to find in durable state; none has been
+          there since #25969 moved production to peek/ack. *)
+       Error "active-lease cancel_accepted is no longer supported"
      | Some (`String "transfer_owner"), _ -> parse_transfer fields
      | Some (`String "settle_from_source_terminal"), _ ->
        parse_source_terminal fields

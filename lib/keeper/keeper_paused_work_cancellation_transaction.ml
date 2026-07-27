@@ -1,11 +1,6 @@
-type request =
-  { source_revision : int64
-  ; owner_nonce : int
-  ; lease : Keeper_registry_event_queue.lease
-  ; operator_operation_id : string
-  ; reason : string
-  ; settled_at : float
-  }
+(* [request] and [cancel] -- the active-lease arm -- lived here. They needed a
+   Keeper_registry_event_queue.lease, which no caller can obtain since #25969
+   moved production to peek/ack and which State.of_yojson never restores. *)
 
 type pending_request =
   { source : Keeper_event_queue.stimulus
@@ -95,20 +90,6 @@ let error_to_string = function
          "%s; reservation_release=%s"
          (failure_to_string cause)
          (release_outcome_to_string release))
-;;
-
-let cancellation_of_request (request : request) =
-  match Keeper_registry_event_queue.lease_stimuli request.lease with
-  | [ source ] ->
-    Ok
-      ({ source
-       ; source_revision = request.source_revision
-       ; owner_nonce = request.owner_nonce
-       ; operator_operation_id = request.operator_operation_id
-       ; reason = request.reason
-       }
-       : Keeper_registry_event_queue.accepted_cancellation)
-  | [] | _ :: _ :: _ -> Error Lease_source_invalid
 ;;
 
 let cancellation_of_pending_request (request : pending_request) :
@@ -253,28 +234,6 @@ let cancel_with_lifecycle
      with
      | `Ran outcome -> outcome
      | `Busy block -> Error (Admission_busy block))
-;;
-
-let cancel config ~keeper_name request =
-  match cancellation_of_request request with
-  | Error cause -> Error (Failed { cause; reservation_release = None })
-  | Ok cancellation ->
-    cancel_with_lifecycle
-      config
-      ~keeper_name
-      ~owner_nonce:request.owner_nonce
-      ~replay:
-        (Keeper_event_queue_state.accepted_cancellation_replay
-           request.lease
-           cancellation)
-      ~commit:(fun current_owner_nonce ->
-        Keeper_registry_event_queue.cancel_accepted_result
-          ~base_path:config.Workspace.base_path
-          keeper_name
-          ~current_owner_nonce
-          ~settled_at:request.settled_at
-          ~lease:request.lease
-          ~cancellation)
 ;;
 
 let cancel_pending config ~keeper_name request =

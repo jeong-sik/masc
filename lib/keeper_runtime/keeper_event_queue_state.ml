@@ -226,6 +226,17 @@ type outbox_entry =
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
+(* [leases] and [next_lease_sequence] are no longer part of this module's
+   interface: nothing outside it can claim, settle, or observe a lease. They
+   remain as private carriers because the three surviving pending-side
+   commits (cancel_pending_accepted, transfer_pending_accepted,
+   settle_pending_from_source_terminal) still mint a synthetic single-event
+   lease to reach [settle_committed], and because the durable settlement WAL
+   (masc.keeper_event_queue.settlement.v2) records [lease_id] and
+   [lease_sequence] inside every transition receipt and replays them by that
+   identity. Dropping the carriers therefore means a WAL schema change, not a
+   dead-code deletion. [of_yojson] never restores either field, so neither
+   survives a restart. *)
 type t =
   { revision : int64
   ; next_lease_sequence : int64
@@ -260,9 +271,7 @@ let empty =
 ;;
 
 let revision state = state.revision
-let next_lease_sequence state = state.next_lease_sequence
 let pending state = state.pending
-let leases state = state.leases
 let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
 let accepted_transfer_projections state = state.accepted_transfer_projections
@@ -270,12 +279,6 @@ let exact_execution_binding state =
   match state.exact_execution_bindings with
   | [] -> None
   | binding :: _ -> Some binding
-;;
-let lease_kind (lease : lease) = lease.kind
-let active_lease state =
-  match state.leases with
-  | [] -> None
-  | lease :: _ -> Some lease
 ;;
 
 let accounted_stimuli state =

@@ -226,41 +226,12 @@ let test_inventory_exposes_exact_durable_fences () =
       Alcotest.(check int)
         "inventory exact pending count"
         1
-        (json |> member "queue" |> member "pending" |> to_list |> List.length);
-      ignore
-        (Persistence.claim_when_result
-           ~base_path
-           ~keeper_name
-           ~claimed_at:3.0
-           ~ready:(fun _ -> true)
-           ()
-         |> require_ok "claim inventory source"
-         |> require_some "inventory active lease");
-      let active_state =
-        Persistence.load_state_result ~base_path ~keeper_name
-        |> require_ok "load active inventory state"
-      in
-      let active_inventory =
-        Operator.inventory_json config ~keeper_name
-        |> require_inventory_ok "project active paused-work inventory"
-      in
-      let lease_json = active_inventory |> member "queue" |> member "active_lease" in
-      let active_cancel =
-        common
-          "cancel_accepted"
-          [ "source_state", `String "active_lease"
-          ; "lease", lease_json
-          ; "source_revision", int64_json (State.revision active_state)
-          ; "owner_nonce", `Int 17
-          ; "operator_operation_id", `String "operator-cancel-active"
-          ; "reason", `String "operator cancelled active retained work"
-          ; "settled_at", `Float 4.0
-          ]
-      in
-      match Operator.request_of_yojson active_cancel with
-      | Ok (Operator.Cancel_active_lease _) -> ()
-      | Ok _ -> Alcotest.fail "active lease cancellation decoded incorrectly"
-      | Error detail -> Alcotest.fail detail)
+        (json |> member "queue" |> member "pending" |> to_list |> List.length))
+      (* The tail claimed a lease so the inventory would expose
+         queue.active_lease, then decoded a cancel_accepted request with
+         source_state="active_lease". Both are gone: no caller can claim a
+         lease since #25969, the inventory no longer reports the field, and the
+         request arm is rejected at parse time. *)
 ;;
 
 let admission_error_json block =

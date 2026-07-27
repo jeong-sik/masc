@@ -181,40 +181,27 @@ let create_schedule_exn config ~schedule_id ~scheduled_by =
     fail ("schedule create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let test_event_queue_pending_and_inflight_are_visible () =
+let test_event_queue_pending_is_visible () =
   with_workspace
   @@ fun config ->
   let keeper_name = "waiting-inventory-keeper" in
   ensure_keeper config keeper_name;
+  (* This case also asserted an in-flight row: it claimed a lease over a second
+     stimulus so the inventory would report source=event_queue_inflight. #25969
+     moved production to peek/ack, no caller can claim a lease, and the
+     in-flight projection is therefore always empty. The pending half is
+     unchanged and still exercises the dashboard projection. *)
   let pending =
     stimulus ~post_id:"pending-1" ~arrived_at:100.0 Keeper_event_queue.Bootstrap
-  in
-  let inflight =
-    stimulus ~post_id:"inflight-1" ~arrived_at:110.0 Keeper_event_queue.Bootstrap
   in
   Keeper_event_queue_persistence.persist
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
-    (queue_of_list [ inflight; pending ]);
-  (match
-     Keeper_event_queue_persistence.claim_when_result
-       ~base_path:config.Workspace_utils_backend_setup.base_path
-       ~keeper_name
-       ~claimed_at:120.0
-       ~ready:(fun stimulus -> String.equal stimulus.Keeper_event_queue.post_id inflight.post_id)
-       ()
-   with
-   | Ok (Some _) -> ()
-   | Ok None -> fail "current queue fixture did not claim inflight stimulus"
-   | Error detail -> fail detail);
+    (queue_of_list [ pending ]);
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "event pending metric"
     Otel_metric_store.metric_keeper_waiting_count
     ~labels:[ "scope", "keeper"; "source", "event_queue_pending" ]
-    1.0;
-  check_metric_float "event inflight metric"
-    Otel_metric_store.metric_keeper_waiting_count
-    ~labels:[ "scope", "keeper"; "source", "event_queue_inflight" ]
     1.0;
   check_metric_float "waiting keeper metric"
     Otel_metric_store.metric_keeper_waiting_keeper_count
@@ -229,21 +216,18 @@ let test_event_queue_pending_and_inflight_are_visible () =
     (json_string_member "schema" json);
   check int "one keeper" 1 (json_int_member "keeper_count" json);
   check int "one waiting keeper" 1 (json_int_member "waiting_keeper_count" json);
-  check int "two rows" 2 (json_int_member "row_count" json);
+  check int "one row" 1 (json_int_member "row_count" json);
   match find_keeper json keeper_name with
   | None -> fail "keeper row missing"
   | Some keeper ->
     check string "state" "waiting" (json_string_member "state" keeper);
-    check int "waiting count" 2 (json_int_member "waiting_count" keeper);
+    check int "waiting count" 1 (json_int_member "waiting_count" keeper);
     check int "pending source" 1 U.(keeper |> member "sources" |> member "event_queue_pending" |> to_int);
-    check int "inflight source" 1 U.(keeper |> member "sources" |> member "event_queue_inflight" |> to_int);
     (match U.(keeper |> member "waiting_on" |> to_list) with
-     | pending_row :: inflight_row :: _ ->
+     | pending_row :: _ ->
        check string "pending wake producer" "keeper_supervisor"
-         (json_string_member "wake_producer" pending_row);
-       check string "inflight wake producer" "keeper_supervisor"
-        (json_string_member "wake_producer" inflight_row)
-     | rows -> failf "expected two queue rows, got %d" (List.length rows))
+         (json_string_member "wake_producer" pending_row)
+     | rows -> failf "expected one queue row, got %d" (List.length rows))
 ;;
 
 let test_manual_compaction_waiting_row_has_typed_producer () =
@@ -1017,7 +1001,7 @@ let () =
   run "keeper_waiting_inventory"
     [ ( "dashboard_json"
       , [ test_case "event queue pending and inflight are visible" `Quick
-            test_event_queue_pending_and_inflight_are_visible
+            test_event_queue_pending_is_visible
         ; test_case "manual compaction producer is typed" `Quick
             test_manual_compaction_waiting_row_has_typed_producer
         ; test_case "chat queue pending rows are visible" `Quick

@@ -66,35 +66,8 @@ let with_temp_dir prefix f =
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
-
-let claim_manual_lease ~base_path ~keeper_name =
-  let stimulus : Q.stimulus =
-    { post_id = "manual-compaction"
-    ; urgency = Q.Immediate
-    ; arrived_at = 1.0
-    ; payload = Q.Manual_compaction_requested
-    }
-  in
-  (match
-     P.update_checked_result
-       ~base_path
-       ~keeper_name
-       (fun pending -> Ok (Q.enqueue pending stimulus))
-   with
-   | Ok () -> ()
-   | Error detail -> Alcotest.failf "manual stimulus persist failed: %s" detail);
-  match
-    P.claim_when_result
-      ~base_path
-      ~keeper_name
-      ~claimed_at:2.0
-      ~ready:(fun _ -> true)
-      ()
-  with
-  | Ok (Some lease) -> lease
-  | Ok None -> Alcotest.fail "manual lease was not claimed"
-  | Error detail -> Alcotest.failf "manual lease claim failed: %s" detail
-;;
+(* [claim_manual_lease] built a lease for the removed exact-execution fence and
+   already had no callers here. *)
 
 let persisted_checkpoint_source_exn trace_id =
   match Keeper_id.Trace_id.of_string trace_id with
@@ -111,39 +84,9 @@ let persisted_checkpoint_source_exn trace_id =
      | Error _ -> Alcotest.fail "persisted checkpoint source ref failed")
 ;;
 
-let settle_terminal_disposition_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~source
-      ~(terminal : P.exact_execution_terminal)
-      ~settled_at
-  =
-  let disposition =
-    match
-      P.prepare_exact_source_disposition_result
-        ~base_path
-        ~keeper_name
-        ~lease
-        ~source
-        ~terminal
-        ~semantic:P.Exact_no_compaction
-        ~prepared_at:settled_at
-        ()
-    with
-    | Error detail -> Alcotest.failf "terminal disposition preparation failed: %s" detail
-    | Ok (_, P.Visible_sync_unconfirmed detail) ->
-      Alcotest.failf "terminal disposition preparation durability unknown: %s" detail
-    | Ok (disposition, P.Fsync_completed) -> disposition
-  in
-  P.finalize_exact_source_disposition_result
-    ~base_path
-    ~keeper_name
-    ~settled_at
-    ~lease
-    ~disposition_id:disposition.disposition_id
-    ()
-;;
+(* [settle_terminal_disposition_result] drove prepare/finalize of an exact
+   source disposition through a lease. Both entry points went with the lease
+   model, and this helper already had no callers here. *)
 
 let execute_prepared_lane
       ~keeper_name
@@ -980,5 +923,8 @@ let () =
             `Quick
             test_post_success_commit_claim_blocks_reject
         ] )
+      (* The "affinity and non-sharing" group held only cases whose functions
+         #25993 removed; its registrations were left behind and the group is now
+         empty. See #26013. *)
     ]
 ;;

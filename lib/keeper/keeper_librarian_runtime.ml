@@ -1312,12 +1312,15 @@ let preflight_recognition_store ?clock ~base_path ~keeper_id () =
       ~base_path
       ~cluster_name:(Env_config_core.cluster_name ())
   in
+  (* NDT-OK: one preflight timestamp defines both recovery and explicit-expiry
+     admission for this serialized fact snapshot. *)
+  let now = Unix.gettimeofday () in
   Keeper_memory_os_io.with_recognition_fact_transaction
     ?clock
     ~masc_root
     ~keeper_id
     ~on_timeout:(fun detail -> Error (Memory_apply_failed detail))
-    (fun ~rewrite:_ ~masc_root:_ ->
+    (fun ~rewrite ~masc_root:_ ->
        match Keeper_memory_os_io.read_facts_all_strict_offloaded ~keeper_id with
        | Error detail -> Error (Store_read_failed detail)
        | Ok store ->
@@ -1326,11 +1329,22 @@ let preflight_recognition_store ?clock ~base_path ~keeper_id () =
               ~masc_root
               ~keeper_id
               ~current_store:store
-              (* NDT-OK: recovery terminal timestamps are provenance metadata. *)
-              ~now:(Unix.gettimeofday ())
+              ~now
               ()
           with
-          | Ok _ -> Ok store
+          | Ok _ ->
+            let current_store =
+              List.filter (Keeper_memory_os_types.fact_is_current ~now) store
+            in
+            if Keeper_memory_os_io.same_fact_snapshot store current_store
+            then Ok store
+            else
+              (try
+                 rewrite current_store;
+                 Ok current_store
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn -> Error (Memory_apply_failed (Printexc.to_string exn)))
           | Error error -> Error (Pending_publication_blocked error)))
 ;;
 
@@ -1367,6 +1381,7 @@ let extract_and_append_with
 
 module For_testing = struct
   let apply_and_persist = apply_and_persist
+  let preflight_recognition_store = preflight_recognition_store
   let persist_cadence_backoff = persist_cadence_backoff
   let reserve_recognition_input = reserve_recognition_input
   let extract_and_append_with = extract_and_append_with

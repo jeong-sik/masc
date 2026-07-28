@@ -629,6 +629,35 @@ let test_librarian_zero_op_rejects_stale_snapshot () =
     | Ok _ -> Alcotest.fail "stale zero-op result was incorrectly published")
 ;;
 
+let test_librarian_preflight_prunes_expired_facts_before_prompt_snapshot () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "librarian-preflight-expiry" in
+    let expired =
+      { (fact_fixture ~now:1_000_000.0 ()) with
+        Types.valid_until = Some 0.0
+      }
+    in
+    let current = fact_fixture ~now:1_000_000.0 () in
+    Memory_io.append_fact ~keeper_id expired;
+    Memory_io.append_fact ~keeper_id current;
+    match
+      Librarian_runtime.For_testing.preflight_recognition_store
+        ~base_path:"/tmp/librarian-preflight-expiry"
+        ~keeper_id
+        ()
+    with
+    | Error error ->
+      Alcotest.fail
+        (Librarian_runtime.extraction_error_to_string error)
+    | Ok facts ->
+      Alcotest.(check int) "expired fact is absent from provider snapshot" 1 (List.length facts);
+      Alcotest.(check string) "current fact remains" current.Types.claim (List.hd facts).Types.claim;
+      Alcotest.(check int)
+        "expired fact is removed from canonical store"
+        1
+        (List.length (Memory_io.read_facts_all ~keeper_id)))
+;;
+
 let test_librarian_recalled_echo_persists_metadata_without_fact_rewrite () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "recalled-echo-metadata" in
@@ -4778,6 +4807,10 @@ let () =
             "librarian zero-op rejects a stale snapshot"
             `Quick
             test_librarian_zero_op_rejects_stale_snapshot
+        ; Alcotest.test_case
+            "librarian preflight prunes expired facts before the prompt snapshot"
+            `Quick
+            test_librarian_preflight_prunes_expired_facts_before_prompt_snapshot
         ; Alcotest.test_case
             "librarian recalled echo persists metadata without fact rewrite"
             `Quick

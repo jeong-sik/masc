@@ -171,6 +171,13 @@ module For_testing : sig
     -> Keeper_librarian.recognition_output
     -> (recognition_write, extraction_error) result
 
+  val preflight_recognition_store
+    :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> base_path:string
+    -> keeper_id:string
+    -> unit
+    -> (Keeper_memory_os_types.fact list, extraction_error) result
+
   val persist_cadence_backoff
     :  should_defer:bool
     -> write:(unit -> (unit, string) result)

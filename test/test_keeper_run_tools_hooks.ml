@@ -312,6 +312,26 @@ let bulky_message index =
 
 let as_json message = Masc.Keeper_context_core.message_to_json message
 
+let test_gate_causal_initial_is_request_local () =
+  let open Yojson.Safe.Util in
+  let initial =
+    Setup.gate_causal_initial
+      ~gate_history:[ `String "recent" ]
+      ~gate_history_omitted:4
+      ~user_message:"inspect the request"
+      ~dynamic_context:"current state"
+  in
+  check
+    (list string)
+    "only request-local evidence fields are captured"
+    [ "history_messages"; "history_messages_omitted"; "user_message"; "dynamic_context" ]
+    (initial |> to_assoc |> List.map fst);
+  check string "trigger is preserved" "inspect the request"
+    (initial |> member "user_message" |> to_string);
+  check string "current state is preserved" "current state"
+    (initial |> member "dynamic_context" |> to_string)
+;;
+
 let test_gate_history_keeps_newest_within_budget () =
   let messages = List.init 200 bulky_message in
   let kept, omitted = Setup.gate_history_slice messages in
@@ -401,7 +421,9 @@ let () =
             test_missing_path_falls_back_to_base_path
         ] )
     ; ( "gate_history_slice"
-      , [ test_case "keeps the newest messages within the budget" `Quick
+      , [ test_case "captures only request-local causal fields" `Quick
+            test_gate_causal_initial_is_request_local
+        ; test_case "keeps the newest messages within the budget" `Quick
             test_gate_history_keeps_newest_within_budget
         ; test_case "short history is passed through whole" `Quick
             test_gate_history_short_history_is_whole

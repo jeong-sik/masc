@@ -758,7 +758,7 @@ jobs:
         run: |
           opam exec -- dune build --root . @test/runtest-test_runtime_config_validity
 
-      - name: Run paused-work transfer and operator suites
+      - name: Run paused-work transfer and source-ACK suites
         id: paused_work_transfer_and_operator_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
@@ -767,7 +767,7 @@ jobs:
           DUNE_JOBS: 1
         run: |
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_paused_work_transfer_transaction @test/runtest-test_keeper_paused_work_operator"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_paused_work_transfer_transaction @test/runtest-test_keeper_paused_work_source_terminal_transaction @test/runtest-test_keeper_paused_work_operator"
 
       # NOTE: the "Shell IR differential-safety harness gate" step was removed
       # here. #24332 (nonhierarchical Gate refactor) retired the entire

@@ -7,14 +7,14 @@ type request = Keeper_paused_work_operator_request.t =
       { to_keeper : string
       ; request : Keeper_paused_work_transfer_transaction.request
       }
-  | Settle_from_source_terminal of
+  | Ack_source_terminal of
       Keeper_paused_work_source_terminal_transaction.request
 
 type outcome =
   | Resumed of Keeper_paused_work_resume_transaction.success
   | Cancelled of Keeper_paused_work_cancellation_transaction.success
   | Transferred of Keeper_paused_work_transfer_transaction.success
-  | Source_terminal_settled of Keeper_paused_work_source_terminal_transaction.success
+  | Source_terminal_acked of Keeper_paused_work_source_terminal_transaction.success
 
 type error =
   | Invalid_request of string

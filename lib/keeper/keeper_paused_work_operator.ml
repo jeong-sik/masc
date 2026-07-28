@@ -14,13 +14,13 @@ type request = Request.t =
       { to_keeper : string
       ; request : Transfer.request
       }
-  | Settle_from_source_terminal of Source_terminal.request
+  | Ack_source_terminal of Source_terminal.request
 
 type outcome =
   | Resumed of Resume.success
   | Cancelled of Cancellation.success
   | Transferred of Transfer.success
-  | Source_terminal_settled of Source_terminal.success
+  | Source_terminal_acked of Source_terminal.success
 
 type error =
   | Invalid_request of string
@@ -57,9 +57,9 @@ let execute config ~keeper_name = function
     Transfer.transfer_pending config ~from_keeper:keeper_name ~to_keeper request
     |> Result.map (fun success -> Transferred success)
     |> Result.map_error (fun error -> Transfer_rejected error)
-  | Settle_from_source_terminal request ->
-    Source_terminal.settle_pending config ~keeper_name request
-    |> Result.map (fun success -> Source_terminal_settled success)
+  | Ack_source_terminal request ->
+    Source_terminal.ack_pending config ~keeper_name request
+    |> Result.map (fun success -> Source_terminal_acked success)
     |> Result.map_error (fun error -> Source_terminal_rejected error)
 ;;
 
@@ -159,7 +159,7 @@ let outcome_to_yojson = function
        ; "receipt", Disposition.to_yojson success.receipt
        ]
        @ match error with None -> [] | Some detail -> [ "error", `String detail ])
-  | Source_terminal_settled (success : Source_terminal.success) ->
+  | Source_terminal_acked (success : Source_terminal.success) ->
     let commit_status =
       match success.commit_status with
       | Source_terminal.Committed -> commit_status `Committed
@@ -178,7 +178,7 @@ let outcome_to_yojson = function
     `Assoc
       ([ "ok", `Bool ok
        ; "committed", `Bool true
-       ; "operation", `String "settle_from_source_terminal"
+       ; "operation", `String "ack_source_terminal"
        ; "commit_status", `String commit_status
        ; "projection", `String projection
        ; "receipt", Disposition.to_yojson success.receipt
@@ -195,13 +195,13 @@ let outcome_projection_complete = function
       ; _
       }
   | Transferred { projection = Transfer.Applied _; _ }
-  | Source_terminal_settled { projection = Source_terminal.Applied _; _ } ->
+  | Source_terminal_acked { projection = Source_terminal.Applied _; _ } ->
     true
   | Resumed { projection = Resume.Committed_followup_failed _; _ }
   | Cancelled
       { settlement = Keeper_registry_event_queue.Committed_followup_failed _; _ }
   | Transferred { projection = Transfer.Committed_followup_failed _; _ }
-  | Source_terminal_settled
+  | Source_terminal_acked
       { projection = Source_terminal.Committed_followup_failed _; _ } ->
     false
 ;;
@@ -342,7 +342,7 @@ let error_class = function
           | Source_terminal.Receipt_read_failed _
           | Source_terminal.Receipt_write_failed _
           | Source_terminal.Durable_meta_read_failed _
-          | Source_terminal.Committed_settlement_failed _ )
+          | Source_terminal.Committed_ack_failed _ )
       ; _
       } ->
     `Unavailable

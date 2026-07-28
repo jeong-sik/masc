@@ -235,7 +235,7 @@ let transfer_of_receipt receipt =
   | Keeper_paused_work_disposition_receipt.Transfer_owner transfer -> Ok transfer
   | Keeper_paused_work_disposition_receipt.Resume_owner ->
     Error (Receipt_conflict receipt)
-  | Keeper_paused_work_disposition_receipt.Settle_from_source_terminal _ ->
+  | Keeper_paused_work_disposition_receipt.Ack_source_terminal _ ->
     Error (Receipt_conflict receipt)
 ;;
 

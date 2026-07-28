@@ -132,6 +132,25 @@ extract_event_bus_variants() {
   ' "${file}" | sort -u
 }
 
+# Closed Hook variants are control decisions, not telemetry. A new constructor
+# can compile at wildcard consumers while changing whether MASC grants tool
+# execution authority, so keep the decision, decision-kind, and approval
+# result sets in the pin fingerprint.
+extract_hook_variants() {
+  local src="$1"
+  local type_name="$2"
+  local file="${src}/lib/base/hooks.mli"
+  [[ -f "${file}" ]] || { echo "missing ${file}" >&2; return 1; }
+  awk -v type_name="${type_name}" '
+    $0 ~ ("^type " type_name "[[:space:]]*=") { inblock=1; next }
+    inblock && /^(type|val|module|exception) / { inblock=0 }
+    inblock && /^  \| [A-Z]/ {
+      sub(/^  \| /, ""); sub(/[[:space:]].*/, "");
+      print
+    }
+  ' "${file}" | sort -u
+}
+
 # Http_client error variants from the .mli type http_error.
 extract_http_error_variants() {
   local src="$1"
@@ -321,8 +340,11 @@ lines_to_json_array() {
 
 build_fingerprint() {
   local src="$1"
-  local ebv hev irr mf eod eor
+  local ebv hdv hdk tav hev irr mf eod eor
   ebv="$(extract_event_bus_variants   "${src}" | lines_to_json_array)"
+  hdv="$(extract_hook_variants "${src}" hook_decision | lines_to_json_array)"
+  hdk="$(extract_hook_variants "${src}" hook_decision_kind | lines_to_json_array)"
+  tav="$(extract_hook_variants "${src}" tool_approval | lines_to_json_array)"
   hev="$(extract_http_error_variants  "${src}" | lines_to_json_array)"
   irr="$(extract_invalid_request_reasons "${src}" | lines_to_json_array)"
   mf="$( extract_metrics_fields       "${src}" | lines_to_json_array)"
@@ -333,6 +355,9 @@ build_fingerprint() {
     --arg sha "${OAS_AGENT_SDK_SHA}" \
     --arg ver "${OAS_AGENT_SDK_BASE_VERSION}" \
     --argjson ebv "${ebv}" \
+    --argjson hdv "${hdv}" \
+    --argjson hdk "${hdk}" \
+    --argjson tav "${tav}" \
     --argjson hev "${hev}" \
     --argjson irr "${irr}" \
     --argjson mf  "${mf}" \
@@ -343,6 +368,9 @@ build_fingerprint() {
        pinned_version:    $ver,
        surfaces: {
          event_bus_payload_variants: $ebv,
+         hook_decision_variants:      $hdv,
+         hook_decision_kind_variants: $hdk,
+         tool_approval_variants:      $tav,
          http_error_variants:        $hev,
          invalid_request_reasons:    $irr,
          metrics_fields:             $mf,
@@ -461,7 +489,7 @@ case "${MODE}" in
     if ! report_metadata_diff "${prev}" "${current}"; then
       drift=1
     fi
-    for section in event_bus_payload_variants http_error_variants invalid_request_reasons metrics_fields exact_output_declarations exact_output_reexport_declarations; do
+    for section in event_bus_payload_variants hook_decision_variants hook_decision_kind_variants tool_approval_variants http_error_variants invalid_request_reasons metrics_fields exact_output_declarations exact_output_reexport_declarations; do
       prev_arr="$(jq ".surfaces.${section}" <<<"${prev}")"
       curr_arr="$(jq ".surfaces.${section}" <<<"${current}")"
       if ! report_diff "${section}" "${prev_arr}" "${curr_arr}"; then

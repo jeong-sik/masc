@@ -41,6 +41,12 @@ let payload_agent_name payload =
      | None -> Json_util.get_string payload "keeper_name")
 ;;
 
+let tool_approval_label = function
+  | Agent_sdk.Hooks.Approved -> "approved"
+  | Agent_sdk.Hooks.Denied -> "denied"
+  | Agent_sdk.Hooks.Timed_out -> "timed_out"
+;;
+
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
   let log_at level message =
     Log.Oas_event.emit level ~details:json message
@@ -81,6 +87,14 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
   | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
     log_routine
       (Printf.sprintf "tool completed agent=%s tool_name=%s" agent_name tool_name)
+  | Agent_sdk.Event_bus.ToolApprovalCompleted
+      { agent_name; tool_name; approval; _ } ->
+    log_routine
+      (Printf.sprintf
+         "tool approval completed agent=%s tool_name=%s approval=%s"
+         agent_name
+         tool_name
+         (tool_approval_label approval))
   | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
     (* [substrate:tool_surface] — deterministic per-turn snapshot of the
          tool list the LLM actually sees this turn (after guardrails,
@@ -258,6 +272,23 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          @ execution_id_fields)
     in
     Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
+  | Agent_sdk.Event_bus.ToolApprovalCompleted
+      { invocation; agent_name; tool_name; approval } ->
+    let payload =
+      `Assoc
+        ([ "agent_name", `String agent_name
+         ; "tool_name", `String tool_name
+         ; "approval", `String (tool_approval_label approval)
+         ]
+         @ invocation_payload_fields invocation)
+    in
+    Some
+      (wrap
+         ~event_type:"tool_approval_completed"
+         ~payload
+         ~agent_name
+         ~tool_name
+         ())
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
     let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
     Some (wrap ~event_type:"turn_started" ~payload ~agent_name ~turn ())

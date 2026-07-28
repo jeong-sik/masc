@@ -315,7 +315,7 @@ jobs:
             tla=true
           fi
 
-          if has_match '^(ci/check-oas-pin\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/sync-oas-pin-manifests\.sh$|dune-project$|.*\.opam$|masc\.opam\.locked$|docs/KEEPER-USER-MANUAL\.md$|docs/OAS-UTILIZATION-AUDIT\.md$)'; then
+          if has_match '^(ci/check-oas-pin\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/oas-drift-check\.sh$|scripts/oas-api-surface\.json$|scripts/sync-oas-pin-docs\.sh$|scripts/sync-oas-pin-manifests\.sh$|dune-project$|.*\.opam$|masc\.opam\.locked$|docs/KEEPER-USER-MANUAL\.md$|docs/OAS-UTILIZATION-AUDIT\.md$)'; then
             oas_pin=true
           fi
 
@@ -388,7 +388,7 @@ jobs:
       - name: Install meta shell dependencies
         run: |
           bash scripts/ci/apt-refresh.sh
-          sudo apt-get install -y -qq ripgrep
+          sudo apt-get install -y -qq jq ripgrep
 
       - name: Check single OCaml compile authority
         run: bash scripts/ci/check-ocaml-compile-authority.sh
@@ -430,8 +430,9 @@ jobs:
       - name: Check OAS pin consistency
         if: needs.changes.outputs.oas_pin == 'true'
         run: |
-          chmod +x scripts/check-oas-pin.sh
+          chmod +x scripts/check-oas-pin.sh scripts/oas-drift-check.sh
           scripts/check-oas-pin.sh --local-only
+          scripts/oas-drift-check.sh
 
       - name: Run report self-test
         if: needs.changes.outputs.lib_deps == 'true'
@@ -797,6 +798,19 @@ jobs:
       # refactors without identifying a runtime regression. `@check` above
       # still compiles every test target; the authoritative runtime, operator,
       # transport, SSE, and contract suites below remain executable gates.
+
+      - name: Run OAS pin behavior suite
+        id: oas_pin_behavior_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' && needs.changes.outputs.oas_pin == 'true' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          oas_pin_targets="@test/runtest-test_keeper_hooks_oas_introspection @test/runtest-test_keeper_execution_join"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${oas_pin_targets}"
 
       - name: Run operator control suite
         id: operator_control_suite

@@ -46,12 +46,37 @@ let comment ~post_id ~author ~content =
   | Ok _comment -> ()
 ;;
 
-let state_label = function
-  | Board_signal.Unavailable u -> "unavailable:" ^ Board_signal.unavailable_to_string u
-  | Board_signal.Available `Never -> "never"
-  | Board_signal.Available `No_new_external -> "no_new_external"
-  | Board_signal.Available (`New_external (n, author, _)) ->
-    Printf.sprintf "new_external:%d:%s" n author
+let expect_new_external ~label ~count ~author = function
+  | Board_signal.Available (`New_external (actual_count, actual_author, _)) ->
+    check int (label ^ ": count") count actual_count;
+    check string (label ^ ": author") author actual_author
+  | Board_signal.Unavailable unavailable ->
+    failf "%s: board read unavailable: %s" label
+      (Board_signal.unavailable_to_string unavailable)
+  | Board_signal.Available `Never -> failf "%s: expected external activity, got never" label
+  | Board_signal.Available `No_new_external ->
+    failf "%s: expected external activity, got no new activity" label
+;;
+
+let expect_no_new_external ~label = function
+  | Board_signal.Available `No_new_external -> ()
+  | Board_signal.Unavailable unavailable ->
+    failf "%s: board read unavailable: %s" label
+      (Board_signal.unavailable_to_string unavailable)
+  | Board_signal.Available `Never -> failf "%s: expected participation, got never" label
+  | Board_signal.Available (`New_external _) ->
+    failf "%s: expected no new activity, got external activity" label
+;;
+
+let expect_never ~label = function
+  | Board_signal.Available `Never -> ()
+  | Board_signal.Unavailable unavailable ->
+    failf "%s: board read unavailable: %s" label
+      (Board_signal.unavailable_to_string unavailable)
+  | Board_signal.Available `No_new_external ->
+    failf "%s: expected non-participation, got participation" label
+  | Board_signal.Available (`New_external _) ->
+    failf "%s: expected non-participation, got external activity" label
 ;;
 
 let temp_dir () =
@@ -97,9 +122,11 @@ let test_post_author_is_a_participant () =
   let self_ids = keeper_ids "verifier" in
   let post_id = create_post ~author:"verifier" ~title:"blocker" in
   comment ~post_id ~author:"operator" ~content:"resolved - assignment withdrawn";
-  check string "reply to my own post is new external activity"
-    "new_external:1:operator"
-    (state_label (Board_signal.check_self_thread_status ~self_ids ~post_id))
+  Board_signal.check_self_thread_status ~self_ids ~post_id
+  |> expect_new_external
+       ~label:"reply to my own post is new external activity"
+       ~count:1
+       ~author:"operator"
 ;;
 
 (* Authorship alone, with nobody having answered yet, is participation without
@@ -108,9 +135,8 @@ let test_post_author_is_a_participant () =
 let test_own_post_without_replies_is_participation_without_news () =
   let self_ids = keeper_ids "verifier" in
   let post_id = create_post ~author:"verifier" ~title:"blocker" in
-  check string "my own unanswered post is not news to me"
-    "no_new_external"
-    (state_label (Board_signal.check_self_thread_status ~self_ids ~post_id))
+  Board_signal.check_self_thread_status ~self_ids ~post_id
+  |> expect_no_new_external ~label:"my own unanswered post is not news to me"
 ;;
 
 (* A keeper with no post and no comment in the thread stays a non-participant;
@@ -120,9 +146,8 @@ let test_uninvolved_keeper_is_not_a_participant () =
   let self_ids = keeper_ids "bystander" in
   let post_id = create_post ~author:"verifier" ~title:"blocker" in
   comment ~post_id ~author:"operator" ~content:"resolved";
-  check string "no post and no comment means no participation"
-    "never"
-    (state_label (Board_signal.check_self_thread_status ~self_ids ~post_id))
+  Board_signal.check_self_thread_status ~self_ids ~post_id
+  |> expect_never ~label:"no post and no comment means no participation"
 ;;
 
 (* The pre-existing comment route must keep working unchanged. *)
@@ -131,9 +156,11 @@ let test_commenter_is_still_a_participant () =
   let post_id = create_post ~author:"external-author" ~title:"thread" in
   comment ~post_id ~author:"rondo" ~content:"rondo was here";
   comment ~post_id ~author:"operator" ~content:"follow up";
-  check string "reply after my comment is new external activity"
-    "new_external:1:operator"
-    (state_label (Board_signal.check_self_thread_status ~self_ids ~post_id))
+  Board_signal.check_self_thread_status ~self_ids ~post_id
+  |> expect_new_external
+       ~label:"reply after my comment is new external activity"
+       ~count:1
+       ~author:"operator"
 ;;
 
 (* The baseline is the keeper's LATEST contribution across both kinds. A reply
@@ -144,13 +171,14 @@ let test_baseline_is_the_latest_self_contribution () =
   let post_id = create_post ~author:"verifier" ~title:"blocker" in
   comment ~post_id ~author:"operator" ~content:"first answer";
   comment ~post_id ~author:"verifier" ~content:"acknowledged";
-  check string "nothing external since my own last word"
-    "no_new_external"
-    (state_label (Board_signal.check_self_thread_status ~self_ids ~post_id));
+  Board_signal.check_self_thread_status ~self_ids ~post_id
+  |> expect_no_new_external ~label:"nothing external since my own last word";
   comment ~post_id ~author:"operator" ~content:"second answer";
-  check string "a later external reply re-triggers"
-    "new_external:1:operator"
-    (state_label (Board_signal.check_self_thread_status ~self_ids ~post_id))
+  Board_signal.check_self_thread_status ~self_ids ~post_id
+  |> expect_new_external
+       ~label:"a later external reply re-triggers"
+       ~count:1
+       ~author:"operator"
 ;;
 
 let () =

@@ -29,6 +29,13 @@ let json_snapshot ~index snapshot =
 
 let stop ~index = Agent_sdk.Types.ContentBlockStop { index }
 
+(* Unlike [start], this does not hardcode content_type = "tool_use" — it
+   represents a genuinely non-tool content block (e.g. text/thinking), which
+   carries no tool identity because it is not a tool block at all. *)
+let non_tool_start ~index ~content_type =
+  Agent_sdk.Types.ContentBlockStart
+    { index; content_type; tool_id = None; tool_name = None }
+
 let media_delta ~index data =
   Agent_sdk.Types.ContentBlockDelta
     { index
@@ -84,6 +91,17 @@ let test_replayed_start_keeps_received_fragments () =
     [ { call_id = "call-replayed"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
     (A.to_tool_calls t)
 
+let test_tool_identity_is_trimmed_before_persistence () =
+  let t = A.create () in
+  A.on_event t
+    (start ~index:0 ~tool_id:(Some " call-trimmed ")
+       ~tool_name:(Some " Read "));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "persisted identity matches live trimmed identity"
+    [ { call_id = "call-trimmed"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
+    (A.to_tool_calls t)
+
 let test_conflicting_start_cannot_reopen_until_stop () =
   let t = A.create () in
   A.on_event t (start ~index:0 ~tool_id:(Some "call-a") ~tool_name:(Some "Read"));
@@ -126,7 +144,7 @@ let test_message_stop_finalizes_open_blocks () =
 
 let test_non_tool_events_are_ignored () =
   let t = A.create () in
-  A.on_event t (start ~index:0 ~tool_id:None ~tool_name:None);
+  A.on_event t (non_tool_start ~index:0 ~content_type:"text");
   A.on_event t (json_delta ~index:0 "{\"ignored\":true}");
   A.on_event t (stop ~index:0);
   check (list tool_call) "no calls" [] (A.to_tool_calls t)
@@ -136,11 +154,48 @@ let test_identity_free_non_tool_start_preserves_active_tool () =
   A.on_event t
     (start ~index:0 ~tool_id:(Some "call-active") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":");
-  A.on_event t (start ~index:0 ~tool_id:None ~tool_name:None);
+  A.on_event t (non_tool_start ~index:0 ~content_type:"text");
   A.on_event t (json_delta ~index:0 "\"a.ml\"}");
   A.on_event t (stop ~index:0);
   check (list tool_call) "identity-free non-tool start leaves active call intact"
     [ { call_id = "call-active"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
+    (A.to_tool_calls t)
+
+(* masc#26071 review round 3: content_type = "tool_use" with no id/name is not
+   a non-tool start — it is the malformed-tool-typed case the bridge
+   tombstones (Tool_start_missing_identity). Unlike a genuinely non-tool
+   start, the bridge's handler for this case does not consult the existing
+   block: it unconditionally invalidates whatever was at that index,
+   discarding an in-progress active tool's fragments too. *)
+let test_malformed_tool_use_start_invalidates_active_tool () =
+  let t = A.create () in
+  A.on_event t
+    (start ~index:0 ~tool_id:(Some "call-active") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
+  A.on_event t (start ~index:0 ~tool_id:None ~tool_name:None);
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "malformed tool-use start drops the active call" []
+    (A.to_tool_calls t)
+
+(* Fresh evidence beyond the malformed-start review: a valid tool start
+   arrives at the same index a malformed tool-use start already tombstoned,
+   before that block's own terminator. The bridge keeps the index
+   Invalid_tool_block until its stop and never emits Tool_call_start for the
+   later valid start; the collector must not open a fresh block either. *)
+let test_valid_start_after_malformed_tool_use_on_same_index_is_dropped () =
+  let t = A.create () in
+  A.on_event t (start ~index:0 ~tool_id:None ~tool_name:None);
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-e") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"e.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "valid start after malformed tool-use start is dropped" []
+    (A.to_tool_calls t);
+  (* The stop clears the tombstone; the index is reusable afterwards. *)
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-f") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"f.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "index reusable after malformed block's stop"
+    [ { call_id = "call-f"; call_name = "Read"; args = "{\"path\":\"f.ml\"}" } ]
     (A.to_tool_calls t)
 
 let test_invalid_tool_starts_are_ignored () =
@@ -153,6 +208,9 @@ let test_invalid_tool_starts_are_ignored () =
   A.on_event t (Agent_sdk.Types.ContentBlockStart
     { index = 1; content_type = "text"; tool_id = Some "call-x"; tool_name = Some "Read" });
   A.on_event t (json_delta ~index:1 "{\"path\":\"b.ml\"}");
+  A.on_event t
+    (start ~index:1 ~tool_id:(Some "call-y") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:1 "{\"path\":\"y.ml\"}");
   A.on_event t (stop ~index:1);
   check (list tool_call) "invalid starts ignored" [] (A.to_tool_calls t)
 
@@ -197,12 +255,18 @@ let () =
         ; test_case "snapshot replaces fragments" `Quick test_snapshot_replaces_fragments
         ; test_case "parallel blocks keep provider order" `Quick test_parallel_blocks_keep_provider_order
         ; test_case "replayed start keeps fragments" `Quick test_replayed_start_keeps_received_fragments
+        ; test_case "tool identity is trimmed before persistence" `Quick
+            test_tool_identity_is_trimmed_before_persistence
         ; test_case "conflicting start stays closed until stop" `Quick test_conflicting_start_cannot_reopen_until_stop
         ; test_case "block without call id is dropped" `Quick test_block_without_call_id_is_dropped
         ; test_case "message stop finalizes open blocks" `Quick test_message_stop_finalizes_open_blocks
         ; test_case "non-tool events are ignored" `Quick test_non_tool_events_are_ignored
         ; test_case "identity-free non-tool start preserves active tool" `Quick
             test_identity_free_non_tool_start_preserves_active_tool
+        ; test_case "malformed tool-use start invalidates active tool" `Quick
+            test_malformed_tool_use_start_invalidates_active_tool
+        ; test_case "valid start stays dropped until malformed stop" `Quick
+            test_valid_start_after_malformed_tool_use_on_same_index_is_dropped
         ; test_case "invalid tool starts are ignored" `Quick test_invalid_tool_starts_are_ignored
         ; test_case "tool start on media-occupied index is dropped" `Quick
             test_tool_start_on_media_occupied_index_is_dropped

@@ -311,6 +311,7 @@ val append_assistant_message_result :
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->
+  ?assistant_kind:Row_kind.t ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->

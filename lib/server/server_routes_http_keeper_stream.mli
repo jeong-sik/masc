@@ -213,14 +213,14 @@ val process_single_turn :
 
     [queued_turn] (default [false], set [true] only by
     [Server_bootstrap_loops]'s queue-consumer [handle_turn] wiring) changes
-    ONLY the [No_visible_reply]/empty-[Visible_reply] outcome: the
-    interactive HTTP stream keeps recording the user line only
-    ([persist_user_message_only]), matching its existing "the keeper will
-    answer on the next turn" semantics; a queued turn instead persists a
-    typed failure row via [persist_failure_reply]. A queued message was
-    already leased from [Keeper_chat_queue] — there is no "next turn" for
-    it to ride along with, so silence here is terminal, not merely
-    deferred. *)
+    ONLY the [No_visible_reply]/empty-[Visible_reply] outcome. A persisted
+    media block is a delivered reply even when its text is empty. With no
+    visible blocks, the interactive HTTP stream keeps recording the user line
+    only ([persist_user_message_only]), matching its existing "the keeper will
+    answer on the next turn" semantics; a queued turn instead persists a typed
+    failure row via [persist_failure_reply]. A queued message was already
+    leased from [Keeper_chat_queue] — there is no "next turn" for it to ride
+    along with, so true silence here is terminal, not merely deferred. *)
 
 (** {1 Testing helpers} *)
 
@@ -293,6 +293,11 @@ module For_testing : sig
     turn_ref:Ids.Turn_ref.t option ->
     (unit, string) result ->
     (queued_turn_outcome option, string) result
+  val empty_reply_delivery_plan :
+    queued_turn:bool ->
+    has_visible_blocks:bool ->
+    has_tool_calls:bool ->
+    [ `Visible_blocks | `Tool_calls_only | `Failure | `User_only ]
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val keeper_tool_failure_log_details :

@@ -499,6 +499,17 @@ let test_terminal_commit_error_cannot_become_delivery_success () =
   check_error "direct commit preserves typed Error" false;
   check_error "queued commit preserves typed Error" true
 
+let test_media_only_queued_reply_uses_delivery_path () =
+  match
+    Stream.For_testing.empty_reply_delivery_plan
+      ~queued_turn:true
+      ~has_visible_blocks:true
+      ~has_tool_calls:false
+  with
+  | `Visible_blocks -> ()
+  | `Tool_calls_only | `Failure | `User_only ->
+    fail "media-only queued reply must use the delivered assistant path"
+
 let body fields = `Assoc fields
 
 let test_direct_reply_visible_text () =
@@ -570,6 +581,8 @@ let () =
             test_queued_delivery_requires_exact_turn_ref;
           test_case "terminal commit error cannot become delivery success" `Quick
             test_terminal_commit_error_cannot_become_delivery_success;
+          test_case "media-only queued reply uses delivery path" `Quick
+            test_media_only_queued_reply_uses_delivery_path;
         ] );
       ( "direct_reply",
         [

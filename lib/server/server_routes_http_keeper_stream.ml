@@ -1440,6 +1440,15 @@ let committed_delivery_outcome ~queued_turn ~turn_ref = function
          then Some (queued_delivery_outcome_of_turn_ref turn_ref)
          else None)
 
+let empty_reply_delivery_plan ~queued_turn ~has_visible_blocks ~has_tool_calls =
+  if has_visible_blocks
+  then `Visible_blocks
+  else if has_tool_calls
+  then `Tool_calls_only
+  else if queued_turn
+  then `Failure
+  else `User_only
+
 type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 
 type translated_keeper_stream_event =
@@ -1922,6 +1931,7 @@ let process_single_turn ~user_row_origin ~queued_turn
             ~content
             ~tool_calls
             ~surface:chat_surface
+            ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
             ?turn_ref
             ~stream_lifecycle:errored_stream_lifecycle
             ()
@@ -2339,35 +2349,36 @@ let process_single_turn ~user_row_origin ~queued_turn
                        let detail =
                          "no visible reply was produced for this queued message"
                        in
-                       if queued_turn
-                       then
-                         let persist =
-                           if has_visible_blocks || tool_calls <> []
-                           then if tool_calls <> [] && not has_visible_blocks
-                           then persist_tool_calls_only ()
-                           else persist_assistant_reply ~assistant_content:""
-                           else persist_failure_reply ?turn_ref detail
-                         in
-                         (match persist with
-                          | Ok () ->
-                            if has_visible_blocks || tool_calls <> []
-                            then
-                              Keeper_chat_broadcast.chat_appended
-                                ~keeper_name:payload.name ~source:chat_source ();
-                            Ok (Some (Failed { kind = No_visible_reply; detail }))
-                          | Error persist_error -> Error persist_error)
-                       else if has_visible_blocks || tool_calls <> []
-                       then if tool_calls <> [] && not has_visible_blocks
-                       then
-                        Result.bind
-                          (persist_tool_calls_only ())
-                          (fun () -> broadcast_after_tool_only_persist ())
-                       else
-                         persist_assistant_reply ~assistant_content:""
-                         |> delivered_after_persist
-                       else (
-                         persist_user_message_only ();
-                         Ok None)
+                       (match
+                          empty_reply_delivery_plan ~queued_turn
+                            ~has_visible_blocks
+                            ~has_tool_calls:(tool_calls <> [])
+                        with
+                        | `Visible_blocks ->
+                          persist_assistant_reply ~assistant_content:""
+                          |> delivered_after_persist
+                        | `Tool_calls_only ->
+                          Result.bind
+                            (persist_tool_calls_only ())
+                            (fun () ->
+                               Keeper_chat_broadcast.chat_appended
+                                 ~keeper_name:payload.name
+                                 ~source:chat_source
+                                 ();
+                               if queued_turn
+                               then
+                                 Ok
+                                   (Some
+                                      (Failed
+                                         { kind = No_visible_reply; detail }))
+                               else Ok None)
+                        | `Failure ->
+                          persist_failure_reply ?turn_ref detail
+                          |> Result.map (fun () ->
+                                 Some (Failed { kind = No_visible_reply; detail }))
+                        | `User_only ->
+                          persist_user_message_only ();
+                          Ok None)
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
@@ -3224,6 +3235,7 @@ module For_testing = struct
   let queued_delivery_outcome_of_turn_ref =
     queued_delivery_outcome_of_turn_ref
   let committed_delivery_outcome = committed_delivery_outcome
+  let empty_reply_delivery_plan = empty_reply_delivery_plan
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details

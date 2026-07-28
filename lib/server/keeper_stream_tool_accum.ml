@@ -73,16 +73,31 @@ let replace_fragments t index snapshot =
   | None -> ()
   | Some block -> replace_block t index { block with args_fragments = [ snapshot ] }
 
-let stream_start_is_tool (evt : Agent_sdk.Types.sse_event) =
+(* [sse_event_is_deliverable_progress_signal] answers a [content_type = "tool_use"]
+   check alone (agent_sdk's [Streaming.sse_event_is_deliverable_progress_signal]),
+   independent of whether identity fields are populated. Keeping that check
+   separate from the identity check below lets the malformed-but-tool-typed
+   case (deliverable, no id/name) be told apart from a genuinely non-tool
+   start (not deliverable): the bridge tombstones the former
+   (Tool_start_missing_identity, keeper_chat_oas_stream_bridge.ml's
+   ContentBlockStart handler) and leaves the latter's index untouched. *)
+let stream_start_is_tool_progress (evt : Agent_sdk.Types.sse_event) =
   match evt with
-  | Agent_sdk.Types.ContentBlockStart { content_type; tool_id; tool_name; _ } ->
+  | Agent_sdk.Types.ContentBlockStart _ ->
     Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal evt
-    &&
-    (match tool_id, tool_name with
-     | Some tid, Some tname
-       when String.trim tid <> "" && String.trim tname <> "" -> true
-     | _ -> false)
   | _ -> false
+
+let stream_start_has_tool_identity (evt : Agent_sdk.Types.sse_event) =
+  match evt with
+  | Agent_sdk.Types.ContentBlockStart { tool_id; tool_name; _ } -> (
+    match tool_id, tool_name with
+    | Some tid, Some tname
+      when String.trim tid <> "" && String.trim tname <> "" -> true
+    | _ -> false)
+  | _ -> false
+
+let stream_start_is_tool evt =
+  stream_start_is_tool_progress evt && stream_start_has_tool_identity evt
 
 let on_event t (evt : Agent_sdk.Types.sse_event) =
   match evt with
@@ -90,7 +105,9 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
     if List.mem index t.invalid_indices
     then ()
     else if stream_start_is_tool evt then (
-      match block_for_index t index, tool_id, tool_name with
+      let call_id = Option.map String.trim tool_id in
+      let call_name = Option.map String.trim tool_name in
+      match block_for_index t index, call_id, call_name with
       (* Providers may replay a start event after its JSON deltas. It is the
          same open block, not a replacement, so retaining it preserves the
          already received fragments. A conflicting replay is malformed and is
@@ -106,15 +123,23 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
         let opened_at = t.next_opened_at in
         t.next_opened_at <- opened_at + 1;
         replace_block t index
-          { opened_at; call_id = tool_id; call_name = tool_name; args_fragments = [] })
+          { opened_at; call_id; call_name; args_fragments = [] })
+    else if stream_start_is_tool_progress evt
+    then
+      (* Deliverable tool-use content type but missing/blank identity: the
+         live bridge tombstones this index (Tool_start_missing_identity)
+         until its terminator, so a later valid start at the same index must
+         not resurrect it as a fresh block. *)
+      invalidate_index t index
     else
       (match tool_id, tool_name with
        | None, None ->
-         (* The live OAS bridge emits an identity-free non-tool start without
-            changing index occupancy. Preserve an active tool block and leave
-            an empty index empty so durable history matches the live stream. *)
+         (* An identity-free non-tool block leaves occupancy untouched. *)
          ()
-       | Some _, _ | _, Some _ -> invalidate_index t index)
+       | Some _, _ | _, Some _ ->
+         (* The live bridge tombstones a non-tool block carrying tool identity
+            until its stop, so it cannot be reopened as a valid tool block. *)
+         invalidate_index t index)
   | Agent_sdk.Types.ContentBlockDelta
       { index; delta = Agent_sdk.Types.InputJsonDelta fragment } ->
     append_fragment t index fragment

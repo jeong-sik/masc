@@ -827,6 +827,21 @@ describe('thread history merge & persistence', () => {
     expect(tool?.delivery).toBe('history')
   })
 
+  it('normalizes persisted tool identity to the live stream convention', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_000,
+        tool_call_id: ' toolu_trimmed ',
+        tool_call_name: ' Read ',
+      },
+    ])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.id).toBe('tool-toolu_trimmed')
+    expect(entries[0]?.label).toBe('Read')
+  })
+
   it('decodes persisted attachments so uploads survive a reload', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

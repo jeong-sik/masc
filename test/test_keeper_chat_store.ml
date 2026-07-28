@@ -150,7 +150,7 @@ let test_append_turn_roundtrip () =
         ~user_attachments:[]
         ~tool_calls:
           [
-            { K.call_id = "toolu_1"; call_name = "Read"; args = {|{"path":"x"}|} };
+            { K.call_id = " toolu_1 "; call_name = "Read"; args = {|{"path":"x"}|} };
             (* Empty args normalise to "{}", empty id to a positional one. *)
             { K.call_id = ""; call_name = "masc_status"; args = "  " };
           ]
@@ -787,6 +787,38 @@ let test_orphan_leading_tool_lines_trimmed () =
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "leading orphan tool trimmed"
         [ "user"; "assistant" ] (roles messages))
+
+let test_leading_failure_tool_batch_is_retained () =
+  let base_dir = temp_base_path "keeper-chat-store-leading-failure-tools" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-leading-failure-tools" in
+      (match
+         K.append_assistant_message_result ~base_dir ~keeper_name
+           ~content:"Keeper request failed: projection rejected"
+           ~tool_calls:
+             [ { K.call_id = "failure-call"
+               ; call_name = "Read"
+               ; args = {|{"path":"lib/a.ml"}|}
+               }
+             ]
+           ~assistant_kind:K.Row_kind.Transport_failure
+           ()
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      match K.load ~base_dir ~keeper_name with
+      | [ tool; failure ] ->
+        Alcotest.(check string) "tool row remains first" "tool"
+          (K.Role.to_label tool.role);
+        Alcotest.(check (option string)) "tool identity retained"
+          (Some "failure-call") tool.tool_call_id;
+        Alcotest.(check bool) "terminal row proves failure batch" true
+          (K.Row_kind.equal failure.kind K.Row_kind.Transport_failure)
+      | messages ->
+        Alcotest.failf "expected failure tool batch, got roles [%s]"
+          (String.concat "; " (roles messages)))
 
 let test_identified_tool_only_history_is_not_trimmed () =
   let base_dir = temp_base_path "keeper-chat-store-identified-tool-only" in
@@ -2166,6 +2198,8 @@ let () =
             test_window_keeps_tool_lines_of_retained_turns;
           Alcotest.test_case "orphan leading tool lines trimmed" `Quick
             test_orphan_leading_tool_lines_trimmed;
+          Alcotest.test_case "leading failure tool batch is retained" `Quick
+            test_leading_failure_tool_batch_is_retained;
           Alcotest.test_case "identified tool-only history is retained" `Quick
             test_identified_tool_only_history_is_not_trimmed;
           Alcotest.test_case "tail-bounded load matches full-scan window (RFC-0226 P2)"

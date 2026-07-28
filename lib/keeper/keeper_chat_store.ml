@@ -782,7 +782,9 @@ let normalize_tool_args args =
   if String.trim args = "" then "{}" else args
 
 let normalize_tool_call_id ~position call_id =
-  if String.trim call_id = "" then Printf.sprintf "tc-%d" position else call_id
+  match String.trim call_id with
+  | "" -> Printf.sprintf "tc-%d" position
+  | normalized -> normalized
 
 (* RFC-0232 §3.3: the append IS the parse boundary.  Mentions are
    derived from the content that is actually persisted (post-redaction),
@@ -963,8 +965,9 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
    propagate it. The failure is still counted + warn-logged here so callers that
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
 let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
-    ?(tool_calls = []) ?surface ?conversation_id ?audio ?blocks ?turn_ref
-    ?stream_lifecycle () : (unit, string) result =
+    ?(tool_calls = []) ?surface ?conversation_id ?audio
+    ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
+    () : (unit, string) result =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -987,7 +990,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
-        ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+        ?audio ~kind:assistant_kind ?blocks ?turn_ref ?stream_lifecycle ()
     in
     let payload =
       String.concat "\n" (tool_lines @ [ line ]) ^ "\n"
@@ -1623,11 +1626,23 @@ let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
    window evicts their owning user row. Current tool-only continuations carry
    [turn_ref] or an idempotent [delivery_key] and remain valid even when they
    are the first retained row. *)
-let rec drop_leading_orphan_tool_messages = function
-  | ({ turn_ref = None; delivery_key = None; _ } as msg) :: rest
-    when is_tool_message msg ->
-    drop_leading_orphan_tool_messages rest
-  | messages -> messages
+let drop_leading_orphan_tool_messages messages =
+  let rec split anonymous_tools = function
+    | ({ turn_ref = None; delivery_key = None; _ } as msg) :: rest
+      when is_tool_message msg ->
+      split (msg :: anonymous_tools) rest
+    | rest -> List.rev anonymous_tools, rest
+  in
+  match split [] messages with
+  | [], _ -> messages
+  | anonymous_tools,
+    ({ role = Role.Assistant; kind = Row_kind.Transport_failure; _ } :: _ as rest) ->
+    (* Failure persistence is one ordered batch: tool rows followed by its
+       typed terminal assistant row. The user row may already have been
+       persisted upstream or may fall just outside this page, so the terminal
+       marker—not a guessed missing parent—proves these leading rows belong. *)
+    anonymous_tools @ rest
+  | _, rest -> rest
 
 (* RFC-0226 P2: [load] serves a fixed window ([max_total_lines]) but
    used to read and JSON-parse the whole file to build it, so its cost

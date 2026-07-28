@@ -1603,12 +1603,14 @@ interface RestChatHistoryMessage {
  *  raw content is used as-is — formatKeeperVisibleReply is for keeper
  *  reply text and would mangle argument JSON. */
 function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEntry | null {
-  if (!message.tool_call_id || !message.tool_call_name) return null
+  const toolCallId = message.tool_call_id?.trim()
+  const toolCallName = message.tool_call_name?.trim()
+  if (!toolCallId || !toolCallName) return null
   return {
-    id: toolEntryIdFromCallId(message.tool_call_id),
+    id: toolEntryIdFromCallId(toolCallId),
     role: 'tool',
     source: 'tool_result',
-    label: message.tool_call_name,
+    label: toolCallName,
     text: message.content,
     rawText: message.content,
     timestamp: toIsoTimestamp(message.ts),

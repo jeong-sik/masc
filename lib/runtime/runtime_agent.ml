@@ -105,6 +105,7 @@ type config =
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_sdk.Hooks.hooks option;
+  capacity_probe_hooks : Agent_sdk.Hooks.hooks option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
   description : string option;
@@ -1221,7 +1222,11 @@ let probe_blocks_admission
     let transport = probe_transport observed in
     let probe_config =
       { config with
-        request_wire_observer = None
+        hooks = config.capacity_probe_hooks
+      ; capacity_probe_hooks = None
+      ; context_injector = None
+      ; context = None
+      ; request_wire_observer = None
       ; raw_trace = None
       ; event_bus = None
       ; on_run_complete = None

@@ -1304,6 +1304,21 @@ let test_reactive_compaction_readmits_same_failed_request () =
         ()
       |> expect_terminal
            Keeper_event_queue_state.Failed_request_readmission_failed;
+      let cancellation_propagated =
+        try
+          let _ =
+            prepare
+              ~candidate_readmission_probe:(fun _ ->
+                raise
+                  (Eio.Cancel.Cancelled
+                     (Failure "injected readmission cancellation")))
+              ()
+          in
+          false
+        with
+        | Eio.Cancel.Cancelled _ -> true
+      in
+      check bool "readmission cancellation is re-raised" true cancellation_propagated;
       let probed_checkpoint = ref None in
       let prepared =
         match
@@ -1340,11 +1355,11 @@ let test_reactive_compaction_readmits_same_failed_request () =
       check
         int
         "every rejected exact attempt is quarantined once"
-        5
+        6
         (List.length !quarantine_causes);
       check int
         "each readmission case executes one compaction plan"
-        5
+        6
         (Exact_fixture.post_count exact_server))
 ;;
 

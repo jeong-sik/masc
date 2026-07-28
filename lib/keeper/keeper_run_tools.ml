@@ -60,6 +60,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
   ; user_message : string
   ; hooks : Agent_sdk.Hooks.hooks
+  ; capacity_probe_hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection :
       Agent_sdk.Types.message list -> Agent_sdk.Types.message list
   ; acc : hook_accumulator

@@ -97,6 +97,7 @@ val run_named :
   ?temperature:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
+  ?capacity_probe_hooks:Agent_sdk.Hooks.hooks ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->

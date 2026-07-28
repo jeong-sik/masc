@@ -16,6 +16,7 @@ type agent_setup =
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
   ; user_message : string
   ; hooks : Agent_sdk.Hooks.hooks
+  ; capacity_probe_hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection :
       Agent_sdk.Types.message list -> Agent_sdk.Types.message list
   ; acc : hook_accumulator
@@ -280,6 +281,7 @@ let assemble_hooks
              ()))
         ()
     in
+    let capacity_probe_turn_params = ref None in
     let before_turn_hook : Agent_sdk.Hooks.hooks =
       { Agent_sdk.Hooks.empty with
         before_turn_params =
@@ -540,15 +542,35 @@ let assemble_hooks
                        ())
                   manifest_keeper_turn_id;
                 Eio.Fiber.yield ();
-                Agent_sdk.Hooks.AdjustParams
+                let adjusted_params =
                   { current_params with
                     extra_system_context = ctx
                   ; tool_choice
                   }
+                in
+                capacity_probe_turn_params := Some adjusted_params;
+                Agent_sdk.Hooks.AdjustParams adjusted_params
               | _event -> Agent_sdk.Hooks.Continue)
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
+    let capacity_probe_hooks : Agent_sdk.Hooks.hooks =
+      { Agent_sdk.Hooks.empty with
+        before_turn_params =
+          Some
+            (fun event ->
+              match event, !capacity_probe_turn_params with
+              | Agent_sdk.Hooks.BeforeTurnParams _, Some adjusted_params ->
+                Agent_sdk.Hooks.AdjustParams adjusted_params
+              | Agent_sdk.Hooks.BeforeTurnParams _, None ->
+                Agent_sdk.Hooks.HookFailed
+                  { stage = Agent_sdk.Hooks.Before_turn_params
+                  ; detail =
+                      "capacity probe has no captured request-shaping authority"
+                  }
+              | _ -> Agent_sdk.Hooks.Continue)
+      }
+    in
     let model_input_projection =
       let store = Tool_blob_store.create ~base_path:ctx.config.base_path in
       Keeper_artifact_hydrator.hydrate_recent
@@ -561,6 +583,7 @@ let assemble_hooks
       ; terminal_effect_state
       ; user_message
       ; hooks
+      ; capacity_probe_hooks
       ; model_input_projection
       ; acc
       ; all_tool_names

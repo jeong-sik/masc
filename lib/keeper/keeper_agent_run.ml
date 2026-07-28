@@ -741,6 +741,7 @@ let run_turn
     @@ fun () ->
     let tools = s.Keeper_run_tools.tools in
     let hooks = s.Keeper_run_tools.hooks in
+    let capacity_probe_hooks = s.Keeper_run_tools.capacity_probe_hooks in
     let model_input_projection =
       s.Keeper_run_tools.model_input_projection
     in
@@ -896,6 +897,7 @@ let run_turn
                       ~initial_messages
                       ~model_input_projection
                       ~hooks
+                      ~capacity_probe_hooks
                       ~runtime_manifest_context
                       ~runtime_manifest_append:
                         (fun manifest ->

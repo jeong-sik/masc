@@ -36,6 +36,7 @@ type try_provider_ctx =
   ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
+  ; capacity_probe_hooks : Agent_sdk.Hooks.hooks option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; (* Transport *)
@@ -320,6 +321,7 @@ let run_try_provider
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature
           ; hooks = ctx.hooks
+          ; capacity_probe_hooks = ctx.capacity_probe_hooks
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved

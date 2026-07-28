@@ -738,6 +738,14 @@ let validate_failed_request_readmission
          resume_checkpoint_of_context preparation.context
        in
        (match probe candidate_checkpoint with
+        | exception Eio.Cancel.Cancelled _ as cancellation ->
+          let _terminalization =
+            terminalize_failed_readmission
+              ~source
+              post_success_terminalizer
+              Keeper_event_queue_state.Exact_execution_cancelled
+          in
+          raise cancellation
         | Ok evidence ->
           (match readmission_evidence_for_trigger trigger evidence with
            | Ok () -> Ok ()

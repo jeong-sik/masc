@@ -61,6 +61,7 @@ type config =
         request budget. *)
   ; temperature : float option
   ; hooks : Agent_sdk.Hooks.hooks option
+  ; capacity_probe_hooks : Agent_sdk.Hooks.hooks option
   ; event_bus : Agent_sdk.Event_bus.t option
   ; session_id : string option
   ; description : string option
@@ -124,6 +125,7 @@ let default_config
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
   ; hooks = None
+  ; capacity_probe_hooks = None
   ; event_bus = None
   ; session_id = None
   ; description = None

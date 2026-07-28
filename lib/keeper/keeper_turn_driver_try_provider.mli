@@ -19,6 +19,7 @@ type try_provider_ctx =
   ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
+  ; capacity_probe_hooks : Agent_sdk.Hooks.hooks option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t

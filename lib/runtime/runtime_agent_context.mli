@@ -54,6 +54,7 @@ type config = {
       (** Exact caller/model sampling declaration. [None] omits temperature and
           leaves the selected provider's default intact. *)
   hooks : Agent_sdk.Hooks.hooks option;
+  capacity_probe_hooks : Agent_sdk.Hooks.hooks option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
   description : string option;

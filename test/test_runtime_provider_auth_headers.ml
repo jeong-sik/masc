@@ -1691,6 +1691,66 @@ let test_capacity_readmission_probe_admits_without_completion_dispatch () =
     [ "/v1/messages/count_tokens" ]
     paths
 
+let test_capacity_readmission_probe_uses_only_captured_request_shaping () =
+  let live_hook_calls = ref 0 in
+  let probe_hook_calls = ref 0 in
+  let shaping_marker = "captured-probe-request-shaping" in
+  let hooks counter decision : Agent_sdk.Hooks.hooks =
+    { Agent_sdk.Hooks.empty with
+      before_turn_params =
+        Some
+          (fun _ ->
+            incr counter;
+            decision)
+    }
+  in
+  let live_hooks = hooks live_hook_calls Agent_sdk.Hooks.Continue in
+  let probe_hooks =
+    hooks
+      probe_hook_calls
+      (Agent_sdk.Hooks.AdjustParams
+         { Agent_sdk.Hooks.default_turn_params with
+           extra_system_context = Some shaping_marker
+         })
+  in
+  let (), paths, bodies =
+    with_native_count_server
+      ~input_tokens:400
+    @@ fun ~sw ~net ~base_url ->
+    let config =
+      { (context_fit_runtime_config base_url) with
+        hooks = Some live_hooks
+      ; capacity_probe_hooks = Some probe_hooks
+      }
+    in
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config
+        ~checkpoint:(context_fit_checkpoint ())
+        ~stream:false
+        ~continuation:false
+        [ Agent_sdk.Types.Text "same failed request" ]
+    with
+    | Ok _ -> ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+  in
+  check int "live keeper hook is not replayed" 0 !live_hook_calls;
+  check int "captured request shaping runs once" 1 !probe_hook_calls;
+  check
+    (list string)
+    "isolated probe performs only native measurement"
+    [ "/v1/messages/count_tokens" ]
+    paths;
+  match bodies with
+  | [ body ] ->
+    check bool "captured shaping reaches exact measured request" true
+      (String_util.contains_substring body shaping_marker)
+  | _ -> fail "isolated probe did not produce one measured request"
+
 let test_capacity_readmission_stream_continuation_does_not_duplicate_goal () =
   let persisted_marker = "persisted-original-goal" in
   let duplicate_marker = "must-not-be-appended-again" in
@@ -2080,6 +2140,10 @@ let () =
             "capacity readmission admits without completion dispatch"
             `Quick
             test_capacity_readmission_probe_admits_without_completion_dispatch
+        ; test_case
+            "capacity readmission uses only captured request shaping"
+            `Quick
+            test_capacity_readmission_probe_uses_only_captured_request_shaping
         ; test_case
             "capacity readmission continues without duplicate goal"
             `Quick

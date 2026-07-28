@@ -346,6 +346,7 @@ let run_named
     ?temperature
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
+    ?capacity_probe_hooks
     ?raw_trace
     ?on_event
     ?on_yield
@@ -682,6 +683,7 @@ let run_named
             ; temperature
             ; accept
             ; hooks
+            ; capacity_probe_hooks
             ; raw_trace
             ; transport_resolved
             ; checkpoint_sidecar

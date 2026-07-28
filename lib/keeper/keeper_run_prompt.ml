@@ -10,7 +10,6 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_sdk.Types.message list
@@ -129,7 +128,6 @@ let build_turn_context
       ~base_system_prompt
       ~messages:(Keeper_context_runtime.messages_of_context ctx_work)
   in
-  let memory_context = "" in
   let temporal_context =
     Masc_context_injector.render_temporal_summary shared_context
     |> Option.value ~default:""
@@ -184,7 +182,6 @@ let build_turn_context
    | Record_user_turn, true | Skip_uninformative_wake, _ -> ());
   { turn_system_prompt
   ; dynamic_context
-  ; memory_context
   ; temporal_context
   ; prompt_metrics
   ; history_messages

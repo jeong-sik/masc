@@ -528,7 +528,6 @@ let run_turn
   in
   let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
-  let memory_context = prompt_ctx.Keeper_run_prompt.memory_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let prompt_metrics = prompt_ctx.Keeper_run_prompt.prompt_metrics in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
@@ -542,7 +541,7 @@ let run_turn
   let history_messages_digest = digest_message_texts_as_joined history_messages in
   let context_digest =
     digest_text
-      (base_system_prompt ^ turn_system_prompt ^ dynamic_context ^ memory_context
+      (base_system_prompt ^ turn_system_prompt ^ dynamic_context
        ^ temporal_context ^ user_message ^ history_messages_digest)
   in
   append_manifest ~site:"context_injected"
@@ -556,7 +555,6 @@ let run_turn
             ("base_system_prompt_digest", `String (digest_text base_system_prompt));
             ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
             ("dynamic_context_digest", `String (digest_text dynamic_context));
-            ("memory_context_digest", `String (digest_text memory_context));
             ("temporal_context_digest", `String (digest_text temporal_context));
             ("user_message_digest", `String (digest_text user_message));
             ("history_message_count", `Int (List.length history_messages));
@@ -847,7 +845,6 @@ let run_turn
                    build_ctx_composition_metrics
                      ~system_prompt:turn_system_prompt
                      ~dynamic_context
-                     ~memory_context
                      ~temporal_context
                      ~user_message
                      ~history_messages

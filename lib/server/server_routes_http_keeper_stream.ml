@@ -1782,6 +1782,14 @@ let process_single_turn ~user_row_origin ~queued_turn
     Keeper_stream_tool_accum.on_event worker_tool_accum evt;
     push_worker_event (Stream_event evt)
   in
+  let accumulated_media_blocks () =
+    match
+      Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
+        worker_media_accum
+    with
+    | [] -> None
+    | media_blocks -> Some media_blocks
+  in
   let persist_user_message_only () =
     if Option.is_some !direct_delivery_checkpoint || queued_turn
     then ()
@@ -1804,7 +1812,14 @@ let process_single_turn ~user_row_origin ~queued_turn
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
        message it failed to answer stays pending for the keeper's next
-       turn — and the keeper never reads the error as its own words. *)
+       turn — and the keeper never reads the error as its own words. Any
+       completed media block was already delivered live, so a failure must
+       retain it for reload just as a successful terminal does. *)
+    let blocks =
+      match blocks with
+      | Some _ -> blocks
+      | None -> accumulated_media_blocks ()
+    in
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ChatTransportFailures)
       ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
@@ -2070,14 +2085,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                this turn's stream) as reload-visible chat blocks so a dashboard
                reload shows media-only replies too, not just text-bearing
                replies. *)
-            let blocks =
-              match
-                Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
-                  worker_media_accum
-              with
-              | [] -> None
-              | media_blocks -> Some media_blocks
-            in
+            let blocks = accumulated_media_blocks () in
             let has_visible_blocks = Option.is_some blocks in
             (match
                direct_reply_terminal_error ~has_visible_blocks payload_json_opt

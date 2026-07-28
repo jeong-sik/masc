@@ -18,6 +18,14 @@ type stop_reason =
     (* The current autonomous cycle completed at least one OAS provider turn,
        then released its lane because another durable stimulus was queued
        behind the stimulus already leased by this cycle. *)
+  | Yielded_after_repeated_tool_call of
+      { turns_used : int
+      ; tool_name : string
+      ; repeated_count : int
+      }
+    (* The current run repeated the same tool input and observed the same
+       result enough times to prove that the provider loop was not advancing.
+       The exact post-tool checkpoint is retained for a later cycle. *)
   | InputRequired of
       { turns_used : int
       ; request : Agent_sdk.Error.input_required

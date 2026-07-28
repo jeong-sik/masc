@@ -124,6 +124,41 @@ let runtime_yield_reason request =
     Runtime_agent.Durable_stimulus_waiting
 ;;
 
+let repeated_tool_call_yield_threshold = 3
+
+let same_present_fingerprint left right =
+  match left, right with
+  | Some left, Some right -> String.equal left right
+  | None, None
+  | Some _, None
+  | None, Some _ ->
+    false
+;;
+
+let same_exact_tool_call
+      (left : Keeper_agent_result.tool_call_detail)
+      (right : Keeper_agent_result.tool_call_detail)
+  =
+  String.equal left.tool_name right.tool_name
+  && same_present_fingerprint left.input_fingerprint right.input_fingerprint
+  && same_present_fingerprint left.output_fingerprint right.output_fingerprint
+;;
+
+let repeated_exact_tool_call ~threshold tool_calls =
+  match tool_calls with
+  | [] -> None
+  | latest :: previous ->
+    let rec count_same count = function
+      | call :: rest when same_exact_tool_call latest call ->
+        count_same (count + 1) rest
+      | _ -> count
+    in
+    let repeated_count = count_same 1 previous in
+    if threshold > 1 && repeated_count >= threshold
+    then Some (latest.tool_name, repeated_count)
+    else None
+;;
+
 let keeper_raw_trace_sink
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -233,6 +268,7 @@ module For_testing = struct
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let runtime_yield_reason = runtime_yield_reason
+  let repeated_exact_tool_call = repeated_exact_tool_call
   let provider_transcript_admission = provider_transcript_admission
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
@@ -631,13 +667,32 @@ let run_turn
                    | Error _ as error -> error
                    | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
                    | Ok Runtime_agent.Continue ->
+                     let repeated_tool_call_decision () =
+                           (match
+                              repeated_exact_tool_call
+                                ~threshold:repeated_tool_call_yield_threshold
+                                s.acc.tool_calls
+                            with
+                            | None -> Ok Runtime_agent.Continue
+                            | Some (tool_name, repeated_count) ->
+                              Log.Keeper.warn
+                                ~keeper_name:meta.name
+                                "yielding repeated exact tool loop tool=%s \
+                                 count=%d"
+                                tool_name
+                                repeated_count;
+                              Ok
+                                (Runtime_agent.Yield
+                                   (Runtime_agent.Repeated_tool_call
+                                      { tool_name; repeated_count })))
+                     in
                      (match autonomous_yield_requested with
-                      | None -> Ok Runtime_agent.Continue
+                      | None -> repeated_tool_call_decision ()
                       | Some requested ->
                         (match requested () with
                          | Ok (Some request) ->
                            Ok (Runtime_agent.Yield (runtime_yield_reason request))
-                         | Ok None -> Ok Runtime_agent.Continue
+                         | Ok None -> repeated_tool_call_decision ()
                          | Error detail ->
                            Error
                              (Agent_sdk.Error.Internal

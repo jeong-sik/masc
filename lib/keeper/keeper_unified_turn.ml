@@ -113,7 +113,8 @@ type turn_success =
 let turn_success_of_stop_reason ~meta = function
   | Runtime_agent.Completed -> Turn_completed meta
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
     Turn_checkpointed meta
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;

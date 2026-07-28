@@ -842,16 +842,12 @@ let transition_id (lease : lease) settlement =
   match settlement with
   | Settle_exact disposition ->
     Printf.sprintf "%s:settle_exact:%s" lease.lease_id disposition.disposition_id
-  | Ack_source_terminal _ ->
-    (* Reaction and outbox deduplication use this immutable historical ID.
-       The semantic variant and its persisted kind are ACK; only the original
-       external identity remains so existing ledger rows continue to match. *)
-    Printf.sprintf "%s:%s" lease.lease_id legacy_source_terminal_settlement_kind
   | Ack
   | Manual_compaction_committed _
   | No_compaction _
   | Cancel_accepted _
   | Transfer_accepted _
+  | Ack_source_terminal _
   | Requeue _
   | Escalate _ ->
     Printf.sprintf "%s:%s" lease.lease_id (settlement_kind_label settlement)
@@ -3284,13 +3280,14 @@ let transition_receipt_of_yojson json =
   let* settlement_json = required_field ~context "settlement" fields in
   let* settlement = settlement_of_yojson settlement_json in
   let expected_lease_id = lease_id_of_sequence lease_sequence in
-  let expected_transition_id =
+  let expected_transition_ids =
     match settlement with
     | Settle_exact disposition ->
-      Printf.sprintf
-        "%s:settle_exact:%s"
-        expected_lease_id
-        disposition.disposition_id
+      [ Printf.sprintf
+          "%s:settle_exact:%s"
+          expected_lease_id
+          disposition.disposition_id
+      ]
     | Ack
     | Manual_compaction_committed _
     | No_compaction _
@@ -3298,20 +3295,31 @@ let transition_receipt_of_yojson json =
     | Transfer_accepted _
     | Requeue _
     | Escalate _ ->
-      Printf.sprintf "%s:%s" expected_lease_id (settlement_kind_label settlement)
+      [ Printf.sprintf "%s:%s" expected_lease_id (settlement_kind_label settlement) ]
     | Ack_source_terminal _ ->
-      Printf.sprintf "%s:%s" expected_lease_id legacy_source_terminal_settlement_kind
+      (* A v8 snapshot can be checkpointed again as v9 before its old outbox
+         obligation is projected.  Its immutable ledger identity must remain
+         readable across that restart, but [transition_id] above never emits
+         this legacy spelling for a new ACK. *)
+      [ Printf.sprintf
+          "%s:%s"
+          expected_lease_id
+          (settlement_kind_label settlement)
+      ; Printf.sprintf
+          "%s:%s"
+          expected_lease_id
+          legacy_source_terminal_settlement_kind
+      ]
   in
-  let expected_event_id = event_id_of_transition expected_transition_id in
   if Int64.compare lease_sequence 1L < 0
   then Error "event queue receipt lease sequence must be positive"
   else if not (Float.is_finite settled_at)
   then Error "event queue receipt settlement time must be finite"
   else if not (String.equal lease_id expected_lease_id)
   then Error (Printf.sprintf "event queue receipt lease id mismatch: %s" lease_id)
-  else if not (String.equal transition_id expected_transition_id)
+  else if not (List.exists (String.equal transition_id) expected_transition_ids)
   then Error (Printf.sprintf "event queue receipt transition id mismatch: %s" transition_id)
-  else if not (String.equal event_id expected_event_id)
+  else if not (String.equal event_id (event_id_of_transition transition_id))
   then Error (Printf.sprintf "event queue receipt event id mismatch: %s" event_id)
   else
     Ok

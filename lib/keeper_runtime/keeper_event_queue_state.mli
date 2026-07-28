@@ -403,5 +403,6 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v5"]. Only this current schema is accepted.
-    Stale or unknown persisted state fails closed and requires a runtime reset. *)
+(** ["keeper.event_queue.state.v9"] is the current write schema. Historical
+    v7/v8 snapshots are accepted only at the durable recovery boundary;
+    unknown schemas fail closed and require a runtime reset. *)

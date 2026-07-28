@@ -45,8 +45,12 @@ val of_result_surface : response_text:string -> Runtime_agent.stop_reason -> t
     [Completed] with blank [response_text] is [No_visible_reply], not
     [Visible_reply].  This keeps hidden read-only/tool-only runtime turns
     from being reported as user-visible replies while preserving the
-    explicit continuation checkpoint outcome for control-yield stops. A
-    runtime execution-limit observation does not create a MASC lifecycle gate. *)
+    explicit continuation checkpoint outcome for control-yield stops.
+    [Awaiting_external_effect] likewise requires a nonblank response: its
+    producer emits the deterministic Gate acknowledgement so a queued
+    originating request is delivered rather than mistaken for a continuation
+    checkpoint. A runtime execution-limit observation does not create a MASC
+    lifecycle gate. *)
 
 val of_reply_payload : Yojson.Safe.t option -> t
 (** Decode from a parsed keeper reply payload.  Known labels decode to

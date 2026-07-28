@@ -1,0 +1,114 @@
+name: Test Gate Inventory
+
+# CI executes 6 of 848 test files (#26113). ci.yml records why: the old
+# catch-all `dune test` gate mixed behaviour tests with source-text and
+# log-wording assertions, so legitimate refactors turned main red and the gate
+# was switched off rather than the tests fixed.
+#
+# 680 of those files carry no prose assertion and are gate candidates on paper.
+# Nobody knows how many actually pass — "no substring assertion" is a static
+# property, and a suite can be prose-free and still flaky, environment-
+# dependent, or already broken and invisible (#26104).
+#
+# This runs them and prints the answer. It measures, it does not gate: the
+# script exits 0 whenever the run completes, so this workflow cannot make main
+# red. Turning the passing set into an actual gate is a separate, informed
+# decision — which is the point of running it first.
+#
+# Manual trigger only. Running 680 suites is not something to spend on every
+# push, and the number this produces changes on the scale of weeks, not
+# commits.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Run only the first N candidate suites (0 = all 680)"
+        required: false
+        default: "0"
+      timeout:
+        description: "Per-suite timeout in seconds"
+        required: false
+        default: "120"
+      ref:
+        description: "Git ref to measure"
+        required: false
+        default: "main"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-gate-inventory
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: Which suites could join the gate
+    runs-on: ubuntu-latest
+    # Generous: this deliberately runs suites nothing else runs, so some of
+    # them will be slow or hang. The per-suite timeout bounds each one; this
+    # bounds the sweep.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+        with:
+          dune-cache-save: "false"
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+          os-packages: jq ripgrep
+
+      - name: List candidates
+        run: |
+          chmod +x scripts/audit-test-gate-candidates.py
+          echo "candidate suites: $(scripts/audit-test-gate-candidates.py --list | wc -l)"
+
+      # One sweep, both reports. Running the suites twice to get a second
+      # output format would double a job already measured in hours.
+      - name: Run candidates
+        id: run
+        env:
+          ME_ROOT: /tmp/me
+          DUNE_JOBS: 2
+        run: |
+          mkdir -p /tmp/me
+          scripts/audit-test-gate-candidates.py \
+            --run \
+            --limit "${{ inputs.limit }}" \
+            --timeout "${{ inputs.timeout }}" \
+            --json-out inventory.json \
+            | tee inventory.txt
+
+      - name: Upload inventory
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-gate-inventory
+          path: |
+            inventory.txt
+            inventory.json
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Test gate inventory (\`${{ inputs.ref }}\`)"
+            echo ""
+            echo '```'
+            cat inventory.txt 2>/dev/null || echo "no inventory produced"
+            echo '```'
+            echo ""
+            echo "The failing list is the work item behind #26113."
+            echo "The passing list is what could be gated today."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1393,6 +1393,201 @@ let test_readmission_evidence_matches_trigger_axis () =
     (terminal = Keeper_event_queue_state.Failed_request_still_over_capacity)
 ;;
 
+let test_reactive_compaction_requires_failed_request_readmission () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let meta = make_meta () in
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      init_runtime_fixture ();
+      let checkpoint = make_checkpoint () in
+      let session =
+        Masc.Keeper_context_core.create_session
+          ~session_id:checkpoint.session_id
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+      in
+      let source_context =
+        Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint
+      in
+      (match
+         Masc.Keeper_context_core.save_oas_checkpoint_classified
+           ~multimodal_policy:meta.multimodal_policy
+           ~keeper_name:meta.name
+           ~session
+           ~agent_name:meta.agent_name
+           ~ctx:source_context
+           ~generation:1
+       with
+       | Ok _ -> ()
+       | Error detail ->
+         failf
+           "readmission fixture checkpoint save failed: %s"
+           (Masc.Keeper_context_core.checkpoint_write_error_to_string
+              ~persistence_error_to_string:(fun detail -> detail)
+              detail));
+      let exact_server =
+        Exact_fixture.start_server
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          (Exact_fixture.Reply (summarize_response "shorter"))
+      in
+      publish_exact_fixture
+        ~source:"post-turn failed-request readmission"
+        exact_server;
+      ensure_registered_keeper ~base_path:config.base_path meta;
+      let quarantine_causes = ref [] in
+      let exact_execution_guard : Summarizer.exact_execution_guard =
+        { Exact_fixture.permissive_exact_execution_guard with
+          quarantine =
+            (fun cause _observation ->
+               quarantine_causes := cause :: !quarantine_causes;
+               Ok Summarizer.Fsync_completed)
+        }
+      in
+      let trigger =
+        Compaction_trigger.Provider_overflow { limit_tokens = Some 4_096 }
+      in
+      let admitted_evidence : Runtime_agent.capacity_readmission_evidence =
+        { serialized_body_limit_bytes = Some 1_048_576
+        ; token_fit_limit_tokens = Some 4_096
+        ; serving_constraint_admitted = false
+        }
+      in
+      let prepare ?candidate_readmission_probe () =
+        Post_turn.prepare_compaction
+          ~base_path:config.base_path
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+          ~meta
+          ~trigger
+          ~exact_execution_guard
+          ?candidate_readmission_probe
+          ()
+      in
+      let expect_terminal expected = function
+        | Error
+            (Post_turn.No_compaction
+               { reason =
+                   Keeper_event_queue_state.Exact_execution_terminal
+                     { cause; _ }
+               ; _
+               })
+          when cause = expected ->
+          ()
+        | Error error ->
+          failf
+            "readmission returned the wrong terminal: %s"
+            (Post_turn.compaction_recovery_error_to_string error)
+        | Ok _ -> fail "reactive compaction bypassed failed-request readmission"
+      in
+      (match
+         Post_turn.recover_latest_checkpoint_for_compaction
+           ~base_path:config.base_path
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+           ~meta
+           ~trigger
+           ~exact_execution_guard
+           ()
+       with
+       | Post_turn.Already_rejected
+           { reason =
+               Keeper_event_queue_state.Exact_execution_terminal
+                 { cause =
+                     Keeper_event_queue_state.Failed_request_readmission_unavailable
+                 ; _
+                 }
+           ; _
+           } ->
+         ()
+       | Post_turn.Commit_failed { error; _ } ->
+         failf
+           "readmission terminal was converted back into retryable failure: %s"
+           (Post_turn.compaction_recovery_error_to_string error)
+       | _ ->
+         fail
+           "recovery did not preserve readmission rejection as no-compaction");
+      prepare
+        ~candidate_readmission_probe:(fun _ ->
+          Error
+            (Runtime_agent.Still_over_capacity
+               (Agent_sdk.Error.Internal "injected capacity refusal")))
+        ()
+      |> expect_terminal
+           Keeper_event_queue_state.Failed_request_still_over_capacity;
+      prepare
+        ~candidate_readmission_probe:(fun _ ->
+          raise (Failure "injected readmission failure"))
+        ()
+      |> expect_terminal
+           Keeper_event_queue_state.Failed_request_readmission_failed;
+      let cancellation_propagated =
+        try
+          let _ =
+            prepare
+              ~candidate_readmission_probe:(fun _ ->
+                raise
+                  (Eio.Cancel.Cancelled
+                     (Failure "injected readmission cancellation")))
+              ()
+          in
+          false
+        with
+        | Eio.Cancel.Cancelled _ -> true
+      in
+      check bool "readmission cancellation is re-raised" true cancellation_propagated;
+      let probed_checkpoint = ref None in
+      let prepared =
+        match
+          prepare
+            ~candidate_readmission_probe:(fun candidate ->
+              probed_checkpoint := Some candidate;
+              Ok admitted_evidence)
+            ()
+        with
+        | Ok prepared -> prepared
+        | Error error ->
+          failf
+            "admitted compacted request was not prepared: %s"
+            (Post_turn.compaction_recovery_error_to_string error)
+      in
+      (match !probed_checkpoint with
+       | None -> fail "successful reactive compaction did not invoke its probe"
+       | Some candidate ->
+         check bool
+           "probe receives an isolated OAS context"
+           true
+           (not (candidate.Agent_sdk.Checkpoint.context == checkpoint.context));
+         check bool
+           "probe receives the compacted candidate checkpoint"
+           true
+           (Masc.Keeper_context_core.serialized_bytes
+              (Masc.Keeper_context_core.context_of_oas_checkpoint candidate)
+            < Masc.Keeper_context_core.serialized_bytes source_context));
+      (match Post_turn.no_compaction_of_uncommitted_prepared prepared with
+       | Post_turn.Uncommitted_terminalized _ -> ()
+       | _ -> fail "prepared fixture cleanup did not terminalize");
+      check
+        int
+        "every rejected exact attempt is quarantined once"
+        5
+        (List.length !quarantine_causes);
+      check
+        int
+        "each readmission case executes one compaction plan"
+        5
+        (Exact_fixture.post_count exact_server))
+;;
+
 let () =
   run "post-turn durability" [
     "durable compaction", [
@@ -1427,6 +1622,8 @@ let () =
         `Quick test_suspended_streak_refuses_reactive_prepare;
       test_case "readmission evidence matches trigger axis"
         `Quick test_readmission_evidence_matches_trigger_axis;
+      test_case "reactive compaction requires failed-request readmission"
+        `Quick test_reactive_compaction_requires_failed_request_readmission;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

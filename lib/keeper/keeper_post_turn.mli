@@ -135,6 +135,7 @@ val prepare_compaction :
   ?before_dispatch_authority:
     Keeper_compaction_llm_summarizer.before_dispatch_authority ->
   ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
+  ?candidate_readmission_probe:Runtime_agent.capacity_readmission_probe ->
   base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -192,6 +193,7 @@ val recover_latest_checkpoint_for_compaction :
   ?before_dispatch_authority:
     Keeper_compaction_llm_summarizer.before_dispatch_authority ->
   ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
+  ?candidate_readmission_probe:Runtime_agent.capacity_readmission_probe ->
   base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->

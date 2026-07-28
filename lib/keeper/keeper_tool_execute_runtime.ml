@@ -54,6 +54,10 @@ let sandbox_target_label = function
   | Masc_exec.Sandbox_target.Docker { image; _ } -> "docker:" ^ image
 ;;
 
+(* The Gate operation name this runtime submits under. Shared with the replay
+   path so the two cannot drift apart into a silent Not_applicable. *)
+let gate_operation = "tool_execute"
+
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
@@ -62,6 +66,26 @@ let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
     ; "sandbox_profile", `String sandbox_profile
     ; "sandbox_target", `String sandbox_target
     ]
+;;
+
+(* Inverse of [execute_gate_input]. The producer owns the argument schema and
+   the effect encoding, so it owns the inversion — replay only decides whether
+   to spend the grant.
+
+   Unlike the write path, nothing is reconstructed: the approved tool
+   arguments were stored verbatim under [input], because the Gate request
+   wraps them with execution context rather than re-encoding them. The
+   surrounding [cwd]/[sandbox_*] fields describe where the approval was
+   granted; the handler re-derives them from the current turn, and a
+   divergence there fails the canonical-input match rather than silently
+   executing somewhere else. *)
+let replay_args_of_gate_input input =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "input" fields with
+     | Some args -> Ok args
+     | None -> Error "approved Gate input has no input")
+  | _ -> Error "approved Gate input is not an object"
 ;;
 
 let execute_secret_redaction ~base_path ~keeper_name =
@@ -307,7 +331,7 @@ let handle_tool_execute_typed
         in
         let gate_request : Keeper_gate.request =
           { keeper_name = meta.name
-          ; operation = "tool_execute"
+          ; operation = gate_operation
           ; input = gate_input
           ; base_path = config.base_path
           ; causal_context = Option.map (fun current -> current ()) gate_context
@@ -324,7 +348,7 @@ let handle_tool_execute_typed
          with
          | Keeper_gate.Deferred { approval_id; reason } ->
            Keeper_gate_deferred_payload.create
-             ~operation:"tool_execute"
+             ~operation:gate_operation
              ~approval_id
              ~reason
              ~context:(`Assoc typed_context_fields)

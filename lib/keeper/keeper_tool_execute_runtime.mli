@@ -14,6 +14,19 @@ val handle_tool_execute :
   unit ->
   string
 
+val gate_operation : string
+(** The Gate operation name this runtime submits under. Shared with the replay
+    path so an approved execute is recognised rather than skipped. *)
+
+val replay_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** Recover the approved tool arguments from the stored Gate input.
+
+    The Gate request wraps the arguments with execution context rather than
+    re-encoding them, so the approved arguments are returned verbatim. The
+    stored [cwd]/[sandbox_*] fields are not replayed: the handler re-derives
+    them from the current turn, and a divergence fails the canonical-input
+    match instead of executing somewhere the approval did not describe. *)
+
 val handle_tool_execute_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->

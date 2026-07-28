@@ -215,6 +215,49 @@ let test_base_projection_may_not_change_structured_tool_result () =
   | Ok _ -> Alcotest.fail "structured ToolResult drift was accepted"
 ;;
 
+let test_inspection_failure_is_nonfatal_and_explicit () =
+  let canonical = [ text T.User "durable history" ] in
+  let current_run = [ text T.User "current turn" ] in
+  let messages = canonical @ current_run in
+  let bounded =
+    { (provider_config ()) with
+      Llm_provider.Provider_config.max_request_body_bytes = Some 1024
+    }
+  in
+  let observed_failure = ref None in
+  let project =
+    P.create
+      ~canonical_prefix:canonical
+      ~provider_config:bounded
+      ~tools:[]
+      ~stream:true
+      ~base_projection:Fun.id
+      ~inspect_serialized_request:
+        (fun ~stream:_ ~config:_ ~messages:_ ~tools:_ () ->
+           Error "injected diagnostic serializer failure")
+      ~observe_inspection_failure:(fun failure ->
+        observed_failure := Some failure)
+      ()
+  in
+  let projected = project messages |> require_ok in
+  check_messages
+    "diagnostic failure preserves canonical OAS input"
+    messages
+    projected;
+  match !observed_failure with
+  | None -> Alcotest.fail "inspection failure was silent"
+  | Some failure ->
+    Alcotest.(check int) "declared limit retained" 1024 failure.limit_bytes;
+    Alcotest.(check int) "canonical count retained" 1
+      failure.canonical_history_messages;
+    Alcotest.(check int) "current-run count retained" 1
+      failure.current_run_messages;
+    Alcotest.(check string)
+      "typed diagnostic detail"
+      "injected diagnostic serializer failure"
+      failure.detail
+;;
+
 let () =
   Alcotest.run
     "keeper provider input projection"
@@ -243,6 +286,10 @@ let () =
             "base projection preserves structured ToolResult fields"
             `Quick
             test_base_projection_may_not_change_structured_tool_result
+        ; Alcotest.test_case
+            "inspection failure remains diagnostic"
+            `Quick
+            test_inspection_failure_is_nonfatal_and_explicit
         ] )
     ]
 ;;

@@ -22,6 +22,27 @@ type observation =
   ; fits : bool
   }
 
+type inspection =
+  { body_bytes : int
+  ; body_sha256 : string
+  }
+
+type inspection_failure =
+  { limit_bytes : int
+  ; stream : bool
+  ; canonical_history_messages : int
+  ; current_run_messages : int
+  ; detail : string
+  }
+
+type serialized_request_inspector =
+  stream:bool ->
+  config:Llm_provider.Provider_config.t ->
+  messages:Agent_sdk.Types.message list ->
+  tools:Yojson.Safe.t list ->
+  unit ->
+  (inspection, string) result
+
 val create :
   canonical_prefix:Agent_sdk.Types.message list ->
   provider_config:Llm_provider.Provider_config.t ->
@@ -30,6 +51,8 @@ val create :
   base_projection:
     (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) ->
   ?observe:(observation -> unit) ->
+  ?observe_inspection_failure:(inspection_failure -> unit) ->
+  ?inspect_serialized_request:serialized_request_inspector ->
   unit ->
   Agent_sdk.Agent.model_input_projection
 (** [create] returns an OAS model-input projection tied to one resolved runtime
@@ -39,4 +62,9 @@ val create :
     preserving every message position, role, protocol identity, and all other
     content. Keeper's artifact hydrator satisfies that contract. The preflight
     fails closed if the canonical prefix is absent or the base projection
-    violates this invariant. *)
+    violates this invariant.
+
+    Serialized-request inspection is diagnostic only. Its failure is reported
+    through [observe_inspection_failure], but the lossless messages continue to
+    OAS's canonical prepare/measure/admit path so a diagnostic failure cannot
+    become [HookExecutionFailed]. *)

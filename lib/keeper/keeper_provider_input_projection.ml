@@ -12,6 +12,27 @@ type observation =
   ; fits : bool
   }
 
+type inspection =
+  { body_bytes : int
+  ; body_sha256 : string
+  }
+
+type inspection_failure =
+  { limit_bytes : int
+  ; stream : bool
+  ; canonical_history_messages : int
+  ; current_run_messages : int
+  ; detail : string
+  }
+
+type serialized_request_inspector =
+  stream:bool ->
+  config:Llm_provider.Provider_config.t ->
+  messages:Agent_sdk.Types.message list ->
+  tools:Yojson.Safe.t list ->
+  unit ->
+  (inspection, string) result
+
 let prefix_mismatch_to_string = function
   | Keeper_replay_prefix.Prefix_longer_than_messages ->
     "canonical_prefix_longer_than_provider_messages"
@@ -82,6 +103,18 @@ let notify observe observation =
          (Printexc.to_string exn))
 ;;
 
+let inspect_serialized_request ~stream ~config ~messages ~tools () =
+  Llm_provider.Complete.inspect_serialized_request
+    ~stream
+    ~config
+    ~messages
+    ~tools
+    ()
+  |> Result.map (fun wire ->
+    { body_bytes = wire.body_bytes; body_sha256 = wire.body_sha256 })
+  |> Result.map_error Provider_http_error.to_message
+;;
+
 let create
       ~(canonical_prefix : Agent_sdk.Types.message list)
       ~(provider_config : Llm_provider.Provider_config.t)
@@ -89,6 +122,8 @@ let create
       ~stream
       ~base_projection
       ?observe
+      ?observe_inspection_failure
+      ?(inspect_serialized_request = inspect_serialized_request)
       ()
   : Agent_sdk.Agent.model_input_projection
   =
@@ -115,31 +150,43 @@ let create
     match provider_config.max_request_body_bytes with
     | None -> Ok projected_messages
     | Some limit_bytes ->
-      let* wire =
-        Llm_provider.Complete.inspect_serialized_request
+      (match
+         inspect_serialized_request
           ~stream
           ~config:provider_config
           ~messages:projected_messages
           ~tools
           ()
-        |> Result.map_error (fun error ->
-          Printf.sprintf
-            "keeper provider input projection could not inspect final request: %s"
-            (Provider_http_error.to_message error))
-      in
-      notify
-        observe
-        { limit_bytes
-        ; stream
-        ; canonical_history_messages = List.length canonical_prefix
-        ; current_run_messages = List.length current_run
-        ; body_bytes = wire.body_bytes
-        ; body_sha256 = wire.body_sha256
-        ; fits = wire.body_bytes <= limit_bytes
-        };
-      (* Never hide canonical messages from the model. If this exact body is
-         over the declared bound, OAS's final admission returns the typed
-         Request_body_too_large refusal before HTTP. MASC then owns checkpoint
-         compaction and exact source requeue. *)
-      Ok projected_messages
+       with
+       | Error detail ->
+         let failure =
+           { limit_bytes
+           ; stream
+           ; canonical_history_messages = List.length canonical_prefix
+           ; current_run_messages = List.length current_run
+           ; detail
+           }
+         in
+         Log.Keeper.warn
+           "serialized-request diagnostic inspection failed; continuing to OAS \
+            canonical admission: %s"
+           detail;
+         notify observe_inspection_failure failure;
+         Ok projected_messages
+       | Ok wire ->
+         notify
+           observe
+           { limit_bytes
+           ; stream
+           ; canonical_history_messages = List.length canonical_prefix
+           ; current_run_messages = List.length current_run
+           ; body_bytes = wire.body_bytes
+           ; body_sha256 = wire.body_sha256
+           ; fits = wire.body_bytes <= limit_bytes
+           };
+         (* Never hide canonical messages from the model. If this exact body is
+            over the declared bound, OAS's final admission returns the typed
+            Request_body_too_large refusal before HTTP. MASC then owns checkpoint
+            compaction and exact source requeue. *)
+         Ok projected_messages)
 ;;

@@ -205,6 +205,24 @@ let projection_manifest_decision
       ])
 ;;
 
+let projection_inspection_failure_manifest_decision
+      (failure : Keeper_provider_input_projection.inspection_failure)
+  =
+  Keeper_runtime_manifest.with_payload_role
+    ~payload_role:Keeper_runtime_manifest.Operator_evidence
+    (`Assoc
+      [ "projection", `String "lossless_exact_body_preflight"
+      ; "inspection", `String "failed_non_authoritative"
+      ; "canonical_history_unchanged", `Bool true
+      ; "canonical_oas_admission_continues", `Bool true
+      ; "limit_bytes", `Int failure.limit_bytes
+      ; "stream", `Bool failure.stream
+      ; "canonical_history_messages", `Int failure.canonical_history_messages
+      ; "current_run_messages", `Int failure.current_run_messages
+      ; "detail", `String failure.detail
+      ])
+;;
+
 let request_wire_manifest_decision
       (observation : Llm_provider.Request_wire_observer.observation)
   =
@@ -334,6 +352,7 @@ let run_try_provider
     let model_input_projection_for
           ~canonical_prefix
           ?observe
+          ?observe_inspection_failure
           ()
       =
       Keeper_provider_input_projection.create
@@ -343,6 +362,7 @@ let run_try_provider
         ~stream:(Option.is_some ctx.on_event)
         ~base_projection
         ?observe
+        ?observe_inspection_failure
         ()
     in
     let model_input_projection =
@@ -356,6 +376,12 @@ let run_try_provider
                then "exact_body_within_limit"
                else "exact_body_requires_compaction")
             ~decision:(projection_manifest_decision observation)
+            Keeper_runtime_manifest.Context_injected)
+        ~observe_inspection_failure:(fun failure ->
+          emit_runtime_manifest
+            ctx
+            ~status:"exact_body_inspection_failed"
+            ~decision:(projection_inspection_failure_manifest_decision failure)
             Keeper_runtime_manifest.Context_injected)
         ()
     in

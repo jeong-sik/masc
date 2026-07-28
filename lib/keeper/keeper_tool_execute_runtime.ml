@@ -17,10 +17,26 @@ let model_execute_location_fields ~config ~meta ~args ~cwd =
   in
   let response_cwd =
     match execution_location with
-    | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt "cwd" fields)
+    | `Assoc fields ->
+      (match List.assoc_opt "cwd" fields with
+       | Some cwd -> cwd
+       | None -> `Null)
     | _ -> `Null
   in
   [ "cwd", response_cwd; "execution_location", execution_location ]
+
+let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
+  let fields =
+    [ "typed", `Bool true ] @ model_execute_location_fields ~config ~meta ~args ~cwd
+  in
+  let message =
+    match meta.sandbox_profile with
+    | Docker -> "cwd_resolution_failed: requested cwd is unavailable"
+    | _ -> error
+  in
+  Keeper_tool_execution.failure
+    ~class_:Tool_result.Policy_rejection
+    (error_json ~fields message)
 
 let sandbox_target_label = function
   | Masc_exec.Sandbox_target.Host -> "host"
@@ -120,7 +136,15 @@ let handle_tool_execute_typed
       ~write_enabled:true
       ~args
   with
-    | Error e -> Keeper_tool_execution.failure (error_json e)
+    | Error e ->
+      let cwd =
+        Keeper_tool_execute_path.requested_tool_execute_cwd
+          ~config
+          ~meta
+          ~write_enabled:true
+          ~args
+      in
+      model_execute_cwd_resolution_error ~config ~meta ~args ~cwd e
     | Ok cwd ->
         let model_location_fields =
           model_execute_location_fields ~config ~meta ~args ~cwd

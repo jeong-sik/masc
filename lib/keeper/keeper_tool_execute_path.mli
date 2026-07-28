@@ -17,6 +17,16 @@ val resolve_tool_execute_cwd :
     Execute uses the no-create playground root. Explicit cwd resolution
     never creates directories or changes repo/worktree state. *)
 
+val requested_tool_execute_cwd :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  write_enabled:bool ->
+  args:Yojson.Safe.t ->
+  string
+(** Return the host-side cwd candidate used by Execute resolution. This is
+    exposed so response projection can describe a failed resolution without
+    reconstructing relative-path anchoring separately. *)
+
 val resolve_tool_read_path :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

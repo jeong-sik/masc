@@ -25,22 +25,24 @@ let resolve_tool_read_cwd
     else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
+let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
+  let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
+  if raw_cwd = ""
+  then
+    if write_enabled
+    then keeper_default_write_root ~config ~meta
+    else Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta
+  else if Filename.is_relative raw_cwd
+  then Filename.concat (keeper_default_write_root ~config ~meta) raw_cwd
+  else raw_cwd
+
 let resolve_tool_execute_cwd ~config ~meta ~write_enabled ~args =
+  let raw_path = requested_tool_execute_cwd ~config ~meta ~write_enabled ~args in
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
   let resolved =
     if raw_cwd = ""
-    then
-      Ok
-        (if write_enabled
-         then keeper_default_write_root ~config ~meta
-         else Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta)
-    else
-      let raw_path =
-        if Filename.is_relative raw_cwd
-        then Filename.concat (keeper_default_write_root ~config ~meta) raw_cwd
-        else raw_cwd
-      in
-      resolve_keeper_execute_cwd ~config ~meta ~raw_path
+    then Ok raw_path
+    else resolve_keeper_execute_cwd ~config ~meta ~raw_path
   in
   match resolved with
   | Error _ as err -> err

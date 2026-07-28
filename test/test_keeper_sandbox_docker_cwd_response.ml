@@ -214,7 +214,40 @@ let test_typed_execute_response_cwd_uses_container_path () =
         error_cwd;
       check string "Docker error location cwd matches top-level cwd"
         error_cwd
-        error_location_cwd)
+        error_location_cwd;
+      let missing_relative = "missing-relative" in
+      let missing_raw =
+        Keeper_tool_command_runtime.handle_tool_execute
+          ~turn_sandbox_factory:(Some factory)
+          ~config
+          ~meta
+          ~args:
+            (`Assoc
+              [ "argv", `List [ `String "pwd" ]
+              ; "cwd", `String missing_relative
+              ])
+          ()
+      in
+      check bool "Docker missing-cwd error does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base missing_raw);
+      let missing_response = Yojson.Safe.from_string missing_raw in
+      let missing_cwd =
+        missing_response
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      let missing_location_cwd =
+        missing_response
+        |> Yojson.Safe.Util.member "execution_location"
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      check string "Docker missing-cwd top-level path is visible"
+        (Filename.concat visible_root missing_relative)
+        missing_cwd;
+      check string "Docker missing-cwd location matches top-level cwd"
+        missing_cwd
+        missing_location_cwd)
 
 let test_retired_path_jail_env_detection () =
   let configured value =

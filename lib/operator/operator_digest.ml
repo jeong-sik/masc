@@ -361,12 +361,17 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
         let fallback_recommendation_summary =
           summary_of_recommendations ~actor:actor_name recommended_actions
         in
+        let fallback_recommendations =
+          List.map
+            (recommended_action_to_yojson ~actor:actor_name)
+            recommended_actions
+        in
         let active_guidance =
-          active_guidance_fields
+          active_guidance
             ~config
-            ~actor:actor_name
             ~target_type:Operator_action_constants.workspace_target_type
             ~target_id:None
+            ~fallback_recommendations
             ~fallback_summary:fallback_recommendation_summary
         in
         let recent_reviews =
@@ -383,15 +388,12 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ("attention_summary", summary_of_attention_items attention_items);
               ("pending_confirm_summary", pending_confirm_summary_json_of_scope confirm_scope);
-              ( "recommended_actions",
-                `List
-                  (List.map (recommended_action_to_yojson ~actor:actor_name)
-                     recommended_actions) );
-              ("recommendation_summary", fallback_recommendation_summary);
+              ("recommended_actions", `List active_guidance.recommended_actions);
+              ("recommendation_summary", active_guidance.recommendation_summary);
               ("workspace", workspace_state_json);
             ]
             @ [ ("recent_reviews", recent_reviews) ]
-            @ active_guidance))
+            @ active_guidance.fields))
     | Some Operator_action_constants.Keeper
     | Some Operator_action_constants.Goal
     | None -> Error "unsupported target_type"

@@ -61,12 +61,8 @@ let check_assertion st assertion =
     `Assoc
       [ "assertion", `String assertion
       ; "passed", `Bool false
-      ; ( "fix_hint"
-        , `String
-            (Printf.sprintf
-               "Unknown assertion: %s (expected one of: %s)"
-               assertion
-               (String.concat ", " valid_assertion_strings)) )
+      ; ( "expected_assertions"
+        , `List (List.map (fun value -> `String value) valid_assertion_strings) )
       ]
 ;;
 
@@ -106,30 +102,10 @@ let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_tim
          | _ -> false)
       results
   in
-  let fix_hint =
-    if all_passed
-    then `Null
-    else (
-      let first_fail =
-        List.find_opt
-          (fun r ->
-             match Json_util.assoc_member_opt "passed" r with
-             | Some (`Bool false) -> true
-             | _ -> false)
-          results
-      in
-      match first_fail with
-      | Some r ->
-        (match Json_util.assoc_member_opt "fix_hint" r with
-         | Some v -> v
-         | None -> `Null)
-      | None -> `Null)
-  in
   let result =
     `Assoc
       [ "assertions", `List results
       ; "all_passed", `Bool all_passed
-      ; "fix_hint", fix_hint
       ]
   in
   Tool_result.make_ok ~tool_name ~start_time ~data:result ()

@@ -292,7 +292,7 @@ let planning_context_state
        { planning_missing_task = None; deliverable_conflict_task })
 ;;
 
-let status_summary_string ~task_list_projection (ctx : context) =
+let status_summary_string (ctx : context) =
   Workspace.ensure_initialized ctx.config;
   let state = Workspace.read_state ctx.config in
   let backlog = safe_read_backlog ctx in
@@ -514,7 +514,7 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx _args =
        status_cache
        ~key:cache_key
        ~ttl_s:(status_cache_ttl_s ())
-       (fun () -> status_summary_string ~task_list_projection ctx))
+       (fun () -> status_summary_string ctx))
 ;;
 
 let handle_reset ~tool_name ~start_time ctx args =

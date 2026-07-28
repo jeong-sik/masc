@@ -908,14 +908,14 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
       W.list_tasks config ~verification_viewer:"keeper-verifier-agent"
     in
     Alcotest.(check bool)
-      "unassigned row prescribes claim"
+      "unassigned row identifies the typed verification phase"
       true
       (contains_substring unassigned
-         "ACTION: keeper_task_claim task_id=task-001");
+         "awaiting_verifier task_id=task-001");
     Alcotest.(check bool)
-      "unassigned row forbids producer-path read"
-      true
-      (contains_substring unassigned "do not Read producer paths");
+      "unassigned row does not choose the verifier's next action"
+      false
+      (contains_substring unassigned "ACTION:");
     (match
        W.claim_task_r config ~agent_name:"keeper-executor-agent" ~task_id:"task-001" ()
      with
@@ -960,9 +960,14 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
       true
       (contains_substring other request_id);
     Alcotest.(check bool)
-      "other keeper is told to skip"
+      "other keeper sees the assigned verifier"
       true
-      (contains_substring other "ACTION: skip");
+      (contains_substring other
+         "assigned_verifier=keeper-verifier-agent");
+    Alcotest.(check bool)
+      "other keeper is not told which action to take"
+      false
+      (contains_substring other "ACTION:");
     let external_projection = W.list_tasks config in
     Alcotest.(check bool)
       "external task list receives no content"

@@ -6,6 +6,12 @@
 
 module U = Yojson.Safe.Util
 
+type projection = {
+  fields : (string * Yojson.Safe.t) list;
+  recommended_actions : Yojson.Safe.t list;
+  recommendation_summary : Yojson.Safe.t;
+}
+
 let fresh_operator_judgment config ~target_type ~target_id =
   match Operator_judgment.target_type_of_string target_type with
   | None -> None
@@ -33,36 +39,61 @@ let judgment_summary_json judgment_json =
       ("disagreement_with_truth", judgment_json |> U.member "disagreement_with_truth");
     ]
 
+let judgment_recommendation_summary_json actions =
+  `Assoc
+    [
+      ("count", `Int (List.length actions));
+      ( "top_action",
+        match actions with
+        | action :: _ -> action
+        | [] -> `Null );
+      ("provenance", `String "judgment");
+      ("authoritative", `Bool true);
+    ]
+
 (* Only an operator judgment — an LLM's own recorded decision — may carry a
    recommended action. The read-model fallback used to synthesise one in
    OCaml (action_type="keeper_probe", reason="Inspect pending external
    attention") and hand it to the model as though a decision had been made;
    the summary below states the observed condition instead. *)
-let active_guidance_fields ~config ~actor:_ ~target_type ~target_id
+let active_guidance ~config ~target_type ~target_id ~fallback_recommendations
     ~fallback_summary =
   match fresh_operator_judgment config ~target_type ~target_id with
   | Some judgment_json ->
-      let judgment_actions =
+      let recommended_actions =
         match Json_util.get_object judgment_json "recommended_action" with
-        | Some value -> `List [ value ]
-        | None -> `List []
+        | Some value -> [ value ]
+        | None -> []
       in
-      [
-        ("judgment_owner", `String "operator_keeper");
-        ("authoritative_judgment_available", `Bool true);
-        ("judgment", judgment_json);
-        ("active_guidance_layer", `String "judgment");
-        ("active_summary", judgment_summary_json judgment_json);
-        ("active_recommended_actions", judgment_actions);
-        ("active_recommendation_summary", judgment_summary_json judgment_json);
-      ]
+      let recommendation_summary =
+        judgment_recommendation_summary_json recommended_actions
+      in
+      {
+        fields =
+          [
+            ("judgment_owner", `String "operator_keeper");
+            ("authoritative_judgment_available", `Bool true);
+            ("judgment", judgment_json);
+            ("active_guidance_layer", `String "judgment");
+            ("active_summary", judgment_summary_json judgment_json);
+            ("active_recommended_actions", `List recommended_actions);
+            ("active_recommendation_summary", recommendation_summary);
+          ];
+        recommended_actions;
+        recommendation_summary;
+      }
   | None ->
-      [
-        ("judgment_owner", `String "fallback_read_model");
-        ("authoritative_judgment_available", `Bool false);
-        ("judgment", `Null);
-        ("active_guidance_layer", `String "fallback");
-        ("active_summary", fallback_summary);
-        ("active_recommended_actions", `List []);
-        ("active_recommendation_summary", fallback_summary);
-      ]
+      {
+        fields =
+          [
+            ("judgment_owner", `String "fallback_read_model");
+            ("authoritative_judgment_available", `Bool false);
+            ("judgment", `Null);
+            ("active_guidance_layer", `String "fallback");
+            ("active_summary", fallback_summary);
+            ("active_recommended_actions", `List []);
+            ("active_recommendation_summary", fallback_summary);
+          ];
+        recommended_actions = fallback_recommendations;
+        recommendation_summary = fallback_summary;
+      }

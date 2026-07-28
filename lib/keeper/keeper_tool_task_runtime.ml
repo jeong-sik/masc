@@ -590,7 +590,6 @@ let handle_keeper_task_tool_with_outcome
        if needs_start then begin
          let start_result =
            Task.Tool.handle_transition
-             ~task_list_projection:Tool_capability_projection.Keeper_tasks_list
              ~tool_name:"keeper_auto_start"
              ~start_time:0.0
              { Task.Tool.config; agent_name = keeper_agent_sender ~meta;
@@ -795,7 +794,6 @@ let handle_keeper_task_tool_with_outcome
       in
       let transition_result =
         Task.Tool.handle_transition
-          ~task_list_projection:Tool_capability_projection.Keeper_tasks_list
           ~tool_name:"keeper_task_done"
           ~start_time:0.0
           {

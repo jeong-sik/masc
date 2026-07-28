@@ -45,8 +45,8 @@ let workflow_rejection_result
     ~data
     (Yojson.Safe.to_string data)
 
-let missing_live_task_transition_rejection ~task_list_projection ~tool_name
-      ~start_time ctx ~task_id ~action_s =
+let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id
+      ~action_s =
   sync_owner_current_task_binding ctx;
   sync_planning_current_task_with_owned_task ctx;
   task_log_warn ~task_id
@@ -68,12 +68,10 @@ let missing_live_task_transition_rejection ~task_list_projection ~tool_name
         bindings and suppressed transition action=%s."
        task_id action_s)
 
-let rec handle_done
-      ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
-      ~tool_name ~start_time ctx args =
+let rec handle_done ~tool_name ~start_time ctx args =
   let notes = get_string args "notes" "" in
   let evidence_refs = get_string_list args "evidence_refs" in
-  handle_transition ~task_list_projection ~tool_name ~start_time ctx
+  handle_transition ~tool_name ~start_time ctx
     (`Assoc
        [
          ("task_id", Json_util.assoc_member_opt "task_id" args |> Option.value ~default:`Null);
@@ -138,9 +136,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
        task_log_error ~task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
   result_to_response ~tool_name ~start_time result
 
-and handle_transition
-      ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
-      ~tool_name ~start_time ctx args =
+and handle_transition ~tool_name ~start_time ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Client_identity and must not
@@ -198,7 +194,6 @@ and handle_transition
   match task_opt with
   | None ->
     missing_live_task_transition_rejection
-      ~task_list_projection
       ~tool_name
       ~start_time
       ctx
@@ -214,9 +209,7 @@ and handle_transition
          let status = Masc_domain.task_status_to_string task.task_status in
          let message =
            Printf.sprintf
-             "Task %s is %s and owned by %s; %s cannot release it. Use \
-              keeper_board_post or masc_board_post to ask the current assignee \
-              for handoff/release, or claim different unowned work."
+             "Task %s is %s and owned by %s; %s cannot release it."
              task_id
              status
              assignee
@@ -680,7 +673,6 @@ let dispatch_with_task_list_projection ?created_by task_list_projection ctx ~nam
   | "masc_transition" ->
     Some
       (handle_transition
-         ~task_list_projection
          ~tool_name:name
          ~start_time:start
          ctx

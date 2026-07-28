@@ -886,11 +886,11 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
       failwith "expected invalid transition to be logged through Task ring"
 )
 
-let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
+let () = test "handle_transition_release_by_nonowner_stays_tool-neutral"
     (fun () ->
   (* When a different agent claims the task, a release attempt by the
-     non-owner must land in the fallthrough branch with ownership-mismatch
-     and redirect to masc_board_post rather than reflexive retry. *)
+     non-owner must report the ownership mismatch without choosing the
+     caller's next tool. *)
   let ctx_owner = make_test_ctx_with_agent "owner-agent" in
   let _ =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
@@ -917,8 +917,6 @@ let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
   assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
   assert (str_contains (Tool_result.message result) "Task task-001 is claimed");
   assert (str_contains (Tool_result.message result) "owner-agent");
-  assert (str_contains (Tool_result.message result) "masc_board_post")
-  ;
   let data = Tool_result.data result in
   assert (Json_util.get_string data "task_id" = Some "task-001");
   assert (Json_util.get_string data "current_assignee" = Some "owner-agent");
@@ -927,8 +925,7 @@ let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
     | Some diagnosis ->
       Json_util.get_string diagnosis "rule_id"
       = Some "task_release_requires_current_owner"
-      && Json_util.get_string diagnosis "tool_suggestion"
-         = Some "keeper_board_post"
+      && Json_util.get_string diagnosis "scope_policy" = Some "observe"
     | None -> false)
 )
 
@@ -2046,13 +2043,12 @@ let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
     match Json_util.assoc_member_opt "diagnosis" data with
     | Some diagnosis ->
       Json_util.get_string diagnosis "rule_id" = Some "stale_task_id_not_found"
-      && Json_util.get_string diagnosis "tool_suggestion"
-         = Some "masc_tasks"
+      && Json_util.get_string diagnosis "scope_policy" = Some "observe"
     | None -> false);
   assert (str_contains (Tool_result.message result) "absent from the live backlog")
 )
 
-let () = test "keeper transition rejection projects Keeper task-list guidance" (fun () ->
+let () = test "keeper transition rejection stays tool-neutral" (fun () ->
   let ctx = make_test_ctx () in
   let result =
     Task.Tool.dispatch_for_keeper
@@ -2071,14 +2067,11 @@ let () = test "keeper transition rejection projects Keeper task-list guidance" (
     (match Json_util.assoc_member_opt "diagnosis" data with
      | Some diagnosis ->
        assert
-         (Json_util.get_string diagnosis "tool_suggestion"
-          = Some "keeper_tasks_list")
+         (Json_util.get_string diagnosis "rule_id"
+          = Some "stale_task_id_not_found");
+       assert (Json_util.assoc_member_opt "tool_suggestion" diagnosis = None)
      | None -> failwith "missing Keeper transition diagnosis");
-    (match Json_util.assoc_member_opt "alternatives" data with
-     | Some (`List alternatives) ->
-       assert (List.mem (`String "keeper_tasks_list") alternatives);
-       assert (not (List.mem (`String "masc_tasks") alternatives))
-     | _ -> failwith "missing Keeper transition alternatives"))
+    assert (Json_util.assoc_member_opt "alternatives" data = None))
 
 (* Submit-for-verification is tested as a lifecycle transition here. Evidence
    text and references are transported to the verifier; this layer does not
@@ -2372,15 +2365,15 @@ let () = test "handle_done_owned_by_other_guidance" (fun () ->
   assert (str_contains (Tool_result.message result) "currently owned by other-agent")
 )
 
-(* Test handle_done on todo task recommends claim/start first *)
-let () = test "handle_done_todo_guidance" (fun () ->
+(* Test handle_done on a todo task reports typed state without choosing a tool. *)
+let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Todo test")]) in
   let result =
     Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Claim/start it first");
+  assert (str_contains (Tool_result.message result) "still todo");
   assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
   let data = Tool_result.data result in
   assert (Json_util.get_bool data "recoverable" = Some true);
@@ -2389,15 +2382,9 @@ let () = test "handle_done_todo_guidance" (fun () ->
     | Some diagnosis ->
       Json_util.get_string diagnosis "rule_id"
       = Some "task_done_requires_claimed_or_started"
-      && Json_util.get_string diagnosis "tool_suggestion"
-         = Some "masc_transition"
+      && Json_util.get_string diagnosis "scope_policy" = Some "observe"
     | None -> false);
-  assert (
-    match Json_util.assoc_member_opt "alternatives" data with
-    | Some (`List alternatives) ->
-      List.exists (( = ) (`String "masc_transition")) alternatives
-      && List.exists (( = ) (`String "keeper_task_claim")) alternatives
-    | _ -> false)
+  assert (Json_util.assoc_member_opt "alternatives" data = None)
 )
 
 (* Test handle_done reports already-done guidance instead of generic not-claimed *)

@@ -128,6 +128,11 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SEC)
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument(
+        "--json-out",
+        default=None,
+        help="also write JSON here, so one run can produce both reports",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="exit 1 when any candidate fails (off by default: this measures, it does not gate)",
@@ -160,20 +165,21 @@ def main() -> int:
     dune = args.dune.split()
     results = [run_suite(name, timeout_sec=args.timeout, dune=dune) for name in selected]
 
+    payload = json.dumps(
+        {
+            "candidates": len(candidates),
+            "ran": len(results),
+            "results": [
+                {"name": r.name, "status": r.status, "detail": r.detail}
+                for r in results
+            ],
+        },
+        indent=2,
+    )
+    if args.json_out:
+        Path(args.json_out).write_text(payload)
     if args.json:
-        print(
-            json.dumps(
-                {
-                    "candidates": len(candidates),
-                    "ran": len(results),
-                    "results": [
-                        {"name": r.name, "status": r.status, "detail": r.detail}
-                        for r in results
-                    ],
-                },
-                indent=2,
-            )
-        )
+        print(payload)
     else:
         print(render(results, len(candidates)))
 

@@ -36,7 +36,8 @@ val run_gc
   -> gc_report
 
 val run_gc_for_keepers_dir
-  :  keepers_dir:string
+  :  ?masc_root:string
+  -> keepers_dir:string
   -> ?dry_run:bool
   -> keeper_id:string
   -> now:float

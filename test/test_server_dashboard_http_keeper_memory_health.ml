@@ -130,10 +130,12 @@ let test_uses_explicit_base_path_not_ambient_resolver () =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:ambient_base
   in
   Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:target_base)
     ~keepers_dir:target_keepers_dir
     ~keeper_id:"target"
     [ fact ~now "target workspace fact" ];
   Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:ambient_base)
     ~keepers_dir:ambient_keepers_dir
     ~keeper_id:"ambient"
     [ fact ~now "ambient workspace fact" ];
@@ -154,6 +156,7 @@ let test_reports_per_keeper_metric_values () =
   let base = fresh_dir "masc-memory-health-metrics" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:base)
     ~keepers_dir
     ~keeper_id:"solo"
     [ fact ~now "alpha durable note one"
@@ -200,6 +203,7 @@ let test_health_reports_expiry_and_exact_duplicate_identity () =
   let base = fresh_dir "masc-memory-health-gc" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:base)
     ~keepers_dir
     ~keeper_id:"gc"
     [ fact ~now "shared claim row"
@@ -247,6 +251,7 @@ let test_reports_execution_slot_busy_metric_as_alert () =
   let keeper_id = "slotbusy-health-" ^ Filename.basename base in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:base)
     ~keepers_dir
     ~keeper_id
     [ fact ~now "slot busy metric keeper fact" ];
@@ -289,8 +294,13 @@ let test_sorts_keepers_by_facts_bytes_desc () =
   let now = test_now in
   let base = fresh_dir "masc-memory-health-sort" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
-  Io.rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id:"small" [ fact ~now "x" ];
   Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:base)
+    ~keepers_dir
+    ~keeper_id:"small"
+    [ fact ~now "x" ];
+  Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:base)
     ~keepers_dir
     ~keeper_id:"large"
     [ fact ~now "a much longer durable claim row number one"
@@ -321,6 +331,7 @@ let test_skips_corrupt_jsonl_keeper () =
   let base = fresh_dir "masc-memory-health-corrupt" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:base)
     ~keepers_dir
     ~keeper_id:"good"
     [ fact ~now "valid durable row" ];

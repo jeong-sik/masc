@@ -962,13 +962,13 @@ let apply_and_persist
         ~recognized_facts:[]
         ~source_turns:[]
     in
-    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
-      let recovered =
-        Keeper_memory_os_io.with_facts_lock
-          ?clock
-          ~keeper_id
-          ~on_timeout:(fun msg -> Error (Memory_apply_failed msg))
-          (fun () ->
+    let recovered =
+      Keeper_memory_os_io.with_recognition_fact_transaction
+        ?clock
+        ~masc_root:recognition_masc_root
+        ~keeper_id
+        ~on_timeout:(fun msg -> Error (Memory_apply_failed msg))
+        (fun ~rewrite:_ ~masc_root:_ ->
              match Keeper_memory_os_io.read_facts_all_strict_offloaded ~keeper_id with
              | Error msg -> Error (Store_read_failed msg)
              | Ok current ->
@@ -1013,6 +1013,7 @@ let apply_and_persist
                        ~event:(fun () ->
                          Keeper_memory_os_io.ensure_recognition_event
                            ~keeper_id
+                           ~publication_id
                            episode)
                        ~commit:(fun () ->
                          Recognition_ledger.append_committed
@@ -1024,7 +1025,7 @@ let apply_and_persist
                            ~now
                            ())
                    with
-                   | Ok () -> Ok ()
+                   | Ok _ -> Ok ()
                    | Error (Recognition_ledger.Prepare_failed detail) ->
                      Error
                        (Memory_apply_failed
@@ -1047,18 +1048,18 @@ let apply_and_persist
                           ("recognition commit marker failed; prepared \
                             publication remains recoverable: "
                            ^ detail)))))
-      in
-      match recovered with
-      | Error _ as error -> error
-      | Ok () -> Ok (Recognized episode))
+    in
+    (match recovered with
+     | Error _ as error -> error
+     | Ok () -> Ok (Recognized episode))
   | _ :: _ ->
-    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
-      let applied =
-        Keeper_memory_os_io.with_facts_lock
-          ?clock
-          ~keeper_id
-          ~on_timeout:(fun msg -> Error (Memory_apply_failed msg))
-          (fun () ->
+    let applied =
+      Keeper_memory_os_io.with_recognition_fact_transaction
+        ?clock
+        ~masc_root:recognition_masc_root
+        ~keeper_id
+        ~on_timeout:(fun msg -> Error (Memory_apply_failed msg))
+        (fun ~rewrite ~masc_root:_ ->
              match Keeper_memory_os_io.read_facts_all_strict_offloaded ~keeper_id with
              | Error msg -> Error (Store_read_failed msg)
              | Ok current ->
@@ -1097,10 +1098,23 @@ let apply_and_persist
                      ~operations:recognition.operations
                      inp.store
                  in
-                 if
+                 let facts_rewrite_required =
                    List.exists
                      (function Recognition.Applied -> true | _ -> false)
                      result.Recognition.dispositions
+                 in
+                 let recalled_echo_only =
+                   result.Recognition.dispositions <> []
+                   && List.for_all
+                        (function
+                          | Recognition.Rejected_recalled_echo -> true
+                          | Recognition.Applied
+                          | Recognition.Rejected_index_out_of_bounds
+                          | Recognition.Rejected_target_overlap
+                          | Recognition.Rejected_target_consumed -> false)
+                        result.Recognition.dispositions
+                 in
+                 if facts_rewrite_required || recalled_echo_only
                  then
                    let episode =
                      Keeper_librarian.episode_of_recognition
@@ -1121,7 +1135,7 @@ let apply_and_persist
                        ~dispositions:result.Recognition.dispositions
                        ~store_after:result.Recognition.facts
                        ~episode
-                       ~facts_rewrite_required:true
+                       ~facts_rewrite_required
                    in
                    (match
                       Recognition_ledger.publish
@@ -1137,19 +1151,19 @@ let apply_and_persist
                             ~dispositions:result.Recognition.dispositions
                             ~store_after:result.Recognition.facts
                             ~episode
-                            ~facts_rewrite_required:true
+                            ~facts_rewrite_required
                             ~now
                             ())
                         ~rewrite:(fun () ->
-                          try
-                            Keeper_memory_os_io.rewrite_facts_atomically
-                              ~allow_recognition_pending:true
-                              ~keeper_id
-                              result.Recognition.facts;
-                            Ok ()
-                          with
-                          | Eio.Cancel.Cancelled _ as exn -> raise exn
-                          | exn -> Error (Printexc.to_string exn))
+                          if not facts_rewrite_required
+                          then Ok ()
+                          else
+                            try
+                              rewrite result.Recognition.facts;
+                              Ok ()
+                            with
+                            | Eio.Cancel.Cancelled _ as exn -> raise exn
+                            | exn -> Error (Printexc.to_string exn))
                         ~episode:(fun () ->
                           Keeper_memory_os_io.ensure_recognition_episode
                             ~keeper_id
@@ -1158,6 +1172,7 @@ let apply_and_persist
                         ~event:(fun () ->
                           Keeper_memory_os_io.ensure_recognition_event
                             ~keeper_id
+                            ~publication_id
                             episode)
                         ~commit:(fun () ->
                           Recognition_ledger.append_committed
@@ -1169,7 +1184,7 @@ let apply_and_persist
                             ~now
                             ())
                     with
-                    | Ok () -> Ok episode
+                    | Ok _ -> Ok episode
                     | Error (Recognition_ledger.Prepare_failed detail) ->
                       Error
                         (Memory_apply_failed
@@ -1198,10 +1213,10 @@ let apply_and_persist
                    Error
                      (Domain_output_invalid
                         "recognition output applied no operations to the current store"))))
-      in
-      match applied with
-      | Error _ as error -> error
-      | Ok episode -> Ok (Recognized episode))
+    in
+    (match applied with
+     | Error _ as error -> error
+     | Ok episode -> Ok (Recognized episode))
 ;;
 
 let persist_cadence_backoff ~should_defer ~write =

@@ -24,6 +24,7 @@ let rec ensure_dir path =
 ;;
 
 let keepers_dir_override : string option ref = ref None
+let recognition_masc_root_override : string option ref = ref None
 
 let keepers_dir () =
   match !keepers_dir_override with
@@ -31,13 +32,36 @@ let keepers_dir () =
   | None -> Config_dir_resolver.keepers_dir ()
 ;;
 
+let recognition_masc_root () =
+  match !recognition_masc_root_override with
+  | Some path -> path
+  | None ->
+    Workspace_utils.masc_root_dir_from
+      ~base_path:(Env_config_core.base_path ())
+      ~cluster_name:(Env_config_core.cluster_name ())
+;;
+
+let current_recognition_masc_root = recognition_masc_root
+
 module For_testing = struct
-  let with_keepers_dir path f =
+  let with_memory_roots ~keepers_dir:path ~masc_root f =
     ensure_dir path;
+    ensure_dir masc_root;
     let previous = !keepers_dir_override in
+    let previous_recognition_root = !recognition_masc_root_override in
     keepers_dir_override := Some path;
+    recognition_masc_root_override := Some masc_root;
     Fun.protect
-      ~finally:(fun () -> keepers_dir_override := previous)
+      ~finally:(fun () ->
+        keepers_dir_override := previous;
+        recognition_masc_root_override := previous_recognition_root)
+      f
+  ;;
+
+  let with_keepers_dir path f =
+    with_memory_roots
+      ~keepers_dir:path
+      ~masc_root:(Filename.dirname path)
       f
   ;;
 end
@@ -55,16 +79,10 @@ let recognition_pending_path_for_masc_root ~masc_root ~keeper_id =
     (keeper_key ^ ".json")
 ;;
 
-let recognition_pending_path_for_keepers_dir ~keepers_dir ~keeper_id =
-  recognition_pending_path_for_masc_root
-    ~masc_root:(Filename.dirname keepers_dir)
-    ~keeper_id
-;;
-
 exception Recognition_publication_pending of string
 
-let reject_pending_recognition ~keepers_dir ~keeper_id =
-  let path = recognition_pending_path_for_keepers_dir ~keepers_dir ~keeper_id in
+let reject_pending_recognition ~masc_root ~keeper_id =
+  let path = recognition_pending_path_for_masc_root ~masc_root ~keeper_id in
   if Sys.file_exists path
   then
     raise
@@ -176,6 +194,13 @@ let episode_bundle_lock_path ~keeper_id =
 
 let with_episode_bundle_lock ?clock ~keeper_id f =
   File_lock_eio.with_lock ?clock (episode_bundle_lock_path ~keeper_id) f
+;;
+
+let with_episode_bundle_lock_for_keepers_dir ?clock ~keepers_dir ~keeper_id f =
+  File_lock_eio.with_lock
+    ?clock
+    (episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    f
 ;;
 
 let episodes_dir_for_keepers_dir ~keepers_dir ~keeper_id =
@@ -362,7 +387,7 @@ let append_json path json =
   append_line path (Yojson.Safe.to_string json)
 ;;
 
-let append_fact ~keeper_id fact =
+let append_fact_unlocked ~keeper_id fact =
   append_json (facts_path ~keeper_id) (fact_to_json fact)
 ;;
 
@@ -375,23 +400,7 @@ let append_episode ~keeper_id episode =
   write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode))
 ;;
 
-let append_episode_bundle ~keeper_id episode =
-  with_episode_bundle_lock ~keeper_id (fun () ->
-    File_lock_eio.with_lock (facts_path ~keeper_id) (fun () ->
-      reject_pending_recognition ~keepers_dir:(keepers_dir ()) ~keeper_id;
-      List.iter (append_fact ~keeper_id) episode.claims);
-    append_episode ~keeper_id episode;
-    append_event ~keeper_id episode)
-;;
-
-let rewrite_facts_atomically_for_keepers_dir
-      ?(allow_recognition_pending = false)
-      ~keepers_dir
-      ~keeper_id
-      facts
-  =
-  if not allow_recognition_pending
-  then reject_pending_recognition ~keepers_dir ~keeper_id;
+let rewrite_facts_atomically_unlocked_for_keepers_dir ~keepers_dir ~keeper_id facts =
   let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let content =
     facts
@@ -402,25 +411,124 @@ let rewrite_facts_atomically_for_keepers_dir
   write_file_atomically path content
 ;;
 
+let run_with_lock_timeout ~on_timeout f =
+  try f () with
+  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
+    on_timeout (Printf.sprintf "lock timeout: %s after %d attempts" path attempts)
+;;
+
+let with_fact_mutation_for_keepers_dir
+      ?clock
+      ~masc_root
+      ~keepers_dir
+      ~keeper_id
+      ~on_timeout
+      f
+  =
+  run_with_lock_timeout ~on_timeout (fun () ->
+    with_episode_bundle_lock_for_keepers_dir
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      (fun () ->
+         File_lock_eio.with_lock
+           ?clock
+           (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+           (fun () ->
+              reject_pending_recognition ~masc_root ~keeper_id;
+              f
+                ~rewrite:(fun facts ->
+                  rewrite_facts_atomically_unlocked_for_keepers_dir
+                    ~keepers_dir
+                    ~keeper_id
+                    facts))))
+;;
+
+let with_fact_mutation ?clock ?masc_root ~keeper_id ~on_timeout f =
+  (* DET-OK: explicit root overrides are test/request scoping; absence selects
+     the process workspace+cluster authority before any filesystem decision. *)
+  with_fact_mutation_for_keepers_dir
+    ?clock
+    ~masc_root:
+      (Option.value masc_root ~default:(recognition_masc_root ())) (* DET-OK *)
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    ~on_timeout
+    f
+;;
+
+let with_recognition_fact_transaction
+      ?clock
+      ~masc_root
+      ~keeper_id
+      ~on_timeout
+      f
+  =
+  run_with_lock_timeout ~on_timeout (fun () ->
+    with_episode_bundle_lock ?clock ~keeper_id (fun () ->
+      File_lock_eio.with_lock ?clock (facts_path ~keeper_id) (fun () ->
+        f
+          ~rewrite:(fun facts ->
+            rewrite_facts_atomically_unlocked_for_keepers_dir
+              ~keepers_dir:(keepers_dir ())
+              ~keeper_id
+              facts)
+          ~masc_root)))
+;;
+
+let append_fact ~keeper_id fact =
+  with_fact_mutation
+    ~keeper_id
+    ~on_timeout:(fun msg -> raise (Failure msg))
+    (fun ~rewrite:_ -> append_fact_unlocked ~keeper_id fact)
+;;
+
+let append_episode_bundle ~keeper_id episode =
+  with_fact_mutation
+    ~keeper_id
+    ~on_timeout:(fun msg -> raise (Failure msg))
+    (fun ~rewrite:_ ->
+       List.iter (append_fact_unlocked ~keeper_id) episode.claims;
+       append_episode ~keeper_id episode;
+       append_event ~keeper_id episode)
+;;
+
+let rewrite_facts_atomically_for_keepers_dir
+      ~masc_root
+      ~keepers_dir
+      ~keeper_id
+      facts
+  =
+  with_fact_mutation_for_keepers_dir
+    ~masc_root
+    ~keepers_dir
+    ~keeper_id
+    ~on_timeout:(fun msg -> raise (Failure msg))
+    (fun ~rewrite -> rewrite facts)
+;;
+
 let rewrite_facts_atomically_for_base_path
-      ?allow_recognition_pending
       ~base_path
       ~keeper_id
       facts
   =
+  let masc_root =
+    Workspace_utils.masc_root_dir_from
+      ~base_path
+      ~cluster_name:(Env_config_core.cluster_name ())
+  in
   rewrite_facts_atomically_for_keepers_dir
-    ?allow_recognition_pending
+    ~masc_root
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
     ~keeper_id
     facts
 ;;
 
-let rewrite_facts_atomically ?allow_recognition_pending ~keeper_id facts =
-  rewrite_facts_atomically_for_keepers_dir
-    ?allow_recognition_pending
-    ~keepers_dir:(keepers_dir ())
+let rewrite_facts_atomically ~keeper_id facts =
+  with_fact_mutation
     ~keeper_id
-    facts
+    ~on_timeout:(fun msg -> raise (Failure msg))
+    (fun ~rewrite -> rewrite facts)
 ;;
 
 (* ---------- Facts snapshot CAS (optimistic concurrency) ---------- *)
@@ -694,29 +802,18 @@ let merge_episode_facts ~merge ~existing ~incoming =
 (* Librarian write path: upsert explicit incoming facts and preserve every row.
    The old keep/trigger/rank parameters no longer authorize deletion. *)
 let merge_facts ~keeper_id ~merge ~incoming =
-  let existing = read_facts_for_rewrite ~keeper_id in
-  let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
-  (match incoming with
-   | [] -> ()
-   | _ :: _ -> rewrite_facts_atomically ~keeper_id merged_list);
-  { merged; appended }
-;;
-
-let read_events_tail ~keeper_id ~n =
-  read_lines_tail (events_path ~keeper_id) ~n
-  |> List.filter_map (parse_json_line episode_of_json)
-  |> take_last n
-;;
-
-let read_events_all ~keeper_id =
-  let path = events_path ~keeper_id in
-  read_lines_all path
-  |> List.mapi (fun index line ->
-    match parse_json_line episode_of_json line with
-    | Some episode -> episode
-    | None ->
-      invalid_arg
-        (Printf.sprintf "memory episode decode failed: %s:%d" path (index + 1)))
+  with_fact_mutation
+    ~keeper_id
+    ~on_timeout:(fun msg -> raise (Failure msg))
+    (fun ~rewrite ->
+       let existing = read_facts_for_rewrite ~keeper_id in
+       let merged_list, merged, appended =
+         merge_episode_facts ~merge ~existing ~incoming
+       in
+       (match incoming with
+        | [] -> ()
+        | _ :: _ -> rewrite merged_list);
+       { merged; appended })
 ;;
 
 let read_episode_file path =
@@ -731,6 +828,114 @@ let read_episode_file path =
 
 let same_episode left right =
   Yojson.Safe.equal (episode_to_json left) (episode_to_json right)
+;;
+
+let compare_episode_recency a b =
+  let by_created = Float.compare a.created_at b.created_at in
+  if by_created <> 0
+  then by_created
+  else (
+    let by_trace = String.compare a.trace_id b.trace_id in
+    if by_trace <> 0
+    then by_trace
+    else (
+      let by_generation = Int.compare a.generation b.generation in
+      if by_generation <> 0
+      then by_generation
+      else String.compare a.episode_summary b.episode_summary))
+;;
+
+let recognition_events_dir_path ~keeper_id =
+  Filename.concat
+    (Filename.concat (keepers_dir ()) keeper_id)
+    "recognition-events"
+;;
+
+let recognition_event_path ~keeper_id ~publication_id =
+  Filename.concat
+    (recognition_events_dir_path ~keeper_id)
+    (Printf.sprintf "%s.json" publication_id)
+;;
+
+let read_recognition_events_all ~keeper_id =
+  let dir = recognition_events_dir_path ~keeper_id in
+  if not (Sys.file_exists dir && Sys.is_directory dir)
+  then []
+  else
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".json")
+    |> List.sort String.compare
+    |> List.map (fun name ->
+      let path = Filename.concat dir name in
+      match read_episode_file path with
+      | Some episode -> episode
+      | None ->
+        invalid_arg (Printf.sprintf "memory recognition event decode failed: %s" path))
+;;
+
+let deduplicate_events events =
+  let seen = Hashtbl.create (List.length events) in
+  let identity_key episode =
+    ( episode.trace_id
+    , episode.generation
+    , Int64.bits_of_float episode.created_at )
+  in
+  let rec loop accepted = function
+    | [] -> List.rev accepted
+    | episode :: rest ->
+      let key = identity_key episode in
+      (match Hashtbl.find_opt seen key with
+       | None ->
+         Hashtbl.add seen key episode;
+         loop (episode :: accepted) rest
+       | Some existing when same_episode existing episode -> loop accepted rest
+       | Some _ ->
+         invalid_arg
+           (Printf.sprintf
+              "memory event identity collision: trace=%s generation=%d created_at=%.17g"
+              episode.trace_id
+              episode.generation
+              episode.created_at))
+  in
+  loop [] events
+;;
+
+let read_legacy_events_all ~keeper_id =
+  let path = events_path ~keeper_id in
+  read_lines_all path
+  |> List.mapi (fun index line ->
+    match parse_json_line episode_of_json line with
+    | Some episode -> episode
+    | None ->
+      invalid_arg
+        (Printf.sprintf "memory episode decode failed: %s:%d" path (index + 1)))
+;;
+
+let read_events_all ~keeper_id =
+  let legacy = read_legacy_events_all ~keeper_id in
+  match read_recognition_events_all ~keeper_id with
+  | [] -> legacy
+  | recognition ->
+    legacy @ recognition |> List.sort compare_episode_recency |> deduplicate_events
+;;
+
+let read_events_tail ~keeper_id ~n =
+  if n <= 0
+  then []
+  else (
+    let legacy =
+      read_lines_tail (events_path ~keeper_id) ~n
+      |> List.filter_map (parse_json_line episode_of_json)
+      |> take_last n
+    in
+    match read_recognition_events_all ~keeper_id with
+    | [] -> legacy
+    | recognition ->
+      legacy @ recognition
+      |> List.sort compare_episode_recency
+      |> deduplicate_events
+      |> take_last n)
 ;;
 
 let recognition_episode_path ~keeper_id ~publication_id =
@@ -760,45 +965,22 @@ let ensure_recognition_episode ~keeper_id ~publication_id episode =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let episode_event_identity_equal left right =
-  String.equal left.trace_id right.trace_id
-  && Int.equal left.generation right.generation
-  && Float.equal left.created_at right.created_at
-;;
-
-(* Events remain the reader-visible commit log. Recognition publication needs
-   replay-safe exact-once semantics, so read it strictly under the caller-held
-   episode-bundle lock and atomically replace the full file when the event is
-   absent. A crash observes either the old file or the complete new file. *)
-let ensure_recognition_event ~keeper_id episode =
-  let path = events_path ~keeper_id in
+(* Recognition events are publication-addressed atomic shards. Recovery checks
+   one deterministic path instead of scanning and rewriting the unbounded
+   legacy JSONL history; [read_events_all] merges these shards with legacy
+   append events and rejects identity collisions. *)
+let ensure_recognition_event ~keeper_id ~publication_id episode =
+  let path = recognition_event_path ~keeper_id ~publication_id in
   try
-    let rec decode line_number acc = function
-      | [] -> Ok (List.rev acc)
-      | line :: rest ->
-        (match parse_json_line episode_of_json line with
-         | Some parsed -> decode (line_number + 1) (parsed :: acc) rest
-         | None ->
-           Error
-             (Printf.sprintf
-                "memory episode decode failed during recognition recovery: %s:%d"
-                path
-                line_number))
-    in
-    match decode 1 [] (read_lines_all path) with
-    | Error _ as error -> error
-    | Ok stored ->
-      (match List.find_opt (episode_event_identity_equal episode) stored with
-       | Some existing when same_episode existing episode -> Ok ()
-       | Some _ -> Error ("recognition event identity collision: " ^ path)
-       | None ->
-         let content =
-           stored @ [ episode ]
-           |> List.map (fun item -> episode_to_json item |> Yojson.Safe.to_string)
-           |> String.concat "\n"
-         in
-         write_file_atomically path (content ^ "\n");
-         Ok ())
+    if Sys.file_exists path
+    then (
+      match read_episode_file path with
+      | Some stored when same_episode stored episode -> Ok ()
+      | Some _ -> Error ("recognition event identity collision: " ^ path)
+      | None -> Error ("recognition event is malformed: " ^ path))
+    else (
+      write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode));
+      Ok ())
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
@@ -854,21 +1036,6 @@ let read_episode_files_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
 
 let read_episode_files_all_strict ~keeper_id =
   read_episode_files_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
-;;
-
-let compare_episode_recency a b =
-  let by_created = Float.compare a.created_at b.created_at in
-  if by_created <> 0
-  then by_created
-  else (
-    let by_trace = String.compare a.trace_id b.trace_id in
-    if by_trace <> 0
-    then by_trace
-    else (
-      let by_generation = Int.compare a.generation b.generation in
-      if by_generation <> 0
-      then by_generation
-      else String.compare a.episode_summary b.episode_summary))
 ;;
 
 let read_episode_files_tail ~keeper_id ~n =

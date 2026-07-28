@@ -255,14 +255,48 @@ let test_rewrite_failure_never_commits_publication () =
       ~event:(fun () -> Ok ())
       ~commit:(fun () ->
         committed := true;
-        Ok ())
+        Ok Ledger.Terminal_durable)
   with
   | Error (Ledger.Rewrite_failed "injected rewrite failure") ->
     check bool "prepare is durable first" true !prepared;
     check bool "rewrite was attempted" true !rewritten;
     check bool "failed rewrite has no committed marker" false !committed
   | Error _ -> fail "unexpected publication failure"
-  | Ok () -> fail "injected rewrite failure unexpectedly committed"
+  | Ok _ -> fail "injected rewrite failure unexpectedly committed"
+;;
+
+let test_terminal_remove_after_unlink_is_typed_success () =
+  let remove_error : Keeper_fs.durable_remove_error =
+    { removed = true
+    ; failure = Keeper_fs.Parent_directory_fsync, "injected fsync failure"
+    }
+  in
+  let expected_detail = Keeper_fs.durable_remove_error_to_string remove_error in
+  (match
+     Ledger.For_testing.terminal_outcome_of_remove_result (Error remove_error)
+   with
+   | Ok (Ledger.Terminal_durable_marker_clear_uncertain detail) ->
+     check string "uncertain durability detail is preserved" expected_detail detail
+   | Ok Ledger.Terminal_durable ->
+     fail "removed marker with failed parent fsync was flattened to durable"
+   | Error detail ->
+     fail ("terminal durable publication was misclassified as failed: " ^ detail));
+  match
+    Ledger.publish
+      ~prepare:(fun () -> Ok ())
+      ~rewrite:(fun () -> Ok ())
+      ~episode:(fun () -> Ok ())
+      ~event:(fun () -> Ok ())
+      ~commit:(fun () ->
+        Ledger.For_testing.terminal_outcome_of_remove_result
+          (Error remove_error))
+  with
+  | Ok (Ledger.Terminal_durable_marker_clear_uncertain detail) ->
+    check string "publication preserves terminal outcome" expected_detail detail
+  | Ok Ledger.Terminal_durable ->
+    fail "publish flattened uncertain marker durability"
+  | Error _ ->
+    fail "terminal row durability must not be reported as a recoverable prepare failure"
 ;;
 
 let test_publication_rows_distinguish_prepared_from_committed () =
@@ -374,10 +408,11 @@ let test_read_admission_recovers_every_publication_boundary_exactly_once () =
         (claims (Memory_io.read_facts_all ~keeper_id));
       if not (String.equal boundary "after_prepare")
       then
-        Memory_io.rewrite_facts_atomically
-          ~allow_recognition_pending:true
+        Memory_io.with_recognition_fact_transaction
+          ~masc_root
           ~keeper_id
-          applied.Recognition.facts;
+          ~on_timeout:(fun detail -> fail detail)
+          (fun ~rewrite ~masc_root:_ -> rewrite applied.Recognition.facts);
       if
         String.equal boundary "after_episode"
         || String.equal boundary "after_event"
@@ -389,12 +424,14 @@ let test_read_admission_recovers_every_publication_boundary_exactly_once () =
              ~publication_id
              episode
          with
-         | Ok () -> ()
+         | Ok _ -> ()
          | Error detail -> fail ("episode fixture failed: " ^ detail));
       if String.equal boundary "after_event" || String.equal boundary "after_commit"
       then
-        (match Memory_io.ensure_recognition_event ~keeper_id episode with
-         | Ok () -> ()
+        (match
+           Memory_io.ensure_recognition_event ~keeper_id ~publication_id episode
+         with
+         | Ok _ -> ()
          | Error detail -> fail ("event fixture failed: " ^ detail));
       if String.equal boundary "after_commit"
       then
@@ -408,7 +445,7 @@ let test_read_admission_recovers_every_publication_boundary_exactly_once () =
              ~now
              ()
          with
-         | Ok () -> ()
+         | Ok _ -> ()
          | Error detail -> fail ("commit fixture failed: " ^ detail));
       List.iter
         (fun turn ->
@@ -514,11 +551,13 @@ let test_zero_op_read_admission_completes_equal_digest_publication () =
              ~publication_id
              episode
          with
-         | Ok () -> ()
+         | Ok _ -> ()
          | Error detail -> fail ("zero-op episode fixture failed: " ^ detail));
       if String.equal boundary "after_event" || String.equal boundary "after_commit"
       then
-        (match Memory_io.ensure_recognition_event ~keeper_id episode with
+        (match
+           Memory_io.ensure_recognition_event ~keeper_id ~publication_id episode
+         with
          | Ok () -> ()
          | Error detail -> fail ("zero-op event fixture failed: " ^ detail));
       if String.equal boundary "after_commit"
@@ -594,6 +633,151 @@ let test_no_pending_recovery_does_not_scan_dated_history () =
   | Ok Ledger.No_pending_publication -> ()
   | Ok _ -> fail "recovery invented a pending publication"
   | Error detail -> fail ("recovery scanned unrelated dated history: " ^ detail)
+;;
+
+let test_recognition_event_ensure_does_not_scan_legacy_history () =
+  let marker = Filename.temp_file "recognition-event-o1" ".tmp" in
+  Sys.remove marker;
+  Memory_io.For_testing.with_keepers_dir marker (fun () ->
+    let keeper_id = "keeper-event-o1" in
+    let legacy_path = Memory_io.events_path ~keeper_id in
+    let oc = open_out_bin legacy_path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{malformed legacy history}\n");
+    let event = episode () in
+    List.iter
+      (fun () ->
+         match
+           Memory_io.ensure_recognition_event
+             ~keeper_id
+             ~publication_id:"event-publication"
+             event
+         with
+         | Ok () -> ()
+         | Error detail -> fail ("recognition event ensure failed: " ^ detail))
+      [ (); () ];
+    let event_dir =
+      Filename.concat
+        (Filename.concat marker keeper_id)
+        "recognition-events"
+    in
+    check int "replay leaves one publication-addressed event shard" 1
+      (Sys.readdir event_dir |> Array.length))
+;;
+
+let test_canonical_audit_reader_deduplicates_crash_window_rows () =
+  let masc_root = Filename.temp_file "recognition-audit-dedupe" ".tmp" in
+  Sys.remove masc_root;
+  Unix.mkdir masc_root 0o700;
+  let before = [ fact ~claim:"before" () ] in
+  let operation = Recognition.Add (fact ~claim:"after" ()) in
+  let applied = apply [ operation ] before in
+  let event = episode ~claims:applied.Recognition.recognized_facts () in
+  let publication_id =
+    Ledger.publication_id
+      ~keeper_id:"audit-dedupe"
+      ~trace_id:event.trace_id
+      ~generation:event.generation
+      ~store_before:before
+      ~operations:[ operation ]
+      ~dispositions:applied.Recognition.dispositions
+      ~store_after:applied.Recognition.facts
+      ~episode:event
+      ~facts_rewrite_required:true
+  in
+  let prepared =
+    Ledger.prepared_to_json
+      ~publication_id
+      ~keeper_id:"audit-dedupe"
+      ~trace_id:event.trace_id
+      ~generation:event.generation
+      ~store_before:before
+      ~operations:[ operation ]
+      ~dispositions:applied.Recognition.dispositions
+      ~store_after:applied.Recognition.facts
+      ~episode:event
+      ~facts_rewrite_required:true
+      ~now
+      ()
+  in
+  let committed =
+    Ledger.committed_to_json
+      ~publication_id
+      ~keeper_id:"audit-dedupe"
+      ~trace_id:event.trace_id
+      ~generation:event.generation
+      ~now
+      ()
+  in
+  let audit = Dated_jsonl.create ~base_dir:(Ledger.base_dir ~masc_root) () in
+  List.iter (Dated_jsonl.append audit) [ prepared; prepared; committed; committed ];
+  match Ledger.read_all_canonical ~masc_root with
+  | Error detail -> fail ("canonical audit read failed: " ^ detail)
+  | Ok rows ->
+    check int "two logical states survive four physical rows" 2
+      (List.length rows)
+;;
+
+let test_pending_guard_uses_authoritative_root_matrix () =
+  let base = Filename.temp_file "recognition-root-matrix" ".tmp" in
+  Sys.remove base;
+  Unix.mkdir base 0o700;
+  let cases =
+    [ ( "default"
+      , Filename.concat (Filename.concat base ".masc") "config/keepers"
+      , Filename.concat base ".masc" )
+    ; ( "explicit-config"
+      , Filename.concat base "external-config/keepers"
+      , Filename.concat base ".masc" )
+    ; ( "nondefault-cluster"
+      , Filename.concat base "cluster-config/keepers"
+      , Filename.concat base ".masc/clusters/blue" )
+    ]
+  in
+  List.iter
+    (fun (label, keepers_dir, masc_root) ->
+       Memory_io.For_testing.with_memory_roots
+         ~keepers_dir
+         ~masc_root
+         (fun () ->
+            let keeper_id = "root-" ^ label in
+            let store = [ fact ~claim:"guarded-before" () ] in
+            let event = episode () in
+            let publication_id =
+              Ledger.publication_id
+                ~keeper_id
+                ~trace_id:event.trace_id
+                ~generation:event.generation
+                ~store_before:store
+                ~operations:[]
+                ~dispositions:[]
+                ~store_after:store
+                ~episode:event
+                ~facts_rewrite_required:false
+            in
+            (match
+               Ledger.append_prepared
+                 ~masc_root
+                 ~publication_id
+                 ~keeper_id
+                 ~trace_id:event.trace_id
+                 ~generation:event.generation
+                 ~store_before:store
+                 ~operations:[]
+                 ~dispositions:[]
+                 ~store_after:store
+                 ~episode:event
+                 ~facts_rewrite_required:false
+                 ~now
+                 ()
+             with
+             | Ok () -> ()
+             | Error detail -> fail (label ^ ": prepare failed: " ^ detail));
+            match Memory_io.append_fact ~keeper_id (fact ~claim:"third-state" ()) with
+            | exception Memory_io.Recognition_publication_pending _ -> ()
+            | () -> fail (label ^ ": writer missed authoritative pending root")))
+    cases
 ;;
 
 let test_recalled_reinforcement_is_rejected_by_provenance () =
@@ -819,6 +1003,8 @@ let () =
             test_merge_uses_authored_claim_id_and_current_turn;
           test_case "rewrite failure never commits publication" `Quick
             test_rewrite_failure_never_commits_publication;
+          test_case "terminal remove after unlink is typed success" `Quick
+            test_terminal_remove_after_unlink_is_typed_success;
           test_case "publication rows distinguish prepared and committed" `Quick
             test_publication_rows_distinguish_prepared_from_committed;
           test_case
@@ -833,6 +1019,18 @@ let () =
             "no-pending recovery does not scan dated history"
             `Quick
             test_no_pending_recovery_does_not_scan_dated_history;
+          test_case
+            "recognition event ensure does not scan legacy history"
+            `Quick
+            test_recognition_event_ensure_does_not_scan_legacy_history;
+          test_case
+            "canonical audit reader deduplicates crash-window rows"
+            `Quick
+            test_canonical_audit_reader_deduplicates_crash_window_rows;
+          test_case
+            "pending guard uses authoritative root matrix"
+            `Quick
+            test_pending_guard_uses_authoritative_root_matrix;
           test_case "recalled reinforcement is rejected by provenance" `Quick
             test_recalled_reinforcement_is_rejected_by_provenance;
           test_case "add appends" `Quick test_add_appends;

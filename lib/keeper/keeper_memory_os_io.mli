@@ -12,8 +12,15 @@ val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> strin
 
 val recognition_pending_path_for_masc_root :
   masc_root:string -> keeper_id:string -> string
+val current_recognition_masc_root : unit -> string
 
 exception Recognition_publication_pending of string
+
+module For_testing : sig
+  val with_keepers_dir : string -> (unit -> 'a) -> 'a
+  val with_memory_roots :
+    keepers_dir:string -> masc_root:string -> (unit -> 'a) -> 'a
+end
 
 (** RFC-0244 Tier 2: keeper ids that currently have a [*.facts.jsonl] store, for
     the cross-keeper consolidation sweep. Excludes the reserved shared id; sorted. *)
@@ -88,11 +95,12 @@ val append_episode : keeper_id:string -> episode -> unit
 val ensure_recognition_episode :
   keeper_id:string -> publication_id:string -> episode -> (unit, string) result
 
-(** Idempotently publish the reader-visible recognition event. The event store
-    is strictly decoded and atomically replaced, so replay adds the episode
-    exactly once or reports a conflict/malformed store. Caller holds the
+(** Idempotently publish the reader-visible recognition event at its
+    publication-addressed atomic shard. Replay checks one deterministic file
+    instead of scanning or rewriting event history. Caller holds the
     episode-bundle lock. *)
-val ensure_recognition_event : keeper_id:string -> episode -> (unit, string) result
+val ensure_recognition_event :
+  keeper_id:string -> publication_id:string -> episode -> (unit, string) result
 
 (** Lock path used by {!with_episode_bundle_lock}; the episode retention sweep
     serializes against episode writers on the same lock. *)
@@ -107,25 +115,47 @@ val with_episode_bundle_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t -> keeper_id:string -> (unit -> 'a) -> 'a
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
-(** Atomic fact rewrite. By default a durable pending recognition publication
-    blocks the mutation with {!Recognition_publication_pending}, preventing a
-    concurrent writer from turning its before/after reconciliation into a third
-    state. Only the recognition transaction itself may pass
-    [allow_recognition_pending=true], while holding its bundle and facts locks. *)
-val rewrite_facts_atomically :
-  ?allow_recognition_pending:bool -> keeper_id:string -> fact list -> unit
+(** Atomic fact rewrite. Every public fact writer owns the lock order
+    episode-bundle -> facts and rejects the authoritative pending marker before
+    mutating. Recognition uses {!with_recognition_fact_transaction}, whose
+    callback-scoped rewrite capability is unavailable outside those locks. *)
+val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
 val rewrite_facts_atomically_for_keepers_dir :
-  ?allow_recognition_pending:bool ->
+  masc_root:string ->
   keepers_dir:string ->
   keeper_id:string ->
   fact list ->
   unit
 val rewrite_facts_atomically_for_base_path :
-  ?allow_recognition_pending:bool ->
   base_path:string ->
   keeper_id:string ->
   fact list ->
   unit
+
+val with_fact_mutation :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?masc_root:string
+  -> keeper_id:string
+  -> on_timeout:(string -> 'a)
+  -> (rewrite:(fact list -> unit) -> 'a)
+  -> 'a
+
+val with_fact_mutation_for_keepers_dir :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> masc_root:string
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> on_timeout:(string -> 'a)
+  -> (rewrite:(fact list -> unit) -> 'a)
+  -> 'a
+
+val with_recognition_fact_transaction :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> masc_root:string
+  -> keeper_id:string
+  -> on_timeout:(string -> 'a)
+  -> (rewrite:(fact list -> unit) -> masc_root:string -> 'a)
+  -> 'a
 
 (** {1 Facts snapshot CAS} *)
 
@@ -204,7 +234,3 @@ val merge_facts :
   -> merge:(existing:fact -> incoming:fact -> fact)
   -> incoming:fact list
   -> fact_merge_stats
-
-module For_testing : sig
-  val with_keepers_dir : string -> (unit -> 'a) -> 'a
-end

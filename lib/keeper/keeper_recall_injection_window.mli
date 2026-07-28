@@ -30,7 +30,8 @@ val window_turns : int
 
 val note : keeper_id:string -> turn:int -> keys:string list -> unit
 (** Record the [claim_identity] keys recall injected for [keeper_id] at [turn].
-    Re-noting the same turn replaces that turn's entry. [keys = []] is a no-op.
+    Re-noting the same turn replaces that turn's entry. [keys = []] records an
+    empty observation by pruning against [turn] without adding an entry.
     Entries from turns newer than [turn] (a reset turn numbering) and entries
     older than {!window_turns} are pruned. *)
 

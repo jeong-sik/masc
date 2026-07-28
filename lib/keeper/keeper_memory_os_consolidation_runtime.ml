@@ -46,8 +46,8 @@ type outcome =
    ([Io.same_fact_snapshot]). Wraps the shared [Io.with_facts_lock] so a contended
    cycle becomes a typed [Transport_failed] rather than an escaping [Flock_timeout]
    (the lock/CAS helpers are the SSOT shared with the reconcile rewrite path). *)
-let with_facts_lock ?clock ~keeper_id f =
-  Io.with_facts_lock
+let with_fact_mutation ?clock ~keeper_id f =
+  Io.with_fact_mutation
     ?clock
     ~keeper_id
     ~on_timeout:(fun msg -> Transport_failed ("consolidation " ^ msg))
@@ -101,7 +101,7 @@ let messages_for_consolidation facts =
 ;;
 
 let rewrite_if_snapshot_current ?clock ~keeper_id ~facts ~survivors ~before ~after () =
-  with_facts_lock ?clock ~keeper_id (fun () ->
+  with_fact_mutation ?clock ~keeper_id (fun ~rewrite ->
     match Io.read_facts_all_strict ~keeper_id with
     | Error msg ->
       Unparseable ("consolidation fact store changed before rewrite: " ^ msg)
@@ -109,7 +109,7 @@ let rewrite_if_snapshot_current ?clock ~keeper_id ~facts ~survivors ~before ~aft
       if not (Io.same_fact_snapshot facts current)
       then Snapshot_changed { before; current = List.length current }
       else (
-        Io.rewrite_facts_atomically ~keeper_id survivors;
+        rewrite survivors;
         Consolidated { before; after }))
 ;;
 

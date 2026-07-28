@@ -119,8 +119,9 @@ let test_window_prunes_old_and_reset_entries () =
     (Window.recently_injected ~keeper_id ~key:"claim:post-reset")
 ;;
 
-(* 5. Empty keys are a no-op and re-noting a turn replaces that turn's entry. *)
-let test_window_empty_noop_and_same_turn_replace () =
+(* 5. Empty observations still advance/prune the window, while re-noting a
+   turn replaces that turn's entry. *)
+let test_window_empty_observation_and_same_turn_replace () =
   let keeper_id = "echo-test-replace" in
   Window.note ~keeper_id ~turn:7 ~keys:[];
   check bool "empty note stores nothing" false
@@ -130,6 +131,12 @@ let test_window_empty_noop_and_same_turn_replace () =
   check bool "same-turn re-note replaces the entry" false
     (Window.recently_injected ~keeper_id ~key:"claim:first render");
   check bool "replacement entry visible" true
+    (Window.recently_injected ~keeper_id ~key:"claim:second render");
+  Window.note
+    ~keeper_id
+    ~turn:(8 + Window.window_turns)
+    ~keys:[];
+  check bool "empty later turn ages out prior provenance" false
     (Window.recently_injected ~keeper_id ~key:"claim:second render")
 ;;
 
@@ -196,8 +203,8 @@ let () =
             test_window_membership_and_isolation
         ; test_case "window prunes old and reset entries" `Quick
             test_window_prunes_old_and_reset_entries
-        ; test_case "window empty noop and same-turn replace" `Quick
-            test_window_empty_noop_and_same_turn_replace
+        ; test_case "window empty observation and same-turn replace" `Quick
+            test_window_empty_observation_and_same_turn_replace
         ; test_case "write boundary join" `Quick test_write_boundary_join
         ; test_case "flywheel anchor frozen across cycles" `Quick
             test_flywheel_anchor_frozen_across_cycles

@@ -79,6 +79,10 @@ val append_prepared
   -> unit
   -> (unit, string) result
 
+type terminal_write_outcome =
+  | Terminal_durable
+  | Terminal_durable_marker_clear_uncertain of string
+
 val append_committed
   :  masc_root:string
   -> publication_id:string
@@ -87,12 +91,12 @@ val append_committed
   -> generation:int
   -> now:float
   -> unit
-  -> (unit, string) result
+  -> (terminal_write_outcome, string) result
 
 type recovery_outcome =
   | No_pending_publication
-  | Recovered_committed of string
-  | Recovered_aborted of string
+  | Recovered_committed of string * terminal_write_outcome
+  | Recovered_aborted of string * terminal_write_outcome
 
 (** Settle the one serialized pending publication against the canonical fact
     store while the caller holds the episode-bundle and facts locks. If current
@@ -126,8 +130,20 @@ val publish
   -> rewrite:(unit -> (unit, string) result)
   -> episode:(unit -> (unit, string) result)
   -> event:(unit -> (unit, string) result)
-  -> commit:(unit -> (unit, string) result)
-  -> (unit, publication_failure) result
+  -> commit:(unit -> (terminal_write_outcome, string) result)
+  -> (terminal_write_outcome, publication_failure) result
+
+(** Strict canonical audit fold. Physical rows are at-least-once; this reader
+    exposes one chronological row per [(publication_id, publication_state)] and
+    fails on malformed/unkeyed rows instead of silently changing evidence. *)
+val read_all_canonical :
+  masc_root:string -> (Yojson.Safe.t list, string) result
+
+module For_testing : sig
+  val terminal_outcome_of_remove_result :
+    (unit, Keeper_fs.durable_remove_error) result
+    -> (terminal_write_outcome, string) result
+end
 
 (** Drop dated files older than [retention_days]. For server maintenance. *)
 val prune_older_than

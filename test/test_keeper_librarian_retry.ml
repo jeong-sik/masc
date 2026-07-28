@@ -532,6 +532,34 @@ let test_revise_null_clears_expiry_instead_of_preserving_it () =
     Alcotest.failf "revise null should parse, got %s" (Lib.parse_error_to_string error)
 ;;
 
+let test_rejects_reinforce_of_expired_fact () =
+  let inp = input ~trace_id:"expired-reinforce" in
+  let expired =
+    { (List.hd inp.Lib.store) with
+      Types.valid_until = Some 999_999.0
+    }
+  in
+  let inp = { inp with Lib.store = expired :: List.tl inp.Lib.store } in
+  let raw =
+    output_json_string
+      ~operations:
+        [ `Assoc
+            [ field_op, `String "reinforce"
+            ; field_index, `Int 0
+            ; field_source_turn, `Int 4
+            ]
+        ]
+      ()
+  in
+  match Lib.recognition_output_of_output_result ~now:1_000_000.0 inp raw with
+  | Error (Lib.Operation_schema_mismatch _) -> ()
+  | Error error ->
+    Alcotest.failf
+      "expected Operation_schema_mismatch, got %s"
+      (Lib.parse_error_to_string error)
+  | Ok _ -> Alcotest.fail "expired facts must not be reinforced"
+;;
+
 let test_rejects_single_member_merge () =
   rejects
     "merge with one member"
@@ -880,6 +908,8 @@ let () =
           test_case "parses all operation shapes" `Quick test_parses_all_operation_shapes;
           test_case "revise null clears expiry" `Quick
             test_revise_null_clears_expiry_instead_of_preserving_it;
+          test_case "rejects reinforce of expired fact" `Quick
+            test_rejects_reinforce_of_expired_fact;
           test_case "rejects single-member merge" `Quick test_rejects_single_member_merge;
           test_case "rejects duplicate-member merge" `Quick
             test_rejects_duplicate_member_merge;

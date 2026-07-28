@@ -61,9 +61,8 @@ let expired_category_counts expired =
    past. It does not deduplicate or rank rows; semantic forgetting belongs to the
    configured Memory/LLM consolidation plan. *)
 let run_gc_with_store
-      ~facts_path
+      ~with_fact_mutation
       ~read_facts_all_strict
-      ~rewrite_facts_atomically
       ?(dry_run = false)
       ~keeper_id
       ~now
@@ -84,7 +83,7 @@ let run_gc_with_store
      File_lock_eio already offloads the blocking flock so the Eio domain is not
      stalled. Must run inside an Eio context (the maintenance fiber and tests
      both are). *)
-  File_lock_eio.with_lock facts_path (fun () ->
+  with_fact_mutation (fun ~rewrite ->
     (* Read strictly: a malformed JSONL row aborts the sweep rather than being
        silently dropped by the lenient decoder and then erased by the rewrite
        below. Every other destructive rewrite path already refuses to overwrite a
@@ -105,7 +104,7 @@ let run_gc_with_store
         expired_category_counts expired
       in
       let survivors = live in
-      if not dry_run then rewrite_facts_atomically survivors;
+      if not dry_run then rewrite survivors;
       { total_input = List.length facts
       ; ttl_expired = List.length expired
       ; ttl_expired_ephemeral
@@ -118,22 +117,32 @@ let run_gc_with_store
 
 let run_gc ?dry_run ~keeper_id ~now () =
   run_gc_with_store
-    ~facts_path:(Io.facts_path ~keeper_id)
+    ~with_fact_mutation:(fun f ->
+      Io.with_fact_mutation
+        ~keeper_id
+        ~on_timeout:(fun message -> raise (Fact_store_corrupt message))
+        f)
     ~read_facts_all_strict:(fun () -> Io.read_facts_all_strict ~keeper_id)
-    ~rewrite_facts_atomically:(fun facts -> Io.rewrite_facts_atomically ~keeper_id facts)
     ?dry_run
     ~keeper_id
     ~now
     ()
 ;;
 
-let run_gc_for_keepers_dir ~keepers_dir ?dry_run ~keeper_id ~now () =
+let run_gc_for_keepers_dir ?masc_root ~keepers_dir ?dry_run ~keeper_id ~now () =
+  (* DET-OK: explicit roots are threaded by request-scoped callers; the absent
+     case intentionally shares the process writer's workspace+cluster root. *)
   run_gc_with_store
-    ~facts_path:(Io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    ~with_fact_mutation:(fun f ->
+      Io.with_fact_mutation_for_keepers_dir
+        ~masc_root:
+          (Option.value masc_root ~default:(Io.current_recognition_masc_root ())) (* DET-OK *)
+        ~keepers_dir
+        ~keeper_id
+        ~on_timeout:(fun message -> raise (Fact_store_corrupt message))
+        f)
     ~read_facts_all_strict:(fun () ->
       Io.read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id)
-    ~rewrite_facts_atomically:(fun facts ->
-      Io.rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts)
     ?dry_run
     ~keeper_id
     ~now

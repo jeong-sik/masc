@@ -14,6 +14,7 @@ module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
 module Domain_pool_ref = Domain_pool_ref
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
+module Recall_window = Masc.Keeper_recall_injection_window
 module Metrics = Masc.Otel_metric_store
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 
@@ -539,6 +540,62 @@ let test_librarian_zero_op_metadata_persists_episode () =
         "fact store remains empty"
         0
         (List.length (Memory_io.read_facts_all ~keeper_id)))
+;;
+
+let test_librarian_recalled_echo_persists_metadata_without_fact_rewrite () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "recalled-echo-metadata" in
+    let fact =
+      { (fact_fixture ~now:1_000_000.0 ()) with
+        Types.claim_id = Some "echoed-claim"
+      ; Types.reinforcement_count = 4
+      }
+    in
+    Memory_io.append_fact ~keeper_id fact;
+    Recall_window.note
+      ~keeper_id
+      ~turn:8
+      ~keys:[ Types.claim_identity fact ];
+    let inp : Librarian.input =
+      { trace_id = "trace-recalled-echo"
+      ; generation = 7
+      ; messages = []
+      ; store = [ fact ]
+      }
+    in
+    let recognition : Librarian.recognition_output =
+      { episode_summary = "Recalled context remained relevant"
+      ; operations = [ Recognition.Reinforce { index = 0; source_turn = 0 } ]
+      ; open_items = [ "keep observing" ]
+      ; constraints = [ "do not self-reinforce" ]
+      ; preserved_tool_refs = []
+      }
+    in
+    match
+      Librarian_runtime.For_testing.apply_and_persist
+        ~base_path:"/tmp/librarian-recalled-echo"
+        ~keeper_id
+        ~generation:8
+        inp
+        recognition
+    with
+    | Error error ->
+      Alcotest.fail
+        (Librarian_runtime.extraction_error_to_string error)
+    | Ok (Librarian_runtime.Recognized episode) ->
+      Alcotest.(check (list string))
+        "echo metadata persists"
+        [ "keep observing" ]
+        episode.Types.open_items;
+      let stored = Memory_io.read_facts_all ~keeper_id |> List.hd in
+      Alcotest.(check int)
+        "echo does not increment reinforcement"
+        4
+        stored.Types.reinforcement_count;
+      Alcotest.(check int)
+        "metadata event is reader-visible exactly once"
+        1
+        (List.length (Memory_io.read_events_tail ~keeper_id ~n:10)))
 ;;
 
 let test_librarian_prompt_omits_private_blocks () =
@@ -4626,6 +4683,10 @@ let () =
             "librarian zero-op metadata persists an episode"
             `Quick
             test_librarian_zero_op_metadata_persists_episode
+        ; Alcotest.test_case
+            "librarian recalled echo persists metadata without fact rewrite"
+            `Quick
+            test_librarian_recalled_echo_persists_metadata_without_fact_rewrite
         ; Alcotest.test_case
             "librarian episode provenance uses current operation turn"
             `Quick

@@ -238,11 +238,25 @@ let save_pending_marker ~masc_root ~keeper_id ~prepared ~prepared_logged =
   | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
 ;;
 
+type terminal_write_outcome =
+  | Terminal_durable
+  | Terminal_durable_marker_clear_uncertain of string
+
+let terminal_outcome_of_remove_result = function
+  | Ok () -> Ok Terminal_durable
+  | Error ({ Keeper_fs.removed = true; _ } as error) ->
+    Ok
+      (Terminal_durable_marker_clear_uncertain
+         (Keeper_fs.durable_remove_error_to_string error))
+  | Error ({ Keeper_fs.removed = false; _ } as error) ->
+    Error (Keeper_fs.durable_remove_error_to_string error)
+;;
+
 let clear_pending_marker ~masc_root ~keeper_id ~publication_id =
   let path = pending_path ~masc_root ~keeper_id in
   try
     if not (Sys.file_exists path)
-    then Ok ()
+    then Ok Terminal_durable
     else (
       let channel = open_in_bin path in
       let json =
@@ -258,10 +272,8 @@ let clear_pending_marker ~masc_root ~keeper_id ~publication_id =
          | Some (`Assoc prepared_fields) ->
            (match List.assoc_opt field_publication_id prepared_fields with
             | Some (`String stored_id) when String.equal stored_id publication_id ->
-              (match Keeper_fs.remove_file_durable ~ownership_root:masc_root path with
-               | Ok () -> Ok ()
-               | Error error ->
-                 Error (Keeper_fs.durable_remove_error_to_string error))
+              Keeper_fs.remove_file_durable ~ownership_root:masc_root path
+              |> terminal_outcome_of_remove_result
             | Some (`String _) -> Error "pending recognition publication id changed"
             | Some _ | None -> Error "pending recognition publication has no id")
          | Some _ | None -> Error "pending recognition marker has no prepared payload")
@@ -384,8 +396,8 @@ type pending_publication =
 
 type recovery_outcome =
   | No_pending_publication
-  | Recovered_committed of string
-  | Recovered_aborted of string
+  | Recovered_committed of string * terminal_write_outcome
+  | Recovered_aborted of string * terminal_write_outcome
 
 let string_field key fields =
   match List.assoc_opt key fields with
@@ -567,7 +579,8 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
                    ~now
                    ()
                with
-               | Ok () -> Ok (Recovered_aborted publication.publication_id)
+               | Ok outcome ->
+                 Ok (Recovered_aborted (publication.publication_id, outcome))
                | Error detail ->
                  Error ("recognition abort marker write failed: " ^ detail))
             else if
@@ -587,6 +600,7 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
                  (match
                     Keeper_memory_os_io.ensure_recognition_event
                       ~keeper_id
+                      ~publication_id:publication.publication_id
                       publication.episode
                   with
                   | Error detail ->
@@ -602,7 +616,10 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
                          ~now
                          ()
                      with
-                     | Ok () -> Ok (Recovered_committed publication.publication_id)
+                     | Ok outcome ->
+                       Ok
+                         (Recovered_committed
+                            (publication.publication_id, outcome))
                      | Error detail ->
                        Error ("recognition commit recovery failed: " ^ detail))))
             else
@@ -636,8 +653,60 @@ let publish ~prepare ~rewrite ~episode ~event ~commit =
            | Ok () ->
              (match commit () with
               | Error detail -> Error (Commit_failed detail)
-              | Ok () -> Ok ()))))
+              | Ok outcome -> Ok outcome))))
 ;;
+
+let read_all_canonical ~masc_root =
+  let seen = Hashtbl.create 128 in
+  let rows = ref [] in
+  let decode_key = function
+    | `Assoc fields ->
+      (match
+         string_field field_publication_id fields,
+         string_field field_publication_state fields
+       with
+       | Some publication_id, Some publication_state ->
+         Ok (publication_id, publication_state)
+       | None, _ | _, None ->
+         Error "recognition audit row is missing publication identity/state")
+    | _ -> Error "recognition audit row is not an object"
+  in
+  let row_error = ref None in
+  match
+    Dated_jsonl.iter_all_entries_result
+      (make_store ~masc_root ())
+      (fun entry ->
+         match !row_error, entry with
+         | Some _, _ -> ()
+         | None, Dated_jsonl.Malformed_json { path; line_number; detail } ->
+           row_error
+           := Some
+                (Printf.sprintf
+                   "%s%s: malformed recognition audit JSON: %s"
+                   path
+                   (match line_number with
+                    | None -> ""
+                    | Some line -> Printf.sprintf ":%d" line)
+                   detail)
+         | None, Dated_jsonl.Parsed json ->
+           (match decode_key json with
+            | Error detail -> row_error := Some detail
+            | Ok key ->
+              if not (Hashtbl.mem seen key)
+              then (
+                Hashtbl.add seen key ();
+                rows := json :: !rows)))
+  with
+  | Error error -> Error (Dated_jsonl.read_error_to_string error)
+  | Ok () ->
+    (match !row_error with
+     | Some detail -> Error detail
+     | None -> Ok (List.rev !rows))
+;;
+
+module For_testing = struct
+  let terminal_outcome_of_remove_result = terminal_outcome_of_remove_result
+end
 
 let prune_older_than ~masc_root ~retention_days =
   try Ok (Dated_jsonl.prune (make_store ~masc_root ()) ~days:retention_days) with

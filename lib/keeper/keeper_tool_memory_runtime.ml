@@ -607,8 +607,7 @@ let append_durable_fact
     Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
   in
   let stats =
-    File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-      Keeper_memory_os_io.merge_facts ~keeper_id ~merge ~incoming:[ fact ])
+    Keeper_memory_os_io.merge_facts ~keeper_id ~merge ~incoming:[ fact ]
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string MemoryOsExplicitFactWrite)

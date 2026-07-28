@@ -512,12 +512,15 @@ let operation_of_json
                 , int_field wire_field_source_turn fields
               with
               | Some index, Some source_turn
-                when source_turn_is_visible ~message_count source_turn ->
+                when source_turn_is_visible ~message_count source_turn
+                     && (List.nth_opt store index
+                         |> Option.exists
+                              (Keeper_memory_os_types.fact_is_current ~now)) ->
                 Ok (Recognition.Reinforce { index; source_turn })
               | _ ->
                 operation_mismatch
                   op
-                  "requires a visible index and source_turn within the conversation slice"))
+                  "requires a visible, unexpired index and source_turn within the conversation slice"))
         | Some op when String.equal op Keeper_memory_os_types.wire_op_merge ->
           (match
              first_foreign_non_null_field

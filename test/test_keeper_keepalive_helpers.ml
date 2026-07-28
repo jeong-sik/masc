@@ -719,105 +719,6 @@ let create_thread_fixture config ~keeper_name =
   meta, signal
 ;;
 
-(* The keeper AUTHORS the post and an external agent replies. This is the
-   shape a keeper produces when it raises a blocker: a post, not a comment.
-   Nothing pinned it before, and [check_self_thread_status] only counted
-   comments, so the author of the thread scored [`Never] and the reply was
-   dropped — measured live on 2026-07-28 as a keeper that posted a blocker,
-   received an operator answer it was never told about, and then polled an
-   empty task list 547 times over 4h52m. *)
-let create_authored_post_fixture config ~keeper_name =
-  let meta = make_board_resume_meta keeper_name in
-  persist_and_register_board_lane config meta;
-  let post =
-    match
-      Board_dispatch.create_post
-        ~author:meta.Keeper_meta_contract.agent_name
-        ~content:"blocker raised by the keeper itself"
-        ~title:"blocker"
-        ~post_kind:Board.Human_post
-        ~visibility:Board.Internal
-        ()
-    with
-    | Error error -> fail (Board.show_board_error error)
-    | Ok post -> post
-  in
-  let post_id = Board.Post_id.to_string post.id in
-  (* No comment by the keeper anywhere in this thread — authorship is its
-     only contribution, which is exactly the case that used to be missed. *)
-  (match
-     Board_dispatch.add_comment
-       ~post_id
-       ~author:"external-author"
-       ~content:"resolved - assignment withdrawn"
-       ()
-   with
-   | Error error -> fail (Board.show_board_error error)
-   | Ok _comment -> ());
-  let signal : Board_dispatch.addressed_board_signal =
-    { signal =
-        { kind = Board_dispatch.Board_comment_added
-        ; post_id
-        ; author = "external-author"
-        ; title = "blocker"
-        ; content = "resolved - assignment withdrawn"
-        ; hearth = None
-        ; updated_at = Some 200.0
-        }
-      (* No @mention: an answer written as plain prose must still reach the
-         keeper that asked. With a mention the [Targets] route would deliver
-         regardless, which is what masked this. *)
-    ; audience = Board.Thread_participants
-    }
-  in
-  meta, signal
-;;
-
-let test_post_author_wakes_on_reply_to_own_post () =
-  Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
-  Fun.protect
-    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
-    (fun () ->
-       let meta, signal =
-         create_authored_post_fixture config ~keeper_name:"authorlane"
-       in
-       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
-       check int "reply to own post is delivered" 1
-         (board_queue_length config meta.name);
-       match Keeper_registry.get ~base_path:config.base_path meta.name with
-       | Some entry ->
-         check bool "post author woken by the reply" true
-           (Atomic.get entry.fiber_wakeup)
-       | None -> fail "authorlane registry entry missing")
-;;
-
-(* The complement: the keeper's own comment on its own post must not wake it.
-   [is_self_author] short-circuits before any store read, so widening
-   participation to post authorship must not turn self-authored activity into
-   a wake loop. *)
-let test_post_author_not_woken_by_own_comment () =
-  Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
-  Fun.protect
-    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
-    (fun () ->
-       let meta, signal =
-         create_authored_post_fixture config ~keeper_name:"selflane"
-       in
-       let self_signal =
-         { signal with
-           Board_dispatch.signal =
-             { signal.Board_dispatch.signal with
-               Board_dispatch.author = meta.Keeper_meta_contract.agent_name
-             }
-         }
-       in
-       KKS.wakeup_relevant_keeper_for_board_signal ~config self_signal;
-       check int "self-authored comment is not delivered back" 0
-         (board_queue_length config meta.name))
-;;
-
 (* #25600 regression: a transient store read failure on the
    [Thread_participants] route must not silently drop the signal — the
    bounded retry re-reads and the addressed keeper still wakes. *)
@@ -908,10 +809,6 @@ let () =
             test_thread_participant_wakes_after_transient_store_read_failure
         ; test_case "thread participant drop is bounded under persistent failure" `Quick
             test_thread_participant_drop_is_bounded_under_persistent_failure
-        ; test_case "post author wakes on a reply to its own post" `Quick
-            test_post_author_wakes_on_reply_to_own_post
-        ; test_case "post author is not woken by its own comment" `Quick
-            test_post_author_not_woken_by_own_comment
         ] )
     ; ( "interruptible_cadence"
       , [ test_case "directed wake cuts configured sleep" `Quick

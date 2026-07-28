@@ -117,6 +117,7 @@ let prepare_agent_setup
       ?runtime_manifest_append
       ?continuation_channel
       ?hitl_resolution
+      ?on_user_message_composed
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
@@ -196,6 +197,9 @@ let prepare_agent_setup
       ~hitl_resolution
       ~replay_delivery
   in
+  Option.iter
+    (fun callback -> callback user_message)
+    on_user_message_composed;
   let prompt_metrics =
     Keeper_agent_prompt_metrics.build_prompt_metrics
       ~system_prompt:turn_system_prompt

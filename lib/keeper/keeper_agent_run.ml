@@ -619,6 +619,23 @@ let run_turn
       ~publication_recovery
       ?continuation_channel
       ?hitl_resolution
+      ~on_user_message_composed:
+        (fun composed_user_message ->
+           match hitl_resolution with
+           | Some _ when not is_retry ->
+             (* HITL persistence was deferred above until host replay had
+                consumed the grant and composed the final bounded evidence.
+                Persist before the remaining hook assembly, so a setup error
+                cannot leave a successful external effect represented only by
+                the raw pre-replay wake message. A retry keeps the ordinary
+                no-duplicate contract. *)
+             Keeper_context_runtime.persist_message
+               ~source:history_user_source
+               session
+               (Agent_sdk.Types.user_msg composed_user_message)
+           | None
+           | Some _ ->
+             ())
       ~turn_ctx_cell
       ~ctx_work
       ~session
@@ -656,16 +673,7 @@ let run_turn
       | None -> ctx_work
       | Some _ ->
         let user_message = Agent_sdk.Types.user_msg user_message in
-        let ctx_work =
-          Keeper_context_runtime.append ctx_work user_message
-        in
-        if not is_retry
-        then
-          Keeper_context_runtime.persist_message
-            ~source:history_user_source
-            session
-            user_message;
-        ctx_work
+        Keeper_context_runtime.append ctx_work user_message
     in
     let prompt_metrics =
       Keeper_agent_prompt_metrics.build_prompt_metrics

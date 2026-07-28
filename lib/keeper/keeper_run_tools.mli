@@ -94,5 +94,6 @@ val prepare_agent_setup
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?on_user_message_composed:(string -> unit)
   -> unit
   -> (agent_setup, Agent_sdk.Error.sdk_error) result

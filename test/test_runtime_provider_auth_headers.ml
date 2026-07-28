@@ -1495,7 +1495,7 @@ let fresh_loopback_port () =
   Unix.close socket;
   port
 
-let with_native_count_server f =
+let with_native_count_server ?(input_tokens = 500) f =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -1508,7 +1508,11 @@ let with_native_count_server f =
     let path = Cohttp.Request.uri request |> Uri.path in
     paths := path :: !paths;
     if String.equal path "/v1/messages/count_tokens"
-    then Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":500}|} ()
+    then
+      Cohttp_eio.Server.respond_string
+        ~status:`OK
+        ~body:(Printf.sprintf {|{"input_tokens":%d}|} input_tokens)
+        ()
     else
       Cohttp_eio.Server.respond_string
         ~status:`Internal_server_error
@@ -1621,6 +1625,60 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
       (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
+
+let test_capacity_readmission_probe_stops_before_transport_when_still_over () =
+  let (), paths =
+    with_native_count_server
+    @@ fun ~sw ~net ~base_url ->
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config:(context_fit_runtime_config base_url)
+        ~checkpoint:(context_fit_checkpoint ())
+        ~stream:false
+        [ Agent_sdk.Types.Text "same failed request" ]
+    with
+    | Error
+        (Runtime_agent.Still_over_capacity
+           (Agent_sdk.Error.Api
+              (Agent_sdk.Retry.ContextOverflow { limit = Some 512; _ }))) ->
+      ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+    | Ok () -> fail "over-capacity candidate reached the probe transport"
+  in
+  check
+    (list string)
+    "rejected probe performs only provider-native measurement"
+    [ "/v1/messages/count_tokens" ]
+    paths
+
+let test_capacity_readmission_probe_admits_without_provider_dispatch () =
+  let (), paths =
+    with_native_count_server
+      ~input_tokens:400
+    @@ fun ~sw ~net ~base_url ->
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config:(context_fit_runtime_config base_url)
+        ~checkpoint:(context_fit_checkpoint ())
+        ~stream:false
+        [ Agent_sdk.Types.Text "same failed request" ]
+    with
+    | Ok () -> ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+  in
+  check
+    (list string)
+    "admitted probe measures but never dispatches provider HTTP"
+    [ "/v1/messages/count_tokens" ]
+    paths
 
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
@@ -1850,6 +1908,14 @@ let () =
             "runtime resume enforces native context fit"
             `Quick
             test_runtime_agent_resume_enforces_native_context_fit
+        ; test_case
+            "capacity readmission stops before transport while still over"
+            `Quick
+            test_capacity_readmission_probe_stops_before_transport_when_still_over
+        ; test_case
+            "capacity readmission admits without provider dispatch"
+            `Quick
+            test_capacity_readmission_probe_admits_without_provider_dispatch
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

@@ -70,6 +70,14 @@ module For_testing : sig
   val normalize_keeper_tool_choice :
     Runtime_agent.config -> Runtime_agent.config
 
+  val readmission_config_for_checkpoint :
+    model_input_projection_for:
+      (Agent_sdk.Types.message list ->
+       Agent_sdk.Agent.model_input_projection) ->
+    Runtime_agent.config ->
+    Agent_sdk.Checkpoint.t ->
+    Runtime_agent.config
+
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->

@@ -899,6 +899,20 @@ let partial_response_of_stop =
 (* Build                                                             *)
 (* ================================================================ *)
 
+let build_with_transport
+    ~sw:(_ : Eio.Switch.t)
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~(config : config)
+    ~(transport : Llm_provider.Llm_transport.t)
+  : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
+  match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
+  | Error _ as e -> e
+  | Ok _ ->
+    let builder =
+      Runtime_agent_context.builder ~net ~config ~transport ()
+    in
+    Agent_sdk.Builder.build_safe builder
+
 let build
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -917,9 +931,7 @@ let build
          ()
      with
      | Error _ as e -> e
-     | Ok transport ->
-      let builder = Runtime_agent_context.builder ~net ~config ?transport () in
-      Agent_sdk.Builder.build_safe builder)
+     | Ok transport -> build_with_transport ~sw ~net ~config ~transport)
 
 let run_duration_ms_since started_at =
   Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)
@@ -985,6 +997,33 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
       Agent.resume state restoration.
     - OAS no longer enforces cost or cumulative-token budgets; cost is
       observe-only telemetry. *)
+let resume_from_checkpoint_with_transport
+    ~sw:(_ : Eio.Switch.t)
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~(config : config)
+    ~(checkpoint : Agent_sdk.Checkpoint.t)
+    ~(transport : Llm_provider.Llm_transport.t)
+  : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
+  match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
+  | Error _ as e -> e
+  | Ok _ ->
+    let prepared_resume =
+      Runtime_agent_context.prepare_resume ~config ~checkpoint
+    in
+    Log.Misc.info
+      "oas_worker %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
+      config.name checkpoint.turn_count;
+    let options = { prepared_resume.options with transport } in
+    Ok
+      (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
+         ~tools:config.tools ?context:config.context
+         ~provider_config:config.provider_cfg
+         ~context_fit_admission:prepared_resume.context_fit_admission
+         ?model_input_projection:config.model_input_projection
+         ~options ~config:prepared_resume.agent_config
+         ?checkpoint_sink:config.checkpoint_sink
+         ())
+
 let resume_from_checkpoint
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -1005,22 +1044,155 @@ let resume_from_checkpoint
      with
      | Error _ as e -> e
      | Ok transport ->
-      let prepared_resume =
-        Runtime_agent_context.prepare_resume ~config ~checkpoint
-      in
-      Log.Misc.info
-        "oas_worker %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
-        config.name checkpoint.turn_count;
-      let options = { prepared_resume.options with transport } in
-      Ok
-        (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
-           ~tools:config.tools ?context:config.context
-           ~provider_config:config.provider_cfg
-           ~context_fit_admission:prepared_resume.context_fit_admission
-           ?model_input_projection:config.model_input_projection
-           ~options ~config:prepared_resume.agent_config
-           ?checkpoint_sink:config.checkpoint_sink
-           ()))
+       resume_from_checkpoint_with_transport
+         ~sw
+         ~net
+         ~config
+         ~checkpoint
+         ~transport)
+
+type capacity_readmission_failure =
+  | Still_over_capacity of Agent_sdk.Error.sdk_error
+  | Readmission_failed of Agent_sdk.Error.sdk_error
+
+type capacity_readmission_probe =
+  Agent_sdk.Checkpoint.t -> (unit, capacity_readmission_failure) result
+
+let capacity_readmission_failure_of_error error =
+  match error with
+  | Agent_sdk.Error.Api (ContextOverflow _)
+  | Agent_sdk.Error.Api
+      (InvalidRequest
+         { reason =
+             ( Request_body_too_large _
+             | Request_body_refused_by_provider _ )
+         ; _
+         })
+  | Agent_sdk.Error.Api
+      (InputCapacity
+         { reason =
+             Serving_constraint_rejected
+               (Llm_provider.Serving_constraint.Boundary_unknown _
+               | Llm_provider.Serving_constraint.Input_rejected _)
+         ; _
+         }) ->
+    Still_over_capacity error
+  | Agent_sdk.Error.Api
+      (InvalidRequest
+         { reason = Json_parse_error | Unknown_invalid_request; _ })
+  | Agent_sdk.Error.Api
+      (InputCapacity
+         { reason =
+             ( Serving_constraint_rejected
+                 (Llm_provider.Serving_constraint.Evidence_not_yet_valid _
+                 | Llm_provider.Serving_constraint.Evidence_expired _)
+             | Token_measurement_unavailable _ )
+         ; _
+         })
+  | Agent_sdk.Error.Api
+      ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
+      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
+      | Timeout _ )
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ ->
+    Readmission_failed error
+;;
+
+module Capacity_readmission_for_testing = struct
+  let failure_of_error = capacity_readmission_failure_of_error
+end
+
+let probe_transport observed : Llm_provider.Llm_transport.t =
+  let reject () =
+    Atomic.set observed true;
+    Error
+      (Llm_provider.Http_client.AcceptRejected
+         { reason =
+             "provider transport is disabled for capacity re-admission"
+         })
+  in
+  { complete_sync =
+      (fun _ ->
+         { Llm_provider.Llm_transport.response = reject ()
+         ; latency_ms = None
+         })
+  ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> reject ())
+  }
+;;
+
+let probe_blocks_admission
+      ~(sw : Eio.Switch.t)
+      ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+      ~(config : config)
+      ~(checkpoint : Agent_sdk.Checkpoint.t)
+      ~(stream : bool)
+      (goal_blocks : Agent_sdk.Types.content_block list)
+  : (unit, capacity_readmission_failure) result
+  =
+  match validate_content_blocks_for_config ~oas_checkpoint:checkpoint ~config goal_blocks with
+  | Error error -> Error (capacity_readmission_failure_of_error error)
+  | Ok () ->
+    let observed = Atomic.make false in
+    let transport = probe_transport observed in
+    let probe_config =
+      { config with
+        request_wire_observer = None
+      ; raw_trace = None
+      ; event_bus = None
+      ; on_run_complete = None
+      ; checkpoint_sink = None
+      }
+    in
+    (match
+       resume_from_checkpoint_with_transport
+         ~sw
+         ~net
+         ~config:probe_config
+         ~checkpoint
+         ~transport
+     with
+     | Error error -> Error (capacity_readmission_failure_of_error error)
+     | Ok agent ->
+       let run_result =
+         let clock =
+           match Process_eio.get_clock () with
+           | Ok clock -> Some clock
+           | Error _ -> Eio_context.get_clock_opt ()
+         in
+         try
+           if stream
+           then
+             Agent_sdk.Agent.run_stream_blocks
+               ~sw
+               ?clock
+               ~on_event:(fun _ -> ())
+               agent
+               goal_blocks
+           else Agent_sdk.Agent.run_blocks ~sw ?clock agent goal_blocks
+         with
+         | Eio.Cancel.Cancelled _ as exn ->
+           close_agent_for_cleanup ~propagate_cancel:false ~config:probe_config agent;
+           raise exn
+       in
+       close_agent_for_cleanup ~propagate_cancel:false ~config:probe_config agent;
+       if Atomic.get observed
+       then Ok ()
+       else
+         (match run_result with
+          | Error error ->
+            Error (capacity_readmission_failure_of_error error)
+          | Ok _ ->
+            Error
+              (Readmission_failed
+                 (Agent_sdk.Error.Internal
+                    "capacity re-admission completed without reaching the provider admission boundary"))))
+;;
 
 (* ================================================================ *)
 (* Run                                                               *)

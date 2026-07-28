@@ -206,6 +206,62 @@ let test_keeper_provider_attempt_uses_relaxed_tool_choice () =
     true
     (request_config.tool_choice = Some Agent_sdk.Types.Auto)
 
+let test_readmission_config_uses_only_candidate_history_and_context () =
+  let original_history =
+    [ message ~role:Agent_sdk.Types.User
+        [ Agent_sdk.Types.Text "original uncompressed history" ]
+    ]
+  in
+  let candidate_history =
+    [ message ~role:Agent_sdk.Types.User
+        [ Agent_sdk.Types.Text "compacted history" ]
+    ]
+  in
+  let original_context = Agent_sdk.Context.create_sync () in
+  let checkpoint = checkpoint_with_messages candidate_history in
+  let config =
+    { (Runtime_agent.default_config
+         ~name:"readmission-candidate"
+         ~provider_cfg:
+           (Llm_provider.Provider_config.make
+              ~kind:Llm_provider.Provider_config.OpenAI_compat
+              ~model_id:"readmission-candidate"
+              ~base_url:"http://127.0.0.1"
+              ())
+         ~system_prompt:"system"
+         ~tools:[])
+      with
+      initial_messages = original_history
+    ; context = Some original_context
+    }
+  in
+  let observed_prefix = ref [] in
+  let readmission =
+    Masc.Keeper_turn_driver_try_provider.For_testing
+    .readmission_config_for_checkpoint
+      ~model_input_projection_for:(fun prefix ->
+        observed_prefix := prefix;
+        fun messages -> Ok messages)
+      config
+      checkpoint
+  in
+  Alcotest.(check bool)
+    "original history is replaced rather than prepended"
+    true
+    (readmission.initial_messages = candidate_history);
+  Alcotest.(check bool)
+    "projection is rebuilt against compacted history"
+    true
+    (!observed_prefix = candidate_history);
+  Alcotest.(check bool)
+    "probe context is candidate-local"
+    true
+    (match readmission.context with
+     | Some context ->
+       context == checkpoint.context
+       && not (checkpoint.context == original_context)
+     | None -> false)
+
 let test_accept_keeps_result () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -1767,6 +1823,10 @@ let () =
             "provider attempt and preflight share relaxed tool_choice"
             `Quick
             test_keeper_provider_attempt_uses_relaxed_tool_choice;
+          Alcotest.test_case
+            "readmission uses only candidate history and context"
+            `Quick
+            test_readmission_config_uses_only_candidate_history_and_context;
           Alcotest.test_case "rejected response is typed" `Quick
             test_rejects_as_typed_accept_error;
           Alcotest.test_case "thinking-only rejection is diagnosed" `Quick

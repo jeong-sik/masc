@@ -203,6 +203,8 @@ val run_turn
   -> ?on_runtime_retry_deferred:
        (Keeper_turn_driver.deferred_runtime_lane -> unit)
   -> ?on_deferred_runtime_consumed:(unit -> unit)
+  -> ?on_capacity_readmission_probe:
+       (Runtime_agent.capacity_readmission_probe -> unit)
   -> ?is_retry:bool
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t

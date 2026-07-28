@@ -140,6 +140,8 @@ type ctx =
   ; turn_id : int
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; on_deferred_runtime_consumed : (unit -> unit) option
+  ; on_capacity_readmission_probe :
+      (Runtime_agent.capacity_readmission_probe -> unit) option
   ; active_source_stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -179,6 +181,7 @@ let run (ctx : ctx)
       ; attempt = _attempt
       ; deferred_runtime_lane
       ; on_deferred_runtime_consumed
+      ; on_capacity_readmission_probe
       ; active_source_stimuli
       } =
     ctx
@@ -291,6 +294,7 @@ let run (ctx : ctx)
                    (fun hint -> deferred_runtime_lane_ref := Some hint)
                  ?on_deferred_runtime_consumed:
                    (if is_retry then None else on_deferred_runtime_consumed)
+                 ?on_capacity_readmission_probe
                  ~temperature:execution.temperature
                  ~trajectory_acc
                  ~is_retry

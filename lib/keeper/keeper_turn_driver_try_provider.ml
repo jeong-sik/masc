@@ -62,6 +62,8 @@ type try_provider_ctx =
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; on_runtime_observation :
       (Runtime_observation.runtime_observation -> unit) option
+  ; on_capacity_readmission_probe :
+      (Runtime_agent.capacity_readmission_probe -> unit) option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -237,6 +239,19 @@ let request_config_for_keeper_projection (config : Runtime_agent.config) =
   Runtime_agent_context.provider_config_for_request config
 ;;
 
+let readmission_config_for_checkpoint
+      ~model_input_projection_for
+      (config : Runtime_agent.config)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  { config with
+    initial_messages = checkpoint.messages
+  ; model_input_projection =
+      Some (model_input_projection_for checkpoint.messages)
+  ; context = Some checkpoint.context
+  }
+;;
+
 let run_try_provider
       (ctx : try_provider_ctx)
       ?enable_thinking_override
@@ -312,13 +327,23 @@ let run_try_provider
       | None -> fun messages -> messages
       | Some projection -> projection
     in
-    let model_input_projection =
+    let model_input_projection_for
+          ~canonical_prefix
+          ?observe
+          ()
+      =
       Keeper_provider_input_projection.create
-        ~canonical_prefix:ctx.initial_messages
+        ~canonical_prefix
         ~provider_config:request_config
         ~tools:ctx.tools
         ~stream:(Option.is_some ctx.on_event)
         ~base_projection
+        ?observe
+        ()
+    in
+    let model_input_projection =
+      model_input_projection_for
+        ~canonical_prefix:ctx.initial_messages
         ~observe:(fun observation ->
           emit_runtime_manifest
             ctx
@@ -348,6 +373,32 @@ let run_try_provider
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
+    let goal_blocks =
+      match ctx.goal_blocks with
+      | Some blocks -> blocks
+      | None -> [ Agent_sdk.Types.Text ctx.goal ]
+    in
+    Option.iter
+      (fun publish ->
+         publish
+           (fun checkpoint ->
+              let readmission_config =
+                readmission_config_for_checkpoint
+                  ~model_input_projection_for:(fun canonical_prefix ->
+                    model_input_projection_for
+                      ~canonical_prefix
+                      ())
+                  config
+                  checkpoint
+              in
+              Runtime_agent.probe_blocks_admission
+                ~sw:ctx.sw
+                ~net:ctx.net
+                ~config:readmission_config
+                ~checkpoint
+                ~stream:(Option.is_some ctx.on_event)
+                goal_blocks))
+      ctx.on_capacity_readmission_probe;
     (* Explicit stream stall detection is handled by OAS's
        [stream_idle_timeout_s]; [None] deliberately leaves it disabled.
        No separate liveness FSM — provider stall is an OAS-level concern.
@@ -427,4 +478,5 @@ let run_try_provider
 module For_testing = struct
   let apply_accept = apply_accept
   let normalize_keeper_tool_choice = normalize_keeper_tool_choice
+  let readmission_config_for_checkpoint = readmission_config_for_checkpoint
 end

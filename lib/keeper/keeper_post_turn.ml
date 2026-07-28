@@ -609,9 +609,79 @@ let no_compaction_of_uncommitted_prepared
     Uncommitted_failed error
 ;;
 
+let readmission_terminal_cause_of_failure = function
+  | Runtime_agent.Still_over_capacity _ ->
+    Keeper_event_queue_state.Failed_request_still_over_capacity
+  | Runtime_agent.Readmission_failed _ ->
+    Keeper_event_queue_state.Failed_request_readmission_failed
+;;
+
+let terminalize_failed_readmission
+      ~source
+      terminalizer
+      cause
+  =
+  match
+    Keeper_compaction_llm_summarizer.terminalize_post_success
+      terminalizer
+      cause
+  with
+  | Keeper_compaction_llm_summarizer.Terminalized terminal ->
+    Error
+      (No_compaction
+         { source
+         ; reason = Keeper_event_queue_state.Exact_execution_terminal terminal
+         })
+  | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed
+      (_, detail)
+  | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
+    Error (Checkpoint_candidate_failed detail)
+  | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _ ->
+    Error
+      (Checkpoint_candidate_failed
+         "failed-request re-admission raced with compaction commit")
+  | Keeper_compaction_llm_summarizer.Terminalization_already_committed ->
+    Error
+      (Checkpoint_candidate_failed
+         "failed-request re-admission observed an already committed compaction")
+;;
+
+let validate_failed_request_readmission
+      ~source
+      ~trigger
+      ~candidate_readmission_probe
+      (preparation : Keeper_compact_policy.compaction_preparation)
+      post_success_terminalizer
+  =
+  match trigger with
+  | Compaction_trigger.Manual -> Ok ()
+  | Compaction_trigger.Provider_overflow _
+  | Compaction_trigger.Request_body_over_capacity _
+  | Compaction_trigger.Request_body_refused_by_provider _
+  | Compaction_trigger.Serving_input_capacity _ ->
+    (match candidate_readmission_probe with
+     | None ->
+       terminalize_failed_readmission
+         ~source
+         post_success_terminalizer
+         Keeper_event_queue_state.Failed_request_readmission_unavailable
+     | Some probe ->
+       let candidate_checkpoint =
+         resume_checkpoint_of_context preparation.context
+       in
+       (match probe candidate_checkpoint with
+        | Ok () -> Ok ()
+        | Error failure ->
+          terminalize_failed_readmission
+            ~source
+            post_success_terminalizer
+            (readmission_terminal_cause_of_failure failure)))
+;;
+
 let prepare_compaction_admitted
       ~compact_for_request
       ~base_dir
+      ~candidate_readmission_probe
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
   : (prepared_compaction, compaction_recovery_error) result =
@@ -681,26 +751,36 @@ let prepare_compaction_admitted
      | Keeper_compact_policy.Prepared prepared_trigger,
        Some evidence,
        Some post_success_terminalizer ->
-       let commit_waiter, commit_resolver = Eio.Promise.create () in
-       Ok
-         { session
-         ; source_ref
-         ; retry_meta
-         ; turn_generation
-         ; prepared_trigger
-         ; context = preparation.context
-         ; evidence
-         ; post_success_terminalizer
-         ; commit_waiter
-         ; publish_commit_completion =
-             (fun completion ->
-                ignore
-                  (Eio.Promise.try_resolve
-                     commit_resolver
-                     completion
-                   : bool))
-         ; canonical_commit_completion = Atomic.make None
-         }
+       (match
+          validate_failed_request_readmission
+            ~source:source_ref
+            ~trigger
+            ~candidate_readmission_probe
+            preparation
+            post_success_terminalizer
+        with
+        | Error _ as error -> error
+        | Ok () ->
+          let commit_waiter, commit_resolver = Eio.Promise.create () in
+          Ok
+            { session
+            ; source_ref
+            ; retry_meta
+            ; turn_generation
+            ; prepared_trigger
+            ; context = preparation.context
+            ; evidence
+            ; post_success_terminalizer
+            ; commit_waiter
+            ; publish_commit_completion =
+                (fun completion ->
+                   ignore
+                     (Eio.Promise.try_resolve
+                        commit_resolver
+                        completion
+                      : bool))
+            ; canonical_commit_completion = Atomic.make None
+            })
      | Keeper_compact_policy.Rejected (_, reason), _, _ ->
        (match rejection_disposition reason with
         | Terminal_no_compaction terminal_reason ->
@@ -732,6 +812,7 @@ let prepare_compaction_admitted
 let prepare_compaction_with
       ~compact_for_request
       ~base_dir
+      ~candidate_readmission_probe
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
   : (prepared_compaction, compaction_recovery_error) result =
@@ -769,6 +850,7 @@ let prepare_compaction_with
     prepare_compaction_admitted
       ~compact_for_request
       ~base_dir
+      ~candidate_readmission_probe
       ~meta
       ~trigger
 ;;
@@ -776,6 +858,7 @@ let prepare_compaction_with
 let prepare_compaction
       ?before_dispatch_authority
       ?exact_execution_guard
+      ?candidate_readmission_probe
       ~base_path
       ~base_dir
       ~meta
@@ -789,6 +872,7 @@ let prepare_compaction
          ?exact_execution_guard
          ~base_path)
     ~base_dir
+    ~candidate_readmission_probe
     ~meta
     ~trigger
 ;;
@@ -1050,6 +1134,7 @@ end
 let recover_latest_checkpoint_for_compaction
     ?before_dispatch_authority
     ?exact_execution_guard
+    ?candidate_readmission_probe
     ~(base_path : string)
     ~(base_dir : string)
     ~(meta : keeper_meta)
@@ -1060,6 +1145,7 @@ let recover_latest_checkpoint_for_compaction
     prepare_compaction
       ?before_dispatch_authority
       ?exact_execution_guard
+      ?candidate_readmission_probe
       ~base_path
       ~base_dir
       ~meta

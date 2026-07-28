@@ -132,6 +132,21 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
+type capacity_readmission_failure =
+  | Still_over_capacity of Agent_sdk.Error.sdk_error
+  | Readmission_failed of Agent_sdk.Error.sdk_error
+
+type capacity_readmission_probe =
+  Agent_sdk.Checkpoint.t -> (unit, capacity_readmission_failure) result
+(** Rebuild and re-admit the same Keeper provider request against a candidate
+    checkpoint. [Ok ()] means OAS reached its admitted transport boundary;
+    the probe transport performs no provider request. *)
+
+module Capacity_readmission_for_testing : sig
+  val failure_of_error :
+    Agent_sdk.Error.sdk_error -> capacity_readmission_failure
+end
+
 type worker_lifecycle_classification =
   { event : string
   ; status : string
@@ -373,6 +388,18 @@ val resume_from_checkpoint :
   config:config ->
   checkpoint:Agent_sdk.Checkpoint.t ->
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
+
+val probe_blocks_admission :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  config:config ->
+  checkpoint:Agent_sdk.Checkpoint.t ->
+  stream:bool ->
+  Agent_sdk.Types.content_block list ->
+  (unit, capacity_readmission_failure) result
+(** Execute the exact OAS preparation, provider-native measurement, and
+    admission path with a local transport sentinel. The sentinel is reached
+    only after admission and never dispatches to the provider. *)
 (** Resumes from a persisted checkpoint.  Uses
     [Runtime_agent_context.prepare_resume] to reconcile
     [checkpoint.turn_count] with the current config. *)

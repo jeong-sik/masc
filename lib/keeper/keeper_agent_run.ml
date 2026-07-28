@@ -402,6 +402,7 @@ let run_turn
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
       ?on_deferred_runtime_consumed
+      ?on_capacity_readmission_probe
       ?(is_retry = false)
       ?shared_context
       ?event_bus
@@ -928,6 +929,7 @@ let run_turn
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
+                      ?on_capacity_readmission_probe
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]

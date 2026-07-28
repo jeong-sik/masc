@@ -184,6 +184,7 @@ type provider_overflow_recovery =
 let recover_provider_context_overflow_in_lane
       ?exact_execution_guard
       ~before_dispatch_authority
+      ~candidate_readmission_probe
       ~(config : Workspace.config)
       ~base_dir
       ~(meta : keeper_meta)
@@ -405,6 +406,7 @@ let recover_provider_context_overflow_in_lane
                   recover_latest_checkpoint_for_compaction
                     ~before_dispatch_authority:before_compaction_dispatch
                     ?exact_execution_guard
+                    ?candidate_readmission_probe
                     ~base_path:config.base_path
                     ~base_dir
                     ~meta
@@ -641,6 +643,11 @@ let run_keeper_cycle
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
+  let capacity_readmission_probe :
+      Runtime_agent.capacity_readmission_probe option Atomic.t
+    =
+    Atomic.make None
+  in
   (* Decide turn_id at function entry so phase-gate and runtime-routing
      terminal paths can include it in the receipt and observability stream. *)
   let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
@@ -1087,6 +1094,12 @@ let run_keeper_cycle
                            ; turn_id = keeper_turn_id
                            ; deferred_runtime_lane
                            ; on_deferred_runtime_consumed
+                           ; on_capacity_readmission_probe =
+                               Some
+                                 (fun probe ->
+                                    Atomic.set
+                                      capacity_readmission_probe
+                                      (Some probe))
                            ; active_source_stimuli
                            }
                            ~initial_execution
@@ -1394,6 +1407,8 @@ dominant source of the observed CAS race exhaustion after
                         recover_provider_context_overflow_in_lane
                           ?exact_execution_guard
                           ~before_dispatch_authority
+                          ~candidate_readmission_probe:
+                            (Atomic.get capacity_readmission_probe)
                           ~config
                           ~base_dir
                           ~meta

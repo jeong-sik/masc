@@ -351,6 +351,7 @@ let run_named
     ?trace_link
     ?event_bus
     ?on_runtime_observation
+    ?on_capacity_readmission_probe
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?deferred_runtime_lane
@@ -689,6 +690,7 @@ let run_named
             ; on_resume
             ; agent_ref
             ; on_runtime_observation
+            ; on_capacity_readmission_probe
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append

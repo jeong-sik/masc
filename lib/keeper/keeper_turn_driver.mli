@@ -115,6 +115,8 @@ val run_named :
   ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
+  ?on_capacity_readmission_probe:
+    (Runtime_agent.capacity_readmission_probe -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->

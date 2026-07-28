@@ -1343,6 +1343,14 @@
 ; RFC-0301 item 6: the turn-local generated-media accumulator turns stream media
 ; into reload chat blocks (image / voice / attach) via the content-addressed store.
 
+; The turn-local tool-call accumulator the persist site reads for
+; append_turn_result ~tool_calls.
+
+(test
+ (name test_keeper_stream_tool_accum)
+ (modules test_keeper_stream_tool_accum)
+ (libraries alcotest masc masc_server agent_sdk unix))
+
 (test
  (name test_keeper_stream_media_accum)
  (modules test_keeper_stream_media_accum)

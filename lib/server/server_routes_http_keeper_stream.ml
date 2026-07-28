@@ -1832,8 +1832,14 @@ let process_single_turn ~user_row_origin ~queued_turn
      media live over SSE; the persist site records it durably (see the persist arm
      below). Content-addressed, so the two persists reuse one file. *)
   let worker_media_accum = Keeper_stream_media_accum.create () in
+  (* The same stream carries this turn's tool calls. Without collecting them the
+     persist site below has nothing to pass as [?tool_calls], so history rows
+     hold no tool rows and a reload loses the tool timeline the live stream
+     showed. *)
+  let worker_tool_accum = Keeper_stream_tool_accum.create () in
   let on_event evt =
     Keeper_stream_media_accum.on_event worker_media_accum evt;
+    Keeper_stream_tool_accum.on_event worker_tool_accum evt;
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
@@ -2187,6 +2193,9 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ~keeper_name:payload.name
                          ~user_content:payload.message
                          ~user_attachments:payload.attachments
+                         ~tool_calls:
+                           (Keeper_stream_tool_accum.to_tool_calls
+                              worker_tool_accum)
                          ~surface:chat_surface
                          ~speaker:chat_speaker
                          ~assistant_content

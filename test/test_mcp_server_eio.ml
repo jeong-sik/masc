@@ -2784,31 +2784,6 @@ tags: [alpha, keeper]
 ---
 Alpha body
 |};
-  write_text_file (Filename.concat masc_dir "institution.json")
-    {|{
-  "identity": {
-    "id": "inst-1",
-    "name": "Fixture Institution",
-    "mission": "Keep collective memory coherent",
-    "founded_at": 0.0,
-    "generation": 1
-  },
-  "memory": {
-    "episodic": [],
-    "semantic": [],
-    "procedural": []
-  },
-  "culture": [],
-  "succession": {
-    "onboarding_steps": ["Read mission"],
-    "required_knowledge": [],
-    "mentor_assignment": "best_fit",
-    "probation_period": 24.0,
-    "graduation_criteria": ["Ship one task"]
-  },
-  "current_agents": [],
-  "alumni": []
-}|};
   let cases =
     [
       ("masc://status.json", "application/json", "\"base_path\"");
@@ -2818,8 +2793,6 @@ Alpha body
       ("masc://messages.json", "application/json", "[");
       ("masc://events.json", "application/json", "[");
       ("masc://worktrees.json", "application/json", "{");
-      ("masc://institution", "text/markdown", "Mission");
-      ("masc://institution.json", "application/json", "\"identity\"");
       ("masc://library", "text/markdown", "Library Index");
       ("masc://library.json", "application/json", "\"documents\"");
       ("masc://library/alpha", "text/markdown", "Alpha body");

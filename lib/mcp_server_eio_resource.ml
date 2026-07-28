@@ -189,31 +189,6 @@ let handle_read_resource_eio state id params =
                   ]
               in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | "institution" ->
-              let file = Filename.concat
-                (Common.masc_dir_from_base_path ~base_path:config.base_path)
-                "institution.json" in
-              if Sys.file_exists file then
-                try
-                  let json = Workspace.read_json config file in
-                  let inst = Institution_eio.institution_of_json json in
-                  ("text/markdown", Some (Institution_eio.format_for_injection inst))
-                with
-                | Yojson.Json_error _ | Sys_error _
-                | Yojson.Safe.Util.Type_error _ ->
-                  let content = Fs_compat.load_file file in
-                  ("application/json", Some content)
-              else
-                ("text/markdown", Some "No institution memory found. Create one with masc_init.")
-          | "institution.json" ->
-              let file = Filename.concat
-                (Common.masc_dir_from_base_path ~base_path:config.base_path)
-                "institution.json" in
-              if Sys.file_exists file then
-                let content = Fs_compat.load_file file in
-                ("application/json", Some content)
-              else
-                ("application/json", Some "{\"error\": \"No institution memory found\"}")
           | s when String.starts_with s ~prefix:"library" ->
               let library_dir = Filename.concat config.base_path "docs/library" in
               if not (Sys.file_exists library_dir) then

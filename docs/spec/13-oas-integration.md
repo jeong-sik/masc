@@ -98,7 +98,7 @@ graph TB
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, dispatch, auth |
 | 컨텍스트 축약 | 없음; exact message history를 실행 | Keeper compaction, persisted-history repair, provider-bound artifact projection |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 publish할지, SSE/dashboard 연결 |
-| 장기 메모리 | 없음 | Memory OS fact store, institution/procedural stores |
+| 장기 메모리 | 없음 | Memory OS fact store |
 | 조율 상태 | 없음 | workspace, tasks, board, keeper Gate |
 
 ---
@@ -350,7 +350,6 @@ MASC 조율 이벤트를 OAS `Event_bus`에 `Custom("masc:<type>", json)` 형식
 | `masc:heartbeat_recovered` | timeout 복구 |
 | `masc:keeper:snapshot` | keeper 상태 스냅샷 |
 | `masc:keeper:lifecycle` | keeper 시작/중단/충돌/재시작 |
-| `masc:institution_episode` | institution 에피소드 기록 |
 
 ### 8.2 SSE Relay (oas_event_bridge.ml)
 

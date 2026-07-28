@@ -329,7 +329,6 @@ export {
 
 export type {
   MemorySubsystemsSynapse,
-  MemorySubsystemsEpisode,
   MemorySubsystemsDelegationRequest,
   MemorySubsystemsResponse,
   KeeperMemoryHealthAlert,

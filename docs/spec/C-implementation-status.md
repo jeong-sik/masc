@@ -146,7 +146,7 @@ Board Listener 제거됨 (filesystem-first에서 Board_dispatch가 SSE 직접 �
 
 ### 12-Memory Systems (100% IMPL)
 
-4개 시스템 전부 운용: `Masc.Memory.t` facade, Keeper Memory Bank(JSONL+compaction), Institution(episodic/semantic/procedural), Procedural Memory(crystallization), Context Budget(4 phases).
+Memory OS fact store 단일 운용 (legacy Memory Bank·Institution은 2026-07-28 제거, `Masc.Memory.t` facade 소멸). Context Budget(4 phases)는 유지.
 External memory projection은 제거됨. Hebbian Learning(synapse model)은 retired surface.
 
 ### 13-OAS Integration (100% IMPL)

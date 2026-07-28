@@ -102,7 +102,6 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
-  test_institution_ids
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -308,7 +307,6 @@
   test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
   test_warn_root_causes
-  test_institution_of_string_fail_closed
   test_mid_turn_resume
   test_telemetry_observe
   test_keeper_typed_labels
@@ -413,7 +411,6 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
-  test_institution_ids
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -623,7 +620,6 @@
   test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
   test_warn_root_causes
-  test_institution_of_string_fail_closed
   test_mid_turn_resume
   test_telemetry_observe
   test_keeper_typed_labels

@@ -23,8 +23,6 @@ function emptyResponse(): MemorySubsystemsResponse {
   return {
     generated_at: '2026-06-22T00:00:00Z',
     hebbian: { synapses: [], last_consolidation: 0 },
-    episodes: { total: 0, filtered: 0, shown: 0, limit: 10, items: [] },
-    filters: { keepers: [], outcomes: [] },
   }
 }
 

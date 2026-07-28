@@ -879,12 +879,10 @@ describe('fetchKeeperTurnTranscript', () => {
 })
 
 describe('fetchMemorySubsystems', () => {
-  it('builds the query string from the provided filters', async () => {
+  it('builds the query string from the provided limit', async () => {
     const rawResponse = {
       generated_at: '2026-05-06T00:00:00Z',
       hebbian: { synapses: [], last_consolidation: 0 },
-      episodes: { total: 0, filtered: 0, shown: 0, limit: 100, items: [] },
-      filters: { keepers: [], outcomes: [] },
     }
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify(rawResponse), {
@@ -894,15 +892,12 @@ describe('fetchMemorySubsystems', () => {
     ))
     vi.stubGlobal('fetch', fetchMock)
 
-    await fetchMemorySubsystems({ limit: 100, keeper: 'sangsu', outcome: 'success', q: 'note' })
+    await fetchMemorySubsystems({ limit: 100 })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const requestUrl = new URL(fetchMock.mock.calls[0]?.[0] as string, 'http://dashboard.local')
     expect(requestUrl.pathname).toBe('/api/v1/dashboard/memory-subsystems')
     expect(requestUrl.searchParams.get('limit')).toBe('100')
-    expect(requestUrl.searchParams.get('keeper')).toBe('sangsu')
-    expect(requestUrl.searchParams.get('outcome')).toBe('success')
-    expect(requestUrl.searchParams.get('q')).toBe('note')
   })
 })
 

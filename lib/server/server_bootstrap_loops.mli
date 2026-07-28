@@ -179,8 +179,8 @@ val start_background_maintenance :
   clock:float Eio.Time.clock_ty Eio.Time.clock ->
   env:Eio_unix.Stdenv.base ->
   Mcp_server.server_state -> string * string
-(** Spawn the periodic maintenance fibers (institution episode capping,
-    cost ledger flush, dashboard cache warmer, etc.) under [sw].
+(** Spawn the periodic maintenance fibers (cost ledger flush,
+    dashboard cache warmer, etc.) under [sw].
     Returns a [(summary, diagnostics_hint)] pair printed at boot so an
     operator can see what schedules are active and where to look when
     one stops. *)

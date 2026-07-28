@@ -342,78 +342,8 @@ let dashboard_memory_subsystems_http_json
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:500 in
   let memory_quality_limit = dashboard_memory_quality_recent_limit request in
   let memory_quality_top_key_limit = dashboard_memory_quality_top_key_limit request in
-  let keeper_filter =
-    query_param request "keeper"
-    |> Option.map String.trim
-    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
-  in
-  let outcome_filter =
-    query_param request "outcome"
-    |> Option.map String.trim
-    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
-  in
-  let search =
-    query_param request "q"
-    |> Option.map (fun s -> String.trim s |> String.lowercase_ascii)
-    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
-  in
   let now = Unix.gettimeofday () in
   let hebbian = compute_hebbian ~base_path:config.base_path ~now () in
-  let all_episodes =
-    try Institution_eio.load_recent_episodes_jsonl ~limit:max_int with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> []
-  in
-  let total = List.length all_episodes in
-  (* Empty filter [q] used to match all episodes; preserve that and
-     delegate non-empty matching to the SSOT helper, which scans byte by
-     byte without lowercasing the haystack or allocating per position. *)
-  let contains_ci haystack needle =
-    String.length needle = 0 || String_util.contains_substring_ci haystack needle
-  in
-  let filtered =
-    all_episodes
-    |> List.filter (fun (e : Institution_eio.episode) ->
-      let keeper_ok =
-        match keeper_filter with
-        | None -> true
-        | Some k -> List.mem k e.participants
-      in
-      let outcome_ok =
-        match outcome_filter with
-        | None -> true
-        | Some "success" -> e.outcome = `Success
-        | Some "failure" -> e.outcome = `Failure
-        | Some "partial" -> e.outcome = `Partial
-        | Some _ -> true
-      in
-      let search_ok =
-        match search with
-        | None -> true
-        | Some q ->
-          contains_ci e.summary q
-          || contains_ci e.event_type q
-          || List.exists (fun l -> contains_ci l q) e.learnings
-          || List.exists (fun p -> contains_ci p q) e.participants
-      in
-      keeper_ok && outcome_ok && search_ok)
-  in
-  let filtered_total = List.length filtered in
-  let episodes =
-    let rec drop n = function
-      | [] -> []
-      | rest when n <= 0 -> rest
-      | _ :: rest -> drop (n - 1) rest
-    in
-    if filtered_total <= limit then filtered else drop (filtered_total - limit) filtered
-  in
-  let known_keepers =
-    let episode_keepers =
-      all_episodes
-      |> List.concat_map (fun (e : Institution_eio.episode) -> e.participants)
-    in
-    episode_keepers |> List.sort_uniq String.compare
-  in
   let delegation_requests =
     match
       Keeper_delegation_request_store.list_requests ~base_path:config.base_path
@@ -453,19 +383,6 @@ let dashboard_memory_subsystems_http_json
           ~config
           ~sample_limit:memory_quality_limit
           ~top_key_limit:memory_quality_top_key_limit )
-    ; ( "episodes"
-      , `Assoc
-          [ "total", `Int total
-          ; "filtered", `Int filtered_total
-          ; "shown", `Int (List.length episodes)
-          ; "limit", `Int limit
-          ; "items", `List (List.map Institution_eio.episode_to_json episodes)
-          ] )
     ; "delegation_requests", delegation_requests
-    ; ( "filters"
-      , `Assoc
-          [ "keepers", `List (List.map (fun k -> `String k) known_keepers)
-          ; "outcomes", `List [ `String "success"; `String "partial"; `String "failure" ]
-          ] )
     ]
 ;;

@@ -20,17 +20,6 @@ export interface MemorySubsystemsSynapse {
   weight_history?: Array<[number, number]>
 }
 
-export interface MemorySubsystemsEpisode {
-  id: string
-  timestamp: number
-  participants: string[]
-  event_type: string
-  summary: string
-  outcome: string
-  learnings: string[]
-  context: Record<string, string>
-}
-
 export interface MemorySubsystemsDelegationRequest {
   id: string
   requester: string
@@ -48,13 +37,6 @@ export interface MemorySubsystemsResponse {
     synapses: MemorySubsystemsSynapse[]
     last_consolidation: number
   }
-  episodes: {
-    total: number
-    filtered: number
-    shown: number
-    limit: number
-    items: MemorySubsystemsEpisode[]
-  }
   delegation_requests?: {
     total: number
     shown: number
@@ -63,17 +45,10 @@ export interface MemorySubsystemsResponse {
     items: MemorySubsystemsDelegationRequest[]
     error?: string | null
   }
-  filters: {
-    keepers: string[]
-    outcomes: string[]
-  }
 }
 
 interface MemorySubsystemsQuery {
   limit?: number
-  keeper?: string
-  outcome?: string
-  q?: string
   signal?: AbortSignal
 }
 
@@ -82,9 +57,6 @@ export function fetchMemorySubsystems(
 ): Promise<MemorySubsystemsResponse> {
   const params = new URLSearchParams()
   if (opts?.limit != null) params.set('limit', String(opts.limit))
-  if (opts?.keeper) params.set('keeper', opts.keeper)
-  if (opts?.outcome) params.set('outcome', opts.outcome)
-  if (opts?.q) params.set('q', opts.q)
   const qs = params.toString()
   return get<MemorySubsystemsResponse>(
     `/api/v1/dashboard/memory-subsystems${qs ? `?${qs}` : ''}`,

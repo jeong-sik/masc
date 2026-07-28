@@ -9,7 +9,7 @@ type request =
   }
 
 type projection_stage =
-  | Source_settlement
+  | Source_ack
   | Target_enqueue
 
 type failure =
@@ -58,10 +58,7 @@ type target_projection =
   | Already_present
 
 type projection =
-  | Applied of
-      { source_settlement : Keeper_registry_event_queue.settle_result
-      ; target_projection : target_projection
-      }
+  | Applied of target_projection
   | Committed_followup_failed of failure
 
 type success =
@@ -74,7 +71,7 @@ type success =
 let ( let* ) = Result.bind
 
 let projection_stage_to_string = function
-  | Source_settlement -> "source_settlement"
+  | Source_ack -> "source_ack"
   | Target_enqueue -> "target_enqueue"
 ;;
 
@@ -301,7 +298,7 @@ let accepted_transfer receipt
   }
 ;;
 
-let source_settlement config receipt transfer =
+let ack_source config receipt transfer =
   let causal = accepted_transfer receipt transfer in
   let base_path = config.Workspace.base_path in
   let* source_state =
@@ -309,15 +306,15 @@ let source_settlement config receipt transfer =
       ~base_path
       ~keeper_name:transfer.from_keeper
     |> Result.map_error (fun detail ->
-      Committed_projection_failed { stage = Source_settlement; detail })
+      Committed_projection_failed { stage = Source_ack; detail })
   in
   let* prior =
     Keeper_event_queue_state.accepted_pending_transfer_replay causal source_state
     |> Result.map_error (fun detail ->
-      Committed_projection_failed { stage = Source_settlement; detail })
+      Committed_projection_failed { stage = Source_ack; detail })
   in
   match prior with
-  | Some prior -> Ok (Keeper_registry_event_queue.Already_settled prior)
+  | Some _ -> Ok ()
   | None ->
     let* current = read_meta config transfer.from_keeper in
     let* () =
@@ -339,7 +336,8 @@ let source_settlement config receipt transfer =
       ~settled_at:transfer.settled_at
       ~transfer:causal
     |> Result.map_error (fun detail ->
-      Committed_projection_failed { stage = Source_settlement; detail })
+      Committed_projection_failed { stage = Source_ack; detail })
+    |> Result.map (fun _ -> ())
 ;;
 
 let validate_committed_target config transfer =
@@ -374,9 +372,9 @@ let target_enqueue config receipt transfer =
 
 let project_receipt config receipt =
   let* transfer = transfer_of_receipt receipt in
-  let* source_settlement = source_settlement config receipt transfer in
+  let* () = ack_source config receipt transfer in
   let* target_projection = target_enqueue config receipt transfer in
-  Ok (Applied { source_settlement; target_projection })
+  Ok (Applied target_projection)
 ;;
 
 let run_owned receipt_lock config ~from_keeper ~to_keeper request =

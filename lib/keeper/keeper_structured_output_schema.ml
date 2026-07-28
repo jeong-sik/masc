@@ -60,11 +60,51 @@ let librarian_claim_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+(* Recognition operation object (masc#26122). One flat object per operation:
+   [op] selects the shape, op-specific payloads ride nullable fields, and the
+   parser rejects any non-null field foreign to the op. Same
+   no-oneOf/nullable-fields convention as [compaction_plan_output_schema]. *)
+let librarian_operation_schema =
+  let nullable_fact_schema =
+    match librarian_claim_schema with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "type", `String "object" ->
+               "type", `List [ `String "object"; `String "null" ]
+             | field -> field)
+           fields)
+    | _ -> invalid_arg "librarian_claim_schema must be an object schema"
+  in
+  let nullable_int_array_schema =
+    `Assoc
+      [ "type", `List [ `String "array"; `String "null" ]
+      ; "items", integer_schema
+      ]
+  in
+  let fields =
+    [ Keeper_librarian.wire_field_op
+      , enum_schema Keeper_memory_os_types.wire_op_tokens
+    ; Keeper_librarian.wire_field_fact, nullable_fact_schema
+    ; Keeper_librarian.wire_field_index, nullable_integer_schema
+    ; Keeper_librarian.wire_field_member_indices, nullable_int_array_schema
+    ; Keeper_librarian.wire_field_claim, nullable_string_schema
+    ; Keeper_librarian.wire_field_category, nullable_enum_schema category_tokens
+    ; Keeper_librarian.wire_field_claim_id, nullable_string_schema
+    ; Keeper_librarian.wire_field_valid_for_days, nullable_integer_schema
+    ; Keeper_librarian.wire_field_source_turn, nullable_integer_schema
+    ; Keeper_librarian.wire_field_reason, nullable_string_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let librarian_episode_output_schema =
   let fields =
     [ Keeper_librarian.wire_field_episode_summary, string_schema
-    ; ( Keeper_librarian.wire_field_claims
-      , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
+    ; ( Keeper_librarian.wire_field_operations
+      , `Assoc [ "type", `String "array"; "items", librarian_operation_schema ] )
     ; Keeper_librarian.wire_field_open_items, string_array_schema
     ; Keeper_librarian.wire_field_constraints, string_array_schema
     ; Keeper_librarian.wire_field_preserved_tool_refs, string_array_schema

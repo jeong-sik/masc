@@ -1,19 +1,34 @@
-(** Keeper_librarian — structured claim extraction for the Memory OS.
+(** Keeper_librarian — store-aware recognition extraction for the Memory OS.
 
     This module stays on the MASC side of the OAS boundary. It does not call
-    providers or persist files; callers choose the message slice, render the
-    external prompt, call the LLM, and store accepted episodes via
-    [Keeper_memory_os_io]. *)
+    providers or persist files; callers choose the message slice, read the
+    fact-store snapshot, render the external prompt, call the LLM, and apply
+    accepted operations via [Keeper_librarian_runtime].
 
-(** Input bundle for one librarian extraction. *)
+    masc#26122: storage is recognition. The input carries the keeper's current
+    fact store; the output is typed operations
+    ({!Keeper_librarian_recognition.operation}), so whether something is
+    already known is the model's judgment — never a programmable identity
+    comparison. *)
+
+(** Input bundle for one librarian recognition pass. *)
 type input =
   { trace_id : string
   ; generation : int
   ; messages : Agent_sdk.Types.message list
+  ; store : Keeper_memory_os_types.fact list
+    (** The keeper's current facts, exactly as read before the LLM call.
+        The prompt renders them 0-indexed; output operation indices refer to
+        this snapshot. *)
   }
 
 val wire_field_episode_summary : string
-val wire_field_claims : string
+val wire_field_operations : string
+val wire_field_op : string
+val wire_field_fact : string
+val wire_field_index : string
+val wire_field_member_indices : string
+val wire_field_reason : string
 val wire_field_open_items : string
 val wire_field_constraints : string
 val wire_field_preserved_tool_refs : string
@@ -31,14 +46,18 @@ val wire_field_valid_for_days : string
     horizon (RFC-0351 S2). *)
 
 val wire_episode_fields : string list
-(** Canonical episode-object wire field names accepted by the parser and used by
-    retry prompt rendering. *)
+(** Canonical output-object wire field names accepted by the parser and used
+    by retry prompt rendering. *)
 
 val wire_claim_fields : string list
-(** Canonical claim-object wire field names accepted by the parser and used by
-    retry prompt rendering. *)
+(** Canonical claim-object wire field names (the [fact] payload of an [add]
+    operation) accepted by the parser and used by retry prompt rendering. *)
 
-(** Prompt variables for [keeper.librarian.episode_extraction]. *)
+val wire_operation_fields : string list
+(** Canonical operation-object wire field names accepted by the parser. *)
+
+(** Prompt variables for [keeper.librarian.episode_extraction]:
+    [conversation_history] and [current_store]. *)
 val prompt_variables : input -> (string * string) list
 
 (** Structured parse failure for raw librarian output. *)
@@ -50,43 +69,46 @@ type parse_error =
   | Unexpected_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
+  | Operation_schema_mismatch of string
 
 val parse_error_to_string : parse_error -> string
 
-(** Parse a raw strict-JSON LLM response into an episode.
+(** The librarian's full recognition output: the episode narrative plus the
+    typed store operations. *)
+type recognition_output =
+  { episode_summary : string
+  ; operations : Keeper_librarian_recognition.operation list
+  ; open_items : string list
+  ; constraints : string list
+  ; preserved_tool_refs : string list
+  }
 
-    Accepted wire forms are deliberately narrow:
-    - exact JSON object;
-    - exact JSON string whose contents are a JSON object.
-
-    Markdown fences, prose before/after JSON, multiple JSON objects, and schema
-    drift return a structured [parse_error]. A provider-supplied
-    [schema_version] field is ignored if present; persisted episodes always use
-    {!Keeper_memory_os_types.schema_version}. [now] is optional so tests can
-    keep timestamps deterministic. *)
-val episode_of_output_result
+val recognition_output_of_json_result
   :  ?now:float
-  -> generation:int
-  -> input
-  -> string
-  -> (Keeper_memory_os_types.episode, parse_error) result
-
-val episode_of_json_result
-  :  ?now:float
-  -> generation:int
   -> input
   -> Yojson.Safe.t
-  -> (Keeper_memory_os_types.episode, parse_error) result
-(** Parse an already extracted provider-native JSON response into an episode.
-    This is the runtime path used after OAS structured response extraction. *)
+  -> (recognition_output, parse_error) result
+(** Parse an already extracted provider-native JSON response. Accepted wire
+    forms are deliberately narrow: exact JSON object with exactly the
+    documented fields; any schema drift (unknown field, non-null foreign
+    field on an operation, malformed op payload) is a structured
+    [parse_error]. A provider-supplied [schema_version] field is ignored if
+    present. [now] is optional so tests can keep timestamps deterministic. *)
 
-(** Parse a raw strict-JSON LLM response into an episode.
-
-    Compatibility wrapper over {!episode_of_output_result}; [None] means the
-    response was not JSON or violated the extraction schema. *)
-val episode_of_output
+val recognition_output_of_output_result
   :  ?now:float
-  -> generation:int
   -> input
   -> string
-  -> Keeper_memory_os_types.episode option
+  -> (recognition_output, parse_error) result
+(** Like {!recognition_output_of_json_result} for a raw string response
+    (exact JSON object, or exact JSON string wrapping one). *)
+
+(** The persisted episode for one applied recognition pass: the librarian's
+    narrative with the recognized (created/rewritten) rows as its claims. *)
+val episode_of_recognition
+  :  now:float
+  -> generation:int
+  -> input
+  -> recognition_output
+  -> recognized_facts:Keeper_memory_os_types.fact list
+  -> Keeper_memory_os_types.episode

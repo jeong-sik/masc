@@ -55,6 +55,29 @@ val wire_librarian_episode_fields : string list
     prompts. *)
 val wire_librarian_claim_fields : string list
 
+(** Recognition write contract (masc#26122): wire keys and op tokens for the
+    librarian's store-aware operation output. Storage is recognition — whether
+    something is already known is the model's judgment, expressed as one of
+    these typed operations; no programmable identity comparison participates. *)
+val wire_field_operations : string
+val wire_field_op : string
+val wire_field_fact : string
+val wire_field_index : string
+val wire_field_member_indices : string
+val wire_field_reason : string
+val wire_field_reinforcement_count : string
+val wire_op_add : string
+val wire_op_reinforce : string
+val wire_op_merge : string
+val wire_op_revise : string
+val wire_op_forget : string
+
+(** All recognition op tokens, in schema order. *)
+val wire_op_tokens : string list
+
+(** Operation-object fields accepted from the librarian recognition output. *)
+val wire_librarian_operation_fields : string list
+
 (** Source attribution for a single extracted fact. *)
 type provenance_event =
   { trace_id : string
@@ -140,6 +163,11 @@ type fact =
   ; claim_id : string option
     (** Optional producer-emitted stable conclusion id. It is preserved exactly;
         absent ids use exact observation identity, never normalized prose. *)
+  ; reinforcement_count : int
+    (** How many times the librarian re-recognized this claim in later windows
+        (recognition op Reinforce, masc#26122). 0 for a first observation and
+        for every pre-recognition row (omitted from JSON at 0). Per-event
+        provenance lives in the recognition ledger, not on the row. *)
   }
 
 (** The exact producer-supplied hard-expiry horizon. No category, claim-kind, or

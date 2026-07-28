@@ -1,6 +1,8 @@
 (** Runtime adapter for Memory OS librarian extraction. *)
 
 module Exact_output = Agent_sdk.Exact_output
+module Recognition = Keeper_librarian_recognition
+module Recognition_ledger = Keeper_librarian_recognition_ledger
 
 let exact_lane_id = "librarian_exact"
 
@@ -191,26 +193,35 @@ type exact_flow_callback_error =
 type extraction_error =
   | Prompt_render_failed of string
   | Execution_clock_unavailable
+  | Store_read_failed of string
+  | Store_snapshot_changed of
+      { snapshot : int
+      ; current : int
+      }
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Domain_output_invalid of string
-  | Memory_fact_upsert_failed of string
+  | Memory_apply_failed of string
 
 type extraction_error_kind =
   | Prompt_render_failure
   | Execution_clock_unavailable
+  | Store_read_failure
+  | Store_snapshot_change
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
-  | Memory_fact_upsert_failure
+  | Memory_apply_failure
 
 let extraction_error_kind = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Execution_clock_unavailable -> Execution_clock_unavailable
+  | Store_read_failed _ -> Store_read_failure
+  | Store_snapshot_changed _ -> Store_snapshot_change
   | Exact_setup_failed _ -> Exact_setup_failure
   | Exact_execution_failed _ -> Exact_execution_failure
   | Domain_output_invalid _ -> Domain_output_invalid
-  | Memory_fact_upsert_failed _ -> Memory_fact_upsert_failure
+  | Memory_apply_failed _ -> Memory_apply_failure
 ;;
 
 let librarian_execution_clock_unavailable_error =
@@ -252,6 +263,13 @@ let exact_setup_error_to_string = function
 let extraction_error_to_string = function
   | Prompt_render_failed msg -> msg
   | Execution_clock_unavailable -> librarian_execution_clock_unavailable_error
+  | Store_read_failed msg -> "memory os fact store read failed: " ^ msg
+  | Store_snapshot_changed { snapshot; current } ->
+    Printf.sprintf
+      "memory os fact store changed during extraction (snapshot=%d current=%d); \
+       operations abandoned"
+      snapshot
+      current
   | Exact_setup_failed error -> exact_setup_error_to_string error
   | Exact_execution_failed { outward_effect; failure } ->
     let detail =
@@ -273,7 +291,7 @@ let extraction_error_to_string = function
       detail
   | Domain_output_invalid msg ->
     "librarian domain output invalid: " ^ msg
-  | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
+  | Memory_apply_failed msg -> "memory os recognition apply failed: " ^ msg
 ;;
 
 let should_record_cadence_backoff_after_error = function
@@ -283,8 +301,12 @@ let should_record_cadence_backoff_after_error = function
   | Domain_output_invalid _ -> true
   | Execution_clock_unavailable
   | Prompt_render_failed _
+  | Store_read_failed _
+    (* A concurrent writer invalidated the snapshot; the next turn re-reads a
+       fresh store, so staying due is the correct retry. *)
+  | Store_snapshot_changed _
   | Exact_setup_failed _
-  | Memory_fact_upsert_failed _ ->
+  | Memory_apply_failed _ ->
     false
 ;;
 
@@ -639,7 +661,7 @@ let extract_with_exact_output_classified_unlocked
     bound_candidate := None;
     Ok ()
   in
-  let terminalize_success success episode =
+  let terminalize_success success recognition =
     let candidate = Exact_output.flow_success_candidate success in
     let persistence_failure detail =
       Error
@@ -666,7 +688,7 @@ let extract_with_exact_output_classified_unlocked
            ~state:"domain_valid"
            [ "candidate", attempt_receipt_json candidate ]
        with
-       | Ok () -> Ok episode
+       | Ok () -> Ok recognition
        | Error detail -> persistence_failure detail)
   in
   match clock with
@@ -679,8 +701,8 @@ let extract_with_exact_output_classified_unlocked
     let* attempt = prepare_attempt messages in
     let validate flow_success =
       let output = Exact_output.flow_success_output flow_success in
-      match Keeper_librarian.episode_of_json_result ~generation inp output.output with
-      | Ok episode -> Exact_output.Accept episode
+      match Keeper_librarian.recognition_output_of_json_result inp output.output with
+      | Ok recognition -> Exact_output.Accept recognition
       | Error error -> Exact_output.Reject_and_advance error
     in
     match
@@ -768,59 +790,89 @@ let extract_with_exact_output_classified
     inp
 ;;
 
-let append_episode
+(* Apply an accepted recognition output and persist the whole bundle.
+
+   Optimistic concurrency, mirroring the consolidation rewrite path: the store
+   snapshot was read WITHOUT the lock before the provider call; here the facts
+   lock is taken, the snapshot revalidated ([same_fact_snapshot]), and a stale
+   snapshot abandons the operations as a typed [Store_snapshot_changed] — the
+   indices the model emitted refer to rows a concurrent writer may have moved,
+   so applying them would corrupt unrelated facts. The next due turn re-reads
+   a fresh store.
+
+   No programmable identity comparison participates (masc#26122): the model
+   already judged what is known against the snapshot it saw; code only applies
+   the typed operations and persists the evidence. *)
+let apply_and_persist
     ?clock
+    ~base_path
     ~keeper_id
-    episode
+    ~generation
+    (inp : Keeper_librarian.input)
+    (recognition : Keeper_librarian.recognition_output)
   =
-  let now = episode.Keeper_memory_os_types.created_at in
+  (* NDT-OK: application timestamps are provenance/retention metadata only. *)
+  let now = Unix.gettimeofday () in
   Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
-    match
-      try
-        let merge ~existing ~incoming =
-          let provenance =
-            let key = Keeper_memory_os_types.claim_identity incoming in
-            if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
-            then (
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
-                ~labels:[ "keeper", keeper_id ]
-                ();
-              Keeper_memory_os_policy.Recalled_echo)
-            else Keeper_memory_os_policy.Independent_observation
-          in
-          Keeper_memory_os_policy.reobserve_fact
-            ~now
-            ~provenance
-            ~existing
-            ~incoming
-        in
-        let (_ : Keeper_memory_os_io.fact_merge_stats) =
-          File_lock_eio.with_lock
-            ?clock
-            (Keeper_memory_os_io.facts_path ~keeper_id)
-            (fun () ->
-               Keeper_memory_os_io.merge_facts
-                 ~keeper_id
-                 ~merge
-                 ~incoming:episode.Keeper_memory_os_types.claims)
-        in
-        Ok ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        let message = Printexc.to_string exn in
-        Log.Keeper.warn
-          "memory os fact upsert failed keeper=%s: %s"
-          keeper_id
-          message;
-        Error message
-    with
-    | Ok () ->
+    let applied =
+      Keeper_memory_os_io.with_facts_lock
+        ?clock
+        ~keeper_id
+        ~on_timeout:(fun msg -> Error (Memory_apply_failed msg))
+        (fun () ->
+           match Keeper_memory_os_io.read_facts_all_strict ~keeper_id with
+           | Error msg -> Error (Store_read_failed msg)
+           | Ok current ->
+             if not (Keeper_memory_os_io.same_fact_snapshot inp.store current)
+             then
+               Error
+                 (Store_snapshot_changed
+                    { snapshot = List.length inp.store
+                    ; current = List.length current
+                    })
+             else (
+               let result =
+                 Recognition.apply
+                   ~now
+                   ~operations:recognition.operations
+                   inp.store
+               in
+               (match recognition.operations with
+                | [] -> ()
+                | _ :: _ ->
+                  Keeper_memory_os_io.rewrite_facts_atomically
+                    ~keeper_id
+                    result.Recognition.facts);
+               Ok result))
+    in
+    match applied with
+    | Error _ as error -> error
+    | Ok result ->
+      let episode =
+        Keeper_librarian.episode_of_recognition
+          ~now
+          ~generation
+          inp
+          recognition
+          ~recognized_facts:result.Recognition.recognized_facts
+      in
       Keeper_memory_os_io.append_episode ~keeper_id episode;
       Keeper_memory_os_io.append_event ~keeper_id episode;
-      Ok episode
-    | Error message -> Error (Memory_fact_upsert_failed message))
+      Recognition_ledger.append
+        ~masc_root:
+          (Workspace_utils.masc_root_dir_from
+             ~base_path
+             ~cluster_name:(Env_config_core.cluster_name ()))
+        ~keeper_id
+        ~trace_id:inp.trace_id
+        ~generation
+        ~store_before:inp.store
+        ~operations:recognition.operations
+        ~dispositions:result.Recognition.dispositions
+        ~store_after:result.Recognition.facts
+        ~now
+        ();
+      Ok episode)
 ;;
 
 let extract_and_append_with_exact_output_classified
@@ -833,27 +885,37 @@ let extract_and_append_with_exact_output_classified
   match clock with
   | None -> Error Execution_clock_unavailable
   | Some _ ->
-    let generation =
-      Keeper_memory_os_io.next_generation_with_floor
-        ~floor:inp.Keeper_librarian.generation
-        ~keeper_id
-        ~trace_id:inp.Keeper_librarian.trace_id
-    in
-    (match
-       extract_with_exact_output_classified
-         ?clock
-         ~base_path
-         ~net
-         ~keeper_id
-         ~generation
-         inp
-     with
-     | Error _ as error -> error
-     | Ok episode ->
-       append_episode
-         ?clock
-         ~keeper_id
-         episode)
+    (* The store snapshot is read here, outside any lock, and rides the input
+       into both the prompt (numbered rendering) and the post-provider CAS
+       revalidation in [apply_and_persist]. *)
+    (match Keeper_memory_os_io.read_facts_all_strict ~keeper_id with
+     | Error msg -> Error (Store_read_failed msg)
+     | Ok store ->
+       let inp = { inp with Keeper_librarian.store } in
+       let generation =
+         Keeper_memory_os_io.next_generation_with_floor
+           ~floor:inp.Keeper_librarian.generation
+           ~keeper_id
+           ~trace_id:inp.Keeper_librarian.trace_id
+       in
+       (match
+          extract_with_exact_output_classified
+            ?clock
+            ~base_path
+            ~net
+            ~keeper_id
+            ~generation
+            inp
+        with
+        | Error _ as error -> error
+        | Ok recognition ->
+          apply_and_persist
+            ?clock
+            ~base_path
+            ~keeper_id
+            ~generation
+            inp
+            recognition))
 ;;
 
 let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =

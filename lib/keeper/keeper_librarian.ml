@@ -1,17 +1,31 @@
-(** Keeper_librarian — structured claim extraction for the Memory OS. *)
+(** Keeper_librarian — store-aware recognition extraction for the Memory OS.
+
+    masc#26122: the librarian's input carries the keeper's current fact store
+    and its output is a list of typed recognition operations
+    ({!Keeper_librarian_recognition.operation}), not bare claims. *)
 
 open Keeper_memory_os_types
 
 module Canonical_tool = Agent_sdk.Canonical_tool
+module Recognition = Keeper_librarian_recognition
 
 type input =
   { trace_id : string
   ; generation : int
   ; messages : Agent_sdk.Types.message list
+  ; store : fact list
+    (* The keeper's current facts, exactly as read before the LLM call. The
+       prompt renders them with 0-based indices; every index in the output
+       operations refers to this snapshot. *)
   }
 
 let wire_field_episode_summary = Keeper_memory_os_types.wire_field_episode_summary
-let wire_field_claims = Keeper_memory_os_types.wire_field_claims
+let wire_field_operations = Keeper_memory_os_types.wire_field_operations
+let wire_field_op = Keeper_memory_os_types.wire_field_op
+let wire_field_fact = Keeper_memory_os_types.wire_field_fact
+let wire_field_index = Keeper_memory_os_types.wire_field_index
+let wire_field_member_indices = Keeper_memory_os_types.wire_field_member_indices
+let wire_field_reason = Keeper_memory_os_types.wire_field_reason
 let wire_field_open_items = Keeper_memory_os_types.wire_field_open_items
 let wire_field_constraints = Keeper_memory_os_types.wire_field_constraints
 let wire_field_preserved_tool_refs = Keeper_memory_os_types.wire_field_preserved_tool_refs
@@ -25,6 +39,7 @@ let wire_field_valid_for_days = Keeper_memory_os_types.wire_field_valid_for_days
 let wire_field_schema_version = Keeper_memory_os_types.wire_field_schema_version
 let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
+let wire_operation_fields = Keeper_memory_os_types.wire_librarian_operation_fields
 
 let accepted_episode_fields = wire_field_schema_version :: wire_episode_fields
 
@@ -96,9 +111,16 @@ let format_messages_for_prompt messages =
     |> String.concat "\n\n---\n\n"
 ;;
 
+let format_store_for_prompt store =
+  match store with
+  | [] -> "[no stored facts]"
+  | _ :: _ -> Keeper_memory_os_consolidation.render_numbered_facts store
+;;
+
 let prompt_variables (inp : input) : (string * string) list =
   [ ( "conversation_history"
     , inp.messages |> format_messages_for_prompt )
+  ; "current_store", format_store_for_prompt inp.store
   ]
 ;;
 
@@ -163,6 +185,7 @@ type parse_error =
   | Unexpected_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
+  | Operation_schema_mismatch of string
 
 let parse_error_to_string = function
   | Empty_output -> "empty_output"
@@ -172,6 +195,7 @@ let parse_error_to_string = function
   | Unexpected_field field -> "unexpected_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
+  | Operation_schema_mismatch detail -> "operation_schema_mismatch: " ^ detail
 ;;
 
 let json_of_output raw =
@@ -275,6 +299,7 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          ; last_verified_at = None (* RFC-0285 §3.3 / RFC-0259 P7: re-extraction must not advance last_verified_at *)
          ; schema_version
          ; claim_id
+         ; reinforcement_count = 0 (* first observation; Reinforce ops move it *)
          }
      | (Some _, Some _, Some _, _, _, _, _)
      | (Some _, Some _, None, _, _, _, _)
@@ -298,8 +323,176 @@ let unexpected_claim_field = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t) :
-  (episode, parse_error) result
+(* ---------- Recognition operation parsing (masc#26122) ---------- *)
+
+(* Every non-null key of an operation object must be [op] or listed in
+   [relevant]. A non-null value on a field foreign to the op is model
+   confusion and rejects the whole output, like every other strict check
+   here. *)
+let first_foreign_non_null_field ~relevant fields =
+  List.find_map
+    (fun (key, value) ->
+       match value with
+       | `Null -> None
+       | _ ->
+         if String.equal key wire_field_op
+            || List.exists (String.equal key) relevant
+         then None
+         else Some key)
+    fields
+;;
+
+let operation_mismatch op detail =
+  Error (Operation_schema_mismatch (op ^ ": " ^ detail))
+;;
+
+let index_field fields =
+  match int_field wire_field_index fields with
+  | Some i when i >= 0 -> Some i
+  | Some _ | None -> None
+;;
+
+let member_indices_field fields =
+  match List.assoc_opt wire_field_member_indices fields with
+  | Some (`List items) ->
+    traverse (function
+      | `Int i when i >= 0 -> Some i
+      | _ -> None)
+      items
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
+  | None -> None
+;;
+
+let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
+  (Recognition.operation, parse_error) result
+  =
+  match json with
+  | `Assoc fields ->
+    (match first_unexpected_field ~allowed:wire_operation_fields fields with
+     | Some field -> Error (Unexpected_field field)
+     | None ->
+       (match string_field wire_field_op fields with
+        | None -> Error (Operation_schema_mismatch "missing op")
+        | Some op when String.equal op Keeper_memory_os_types.wire_op_add ->
+          (match first_foreign_non_null_field ~relevant:[ wire_field_fact ] fields with
+           | Some field -> operation_mismatch op ("foreign field " ^ field)
+           | None ->
+             (match List.assoc_opt wire_field_fact fields with
+              | Some (`Assoc _ as fact_json) ->
+                (match unexpected_claim_field fact_json with
+                 | Some field -> Error (Unexpected_field field)
+                 | None ->
+                   (match fact_of_json ~trace_id ~now fact_json with
+                    | Some fact -> Ok (Recognition.Add fact)
+                    | None -> Error Claim_schema_mismatch))
+              | Some _ | None -> operation_mismatch op "missing fact object"))
+        | Some op when String.equal op Keeper_memory_os_types.wire_op_reinforce ->
+          (match
+             first_foreign_non_null_field
+               ~relevant:[ wire_field_index; wire_field_source_turn ]
+               fields
+           with
+           | Some field -> operation_mismatch op ("foreign field " ^ field)
+           | None ->
+             (match index_field fields, int_field wire_field_source_turn fields with
+              | Some index, Some source_turn when source_turn >= 0 ->
+                Ok (Recognition.Reinforce { index; source_turn })
+              | _ -> operation_mismatch op "requires index and source_turn"))
+        | Some op when String.equal op Keeper_memory_os_types.wire_op_merge ->
+          (match
+             first_foreign_non_null_field
+               ~relevant:
+                 [ wire_field_member_indices; wire_field_claim; wire_field_category ]
+               fields
+           with
+           | Some field -> operation_mismatch op ("foreign field " ^ field)
+           | None ->
+             (match
+                ( member_indices_field fields
+                , string_field wire_field_claim fields
+                , string_field wire_field_category fields )
+              with
+              | Some (_ :: _ :: _ as member_indices), Some claim, Some category ->
+                Ok
+                  (Recognition.Merge
+                     { member_indices
+                     ; consolidated_claim = claim
+                     ; category = category_of_string category
+                     })
+              | _ ->
+                operation_mismatch
+                  op
+                  "requires member_indices (>= 2), claim, and category"))
+        | Some op when String.equal op Keeper_memory_os_types.wire_op_revise ->
+          (match
+             first_foreign_non_null_field
+               ~relevant:
+                 [ wire_field_index
+                 ; wire_field_claim
+                 ; wire_field_category
+                 ; wire_field_claim_id
+                 ; wire_field_valid_for_days
+                 ]
+               fields
+           with
+           | Some field -> operation_mismatch op ("foreign field " ^ field)
+           | None ->
+             (match
+                ( index_field fields
+                , string_field wire_field_claim fields
+                , optional_string_field wire_field_category fields
+                , claim_id_field fields
+                , valid_for_days_field fields )
+              with
+              | Some index, Some claim, category, Some claim_id, Some valid_for_days ->
+                Ok
+                  (Recognition.Revise
+                     { index
+                     ; claim
+                     ; category = Option.map category_of_string category
+                     ; claim_id
+                     ; valid_for_days
+                     })
+              | _ -> operation_mismatch op "requires index and claim"))
+        | Some op when String.equal op Keeper_memory_os_types.wire_op_forget ->
+          (match
+             first_foreign_non_null_field
+               ~relevant:[ wire_field_index; wire_field_reason ]
+               fields
+           with
+           | Some field -> operation_mismatch op ("foreign field " ^ field)
+           | None ->
+             (match index_field fields, string_field wire_field_reason fields with
+              | Some index, Some reason -> Ok (Recognition.Forget { index; reason })
+              | _ -> operation_mismatch op "requires index and reason"))
+        | Some op -> Error (Operation_schema_mismatch ("unknown op " ^ op))))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error (Operation_schema_mismatch "operation is not an object")
+;;
+
+(* The librarian's full recognition output: the episode narrative plus the
+   typed store operations. *)
+type recognition_output =
+  { episode_summary : string
+  ; operations : Recognition.operation list
+  ; open_items : string list
+  ; constraints : string list
+  ; preserved_tool_refs : string list
+  }
+
+let rec traverse_result f = function
+  | [] -> Ok []
+  | x :: xs ->
+    (match f x with
+     | Error _ as error -> error
+     | Ok y ->
+       (match traverse_result f xs with
+        | Error _ as error -> error
+        | Ok ys -> Ok (y :: ys)))
+;;
+
+let recognition_output_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
+  (recognition_output, parse_error) result
   =
   let now =
     match now with
@@ -315,56 +508,64 @@ let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t)
      | None ->
        (match
           string_field wire_field_episode_summary fields
-          , List.assoc_opt wire_field_claims fields
+          , List.assoc_opt wire_field_operations fields
           , string_list_field_or_empty wire_field_open_items fields
           , string_list_field_or_empty wire_field_constraints fields
           , string_list_field_or_empty wire_field_preserved_tool_refs fields
         with
         | ( Some episode_summary
-          , Some (`List claim_items)
+          , Some (`List operation_items)
           , Some open_items
           , Some constraints
           , Some preserved_tool_refs ) ->
-          (match List.find_map unexpected_claim_field claim_items with
-           | Some field -> Error (Unexpected_field field)
-           | None ->
-             (match traverse (fact_of_json ~trace_id:inp.trace_id ~now) claim_items with
-              | Some claims ->
-                Ok
-                  { trace_id = inp.trace_id
-                  ; generation
-                  ; episode_summary
-                  ; claims
-                  ; open_items
-                  ; constraints
-                  ; preserved_tool_refs
-                  ; source_turn_range = source_turn_range claims
-                  ; created_at = now
-                  ; valid_until = None
-                  ; terminal_marker = None
-                  ; schema_version
-                  }
-              | None -> Error Claim_schema_mismatch))
+          (match
+             traverse_result
+               (operation_of_json ~trace_id:inp.trace_id ~now)
+               operation_items
+           with
+           | Error _ as error -> error
+           | Ok operations ->
+             Ok
+               { episode_summary
+               ; operations
+               ; open_items
+               ; constraints
+               ; preserved_tool_refs
+               })
         | _ -> Error Missing_required_fields))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error Top_level_not_object
 ;;
 
-let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
-  (episode, parse_error) result
+let recognition_output_of_output_result ?now (inp : input) (raw : string) :
+  (recognition_output, parse_error) result
   =
   match json_of_output raw with
   | Error _ as error -> error
-  | Ok json -> episode_of_json_result ?now ~generation inp json
+  | Ok json -> recognition_output_of_json_result ?now inp json
 ;;
 
-let episode_of_output ?now ~generation inp raw : episode option =
-  match episode_of_output_result ?now ~generation inp raw with
-  | Ok episode -> Some episode
-  | Error error ->
-    Log.Keeper.debug
-      "librarian episode parse failed: %s (raw: %s)"
-      (parse_error_to_string error)
-      (truncate_for_log 800 raw);
-    None
+(* The persisted episode for one applied recognition pass: the narrative from
+   the librarian, the recognized (created/rewritten) rows as its claims. *)
+let episode_of_recognition
+      ~now
+      ~generation
+      (inp : input)
+      (out : recognition_output)
+      ~recognized_facts
+  : episode
+  =
+  { trace_id = inp.trace_id
+  ; generation
+  ; episode_summary = out.episode_summary
+  ; claims = recognized_facts
+  ; open_items = out.open_items
+  ; constraints = out.constraints
+  ; preserved_tool_refs = out.preserved_tool_refs
+  ; source_turn_range = source_turn_range recognized_facts
+  ; created_at = now
+  ; valid_until = None
+  ; terminal_marker = None
+  ; schema_version
+  }
 ;;

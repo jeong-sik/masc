@@ -288,6 +288,9 @@ let consolidated_fact ~now:_ ~members (group : merge_group) =
   ; last_verified_at = last_verified_for_members members
   ; schema_version
   ; claim_id = shared_claim_id_for_members members
+    (* Every member's reinforcement history converges on the merged row. *)
+  ; reinforcement_count =
+      List.fold_left (fun acc (m : fact) -> acc + m.reinforcement_count) 0 members
   }
 ;;
 

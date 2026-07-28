@@ -589,6 +589,7 @@ let append_durable_fact
     ; last_verified_at = None
     ; schema_version = Keeper_memory_os_types.schema_version
     ; claim_id = None
+    ; reinforcement_count = 0
     }
   in
   let merge ~existing ~incoming =

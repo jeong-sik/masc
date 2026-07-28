@@ -73,6 +73,9 @@ let run
       { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
       ; generation
       ; messages = librarian_messages
+        (* The runtime overwrites this with a fresh snapshot immediately
+           before the provider call (extract_and_append CAS discipline). *)
+      ; store = []
       }
     in
     Keeper_librarian_runtime.run_best_effort

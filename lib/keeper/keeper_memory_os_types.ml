@@ -43,9 +43,14 @@ let wire_field_hi = "hi"
 let wire_field_created_at = "created_at"
 let wire_field_terminal_marker = "terminal_marker"
 
+let wire_field_operations = "operations"
+
+(* The librarian's output object (masc#26122): recognition operations replace
+   the former bare [claims] array. [wire_field_claims] remains the on-disk
+   episode key — the persisted episode still carries the recognized facts. *)
 let wire_librarian_episode_fields =
   [ wire_field_episode_summary
-  ; wire_field_claims
+  ; wire_field_operations
   ; wire_field_open_items
   ; wire_field_constraints
   ; wire_field_preserved_tool_refs
@@ -62,6 +67,40 @@ let wire_librarian_claim_fields =
   ; wire_field_claim_id
   ; wire_field_claim_kind
   ; wire_field_valid_for_days
+  ]
+;;
+
+(* Recognition write contract (masc#26122): the librarian sees the current
+   store and returns typed operations instead of bare claims. These are the
+   wire keys and op tokens for that contract; the parser, retry prompt,
+   provider schema, and tests all read them from here. *)
+let wire_field_op = "op"
+let wire_field_fact = "fact"
+let wire_field_index = "index"
+let wire_field_member_indices = "member_indices"
+let wire_field_reason = "reason"
+let wire_field_reinforcement_count = "reinforcement_count"
+let wire_op_add = "add"
+let wire_op_reinforce = "reinforce"
+let wire_op_merge = "merge"
+let wire_op_revise = "revise"
+let wire_op_forget = "forget"
+
+let wire_op_tokens =
+  [ wire_op_add; wire_op_reinforce; wire_op_merge; wire_op_revise; wire_op_forget ]
+;;
+
+let wire_librarian_operation_fields =
+  [ wire_field_op
+  ; wire_field_fact
+  ; wire_field_index
+  ; wire_field_member_indices
+  ; wire_field_claim
+  ; wire_field_category
+  ; wire_field_claim_id
+  ; wire_field_valid_for_days
+  ; wire_field_source_turn
+  ; wire_field_reason
   ]
 ;;
 
@@ -205,6 +244,11 @@ type fact =
   ; claim_id : string option
     (* Optional producer-emitted stable conclusion id. It is preserved exactly;
        absent ids use exact observation identity, never normalized prose. *)
+  ; reinforcement_count : int
+    (* How many times the librarian re-recognized this claim in later windows
+       (recognition op Reinforce, masc#26122). 0 for a first observation; the
+       full provenance of each reinforcement lives in the recognition ledger,
+       not on the row. *)
   }
 
 let fact_effective_valid_until (fact : fact) = fact.valid_until
@@ -381,6 +425,12 @@ let fact_to_json (f : fact) =
     @ (match f.claim_kind with
        | Some k -> [ wire_field_claim_kind, `String (claim_kind_to_string k) ]
        | None -> [])
+    (* masc#26122: omitted at 0 so pre-recognition rows stay byte-identical;
+       appended after claim_kind for the same key-order-stability reason. *)
+    @ (match f.reinforcement_count with
+       | 0 -> []
+       | n when n > 0 -> [ wire_field_reinforcement_count, `Int n ]
+       | _ -> invalid_arg "memory fact reinforcement_count must be >= 0")
   in
   `Assoc fields
 ;;
@@ -417,9 +467,18 @@ let fact_of_json (json : Yojson.Safe.t) =
             Option.value (json_string_list_field wire_field_observed_by fields) ~default:[]
           in
           let claim_kind = persisted_claim_kind_of_json fields in
-          (match category_and_claim_kind_of_persisted_row ~category_str ~claim_kind with
-           | None -> None
-           | Some (category, claim_kind) ->
+          let reinforcement_count =
+            match List.assoc_opt wire_field_reinforcement_count fields with
+            | None -> Some 0
+            | Some (`Int n) when n >= 0 -> Some n
+            | Some _ -> None
+          in
+          (match
+             ( category_and_claim_kind_of_persisted_row ~category_str ~claim_kind
+             , reinforcement_count )
+           with
+           | None, _ | _, None -> None
+           | Some (category, claim_kind), Some reinforcement_count ->
              Some
                { claim
                ; (* Parse once at the read boundary. Unknown categories remain
@@ -433,6 +492,7 @@ let fact_of_json (json : Yojson.Safe.t) =
                ; last_verified_at
                ; schema_version = row_version
                ; claim_id
+               ; reinforcement_count
                })
         | None -> None)
      | (Some _, Some _, None, _, _, _)

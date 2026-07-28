@@ -878,6 +878,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                    (Keeper_recall_injection_ledger.string_of_prune_error label);
                  0
              in
+             let prune_librarian_recognition () =
+               match
+                 Keeper_librarian_recognition_ledger.prune_older_than
+                   ~masc_root:masc
+                   ~retention_days:days
+               with
+               | Ok count -> count
+               | Error () -> 0
+             in
              let total =
                prune_dir (Filename.concat masc "audit")
                + prune_dir (Filename.concat masc "telemetry")
@@ -885,6 +894,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + prune_dir (Filename.concat masc "events")
                + prune_dir (Filename.concat masc "activity-events")
                + prune_recall_injections ()
+               + prune_librarian_recognition ()
                + prune_dir (Filename.concat masc "voice_sessions")
                + prune_dir (Filename.concat masc "tool_calls")
                (* transition-audit was absent from this list since its

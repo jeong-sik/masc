@@ -96,10 +96,16 @@ type extraction_error
 type extraction_error_kind =
   | Prompt_render_failure
   | Execution_clock_unavailable
+  | Store_read_failure
+  | Store_snapshot_change
+    (** A concurrent writer changed the fact store between the pre-provider
+        snapshot and the post-provider apply; the operations were abandoned
+        (their indices refer to the stale snapshot) and the next due turn
+        re-reads a fresh store. *)
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
-  | Memory_fact_upsert_failure
+  | Memory_apply_failure
 
 val extraction_error_kind : extraction_error -> extraction_error_kind
 
@@ -118,17 +124,17 @@ val extract_with_exact_output_classified
   -> keeper_id:string
   -> generation:int
   -> Keeper_librarian.input
-  -> (Keeper_memory_os_types.episode, extraction_error) result
-(** OAS exact-output Librarian extraction. Target resolution, capability
+  -> (Keeper_librarian.recognition_output, extraction_error) result
+(** OAS exact-output Librarian recognition pass. Target resolution, capability
     admission, wire materialization, and failover are owned by OAS. MASC
-    supplies only the immutable prompt, domain schema, minimum JSON guarantee,
-    post-success domain validation, and an fsync-backed generation journal for
-    OAS's predetermined candidate transitions. An unsettled journal blocks only
-    the same trace generation; historical pre-release journals are not migrated
-    or consulted. [clock] stays optional at the API
-    boundary because [run_best_effort] may be called from contexts that cannot
-    supply an Eio clock; [None] returns a typed
-    [Execution_clock_unavailable] classification before OAS I/O. *)
+    supplies only the immutable prompt (conversation window + numbered store
+    snapshot), domain schema, minimum JSON guarantee, post-success domain
+    validation, and an fsync-backed generation journal for OAS's predetermined
+    candidate transitions. An unsettled journal blocks only the same trace
+    generation; historical pre-release journals are not migrated or consulted.
+    [clock] stays optional at the API boundary because [run_best_effort] may be
+    called from contexts that cannot supply an Eio clock; [None] returns a
+    typed [Execution_clock_unavailable] classification before OAS I/O. *)
 
 val extract_and_append_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -137,6 +143,13 @@ val extract_and_append_with_exact_output_classified
   -> keeper_id:string
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result
+(** Full recognition write (masc#26122): snapshot the fact store, run the
+    exact-output pass with the snapshot in the prompt, revalidate the snapshot
+    under the facts lock ([same_fact_snapshot] CAS), apply the typed
+    operations ({!Keeper_librarian_recognition.apply} — the store can shrink),
+    persist the episode bundle, and append the recognition evidence row
+    ({!Keeper_librarian_recognition_ledger}). The input's [store] field is
+    overwritten with the fresh snapshot read here. *)
 
 val run_best_effort
   :  base_path:string

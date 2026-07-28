@@ -38,8 +38,25 @@ val output_rejection_reason_to_string : output_rejection_reason -> string
 
 (** The numbered fact list the consolidation prompt sees: one 0-based line per
     fact, ["i: [category] claim"]. The index is the LLM's only handle on an
-    existing fact, matching [apply_plan]'s reading. *)
+    existing fact, matching [apply_plan]'s reading. Also the store rendering
+    the recognition write contract shows the librarian (masc#26122). *)
 val render_numbered_facts : fact list -> string
+
+(** Structural merge gates shared with the recognition write contract
+    (masc#26122): a merged row has one [claim_kind] / [valid_until] slot, so a
+    group mixing explicit values cannot be represented without losing
+    information and is rejected — a representability check, not an identity
+    judgment. *)
+val group_preserves_claim_kind : members:fact list -> bool
+
+val group_preserves_valid_until : members:fact list -> bool
+
+(** The consolidated fact for one group: claim/category from the LLM's plan;
+    provenance (earliest source/first_seen, union of [observed_by], max
+    [last_verified_at], summed [reinforcement_count]) reconstructed
+    structurally from [members]. Raises [Invalid_argument] on empty
+    [members]; callers guarantee >= 2. *)
+val consolidated_fact : now:float -> members:fact list -> merge_group -> fact
 
 (** Parse the LLM's consolidation output. Garbled groups degrade individually
     (dropped with warning counts, not fatal); a wholly invalid object yields

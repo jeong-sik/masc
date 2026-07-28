@@ -1043,36 +1043,6 @@ let test_of_meta_projection_budgets_against_routed_runtime () =
       res.Keeper_context_runtime.effective_budget)
 ;;
 
-let test_direct_first_attempt_uses_provider_effective_budget () =
-  with_runtime_initialized (fun () ->
-    (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
-    let meta =
-      { (make_meta "budgettest") with max_context_override = Some 128000 }
-    in
-    let execution =
-      match
-        Keeper_unified_turn_pre_dispatch.build_runtime_execution
-          ~meta
-          ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-      with
-      | Ok execution -> execution
-      | Error error ->
-        Alcotest.fail (Agent_sdk.Error.to_string error)
-    in
-    Alcotest.(check int)
-      "direct first attempt uses the provider-effective routed budget"
-      64000
-      execution.max_context;
-    Alcotest.(check int)
-      "direct execution keeps the resolved effective budget"
-      64000
-      execution.max_context_resolution.effective_budget;
-    Alcotest.(check (option int))
-      "direct execution retains the requested override for diagnostics"
-      (Some 128000)
-      execution.max_context_resolution.requested_override)
-;;
-
 (* ---- per-model thinking gate: runtime.toml [thinking-support] drives the
    keeper thinking seed via [Runtime_inference.for_runtime] ----
 
@@ -1943,10 +1913,6 @@ let () =
             "of_meta projection prefers the routed runtime"
             `Quick
             test_of_meta_projection_budgets_against_routed_runtime
-        ; Alcotest.test_case
-            "direct first attempt uses provider-effective budget"
-            `Quick
-            test_direct_first_attempt_uses_provider_effective_budget
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case

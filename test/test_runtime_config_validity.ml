@@ -3046,7 +3046,40 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
                 (Some (8192, "override_clamped_by_capability"))
                 (Runtime.resolve_max_context_of_runtime rt
                  |> Option.map (fun (n, source) ->
-                   n, Runtime.max_context_source_to_string source)))))
+                   n, Runtime.max_context_source_to_string source)));
+           let meta =
+             match
+               Masc_test_deps.meta_of_json_fixture
+                 (`Assoc
+                    [ "name", `String "direct-cap-clamp"
+                    ; "trace_id", `String "test-direct-cap-clamp"
+                    ])
+             with
+             | Ok meta -> { meta with max_context_override = Some 128000 }
+             | Error detail -> failf "direct meta fixture failed: %s" detail
+           in
+           match
+             Keeper_unified_turn_pre_dispatch.build_runtime_execution
+               ~meta
+               ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+           with
+           | Error error ->
+             failf
+               "direct runtime execution should resolve: %s"
+               (Agent_sdk.Error.to_string error)
+           | Ok execution ->
+             check int
+               "direct first attempt receives the provider-effective budget"
+               8192
+               execution.max_context;
+             check int
+               "direct execution preserves the resolved effective budget"
+               8192
+               execution.max_context_resolution.effective_budget;
+             check (option int)
+               "direct execution retains the requested override for diagnostics"
+               (Some 128000)
+               execution.max_context_resolution.requested_override))
 
 let test_runtime_max_context_missing_both_sources_rejected_at_load () =
   let runtime_toml =

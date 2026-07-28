@@ -18,6 +18,29 @@
       "TurnReady",
       "TurnStarted"
     ],
+    "hook_decision_variants": [
+      "AdjustParams",
+      "Block",
+      "Continue",
+      "ElicitInput",
+      "ElicitToolApproval",
+      "HookFailed",
+      "Nudge"
+    ],
+    "hook_decision_kind_variants": [
+      "K_AdjustParams",
+      "K_Block",
+      "K_Continue",
+      "K_ElicitInput",
+      "K_ElicitToolApproval",
+      "K_HookFailed",
+      "K_Nudge"
+    ],
+    "tool_approval_variants": [
+      "Approved",
+      "Denied",
+      "Timed_out"
+    ],
     "http_error_variants": [
       "AcceptRejected",
       "HttpError",

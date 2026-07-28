@@ -144,6 +144,7 @@ create_payload="$(
       requested_by_id: "contract-operator",
       scheduled_by_id: "contract-scheduler",
       payload_kind: "masc.keeper_wake",
+      allow_unregistered_keeper: true,
       payload_body: {
         keeper_name: $keeper_name,
         title: "Contract scheduler evidence",

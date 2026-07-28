@@ -656,17 +656,47 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
      resolver actually accepts, rather than restating it. *)
   let sandbox_paths =
     let config = Workspace.default_config base_path in
-    let visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta in
     let sandbox = Keeper_sandbox.of_meta ~config ~meta in
+    (* The root line depends on the backend because the two backends make
+       different promises about the absolute spelling:
+
+       - Local ([container_root = None]): every command executes on the
+         host, so the host-absolute root is stable and may appear in a cwd
+         or argv operand.
+       - Docker ([container_root = Some _]): the mount spelling is real
+         only while the command actually runs inside the container.
+         Execute dispatch transparently runs the same sandbox on the host
+         when the image preflight fails
+         ([Keeper_sandbox_shell_ir_target.docker_local_fallback_target]),
+         and the typed cwd resolver confines raw cwds against host roots
+         either way ([Keeper_tool_shared_runtime
+         .resolve_keeper_execute_cwd_typed]) — so the mount path is
+         orientation vocabulary, never an execution operand. The fallback
+         is decided per call at dispatch time, so this statically rendered
+         prompt cannot name the effective target; it can only refuse to
+         promise one. *)
+    let root_line =
+      match sandbox.Keeper_sandbox.container_root with
+      | None ->
+        Printf.sprintf "- Sandbox root: %s" sandbox.Keeper_sandbox.host_root_abs
+      | Some container_root ->
+        Printf.sprintf
+          "- Sandbox root: mounted at %s inside your container. The same \
+           sandbox may execute on the host under a different absolute \
+           spelling when the container backend is unavailable, so never \
+           place this absolute path in a typed cwd or an argv operand."
+          container_root
+    in
     String.concat
       "\n"
-      [ Printf.sprintf "- Sandbox root: %s" visible_root
+      [ root_line
       ; Printf.sprintf
           "- Repository clones: %s, relative to that root."
           sandbox.Keeper_sandbox.repos_arg
       ; Printf.sprintf
           "- Pass a relative typed cwd (`%s` for the root, `%s/<repository>` for \
-           a clone). Relative argv path operands resolve from that cwd."
+           a clone). Relative argv path operands resolve from that cwd and are \
+           the only path spelling valid on every execution backend."
           sandbox.Keeper_sandbox.root_arg
           sandbox.Keeper_sandbox.repos_arg
       ]

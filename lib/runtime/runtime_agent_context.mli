@@ -44,12 +44,11 @@ type config = {
           owned by [stream_idle_timeout_s] and the attempt liveness
           observer. Non-HTTP transports ignore it. *)
   max_tokens : int option;
-      (** Request-time output token budget. [None] means no [max_tokens]
-          field goes on the request at all — the keeper lane's default
-          (masc#24067 / oas#2517): the OAS capability catalog ceiling is a
-          validation bound, never a synthesized request value. [Some n] is
-          an explicit operator/profile override or a non-keeper caller's
-          deliberate request budget. *)
+      (** Caller-level output-token override. [None] adds no override, so an
+          explicit [provider_cfg.max_tokens] remains authoritative; when both
+          are absent no request field is synthesized from a capability
+          ceiling. [Some n] is an operator/profile override or a non-keeper
+          caller's deliberate request budget. *)
   temperature : float option;
       (** Exact caller/model sampling declaration. [None] omits temperature and
           leaves the selected provider's default intact. *)
@@ -58,8 +57,7 @@ type config = {
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
-  model_input_projection
-      : (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
+  model_input_projection : Agent_sdk.Agent.model_input_projection option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
@@ -130,8 +128,9 @@ type prepared_resume = {
   options : Agent_sdk.Agent.options;
   context_fit_admission : Agent_sdk.Agent.context_fit_admission;
 }
-(** Output of {!prepare_resume}. [patched_checkpoint] has runtime identity
-    fields adjusted. *)
+(** Output of {!prepare_resume}. [patched_checkpoint] and [agent_config] use
+    the same provider-base-plus-explicit-override resolution as a fresh
+    builder. *)
 
 val set_oas_tracer : Agent_sdk.Tracing.t -> unit
 (** Set the OAS tracer used by {!builder}.  Called once

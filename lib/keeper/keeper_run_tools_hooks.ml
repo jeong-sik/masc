@@ -15,8 +15,7 @@ type agent_setup =
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
   ; hooks : Agent_sdk.Hooks.hooks
-  ; model_input_projection :
-      Agent_sdk.Types.message list -> Agent_sdk.Types.message list
+  ; model_input_projection : Agent_sdk.Agent.model_input_projection
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; receipt_turn_count_ref : int option ref
@@ -553,12 +552,13 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    let model_input_projection =
+    let hydrate_model_input =
       let store = Tool_blob_store.create ~base_path:ctx.config.base_path in
       Keeper_artifact_hydrator.hydrate_recent
         ~store
         ~keep_recent:(Keeper_artifact_hydrator.keep_recent_from_env ())
     in
+    let model_input_projection messages = Ok (hydrate_model_input messages) in
     Ok
       { tools
       ; cleanup = keeper_tools_cleanup

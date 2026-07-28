@@ -85,8 +85,7 @@ type config = Runtime_agent_context.config = {
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
-  model_input_projection
-      : (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
+  model_input_projection : Agent_sdk.Agent.model_input_projection option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;

@@ -51,6 +51,10 @@ type pending_board_event = {
   (** Preview of the most recent external comment content. *)
 }
 
+(** [false] only for a scheduled-work carrier that shares the historical
+    observation container but must not be projected as Board activity. *)
+val is_board_activity_event : pending_board_event -> bool
+
 (** Read-only projection of one schedule row that needs keeper attention. *)
 type scheduled_automation_item = {
   schedule_id : string;
@@ -260,7 +264,7 @@ val pending_board_event_of_external_attention :
   Keeper_external_attention.item ->
   pending_board_event
 
-(** Convert a queued Event Layer stimulus back into structured board activity
+(** Convert a queued Event Layer stimulus into structured turn activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
     [Bg_completed] (RFC-0290), and [Schedule_due] produce [Some];
     [Bootstrap] returns [None] (no prompt injection).
@@ -311,6 +315,10 @@ val observe_direct_keeper_msg :
 
 (** Structured work signal present in the observation itself. *)
 val actionable_signal_present : world_observation -> bool
+
+(** Whether the observation contains actual Board-compatible activity.
+    A [Schedule_due] work request is actionable but is not Board activity. *)
+val has_pending_board_activity : world_observation -> bool
 
 val keeper_cycle_decision :
   ?reactive_wake:bool ->

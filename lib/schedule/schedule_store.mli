@@ -90,6 +90,16 @@ val executions_for_schedule :
 val last_execution_for_schedule :
   state -> schedule_id:string -> Schedule_domain.execution_record option
 
+val execution_for_occurrence :
+  state ->
+  schedule_id:string ->
+  due_at:float ->
+  payload_digest:string ->
+  Schedule_domain.execution_record option
+(** Exact occurrence lookup. This is the correlation boundary used by
+    asynchronous consumers; schedule id alone is insufficient for recurring
+    work because multiple dispatched executions may coexist. *)
+
 val insert_request :
   Workspace_utils.config ->
   Schedule_domain.schedule_request ->
@@ -146,6 +156,43 @@ val complete_running :
     recurring requests advance to the next [Scheduled] occurrence. The matching
     execution attempt is marked [succeeded]. *)
 
+val accept_running :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  ?detail:Yojson.Safe.t ->
+  unit ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Records that a consumer durably accepted asynchronous work. Recurring
+    requests advance to their next [Scheduled] occurrence; one-shot requests
+    remain [Running]. The matching execution remains unfinished with status
+    [Execution_dispatched] until a correlated work-completion path settles it. *)
+
+val complete_dispatched_occurrence :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  due_at:float ->
+  payload_digest:string ->
+  ?detail:Yojson.Safe.t ->
+  unit ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Marks one exact running/dispatched occurrence succeeded. Idempotent when
+    that occurrence is already succeeded. A one-shot request becomes
+    [Succeeded]; an already-advanced recurring request keeps its next due row. *)
+
+val fail_dispatched_occurrence :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  due_at:float ->
+  payload_digest:string ->
+  error:string ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Marks one exact running/dispatched occurrence failed. Idempotent when that
+    occurrence is already failed. A recurring schedule continues at its
+    already-computed next occurrence. *)
+
 val fail_running :
   Workspace_utils.config ->
   now:float ->
@@ -169,9 +216,11 @@ val recover_running_on_startup :
   now:float ->
   (state * int, store_error) result
 (** Atomically returns every persisted [Running] schedule to [Due] and finishes
-    each matching execution attempt as [Failed]. Intended for a one-time runner
-    startup recovery before any new dispatch can be active. The recovery reason
-    is fixed to [Interrupted_by_process_restart]. *)
+    each exact current occurrence's execution attempt as [Failed]. Exact
+    occurrence identity, rather than wall-clock ordering, distinguishes a newly
+    interrupted retry from an older dispatched recurrence. Intended for a
+    one-time runner startup recovery before any new dispatch can be active. The
+    recovery reason is fixed to [Interrupted_by_process_restart]. *)
 
 val fail_due_candidate :
   Workspace_utils.config ->

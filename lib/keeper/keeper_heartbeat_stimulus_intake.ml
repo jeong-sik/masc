@@ -325,6 +325,64 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
     true
 ;;
 
+type terminal_schedule_reconciliation =
+  | Not_terminal_schedule
+  | Terminal_schedule_acknowledged
+
+let reconcile_terminal_schedule_selection ~config ~keeper_name selection =
+  match
+    selection.Keeper_registry_event_queue.kind,
+    selection.Keeper_registry_event_queue.stimuli
+  with
+  | Keeper_event_queue_persistence.Single,
+    [ { Keeper_event_queue.payload = Schedule_due wake; _ } ] ->
+    (* The schedule lock covers both the terminal read and queue ACK. A retry
+       must start under the same lock, so either it starts first and this sees
+       its non-terminal execution, or this removes the old wake first and the
+       retry enqueues it again afterwards. *)
+    Workspace_utils.with_file_lock config (Schedule_store.schedules_path config)
+    @@ fun () ->
+    (match Schedule_store.read_state_result config with
+     | Error err ->
+       Error
+         ("schedule terminal reconciliation read failed: "
+          ^ Schedule_store.read_error_to_string err)
+     | Ok state ->
+       (match
+          Schedule_store.execution_for_occurrence
+            state
+            ~schedule_id:wake.schedule_id
+            ~due_at:wake.due_at
+            ~payload_digest:wake.payload_digest
+        with
+        | Some
+            { Schedule_domain.status =
+                ( Schedule_domain.Execution_succeeded
+                | Schedule_domain.Execution_failed )
+            ; _
+            } ->
+          (match
+             Keeper_registry_event_queue.ack_pending_result
+               ~base_path:config.Workspace_utils.base_path
+               keeper_name
+               ~selection
+           with
+           | Error message ->
+             Error ("schedule terminal reconciliation ack failed: " ^ message)
+           | Ok () -> Ok Terminal_schedule_acknowledged)
+        | Some
+            { Schedule_domain.status =
+                ( Schedule_domain.Execution_running
+                | Schedule_domain.Execution_dispatched )
+            ; _
+            }
+        | None ->
+          Ok Not_terminal_schedule))
+  | Keeper_event_queue_persistence.Single, _
+  | Keeper_event_queue_persistence.Board_batch, _ ->
+    Ok Not_terminal_schedule
+;;
+
 let heartbeat_event_intake
       ~ctx
       ~meta_after_triage
@@ -343,7 +401,27 @@ let heartbeat_event_intake
       keeper_name
       ~ready:(stimulus_ready_for_intake ~base_path)
   in
-  let pending_selection = select_pending () in
+  let rec select_pending_after_terminal_reconciliation () =
+    match select_pending () with
+    | Error _ as error -> error
+    | Ok None as empty -> empty
+    | Ok (Some selection) ->
+      (match
+         reconcile_terminal_schedule_selection
+           ~config:ctx.config
+           ~keeper_name
+           selection
+       with
+       | Error message -> Error message
+       | Ok Not_terminal_schedule -> Ok (Some selection)
+       | Ok Terminal_schedule_acknowledged ->
+         Log.Keeper.info
+           "turn entry: acknowledged already-terminal scheduled occurrence \
+            without duplicate turn keeper=%s"
+           keeper_name;
+         select_pending_after_terminal_reconciliation ())
+  in
+  let pending_selection = select_pending_after_terminal_reconciliation () in
   let queued_observations, consumed_stimuli, pending_selection, event_queue_claim_error =
     match pending_selection with
     | Error message ->
@@ -380,10 +458,23 @@ let heartbeat_event_intake
              acc
          then acc
          else (
-           Log.Keeper.info
-             "turn entry: promoted queued board stimulus post_id=%s keeper=%s"
-             event.Keeper_world_observation.post_id
-             meta_after_triage.name;
+           (match event.Keeper_world_observation.event_kind with
+            | Keeper_world_observation.Schedule_due ->
+              Log.Keeper.info
+                "turn entry: promoted scheduled work occurrence_id=%s keeper=%s"
+                event.Keeper_world_observation.post_id
+                meta_after_triage.name
+            | Keeper_world_observation.Board_post_created
+            | Keeper_world_observation.Board_comment_added
+            | Keeper_world_observation.Board_reaction_changed _
+            | Keeper_world_observation.Fusion_completed
+            | Keeper_world_observation.Bg_completed
+            | Keeper_world_observation.External_attention
+            | Keeper_world_observation.Goal_assigned ->
+              Log.Keeper.info
+                "turn entry: promoted queued observation post_id=%s keeper=%s"
+                event.Keeper_world_observation.post_id
+                meta_after_triage.name);
            event :: acc))
       pending_board_events
       (List.rev queued_observations)

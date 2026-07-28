@@ -206,12 +206,22 @@ type turn_failure =
 
 type turn_success =
   | Turn_completed of Keeper_meta_contract.keeper_meta
+  | Turn_checkpointed of Keeper_meta_contract.keeper_meta
+  | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
   | Turn_skipped of Keeper_meta_contract.keeper_meta
 (** Typed non-error result of the unified turn boundary. Only
-    [Turn_completed] proves that the action path ran successfully.
-    Supervisor cancellation and a non-executable phase remain distinct so a
-    durable source lease cannot be acknowledged as completed work. *)
+    [Turn_completed] proves that the requested action path finished.
+    [Turn_checkpointed] and [Turn_input_required] are healthy runtime exits but
+    preserve the durable source for continuation. Supervisor cancellation and a
+    non-executable phase remain distinct so a durable source cannot be
+    acknowledged as completed work. *)
+
+val turn_success_of_stop_reason
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> Runtime_agent.stop_reason
+  -> turn_success
+(** Total typed projection used at the successful runtime boundary. *)
 
 val run_keeper_cycle
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
@@ -231,6 +241,7 @@ val run_keeper_cycle
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
+  -> ?active_source_stimuli:Keeper_event_queue.stimulus list
   -> unit
   -> (turn_success, turn_failure) result
 

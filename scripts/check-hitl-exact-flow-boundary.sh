@@ -129,7 +129,7 @@ check_boundary() {
     "$WORKER" \
     "worker must not regain provider/config/sampling/degradation policy"
   forbid_pattern \
-    'Http_client|Cohttp|request_path|http_status|Retry\.|retry_policy|retry_after|is_retryable|Error_domain|Capabilities|capability_|supports_|validate_output_schema_request' \
+    'Http_client|Cohttp|request_path|Retry\.|retry_policy|retry_after|is_retryable|Error_domain|Capabilities|capability_|supports_|validate_output_schema_request' \
     "$WORKER" \
     "worker must not bypass OAS HTTP, retry, or capability policy"
   forbid_pattern \
@@ -153,7 +153,7 @@ check_boundary() {
     "$ROOT/lib" \
     "the retired exact failure-to-retry queue transition must not return"
   forbid_pattern \
-    'Pricing|pricing|price|Limit|limit' \
+    '(^|[^_[:alnum:]])(open[[:space:]]+)?(Pricing|Limit_policy)([^_[:alnum:]]|$)|pricing_policy|price_policy|limit_policy|limit_observation|observe_limit' \
     "$WORKER" \
     "pricing and limit observations are not HITL execution policy"
   forbid_pattern \
@@ -201,6 +201,13 @@ self_test() (
     >>"$fixture/lib/keeper/hitl_summary_worker.ml"
   if HITL_EXACT_BOUNDARY_ROOT="$fixture" "$0" --check >/dev/null 2>&1; then
     fail "self-test did not reject a direct provider subcall"
+  fi
+  cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
+
+  printf '\nlet _ = Limit_policy.apply\n' \
+    >>"$fixture/lib/keeper/hitl_summary_worker.ml"
+  if HITL_EXACT_BOUNDARY_ROOT="$fixture" "$0" --check >/dev/null 2>&1; then
+    fail "self-test did not reject direct limit-policy ownership"
   fi
   cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
 

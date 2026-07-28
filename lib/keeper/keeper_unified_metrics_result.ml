@@ -56,7 +56,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
   in
-  let is_board_reactive = observation.pending_board_events <> [] in
+  let is_board_reactive =
+    Keeper_world_observation.has_pending_board_activity observation
+  in
   let is_mention_reactive =
     Keeper_world_observation_message_scope.has_kind
       Keeper_world_observation_message_scope.Mention observation.pending_messages

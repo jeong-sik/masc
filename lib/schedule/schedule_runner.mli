@@ -43,6 +43,14 @@ type consumer_dispatch_error =
   | Retryable_dispatch_failure of string
   | Terminal_dispatch_rejection of string
 
+type consumer_dispatch_result =
+  | Work_completed of Yojson.Safe.t
+  | Work_accepted of Yojson.Safe.t
+  | Work_failed of
+      { error : string
+      ; detail : Yojson.Safe.t
+      }
+
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
   ; dispatch :
@@ -50,7 +58,7 @@ type consumer =
       now:float ->
       wake_signal ->
       Schedule_domain.schedule_request ->
-      (Yojson.Safe.t, consumer_dispatch_error) result
+      (consumer_dispatch_result, consumer_dispatch_error) result
   }
 
 type runner_error =
@@ -82,6 +90,10 @@ val tick :
 (** Refresh due state and append at-most-once generic wake signals for newly
     observable due work. Recurring due work is advanced
     after the generic due signal path succeeds when no consumer is installed; a
-    consumer dispatch can instead complete/fail the request. Consumer payload
-    rejection is terminal. A typed retryable dispatch failure finishes only its
-    current execution attempt and leaves the schedule [Due] for the next tick. *)
+    consumer dispatch can complete, durably accept, or fail the request.
+    [Work_accepted] advances recurring intent but leaves the execution
+    unfinished; a one-shot request remains [Running]. Consumer payload rejection
+    is terminal. [Work_failed] finishes the exact occurrence; recurring intent
+    advances while a one-shot request becomes [Failed]. A typed retryable
+    dispatch failure finishes only its current execution attempt and leaves the
+    schedule [Due] for the next tick. *)

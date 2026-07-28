@@ -108,6 +108,11 @@ module For_testing : sig
     :  autonomous_yield_request
     -> Runtime_agent.cooperative_yield_reason
 
+  val repeated_exact_tool_call
+    :  threshold:int
+    -> tool_call_detail list
+    -> (string * int) option
+
   val provider_transcript_admission
     :  Agent_sdk.Types.message list
     -> (unit, Agent_sdk.Error.sdk_error) result

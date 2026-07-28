@@ -69,6 +69,7 @@ type schedule_request =
 
 type execution_status =
   | Execution_running
+  | Execution_dispatched
   | Execution_succeeded
   | Execution_failed
 
@@ -154,12 +155,14 @@ let recurrence_summary = function
 
 let execution_status_to_string = function
   | Execution_running -> "running"
+  | Execution_dispatched -> "dispatched"
   | Execution_succeeded -> "succeeded"
   | Execution_failed -> "failed"
 ;;
 
 let execution_status_of_string = function
   | "running" -> Ok Execution_running
+  | "dispatched" -> Ok Execution_dispatched
   | "succeeded" -> Ok Execution_succeeded
   | "failed" -> Ok Execution_failed
   | other -> Error ("unknown execution_status: " ^ other)

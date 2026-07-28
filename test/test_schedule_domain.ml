@@ -256,6 +256,29 @@ let test_execution_record_roundtrip () =
       decoded.payload_digest
 ;;
 
+let test_dispatched_execution_record_roundtrip () =
+  let req = request () in
+  let execution =
+    { execution_id = "exec-dispatched"
+    ; schedule_id = req.schedule_id
+    ; started_at = 201.0
+    ; finished_at = None
+    ; due_at = req.due_at
+    ; payload_digest = payload_digest req.payload
+    ; status = Execution_dispatched
+    ; detail = Some (`Assoc [ "kind", `String "consumer.accepted" ])
+    ; error = None
+    }
+  in
+  match execution_record_to_yojson execution |> execution_record_of_yojson with
+  | Error msg -> fail msg
+  | Ok decoded ->
+    check string "dispatched status" "dispatched"
+      (execution_status_to_string decoded.status);
+    check (option (float 0.001)) "dispatched remains unfinished" None
+      decoded.finished_at
+;;
+
 let () =
   run "Schedule_domain"
     [
@@ -295,6 +318,8 @@ let () =
             test_missing_recurrence_defaults_one_shot;
           test_case "execution record roundtrip" `Quick
             test_execution_record_roundtrip;
+          test_case "dispatched execution record roundtrip" `Quick
+            test_dispatched_execution_record_roundtrip;
         ] );
     ]
 ;;

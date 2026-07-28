@@ -46,6 +46,18 @@ type pending_board_event =
   ; latest_external_preview : string option
   }
 
+let is_board_activity_event (event : pending_board_event) =
+  match event.event_kind with
+  | Schedule_due -> false
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed _
+  | Fusion_completed
+  | Bg_completed
+  | External_attention
+  | Goal_assigned -> true
+;;
+
 type scheduled_automation_item =
   { schedule_id : string
   ; action : string
@@ -493,7 +505,7 @@ let pending_board_event_of_scheduled_wake
   ; post_id
   ; author = scheduled_automation_actor
   ; title
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len sw.message
+  ; preview = sw.message
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -1123,6 +1135,10 @@ let actionable_signal_present (observation : world_observation) =
   || observation.scheduled_automation.due_ready_count > 0
 ;;
 
+let has_pending_board_activity (observation : world_observation) =
+  List.exists is_board_activity_event observation.pending_board_events
+;;
+
 let keeper_cycle_decision
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
@@ -1151,7 +1167,7 @@ let keeper_cycle_decision
     [ (if Message_scope.has_kind Message_scope.Mention observation.pending_messages
        then Some Mention_pending
        else None)
-    ; (if observation.pending_board_events <> [] then Some Board_event_pending else None)
+    ; (if has_pending_board_activity observation then Some Board_event_pending else None)
     ; (if Message_scope.has_kind Message_scope.Scope observation.pending_messages
        then Some Scope_message_pending
        else None)

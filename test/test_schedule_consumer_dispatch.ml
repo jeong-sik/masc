@@ -352,6 +352,18 @@ let single_occurrence_id (result : Schedule_runner.tick_result) =
     failf "expected one emitted schedule occurrence, got %d" (List.length signals)
 ;;
 
+let pending_selection_exn ~base_path ~keeper_name =
+  match
+    Keeper_event_queue_persistence.peek_when_result
+      ~base_path
+      ~keeper_name
+      ~ready:(fun _ -> true)
+  with
+  | Ok (Some selection) -> selection
+  | Ok None -> fail "expected pending keeper selection"
+  | Error detail -> fail detail
+;;
+
 let runner_status_json_after_dispatches (result : Schedule_runner.tick_result) =
   Schedule_runner_status.reset_for_test ();
   let wake_enqueue_counts =
@@ -383,7 +395,7 @@ let test_board_post_schedule_is_rejected_without_mutation () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
-let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
+let test_keeper_wake_consumer_records_dispatch_without_work_success () =
   with_workspace
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
@@ -405,14 +417,21 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
     Yojson.Safe.Util.(runner_counts |> member "wake_enqueued" |> to_int);
   check int "runner wake failed stays zero" 0
     Yojson.Safe.Util.(runner_counts |> member "wake_failed" |> to_int);
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "accepted schedule missing"
+   | Some stored ->
+     check string "one-shot remains running until work completion" "running"
+       (Schedule_domain.schedule_status_to_string stored.status));
   (match
      Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
        ~schedule_id:request.schedule_id
    with
    | None -> fail "missing execution record"
    | Some execution ->
-     check string "execution status" "succeeded"
+     check string "execution status" "dispatched"
        (Schedule_domain.execution_status_to_string execution.status);
+     check (option (float 0.001)) "accepted work is unfinished" None
+       execution.finished_at;
      (match execution.detail with
       | Some detail ->
         let open Yojson.Safe.Util in
@@ -465,6 +484,8 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
   in
   let open Yojson.Safe.Util in
   let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
+    check bool "running one-shot has no next due occurrence" true
+      (row |> member "next_due_at" |> to_option to_float |> Option.is_none);
     let receipt = row |> member "dispatch_receipt" in
     check string "receipt recognized" "recognized"
       (receipt |> member "projection_status" |> to_string);
@@ -718,25 +739,135 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       Atomic.set entry.fiber_wakeup false;
       let retried = tick_ok config ~now:205.0 in
       (match List.hd retried.dispatches with
-       | { detail = Some detail; _ } ->
+       | { status = Schedule_runner.Dispatch_failed
+         ; detail = Some detail
+         ; error = Some error
+         ; _
+         } ->
          check string "retry observes terminal cancellation" "already_cancelled"
            Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
          check string "terminal cancellation needs no activation" "not_required"
-           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
-       | _ -> fail "cancelled retry completion receipt missing");
+           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string);
+         check bool "terminal cancellation failure is explicit" true
+           (String_util.contains_substring error "already cancelled")
+       | _ -> fail "cancelled retry terminal receipt missing");
       check int "cancelled retry enqueues no second occurrence" 0
         (Keeper_registry_event_queue.snapshot ~base_path keeper_name
          |> Keeper_event_queue.length);
-      let evidence =
-        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
-        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
-        |> Yojson.Safe.Util.member "keeper_reaction_evidence"
+      (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+       | Some stored ->
+         check string "cancelled one-shot is terminal" "failed"
+           (Schedule_domain.schedule_status_to_string stored.status)
+       | None -> fail "cancelled schedule missing");
+      (match
+         Schedule_store.execution_for_occurrence
+           (Schedule_store.read_state config)
+           ~schedule_id:request.schedule_id
+           ~due_at:request.due_at
+           ~payload_digest:(Schedule_domain.payload_digest request.payload)
+       with
+       | Some execution ->
+         check string "cancelled occurrence execution is terminal" "failed"
+           (Schedule_domain.execution_status_to_string execution.status)
+       | None -> fail "cancelled occurrence execution missing");
+      let stimulus_id =
+        Schedule_occurrence_id.to_string signal.occurrence_id
       in
-      check string "dashboard preserves terminal cancellation"
-        "matched_terminal_cancelled"
-        Yojson.Safe.Util.(evidence |> member "projection_status" |> to_string);
-      check bool "dashboard exposes exact cancelled evidence" true
-        Yojson.Safe.Util.(evidence |> member "event_queue_cancelled_seen" |> to_bool))
+      match
+        Keeper_reaction_ledger.event_queue_reaction_evidence_result
+          ~base_path
+          ~keeper_name
+          ~stimulus_id
+      with
+      | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+        check bool "reaction ledger preserves terminal cancellation" true
+          evidence.event_queue_cancelled_seen
+      | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+        fail "cancelled occurrence evidence was quarantined"
+      | Error error ->
+        fail
+          (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+             error))
+;;
+
+let test_terminal_reconciliation_before_retry_recreates_wake () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  mkdir_p ledger_dir;
+  Unix.chmod ledger_dir 0o500;
+  let request = create_keeper_wake_schedule config in
+  let first = tick_ok config ~now:201.0 in
+  Unix.chmod ledger_dir 0o755;
+  check string "first dispatch is retryable failure" "failed"
+    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_terminal_schedule_selection
+       ~config
+       ~keeper_name
+       selection
+   with
+   | Ok Keeper_heartbeat_stimulus_intake.Terminal_schedule_acknowledged -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Not_terminal_schedule ->
+     fail "failed occurrence was not reconciled as terminal"
+   | Error detail -> fail detail);
+  check int "terminal wake removed before retry" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  rm_rf ledger_dir;
+  let retried = tick_ok config ~now:202.0 in
+  check string "retry dispatch succeeds" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd retried.dispatches).status);
+  check int "retry recreates wake after terminal ACK" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  match
+    Schedule_store.execution_for_occurrence
+      (Schedule_store.read_state config)
+      ~schedule_id:request.schedule_id
+      ~due_at:request.due_at
+      ~payload_digest:(Schedule_domain.payload_digest request.payload)
+  with
+  | Some execution ->
+    check string "retry remains live" "dispatched"
+      (Schedule_domain.execution_status_to_string execution.status)
+  | None -> fail "retried execution missing"
+;;
+
+let test_retry_before_terminal_reconciliation_retains_wake () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  mkdir_p ledger_dir;
+  Unix.chmod ledger_dir 0o500;
+  ignore (create_keeper_wake_schedule config);
+  let first = tick_ok config ~now:201.0 in
+  Unix.chmod ledger_dir 0o755;
+  check string "first dispatch is retryable failure" "failed"
+    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
+  rm_rf ledger_dir;
+  let retried = tick_ok config ~now:202.0 in
+  check string "retry dispatch succeeds" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd retried.dispatches).status);
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_terminal_schedule_selection
+       ~config
+       ~keeper_name
+       selection
+   with
+   | Ok Keeper_heartbeat_stimulus_intake.Not_terminal_schedule -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Terminal_schedule_acknowledged ->
+     fail "non-terminal retry wake was acknowledged"
+   | Error detail -> fail detail);
+  check int "retry wake remains pending" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length)
 ;;
 
 let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
@@ -1110,8 +1241,8 @@ let () =
     [ ( "keeper_wake"
       , [ test_case "board post schedule is rejected without mutation" `Quick
             test_board_post_schedule_is_rejected_without_mutation
-        ; test_case "keeper wake enqueues typed stimulus" `Quick
-            test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule
+        ; test_case "keeper wake records dispatch without work success" `Quick
+            test_keeper_wake_consumer_records_dispatch_without_work_success
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "keeper wake durable enqueue retries same occurrence" `Quick
@@ -1119,6 +1250,12 @@ let () =
         ; test_case "cancelled occurrence recovery does not enqueue again"
             `Quick
             test_cancelled_occurrence_recovery_does_not_enqueue_again
+        ; test_case "terminal reconciliation before retry recreates wake"
+            `Quick
+            test_terminal_reconciliation_before_retry_recreates_wake
+        ; test_case "retry before terminal reconciliation retains wake"
+            `Quick
+            test_retry_before_terminal_reconciliation_retains_wake
         ; test_case "due wake bypasses proactive policy" `Quick
             test_due_schedule_wakes_live_keeper_with_proactive_disabled
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick

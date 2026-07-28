@@ -8,10 +8,7 @@ let make_meta ?(allowed_paths = []) ~name () =
     `Assoc
       [
         ("name", `String name);
-        ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in

@@ -102,14 +102,11 @@ let make_meta ~name ~sandbox =
     `Assoc
       [
         ("name", `String name);
-        ("agent_name", `String ("agent-" ^ name));
-        ("trace_id", `String ("trace-" ^ name));
-        ( "sandbox_profile",
-          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok m -> m
+  | Ok m ->
+    { m with Masc.Keeper_meta_contract.sandbox_profile = sandbox }
   | Error e -> Alcotest.fail e
 
 (* ── should_route_read profile policy ────────────────────────────── *)

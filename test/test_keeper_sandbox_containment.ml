@@ -44,15 +44,12 @@ let make_meta ?(allowed_paths = []) ~name ~sandbox () =
     `Assoc
       [
         ("name", `String name);
-        ("agent_name", `String name);
-        ("trace_id", `String "test-trace-containment");
-        ("sandbox_profile",
-         `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox));
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok m -> m
+  | Ok m ->
+    { m with Masc.Keeper_meta_contract.sandbox_profile = sandbox }
   | Error e -> Alcotest.fail e
 
 (* ── Tests ───────────────────────────────────────────────────────── *)

@@ -473,11 +473,8 @@ let rec capacity_disposition_detail : Exact_output.input_capacity_disposition ->
       reserved_output_tokens
       max_context_tokens
   | Token_capacity_rejected rejection -> token_capacity_detail rejection
-  | Serialized_request_body_too_large { actual_bytes; limit_bytes } ->
-    Printf.sprintf
-      "serialized request body too large (actual=%dB limit=%dB)"
-      actual_bytes
-      limit_bytes
+  | Serialized_request_body_too_large _ ->
+    "serialized request body too large"
 
 and token_capacity_detail : Exact_output.token_capacity_rejection -> string = function
   | Capacity_evidence_not_yet_valid { now_unix_s; checked_at_unix_s } ->
@@ -527,10 +524,10 @@ let candidate_rejection_detail (rejection : Exact_output.candidate_rejection_rec
 (* [Flow_exact_execution_failed] is the branch that carries the provider's own
    verdict, and it was the only flow error settled with no log line at all. *)
 let capacity_refusal_detail : Exact_output.input_capacity_refusal -> string = function
-  | Context_window_refused { limit_tokens } ->
-    Printf.sprintf "context window refused (limit=%s)" (optional_tokens limit_tokens)
-  | Serialized_request_refused { http_status } ->
-    Printf.sprintf "serialized request refused (http_status=%d)" http_status
+  | Context_window_refused _ ->
+    "context window refused"
+  | Serialized_request_refused _ ->
+    "serialized request refused"
 ;;
 
 let execution_cause_detail : Exact_output.execution_error_cause -> string = function

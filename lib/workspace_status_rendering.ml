@@ -155,7 +155,6 @@ let status_summary_string
     ~(todo_conflict_task_ids : string list)
     ~(binding : current_binding)
     ~(planning_state : planning_context_state)
-    ~(suggested_next : string list)
     ~(attention_items : string list)
     ~(state : Masc_domain.workspace_state)
     ~(backlog : Masc_domain.backlog) =
@@ -210,10 +209,6 @@ let status_summary_string
       (Printf.sprintf "Credential: required=yes | available=%s | candidates=%s\n"
          (bool_flag credential_state.credential_available)
          (String.concat "," credential_state.credential_candidates));
-  (match suggested_next with [] -> () | _ ->
-    Buffer.add_string buf
-      (Printf.sprintf "Suggested next: %s\n"
-         (String.concat " -> " suggested_next)));
   (match attention_items with
   | [] -> ()
   | _ ->

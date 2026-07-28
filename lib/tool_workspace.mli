@@ -16,8 +16,7 @@
     (\[text_cache] type, \[make_text_cache], \[_status_cache],
     \[cache_ttl_seconds], \[status_cache_ttl_s],
     \[invalidate_status_cache], \[cached_text_by_key]),
-    \[take_items], \[effective_cluster_name],
-    \[lifecycle_tools] / \[is_lifecycle_tool],
+    \[effective_cluster_name],
     \[unique_strings], \[credential_state],
     \[safe_resolve_agent_name] / \[safe_current_task] / \[safe_get_agents] /
     the deliverable-conflict scanners (\[todo_task_has_completed_deliverable_conflict],

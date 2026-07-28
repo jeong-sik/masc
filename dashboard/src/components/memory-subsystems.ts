@@ -1,66 +1,32 @@
 import { html } from 'htm/preact'
-import { signal, useSignal } from '@preact/signals'
-import { useEffect, useMemo, useRef } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
+import { useEffect, useMemo } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { MermaidGraph } from './common/mermaid-graph'
-import { Select } from './common/select'
 import {
   fetchMemorySubsystems,
   type MemorySubsystemsResponse,
   type MemorySubsystemsSynapse,
-  type MemorySubsystemsEpisode,
   type MemorySubsystemsDelegationRequest,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { openAgentDetail } from './agent-detail-state'
-import { ringFocusClasses, ringSelectClasses } from './common/ring'
-
-type MemorySubsystemsFocus = 'episodes'
-
-export interface MemorySubsystemsProps {
-  readonly focus?: string
-}
-
-export function normalizeMemorySubsystemsFocus(focus?: string): MemorySubsystemsFocus | null {
-  const value = focus?.trim().toLowerCase()
-  return value === 'episodes' ? value : null
-}
-
-function memoryFocusTargetClasses(focused: boolean): string {
-  const base = ringFocusClasses({
-    tone: 'accent-medium',
-    width: 2,
-    offset: 2,
-    offsetSurface: 'page',
-  })
-  if (!focused) return `scroll-mt-24 ${base}`
-  return `scroll-mt-24 rounded-[var(--r-1)] ${base} ${ringSelectClasses({
-    tone: 'accent-medium',
-    width: 2,
-    offset: 2,
-    offsetSurface: 'page',
-  })}`
-}
+import { ringFocusClasses } from './common/ring'
 
 export const ARCHITECTURE_FLOW = `graph LR
     subgraph Keeper["키퍼 턴"]
       K1[LLM 응답 생성] --> K2[턴 증거 수집]
     end
 
-    K2 --> M1[에피소드 기록]
-    M1 --> M2[Memory.t in-memory]
-    M2 --> M3[flush_incremental]
-    M3 --> F1[(institution_episodes.jsonl)]
-    F1 -->|cap 500| F1
-
     subgraph Task["태스크 완료"]
       T1[keeper_task_done] --> T2[transition_task_r]
       T2 --> T3[Done_action 분기]
     end
 
+    K2 --> T1
     T3 --> H1[hebbian_on_task_done_fn]
     H1 --> H2["List.iter: strengthen per peer"]
     H2 --> G1[(graph.json)]
@@ -69,7 +35,6 @@ export const ARCHITECTURE_FLOW = `graph LR
       D1[fetchMemorySubsystems]
     end
 
-    F1 --> D1
     G1 --> D1
     D1 --> UI[기억 서브시스템 패널]
 
@@ -78,35 +43,13 @@ export const ARCHITECTURE_FLOW = `graph LR
     classDef store fill:#221815,stroke:#5a3028,color:#e8d8b8
     classDef action fill:#16210f,stroke:#5a7a3a,color:#e8d8b8
     classDef ui fill:#2a1d08,stroke:#c4461a,color:#e8d8b8
-    class F1,G1 store
-    class M1,M3,H1,H2,T2 action
+    class G1 store
+    class H1,H2,T2 action
     class UI ui`
 
 const shortAgentLabel = (name: string) => {
   const trimmed = name.replace(/^keeper-/, '').replace(/-agent$/, '')
   return trimmed.length > 12 ? trimmed.slice(0, 11) + '…' : trimmed
-}
-
-// Synapse pair filter — when set, only episodes whose participants include
-// both agents are shown in the episode list below the matrix.
-// Module-scope so HebbianMatrix cells, HebbianTopLinks rows, and the main
-// MemorySubsystems component can all read/write it.
-type SynapsePairFilter = { from: string; to: string } | null
-const synapsePairFilter = signal<SynapsePairFilter>(null)
-const setSynapsePairFilter = (pair: SynapsePairFilter) => {
-  synapsePairFilter.value = pair
-}
-const toggleSynapsePairFilter = (from: string, to: string) => {
-  const current = synapsePairFilter.value
-  if (current && current.from === from && current.to === to) {
-    synapsePairFilter.value = null
-  } else {
-    synapsePairFilter.value = { from, to }
-  }
-}
-const isActivePair = (from: string, to: string) => {
-  const f = synapsePairFilter.value
-  return f !== null && f.from === from && f.to === to
 }
 
 // --- Hebbian visualization constants (SSOT) ---------------------------------
@@ -271,10 +214,9 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
             }
             const pct = Math.round(s.weight * 100)
             const isDiag = from === to
-            const active = isActivePair(from, to)
             return html`
               <g>
-                <title>${`${from} → ${to}\nweight ${pct}% · 성공 ${s.success_count} · 실패 ${s.failure_count}\n(클릭: 이 쌍의 에피소드만 필터)`}</title>
+                <title>${`${from} → ${to}\nweight ${pct}% · 성공 ${s.success_count} · 실패 ${s.failure_count}`}</title>
                 <rect
                   x=${x}
                   y=${y}
@@ -282,14 +224,11 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
                   height=${cell - 1}
                   fill=${weightColor(s.weight)}
                   opacity=${weightOpacity(s.weight)}
-                  stroke=${active ? 'var(--frost-100)' : isDiag ? 'var(--color-fg-muted)' : 'var(--panel-dark)'}
+                  stroke=${isDiag ? 'var(--color-fg-muted)' : 'var(--panel-dark)'}
                   stroke-dasharray=${isDiag ? '2 2' : ''}
-                  stroke-width=${active ? '1.5' : '0.5'}
-                  class="cursor-pointer hover:stroke-[var(--color-fg-muted)]"
-                  role="button"
-                  aria-label=${`${from} to ${to}: ${pct}% — filter episodes for this pair`}
-                  aria-pressed=${active ? 'true' : 'false'}
-                  onClick=${() => toggleSynapsePairFilter(from, to)}
+                  stroke-width="0.5"
+                  role="img"
+                  aria-label=${`${from} to ${to}: ${pct}%`}
                 />
               </g>
             `
@@ -371,21 +310,14 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
       <div class="space-y-1.5">
         ${top.map(s => {
           const pct = Math.round(s.weight * 100)
-          const active = isActivePair(s.from_agent, s.to_agent)
           return html`
-            <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded-[var(--r-1)] ${active ? 'ring-1 ring-[var(--color-border-default)] bg-[var(--color-bg-elevated)]' : 'hover:bg-[var(--color-bg-elevated)]'}">
+            <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)]">
               <button
                 type="button"
                 class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-right ${ringFocusClasses()}`}
                 onClick=${() => openAgentDetail(s.from_agent)}
               >${shortAgentLabel(s.from_agent)}</button>
-              <button
-                type="button"
-                aria-pressed=${active ? 'true' : 'false'}
-                title="이 쌍의 에피소드만 필터"
-                class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] ${ringFocusClasses()} ${active ? 'text-[var(--color-accent-fg)]' : ''}`}
-                onClick=${() => toggleSynapsePairFilter(s.from_agent, s.to_agent)}
-              >→</button>
+              <span class="text-[var(--color-fg-muted)]">→</span>
               <button
                 type="button"
                 class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-left ${ringFocusClasses()}`}
@@ -435,61 +367,6 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
       <td class="py-1.5 px-2 text-sm text-[var(--bad-light)] text-center">${s.failure_count}</td>
       <td class="py-1.5 px-2 text-xs text-[var(--color-fg-muted)]">${formatTimeAgo(s.last_updated * 1000)}</td>
     </tr>
-  `
-}
-
-function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
-  const outcomeColor =
-    ep.outcome === 'success'
-      ? 'text-[var(--color-status-ok)]'
-      : ep.outcome === 'partial'
-        ? 'text-[var(--color-status-warn)]'
-        : 'text-[var(--bad-light)]'
-  const outcomeIcon =
-    ep.outcome === 'success' ? '●' : ep.outcome === 'partial' ? '◐' : '○'
-  return html`
-    <div class="v2-monitoring-card border border-[var(--color-border-default)] rounded-[var(--r-1)] p-3 mb-2 hover:border-[var(--color-border-default)] transition-colors">
-      <div class="flex items-start justify-between gap-2 mb-1">
-        <div class="flex items-center gap-2 min-w-0">
-          <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
-          <span class="text-sm font-medium text-[var(--color-fg-muted)] truncate">${ep.summary}</span>
-        </div>
-        <span class="text-xs text-[var(--color-fg-muted)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
-      </div>
-      <div class="flex items-center gap-2 text-xs text-[var(--color-fg-muted)] mb-1 flex-wrap">
-        <span class="bg-[var(--color-bg-elevated)] px-1.5 py-0.5 rounded-[var(--r-1)]">${ep.event_type}</span>
-        ${ep.participants.map(
-          (p: string) => html`<span class="font-mono">${p}</span>`,
-        )}
-        <span class="text-[var(--color-fg-muted)] font-mono text-3xs">${ep.id}</span>
-      </div>
-      ${
-        ep.learnings.length > 0
-          ? html`
-              <div class="mt-1.5 space-y-0.5">
-                ${ep.learnings.map(
-                  (l: string) =>
-                    html`<div class="text-xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--color-border-default)]">${l}</div>`,
-                )}
-              </div>
-            `
-          : null
-      }
-      ${
-        ep.context && Object.keys(ep.context).length > 0
-          ? html`
-              <div class="mt-1 flex gap-2 flex-wrap">
-                ${Object.entries(ep.context).map(
-                  ([k, v]) =>
-                    html`<span class="text-xs bg-[var(--color-bg-elevated)] px-1.5 py-0.5 rounded-[var(--r-1)] text-[var(--color-fg-muted)]"
-                      >${k}: ${v}</span
-                    >`,
-                )}
-              </div>
-            `
-          : null
-      }
-    </div>
   `
 }
 
@@ -575,27 +452,14 @@ function DelegationRequestsPanel({
   `
 }
 
-export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
+export function MemorySubsystems() {
   const resource = useManagedAsyncResource<MemorySubsystemsResponse>(null)
-
-  const keeperFilter = useSignal<string>('')
-  const outcomeFilter = useSignal<string>('')
-  const searchQuery = useSignal<string>('')
   const synapseQuery = useSignal<string>('')
-  const normalizedFocus = normalizeMemorySubsystemsFocus(focus)
-  const episodesSectionRef = useRef<HTMLElement | null>(null)
-  const appliedFocusRef = useRef<MemorySubsystemsFocus | null>(null)
 
   useEffect(() => {
     const run = () => {
       void resource.load(async (signal) =>
-        fetchMemorySubsystems({
-          limit: 100,
-          keeper: keeperFilter.value || undefined,
-          outcome: outcomeFilter.value || undefined,
-          q: searchQuery.value || undefined,
-          signal,
-        }),
+        fetchMemorySubsystems({ limit: 100, signal }),
       )
     }
     run()
@@ -604,22 +468,9 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
       resource.cancel()
       cleanup()
     }
-  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, resource])
+  }, [resource])
 
   const { loading, error, data } = resource.state.value
-
-  useEffect(() => {
-    if (!normalizedFocus) {
-      appliedFocusRef.current = null
-      return
-    }
-    if (loading || !data || appliedFocusRef.current === normalizedFocus) return
-    const target = episodesSectionRef.current
-    if (!target) return
-    target.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
-    target.focus({ preventScroll: true })
-    appliedFocusRef.current = normalizedFocus
-  }, [normalizedFocus, loading, data])
 
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
   if (error && !data)
@@ -635,39 +486,6 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
   const isSynapseFiltering = synapseQueryValue.trim() !== ''
   const delegationRequestBlock = data?.delegation_requests
   const delegationRequests = delegationRequestBlock?.items ?? []
-  const episodes = data?.episodes?.items ?? []
-  const totalEpisodes = data?.episodes?.total ?? 0
-  const filteredTotal = data?.episodes?.filtered ?? episodes.length
-  const knownKeepers = data?.filters?.keepers ?? []
-  const knownOutcomes = data?.filters?.outcomes ?? ['success', 'partial', 'failure']
-
-  const onSearchInput = (e: Event) => {
-    const v = (e.target as HTMLInputElement).value
-    searchQuery.value = v
-  }
-
-  const clearFilters = () => {
-    keeperFilter.value = ''
-    outcomeFilter.value = ''
-    searchQuery.value = ''
-    synapsePairFilter.value = null
-  }
-
-  const pairFilter = synapsePairFilter.value
-  const hasFilter = Boolean(
-    keeperFilter.value || outcomeFilter.value || searchQuery.value || pairFilter,
-  )
-
-  // Pair filter is applied client-side after the server returns episodes —
-  // episodes aren't indexed by synapse pair on the backend. For typical
-  // keeper workloads episode lists are <100 items, so per-render filter
-  // cost is negligible.
-  const visibleEpisodes = pairFilter
-    ? episodes.filter(ep =>
-        ep.participants.includes(pairFilter.from) &&
-        ep.participants.includes(pairFilter.to),
-      )
-    : episodes
 
   const showArch = useSignal(false)
 
@@ -686,7 +504,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
             아키텍처 — 데이터 흐름도
           </span>
           <span class="text-xs text-[var(--color-fg-muted)]">
-            Keeper turn → episodes / task_done → Hebbian. Keeper checkpoint는 다른 패널에서 본다.
+            Keeper turn → task_done → Hebbian. Keeper checkpoint는 다른 패널에서 본다.
           </span>
         </button>
         ${
@@ -782,98 +600,6 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
                         </table>
                       </div>`
                 }
-              `
-        }
-      </section>
-
-      <!-- Episodes -->
-      <section
-        ref=${episodesSectionRef}
-        tabIndex=${-1}
-        data-memory-focus-target="episodes"
-        aria-label="에피소드 기록"
-        class=${memoryFocusTargetClasses(normalizedFocus === 'episodes')}
-      >
-        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h3 class="text-base font-semibold text-[var(--color-fg-muted)]">에피소드 기록</h3>
-          <span class="text-xs text-[var(--color-fg-muted)]">
-            총 ${totalEpisodes}개 · 필터 ${filteredTotal}개 · 표시 ${visibleEpisodes.length}개
-          </span>
-        </div>
-
-        ${
-          pairFilter
-            ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] rounded-[var(--r-1)] text-xs">
-                <span class="text-[var(--color-fg-muted)]">시냅스 쌍 필터</span>
-                <span class="text-[var(--color-fg-muted)] font-mono">${shortAgentLabel(pairFilter.from)} → ${shortAgentLabel(pairFilter.to)}</span>
-                <button
-                  class="v2-monitoring-action ml-auto text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)]"
-                  onClick=${() => setSynapsePairFilter(null)}
-                  aria-label="시냅스 쌍 필터 해제"
-                >✕</button>
-              </div>`
-            : null
-        }
-
-        <!-- Filter Bar -->
-        <div class="flex items-center gap-2 mb-3 flex-wrap">
-          <${TextInput}
-            type="text"
-            class="flex-1 min-w-50 !px-2 !py-1 !text-sm"
-            placeholder="검색 (summary, learnings, event_type...)"
-            ariaLabel="에피소드 검색"
-            value=${searchQuery.value}
-            onInput=${onSearchInput}
-          />
-          <${Select}
-            class="px-2 py-1 text-sm"
-            ariaLabel="키퍼 필터"
-            value=${keeperFilter.value}
-            options=${[
-              { value: '', label: '모든 키퍼' },
-              ...knownKeepers.map((k: string) => ({ value: k, label: k })),
-            ]}
-            onInput=${(v: string) => { keeperFilter.value = v }}
-          />
-          <${Select}
-            class="px-2 py-1 text-sm"
-            ariaLabel="결과 필터"
-            value=${outcomeFilter.value}
-            options=${[
-              { value: '', label: '모든 결과' },
-              ...knownOutcomes.map((o: string) => ({ value: o, label: o })),
-            ]}
-            onInput=${(v: string) => { outcomeFilter.value = v }}
-          />
-          ${
-            hasFilter
-              ? html`<button
-                  onClick=${clearFilters}
-                  class="v2-monitoring-action text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)] px-2 py-1 border border-[var(--color-border-default)] rounded-[var(--r-1)] hover:border-[var(--color-border-default)]0"
-                >
-                  필터 해제
-                </button>`
-              : null
-          }
-        </div>
-
-        ${
-          visibleEpisodes.length === 0
-            ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-4 text-center">
-                ${hasFilter
-                  ? '필터 조건에 맞는 에피소드가 없습니다.'
-                  : '에피소드가 아직 없습니다.'}
-              </div>`
-            : html`
-                <div class="space-y-1">
-                  ${visibleEpisodes
-                    .slice()
-                    .reverse()
-                    .map(
-                      (ep: MemorySubsystemsEpisode) =>
-                        html`<${EpisodeCard} ep=${ep} />`,
-                    )}
-                </div>
               `
         }
       </section>

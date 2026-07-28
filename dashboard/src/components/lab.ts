@@ -49,7 +49,7 @@ export function Lab() {
       ` : null}
 
       ${section === 'memory-subsystems' ? html`
-        <${MemorySubsystems} focus=${route.value.params.focus} />
+        <${MemorySubsystems} />
       ` : null}
 
       ${section === 'keeper-memory-health' ? html`

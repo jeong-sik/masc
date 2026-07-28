@@ -20,8 +20,8 @@ async function loadLab() {
     LabPerf: () => html`<div data-testid="lab-performance">Performance</div>`,
   }))
   vi.doMock('./memory-subsystems', () => ({
-    MemorySubsystems: ({ focus }: { focus?: string }) =>
-      html`<div data-testid="lab-memory-subsystems" data-focus=${focus ?? ''}>MemorySubsystems</div>`,
+    MemorySubsystems: () =>
+      html`<div data-testid="lab-memory-subsystems">MemorySubsystems</div>`,
   }))
   vi.doMock('./memory/keeper-memory-health', () => ({
     KeeperMemoryHealth: () => html`<div data-testid="lab-keeper-memory-health">KeeperMemoryHealth</div>`,
@@ -100,15 +100,14 @@ describe('Lab', () => {
     expect(container.querySelector('[data-testid="lab-audit-integrity"]')).not.toBeNull()
   })
 
-  it('renders the live Memory OS subsystem section and passes through focus', async () => {
-    route.value = { tab: 'lab', params: { section: 'memory-subsystems', focus: 'episodes' } }
+  it('renders the live Memory OS subsystem section', async () => {
+    route.value = { tab: 'lab', params: { section: 'memory-subsystems' } }
     const { Lab } = await loadLab()
 
     render(html`<${Lab} />`, container)
 
     const memory = container.querySelector('[data-testid="lab-memory-subsystems"]')
     expect(memory).not.toBeNull()
-    expect(memory?.getAttribute('data-focus')).toBe('episodes')
     expect(container.querySelector('[data-testid="lab-tools"]')).toBeNull()
   })
 

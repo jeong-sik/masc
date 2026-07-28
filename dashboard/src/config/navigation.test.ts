@@ -178,11 +178,11 @@ describe('lab navigation', () => {
   it('collapses legacy Memory Explore links into the backed Memory OS route', () => {
     expect(normalizeRouteParams('lab', {
       section: 'memory-explore',
-      focus: 'episodes',
+      keeper: 'sangsu',
       view: 'stale',
     })).toEqual({
       section: 'memory-subsystems',
-      focus: 'episodes',
+      keeper: 'sangsu',
     })
   })
 

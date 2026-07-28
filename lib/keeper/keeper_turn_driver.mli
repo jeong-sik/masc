@@ -88,8 +88,7 @@ val run_named :
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->
-  ?model_input_projection:
-    (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) ->
+  ?model_input_projection:Agent_sdk.Agent.model_input_projection ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->

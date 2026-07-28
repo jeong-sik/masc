@@ -12,43 +12,6 @@ open Keeper_types_profile
 
 module StringMap : Map.S with type key = string
 
-(** Phase B PR-6 (2026-04-28): the stale watchdog's three distinct kill
-    causes used to collapse into a single [Stale_turn_timeout of float]
-    variant.  Operators / dashboards could not tell whether a kill was an
-    idle stall (turn never started), an active turn hang (turn running
-    too long), or a no-op failure loop (turn fired but produced no tool
-    calls) — three different root causes that need different operator
-    actions.  Splitting the payload preserves the [Stale_turn_timeout]
-    cohort key so existing dashboards keep working, while exposing the
-    typed sub-class to anything that wants to discriminate. *)
-type stale_kill_class =
-  | Idle_turn of { stall_seconds : float }
-      (** [last_turn_ts] older than the idle threshold while the keeper
-          phase is [Running] but no [current_turn_observation] is
-          recorded. *)
-  | Mid_turn_no_progress of {
-      active_seconds : float;
-      since_progress_seconds : float;
-      progress_timeout_threshold : float;
-      last_progress_kind : string option;
-    }
-      (** A turn is still within the outer turn cap, but no streaming/tool
-          progress has been observed for [progress_timeout_threshold]
-          seconds.  This separates provider no-first-token /
-          inter-chunk-idle stalls from ordinary long-running turns. *)
-  | Noop_failure_loop of { noop_count : int }
-      (** Turns kept firing but produced no tool calls; the keepalive's
-          [consecutive_noop_count] reached the watchdog threshold. *)
-
-val progress_kind_label : string option -> string
-(** Display label for optional progress-kind telemetry.  Missing means no
-    streaming/tool progress label was stamped yet, rendered as ["-"]. *)
-
-val stale_kill_class_to_string : stale_kill_class -> string
-(** Operator-facing label.  Used in [failure_reason_to_string] for the
-    [Stale_turn_timeout] arm and exposed for dashboards / metrics that
-    want to attribute kills by class. *)
-
 (** Issue #18901: cause carried inside [Fiber_unresolved]. Splits the
     24h fleet ratio of 26 graceful-shutdown artifacts to 9 real
     missed-resolutions inside the same supervisor crash log. *)
@@ -60,7 +23,6 @@ type fiber_drop_cause =
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_turn_timeout of stale_kill_class
   | Stale_termination_storm of { count : int }
       (** #10765 Phase 2: latched when [record_stale_termination] returns a
           window count >= [escalation_threshold]. The supervisor's
@@ -102,13 +64,6 @@ val failure_reason_to_string : failure_reason -> string
     OCaml's exhaustive-match check — Option B mitigation for the
     recurring P0 pattern (#10490, #10574). *)
 val failure_reason_cohort_key : failure_reason option -> string
-
-val stale_kill_failure_reason :
-  prior:failure_reason option -> kill_class:stale_kill_class -> failure_reason option
-(** Preserve authoritative terminal failure reasons when a stale kill follows
-    a failed turn, but do not carry stale-kill cohort labels across fresh
-    stale kills. Storm labels are relatched only by the current per-keeper
-    threshold; fleet-batch detection is observation-only. *)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via

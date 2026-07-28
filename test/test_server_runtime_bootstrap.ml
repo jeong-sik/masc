@@ -3207,9 +3207,7 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
           Keeper_registry.set_failure_reason
             ~base_path:config.Workspace.base_path
             failing.name
-            (Some
-               (Keeper_registry.Stale_turn_timeout
-                  (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
+            (Some (Keeper_registry.Turn_consecutive_failures 3));
           terminate_keeper_fiber config failing;
           record_keeper_dead_tombstone config failing;
           let request = Httpun.Request.create `GET "/health" in
@@ -3239,8 +3237,8 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
           | Some row ->
             Alcotest.(check string) "health exposes dead phase" "dead"
               (row |> member "phase" |> to_string);
-            Alcotest.(check string) "health exposes typed stale failure reason"
-              "stale_turn_timeout(idle_turn(2268s))"
+            Alcotest.(check string) "health exposes the typed failure reason"
+              "turn_consecutive_failures(3)"
               (row |> member "last_failure_reason" |> to_string);
             Alcotest.(check string) "health recommends keeper recovery action"
               "keeper_recover"
@@ -3354,9 +3352,7 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
           Keeper_registry.set_failure_reason
             ~base_path
             restored.name
-            (Some
-               (Keeper_registry.Stale_turn_timeout
-                  (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
+            (Some (Keeper_registry.Turn_consecutive_failures 3));
           terminate_keeper_fiber config restored;
           Keeper_registry.record_crash ~base_path restored.name 1234.0 stale_reason;
           record_keeper_dead_tombstone config restored;

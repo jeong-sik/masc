@@ -7,7 +7,6 @@
  (modules
   keeper_registry_types_compaction
   keeper_registry_types_decision
-  keeper_registry_types_kill_class
   keeper_registry_types_turn_phase
   keeper_id
   keeper_runtime_manifest_types

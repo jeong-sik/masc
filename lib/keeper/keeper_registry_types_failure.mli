@@ -1,14 +1,3 @@
-type stale_kill_class =
-  Keeper_registry_types_kill_class.stale_kill_class =
-    Idle_turn of { stall_seconds : float; }
-  | Mid_turn_no_progress of { active_seconds : float;
-      since_progress_seconds : float; progress_timeout_threshold : float;
-      last_progress_kind : string option;
-    }
-  | Noop_failure_loop of { noop_count : int; }
-val progress_kind_label : string option -> string
-val stale_kill_class_to_string :
-  Keeper_registry_types_kill_class.stale_kill_class -> string
 (** Issue #18901: Cause carried inside [Fiber_unresolved] so the emit
     site is forced to distinguish graceful shutdown races from real
     missed-resolution bugs. *)
@@ -19,7 +8,6 @@ type fiber_drop_cause =
 type failure_reason =
     Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_turn_timeout of stale_kill_class
   | Stale_termination_storm of { count : int; }
   | Provider_runtime_error of { code : string; detail : string;
       provider_id : string option; http_status : int option;
@@ -32,6 +20,3 @@ type failure_reason =
   | Operator_interrupt
 val failure_reason_to_string : failure_reason -> string
 val failure_reason_cohort_key : failure_reason option -> string
-val stale_kill_failure_reason :
-  prior:failure_reason option ->
-  kill_class:stale_kill_class -> failure_reason option

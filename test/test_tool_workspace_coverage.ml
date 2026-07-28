@@ -890,7 +890,9 @@ let () =
 (* Issue #7646: valid_next_actions_for_status hint tests. One per
    [Masc_domain.task_status] variant. The witness ensures every variant has a
    defined hint AND the ones with content list each action canonically. *)
-let next_hint = Workspace_task.next_actions_hint
+let next_hint ?(requires_verification = false) status =
+  Workspace_task.next_actions_hint ~requires_verification status
+;;
 
 let () =
   test "next_hint_todo lists claim, release, and cancel" (fun () ->
@@ -917,6 +919,17 @@ let () =
     assert (str_contains h "release");
     assert (not (str_contains h "claim"))
     (* Claim is not legal from InProgress *))
+;;
+
+let () =
+  test "next_hint_strict_in_progress lists submit but not done" (fun () ->
+    let h =
+      next_hint
+        ~requires_verification:true
+        (Masc_domain.InProgress { assignee = "a"; started_at = "t" })
+    in
+    assert (str_contains h "submit_for_verification");
+    assert (not (str_contains h "done")))
 ;;
 
 let () =

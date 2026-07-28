@@ -35,7 +35,11 @@ let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.k
         | None -> Printf.sprintf "Current task: %s (not found in backlog)" task_id
         | Some task ->
           let status = Masc_domain.task_status_to_string task.task_status in
-          let hint = Workspace_task_classify.next_actions_hint task.task_status in
+          let hint =
+            Workspace_task_classify.next_actions_hint
+              ~requires_verification:(Masc_domain.task_requires_verification task)
+              task.task_status
+          in
           Printf.sprintf "Current task: %s, status=%s%s" task_id status hint))
 ;;
 

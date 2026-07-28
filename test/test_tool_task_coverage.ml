@@ -2575,6 +2575,114 @@ let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
 )
 
 let () =
+  test "strict verdict validates justification and credits producer metrics" (fun () ->
+    let ctx = make_test_ctx_with_agent "producer" in
+    let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
+    add_priority_task ctx ~title:"Strict completion metrics";
+    set_only_task_contract
+      ctx
+      (Some (make_task_contract ~strict:true ()));
+    start_task_001 ctx;
+    let submitted =
+      Task.Tool.handle_transition
+        ~tool_name:"test_tool"
+        ~start_time:0.0
+        ctx
+        (`Assoc
+          [ "task_id", `String "task-001"
+          ; "action", `String "submit_for_verification"
+          ; "notes", `String "producer evidence is ready"
+          ])
+    in
+    if not (Tool_result.is_success submitted)
+    then failwith (Tool_result.message submitted);
+    (match
+       Workspace.claim_task_r
+         ctx.config
+         ~agent_name:"verifier"
+         ~task_id:"task-001"
+         ()
+     with
+     | Ok _ -> ()
+     | Error error -> failwith (Masc_domain.masc_error_to_string error));
+    let expect_assigned () =
+      match (only_task ctx).Masc_domain.task_status with
+      | Masc_domain.AwaitingVerification
+          { phase = Masc_domain.Verifier_assigned { verifier }; _ }
+        when String.equal verifier "verifier" -> ()
+      | _ -> failwith "failed verdict must not mutate the assigned verification"
+    in
+    let blank_approve =
+      Task.Tool.handle_transition
+        ~tool_name:"test_tool"
+        ~start_time:0.0
+        verifier_ctx
+        (`Assoc
+          [ "task_id", `String "task-001"
+          ; "action", `String "approve"
+          ; "notes", `String " "
+          ])
+    in
+    assert (not (Tool_result.is_success blank_approve));
+    assert (str_contains (Tool_result.message blank_approve) "non-empty notes");
+    expect_assigned ();
+    let blank_reject =
+      Task.Tool.handle_transition
+        ~tool_name:"test_tool"
+        ~start_time:0.0
+        verifier_ctx
+        (`Assoc
+          [ "task_id", `String "task-001"
+          ; "action", `String "reject"
+          ; "reason", `String " "
+          ])
+    in
+    assert (not (Tool_result.is_success blank_reject));
+    assert (str_contains (Tool_result.message blank_reject) "non-empty reason");
+    expect_assigned ();
+    let previous_metric = Atomic.get Workspace_hooks.record_task_metric_fn in
+    let previous_thompson = Atomic.get Workspace_hooks.record_thompson_result_fn in
+    let metric_events = ref [] in
+    let thompson_events = ref [] in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.record_task_metric_fn previous_metric;
+        Atomic.set Workspace_hooks.record_thompson_result_fn previous_thompson)
+      (fun () ->
+        Atomic.set Workspace_hooks.record_task_metric_fn
+          (fun _config
+               ~agent_id
+               ~task_id:_
+               ~started_at:_
+               ~completed_at:_
+               ~success
+               ~error_message:_
+               ~collaborators
+               ~handoff_from:_
+               ~handoff_to:_ ->
+             metric_events := (agent_id, success, collaborators) :: !metric_events);
+        Atomic.set Workspace_hooks.record_thompson_result_fn
+          (fun ~agent_name ~success ~reason:_ ->
+             thompson_events := (agent_name, success) :: !thompson_events);
+        let approved =
+          Task.Tool.handle_transition
+            ~tool_name:"test_tool"
+            ~start_time:0.0
+            verifier_ctx
+            (`Assoc
+              [ "task_id", `String "task-001"
+              ; "action", `String "approve"
+              ; "notes", `String "tests and evidence verified"
+              ])
+        in
+        if not (Tool_result.is_success approved)
+        then failwith (Tool_result.message approved));
+    assert
+      (List.mem ("producer", true, [ "verifier" ]) !metric_events);
+    assert (List.mem ("producer", true) !thompson_events))
+;;
+
+let () =
   ensure_test_runtime ();
   Alcotest.run "Task.Tool"
     [

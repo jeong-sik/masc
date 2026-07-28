@@ -106,7 +106,11 @@ let client_side_transition_gate_error ~task_opt ~action ~action_s =
   match task_opt with
   | None -> None
   | Some (task : Masc_domain.task) ->
-    let valid_actions = Workspace_task_classify.valid_next_actions_for_status task.task_status in
+    let valid_actions =
+      Workspace_task_classify.valid_next_actions_for_status
+        ~requires_verification:(Masc_domain.task_requires_verification task)
+        task.task_status
+    in
     if List.mem action valid_actions
     then None
     else

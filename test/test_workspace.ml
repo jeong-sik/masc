@@ -1105,7 +1105,8 @@ let test_approve_completion_credits_assignee () =
       in
       let approved =
         Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-          ~task_id:"task-001" ~action:Masc_domain.Approve_verification ()
+          ~task_id:"task-001" ~action:Masc_domain.Approve_verification
+          ~notes:"verified submitted evidence" ()
       in
       Alcotest.(check bool) "approve ok" true
         (match approved with Ok _ -> true | Error _ -> false);
@@ -1132,8 +1133,17 @@ let test_submit_and_approve_rejects_empty_justification () =
         ~task_id:"task-001" ~action:Masc_domain.Approve_verification
         ~notes:"   " ()
     in
-    Alcotest.(check bool) "approve transition ok" true
-      (match approved with Ok _ -> true | Error _ -> false))
+    Alcotest.(check bool) "empty approval rejected before transition" false
+      (match approved with Ok _ -> true | Error _ -> false);
+    match find_task config "task-001" with
+    | Some
+        { task_status =
+            Masc_domain.AwaitingVerification
+              { phase = Masc_domain.Verifier_assigned { verifier }; _ }
+        ; _
+        }
+      when String.equal verifier admin_keeper_agent -> ()
+    | _ -> Alcotest.fail "empty approval mutated the verification state")
 
 (* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
 

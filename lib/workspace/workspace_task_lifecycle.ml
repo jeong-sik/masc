@@ -6,6 +6,8 @@ type invalid =
   | Verification_claim_required
   | Verification_assigned_to of string
   | Verification_self_claim
+  | Verification_approval_notes_required
+  | Verification_rejection_reason_required
   | Invalid_transition
 
 type decision =
@@ -177,6 +179,8 @@ let decide
         } ) ->
     if not (same_agent verifier)
     then Error (Verification_assigned_to verifier)
+    else if String.equal (String.trim notes) ""
+    then Error Verification_approval_notes_required
     else
       ok
         (Masc_domain.Done
@@ -206,6 +210,8 @@ let decide
         { assignee; phase = Masc_domain.Verifier_assigned { verifier }; _ } ) ->
     if not (same_agent verifier)
     then Error (Verification_assigned_to verifier)
+    else if String.equal (String.trim notes) "" && String.equal (String.trim reason) ""
+    then Error Verification_rejection_reason_required
     else ok (Masc_domain.InProgress { assignee; started_at = now })
   | ( Masc_domain.Reject_verification
     , ( Masc_domain.Todo
@@ -229,8 +235,8 @@ let valid_next_actions ~same_agent ~task_status ~requires_verification =
         ~requires_verification
         ~action
         ~now:""
-        ~notes:""
-        ~reason:""
+        ~notes:"preview"
+        ~reason:"preview"
     with
     | Ok _ -> true
     | Error _ -> false

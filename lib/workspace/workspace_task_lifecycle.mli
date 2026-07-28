@@ -6,6 +6,8 @@ type invalid =
   | Verification_claim_required
   | Verification_assigned_to of string
   | Verification_self_claim
+  | Verification_approval_notes_required
+  | Verification_rejection_reason_required
   | Invalid_transition
 
 type decision =

@@ -453,8 +453,33 @@ and handle_transition
             let ts = Masc_domain.parse_iso8601 ~default_time claimed_at in
             let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
+        | Masc_domain.AwaitingVerification { submitted_at; assignee; _ } ->
+            let ts = Masc_domain.parse_iso8601 ~default_time submitted_at in
+            let collabs =
+              if
+                not (String.equal assignee "")
+                && not (String.equal assignee ctx.agent_name)
+              then [ assignee ]
+              else []
+            in
+            (ts, collabs)
         | _ -> (default_time, []))
     | None -> (default_time, [])
+  in
+  let completion_owner =
+    match task_opt with
+    | Some task ->
+      Option.value
+        ~default:ctx.agent_name
+        (Masc_domain.task_assignee_of_status task.task_status)
+    | None -> ctx.agent_name
+  in
+  let completion_collaborators =
+    if
+      (=) action Masc_domain.Approve_verification
+      && not (String.equal completion_owner ctx.agent_name)
+    then [ ctx.agent_name ]
+    else collaborators_from_task
   in
   let prepare_verification_request =
     match action with
@@ -567,14 +592,9 @@ and handle_transition
                "approve_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
-             if String.equal (String.trim notes) "" then
-               task_log_warn ~task_id
-                 "approve_verification for task %s rejected: empty justification (rubber-stamp guard)"
-                 task_id
-             else
-               (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-                 ~task_id ~verifier:ctx.agent_name ~verification_id
-                 ~decision:(`Approve notes))
+             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
+               ~task_id ~verifier:ctx.agent_name ~verification_id
+               ~decision:(`Approve notes))
         | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
           (match verification_id_before with
@@ -583,33 +603,28 @@ and handle_transition
                "reject_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
-             if String.equal (String.trim reason) "" then
-               task_log_warn ~task_id
-                 "reject_verification for task %s rejected: empty justification (unsubstantiated guard)"
-                 task_id
-             else
-               (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-                 ~task_id ~verifier:ctx.agent_name ~verification_id
-                 ~decision:(`Reject reason))
+             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
+               ~task_id ~verifier:ctx.agent_name ~verification_id
+               ~decision:(`Reject reason))
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
   (match result, action with
-   | Ok _, Masc_domain.Done_action ->
+   | Ok _, (Masc_domain.Done_action | Masc_domain.Approve_verification) ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
-         ~agent_id:ctx.agent_name
+         ~agent_id:completion_owner
          ~task_id
          ~started_at:started_at_actual
          ~completed_at:(Some (Time_compat.now ()))
          ~success:true
          ~error_message:None
-         ~collaborators:collaborators_from_task
+         ~collaborators:completion_collaborators
          ~handoff_from:None
          ~handoff_to:None;
         (Atomic.get Workspace_hooks.record_thompson_result_fn)
-          ~agent_name:ctx.agent_name
+          ~agent_name:completion_owner
           ~success:true
           ~reason:None;
         ()
@@ -631,7 +646,7 @@ and handle_transition
           ~reason:(Some "task_cancelled");
         ()
    | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
+            | Masc_domain.Reject_verification | Masc_domain.Release)
    | Error _, _ -> ());
   match result, task_list_projection with
   | Ok message, Tool_capability_projection.Keeper_tasks_list

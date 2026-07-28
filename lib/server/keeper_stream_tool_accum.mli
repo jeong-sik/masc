@@ -23,7 +23,10 @@ val on_event : t -> Agent_sdk.Types.sse_event -> unit
 (** Feed one raw OAS stream event. A tool-bearing [ContentBlockStart] opens a
     block, argument deltas append to it, and [ContentBlockStop] / [MessageStop]
     finalize. Snapshots replace the accumulated fragments rather than appending,
-    matching the provider contract. Non-tool events are ignored. *)
+    matching the provider contract. A [MediaDelta] marks its index as
+    media-occupied until the block's terminator, mirroring the SSE bridge which
+    opens media blocks from a bare delta and rejects tool starts that collide
+    with them; other non-tool events are ignored. *)
 
 val to_tool_calls : t -> Keeper_chat_store.tool_call list
 (** The tool calls finalized so far, in the order the provider opened them.

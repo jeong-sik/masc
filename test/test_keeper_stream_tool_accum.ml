@@ -29,6 +29,14 @@ let json_snapshot ~index snapshot =
 
 let stop ~index = Agent_sdk.Types.ContentBlockStop { index }
 
+let media_delta ~index data =
+  Agent_sdk.Types.ContentBlockDelta
+    { index
+    ; delta =
+        Agent_sdk.Types.MediaDelta
+          { media_type = "image/png"; source_type = Agent_sdk.Types.Base64; data }
+    }
+
 let test_fragments_concatenate_in_order () =
   let t = A.create () in
   A.on_event t (start ~index:0 ~tool_id:(Some "call-1") ~tool_name:(Some "WebSearch"));
@@ -136,6 +144,40 @@ let test_invalid_tool_starts_are_ignored () =
   A.on_event t (stop ~index:1);
   check (list tool_call) "invalid starts ignored" [] (A.to_tool_calls t)
 
+(* The bridge opens an [Active_media] block from a bare [MediaDelta] (no
+   [ContentBlockStart]) and rejects a tool start colliding with it: protocol
+   error only, no [Tool_call_start]. Persisting that start would give the
+   reload a phantom tool row the live stream never showed. *)
+let test_tool_start_on_media_occupied_index_is_dropped () =
+  let t = A.create () in
+  A.on_event t (media_delta ~index:0 "iVBORw0KGgo=");
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-m") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "tool start on media index dropped" [] (A.to_tool_calls t);
+  (* The stop terminates the media block; the index is reusable afterwards,
+     matching the bridge which frees the index at [ContentBlockStop]. *)
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-n") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"b.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "index reusable after media stop"
+    [ { call_id = "call-n"; call_name = "Read"; args = "{\"path\":\"b.ml\"}" } ]
+    (A.to_tool_calls t)
+
+(* A media delta landing on an active tool block is a protocol error on the
+   bridge side, but the bridge keeps the tool block active; the collector must
+   not lose the call either. *)
+let test_media_delta_on_active_tool_block_keeps_the_call () =
+  let t = A.create () in
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-t") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":");
+  A.on_event t (media_delta ~index:0 "iVBORw0KGgo=");
+  A.on_event t (json_delta ~index:0 "\"a.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "tool block survives stray media delta"
+    [ { call_id = "call-t"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
+    (A.to_tool_calls t)
+
 let () =
   run "Keeper_stream_tool_accum"
     [ ( "accumulation"
@@ -148,5 +190,9 @@ let () =
         ; test_case "message stop finalizes open blocks" `Quick test_message_stop_finalizes_open_blocks
         ; test_case "non-tool events are ignored" `Quick test_non_tool_events_are_ignored
         ; test_case "invalid tool starts are ignored" `Quick test_invalid_tool_starts_are_ignored
+        ; test_case "tool start on media-occupied index is dropped" `Quick
+            test_tool_start_on_media_occupied_index_is_dropped
+        ; test_case "media delta on active tool block keeps the call" `Quick
+            test_media_delta_on_active_tool_block_keeps_the_call
         ] )
     ]

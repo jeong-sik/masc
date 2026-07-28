@@ -114,6 +114,19 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
   | Agent_sdk.Types.ContentBlockDelta
       { index; delta = Agent_sdk.Types.InputJsonSnapshot snapshot } ->
     replace_fragments t index snapshot
+  | Agent_sdk.Types.ContentBlockDelta { index; delta = Agent_sdk.Types.MediaDelta _ } ->
+    (* The SSE bridge opens an [Active_media] block straight from a bare
+       [MediaDelta] — no [ContentBlockStart] announces it — and then rejects a
+       tool start at that index as a protocol error without emitting
+       [Tool_call_start] (keeper_chat_oas_stream_bridge.ml, [Some (Active_media _)]
+       arm). Mirror that occupancy: the index stays closed to tool starts until
+       its terminator, so a reload cannot gain a tool row the live stream never
+       showed. A delta landing on an already-open tool block leaves the block
+       alone, matching the bridge's active-tool arm which reports the error but
+       keeps the tool state. *)
+    (match block_for_index t index with
+     | Some _ -> ()
+     | None -> invalidate_index t index)
   | Agent_sdk.Types.ContentBlockStop { index } ->
     if List.mem index t.invalid_indices
     then clear_invalid_index t index

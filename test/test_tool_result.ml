@@ -413,9 +413,12 @@ let test_gate_causal_context_preserves_deferred () =
     ~input:(`Assoc [])
     result;
   let call =
-    (Masc.Keeper_gate_causal_context.snapshot context).snapshot
-    |> Yojson.Safe.Util.member "completed_tool_calls"
-    |> Yojson.Safe.Util.index 0
+    match (Masc.Keeper_gate_causal_context.snapshot context).snapshot with
+    | Some snapshot ->
+      snapshot
+      |> Yojson.Safe.Util.member "completed_tool_calls"
+      |> Yojson.Safe.Util.index 0
+    | None -> Alcotest.fail "turn-local causal evidence was unexpectedly partial"
   in
   Alcotest.(check string)
     "deferred stays distinct"

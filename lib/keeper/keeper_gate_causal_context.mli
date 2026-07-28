@@ -2,8 +2,8 @@
 
     The cell is created once by the outer Keeper turn and threaded through the
     OAS tool bundle. Each completed Tool appends its exact typed input/result.
-    [snapshot] returns immutable JSON for one later Gate request. No global,
-    string-keyed, or fiber-local carrier is used. *)
+    [snapshot] returns one complete immutable evidence snapshot for a later
+    Gate request. No global, string-keyed, or fiber-local carrier is used. *)
 
 type t
 

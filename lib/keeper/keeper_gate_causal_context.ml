@@ -48,9 +48,10 @@ let snapshot t : Keeper_gate.causal_context =
   { turn_id = t.turn_id
   ; tool_call_id = None
   ; snapshot =
-      `Assoc
-        [ "initial", t.initial
-        ; "completed_tool_calls", `List completed_calls
-        ]
+      Some
+        (`Assoc
+           [ "initial", t.initial
+           ; "completed_tool_calls", `List completed_calls
+           ])
   }
 ;;

@@ -639,7 +639,7 @@ let test_symlink_component_swap_cannot_escape_allowed_root
       Unix.symlink case_outside component;
       { Masc.Keeper_gate.turn_id = None
       ; tool_call_id = None
-      ; snapshot = `Assoc [ "race", `String "symlink_component_swap" ]
+      ; snapshot = Some (`Assoc [ "race", `String "symlink_component_swap" ])
       }
     in
     let raw =
@@ -722,7 +722,7 @@ let test_sandbox_root_swap_after_open_keeps_pinned_capability
     Unix.symlink outside playground;
     { Masc.Keeper_gate.turn_id = None
     ; tool_call_id = None
-    ; snapshot = `Assoc [ "race", `String "sandbox_root_swap" ]
+    ; snapshot = Some (`Assoc [ "race", `String "sandbox_root_swap" ])
     }
   in
   let raw =
@@ -780,7 +780,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
       Unix.symlink outside_target target;
       { Masc.Keeper_gate.turn_id = None
       ; tool_call_id = None
-      ; snapshot = `Assoc [ "race", `String "leaf_swap" ]
+      ; snapshot = Some (`Assoc [ "race", `String "leaf_swap" ])
       }
     in
     let raw =
@@ -850,7 +850,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
     Unix.symlink outside_target target;
     { Masc.Keeper_gate.turn_id = None
     ; tool_call_id = None
-    ; snapshot = `Assoc [ "race", `String "missing_leaf_appeared" ]
+    ; snapshot = Some (`Assoc [ "race", `String "missing_leaf_appeared" ])
     }
   in
   let raw =

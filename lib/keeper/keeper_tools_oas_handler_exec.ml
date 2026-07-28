@@ -36,7 +36,7 @@ let gate_context_for_invocation
            | None ->
              { Keeper_gate.turn_id = None
              ; tool_call_id = None
-             ; snapshot = `Assoc []
+             ; snapshot = None
              }
          in
          let tool_call_id =

@@ -1409,7 +1409,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
              Some
                { Gate.turn_id = Some 99
                ; tool_call_id = None
-               ; snapshot = `Assoc []
+               ; snapshot = Some (`Assoc [])
                }
          ; task_id
          ; goal_ids
@@ -3447,7 +3447,7 @@ let test_default_auto_judge_defers_without_blocking () =
              Some
                { Gate.turn_id = Some 9
                ; tool_call_id = None
-               ; snapshot = `Assoc []
+               ; snapshot = Some (`Assoc [])
                }
          ; task_id = Some "task-auto-judge"
          ; goal_ids = [ "goal-auto-judge" ]

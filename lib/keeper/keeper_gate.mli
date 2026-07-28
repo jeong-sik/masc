@@ -9,10 +9,11 @@ type causal_context =
   (** Opaque execution-scoped tool-call identity. [None] is legacy or
       non-provider input; it is never used to infer request deduplication. *)
   ; tool_call_id : string option
-  ; snapshot : Yojson.Safe.t
+  ; snapshot : Yojson.Safe.t option
   }
-(** Exact outer-turn evidence captured before the tool call. The Gate stores
-    and forwards [snapshot] without interpreting its fields. *)
+(** Exact outer-turn evidence captured before the tool call. [None] means the
+    identity is known but the causal evidence is partial. The Gate stores and
+    forwards a present [snapshot] without interpreting its fields. *)
 
 type request =
   { keeper_name : string

@@ -301,13 +301,43 @@ type keeper_meta = {
 }
 
 (** Stamp the current Keeper state as structurally corrupted and requiring
-    checkpoint reset. This is current-state persistence, not a migration. *)
+    checkpoint reset. This is current-state persistence, not a migration.
+
+    A persisted [Dead_tombstone] is stronger and is left in place; see
+    {!Keeper_latched_reason.replace}. *)
 val mark_transcript_corruption_reset_required : keeper_meta -> keeper_meta
 
-(** Sanctioned generic unpause transform. Clears ordinary/operator/dead
-    latches with the pause bit and [runtime.last_blocker]. A
-    [Transcript_corruption_reset_required] latch is returned unchanged, so
-    generic resume cannot replay a poisoned checkpoint. *)
+type operator_pause_outcome =
+  { meta : keeper_meta
+  ; latch : Keeper_latched_reason.replacement
+        (** [Keep_stronger] when a stronger latch was already persisted. The
+            keeper is paused either way; only the recorded reason differs from
+            what was asked. Callers log this. *)
+  }
+
+(** The sanctioned operator-pause transform: the only place that stamps
+    [Operator_paused]. Sets [paused = true] unconditionally — an operator's
+    pause intent is always honoured — but resolves the latch through
+    {!Keeper_latched_reason.replace} so a reset-required or terminal latch is
+    never downgraded to an ordinary pause.
+
+    Before this existed, two sites assigned [Operator_paused] directly
+    ([Keeper_shutdown_finalize.paused_meta] and
+    [Keeper_keepalive.directive_paused_meta]). Either one, run against a
+    transcript-corrupted keeper, relabelled it as ordinarily paused and thereby
+    re-armed generic resume over a checkpoint that admission would still
+    reject. Observed live on 2026-07-27. *)
+val mark_operator_paused :
+  operator_actor:Keeper_latched_reason.operator_actor ->
+  keeper_meta ->
+  operator_pause_outcome
+
+(** Sanctioned generic unpause transform. Clears an ordinary [Operator_paused]
+    latch (and an unclassified pause) along with the pause bit and
+    [runtime.last_blocker]. A latch whose
+    {!Keeper_latched_reason.strength} is [Reset_required] or [Terminal] is
+    returned unchanged, so generic resume can neither replay a poisoned
+    checkpoint nor revive a dead identity. *)
 val mark_resumed : keeper_meta -> keeper_meta
 
 (** Reject [paused = false] paired with a terminal or reset-required latch. *)

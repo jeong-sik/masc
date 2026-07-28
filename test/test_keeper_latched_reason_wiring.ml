@@ -319,6 +319,84 @@ let test_heartbeat_merge_preserves_typed_latched_pause () =
     None
     (latched_reason_wire unclassified_preserved)
 
+(* ── Downgrade guard: the two operator-pause writers ─────────────
+   Both sites used to assign [Operator_paused] unconditionally, so either one
+   run against a transcript-corrupted keeper relabelled it as ordinarily
+   paused — and generic resume, which refuses the reset-required latch by
+   identity, was re-armed against a checkpoint admission still rejects. Live on
+   2026-07-27 (rondo): masc_keeper_down at 14:54:28Z overwrote a latch set at
+   14:42:11Z, and the durable record then no longer named the real cause. *)
+
+let corrupted name =
+  Keeper_meta_contract.mark_transcript_corruption_reset_required (make_meta name)
+;;
+
+let wire_transcript =
+  Keeper_latched_reason.to_wire Keeper_latched_reason.Transcript_corruption_reset_required
+;;
+
+let test_keeper_down_does_not_downgrade_transcript_latch () =
+  let retained =
+    Masc.Keeper_shutdown_finalize.For_testing.paused_meta (corrupted "downretain-corrupt")
+  in
+  check bool "keeper_down still pauses the keeper" true retained.paused;
+  check
+    (option string)
+    "keeper_down keeps the reset-required latch"
+    (Some wire_transcript)
+    (latched_reason_wire retained);
+  (* The point of keeping it: generic resume must still refuse. *)
+  let resumed = Keeper_meta_contract.mark_resumed retained in
+  check bool "generic resume is still refused" true resumed.paused
+;;
+
+let test_grpc_directive_does_not_downgrade_transcript_latch () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "grpc-directive-corrupt" in
+       Keeper_registry.For_testing.clear ();
+       ignore
+         (Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            (corrupted keeper_name));
+       Keeper_keepalive.process_directive ~agent_name:keeper_name Keeper_directive.Pause;
+       match Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool "directive pause still pauses the keeper" true entry.meta.paused;
+         check
+           (option string)
+           "directive pause keeps the reset-required latch"
+           (Some wire_transcript)
+           (latched_reason_wire entry.meta);
+         let resumed = Keeper_meta_contract.mark_resumed entry.meta in
+         check bool "generic resume is still refused" true resumed.paused
+       | None -> fail "keeper vanished from the registry after the pause directive")
+;;
+
+let test_operator_pause_still_applies_to_an_active_keeper () =
+  (* The guard must not turn every pause into a no-op. *)
+  let paused =
+    Masc.Keeper_shutdown_finalize.For_testing.paused_meta (make_meta "downretain-active")
+  in
+  check
+    (option string)
+    "an unlatched keeper records the operator pause"
+    (Some wire_keeper_down)
+    (latched_reason_wire paused);
+  let resumed = Keeper_meta_contract.mark_resumed paused in
+  check bool "and generic resume clears it" false resumed.paused
+;;
+
 let () =
   run
     "keeper_latched_reason_wiring"
@@ -343,5 +421,13 @@ let () =
             test_dead_tombstone_final_meta_records_reason
         ; test_case "heartbeat merge preserves typed latch, not pause shape" `Quick
             test_heartbeat_merge_preserves_typed_latched_pause
+        ] )
+    ; ( "operator pause never downgrades a stronger latch"
+      , [ test_case "keeper_down keeps a reset-required latch" `Quick
+            test_keeper_down_does_not_downgrade_transcript_latch
+        ; test_case "gRPC directive keeps a reset-required latch" `Quick
+            test_grpc_directive_does_not_downgrade_transcript_latch
+        ; test_case "an unlatched keeper still records the operator pause" `Quick
+            test_operator_pause_still_applies_to_an_active_keeper
         ] )
     ]

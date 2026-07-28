@@ -409,24 +409,63 @@ type keeper_meta =
   }
 
 let mark_transcript_corruption_reset_required (m : keeper_meta) : keeper_meta =
-  { m with
-    paused = true
-  ; latched_reason = Some Keeper_latched_reason.Transcript_corruption_reset_required
-  ; updated_at = now_iso ()
+  let latched_reason =
+    match
+      Keeper_latched_reason.replace
+        ~persisted:m.latched_reason
+        ~requested:Keeper_latched_reason.Transcript_corruption_reset_required
+    with
+    | Keeper_latched_reason.Replace reason -> Some reason
+    | Keeper_latched_reason.Keep_stronger { persisted; _ } -> Some persisted
+  in
+  { m with paused = true; latched_reason; updated_at = now_iso () }
+;;
+
+type operator_pause_outcome =
+  { meta : keeper_meta
+  ; latch : Keeper_latched_reason.replacement
+  }
+
+(* The pause bit is set unconditionally: an operator asking for a pause always
+   gets a paused keeper. Only the recorded reason is arbitrated, because the
+   reason now decides which recovery paths stay open. *)
+let mark_operator_paused ~operator_actor (m : keeper_meta) : operator_pause_outcome =
+  let latch =
+    Keeper_latched_reason.replace
+      ~persisted:m.latched_reason
+      ~requested:(Keeper_latched_reason.Operator_paused { operator_actor })
+  in
+  let latched_reason =
+    match latch with
+    | Keeper_latched_reason.Replace reason -> reason
+    | Keeper_latched_reason.Keep_stronger { persisted; _ } -> persisted
+  in
+  { meta =
+      { m with
+        paused = true
+      ; latched_reason = Some latched_reason
+      ; updated_at = now_iso ()
+      }
+  ; latch
   }
 ;;
 
-(* Sanctioned generic unpause transform. Reset-required transcript and terminal
-   dead-tombstone latches are deliberately immutable here. A dead identity is
-   deleted and recreated rather than revived. *)
+(* Sanctioned generic unpause transform. The refusal is expressed through
+   [Keeper_latched_reason.strength] rather than by re-listing the latch
+   variants, so the ordering has exactly one definition: a new latch that is
+   not [Resumable] is refused here without editing this function. *)
 let mark_resumed (m : keeper_meta) : keeper_meta =
-  match m.latched_reason with
-  | Some
-      ( Keeper_latched_reason.Transcript_corruption_reset_required
-      | Keeper_latched_reason.Dead_tombstone ) ->
-    m
-  | Some (Keeper_latched_reason.Operator_paused _)
-  | None ->
+  let clearable =
+    match m.latched_reason with
+    | None -> true
+    | Some reason ->
+      (match Keeper_latched_reason.strength reason with
+       | Keeper_latched_reason.Resumable -> true
+       | Keeper_latched_reason.Reset_required | Keeper_latched_reason.Terminal -> false)
+  in
+  if not clearable
+  then m
+  else
     { m with
       paused = false
     ; latched_reason = None

@@ -541,21 +541,14 @@ let persist_compaction_outcome config ~keeper_name ~outcome
 (* Structural transcript corruption is deterministic current-state damage, not
    a retry class. Persist the typed reset-required latch before the owning
    lease is terminally settled. A concurrent dead tombstone remains stronger;
-   an ordinary operator/unclassified pause is upgraded to reset-required. *)
+   an ordinary operator/unclassified pause is upgraded to reset-required — that
+   arbitration now lives in [Keeper_latched_reason.replace], applied by
+   [mark_transcript_corruption_reset_required], instead of being re-derived
+   from an admission match here. *)
 let persist_transcript_corruption_pause config ~keeper_name
   : ([ `Persisted | `No_durable_meta ], string) result
   =
-  let stamp (m : Keeper_meta_contract.keeper_meta) =
-    match
-      Keeper_lifecycle_admission.state
-        ~paused:m.paused
-        ~latched_reason:m.latched_reason
-    with
-    | Keeper_lifecycle_admission.Dead_tombstone -> m
-    | Keeper_lifecycle_admission.Active
-    | Keeper_lifecycle_admission.Paused _ ->
-      Keeper_meta_contract.mark_transcript_corruption_reset_required m
-  in
+  let stamp = Keeper_meta_contract.mark_transcript_corruption_reset_required in
   match read_meta config keeper_name with
   | Error msg -> Error msg
   | Ok None -> Ok `No_durable_meta

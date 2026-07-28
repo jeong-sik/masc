@@ -307,15 +307,24 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
 ;;
 
 let paused_meta (meta : Keeper_meta_contract.keeper_meta) =
-  { meta with
-    current_task_id = None
-  ; paused = true
-  ; latched_reason =
-      Some
-        (Keeper_latched_reason.Operator_paused
-           { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
-  ; updated_at = Masc_domain.now_iso ()
-  }
+  let { Keeper_meta_contract.meta = paused; latch } =
+    Keeper_meta_contract.mark_operator_paused
+      ~operator_actor:Keeper_latched_reason.operator_actor_keeper_down
+      meta
+  in
+  (match latch with
+   | Keeper_latched_reason.Replace _ -> ()
+   | Keeper_latched_reason.Keep_stronger { persisted; rejected } ->
+     (* The keeper is paused as asked, but a stronger latch was already
+        persisted and stands. Downgrading it here would re-open a recovery path
+        that latch exists to deny. *)
+     Log.Keeper.warn
+       "keeper_down retained the stronger persisted latch keeper=%s persisted=%s \
+        not_applied=%s"
+       meta.name
+       (Keeper_latched_reason.to_wire persisted)
+       (Keeper_latched_reason.to_wire rejected));
+  { paused with current_task_id = None }
 ;;
 
 let dead_tombstone_meta (meta : Keeper_meta_contract.keeper_meta) =

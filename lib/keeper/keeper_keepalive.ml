@@ -124,18 +124,26 @@ let persist_directive_meta_update
 
 let directive_paused_meta (meta : keeper_meta) paused =
   if paused
-  then
-    { meta with
-      paused = true
-    ; latched_reason =
-        Some
-          (Keeper_latched_reason.Operator_paused
-             { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-    ; runtime = { meta.runtime with last_blocker = None }
-    ; updated_at = now_iso ()
-    }
-  else
-    { (Keeper_meta_contract.mark_resumed meta) with updated_at = now_iso () }
+  then (
+    let { Keeper_meta_contract.meta = paused_meta; latch } =
+      Keeper_meta_contract.mark_operator_paused
+        ~operator_actor:Keeper_latched_reason.operator_actor_grpc_directive
+        meta
+    in
+    (match latch with
+     | Keeper_latched_reason.Replace _ -> ()
+     | Keeper_latched_reason.Keep_stronger { persisted; rejected } ->
+       (* A directive pause must not relabel a reset-required or terminal latch
+          as an ordinary pause: that would re-arm generic resume against damage
+          the latch was recorded to withhold it from. *)
+       Log.Keeper.warn
+         "directive pause retained the stronger persisted latch keeper=%s \
+          persisted=%s not_applied=%s"
+         meta.name
+         (Keeper_latched_reason.to_wire persisted)
+         (Keeper_latched_reason.to_wire rejected));
+    { paused_meta with runtime = { paused_meta.runtime with last_blocker = None } })
+  else { (Keeper_meta_contract.mark_resumed meta) with updated_at = now_iso () }
 ;;
 
 let transcript_corruption_reset_required (meta : keeper_meta) =

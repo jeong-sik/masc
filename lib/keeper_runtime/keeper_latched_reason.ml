@@ -29,6 +29,48 @@ let operator_actor_of_wire = function
     Error (Printf.sprintf "Keeper_latched_reason: unknown operator actor %S" other)
 ;;
 
+type strength =
+  | Resumable
+  | Reset_required
+  | Terminal
+
+(* Exhaustive, no wildcard: a new latch variant must state its strength here
+   rather than defaulting into the weakest rung, which is what would let it be
+   silently overwritten. *)
+let strength = function
+  | Operator_paused _ -> Resumable
+  | Transcript_corruption_reset_required -> Reset_required
+  | Dead_tombstone -> Terminal
+;;
+
+let strength_to_wire = function
+  | Resumable -> "resumable"
+  | Reset_required -> "reset_required"
+  | Terminal -> "terminal"
+;;
+
+let strength_rank = function
+  | Resumable -> 0
+  | Reset_required -> 1
+  | Terminal -> 2
+;;
+
+type replacement =
+  | Replace of t
+  | Keep_stronger of
+      { persisted : t
+      ; rejected : t
+      }
+
+let replace ~persisted ~requested =
+  match persisted with
+  | None -> Replace requested
+  | Some persisted ->
+    if strength_rank (strength requested) >= strength_rank (strength persisted)
+    then Replace requested
+    else Keep_stronger { persisted; rejected = requested }
+;;
+
 let equal left right =
   match left, right with
   | Operator_paused { operator_actor = Grpc_directive },

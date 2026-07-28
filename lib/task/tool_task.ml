@@ -25,22 +25,16 @@ let workflow_rejection_result
       ~tool_name
       ~start_time
       ?rule_id
-      ?tool_suggestion
-      ?hint
       ?scope_policy
       ?recoverable
-      ?alternatives
       ?extra_fields
       message
   =
   let data =
     workflow_rejection_payload
       ?rule_id
-      ?tool_suggestion
-      ?hint
       ?scope_policy
       ?recoverable
-      ?alternatives
       ?extra_fields
       message
   in
@@ -53,9 +47,6 @@ let workflow_rejection_result
 
 let missing_live_task_transition_rejection ~task_list_projection ~tool_name
       ~start_time ctx ~task_id ~action_s =
-  let task_list_name =
-    Tool_capability_projection.task_list_name task_list_projection
-  in
   sync_owner_current_task_binding ctx;
   sync_planning_current_task_with_owned_task ctx;
   task_log_warn ~task_id
@@ -65,13 +56,7 @@ let missing_live_task_transition_rejection ~task_list_projection ~tool_name
     ~tool_name
     ~start_time
     ~rule_id:"stale_task_id_not_found"
-    ~tool_suggestion:task_list_name
-    ~hint:
-      "The requested task_id is absent from the live backlog. Do not retry \
-       this task_id from memory; refresh the projected task-list tool and \
-       choose a live task."
     ~scope_policy:"observe"
-    ~alternatives:[ task_list_name; "keeper_task_claim" ]
     ~extra_fields:
       [ "task_id", `String task_id
       ; "action", `String action_s
@@ -156,9 +141,6 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
 and handle_transition
       ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
       ~tool_name ~start_time ctx args =
-  let task_list_name =
-    Tool_capability_projection.task_list_name task_list_projection
-  in
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Client_identity and must not
@@ -245,14 +227,7 @@ and handle_transition
               ~tool_name
               ~start_time
               ~rule_id:"task_release_requires_current_owner"
-              ~tool_suggestion:"keeper_board_post"
-              ~hint:
-                "Do not retry masc_transition(action=release) for a task owned \
-                 by another keeper. Ask the current assignee for handoff/release \
-                 on the board, or inspect and claim different unowned work."
               ~scope_policy:"observe"
-              ~alternatives:
-                [ "keeper_board_post"; "masc_board_post"; task_list_name; "keeper_task_claim" ]
               ~extra_fields:
                 [ "task_id", `String task_id
                 ; "task_status", `String status
@@ -300,48 +275,25 @@ and handle_transition
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name err;
     let message = Masc_domain.masc_error_to_string err in
-    let rule_id, tool_suggestion, hint, alternatives =
+    let rule_id =
       match err with
       | Masc_domain.Task (Masc_domain.Task_error.NotClaimed _) ->
-        ( Some "task_done_requires_claimed_or_started"
-        , Some "masc_transition"
-        , Some
-            "The task is still todo. Use masc_transition with action=claim for \
-             this task_id, then call keeper_task_done after the deliverable is \
-             complete."
-        , [ "masc_transition"; "keeper_task_claim"; task_list_name ] )
+        Some "task_done_requires_claimed_or_started"
       | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
-        ( Some "task_done_requires_current_owner"
-        , Some task_list_name
-        , Some
-            "Another agent owns this task. Inspect the task list, ask for handoff, \
-             or claim different unowned work instead of retrying keeper_task_done."
-        , [ task_list_name; "keeper_board_post"; "keeper_task_claim" ] )
+        Some "task_done_requires_current_owner"
       | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
-        ( Some "task_done_invalid_lifecycle_state"
-        , Some task_list_name
-        , Some
-            "The task lifecycle state does not accept keeper_task_done. Inspect \
-             task status and use the valid next lifecycle action."
-        , [ task_list_name; "masc_transition" ] )
-      | _ ->
-        ( Some "task_done_lifecycle_rejected"
-        , Some task_list_name
-        , Some "Inspect the task status before trying another lifecycle action."
-        , [ task_list_name; "masc_transition" ] )
+        Some "task_done_invalid_lifecycle_state"
+      | _ -> Some "task_done_lifecycle_rejected"
     in
     workflow_rejection_result
       ~tool_name
       ~start_time
       ?rule_id
-      ?tool_suggestion
-      ?hint
       ?recoverable:
         (match rule_id with
          | Some "task_done_requires_claimed_or_started" -> Some true
          | _ -> None)
       ~scope_policy:"observe"
-      ~alternatives
       message
   | None ->
   match handoff_context with
@@ -574,13 +526,8 @@ and handle_transition
         ~tool_name
         ~start_time
         ~rule_id:"task_transition_invalid_state"
-        ~tool_suggestion:task_list_name
-        ~hint:
-          "The lifecycle decision rejected this transition. Follow the exact \
-           remediation in the error instead of retrying the same transition."
         ~scope_policy:"observe"
         ~recoverable:false
-        ~alternatives:[ task_list_name; "masc_transition" ]
         ~extra_fields:
           [ "task_id", `String task_id
           ; "action", `String action_s

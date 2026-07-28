@@ -21,28 +21,6 @@ let completion_boundary_of_runtime_handler = function
   | _ -> Continue_after_success
 ;;
 
-let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : string =
-  let meta = Keeper_current_task_reconcile.sync_current_task_id_from_backlog ~config meta in
-  match meta.current_task_id with
-  | None ->
-    "No task currently assigned. Use keeper_task_claim or keeper_tasks_list to find one."
-  | Some tid ->
-    let task_id = Keeper_id.Task_id.to_string tid in
-    (match Workspace_backlog.read_backlog_r config with
-     | Error _ -> Printf.sprintf "Current task: %s (status unavailable)" task_id
-     | Ok backlog ->
-       (match List.find_opt (fun (t : Masc_domain.task) -> t.id = task_id) backlog.tasks with
-        | None -> Printf.sprintf "Current task: %s (not found in backlog)" task_id
-        | Some task ->
-          let status = Masc_domain.task_status_to_string task.task_status in
-          let hint =
-            Workspace_task_classify.next_actions_hint
-              ~requires_verification:(Masc_domain.task_requires_verification task)
-              task.task_status
-          in
-          Printf.sprintf "Current task: %s, status=%s%s" task_id status hint))
-;;
-
 let make_tool_bundle
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -249,15 +227,9 @@ let make_tool_bundle
                  ~validate_translated_input:descriptor.validate_translated_input
                  ()
              in
-             let description =
-               match descriptor.model_description_projection with
-               | Keeper_tool_descriptor.Static_description -> descriptor.description
-               | Keeper_tool_descriptor.Current_task_state ->
-                 descriptor.description ^ "\n\n" ^ task_state_hint ~config ~meta
-             in
              Tool_bridge.oas_tool_of_masc_with_execution_env
                ~name:model_name
-               ~description
+               ~description:descriptor.description
                ~input_schema:descriptor.input_schema
                (fun execution_env input ->
                  h

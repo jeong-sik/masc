@@ -61,7 +61,6 @@
   masc.tool_types
   masc.crypto_rng
   masc_schedule
-  masc.tool_contract_prompts
   ;; Shared leaf helpers extracted out of include_subdirs-unqualified ownership.
   masc.lockfree_atomic
   masc.json_field

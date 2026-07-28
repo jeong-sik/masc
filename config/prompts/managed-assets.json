@@ -56,8 +56,6 @@
     "keeper.unified.system.md",
     "keeper.world.md",
     "system.orchestrator.md",
-    "tool_contract.task_lifecycle_rule.md",
-    "tool_contract.task_lifecycle_workflow.md",
     "verification.anti_rationalization.md"
   ]
 }

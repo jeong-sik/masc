@@ -132,12 +132,9 @@ let handle_keeper_board_tool_with_outcome
        Keeper_tool_execution.failure
          ~class_:Tool_result.Policy_rejection
          (error_json
-            ~fields:[ "reason", `String "missing_post_id"
-                    ; "recovery", `String "call keeper_board_list or keeper_board_search first" ]
+            ~fields:[ "reason", `String "missing_post_id" ]
             "keeper_board_post_get requires post_id (format: p-xxxx). \
-             You sent empty or missing post_id. Call keeper_board_list \
-             or keeper_board_search first to discover available post IDs, \
-             then retry with the post_id you want to read."))
+             You sent empty or missing post_id."))
   | Some keeper_tool ->
     (match Keeper_tool_name.masc_board_name_of_keeper_tool keeper_tool with
      | Some board_name ->

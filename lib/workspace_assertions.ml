@@ -44,13 +44,6 @@ let assertion_kind_of_string_lenient = function
   | _ -> None
 ;;
 
-let assertion_fix_hint = function
-  | Task_claimed -> "Claim a task with masc_transition(action=claim) or keeper_task_claim"
-  | Current_task_set ->
-    "Call masc_plan_set_task to choose or re-sync the active task when current_task is \
-     unset, stale, or ambiguous"
-;;
-
 let assertion_passes st = function
   | Task_claimed -> st.task_claimed
   | Current_task_set -> st.current_task_set
@@ -60,11 +53,9 @@ let check_assertion st assertion =
   match assertion_kind_of_string_lenient assertion with
   | Some kind ->
     let passed = assertion_passes st kind in
-    let fix_hint = assertion_fix_hint kind in
     `Assoc
       [ "assertion", `String assertion
       ; "passed", `Bool passed
-      ; ("fix_hint", if passed then `Null else `String fix_hint)
       ]
   | None ->
     `Assoc

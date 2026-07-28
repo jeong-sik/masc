@@ -340,20 +340,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ]
 ;;
 
-let test_dynamic_model_description_projection_is_explicit () =
-  all_descriptors ()
-  |> List.iter (fun (descriptor : Descriptor.t) ->
-    let expected =
-      if String.equal descriptor.internal_name "masc_transition"
-      then Descriptor.Current_task_state
-      else Descriptor.Static_description
-    in
-    Alcotest.(check bool)
-      (descriptor.id ^ " model description projection")
-      true
-      (descriptor.model_description_projection = expected))
-;;
-
 let test_all_keeper_shard_schemas_are_descriptor_backed () =
   Tool_shard.all_keeper_tool_schemas
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
@@ -1477,10 +1463,6 @@ let () =
             "registered cluster model projections are explicit"
             `Quick
             test_registered_cluster_model_projections_are_explicit
-        ; test_case
-            "dynamic model description projection is explicit"
-            `Quick
-            test_dynamic_model_description_projection_is_explicit
         ; test_case
             "all Keeper shard schemas are descriptor-backed"
             `Quick

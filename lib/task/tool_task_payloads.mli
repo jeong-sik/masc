@@ -7,22 +7,16 @@ val terminal_verdict_noop_message :
 
 val workflow_rejection_payload :
   ?rule_id:string ->
-  ?tool_suggestion:string ->
-  ?hint:string ->
   ?scope_policy:string ->
   ?recoverable:bool ->
-  ?alternatives:string list ->
   ?extra_fields:(string * Yojson.Safe.t) list ->
   string ->
   Yojson.Safe.t
 
 val workflow_rejection_payload_json :
   ?rule_id:string ->
-  ?tool_suggestion:string ->
-  ?hint:string ->
   ?scope_policy:string ->
   ?recoverable:bool ->
-  ?alternatives:string list ->
   ?extra_fields:(string * Yojson.Safe.t) list ->
   string ->
   string

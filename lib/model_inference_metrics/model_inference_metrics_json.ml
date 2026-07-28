@@ -193,41 +193,6 @@ let prompt_lane_line (index : int) (stats : model_stats) =
     stats.coverage_status
 ;;
 
-let prompt_feedback_guidance (agg : aggregate) =
-  let error_rate = pct agg.total_error_entries agg.total_entries in
-  let p95_values =
-    List.filter_map (fun (stats : model_stats) -> stats.p95_latency_ms) agg.models
-  in
-  let max_p95 =
-    match p95_values with
-    | [] -> None
-    | hd :: tl -> Some (List.fold_left Float.max hd tl)
-  in
-  let has_missing_coverage =
-    List.exists
-      (fun (stats : model_stats) ->
-         stats.usage_missing_count > 0 || stats.telemetry_missing_count > 0)
-      agg.models
-  in
-  let guidance =
-    [
-      ( error_rate >= 25.0
-      , "recent error rate is high; checkpoint before long tool chains and stop \
-         after repeated provider failures instead of looping." );
-      ( Option.value ~default:0.0 max_p95 >= 120_000.0
-      , "recent p95 latency is very high; keep turns smaller and prefer \
-         incremental commits/log evidence." );
-      ( has_missing_coverage
-      , "some turns are missing usage or telemetry; preserve receipts/logs and \
-         avoid treating missing metrics as success." );
-    ]
-    |> List.filter_map (fun (active, text) -> if active then Some text else None)
-  in
-  match guidance with
-  | [] -> "runtime telemetry is healthy enough for normal turn planning."
-  | items -> String.concat " " items
-;;
-
 let render_keeper_prompt_feedback (agg : aggregate) =
   if agg.total_entries <= 0 then ""
   else
@@ -250,8 +215,7 @@ let render_keeper_prompt_feedback (agg : aggregate) =
     String.concat
       "\n"
       (header :: lane_lines
-       @ [ "Guidance: " ^ prompt_feedback_guidance agg
-         ; "Use these redacted runtime-lane labels only as telemetry context; \
+       @ [ "Use these redacted runtime-lane labels only as telemetry context; \
             do not invent concrete provider/model names from them." ])
 ;;
 

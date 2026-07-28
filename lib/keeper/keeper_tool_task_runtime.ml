@@ -24,17 +24,10 @@ let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t opti
 
 let workflow_rejection_error_json
       ?(rule_id = "keeper_task_argument_rejected")
-      ?(alternatives = [])
       ?(typed_outcome : Keeper_tool_outcome.t option)
       message
   =
-  (* RFC-0195 P0: [alternatives] is a typed list of tool names the
-     LLM can call instead.  Empty list omits the field; non-empty
-     surfaces it directly in the JSON payload so the LLM does not
-     have to parse prose [hint] strings to discover next-tool
-     candidates.
-
-     RFC-0239 / audit D1: [typed_outcome] carries a top-level
+  (* RFC-0239 / audit D1: [typed_outcome] carries a top-level
      [typed_outcome] field (extracted by the PostToolUse hook into
      [tool_call_detail.typed_outcome]) so a rejected completion is seen
      as no-progress by the loop detector rather than counted as
@@ -47,7 +40,6 @@ let workflow_rejection_error_json
   Task.Payloads.workflow_rejection_payload_json
     ~rule_id
     ~scope_policy:"observe"
-    ~alternatives
     ~extra_fields
     message
 ;;
@@ -210,8 +202,7 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
   match claim_goal_scope.Keeper_runtime_contract.fallback_reason with
   | Some _ ->
     Printf.sprintf
-      "ACTION: Stop scope-lock diagnosis; claim_scope.mode=%s already searched all \
-       tasks; resolve blockers/excluded=%d."
+      "claim_scope.mode=%s already searched all tasks; blocked/excluded=%d."
       (Keeper_runtime_contract.claim_scope_mode_to_string
          claim_goal_scope.Keeper_runtime_contract.mode)
       excluded_count
@@ -229,7 +220,7 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
       | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks -> ""
     in
     Printf.sprintf
-      "ACTION: Stop task-checking — blocked/excluded=%d.%s"
+      "blocked/excluded=%d.%s"
       excluded_count
       scope_hint
 ;;
@@ -414,19 +405,11 @@ let handle_keeper_task_tool_with_outcome
              ])
         orphans
     in
-    let action_hint =
-      if orphans = [] then
-        "ACTION: STOP calling keeper_tasks_audit — no orphans found. Move on to other work or end your turn."
-      else
-        Printf.sprintf "ACTION: %d orphan(s) found. This audit is read-only; explicit operator reconciliation is required. Surface these task IDs and STOP re-auditing until lifecycle state changes."
-          (List.length orphans)
-    in
     Keeper_tool_execution.success
       (Yojson.Safe.to_string
          (`Assoc
             [ "orphan_count", `Int (List.length orphans)
             ; "orphans", `List items
-            ; "action", `String action_hint
             ; ( "typed_outcome"
               , Keeper_tool_outcome.to_json
                   (if orphans = []
@@ -751,11 +734,10 @@ let handle_keeper_task_tool_with_outcome
       Keeper_tool_execution.failure
         ~class_:Tool_result.Workflow_rejection
         (workflow_rejection_error_json
-           ~alternatives:[ "keeper_task_claim"; "keeper_tasks_list" ]
            ~typed_outcome:
              (Keeper_tool_outcome.Error
                 { reason = "keeper_task_done rejected: task_id required" })
-           "task_id is required. Use the task_id you got from keeper_task_claim.")
+           "task_id is required.")
     else if result_text = ""
     then
       (* Schema (tool_shard_types.ml:1447) declares [result] as a
@@ -771,7 +753,6 @@ let handle_keeper_task_tool_with_outcome
       Keeper_tool_execution.failure
         ~class_:Tool_result.Workflow_rejection
         (workflow_rejection_error_json
-           ~alternatives:[ "keeper_task_done" ]
            ~typed_outcome:
              (Keeper_tool_outcome.Error
                 { reason = "keeper_task_done rejected: result required" })
@@ -783,7 +764,6 @@ let handle_keeper_task_tool_with_outcome
         Keeper_tool_execution.failure
           ~class_:Tool_result.Workflow_rejection
           (workflow_rejection_error_json
-             ~alternatives:[ "keeper_task_done" ]
              ~typed_outcome:
                (Keeper_tool_outcome.Error
                   { reason = "keeper_task_done rejected: evidence_refs required" })

@@ -129,16 +129,6 @@ let turn_based_voice_loop_json ~session_active =
           ; "delivery", `String "tts_audio_clip"
           ; "browser_route", `String "GET /api/v1/voice/audio/<token>"
           ] )
-    ; ( "keeper_next_actions"
-      , `List
-          [ `String "Use keeper_voice_speak for audible keeper output."
-          ; `String
-              "Treat transcribed operator speech as normal text input; do not wait \
-               for a live duplex audio stream."
-          ; `String
-              "Call keeper_voice_agent to inspect whether a turn-based voice session \
-               is active."
-          ] )
     ]
 
 let realtime_bridge_voice_loop_json ~session_active ~endpoint =
@@ -160,17 +150,6 @@ let realtime_bridge_voice_loop_json ~session_active ~endpoint =
           [ "delivery", `String "assistant_audio_events_or_tts_audio_clip"
           ; "fallback_tool", `String "keeper_voice_speak"
           ; "browser_route", `String "GET /api/v1/voice/audio/<token>"
-          ] )
-    ; ( "keeper_next_actions"
-      , `List
-          [ `String
-              "Use the realtime bridge for live audio frames while the session \
-               is active."
-          ; `String
-              "Fall back to keeper_voice_speak and batch STT/TTS if the bridge \
-               disconnects."
-          ; `String
-              "Call keeper_voice_agent to inspect active realtime bridge state."
           ] )
     ]
 

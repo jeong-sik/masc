@@ -554,16 +554,13 @@ let read_facts_all_strict ~keeper_id =
 
 (* Same offload shape as [read_facts_for_rewrite] below: keepers_dir resolves on
    the main domain (plain-ref memo), the blocking read + strict parse runs on
-   the pool. Unlike [read_facts_for_rewrite] this keeps the Result contract —
-   a pool failure is a read error for the caller to classify, not an exception. *)
+   the pool (inline in tests). [submit_io_or_inline] returns the closure's
+   value verbatim, so unlike [read_facts_for_rewrite] this keeps the strict
+   read's Result contract instead of raising on a malformed store. *)
 let read_facts_all_strict_offloaded ~keeper_id =
   let keepers = keepers_dir () in
-  match
-    Domain_pool_ref.submit_io_or_inline (fun () ->
-      read_facts_all_strict_for_keepers_dir ~keepers_dir:keepers ~keeper_id)
-  with
-  | Ok result -> result
-  | Error message -> Error message
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    read_facts_all_strict_for_keepers_dir ~keepers_dir:keepers ~keeper_id)
 ;;
 
 let read_facts_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =

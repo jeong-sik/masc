@@ -298,6 +298,77 @@ let test_partition_bare_relative_outside_repos_is_base_unresolved () =
       fail "expected Base_unresolved partition for playground-local file")
 ;;
 
+(* --- gate history slice ------------------------------------------------- *)
+
+module Setup = Masc.Keeper_run_tools_setup
+
+let encoded_bytes jsons =
+  List.fold_left
+    (fun acc json -> acc + String.length (Yojson.Safe.to_string json))
+    0
+    jsons
+;;
+
+let bulky_message index =
+  Agent_sdk.Types.text_message
+    Agent_sdk.Types.Assistant
+    (Printf.sprintf "turn %d %s" index (String.make 4096 'x'))
+;;
+
+let as_json message = Masc.Keeper_context_core.message_to_json message
+
+let test_gate_history_keeps_newest_within_budget () =
+  let messages = List.init 200 bulky_message in
+  let kept, omitted = Setup.gate_history_slice messages in
+  check bool "slice stays inside the declared budget" true
+    (encoded_bytes kept <= Setup.gate_history_budget_bytes);
+  check bool "older messages were dropped" true (omitted > 0);
+  (* Nothing may vanish unreported: the judge reads [omitted] to know it was
+     handed a partial view. *)
+  check int "every message is either kept or counted" (List.length messages)
+    (List.length kept + omitted);
+  check bool "kept slice is not empty" true (kept <> []);
+  check
+    (of_pp (fun fmt json -> Format.pp_print_string fmt (Yojson.Safe.to_string json)))
+    "the newest message survives"
+    (as_json (bulky_message 199))
+    (List.nth kept (List.length kept - 1))
+;;
+
+let test_gate_history_short_history_is_whole () =
+  let messages = List.init 3 bulky_message in
+  let kept, omitted = Setup.gate_history_slice messages in
+  check int "nothing is dropped" 0 omitted;
+  check int "every message is kept" (List.length messages) (List.length kept)
+;;
+
+let test_gate_history_drops_orphan_tool_result () =
+  (* The call is the oldest message and falls outside the window; its result is
+     the newest. A retained result with no visible call reads as evidence of
+     something the judge never sees happen. *)
+  let call =
+    Agent_sdk.Types.make_message
+      ~role:Agent_sdk.Types.Assistant
+      [ Agent_sdk.Types.ToolUse
+          { id = "call-outside-window"; name = "masc_status"; input = `Assoc [] }
+      ]
+  in
+  let orphan_result =
+    Agent_sdk.Types.tool_result_msg
+      ~tool_use_id:"call-outside-window"
+      ~content:"cluster snapshot"
+      ()
+  in
+  let messages = (call :: List.init 40 bulky_message) @ [ orphan_result ] in
+  let kept, omitted = Setup.gate_history_slice messages in
+  check bool "the orphan result is not retained" false
+    (List.exists
+       (fun json -> Yojson.Safe.equal json (as_json orphan_result))
+       kept);
+  check int "the dropped result is reported" (List.length messages)
+    (List.length kept + omitted)
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -333,6 +404,14 @@ let () =
             test_files_list_uses_first_object_file_path
         ; test_case "missing path falls back to base_path" `Quick
             test_missing_path_falls_back_to_base_path
+        ] )
+    ; ( "gate_history_slice"
+      , [ test_case "keeps the newest messages within the budget" `Quick
+            test_gate_history_keeps_newest_within_budget
+        ; test_case "short history is passed through whole" `Quick
+            test_gate_history_short_history_is_whole
+        ; test_case "drops a tool result whose call fell outside" `Quick
+            test_gate_history_drops_orphan_tool_result
         ] )
     ; ( "observation_partition"
       , [ test_case

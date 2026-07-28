@@ -8,6 +8,74 @@ open Keeper_agent_result
 open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
+(* [config/prompts/keeper.gate_judgment.md] hands the judge this bundle as its
+   entire visible evidence, and [keeper_gate_causal_context.mli] declares that
+   evidence to be turn-local. The capture did not match. Measured on live
+   pending approvals 2026-07-28: [history_messages] was 1,278,158 B of a
+   1,300,053 B bundle (98%), and 88.7% of that was three read-only polls
+   replayed in full - masc_status x308, keeper_board_list x200,
+   keeper_tasks_list x380. Every request raised inside a turn therefore
+   exceeded the judge model's prompt limit and was quarantined (#26081).
+
+   Recent lead-up is real evidence, so the newest messages are kept within a
+   declared budget rather than dropped wholesale. The budget is set against
+   measured behaviour of the judge slot (glm-coding.glm-5-turbo): a 400 KB
+   prompt was accepted, an 800 KB prompt was refused with
+   {"code":"1261","message":"Prompt exceeds max length"}, and 300 KB of
+   poorly-tokenising content was refused. 64 KB of history on top of the
+   ~41 KB remainder of the bundle stays well below the nearest refusal. *)
+let gate_history_budget_bytes = 64 * 1024
+
+let tool_use_ids_of_message (message : Agent_sdk.Types.message) =
+  List.filter_map
+    (fun (block : Agent_sdk.Types.content_block) ->
+       match block with
+       | Agent_sdk.Types.ToolUse { id; _ } -> Some id
+       | _ -> None)
+    message.content
+;;
+
+let tool_result_ids_of_message (message : Agent_sdk.Types.message) =
+  List.filter_map
+    (fun (block : Agent_sdk.Types.content_block) ->
+       match block with
+       | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+       | _ -> None)
+    message.content
+;;
+
+(* Returns the newest messages that fit the budget, plus how many were left
+   out. The count is carried into the bundle: a judge that cannot tell it was
+   handed a partial view weighs partial evidence as if it were complete, and
+   the prompt already asks it to name absent context in its rationale. *)
+let gate_history_slice (messages : Agent_sdk.Types.message list) =
+  let sized =
+    List.map
+      (fun message ->
+         let json = Keeper_context_core.message_to_json message in
+         message, json, String.length (Yojson.Safe.to_string json))
+      messages
+  in
+  let rec newest_within budget kept = function
+    | [] -> kept
+    | (message, json, size) :: older ->
+      if size > budget then kept else newest_within (budget - size) ((message, json) :: kept) older
+  in
+  let kept = newest_within gate_history_budget_bytes [] (List.rev sized) in
+  (* A tool result whose call fell outside the window reads as evidence of
+     something the judge never sees happen. Drop those rather than present a
+     dangling half of a pair. *)
+  let visible_calls = List.concat_map (fun (message, _) -> tool_use_ids_of_message message) kept in
+  let kept =
+    List.filter
+      (fun (message, _) ->
+         tool_result_ids_of_message message
+         |> List.for_all (fun id -> List.mem id visible_calls))
+      kept
+  in
+  List.map snd kept, List.length messages - List.length kept
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -45,16 +113,14 @@ let prepare_agent_setup
     | None -> None
   in
   let ctx_snapshot = ctx_work in
+  let gate_history, gate_history_omitted = gate_history_slice history_messages in
   let gate_context =
     Keeper_gate_causal_context.create
       ~turn_id:manifest_keeper_turn_id
       ~initial:
         (`Assoc
-           [ ( "history_messages"
-             , `List
-                 (List.map
-                    Keeper_context_core.message_to_json
-                    history_messages) )
+           [ "history_messages", `List gate_history
+           ; "history_messages_omitted", `Int gate_history_omitted
            ; "base_system_prompt", `String base_system_prompt
            ; "turn_system_prompt", `String turn_system_prompt
            ; "user_message", `String user_message

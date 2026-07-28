@@ -323,34 +323,21 @@ evidence_ref="note:public MCP tool live sweep verified by producer ${AGENT_NAME}
 done_notes="Public MCP tool live sweep completed all requested tool calls and verified each response before task completion."
 done_summary="public tool live sweep verified across the public MCP surface"
 
-next_step "masc_transition direct done rejection"
+next_step "masc_transition direct done"
 r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
-if response_transport_ok "$r_done" \
-  && ! response_tool_ok "$r_done" \
-  && [[ "$r_done" == *"Task completion must be submitted for verification"* ]] \
-  && [[ "$r_done" != *"Configured LLM completion verifier"* ]]; then
-  echo "  PASS: masc_transition direct done rejection"
+expect_ok "masc_transition direct done" "$r_done"
+
+next_step "masc_tasks done producer credit"
+r_completed="$(call_tool 5038 "masc_tasks" '{"status":"done","include_done":true}')"
+if response_tool_ok "$r_completed" \
+  && [[ "$r_completed" == *"$task_id"* ]] \
+  && [[ "$r_completed" == *"done"* ]] \
+  && [[ "$r_completed" == *"$AGENT_NAME"* ]]; then
+  echo "  PASS: masc_tasks done producer credit"
 else
   mcp_fail_with_context \
-    "masc_transition direct done: expected Verification_submission_required" \
-    "$r_done"
-fi
-
-next_step "masc_transition submit_for_verification"
-r_submit="$(call_tool 5038 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
-expect_ok "masc_transition submit_for_verification" "$r_submit"
-
-next_step "masc_tasks awaiting_verification producer credit"
-r_awaiting="$(call_tool 5039 "masc_tasks" '{"status":"awaiting_verification"}')"
-if response_tool_ok "$r_awaiting" \
-  && [[ "$r_awaiting" == *"$task_id"* ]] \
-  && [[ "$r_awaiting" == *"awaiting_verification"* ]] \
-  && [[ "$r_awaiting" == *"$AGENT_NAME"* ]]; then
-  echo "  PASS: masc_tasks awaiting_verification producer credit"
-else
-  mcp_fail_with_context \
-    "masc_tasks: AwaitingVerification projection did not retain producer credit" \
-    "$r_awaiting"
+    "masc_tasks: Done projection did not retain producer credit" \
+    "$r_completed"
 fi
 CLEANUP_TASK_FINALIZED=1
 

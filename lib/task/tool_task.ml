@@ -399,31 +399,6 @@ and handle_transition
       ~alternatives
       message
   | None ->
-  match client_side_transition_gate_error ~task_opt ~action ~action_s with
-  | Some (Masc_domain.Task_error.InvalidState message as err) ->
-    log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
-    workflow_rejection_result
-      ~tool_name
-      ~start_time
-      ~rule_id:"task_transition_invalid_state"
-      ~tool_suggestion:task_list_name
-      ~hint:
-        "The requested lifecycle transition is not valid for the task's current \
-         state. Inspect the task status and use a valid next action instead of \
-         retrying the same transition."
-      ~scope_policy:"observe"
-      ~recoverable:false
-      ~alternatives:[ task_list_name; "masc_transition" ]
-      ~extra_fields:
-        [ "task_id", `String task_id
-        ; "action", `String action_s
-        ; "requested_agent", `String ctx.agent_name
-        ]
-      (Printf.sprintf "Invalid task state: %s" message)
-  | Some err ->
-    log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
-    result_to_response ~tool_name ~start_time (Error (Masc_domain.Task err))
-  | None ->
   match handoff_context with
   | Error error ->
       (* RFC-0189: handoff_context parse error — caller passed
@@ -645,9 +620,30 @@ and handle_transition
           ~success:false
           ~reason:(Some "task_cancelled");
         ()
-   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
+  | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
             | Masc_domain.Reject_verification | Masc_domain.Release)
-   | Error _, _ -> ());
+  | Error _, _ -> ());
+  let transition_result_to_response = function
+    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
+      workflow_rejection_result
+        ~tool_name
+        ~start_time
+        ~rule_id:"task_transition_invalid_state"
+        ~tool_suggestion:task_list_name
+        ~hint:
+          "The lifecycle decision rejected this transition. Follow the exact \
+           remediation in the error instead of retrying the same transition."
+        ~scope_policy:"observe"
+        ~recoverable:false
+        ~alternatives:[ task_list_name; "masc_transition" ]
+        ~extra_fields:
+          [ "task_id", `String task_id
+          ; "action", `String action_s
+          ; "requested_agent", `String ctx.agent_name
+          ]
+        (Printf.sprintf "Invalid task state: %s" message)
+    | result -> result_to_response ~tool_name ~start_time result
+  in
   match result, task_list_projection with
   | Ok message, Tool_capability_projection.Keeper_tasks_list
     when not task_was_done_before ->
@@ -663,13 +659,13 @@ and handle_transition
               ; "next_action", next_action
               ])
          ()
-     | None -> result_to_response ~tool_name ~start_time result)
+     | None -> transition_result_to_response result)
   | Ok _, Tool_capability_projection.Keeper_tasks_list ->
-    result_to_response ~tool_name ~start_time result
+    transition_result_to_response result
   | Error _, Tool_capability_projection.Keeper_tasks_list ->
-    result_to_response ~tool_name ~start_time result
+    transition_result_to_response result
   | (Ok _ | Error _), Tool_capability_projection.External_masc_tasks ->
-    result_to_response ~tool_name ~start_time result
+    transition_result_to_response result
 
 let handle_update_priority ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in

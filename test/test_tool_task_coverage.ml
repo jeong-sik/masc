@@ -882,7 +882,7 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "Invalid task state");
   assert (str_contains (Tool_result.message result) "todo");
-  assert (str_contains (Tool_result.message result) "Valid actions");
+  assert (str_contains (Tool_result.message result) "valid_next_actions");
   assert (str_contains (Tool_result.message result) "claim");
   (* The output must be a structured workflow rejection so the OAS retry
      ladder treats it as deterministic non-retryable. *)
@@ -898,7 +898,7 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
       (fun (entry : Log.Ring.entry) ->
          str_contains entry.message "task transition failed:"
          && str_contains entry.message
-              "Transition 'start' from status 'todo'")
+              "Invalid transition: todo -> start")
       task_entries
   with
   | Some entry ->
@@ -1351,6 +1351,47 @@ let () = test "handle_transition_done_prefers_ownership_error_over_completion_ga
   assert (str_contains (Tool_result.message result) "currently owned by other-agent");
   assert (not (str_contains (Tool_result.message result) "contract verdict"))
 )
+
+let () = test "handle_transition_strict_done_reaches_lifecycle_submission_error" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("title", `String "Strict completion task");
+          ( "contract",
+            `Assoc
+              [
+                ("strict", `Bool true);
+                ("completion_contract", `List [ `String "review required" ]);
+              ] );
+        ])
+  in
+  let _ =
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "done");
+          ("notes", `String "review required");
+        ])
+  in
+  assert (not (Tool_result.is_success result));
+  assert
+    (str_contains
+       (Tool_result.message result)
+       "Task completion must be submitted for verification");
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.Claimed { assignee; _ } ->
+    assert (String.equal assignee "test-agent")
+  | status ->
+    failwith
+      ("strict direct done mutated task to "
+       ^ Masc_domain.task_status_to_string status))
 
 let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
   let ctx = make_test_ctx_with_agent "admin-agent" in
@@ -2078,8 +2119,11 @@ let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias"
           ])
     in
     assert (not (Tool_result.is_success result));
-    assert (str_contains (Tool_result.message result) "Transition 'submit_for_verification'");
-    assert (str_contains (Tool_result.message result) "from status 'todo' is not allowed");
+    assert
+      (str_contains
+         (Tool_result.message result)
+         "Invalid transition: todo -> submit_for_verification");
+    assert (str_contains (Tool_result.message result) "valid_next_actions=[claim;release;cancel]");
     assert_task_todo ctx)
 )
 

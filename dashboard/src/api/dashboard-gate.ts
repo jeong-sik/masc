@@ -10,6 +10,7 @@ import type {
   DashboardGateResponse,
   KeeperApprovalQueueItem,
   KeeperResolvedApprovalItem,
+  KeeperResolvedApprovalPage,
   KeeperApprovalQueueState,
   KeeperAutoJudgeRearmExpectation,
   GateDecisionSource,
@@ -152,6 +153,45 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
   }
 }
 
+/**
+ * Page bounds for the resolved history. Returns null when the server did not
+ * send them or sent them incompletely — an older server during a rolling
+ * deploy, for instance. Null must render as "completeness unknown", never as
+ * "this is everything": presenting a slice as the whole history is the defect
+ * this field exists to remove, so a partial page is rejected outright rather
+ * than filled in with defaults.
+ */
+function normalizeKeeperResolvedApprovalPage(
+  raw: unknown,
+): KeeperResolvedApprovalPage | null {
+  if (!isRecord(raw)) return null
+  const returned = asInt(raw.returned)
+  const matched = asInt(raw.matched)
+  const limit = asInt(raw.limit)
+  const windowMinutes = asInt(raw.window_minutes)
+  const truncated = asBoolean(raw.truncated)
+  const scanExhausted = asBoolean(raw.scan_exhausted)
+  if (
+    returned === undefined
+    || matched === undefined
+    || limit === undefined
+    || windowMinutes === undefined
+    || truncated === undefined
+    || scanExhausted === undefined
+  ) {
+    return null
+  }
+  if (returned < 0 || matched < 0 || limit < 0 || windowMinutes <= 0) return null
+  return {
+    returned,
+    matched,
+    limit,
+    window_minutes: windowMinutes,
+    truncated,
+    scan_exhausted: scanExhausted,
+  }
+}
+
 export function fetchDashboardGate(
   opts?: FetchDashboardGateOptions,
 ): Promise<DashboardGateResponse> {
@@ -182,6 +222,7 @@ export function fetchDashboardGate(
           .map(item => normalizeKeeperResolvedApprovalItem(item))
           .filter((item): item is KeeperResolvedApprovalItem => item !== null)
       : []
+    const recentResolvedPage = normalizeKeeperResolvedApprovalPage(raw.recent_resolved_page)
     const approvalRules = Array.isArray(raw.approval_rules)
       ? raw.approval_rules
           .map(item => normalizeKeeperApprovalRule(item))
@@ -193,6 +234,7 @@ export function fetchDashboardGate(
       approval_queue: approvalQueue,
       approval_queue_state: approvalQueueState,
       recent_resolved: recentResolved,
+      recent_resolved_page: recentResolvedPage,
       approval_rules: approvalRules,
       hitl: normalizeHitlStatus(raw.hitl),
     }

@@ -16,6 +16,9 @@ export function gateObservationErrorSnapshot(operatorDetail: string): DashboardG
     approval_queue: null,
     approval_queue_state: gateObservationErrorState(operatorDetail),
     recent_resolved: [],
+    // Null, not a zeroed page: an observation error means the history bounds
+    // are unknown, and a zeroed page would read as "nothing was decided".
+    recent_resolved_page: null,
     approval_rules: [],
   }
 }

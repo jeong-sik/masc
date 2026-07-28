@@ -16,6 +16,7 @@ import type {
   KeeperApprovalQueueItem,
   KeeperApprovalRule,
   KeeperResolvedApprovalItem,
+  KeeperResolvedApprovalPage,
   GateDecisionSource,
   GateMode,
   HitlContextSummary,
@@ -143,7 +144,57 @@ function resolvedAtMs(item: KeeperResolvedApprovalItem): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
+function historyWindowLabel(minutes: number): string {
+  if (minutes % 1440 === 0) return `최근 ${minutes / 1440}일`
+  if (minutes % 60 === 0) return `최근 ${minutes / 60}시간`
+  return `최근 ${minutes}분`
+}
+
+/**
+ * States the scope of what is on screen. Without it the list reads as the
+ * complete history, which it is not when the server capped it — the defect
+ * this line exists to remove. A null page means the server did not report its
+ * bounds, so the scope is stated as unknown rather than assumed complete.
+ */
+function ApHistoryScope({ page }: { page: KeeperResolvedApprovalPage | null | undefined }) {
+  if (page == null) {
+    return html`
+      <p class="ap-hist-scope" data-testid="approvals-history-scope">
+        조회 범위를 확인할 수 없습니다 — 표시된 항목이 전체가 아닐 수 있습니다.
+      </p>
+    `
+  }
+  const scope = historyWindowLabel(page.window_minutes)
+  if (page.scan_exhausted) {
+    return html`
+      <p class="ap-hist-scope warn" data-testid="approvals-history-scope">
+        ${scope} · <b class="mono">${page.returned}</b>건 표시 ·
+        조회 상한에 걸려 ${scope} 전체를 읽지 못했습니다
+      </p>
+    `
+  }
+  if (page.truncated) {
+    return html`
+      <p class="ap-hist-scope warn" data-testid="approvals-history-scope">
+        ${scope} <b class="mono">${page.matched}</b>건 중
+        <b class="mono">${page.returned}</b>건 표시
+      </p>
+    `
+  }
+  return html`
+    <p class="ap-hist-scope" data-testid="approvals-history-scope">
+      ${scope} <b class="mono">${page.matched}</b>건 전체
+    </p>
+  `
+}
+
+function ApHistory({
+  items,
+  page,
+}: {
+  items: KeeperResolvedApprovalItem[]
+  page: KeeperResolvedApprovalPage | null | undefined
+}) {
   const [filter, setFilter] = useState<ApprovalHistoryFilter>('all')
   const sorted = useMemo(
     () => [...items].sort((a, b) => resolvedAtMs(b) - resolvedAtMs(a)),
@@ -161,6 +212,7 @@ function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
 
   return html`
     <section class="ap-hist" data-testid="approvals-history-view">
+      <${ApHistoryScope} page=${page} />
       <div class="ap-hist-summary" aria-label="승인 이력 요약">
         <div class="ap-hist-stat"><b class="mono ok">${counts.approve}</b> 승인</div>
         <div class="ap-hist-stat"><b class="mono bad">${counts.reject}</b> 거부</div>
@@ -641,6 +693,7 @@ export function ApprovalsSurface() {
       ? approvalQueueState
       : null
   const resolvedItems = gateData.value?.recent_resolved ?? []
+  const resolvedPage = gateData.value?.recent_resolved_page ?? null
   const rules = gateData.value?.approval_rules ?? []
   const error = gateError.value
   // First load only: gateResource is stale-while-revalidate, so a refetch
@@ -686,7 +739,11 @@ export function ApprovalsSurface() {
                 class=${`ap-viewbtn ${view === 'history' ? 'on' : ''}`}
                 aria-selected=${view === 'history'}
                 onClick=${() => setView('history')}
-              >이력</button>
+              >
+                이력${resolvedItems.length > 0
+                  ? html`<span class="ap-viewbtn-n neutral mono" data-testid="approvals-history-count">${resolvedItems.length}</span>`
+                  : null}
+              </button>
             </div>
             ${view === 'queue' && items && items.length > 0 && stats
               ? html`<span class="ap-sla mono" title="가장 오래 대기 중인 건">최장 대기 ${apAge(stats.longest)}</span>`
@@ -712,7 +769,7 @@ export function ApprovalsSurface() {
         ${firstLoad
           ? html`<${LoadingState}>Gate 큐 불러오는 중...<//>`
           : view === 'history'
-            ? html`<${ApHistory} items=${resolvedItems} />`
+            ? html`<${ApHistory} items=${resolvedItems} page=${resolvedPage} />`
           : queueUnavailable || items === null
             ? null
           : html`

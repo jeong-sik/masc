@@ -190,12 +190,29 @@ export interface GateModeStatus {
   read_error?: string
 }
 
+/**
+ * Bounds that produced `recent_resolved`. Read them with the rows: `returned`
+ * alone cannot distinguish a complete history from the newest slice of one.
+ * `truncated` means more decisions exist inside the window; `scan_exhausted`
+ * means the server's row cap stopped before it reached the window start, so
+ * even `matched` is a floor.
+ */
+export interface KeeperResolvedApprovalPage {
+  returned: number
+  matched: number
+  limit: number
+  window_minutes: number
+  truncated: boolean
+  scan_exhausted: boolean
+}
+
 export interface DashboardGateResponse {
   generated_at?: string
   note?: string
   approval_queue: KeeperApprovalQueueItem[] | null
   approval_queue_state: KeeperApprovalQueueState
   recent_resolved?: KeeperResolvedApprovalItem[]
+  recent_resolved_page?: KeeperResolvedApprovalPage | null
   approval_rules?: KeeperApprovalRule[]
   hitl?: {
     gate_mode?: GateModeStatus

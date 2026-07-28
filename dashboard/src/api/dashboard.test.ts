@@ -1620,6 +1620,82 @@ describe('fetchDashboardGate', () => {
     ])
   })
 
+  // The resolved history is capped by the server. Without the page bounds a
+  // client renders a slice as the whole history, so a page that is absent or
+  // incomplete must normalize to null ("completeness unknown") rather than to
+  // a zeroed record that reads as "this is everything".
+  function gateResponseWithPage(page: unknown) {
+    return vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: [],
+        recent_resolved_page: page,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+  }
+
+  it('normalizes a complete resolved-history page', async () => {
+    vi.stubGlobal('fetch', gateResponseWithPage({
+      returned: 20,
+      matched: 149,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: true,
+      scan_exhausted: false,
+    }))
+
+    const result = await fetchDashboardGate()
+
+    expect(result.recent_resolved_page).toEqual({
+      returned: 20,
+      matched: 149,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: true,
+      scan_exhausted: false,
+    })
+  })
+
+  it('rejects a partial resolved-history page instead of defaulting it', async () => {
+    vi.stubGlobal('fetch', gateResponseWithPage({
+      returned: 20,
+      matched: 149,
+      limit: 20,
+      // window_minutes and the two flags are missing: an older server, or drift.
+    }))
+
+    const result = await fetchDashboardGate()
+
+    expect(result.recent_resolved_page).toBeNull()
+  })
+
+  it('reports an absent resolved-history page as unknown, not as a full history', async () => {
+    vi.stubGlobal('fetch', gateResponseWithPage(undefined))
+
+    const result = await fetchDashboardGate()
+
+    expect(result.recent_resolved_page).toBeNull()
+  })
+
+  it('rejects a resolved-history page with a nonsensical window', async () => {
+    vi.stubGlobal('fetch', gateResponseWithPage({
+      returned: 1,
+      matched: 1,
+      limit: 20,
+      window_minutes: 0,
+      truncated: false,
+      scan_exhausted: false,
+    }))
+
+    const result = await fetchDashboardGate()
+
+    expect(result.recent_resolved_page).toBeNull()
+  })
+
   it('preserves typed unavailable queue state without fabricating an empty ready queue', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

@@ -62,12 +62,14 @@ function responseWithQueue(
   approval_queue_state: DashboardGateResponse['approval_queue_state'] = {
     state: 'ready',
   },
+  recent_resolved_page: DashboardGateResponse['recent_resolved_page'] = null,
 ): DashboardGateResponse {
   return {
     generated_at: '2026-06-19T00:00:00Z',
     approval_queue,
     approval_queue_state,
     recent_resolved,
+    recent_resolved_page,
     approval_rules,
     hitl,
   } as DashboardGateResponse
@@ -83,6 +85,7 @@ async function loadSurface(
   approval_queue_state: DashboardGateResponse['approval_queue_state'] = {
     state: 'ready',
   },
+  recent_resolved_page: DashboardGateResponse['recent_resolved_page'] = null,
 ) {
   vi.resetModules()
   const resolveGateApproval = vi
@@ -111,6 +114,7 @@ async function loadSurface(
         approval_rules,
         hitl,
         approval_queue_state,
+        recent_resolved_page,
       )
     : responseWithQueue(
         approval_queue,
@@ -118,6 +122,7 @@ async function loadSurface(
         approval_rules,
         undefined,
         approval_queue_state,
+        recent_resolved_page,
       )
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),
@@ -556,6 +561,98 @@ describe('ApprovalsSurface', () => {
     expect(container.textContent).not.toContain('보류')
     expect(container.textContent).not.toContain('되돌리기')
     expect(container.textContent).not.toContain('처리이력')
+  }, 20000)
+
+  // The history list is a server-capped page. These four cases pin that the
+  // screen states its scope: a slice must never read as the whole history, and
+  // an unreported page must read as unknown rather than complete.
+  const resolvedRow: KeeperResolvedApprovalItem = {
+    id: 'appr-1',
+    keeper_name: 'rondo',
+    tool_name: 'tool_execute',
+    decision: 'approve',
+    decision_source: 'auto_judge',
+    resolved_at: '2026-07-28T02:53:47Z',
+  }
+
+  async function openHistory(page: DashboardGateResponse['recent_resolved_page']) {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [resolvedRow],
+      [],
+      undefined,
+      { state: 'ready' },
+      page,
+    )
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+    container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
+    await flushUi()
+    return container.querySelector('[data-testid="approvals-history-scope"]')
+  }
+
+  it('states the window and the total when the history is complete', async () => {
+    const scope = await openHistory({
+      returned: 1,
+      matched: 1,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: false,
+      scan_exhausted: false,
+    })
+
+    expect(scope?.textContent).toContain('최근 1일')
+    expect(scope?.textContent).toContain('건 전체')
+    expect(scope?.className).not.toContain('warn')
+  }, 20000)
+
+  it('says how much of the window is missing when the page is a slice', async () => {
+    const scope = await openHistory({
+      returned: 20,
+      matched: 149,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: true,
+      scan_exhausted: false,
+    })
+
+    expect(scope?.textContent).toContain('149')
+    expect(scope?.textContent).toContain('20')
+    expect(scope?.className).toContain('warn')
+  }, 20000)
+
+  it('says the window was not fully read when the server hit its row cap', async () => {
+    const scope = await openHistory({
+      returned: 20,
+      matched: 20,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: false,
+      scan_exhausted: true,
+    })
+
+    expect(scope?.textContent).toContain('읽지 못했습니다')
+    expect(scope?.className).toContain('warn')
+  }, 20000)
+
+  it('reports unknown scope rather than completeness when the server sent no page', async () => {
+    const scope = await openHistory(null)
+
+    expect(scope?.textContent).toContain('확인할 수 없습니다')
+    // Must not make the completeness claim the complete branch makes.
+    expect(scope?.textContent).not.toContain('건 전체')
+  }, 20000)
+
+  it('counts resolved decisions on the history tab so the default screen shows they exist', async () => {
+    const { ApprovalsSurface } = await loadSurface([], [resolvedRow])
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    // Still on the queue tab: the badge is the only cue that history exists.
+    expect(container.querySelector('[data-testid="approvals-history-view"]')).toBeNull()
+    expect(
+      container.querySelector('[data-testid="approvals-history-count"]')?.textContent,
+    ).toBe('1')
   }, 20000)
 
   it('renders resolved approval history with resolved timestamp and closed decision class', async () => {

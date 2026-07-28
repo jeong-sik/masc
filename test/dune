@@ -2020,6 +2020,8 @@
 
 (include stanzas/test_keeper_approval_queue.inc)
 
+(include stanzas/test_keeper_approval_resolved_history.inc)
+
 (include stanzas/test_keeper_toml_parser.inc)
 
 (include stanzas/test_keeper_toml_loader.inc)

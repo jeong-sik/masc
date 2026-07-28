@@ -1251,6 +1251,40 @@ let wide_audit_scan_window n =
   max audit_wide_scan_min_rows (max n 1 * audit_wide_scan_multiplier)
 ;;
 
+(* Resolved-history bounds. The wall-clock window is what an operator reasons
+   about ("the last day"); the row cap is what keeps one dashboard poll from
+   parsing the whole audit store. The two are independent because the store
+   interleaves [resolved] rows with far more numerous [summary_updated] and
+   [pending] rows, so a row cap alone silently returns fewer decisions as
+   non-resolved traffic grows. Both bounds are reported to the caller. *)
+let recent_resolved_max_limit = 200
+let recent_resolved_default_window_minutes = 1440
+let recent_resolved_min_window_minutes = 5
+let recent_resolved_max_window_minutes = 10_080
+let resolved_history_scan_min_rows = 2_000
+let resolved_history_scan_max_rows = 20_000
+
+let resolved_history_scan_rows limit =
+  max
+    resolved_history_scan_min_rows
+    (min
+       resolved_history_scan_max_rows
+       (max limit 1 * audit_wide_scan_multiplier))
+;;
+
+(* A page of resolved decisions plus the evidence needed to tell "this is
+   everything in the window" from "this is the newest slice of more". Callers
+   that render only [resolved_rows] would repeat the silent truncation this
+   record exists to remove. *)
+type resolved_history =
+  { resolved_rows : Yojson.Safe.t list (* newest first, at most [resolved_limit] *)
+  ; resolved_matched : int (* resolved decisions inside the window that were scanned *)
+  ; resolved_limit : int
+  ; resolved_window_minutes : int
+  ; resolved_scan_exhausted : bool
+      (* the row cap stopped the scan before it reached the window start *)
+  }
+
 let recent_audit_cache_key store limit =
   Printf.sprintf "%s:%d" (Dated_jsonl.base_dir store) limit
 ;;
@@ -1446,7 +1480,6 @@ let audit_scan_window ?keeper_name n =
     wide_audit_scan_window n
 ;;
 
-let resolved_audit_scan_window = wide_audit_scan_window
 
 let record_audit_read_failure ?keeper_name ?(metric_site = Keeper_approval_queue_failure_site.Audit_read_recent) ~site exn =
   Keeper_fd_pressure.note_exception ~site exn;
@@ -1533,29 +1566,121 @@ let resolved_approval_json_of_audit_event json =
     ]
 ;;
 
-let list_recent_resolved_json ~base_path ?(n = recent_resolved_history_limit) ()
-  : Yojson.Safe.t list
+(* Day key for the [YYYY-MM/DD.jsonl] layout. Must stay UTC: the write path
+   ([Jsonl_writer.dated_path]) picks the day file with [Unix.gmtime], so a
+   local-time key here would look in the wrong file for the hours where the
+   two calendars disagree. Pinned by
+   [test_keeper_approval_resolved_history.ml]. *)
+let audit_day_string_of_ts ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf
+    "%04d-%02d-%02d"
+    (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1)
+    tm.Unix.tm_mday
+;;
+
+let clamp_int value ~low ~high = max low (min high value)
+
+let resolved_history_empty ~limit ~window_minutes =
+  { resolved_rows = []
+  ; resolved_matched = 0
+  ; resolved_limit = limit
+  ; resolved_window_minutes = window_minutes
+  ; resolved_scan_exhausted = false
+  }
+;;
+
+let list_recent_resolved
+      ~base_path
+      ?(limit = recent_resolved_history_limit)
+      ?(window_minutes = recent_resolved_default_window_minutes)
+      ()
+  : resolved_history
   =
-  if n <= 0
-  then []
+  let limit = clamp_int limit ~low:0 ~high:recent_resolved_max_limit in
+  let window_minutes =
+    clamp_int
+      window_minutes
+      ~low:recent_resolved_min_window_minutes
+      ~high:recent_resolved_max_window_minutes
+  in
+  let empty = resolved_history_empty ~limit ~window_minutes in
+  if limit <= 0
+  then empty
   else (
     match get_audit_store ~base_path () with
-    | None -> []
+    | None -> empty
     | Some store ->
-      try
-        read_recent_audit_raw store (resolved_audit_scan_window n)
-        |> List.filter resolved_history_event
-        |> List.rev
-        |> List.filteri (fun idx _ -> idx < n)
-        |> List.map resolved_approval_json_of_audit_event
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        record_audit_read_failure
-          ~metric_site:Keeper_approval_queue_failure_site.Audit_list_recent_resolved
-          ~site:"approval_audit.list_recent_resolved"
-          exn;
-        [])
+      (try
+         let now = Unix.gettimeofday () in
+         let window_start =
+           now -. (float_of_int window_minutes *. Masc_time_constants.minute)
+         in
+         let scan_rows = resolved_history_scan_rows limit in
+         (* Chronological, oldest first, tail-bounded to [scan_rows]. *)
+         let scanned =
+           Dated_jsonl.read_range_recent
+             store
+             ~since:(audit_day_string_of_ts window_start)
+             ~until:(audit_day_string_of_ts now)
+             scan_rows
+         in
+         let scanned_count = List.length scanned in
+         (* The row cap only hides decisions when it stopped us before we
+            reached back to the window start. If the oldest row we read is
+            already older than the window, the window is fully covered and the
+            cap is irrelevant. *)
+         let scan_exhausted =
+           scanned_count >= scan_rows
+           &&
+           match scanned with
+           | [] -> true
+           | oldest :: _ ->
+             (match Safe_ops.json_float_opt "ts" oldest with
+              | None -> true
+              | Some ts -> ts > window_start)
+         in
+         (* An undated row cannot be placed in a wall-clock window, so it is
+            excluded rather than dated by guesswork. The audit writer always
+            stamps [ts]; this is the boundary that keeps a future regression
+            from silently mis-dating history. *)
+         let matched_rows =
+           scanned
+           |> List.filter_map (fun json ->
+             if resolved_history_event json
+             then (
+               match Safe_ops.json_float_opt "ts" json with
+               | Some ts when ts >= window_start -> Some (ts, json)
+               | Some _ | None -> None)
+             else None)
+           (* Newest first by timestamp, not by file position. The audit writer
+              stamps [ts] before it takes the append lock, so two concurrent
+              resolutions can land in the file in the opposite order from the
+              one they were decided in. [stable_sort] keeps file order as the
+              tie-break for identical stamps. *)
+           |> List.stable_sort (fun (left, _) (right, _) -> Float.compare right left)
+           |> List.map snd
+         in
+         let rows =
+           matched_rows
+           |> List.filteri (fun idx _ -> idx < limit)
+           |> List.map resolved_approval_json_of_audit_event
+         in
+         { resolved_rows = rows
+         ; resolved_matched = List.length matched_rows
+         ; resolved_limit = limit
+         ; resolved_window_minutes = window_minutes
+         ; resolved_scan_exhausted = scan_exhausted
+         }
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         record_audit_read_failure
+           ~metric_site:Keeper_approval_queue_failure_site.Audit_list_recent_resolved
+           ~site:"approval_audit.list_recent_resolved"
+           exn;
+         empty))
 ;;
 
 let generate_id () = make_generated_id "appr"

@@ -194,12 +194,31 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
 
 include Server_dashboard_http_memory_subsystems
 
+(** Read the resolved-history page bounds. [?limit=<rows>] caps the returned
+    decisions and [?window=<minutes>] caps how far back they may be dated,
+    matching the [?window=] idiom of {!dashboard_gate_tool_events_http_json}.
+    Both are clamped by the approval queue, which owns the bounds; the clamp
+    here only keeps a hostile query from allocating before that. [offset] and
+    [status_filter] used to be parsed and cache-keyed here while the projection
+    discarded them, which fragmented the cache across keys that computed
+    identical payloads — they are gone rather than silently ignored. *)
 let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
-  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-  let offset =
-    int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
+  let limit =
+    int_query_param
+      request
+      "limit"
+      ~default:Keeper_approval_queue.recent_resolved_history_limit
+    |> clamp ~min_v:1 ~max_v:Keeper_approval_queue.recent_resolved_max_limit
   in
-  let status_filter = None in
+  let window_minutes =
+    int_query_param
+      request
+      "window"
+      ~default:Keeper_approval_queue.recent_resolved_default_window_minutes
+    |> clamp
+         ~min_v:Keeper_approval_queue.recent_resolved_min_window_minutes
+         ~max_v:Keeper_approval_queue.recent_resolved_max_window_minutes
+  in
   let force = bool_query_param request "force" ~default:false in
   let approval_queue_revision =
     Keeper_approval_queue.store_revision_for_workspace ~base_path
@@ -209,12 +228,12 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
       "gate:%s;%d;%d;%d"
       base_path
       limit
-      offset
+      window_minutes
       approval_queue_revision
   in
   let compute () =
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      Dashboard_gate.dashboard_json ~base_path ~limit ~offset ~status_filter)
+      Dashboard_gate.dashboard_json ~base_path ~limit ~window_minutes)
   in
   if force then Dashboard_cache.invalidate cache_key;
   Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s compute

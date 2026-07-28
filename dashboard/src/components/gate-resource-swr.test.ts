@@ -116,6 +116,9 @@ describe('Gate resource (stale-while-revalidate)', () => {
         icon: '!',
       },
       recent_resolved: [],
+      // Null, not a zeroed page: an observation error leaves the history bounds
+      // unknown, and a zeroed page would render as "nothing was decided".
+      recent_resolved_page: null,
       approval_rules: [],
     })
     expect(signals.gateError.value).toContain('Gate 새로고침 실패')

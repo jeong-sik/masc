@@ -253,11 +253,85 @@ let test_no_goal_prompt_blocks_repo_creation_question () =
        ~needle:"Do not ask the operator what repo, goal, or task to create"
        system)
 
+(* The section is rendered from Keeper_sandbox, so the assertion compares
+   against that SSOT rather than a sentence. Rewording the prompt keeps this
+   green; regressing the projection so a Docker keeper is handed the host
+   root -- the #10650 failure -- does not. *)
+let sandbox_root_for profile =
+  let meta = { meta with Masc.Keeper_meta_contract.sandbox_profile = profile } in
+  let base_path = "/tmp/unused" in
+  let config = Masc.Workspace.default_config base_path in
+  let { Prompt.system_prompt; _ } =
+    Prompt.build_prompt ~meta ~base_path ~observation:base_observation ()
+  in
+  (system_prompt, Masc.Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+
+let test_docker_keeper_sees_its_container_root () =
+  with_repo_prompt_config (fun () ->
+    let rendered, visible_root =
+      sandbox_root_for Masc.Keeper_types_profile.Docker
+    in
+    check bool "container root is in the prompt" true
+      (contains ~needle:visible_root rendered))
+
+let test_local_keeper_sees_its_host_root () =
+  with_repo_prompt_config (fun () ->
+    let rendered, visible_root =
+      sandbox_root_for Masc.Keeper_types_profile.Local
+    in
+    check bool "host root is in the prompt" true
+      (contains ~needle:visible_root rendered))
+
+(* Execute dispatch can transparently run a Docker keeper's command on the
+   host when the image preflight fails
+   (Keeper_sandbox_shell_ir_target.docker_local_fallback_target), and the
+   typed cwd resolver confines raw cwds against host roots in both cases.
+   The mount spelling therefore must never be promised as an execution
+   operand: the prompt has to carry the caveat, and the host spelling of
+   the same sandbox must not reach the Docker keeper at all (#10650). *)
+let test_docker_root_is_not_promised_as_execution_operand () =
+  with_repo_prompt_config (fun () ->
+    let rendered, _ = sandbox_root_for Masc.Keeper_types_profile.Docker in
+    check bool "docker prompt forbids absolute execution operands" true
+      (contains
+         ~needle:
+           "never place this absolute path in a typed cwd or an argv operand"
+         rendered);
+    let config = Masc.Workspace.default_config "/tmp/unused" in
+    let docker_meta =
+      { meta with
+        Masc.Keeper_meta_contract.sandbox_profile =
+          Masc.Keeper_types_profile.Docker
+      }
+    in
+    let host_root =
+      Masc.Keeper_sandbox.host_root_abs_of_meta ~config docker_meta
+    in
+    check bool "host spelling is absent from the docker prompt" false
+      (contains ~needle:host_root rendered))
+
+let test_local_root_carries_no_backend_caveat () =
+  with_repo_prompt_config (fun () ->
+    let rendered, _ = sandbox_root_for Masc.Keeper_types_profile.Local in
+    check bool "local prompt has no container fallback caveat" false
+      (contains ~needle:"when the container backend is unavailable" rendered))
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
   run "keeper_surface_presence_prompt"
     [
+      ( "sandbox paths",
+        [
+          test_case "docker keeper sees its container root" `Quick
+            test_docker_keeper_sees_its_container_root;
+          test_case "local keeper sees its host root" `Quick
+            test_local_keeper_sees_its_host_root;
+          test_case "docker root is not promised as execution operand" `Quick
+            test_docker_root_is_not_promised_as_execution_operand;
+          test_case "local root carries no backend caveat" `Quick
+            test_local_root_carries_no_backend_caveat;
+        ] );
       ( "connected surfaces section",
         [
           test_case "bound keeper sees presence section" `Quick

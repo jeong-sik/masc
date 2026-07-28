@@ -1409,7 +1409,7 @@ let fresh_loopback_port () =
   Unix.close socket;
   port
 
-let with_native_count_server f =
+let with_native_count_server ?(input_tokens = 500) f =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -1417,12 +1417,18 @@ let with_native_count_server f =
   let net = Eio.Stdenv.net env in
   let port = fresh_loopback_port () in
   let paths = ref [] in
+  let bodies = ref [] in
   let handler _conn request body =
-    let _body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     let path = Cohttp.Request.uri request |> Uri.path in
     paths := path :: !paths;
+    bodies := body :: !bodies;
     if String.equal path "/v1/messages/count_tokens"
-    then Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":500}|} ()
+    then
+      Cohttp_eio.Server.respond_string
+        ~status:`OK
+        ~body:(Printf.sprintf {|{"input_tokens":%d}|} input_tokens)
+        ()
     else
       Cohttp_eio.Server.respond_string
         ~status:`Internal_server_error
@@ -1442,7 +1448,7 @@ let with_native_count_server f =
     Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
   let result = f ~sw ~net ~base_url in
-  result, List.rev !paths
+  result, List.rev !paths, List.rev !bodies
 
 let with_native_projection_server f =
   Eio_main.run
@@ -1496,6 +1502,7 @@ let context_fit_provider_config base_url =
     ~request_path:"/v1/messages"
     ~max_tokens:64
     ~max_context:512
+    ~max_request_body_bytes:1_048_576
     ~temperature:0.2
     ()
 
@@ -1541,7 +1548,7 @@ let check_context_fit_overflow = function
   | Ok _ -> fail "overflowed request must not reach completion dispatch"
 
 let test_runtime_agent_fresh_build_enforces_native_context_fit () =
-  let (), paths =
+  let (), paths, _bodies =
     with_native_count_server
     @@ fun ~sw ~net ~base_url ->
     let config = context_fit_runtime_config base_url in
@@ -1557,7 +1564,7 @@ let test_runtime_agent_fresh_build_enforces_native_context_fit () =
   check (list string) "fresh request paths" [ "/v1/messages/count_tokens" ] paths
 
 let test_runtime_agent_resume_enforces_native_context_fit () =
-  let (), paths =
+  let (), paths, _bodies =
     with_native_count_server
     @@ fun ~sw ~net ~base_url ->
     let config = context_fit_runtime_config base_url in
@@ -1577,6 +1584,279 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
       (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
+
+let test_capacity_readmission_probe_stops_before_transport_when_still_over () =
+  let (), paths, _bodies =
+    with_native_count_server
+    @@ fun ~sw ~net ~base_url ->
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config:(context_fit_runtime_config base_url)
+        ~checkpoint:(context_fit_checkpoint ())
+        ~stream:false
+        ~continuation:false
+        [ Agent_sdk.Types.Text "same failed request" ]
+    with
+    | Error
+        (Runtime_agent.Still_over_capacity
+           (Agent_sdk.Error.Api
+              (Agent_sdk.Retry.ContextOverflow { limit = Some 512; _ }))) ->
+      ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+    | Ok _ -> fail "over-capacity candidate reached the probe transport"
+  in
+  check
+    (list string)
+    "rejected probe performs only provider-native measurement"
+    [ "/v1/messages/count_tokens" ]
+    paths
+
+let test_capacity_readmission_probe_admits_without_completion_dispatch () =
+  let (), paths, _bodies =
+    with_native_count_server
+      ~input_tokens:400
+    @@ fun ~sw ~net ~base_url ->
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config:(context_fit_runtime_config base_url)
+        ~checkpoint:(context_fit_checkpoint ())
+        ~stream:false
+        ~continuation:false
+        [ Agent_sdk.Types.Text "same failed request" ]
+    with
+    | Ok evidence ->
+      check
+        (option int)
+        "serialized-body proof retains the runtime cap"
+        (Some 1_048_576)
+        evidence.Runtime_agent.serialized_body_limit_bytes;
+      check
+        (option int)
+        "token-fit proof retains the admitted limit"
+        (Some 512)
+        evidence.token_fit_limit_tokens
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+  in
+  check
+    (list string)
+    "admitted probe measures but never dispatches completion HTTP"
+    [ "/v1/messages/count_tokens" ]
+    paths
+
+let test_capacity_readmission_probe_uses_only_captured_request_shaping () =
+  let live_hook_calls = ref 0 in
+  let probe_hook_calls = ref 0 in
+  let shaping_marker = "captured-probe-request-shaping" in
+  let hooks counter decision : Agent_sdk.Hooks.hooks =
+    { Agent_sdk.Hooks.empty with
+      before_turn_params =
+        Some
+          (fun _ ->
+            incr counter;
+            decision)
+    }
+  in
+  let live_hooks = hooks live_hook_calls Agent_sdk.Hooks.Continue in
+  let probe_hooks =
+    hooks
+      probe_hook_calls
+      (Agent_sdk.Hooks.AdjustParams
+         { Agent_sdk.Hooks.default_turn_params with
+           extra_system_context = Some shaping_marker
+         })
+  in
+  let (), paths, bodies =
+    with_native_count_server
+      ~input_tokens:400
+    @@ fun ~sw ~net ~base_url ->
+    let config =
+      { (context_fit_runtime_config base_url) with
+        hooks = Some live_hooks
+      }
+    in
+    match
+      Runtime_agent.probe_blocks_admission
+        ~request_shaping_hooks:probe_hooks
+        ~sw
+        ~net
+        ~config
+        ~checkpoint:(context_fit_checkpoint ())
+        ~stream:false
+        ~continuation:false
+        [ Agent_sdk.Types.Text "same failed request" ]
+    with
+    | Ok _ -> ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+  in
+  check int "live keeper hook is not replayed" 0 !live_hook_calls;
+  check int "captured request shaping runs once" 1 !probe_hook_calls;
+  check
+    (list string)
+    "isolated probe performs only native measurement"
+    [ "/v1/messages/count_tokens" ]
+    paths;
+  match bodies with
+  | [ body ] ->
+    check bool "captured shaping reaches exact measured request" true
+      (String_util.contains_substring body shaping_marker)
+  | _ -> fail "isolated probe did not produce one measured request"
+
+let test_capacity_readmission_stream_continuation_does_not_duplicate_goal () =
+  let persisted_marker = "persisted-original-goal" in
+  let duplicate_marker = "must-not-be-appended-again" in
+  let (), paths, bodies =
+    with_native_count_server
+      ~input_tokens:400
+    @@ fun ~sw ~net ~base_url ->
+    let checkpoint =
+      { (context_fit_checkpoint ()) with
+        messages =
+          [ Agent_sdk.Types.text_message
+              Agent_sdk.Types.User
+              persisted_marker
+          ]
+      }
+    in
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config:(context_fit_runtime_config base_url)
+        ~checkpoint
+        ~stream:true
+        ~continuation:true
+        [ Agent_sdk.Types.Text duplicate_marker ]
+    with
+    | Ok _ -> ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+  in
+  check
+    (list string)
+    "continuation performs measurement but no completion HTTP"
+    [ "/v1/messages/count_tokens" ]
+    paths;
+  let count_body =
+    match bodies with
+    | [ body ] -> body
+    | _ -> fail "continuation did not produce exactly one measurement body"
+  in
+  check bool "persisted continuation is measured" true
+    (String_util.contains_substring count_body persisted_marker);
+  check bool "original goal is not appended twice" false
+    (String_util.contains_substring count_body duplicate_marker)
+
+let test_capacity_readmission_sync_continuation_fails_closed () =
+  let (), paths, _bodies =
+    with_native_count_server
+      ~input_tokens:400
+    @@ fun ~sw ~net ~base_url ->
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config:(context_fit_runtime_config base_url)
+        ~checkpoint:(context_fit_checkpoint ())
+        ~stream:false
+        ~continuation:true
+        [ Agent_sdk.Types.Text "must not be appended" ]
+    with
+    | Error
+        (Runtime_agent.Readmission_failed
+           (Agent_sdk.Error.Config
+              (Agent_sdk.Error.InvalidConfig
+                 { field = "capacity_readmission.continuation"; _ }))) ->
+      ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+    | Ok _ -> fail "sync continuation silently changed the failed request"
+  in
+  check
+    (list string)
+    "unsupported sync continuation performs no measurement or completion HTTP"
+    []
+    paths
+
+let test_capacity_readmission_compatibility_path_admits_exact_body () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let checkpoint =
+    { (context_fit_checkpoint ()) with
+      agent_name = "body-cap-fixture"
+    ; model = "qwen"
+    ; system_prompt = Some "stale"
+    }
+  in
+  let config max_request_body_bytes =
+    let provider_cfg =
+      { (provider_cfg ()) with
+        Llm_provider.Provider_config.max_request_body_bytes =
+          max_request_body_bytes
+      }
+    in
+    Runtime_agent.default_config
+      ~name:"body-cap-fixture"
+      ~provider_cfg
+      ~system_prompt:"Exercise the compatibility request serializer."
+      ~tools:[]
+  in
+  let probe max_request_body_bytes text =
+    Runtime_agent.probe_blocks_admission
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~config:(config max_request_body_bytes)
+      ~checkpoint
+      ~stream:false
+      ~continuation:false
+      [ Agent_sdk.Types.Text text ]
+  in
+  (match probe (Some 128) (String.make 1_024 'x') with
+   | Error
+       (Runtime_agent.Still_over_capacity
+          (Agent_sdk.Error.Api
+             (Agent_sdk.Retry.InvalidRequest
+                { reason =
+                    Agent_sdk.Retry.Request_body_too_large
+                      { actual_bytes; limit_bytes = 128 }
+                ; _
+                }))) ->
+     check bool "exact compatibility body exceeds the cap" true
+       (actual_bytes > 128)
+   | Error (Runtime_agent.Still_over_capacity error)
+   | Error (Runtime_agent.Readmission_failed error) ->
+     fail (Agent_sdk.Error.to_string error)
+   | Ok _ ->
+     fail
+       "custom probe transport bypassed compatibility serialized-body admission");
+  match probe (Some 1_048_576) "short candidate" with
+  | Ok evidence ->
+    check
+      (option int)
+      "compatibility body limit is exact"
+      (Some 1_048_576)
+      evidence.Runtime_agent.serialized_body_limit_bytes;
+    check
+      (option int)
+      "compatibility route fabricates no token proof"
+      None
+      evidence.token_fit_limit_tokens
+  | Error (Runtime_agent.Still_over_capacity error)
+  | Error (Runtime_agent.Readmission_failed error) ->
+    fail (Agent_sdk.Error.to_string error)
 
 let projection_messages marker messages =
   let project_block = function
@@ -1870,6 +2150,30 @@ let () =
             "runtime resume enforces native context fit"
             `Quick
             test_runtime_agent_resume_enforces_native_context_fit
+        ; test_case
+            "capacity readmission stops before transport while still over"
+            `Quick
+            test_capacity_readmission_probe_stops_before_transport_when_still_over
+        ; test_case
+            "capacity readmission admits without completion dispatch"
+            `Quick
+            test_capacity_readmission_probe_admits_without_completion_dispatch
+        ; test_case
+            "capacity readmission uses only captured request shaping"
+            `Quick
+            test_capacity_readmission_probe_uses_only_captured_request_shaping
+        ; test_case
+            "capacity readmission continues without duplicate goal"
+            `Quick
+            test_capacity_readmission_stream_continuation_does_not_duplicate_goal
+        ; test_case
+            "capacity readmission fails closed for sync continuation"
+            `Quick
+            test_capacity_readmission_sync_continuation_fails_closed
+        ; test_case
+            "capacity readmission compatibility path admits exact body"
+            `Quick
+            test_capacity_readmission_compatibility_path_admits_exact_body
         ; test_case
             "fresh projection precedes measurement and dispatch"
             `Quick

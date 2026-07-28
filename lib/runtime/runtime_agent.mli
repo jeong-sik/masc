@@ -129,6 +129,33 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
+type capacity_readmission_failure =
+  | Still_over_capacity of Agent_sdk.Error.sdk_error
+  | Readmission_failed of Agent_sdk.Error.sdk_error
+
+type capacity_readmission_evidence =
+  { serialized_body_limit_bytes : int option
+  ; token_fit_limit_tokens : int option
+  ; serving_constraint_admitted : bool
+  }
+(** Evidence carried by the exact request that reached the disabled completion
+    transport. A declared [serialized_body_limit_bytes] means the provider body
+    passed that exact byte ceiling. [token_fit_limit_tokens = Some limit] means
+    OAS also measured this request through the provider-native protocol and
+    admitted it against [limit]. *)
+
+type capacity_readmission_probe =
+  Agent_sdk.Checkpoint.t ->
+  (capacity_readmission_evidence, capacity_readmission_failure) result
+(** Rebuild and re-admit one failed Keeper provider request against a candidate
+    checkpoint. The probe may call the provider-native measurement endpoint,
+    but never sends a completion-generation request. *)
+
+module Capacity_readmission_for_testing : sig
+  val failure_of_error :
+    Agent_sdk.Error.sdk_error -> capacity_readmission_failure
+end
+
 type worker_lifecycle_classification =
   { event : string
   ; status : string
@@ -373,6 +400,26 @@ val resume_from_checkpoint :
 (** Resumes from a persisted checkpoint.  Uses
     [Runtime_agent_context.prepare_resume] to reconcile
     [checkpoint.turn_count] with the current config. *)
+
+val probe_blocks_admission :
+  ?request_shaping_hooks:Agent_sdk.Hooks.hooks ->
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  config:config ->
+  checkpoint:Agent_sdk.Checkpoint.t ->
+  stream:bool ->
+  continuation:bool ->
+  Agent_sdk.Types.content_block list ->
+  (capacity_readmission_evidence, capacity_readmission_failure) result
+(** Execute the same OAS projection, serialization, provider-native
+    measurement, and admission path with a local completion-transport sentinel.
+    [request_shaping_hooks] is the caller-captured, request-only hook set; live
+    Keeper effects, context injection, event publication, tracing, and
+    checkpoint persistence are disabled for the probe.
+
+    [continuation] resumes an already-persisted post-tool stream turn without
+    appending the original user input again. Synchronous continuation fails
+    closed because OAS exposes no equivalent public continuation entry point. *)
 
 val run :
   sw:Eio.Switch.t ->

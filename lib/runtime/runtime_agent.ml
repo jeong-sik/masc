@@ -141,6 +141,20 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
+type capacity_readmission_failure =
+  | Still_over_capacity of Agent_sdk.Error.sdk_error
+  | Readmission_failed of Agent_sdk.Error.sdk_error
+
+type capacity_readmission_evidence =
+  { serialized_body_limit_bytes : int option
+  ; token_fit_limit_tokens : int option
+  ; serving_constraint_admitted : bool
+  }
+
+type capacity_readmission_probe =
+  Agent_sdk.Checkpoint.t ->
+  (capacity_readmission_evidence, capacity_readmission_failure) result
+
 type worker_lifecycle_classification =
   { event : string
   ; status : string
@@ -970,6 +984,29 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
       Agent.resume state restoration.
     - OAS no longer enforces cost or cumulative-token budgets; cost is
       observe-only telemetry. *)
+let resume_from_checkpoint_with_transport
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~(config : config)
+    ~(checkpoint : Agent_sdk.Checkpoint.t)
+    ~(transport : Llm_provider.Llm_transport.t option)
+  =
+  let prepared_resume =
+    Runtime_agent_context.prepare_resume ~config ~checkpoint
+  in
+  Log.Misc.info
+    "oas_worker %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
+    config.name checkpoint.turn_count;
+  let options = { prepared_resume.options with transport } in
+  Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
+    ~tools:config.tools ?context:config.context
+    ~provider_config:config.provider_cfg
+    ~context_fit_admission:prepared_resume.context_fit_admission
+    ?model_input_projection:config.model_input_projection
+    ~options ~config:prepared_resume.agent_config
+    ?checkpoint_sink:config.checkpoint_sink
+    ()
+;;
+
 let resume_from_checkpoint
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -989,22 +1026,244 @@ let resume_from_checkpoint
      with
      | Error _ as e -> e
      | Ok transport ->
-      let prepared_resume =
-        Runtime_agent_context.prepare_resume ~config ~checkpoint
-      in
-      Log.Misc.info
-        "oas_worker %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
-        config.name checkpoint.turn_count;
-      let options = { prepared_resume.options with transport } in
       Ok
-        (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
-           ~tools:config.tools ?context:config.context
-           ~provider_config:config.provider_cfg
-           ~context_fit_admission:prepared_resume.context_fit_admission
-           ?model_input_projection:config.model_input_projection
-           ~options ~config:prepared_resume.agent_config
-           ?checkpoint_sink:config.checkpoint_sink
-           ()))
+        (resume_from_checkpoint_with_transport
+           ~net
+           ~config
+           ~checkpoint
+           ~transport))
+
+let capacity_readmission_failure_of_error error =
+  match error with
+  | Agent_sdk.Error.Api (ContextOverflow _)
+  | Agent_sdk.Error.Api
+      (InvalidRequest
+         { reason =
+             ( Request_body_too_large _
+             | Request_body_refused_by_provider _ )
+         ; _
+         })
+  | Agent_sdk.Error.Api
+      (InputCapacity
+         { reason =
+             Serving_constraint_rejected
+               (Llm_provider.Serving_constraint.Boundary_unknown _
+               | Llm_provider.Serving_constraint.Input_rejected _)
+         ; _
+         }) ->
+    Still_over_capacity error
+  | Agent_sdk.Error.Api
+      (InvalidRequest
+         { reason = Json_parse_error | Unknown_invalid_request; _ })
+  | Agent_sdk.Error.Api
+      (InputCapacity
+         { reason =
+             ( Serving_constraint_rejected
+                 (Llm_provider.Serving_constraint.Evidence_not_yet_valid _
+                 | Llm_provider.Serving_constraint.Evidence_expired _)
+             | Token_measurement_unavailable _ )
+         ; _
+         })
+  | Agent_sdk.Error.Api
+      ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
+      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
+      | Timeout _ )
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ ->
+    Readmission_failed error
+;;
+
+module Capacity_readmission_for_testing = struct
+  let failure_of_error = capacity_readmission_failure_of_error
+end
+
+let request_enforces_token_fit (config : Llm_provider.Provider_config.t) =
+  Llm_provider.Count_tokens_sync.supports_completion_request_measurement config
+  ||
+    (match Llm_provider.Provider_config.capabilities_for_config_model config with
+     | Some { Llm_provider.Capabilities.serving_constraint = Some _; _ } -> true
+     | Some _ | None -> false)
+;;
+
+let capacity_readmission_evidence ~stream request =
+  let prepared =
+    Llm_provider.Complete.prepare_request
+      ~config:request.Llm_provider.Llm_transport.config
+      ~messages:request.messages
+      ~tools:request.tools
+      ?capture_id:request.capture_id
+      ?stream_idle_timeout_s:request.stream_idle_timeout_s
+      ?first_event_timeout_s:request.first_event_timeout_s
+      ?body_timeout_s:request.body_timeout_s
+      ()
+  in
+  let token_fit_enforced = request_enforces_token_fit request.config in
+  let ( let* ) = Result.bind in
+  let* () =
+    if token_fit_enforced
+    then
+      (* The Enforce_when_supported route serializes and admits this exact body
+         before native measurement, so reaching the transport is already the
+         proof. Re-serializing here would create a second, merely equivalent
+         artifact rather than observe the admitted one. *)
+      Ok ()
+    else
+      (* Injected transports bypass the built-in HTTP serializer on the
+         compatibility route. Admit that exact request once here before the
+         sentinel can claim success. *)
+      Llm_provider.Complete.admit_request_body ~stream prepared
+      |> Result.map (fun _ -> ())
+  in
+  let* token_fit_limit_tokens =
+    if token_fit_enforced
+    then
+      (match Llm_provider.Complete.resolve_context_limit prepared with
+       | Ok limit -> Ok (Some limit)
+       | Error _ ->
+         Error
+           (Llm_provider.Http_client.AcceptRejected
+              { reason =
+                  "capacity re-admission reached the transport without a \
+                   resolvable context limit"
+              }))
+    else Ok None
+  in
+  Ok
+    { serialized_body_limit_bytes = request.config.max_request_body_bytes
+    ; token_fit_limit_tokens
+    ; serving_constraint_admitted =
+        Option.is_some (Llm_provider.Complete.serving_constraint prepared)
+    }
+;;
+
+let capacity_probe_transport observed : Llm_provider.Llm_transport.t =
+  let reject ~stream request =
+    match capacity_readmission_evidence ~stream request with
+    | Error _ as error -> error
+    | Ok evidence ->
+      Atomic.set observed (Some evidence);
+      Error
+        (Llm_provider.Http_client.AcceptRejected
+           { reason =
+               "provider transport is disabled for capacity re-admission"
+           })
+  in
+  { complete_sync =
+      (fun request ->
+         { Llm_provider.Llm_transport.response =
+             reject ~stream:false request
+         ; latency_ms = None
+         })
+  ; complete_stream =
+      (fun ?on_telemetry:_ ~on_event:_ request ->
+         reject ~stream:true request)
+  }
+;;
+
+let probe_blocks_admission
+      ?request_shaping_hooks
+      ~(sw : Eio.Switch.t)
+      ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+      ~(config : config)
+      ~(checkpoint : Agent_sdk.Checkpoint.t)
+      ~(stream : bool)
+      ~(continuation : bool)
+      (goal_blocks : Agent_sdk.Types.content_block list)
+  : (capacity_readmission_evidence, capacity_readmission_failure) result
+  =
+  let admitted_goal_blocks = if continuation then [] else goal_blocks in
+  match
+    validate_content_blocks_for_config
+      ~oas_checkpoint:checkpoint
+      ~config
+      admitted_goal_blocks
+  with
+  | Error error -> Error (capacity_readmission_failure_of_error error)
+  | Ok () when continuation && not stream ->
+    Error
+      (Readmission_failed
+         (Agent_sdk.Error.Config
+            (Agent_sdk.Error.InvalidConfig
+               { field = "capacity_readmission.continuation"
+               ; detail =
+                   "OAS does not expose a synchronous provider-turn \
+                    continuation entry point"
+               })))
+  | Ok () ->
+    (match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
+     | Error error -> Error (capacity_readmission_failure_of_error error)
+     | Ok _ ->
+       let observed = Atomic.make None in
+       let transport = capacity_probe_transport observed in
+       let probe_config =
+         { config with
+           hooks = request_shaping_hooks
+         ; context_injector = None
+         ; context = None
+         ; raw_trace = None
+         ; event_bus = None
+         ; on_run_complete = None
+         ; checkpoint_sink = None
+         }
+       in
+       let agent =
+         resume_from_checkpoint_with_transport
+           ~net
+           ~config:probe_config
+           ~checkpoint
+           ~transport:(Some transport)
+       in
+       let run_result : (unit, Agent_sdk.Error.sdk_error) result =
+         Fun.protect
+           ~finally:(fun () ->
+             close_agent_for_cleanup
+               ~propagate_cancel:false
+               ~config:probe_config
+               agent)
+           (fun () ->
+              let clock =
+                match Process_eio.get_clock () with
+                | Ok clock -> Some clock
+                | Error _ -> Eio_context.get_clock_opt ()
+              in
+              if continuation
+              then
+                Agent_sdk.Agent.run_turn_stream
+                  ~sw
+                  ?clock
+                  ~on_event:(fun _ -> ())
+                  agent
+                |> Result.map (fun _ -> ())
+              else if stream
+              then
+                Agent_sdk.Agent.run_stream_blocks
+                  ~sw
+                  ?clock
+                  ~on_event:(fun _ -> ())
+                  agent
+                  goal_blocks
+                |> Result.map (fun _ -> ())
+              else
+                Agent_sdk.Agent.run_blocks ~sw ?clock agent goal_blocks
+                |> Result.map (fun _ -> ()))
+       in
+       (match Atomic.get observed, run_result with
+        | Some evidence, _ -> Ok evidence
+        | None, Error error ->
+          Error (capacity_readmission_failure_of_error error)
+        | None, Ok () ->
+          Error
+            (Readmission_failed
+               (Agent_sdk.Error.Internal
+                  "capacity re-admission completed without reaching the \
+                   provider admission boundary"))))
+;;
 
 (* ================================================================ *)
 (* Run                                                               *)

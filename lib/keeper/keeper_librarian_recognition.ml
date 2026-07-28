@@ -75,6 +75,7 @@ type disposition =
   | Rejected_valid_until_mismatch
   | Rejected_too_few_members
   | Rejected_recalled_echo
+  | Rejected_reinforcement_overflow
 
 let disposition_label = function
   | Applied -> "applied"
@@ -85,6 +86,7 @@ let disposition_label = function
   | Rejected_valid_until_mismatch -> "rejected_valid_until_mismatch"
   | Rejected_too_few_members -> "rejected_too_few_members"
   | Rejected_recalled_echo -> "rejected_recalled_echo"
+  | Rejected_reinforcement_overflow -> "rejected_reinforcement_overflow"
 ;;
 
 type apply_result =
@@ -162,6 +164,8 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
       then Rejected_recalled_echo
       else if slot.(index) <> `Free
       then Rejected_target_consumed
+      else if facts_arr.(index).reinforcement_count = max_int
+      then Rejected_reinforcement_overflow
       else (
         let row = facts_arr.(index) in
         facts_arr.(index)

@@ -82,6 +82,18 @@ let test_reinforce_updates_in_place () =
     (List.map Recognition.disposition_label result.Recognition.dispositions)
 ;;
 
+let test_reinforce_rejects_counter_overflow () =
+  let store = [ fact ~claim:"counted" ~reinforcement_count:max_int () ] in
+  let result = apply [ Recognition.Reinforce { index = 0; source_turn = 9 } ] store in
+  check int "counter remains representable" max_int
+    (List.hd result.Recognition.facts).Types.reinforcement_count;
+  check (list string) "overflow is explicit"
+    [ "rejected_reinforcement_overflow" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions);
+  check int "overflow does not create episode provenance" 0
+    (List.length result.Recognition.applied_source_turns)
+;;
+
 let test_forget_shrinks_store () =
   let store = [ fact ~claim:"keep" (); fact ~claim:"drop" () ] in
   let result = apply [ Recognition.Forget { index = 1; reason = "superseded" } ] store in
@@ -1355,6 +1367,8 @@ let () =
         [
           test_case "reinforce updates in place, adds no row" `Quick
             test_reinforce_updates_in_place;
+          test_case "reinforce rejects a non-representable counter increment" `Quick
+            test_reinforce_rejects_counter_overflow;
           test_case "forget shrinks the store" `Quick test_forget_shrinks_store;
           test_case "merge collapses rows" `Quick test_merge_collapses_rows;
           test_case "revise rewrites in place" `Quick test_revise_rewrites_in_place;

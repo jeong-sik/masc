@@ -78,6 +78,7 @@ type disposition =
   | Rejected_valid_until_mismatch
   | Rejected_too_few_members
   | Rejected_recalled_echo
+  | Rejected_reinforcement_overflow
 
 val disposition_label : disposition -> string
 

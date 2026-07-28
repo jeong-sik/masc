@@ -1129,7 +1129,8 @@ let apply_and_persist
                           | Recognition.Rejected_target_consumed
                           | Recognition.Rejected_kind_mismatch
                           | Recognition.Rejected_valid_until_mismatch
-                          | Recognition.Rejected_too_few_members -> false)
+                          | Recognition.Rejected_too_few_members
+                          | Recognition.Rejected_reinforcement_overflow -> false)
                         result.Recognition.dispositions
                  in
                  if facts_rewrite_required || recalled_echo_only

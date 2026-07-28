@@ -3,6 +3,7 @@
 type execution_result =
   { tool_result : Tool_result.result
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
+  ; deferred_kind : Keeper_tool_execution.deferred_kind option
   }
 
 (** Execute a keeper tool call with full observability: telemetry,

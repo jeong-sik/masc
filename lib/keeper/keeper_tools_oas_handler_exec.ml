@@ -6,6 +6,7 @@ open Keeper_tools_oas_handler_telemetry
 type execution_result =
   { tool_result : Tool_result.result
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
+  ; deferred_kind : Keeper_tool_execution.deferred_kind option
   }
 
 let producer_payload ~raw = function
@@ -132,6 +133,7 @@ let execute_with_observers
         ();
       { tool_result = dispatch_result
       ; failure_effect_disposition = Some result.failure_effect_disposition
+      ; deferred_kind = None
       }
     | Tool_result.Completed () ->
       Option.iter
@@ -192,7 +194,10 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~original_bytes:original_len
         ();
-      { tool_result = observed_result; failure_effect_disposition = None }
+      { tool_result = observed_result
+      ; failure_effect_disposition = None
+      ; deferred_kind = None
+      }
     | Tool_result.Deferred () ->
       Option.iter
         (Keeper_tool_emission_hook.capture_typed_result_for_keeper
@@ -248,7 +253,10 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~original_bytes:(String.length projected_result)
         ();
-      { tool_result = observed_result; failure_effect_disposition = None }
+      { tool_result = observed_result
+      ; failure_effect_disposition = None
+      ; deferred_kind = result.deferred_kind
+      }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -315,5 +323,6 @@ let execute_with_observers
       ();
     { tool_result = exception_result
     ; failure_effect_disposition = Some Tool_result.Effect_outcome_unknown
+    ; deferred_kind = None
     }
 ;;

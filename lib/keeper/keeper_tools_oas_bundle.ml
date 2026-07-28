@@ -130,25 +130,49 @@ let make_tool_bundle
   let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
   (* The bundle lives for exactly one Agent run. Its typed tool-boundary
      state is request-scoped and observed by the OAS tool-boundary probe only
-     after the whole tool batch and checkpoint sink have completed. Deferred
-     external effects stop the provider loop until their durable resolution
-     wakes a later turn. A terminal completion supersedes a defer in the same
-     batch; a proven terminal failure dominates every state regardless of
-     callback order. Failure is sticky so its first diagnostic remains
-     authoritative. *)
+     after the whole tool batch and checkpoint sink have completed. A generic
+     deferred tool transition retains the existing durable-stimulus checkpoint;
+     only a typed external-effect defer stops the provider loop until Gate's
+     durable resolution wakes a later turn. A terminal completion supersedes a
+     defer in the same batch; a proven terminal failure dominates every state
+     regardless of callback order. Failure is sticky so its first diagnostic
+     remains authoritative. *)
   let terminal_effect_state = Atomic.make Terminal_effect_open in
-  let mark_external_effect_deferred () =
+  let mark_deferred_tool_result () =
     ignore
       (Atomic.compare_and_set
          terminal_effect_state
          Terminal_effect_open
-         External_effect_deferred)
+         Deferred_tool_result)
+  in
+  let mark_external_effect_deferred () =
+    (* A generic deferred transition may precede the Gate result in one OAS
+       batch. The external effect owns the user-facing terminal projection, so
+       it must promote that generic state rather than being hidden by it. *)
+    let rec transition () =
+      match Atomic.get terminal_effect_state with
+      | External_effect_deferred
+      | Terminal_effect_completed
+      | Terminal_effect_failed _ ->
+        ()
+      | (Terminal_effect_open | Deferred_tool_result) as current ->
+        if
+          not
+            (Atomic.compare_and_set
+               terminal_effect_state
+               current
+               External_effect_deferred)
+        then transition ()
+    in
+    transition ()
   in
   let mark_terminal_effect_completed () =
     let rec transition () =
       match Atomic.get terminal_effect_state with
       | Terminal_effect_completed | Terminal_effect_failed _ -> ()
-      | (Terminal_effect_open | External_effect_deferred) as current ->
+      | ( Terminal_effect_open
+        | Deferred_tool_result
+        | External_effect_deferred ) as current ->
         if
           not
             (Atomic.compare_and_set
@@ -164,6 +188,7 @@ let make_tool_bundle
       match Atomic.get terminal_effect_state with
       | Terminal_effect_failed _ -> ()
       | ( Terminal_effect_open
+        | Deferred_tool_result
         | External_effect_deferred
         | Terminal_effect_completed ) as current ->
         if
@@ -209,7 +234,8 @@ let make_tool_bundle
                  ?gate_grant
                  ?record_gate_result
                  ?on_completed
-                 ~on_deferred:mark_external_effect_deferred
+                 ~on_deferred:mark_deferred_tool_result
+                 ~on_external_effect_deferred:mark_external_effect_deferred
                  ?on_failed
                  ~pre_validate_input:(fun input ->
                    match

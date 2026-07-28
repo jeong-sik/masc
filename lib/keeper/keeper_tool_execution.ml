@@ -1,3 +1,7 @@
+type deferred_kind =
+  | Generic_deferred
+  | External_effect_deferred
+
 type t =
   { raw_output : string
   ; data : Yojson.Safe.t option
@@ -5,6 +9,7 @@ type t =
   ; failure_effect_disposition : Tool_result.failure_effect_disposition
   ; disposition :
       (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
+  ; deferred_kind : deferred_kind option
   }
 
 let success raw_output =
@@ -13,6 +18,7 @@ let success raw_output =
   ; metadata = None
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Completed ()
+  ; deferred_kind = None
   }
 ;;
 
@@ -22,6 +28,7 @@ let success_data ?metadata data =
   ; metadata
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Completed ()
+  ; deferred_kind = None
   }
 ;;
 
@@ -31,6 +38,17 @@ let deferred_data ?metadata data =
   ; metadata
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Deferred ()
+  ; deferred_kind = Some Generic_deferred
+  }
+;;
+
+let deferred_external_effect_data ?metadata data =
+  { raw_output = Yojson.Safe.to_string data
+  ; data = Some data
+  ; metadata
+  ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
+  ; disposition = Tool_result.Deferred ()
+  ; deferred_kind = Some External_effect_deferred
   }
 ;;
 
@@ -44,6 +62,7 @@ let failure
   ; metadata = None
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Failed class_
+  ; deferred_kind = None
   }
 ;;
 
@@ -58,6 +77,7 @@ let failure_data
   ; metadata = None
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Failed class_
+  ; deferred_kind = None
   }
 ;;
 
@@ -71,6 +91,7 @@ let of_tool_result (result : Tool_result.result) =
     ; metadata
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
     ; disposition = Tool_result.Completed ()
+    ; deferred_kind = None
     }
   | Tool_result.Deferred { metadata; _ } ->
     { raw_output
@@ -78,6 +99,7 @@ let of_tool_result (result : Tool_result.result) =
     ; metadata
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
     ; disposition = Tool_result.Deferred ()
+    ; deferred_kind = Some Generic_deferred
     }
   | Tool_result.Failed { class_; _ } ->
     { raw_output
@@ -85,5 +107,6 @@ let of_tool_result (result : Tool_result.result) =
     ; metadata = None
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
     ; disposition = Tool_result.Failed class_
+    ; deferred_kind = None
     }
 ;;

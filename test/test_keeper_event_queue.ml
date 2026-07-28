@@ -1182,14 +1182,16 @@ let () =
         true
         (bool_field "operator_action_required" json));
 
+  (* Build the meta through the shared fixture, not a hand-written object: it
+     fills every field of the current schema from
+     [Keeper_meta_json_current_schema.all_fields], so a schema change cannot
+     leave this helper behind. The hand-written version drifted twice -- it
+     passed the removed [last_model_used] (fixed in #26064) and supplies only
+     three of the schema's required fields. *)
   let meta_for_keeper keeper_name trace_id =
     match
-      Masc.Keeper_meta_json_parse.meta_of_json
-        (`Assoc
-          [ "name", `String keeper_name
-          ; "agent_name", `String keeper_name
-          ; "trace_id", `String trace_id
-          ])
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String keeper_name; "trace_id", `String trace_id ])
     with
     | Ok meta -> meta
     | Error msg -> Alcotest.fail ("meta parse failed: " ^ msg)

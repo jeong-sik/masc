@@ -1337,6 +1337,11 @@ let redact_payload ~base_path (payload : accepted_payload) =
 ;;
 
 let redact_effect redaction (staged : staged_effect) =
+  let redact_tool_call (tool_call : Keeper_chat_store.tool_call) =
+    { tool_call with
+      args = Keeper_secret_redaction.redact_text redaction tool_call.args
+    }
+  in
   let request_result =
     { staged.request_result with
       body =
@@ -1368,40 +1373,19 @@ let redact_effect redaction (staged : staged_effect) =
                (Invalid_effect
                   "secret redaction could not preserve assistant block structure"))
       in
-      let tool_calls =
-        List.map
-          (fun tool_call ->
-             { tool_call with
-               args = Keeper_secret_redaction.redact_text redaction tool_call.args
-             })
-          tool_calls
-      in
+      let tool_calls = List.map redact_tool_call tool_calls in
       Ok (Assistant_reply { content; blocks; turn_ref; tool_calls })
     | Transport_failure { content; tool_calls } ->
       Ok
         (Transport_failure
            { content = Keeper_secret_redaction.redact_text redaction content
-           ; tool_calls =
-               List.map
-                 (fun tool_call ->
-                    { tool_call with
-                      args =
-                        Keeper_secret_redaction.redact_text redaction tool_call.args
-                    })
-                 tool_calls
+           ; tool_calls = List.map redact_tool_call tool_calls
            })
     | Tool_calls_only { tool_calls; turn_ref } ->
       Ok
         (Tool_calls_only
            { turn_ref
-           ; tool_calls =
-               List.map
-                 (fun tool_call ->
-                    { tool_call with
-                      args =
-                        Keeper_secret_redaction.redact_text redaction tool_call.args
-                    })
-                 tool_calls
+           ; tool_calls = List.map redact_tool_call tool_calls
            })
     | No_assistant_reply -> Ok No_assistant_reply
   in

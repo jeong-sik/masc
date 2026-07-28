@@ -1107,7 +1107,7 @@ let append_tool_calls_once
       let path = chat_path ~base_dir ~keeper_name in
       let ts = Time_compat.now () in
       let lines =
-        tool_call_append_lines ~ts ?surface ?conversation_id ?turn_ref ~delivery_key
+        tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
           tool_calls
       in
       let ordinal = List.length tool_calls - 1 in
@@ -1180,7 +1180,7 @@ let append_assistant_message_once
         ()
     in
     let tool_lines =
-      tool_call_append_lines ~ts ?surface ?conversation_id ?turn_ref ~delivery_key
+      tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
         tool_calls
     in
     let assistant_line = { transcript_slot; row_id; line } in

@@ -906,6 +906,32 @@ let initialize_owner_state_blocking
         (Owner_initialization_failed
            (Keeper_persistence_preparation_failed error))
   in
+  (* The periodic maintenance owner only records unreferenced candidates:
+     deleting while live writers can still create references would race the
+     scan. Preparation above has converged recovery writes, while Keeper
+     persistence owners have not started yet, so startup is the sole
+     quiescent deletion boundary. A failed scan retains every blob and does
+     not make unrelated server startup unavailable. *)
+  (match
+     Eio_unix.run_in_systhread (fun () ->
+       Tool_blob_maintenance.run
+         ~base_path
+         ~mode:Tool_blob_maintenance.Delete_previous_candidates)
+   with
+   | Ok report ->
+     if report.candidates_recorded > 0 || report.deleted > 0
+     then
+       Log.Server.info
+         "startup tool blob maintenance: live=%d blobs=%d candidates=%d \
+          deleted=%d"
+         report.live_references
+         report.blobs_observed
+         report.candidates_recorded
+         report.deleted
+   | Error error ->
+     Log.Server.warn
+       "startup tool blob maintenance stopped; no further blobs were deleted: %s"
+       (Tool_blob_maintenance.error_to_string error));
   Runtime_settings.ensure_init ();
   Runtime_params.restore ~base_path;
   Log.Server.info "Runtime_params restored from %s" base_path;

@@ -932,7 +932,38 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
               | Error err ->
                 Log.Server.warn
                   "periodic schedule prune failed: %s"
-                  (Schedule_service.service_error_to_string err))
+                  (Schedule_service.service_error_to_string err));
+             (* Tool-result and Gate-replay blobs are shared across every
+                durable Keeper store. A live server may create a reference
+                after this scan, so the periodic owner records candidates but
+                never deletes. The next startup performs the second scan and
+                deletion before Keeper persistence writers start. Any scan or
+                parse failure retains every blob. *)
+             (match
+                Executor_pool_ref.submit_strict (fun () ->
+                  Tool_blob_maintenance.run
+                    ~base_path:
+                      (Mcp_server.workspace_config state).base_path
+                    ~mode:Tool_blob_maintenance.Observe_only)
+              with
+              | Ok (Ok report) ->
+                if report.candidates_recorded > 0 || report.deleted > 0
+                then
+                  Log.Server.info
+                    "tool blob maintenance: live=%d blobs=%d candidates=%d \
+                     deleted=%d"
+                    report.live_references
+                    report.blobs_observed
+                    report.candidates_recorded
+                    report.deleted
+              | Ok (Error error) ->
+                Log.Server.warn
+                  "tool blob maintenance retained all blobs: %s"
+                  (Tool_blob_maintenance.error_to_string error)
+              | Error error ->
+                Log.Server.warn
+                  "tool blob maintenance executor unavailable: %s"
+                  (Executor_pool_ref.strict_submit_error_to_string error))
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->

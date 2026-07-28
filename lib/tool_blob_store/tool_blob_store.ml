@@ -1,5 +1,3 @@
-module SS = Set_util.StringSet
-
 type t =
   { root : string
   ; ownership_root : string
@@ -135,16 +133,179 @@ let list_all t =
     ) shards;
     !acc
 
-let gc t ~keep_set =
-  let keep = List.fold_left (fun acc s -> SS.add s acc) SS.empty keep_set in
-  let deleted = ref 0 in
-  List.iter (fun sha256 ->
-    if not (SS.mem sha256 keep) then begin
-      let path = shard_path t sha256 in
-      try
-        Unix.unlink path;
-        incr deleted
-      with Unix.Unix_error _ -> ()
-    end
-  ) (list_all t);
-  !deleted
+type list_error =
+  { path : string
+  ; reason : string
+  }
+
+let list_all_result t =
+  let same_directory (left : Unix.stats) (right : Unix.stats) =
+    left.st_dev = right.st_dev
+    && left.st_ino = right.st_ino
+    && left.st_kind = Unix.S_DIR
+    && right.st_kind = Unix.S_DIR
+  in
+  let inspect_dir path =
+    match
+      Fs_compat.inspect_owned_directory_chain
+        ~ownership_root:t.ownership_root
+        path
+    with
+    | Ok observation -> Ok observation
+    | Error rejection ->
+      Error
+        { path
+        ; reason =
+            Fs_compat.owned_directory_chain_rejection_to_string rejection
+        }
+  in
+  let read_dir path =
+    match inspect_dir path with
+    | Error _ as error -> error
+    | Ok Fs_compat.Owned_directory_missing -> Ok None
+    | Ok (Fs_compat.Owned_directory before) ->
+      (try
+         let entries = Sys.readdir path in
+         match inspect_dir path with
+         | Error _ as error -> error
+         | Ok Fs_compat.Owned_directory_missing ->
+           Error { path; reason = "directory disappeared during listing" }
+         | Ok (Fs_compat.Owned_directory after) ->
+           if same_directory before after
+           then Ok (Some entries)
+           else Error { path; reason = "directory identity changed during listing" }
+       with
+       | Sys_error reason -> Error { path; reason }
+       | Unix.Unix_error (code, fn, arg) ->
+         Error
+           { path
+           ; reason =
+               Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+           })
+  in
+  match read_dir t.root with
+  | Error _ as error -> error
+  | Ok None -> Ok []
+  | Ok (Some shards) ->
+      let rec scan_shards acc index =
+        if index = Array.length shards
+        then Ok acc
+        else
+          let shard_dir = Filename.concat t.root shards.(index) in
+          match read_dir shard_dir with
+          | Error _ as error -> error
+          | Ok None -> scan_shards acc (index + 1)
+          | Ok (Some files) ->
+            let acc =
+              Array.fold_left
+                (fun current filename ->
+                   match validate_sha256 filename with
+                   | Ok () -> filename :: current
+                   | Error _ -> current)
+                acc
+                files
+            in
+            scan_shards acc (index + 1)
+      in
+      scan_shards [] 0
+
+type delete_error =
+  { sha256 : string
+  ; path : string
+  ; reason : string
+  }
+
+let delete_error_to_string { sha256; path; reason } =
+  Printf.sprintf "blob delete failed sha256=%s path=%s: %s" sha256 path reason
+;;
+
+let file_kind_to_string = function
+  | Unix.S_REG -> "regular_file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character_device"
+  | Unix.S_BLK -> "block_device"
+  | Unix.S_LNK -> "symbolic_link"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_SOCK -> "socket"
+;;
+
+let delete t ~sha256 =
+  match validate_sha256 sha256 with
+  | Error invalid ->
+    Error
+      { sha256
+      ; path = t.root
+      ; reason = invalid_sha256_to_string invalid
+      }
+  | Ok () ->
+    let path = shard_path t sha256 in
+    let parent = Filename.dirname path in
+    (match
+       Fs_compat.inspect_owned_directory_chain
+         ~ownership_root:t.ownership_root
+         parent
+     with
+     | Error rejection ->
+       Error
+         { sha256
+         ; path
+         ; reason =
+             Fs_compat.owned_directory_chain_rejection_to_string rejection
+         }
+     | Ok Fs_compat.Owned_directory_missing -> Ok false
+     | Ok (Fs_compat.Owned_directory parent_before) ->
+       (try
+          let target = Unix.lstat path in
+          if target.st_kind <> Unix.S_REG
+          then
+            Error
+              { sha256
+              ; path
+              ; reason =
+                  Printf.sprintf
+                    "refusing to delete non-regular blob kind=%s"
+                    (file_kind_to_string target.st_kind)
+              }
+          else
+            (match
+               Fs_compat.inspect_owned_directory_chain
+                 ~ownership_root:t.ownership_root
+                 parent
+             with
+             | Error rejection ->
+               Error
+                 { sha256
+                 ; path
+                 ; reason =
+                     Fs_compat.owned_directory_chain_rejection_to_string
+                       rejection
+                 }
+             | Ok Fs_compat.Owned_directory_missing ->
+               Error { sha256; path; reason = "blob parent disappeared" }
+             | Ok (Fs_compat.Owned_directory parent_after) ->
+               if
+                 parent_before.st_dev <> parent_after.st_dev
+                 || parent_before.st_ino <> parent_after.st_ino
+               then
+                 Error
+                   { sha256
+                   ; path
+                   ; reason = "blob parent identity changed before deletion"
+                   }
+               else (
+                 Unix.unlink path;
+                 Ok true))
+        with
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+        | Unix.Unix_error (code, fn, arg) ->
+          Error
+            { sha256
+            ; path
+            ; reason =
+                Printf.sprintf
+                  "%s(%s): %s"
+                  fn
+                  arg
+                  (Unix.error_message code)
+            }
+        | Sys_error reason -> Error { sha256; path; reason }))

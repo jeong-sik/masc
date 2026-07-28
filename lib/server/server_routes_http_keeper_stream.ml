@@ -1896,13 +1896,13 @@ let process_single_turn ~user_row_origin ~queued_turn
       else if queued_turn
       then append_queued_transport_failure_once ~tool_calls content
       else
-                    match user_row_origin with
-                    | Keeper_chat_store.Needs_append ->
-                      Keeper_chat_store.append_user_and_tool_calls_result
-                        ~base_dir:base_path
-                        ~keeper_name:payload.name
-                        ~user_content:payload.message
-                        ~user_attachments:payload.attachments
+        match user_row_origin with
+        | Keeper_chat_store.Needs_append ->
+          Keeper_chat_store.append_turn_result
+            ~base_dir:base_path
+            ~keeper_name:payload.name
+            ~user_content:payload.message
+            ~user_attachments:payload.attachments
             ~surface:chat_surface
             ~speaker:chat_speaker
             ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
@@ -2207,13 +2207,13 @@ let process_single_turn ~user_row_origin ~queued_turn
                        ?turn_ref
                        ()
                    else
-                    match user_row_origin with
-                    | Keeper_chat_store.Needs_append ->
-                      Keeper_chat_store.append_user_and_tool_calls_result
-                        ~base_dir:base_path
-                        ~keeper_name:payload.name
-                        ~user_content:payload.message
-                        ~user_attachments:payload.attachments
+                     match user_row_origin with
+                     | Keeper_chat_store.Needs_append ->
+                       Keeper_chat_store.append_turn_result
+                         ~base_dir:base_path
+                         ~keeper_name:payload.name
+                         ~user_content:payload.message
+                         ~user_attachments:payload.attachments
                          ~tool_calls
                          ~surface:chat_surface
                          ~speaker:chat_speaker
@@ -2250,23 +2250,23 @@ let process_single_turn ~user_row_origin ~queued_turn
                    else
                      match user_row_origin with
                      | Keeper_chat_store.Needs_append ->
-                       Keeper_chat_store.append_turn_result
+                       Keeper_chat_store.append_user_and_tool_calls_result
                          ~base_dir:base_path
                          ~keeper_name:payload.name
                          ~user_content:payload.message
                          ~user_attachments:payload.attachments
                          ~tool_calls
-                        ~surface:chat_surface
-                        ~speaker:chat_speaker
-                        ()
-                    | Keeper_chat_store.Already_persisted _
-                    | Keeper_chat_store.Already_persisted_upstream ->
-                      Keeper_chat_store.append_tool_calls_result
-                        ~base_dir:base_path
-                        ~keeper_name:payload.name
-                        ~tool_calls
-                        ~surface:chat_surface
-                        ()
+                         ~surface:chat_surface
+                         ~speaker:chat_speaker
+                         ()
+                     | Keeper_chat_store.Already_persisted _
+                     | Keeper_chat_store.Already_persisted_upstream ->
+                       Keeper_chat_store.append_tool_calls_result
+                         ~base_dir:base_path
+                         ~keeper_name:payload.name
+                         ~tool_calls
+                         ~surface:chat_surface
+                         ()
                  in
                  let delivered_after_persist ?content persisted =
                    match

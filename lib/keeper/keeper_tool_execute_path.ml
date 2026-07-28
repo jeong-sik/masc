@@ -34,7 +34,13 @@ let resolve_tool_execute_cwd ~config ~meta ~write_enabled ~args =
         (if write_enabled
          then keeper_default_write_root ~config ~meta
          else Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta)
-    else resolve_keeper_execute_cwd ~config ~meta ~raw_path:raw_cwd
+    else
+      let raw_path =
+        if Filename.is_relative raw_cwd
+        then Filename.concat (keeper_default_write_root ~config ~meta) raw_cwd
+        else raw_cwd
+      in
+      resolve_keeper_execute_cwd ~config ~meta ~raw_path
   in
   match resolved with
   | Error _ as err -> err

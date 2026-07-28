@@ -88,7 +88,8 @@ let tool_execute_cwd_field =
       ; ( "description"
         , `String
             "Optional working directory for the command. Must stay within the keeper \
-             sandbox or an explicit allowed path. Use the Keeper-visible sandbox path; \
+             sandbox or an explicit allowed path. Pass a relative cwd, typically '.'. \
+             The Keeper-visible absolute root is informational, not a cwd input. \
              Docker host absolute paths are unavailable." )
       ] )
 ;;
@@ -186,8 +187,9 @@ let tool_execute_description =
    metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
    objects for redirection and the pipeline field for pipelines. Use Grep for \
    structured file-content search. cwd must resolve inside the Keeper path jail. \
-   Filesystem operands use the selected sandbox namespace, and relative argv paths \
-   resolve against cwd; Docker host absolute paths are unavailable. \
+   Pass a relative cwd (typically '.') and relative filesystem operands, which \
+   resolve against cwd. The Keeper-visible absolute root is informational; Docker \
+   host absolute paths are unavailable. \
    MASC does not interpret program or subcommand \
    meaning: after typed lowering, path containment, sandbox resolution, and the \
    external-effect Gate, the invoked program owns its syntax and exit result."

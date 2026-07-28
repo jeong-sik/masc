@@ -11,29 +11,16 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
-let sandbox_extra_uses_docker sandbox_extra_fields =
-  List.exists
-    (function
-      | "via", `String "docker" -> true
-      | _ -> false)
-    sandbox_extra_fields
-
-let typed_execute_response_cwd_json
-      ~turn_sandbox_factory
-      ~cwd
-      ~sandbox_extra_fields
-  =
-  if sandbox_extra_uses_docker sandbox_extra_fields then
-    match
-      Keeper_sandbox_factory.container_cwd_of_host_opt
-        turn_sandbox_factory
-        ~host_cwd:cwd
-    with
-    | Some container_cwd ->
-      Keeper_cwd_response.docker ~host_cwd:cwd ~container_cwd
-      |> Keeper_cwd_response.to_yojson_response
-    | None -> `String cwd
-  else `String cwd
+let model_execute_location_fields ~config ~meta ~args ~cwd =
+  let execution_location =
+    Keeper_sandbox_repo_path.execution_location_json ~config ~meta ~args ~cwd
+  in
+  let response_cwd =
+    match execution_location with
+    | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt "cwd" fields)
+    | _ -> `Null
+  in
+  [ "cwd", response_cwd; "execution_location", execution_location ]
 
 let sandbox_target_label = function
   | Masc_exec.Sandbox_target.Host -> "host"
@@ -66,7 +53,7 @@ let redact_execute_output redaction ~stdout ~stderr =
 
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
-  let typed_execute_response_cwd_json = typed_execute_response_cwd_json
+  let model_execute_location_fields = model_execute_location_fields
   let execute_gate_input = execute_gate_input
   let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
     let redaction = execute_secret_redaction ~base_path ~keeper_name in
@@ -135,10 +122,8 @@ let handle_tool_execute_typed
   with
     | Error e -> Keeper_tool_execution.failure (error_json e)
     | Ok cwd ->
-        let execution_location_fields cwd =
-          [ ( "execution_location"
-            , Keeper_sandbox_repo_path.execution_location_json ~config ~meta ~args ~cwd )
-          ]
+        let model_location_fields =
+          model_execute_location_fields ~config ~meta ~args ~cwd
       in
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
       match Keeper_tool_execute_typed_input.of_json typed_args with
@@ -147,15 +132,13 @@ let handle_tool_execute_typed
           ~class_:Tool_result.Policy_rejection
           (error_json
              ~fields:
-               ([ "typed", `Bool true; "cwd", `String cwd ]
-                @ execution_location_fields cwd)
+               ([ "typed", `Bool true ] @ model_location_fields)
              e)
       | Ok input ->
         (match Keeper_tool_execute_typed_input.validate input with
          | Error e ->
            let fields =
-             [ "typed", `Bool true; "cwd", `String cwd ]
-             @ execution_location_fields cwd
+             [ "typed", `Bool true ] @ model_location_fields
            in
            Keeper_tool_execution.failure
              ~class_:Tool_result.Policy_rejection
@@ -219,18 +202,11 @@ let handle_tool_execute_typed
            Keeper_tool_execution.failure
              (error_json
                 ~fields:
-                  ([ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
-                   @ execution_location_fields cwd
+                  ([ "typed", `Bool true; "cmd", `String cmd ]
+                   @ model_location_fields
                    @ fields)
                 message)
          | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env) ->
-        let response_cwd_json =
-          typed_execute_response_cwd_json
-            ~turn_sandbox_factory
-            ~cwd
-            ~sandbox_extra_fields
-        in
-        let response_cwd_field = [ "cwd", response_cwd_json ] in
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
            inferred authorization semantics. *)
@@ -238,8 +214,7 @@ let handle_tool_execute_typed
         | Error e ->
           let fields =
             [ "typed", `Bool true; "cmd", `String cmd ]
-            @ response_cwd_field
-            @ execution_location_fields cwd
+            @ model_location_fields
           in
           Keeper_tool_execution.failure
             ~class_:Tool_result.Policy_rejection
@@ -259,8 +234,7 @@ let handle_tool_execute_typed
         in
         let typed_context_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log ]
-          @ response_cwd_field
-          @ execution_location_fields cwd
+          @ model_location_fields
         in
         let typed_error_json
               ?(class_ = Tool_result.Runtime_failure)
@@ -507,8 +481,7 @@ let handle_tool_execute_typed
                     ]
                     @ failure_error_fields
                     @ sandbox_extra_fields
-                    @ response_cwd_field
-                    @ execution_location_fields cwd))
+                    @ model_location_fields))
             in
             if succeeded
             then Keeper_tool_execution.success payload

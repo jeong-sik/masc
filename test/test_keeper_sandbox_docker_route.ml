@@ -726,7 +726,30 @@ let test_execute_typed_pipeline_falls_back_to_local_playground () =
     (parse_string_field raw "requested_sandbox");
   Alcotest.(check (option string)) "fallback local playground"
     (Some "local_playground")
-    (parse_string_field raw "sandbox_fallback")
+    (parse_string_field raw "sandbox_fallback");
+  Alcotest.(check (option string)) "fallback is not reported as via docker" None
+    (parse_string_field raw "via");
+  let visible_root =
+    Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+  in
+  Alcotest.(check bool) "fallback response contains no host base" false
+    (contains_substring raw config.Workspace.base_path);
+  Alcotest.(check (option string)) "fallback top-level cwd is Keeper-visible"
+    (Some visible_root)
+    (parse_string_field raw "cwd");
+  let execution_location_cwd =
+    try
+      raw
+      |> Yojson.Safe.from_string
+      |> Yojson.Safe.Util.member "execution_location"
+      |> Yojson.Safe.Util.member "cwd"
+      |> Yojson.Safe.Util.to_string_option
+    with
+    | Yojson.Json_error _ -> None
+  in
+  Alcotest.(check (option string)) "fallback nested cwd matches top-level cwd"
+    (Some visible_root)
+    execution_location_cwd
 
 let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
   setup ~sandbox:Keeper_types_profile_sandbox.Local

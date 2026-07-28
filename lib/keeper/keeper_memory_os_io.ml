@@ -845,10 +845,26 @@ let compare_episode_recency a b =
       else String.compare a.episode_summary b.episode_summary))
 ;;
 
-let recognition_events_dir_path ~keeper_id =
+let recognition_events_dir_path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat
-    (Filename.concat (keepers_dir ()) keeper_id)
+    (Filename.concat keepers_dir keeper_id)
     "recognition-events"
+;;
+
+let recognition_events_dir_path ~keeper_id =
+  recognition_events_dir_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
+;;
+
+let recognition_event_paths_for_keepers_dir ~keepers_dir ~keeper_id =
+  let dir = recognition_events_dir_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  if not (Sys.file_exists dir && Sys.is_directory dir)
+  then []
+  else
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".json")
+    |> List.sort String.compare
+    |> List.map (Filename.concat dir)
 ;;
 
 let recognition_event_path ~keeper_id ~publication_id =
@@ -858,16 +874,8 @@ let recognition_event_path ~keeper_id ~publication_id =
 ;;
 
 let read_recognition_events_all ~keeper_id =
-  let dir = recognition_events_dir_path ~keeper_id in
-  if not (Sys.file_exists dir && Sys.is_directory dir)
-  then []
-  else
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".json")
-    |> List.sort String.compare
-    |> List.map (fun name ->
-      let path = Filename.concat dir name in
+  recognition_event_paths_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
+  |> List.map (fun path ->
       match read_episode_file path with
       | Some episode -> episode
       | None ->

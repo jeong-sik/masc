@@ -43,6 +43,10 @@ val list_fact_store_keeper_ids_for_base_path : base_path:string -> string list
 
 val events_path : keeper_id:string -> string
 val events_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+val recognition_events_dir_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+val recognition_event_paths_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string list
+(** Publication-addressed recognition event shards in deterministic filename
+    order. A missing shard directory is an empty event set. *)
 
 type legacy_memory_file =
   | Legacy_facts

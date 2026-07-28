@@ -196,6 +196,50 @@ let test_reports_per_keeper_metric_values () =
     (float_field "generated_at" json >= 0.0)
 ;;
 
+let test_includes_recognition_event_shards_in_event_metrics () =
+  Eio_main.run
+  @@ fun _env ->
+  let now = test_now in
+  let base = fresh_dir "masc-memory-health-recognition-events" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "recognition-events" in
+  Io.rewrite_facts_atomically_for_keepers_dir
+    ~masc_root:(Config_dir_resolver.masc_root ~base_path:base)
+    ~keepers_dir
+    ~keeper_id
+    [ fact ~now "fact with shard-backed event" ];
+  Io.For_testing.with_keepers_dir keepers_dir (fun () ->
+    let episode : Types.episode =
+      { trace_id = "recognition-event-health"
+      ; generation = 1
+      ; episode_summary = "shard-backed recognition event"
+      ; claims = []
+      ; open_items = []
+      ; constraints = []
+      ; preserved_tool_refs = []
+      ; source_turn_range = None
+      ; created_at = now
+      ; valid_until = None
+      ; terminal_marker = None
+      ; schema_version = Types.schema_version
+      }
+    in
+    match Io.ensure_recognition_event ~keeper_id ~publication_id:"health-shard" episode with
+    | Ok () -> ()
+    | Error detail -> Alcotest.fail detail);
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let keeper = keeper_obj keeper_id json in
+  Alcotest.(check int) "recognition event shard counted" 1 (int_field "events" keeper);
+  Alcotest.(check bool)
+    "recognition event shard bytes counted"
+    true
+    (int_field "events_bytes" keeper > 0);
+  Alcotest.(check bool)
+    "total event bytes include recognition shard"
+    true
+    (int_field "events_bytes" (totals json) > 0)
+;;
+
 let test_health_reports_expiry_and_exact_duplicate_identity () =
   Eio_main.run
   @@ fun _env ->
@@ -361,6 +405,10 @@ let () =
             "reports per-keeper metric values"
             `Quick
             test_reports_per_keeper_metric_values
+        ; Alcotest.test_case
+            "includes recognition event shards in event metrics"
+            `Quick
+            test_includes_recognition_event_shards_in_event_metrics
         ; Alcotest.test_case
             "dry-run gc reports expired and duplicate rows"
             `Quick

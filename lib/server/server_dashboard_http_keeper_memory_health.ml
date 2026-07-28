@@ -8,7 +8,8 @@
     - [Config_dir_resolver.keepers_dir_for_base_path] for request-scoped paths.
     - [Keeper_memory_os_io.list_fact_store_keeper_ids] for the keeper list.
     - [Keeper_memory_os_io.read_facts_all] and file stat for facts count/bytes.
-    - [Keeper_memory_os_io.events_path] + file stat for events bytes.
+    - [Keeper_memory_os_io.events_path] and recognition event shards for event
+      counts and bytes.
     - [Keeper_memory_os_gc.run_gc ~dry_run:true] for explicitly expired rows
       without mutating the store.
     - [Otel_metric_store] execution-slot-busy counters for skipped librarian
@@ -203,7 +204,14 @@ let keeper_health ~keepers_dir ~now keeper_id =
   let events_p =
     Keeper_memory_os_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
   in
-  let events_bytes = file_size_bytes events_p in
+  let recognition_event_paths =
+    Keeper_memory_os_io.recognition_event_paths_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  let recognition_events_bytes =
+    List.fold_left (fun total path -> total + file_size_bytes path) 0 recognition_event_paths
+  in
+  let events = count_lines_in_file events_p + List.length recognition_event_paths in
+  let events_bytes = file_size_bytes events_p + recognition_events_bytes in
   (* dry_run keeps the scan read-only: it reports only rows whose explicit
      [valid_until] has passed, without rewriting the store. *)
   let gc_report =
@@ -217,7 +225,7 @@ let keeper_health ~keepers_dir ~now keeper_id =
   { keeper_id
   ; facts = facts_count
   ; facts_bytes
-  ; events = count_lines_in_file events_p
+  ; events
   ; events_bytes
   ; events_to_facts_ratio =
       float_of_int events_bytes /. float_of_int (max 1 facts_bytes)

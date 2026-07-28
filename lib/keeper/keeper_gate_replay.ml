@@ -123,15 +123,13 @@ let outcome_to_string = function
       (payload_fingerprint detail)
 ;;
 
-(* Replay recognizes exactly the identity its producer submits; every other
-   approved operation stays with its own producer. The identity is read from
-   that producer so the literal has one definition. *)
-let write_operation = Keeper_tool_filesystem_runtime.gate_operation
-let execute_operation = Keeper_tool_execute_runtime.gate_operation
-let network_read_operation = Keeper_tool_in_process_runtime.network_read_gate_operation
-let connector_post_operation =
-  Keeper_tool_in_process_runtime.connector_post_gate_operation
-;;
+(* Replay recognizes exactly the operation identity its producer submits.
+   Durable requests carry the string wire form; it is decoded once at this
+   boundary before replay authority is selected. *)
+let write_operation = Keeper_gate.Filesystem_write
+let execute_operation = Keeper_gate.Tool_execute
+let network_read_operation = Keeper_gate.Network_read
+let connector_post_operation = Keeper_gate.Connector_post
 
 (* The producer owns both the argument schema and the effect encoding, so it
    owns the inversion; replay only decides whether to spend the grant. *)
@@ -161,16 +159,12 @@ type replayable =
   | Replay_network_read
   | Replay_connector_post
 
-let replayable_of_operation operation =
-  if String.equal operation write_operation
-  then Some Replay_write
-  else if String.equal operation execute_operation
-  then Some Replay_execute
-  else if String.equal operation network_read_operation
-  then Some Replay_network_read
-  else if String.equal operation connector_post_operation
-  then Some Replay_connector_post
-  else None
+let replayable_of_operation = function
+  | Keeper_gate.Filesystem_write -> Some Replay_write
+  | Keeper_gate.Tool_execute -> Some Replay_execute
+  | Keeper_gate.Network_read -> Some Replay_network_read
+  | Keeper_gate.Connector_post -> Some Replay_connector_post
+  | Keeper_gate.Opaque_operation _ -> None
 ;;
 
 type effect_outcome =
@@ -644,10 +638,17 @@ let replay_approved_effect
              ~approval_id
              ~operation
     in
-    (match replayable_of_operation request.tool_name with
+    (match
+       request.tool_name
+       |> Keeper_gate.operation_of_storage_string
+       |> replayable_of_operation
+     with
      | None -> Not_applicable
      | Some Replay_write ->
-       replay write_operation write_args_of_gate_input (fun args ->
+       replay
+         (Keeper_gate.operation_to_string write_operation)
+         write_args_of_gate_input
+         (fun args ->
          Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
            ~turn_sandbox_factory
            ~config
@@ -659,7 +660,10 @@ let replay_approved_effect
            ~args
            ())
      | Some Replay_execute ->
-       replay execute_operation execute_args_of_gate_input (fun args ->
+       replay
+         (Keeper_gate.operation_to_string execute_operation)
+         execute_args_of_gate_input
+         (fun args ->
          Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
            ~turn_sandbox_factory
            ~config
@@ -673,7 +677,7 @@ let replay_approved_effect
        (match network_read_of_gate_input request.input with
         | Error detail ->
           Repair_required
-            { operation = network_read_operation
+            { operation = Keeper_gate.operation_to_string network_read_operation
             ; stage = Request_decode
             ; detail
             }
@@ -686,11 +690,12 @@ let replay_approved_effect
             ~gate_grant:grant
             ~args
             ()
-          |> summarize_execution ~operation:network_read_operation
+          |> summarize_execution
+               ~operation:(Keeper_gate.operation_to_string network_read_operation)
           |> replayed_outcome
                ~base_path:config.base_path
                ~approval_id
-               ~operation:network_read_operation
+               ~operation:(Keeper_gate.operation_to_string network_read_operation)
         | Ok (Keeper_tool_in_process_runtime.Replay_web_fetch args) ->
           Keeper_tool_in_process_runtime.handle_web_fetch_with_outcome
             ~config
@@ -700,14 +705,15 @@ let replay_approved_effect
             ~gate_grant:grant
             ~args
             ()
-          |> summarize_execution ~operation:network_read_operation
+          |> summarize_execution
+               ~operation:(Keeper_gate.operation_to_string network_read_operation)
           |> replayed_outcome
                ~base_path:config.base_path
                ~approval_id
-               ~operation:network_read_operation)
+               ~operation:(Keeper_gate.operation_to_string network_read_operation))
      | Some Replay_connector_post ->
        replay
-         connector_post_operation
+         (Keeper_gate.operation_to_string connector_post_operation)
          connector_post_of_gate_input
          (fun connector_post ->
             Keeper_tool_in_process_runtime.replay_connector_post_with_outcome

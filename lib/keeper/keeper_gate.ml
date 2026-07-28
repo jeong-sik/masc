@@ -4,9 +4,38 @@ type causal_context =
   ; snapshot : Yojson.Safe.t option
   }
 
+type operation =
+  | Filesystem_write
+  | Tool_execute
+  | Network_read
+  | Connector_post
+  | Opaque_operation of string
+
+let operation_to_string = function
+  | Filesystem_write -> "filesystem_write"
+  | Tool_execute -> "tool_execute"
+  | Network_read -> "network_read"
+  | Connector_post -> "connector_post"
+  | Opaque_operation operation -> operation
+;;
+
+let known_replay_operations =
+  [ Filesystem_write; Tool_execute; Network_read; Connector_post ]
+;;
+
+let operation_of_storage_string operation =
+  match
+    List.find_opt
+      (fun known -> String.equal operation (operation_to_string known))
+      known_replay_operations
+  with
+  | Some known -> known
+  | None -> Opaque_operation operation
+;;
+
 type request =
   { keeper_name : string
-  ; operation : string
+  ; operation : operation
   ; input : Yojson.Safe.t
   ; base_path : string
   ; causal_context : causal_context option
@@ -40,6 +69,7 @@ type decision =
       { approval_id : string
       ; reason : deferred_reason
       }
+  | Resolved of { approval_id : string }
   | Unavailable of unavailable_reason
 
 type auto_judge_completion_rejection =
@@ -187,7 +217,7 @@ let rec take_matching_cycle_grant grant request =
         ~base_path:request.base_path
         ~id:entry.approval_id
         ~keeper_name:request.keeper_name
-        ~tool_name:request.operation
+        ~tool_name:(operation_to_string request.operation)
         ~input:request.input
       with
       | Error error ->
@@ -269,11 +299,26 @@ let decision_to_yojson = function
        ; "reason", `String (deferred_reason_to_string reason)
        ]
        @ detail)
+  | Resolved { approval_id } ->
+    `Assoc
+      [ "decision", `String "resolved"
+      ; "approval_id", `String approval_id
+      ]
   | Unavailable reason ->
     `Assoc
       [ "decision", `String "unavailable"
       ; "reason", `String (unavailable_reason_to_string reason)
       ]
+;;
+
+let resolved_retry_payload approval_id =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "message"
+       , `String
+           "This exact external-effect invocation already has a durable Gate resolution. It was not executed and no new approval was queued."
+       ; "gate", decision_to_yojson (Resolved { approval_id })
+       ])
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
@@ -287,7 +332,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
        | Keeper_always_allow | Workspace_always_allow ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
+    ~tool_name:(operation_to_string request.operation)
     ?tool_call_id:(Option.bind request.causal_context (fun context -> context.tool_call_id))
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
@@ -301,7 +346,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
 let submit request =
   Keeper_approval_queue.submit_pending
     ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
+    ~tool_name:(operation_to_string request.operation)
     ~input:request.input
     ~base_path:request.base_path
     ?turn_id:(request_turn_id request)
@@ -1344,7 +1389,9 @@ let request_operator_auto_judge_recovery ~base_path =
 let defer request reason =
   match submit request with
   | Error error -> Unavailable (Queue_storage_unavailable error)
-  | Ok approval_id ->
+  | Ok (Keeper_approval_queue.Submission_resolved approval_id) ->
+    Resolved { approval_id }
+  | Ok (Keeper_approval_queue.Submission_pending approval_id) ->
     let reason =
       match reason with
       | Judge_requested ->
@@ -1390,7 +1437,7 @@ let defer request reason =
              ~event_type:"auto_judge_block_observation_superseded"
              ~id:approval_id
              ~keeper_name:request.keeper_name
-             ~tool_name:request.operation
+             ~tool_name:(operation_to_string request.operation)
              ();
            Log.Keeper.warn
              ~keeper_name:request.keeper_name
@@ -1431,7 +1478,7 @@ let observe_exact_rule_store_degraded request error =
   Log.Keeper.error
     ~keeper_name:request.keeper_name
     "exact Always Allowed rule lookup unavailable operation=%s: %s; continuing configured Gate mode"
-    request.operation
+    (operation_to_string request.operation)
     detail;
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
@@ -1442,7 +1489,7 @@ let observe_exact_rule_store_degraded request error =
     ~event_type:"gate_exact_rule_store_degraded"
     ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
+    ~tool_name:(operation_to_string request.operation)
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids
@@ -1454,13 +1501,13 @@ let observe_exact_rule_expired request (rule_match : Keeper_approval_queue.rule_
     ~keeper_name:request.keeper_name
     "exact Always Allowed rule %s expired operation=%s; continuing configured Gate mode"
     rule_match.rule_id
-    request.operation;
+    (operation_to_string request.operation);
   Keeper_approval_queue.audit_approval_event
     ~base_path:request.base_path
     ~event_type:"gate_exact_rule_expired"
     ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
+    ~tool_name:(operation_to_string request.operation)
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids
@@ -1505,7 +1552,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
           Keeper_approval_queue.find_matching_rule
             ~base_path:request.base_path
             ~keeper_name:request.keeper_name
-            ~tool_name:request.operation
+            ~tool_name:(operation_to_string request.operation)
             ~input:request.input
             ()
         with
@@ -1544,14 +1591,14 @@ let decide ?cycle_grant ~keeper_always_allow request =
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
       "one-shot Gate grant unavailable; preserving the unconsumed grant operation=%s reason=%s"
-      request.operation
+      (operation_to_string request.operation)
       (unavailable_reason_to_string reason);
     Keeper_approval_queue.audit_approval_event
       ~base_path:request.base_path
       ~event_type:"gate_grant_unavailable"
       ~id:approval_id
       ~keeper_name:request.keeper_name
-      ~tool_name:request.operation
+      ~tool_name:(operation_to_string request.operation)
       ?turn_id:(request_turn_id request)
       ?task_id:request.task_id
       ~goal_ids:request.goal_ids

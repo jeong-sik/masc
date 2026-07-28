@@ -115,7 +115,7 @@ type replayable =
   | Replay_network_read
   | Replay_connector_post
 
-val replayable_of_operation : string -> replayable option
+val replayable_of_operation : Keeper_gate.operation -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the
     call. Exposed because a decode function that exists but is never dispatched
     to is indistinguishable from a working replay at the boundary. *)

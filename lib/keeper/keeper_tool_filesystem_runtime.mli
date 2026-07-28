@@ -44,10 +44,9 @@ val handle_read_file_with_outcome :
     downgrading the approved semantics. *)
 val replay_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
-(** The opaque Gate operation identity this module submits for local writes.
-    Consumers that must recognise the same effect read it here rather than
-    repeating the literal. *)
-val gate_operation : string
+(** The closed Gate operation identity this module submits for local writes.
+    Consumers use the value rather than repeating its durable wire literal. *)
+val gate_operation : Keeper_gate.operation
 
 val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

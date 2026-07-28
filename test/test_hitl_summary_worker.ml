@@ -96,7 +96,9 @@ let pending_entry
           (if include_request_context then Some request_context else None)
         ()
     with
-    | Ok id -> id
+    | Ok (Q.Submission_pending id) -> id
+    | Ok (Q.Submission_resolved id) ->
+      fail ("summary worker fixture reused terminal approval: " ^ id)
     | Error error -> fail (Q.storage_error_to_string error)
   in
   (match Q.mark_summary_pending ~id with

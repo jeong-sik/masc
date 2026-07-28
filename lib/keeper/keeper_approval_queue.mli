@@ -402,6 +402,13 @@ end
 
 (** {1 Nonblocking submission and explicit resolution} *)
 
+type submission =
+  | Submission_pending of string
+  | Submission_resolved of string
+(** A request is pending only while its exact invocation still requires an
+    operator resolution.  A matching resolved delivery is terminal for that
+    invocation: callers must not publish another deferred wait. *)
+
 (** Durably enqueue an exact request without suspending the caller. When
     supplied, [tool_call_id] must be non-blank. An existing id is reused for
     the same durable [tool_call_id], Keeper, operation identity, and canonical
@@ -424,7 +431,7 @@ val submit_pending :
   ?goal_ids:string list ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
-  (string, storage_error) result
+  (submission, storage_error) result
 
 type resolve_error =
   | Not_found of string

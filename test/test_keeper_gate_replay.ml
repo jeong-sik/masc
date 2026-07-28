@@ -393,22 +393,30 @@ let test_dispatch_covers_both_replayable_operations () =
     Alcotest.bool
     "an approved filesystem_write is replayed"
     true
-    (replayable_of_operation "filesystem_write" = Some Replay_write);
+    (replayable_of_operation
+       (Masc.Keeper_gate.operation_of_storage_string "filesystem_write")
+     = Some Replay_write);
   Alcotest.check
     Alcotest.bool
     "an approved tool_execute is replayed"
     true
-    (replayable_of_operation "tool_execute" = Some Replay_execute);
+    (replayable_of_operation
+       (Masc.Keeper_gate.operation_of_storage_string "tool_execute")
+     = Some Replay_execute);
   Alcotest.check
     Alcotest.bool
     "an approved WebSearch/WebFetch network_read is replayed"
     true
-    (replayable_of_operation "network_read" = Some Replay_network_read);
+    (replayable_of_operation
+       (Masc.Keeper_gate.operation_of_storage_string "network_read")
+     = Some Replay_network_read);
   Alcotest.check
     Alcotest.bool
     "an approved connector_post is host-replayed"
     true
-    (replayable_of_operation "connector_post" = Some Replay_connector_post)
+    (replayable_of_operation
+       (Masc.Keeper_gate.operation_of_storage_string "connector_post")
+     = Some Replay_connector_post)
 ;;
 
 let test_dispatch_refuses_unknown_operations () =
@@ -419,7 +427,9 @@ let test_dispatch_refuses_unknown_operations () =
          Alcotest.bool
          (operation ^ " still requires resubmission")
          true
-         (replayable_of_operation operation = None))
+         (replayable_of_operation
+            (Masc.Keeper_gate.operation_of_storage_string operation)
+          = None))
     [ "keeper_board_post"; "" ]
 ;;
 

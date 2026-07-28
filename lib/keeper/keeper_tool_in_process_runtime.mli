@@ -13,7 +13,7 @@ val handle_time_now : args:Yojson.Safe.t -> string
 
 val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
-val network_read_gate_operation : string
+val network_read_gate_operation : Keeper_gate.operation
 
 type network_read_replay =
   | Replay_web_search of Yojson.Safe.t
@@ -24,7 +24,7 @@ val network_read_replay_of_gate_input :
 (** Decode the exact producer-owned Gate envelope for WebSearch/WebFetch.
     Replay never reconstructs arguments or guesses a capability. *)
 
-val connector_post_gate_operation : string
+val connector_post_gate_operation : Keeper_gate.operation
 
 type connector_post_replay =
   | Replay_discord_post of

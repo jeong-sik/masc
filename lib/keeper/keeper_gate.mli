@@ -1,8 +1,9 @@
 (** Non-hierarchical authorization boundary for Keeper external effects.
 
-    The Gate receives an already-normalized, opaque operation identity and its
-    complete concrete input. It never parses a command, tool name, provider,
-    connector, or product-specific payload. *)
+    The Gate receives an already-normalized operation identity and its complete
+    concrete input. Replayable operations are closed values; all other
+    identities remain opaque. The Gate never parses a command, tool name,
+    provider, connector, or product-specific payload. *)
 
 type causal_context =
   { turn_id : int option
@@ -15,9 +16,22 @@ type causal_context =
     identity is known but the causal evidence is partial. The Gate stores and
     forwards a present [snapshot] without interpreting its fields. *)
 
+type operation =
+  | Filesystem_write
+  | Tool_execute
+  | Network_read
+  | Connector_post
+  | Opaque_operation of string
+(** Closed identities for the external effects whose durable approval the
+    runtime can replay. [Opaque_operation] preserves the Gate's generic
+    boundary for effects that this runtime does not replay. *)
+
+val operation_to_string : operation -> string
+val operation_of_storage_string : string -> operation
+
 type request =
   { keeper_name : string
-  ; operation : string
+  ; operation : operation
   ; input : Yojson.Safe.t
   ; base_path : string
   ; causal_context : causal_context option
@@ -51,6 +65,9 @@ type decision =
       { approval_id : string
       ; reason : deferred_reason
       }
+  | Resolved of { approval_id : string }
+  (** The same exact tool invocation already has a durable terminal resolution.
+      The effect is not executed and no second deferred wait is published. *)
   | Unavailable of unavailable_reason
 
 type auto_judge_completion_rejection =
@@ -165,6 +182,7 @@ val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
+val resolved_retry_payload : string -> string
 
 module For_testing : sig
   type exact_completion =

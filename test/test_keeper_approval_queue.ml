@@ -96,6 +96,9 @@ let drop_resolution ~base_path ~keeper_name resolution =
   | Error reason -> Alcotest.fail reason
 ;;
 
+let submission_id = function
+  | AQ.Submission_pending id | AQ.Submission_resolved id -> id
+;;
 
 let submit_with_context
       ?tool_call_id
@@ -125,7 +128,7 @@ let submit_with_context
       ?continuation_channel
       ()
   with
-  | Ok id -> id
+  | Ok submission -> submission_id submission
   | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
 ;;
 
@@ -203,8 +206,10 @@ let test_tool_call_identity_controls_pending_deduplication () =
             "blank tool call identity is rejected at ingress"
             "tool_call_id must be non-blank when supplied"
             error.reason
-        | Ok id ->
-          Alcotest.failf "blank tool call identity created approval %s" id);
+        | Ok submission ->
+          Alcotest.failf
+            "blank tool call identity created approval %s"
+            (submission_id submission));
        let first =
          submit_with_context
            ~tool_call_id:"tool-call-1"
@@ -260,10 +265,10 @@ let test_tool_call_identity_controls_pending_deduplication () =
             "tool call identity collision fails closed"
             true
             (String.starts_with ~prefix:"tool_call_id" error.reason)
-        | Ok id ->
+        | Ok submission ->
           Alcotest.failf
             "tool call identity collision created approval %s"
-            id);
+            (submission_id submission));
        let another_turn =
          submit_with_context
            ~tool_call_id:"tool-call-2"
@@ -355,15 +360,24 @@ let test_tool_call_identity_controls_pending_deduplication () =
         | Error error ->
           Alcotest.fail (AQ.resolve_error_to_string error));
        let resolved_retry =
-         submit_with_context
+         match
+           AQ.submit_pending
+             ~keeper_name
+             ~tool_name:"external-effect"
            ~tool_call_id:"tool-call-1"
            ~turn_id:42
            ~goal_ids:[ "goal-after-resolution" ]
            ~continuation_channel:dashboard_b
            ~base_path
-           ~keeper_name
            ~input
            ()
+         with
+         | Ok (AQ.Submission_resolved id) -> id
+         | Ok (AQ.Submission_pending id) ->
+           Alcotest.failf
+             "resolved execution identity remained pending as approval %s"
+             id
+         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
        in
        Alcotest.(check string)
          "resolved execution identity cannot create another approval"
@@ -383,10 +397,10 @@ let test_tool_call_identity_controls_pending_deduplication () =
             "resolved identity collision still fails closed"
             true
             (String.starts_with ~prefix:"tool_call_id" error.reason)
-        | Ok id ->
+        | Ok submission ->
           Alcotest.failf
             "resolved identity collision created approval %s"
-            id);
+            (submission_id submission));
        List.iter (reject_and_cleanup ~base_path)
          [ another_turn
          ; another_channel

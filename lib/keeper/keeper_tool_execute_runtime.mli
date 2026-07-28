@@ -14,7 +14,7 @@ val handle_tool_execute :
   unit ->
   string
 
-val gate_operation : string
+val gate_operation : Keeper_gate.operation
 (** The Gate operation name this runtime submits under. Shared with the replay
     path so an approved execute is recognised rather than skipped. *)
 

@@ -25,6 +25,7 @@ type external_gate_block =
 
 type external_gate_non_allow =
   | Gate_deferred of Keeper_gate_deferred_payload.t
+  | Gate_resolved of string
   | Gate_unavailable of external_gate_block
 
 let external_gate_decision
@@ -37,6 +38,7 @@ let external_gate_decision
       ~input
       ()
   =
+  let operation_name = Keeper_gate.operation_to_string operation in
   match
     Keeper_gate.decide
       ?cycle_grant:gate_grant
@@ -55,10 +57,11 @@ let external_gate_decision
     Error
       (Gate_deferred
          (Keeper_gate_deferred_payload.create
-            ~operation
+            ~operation:operation_name
             ~approval_id
             ~reason
             ()))
+  | Keeper_gate.Resolved { approval_id } -> Error (Gate_resolved approval_id)
   | Keeper_gate.Unavailable reason ->
     Error
       (Gate_unavailable
@@ -78,7 +81,7 @@ let external_gate_decision
     Log.Keeper.info
       ~keeper_name:meta.name
       "external effect authorized operation=%s source=%s"
-      operation
+      operation_name
       (Keeper_gate.authorization_source_to_string authorization.source);
     Ok ()
 ;;
@@ -107,12 +110,17 @@ let with_external_gate_tool_result
   | Ok () -> continue ()
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_tool_result
-      ~tool_name:operation
+      ~tool_name:(Keeper_gate.operation_to_string operation)
       ~start_time:(Time_compat.now ())
       deferred
+  | Error (Gate_resolved approval_id) ->
+    Tool_result.ok
+      ~tool_name:(Keeper_gate.operation_to_string operation)
+      ~start_time:(Time_compat.now ())
+      (Keeper_gate.resolved_retry_payload approval_id)
   | Error (Gate_unavailable blocked) ->
     tool_result_error
-      ~tool_name:operation
+      ~tool_name:(Keeper_gate.operation_to_string operation)
       ~class_:blocked.failure_class
       blocked.payload
 ;;
@@ -142,13 +150,19 @@ let with_external_gate_tool_result_option
   | Error (Gate_deferred deferred) ->
     Some
       (Keeper_gate_deferred_payload.to_tool_result
-         ~tool_name:operation
+         ~tool_name:(Keeper_gate.operation_to_string operation)
          ~start_time:(Time_compat.now ())
          deferred)
+  | Error (Gate_resolved approval_id) ->
+    Some
+      (Tool_result.ok
+         ~tool_name:(Keeper_gate.operation_to_string operation)
+         ~start_time:(Time_compat.now ())
+         (Keeper_gate.resolved_retry_payload approval_id))
   | Error (Gate_unavailable blocked) ->
     Some
       (tool_result_error
-         ~tool_name:operation
+         ~tool_name:(Keeper_gate.operation_to_string operation)
          ~class_:blocked.failure_class
          blocked.payload)
 ;;
@@ -177,6 +191,8 @@ let with_external_gate_execution
   | Ok () -> continue ()
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_execution deferred
+  | Error (Gate_resolved approval_id) ->
+    Keeper_tool_execution.success (Keeper_gate.resolved_retry_payload approval_id)
   | Error (Gate_unavailable blocked) ->
     Keeper_tool_execution.failure
       ~class_:blocked.failure_class
@@ -184,7 +200,7 @@ let with_external_gate_execution
       blocked.payload
 ;;
 
-let network_read_gate_operation = "network_read"
+let network_read_gate_operation = Keeper_gate.Network_read
 
 type network_read_replay =
   | Replay_web_search of Yojson.Safe.t
@@ -408,7 +424,7 @@ let connector_post_gate_input ~connector ~channel_id ~content ?blocks () =
      @ block_fields)
 ;;
 
-let connector_post_gate_operation = "connector_post"
+let connector_post_gate_operation = Keeper_gate.Connector_post
 
 type connector_post_replay =
   | Replay_discord_post of

@@ -395,7 +395,9 @@ let submit_eligibility_entry ~base_path ~keeper_name label =
       ~base_path
       ()
   with
-  | Ok id -> approval_entry_exn id
+  | Ok (AQ.Submission_pending id) -> approval_entry_exn id
+  | Ok (AQ.Submission_resolved id) ->
+    fail ("eligibility fixture reused terminal approval: " ^ id)
   | Error error -> fail (AQ.storage_error_to_string error)
 ;;
 

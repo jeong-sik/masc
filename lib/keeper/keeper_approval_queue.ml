@@ -3511,6 +3511,10 @@ let find_request_id_in_map
 
 (* ── Nonblocking submission ───────────────────────────────── *)
 
+type submission =
+  | Submission_pending of string
+  | Submission_resolved of string
+
 let valid_tool_call_id = function
   | None -> true
   | Some value -> String.trim value <> ""
@@ -3529,7 +3533,7 @@ let submit_pending
       ?(goal_ids = [])
       ?continuation_channel
       ()
-  : (string, storage_error) result
+  : (submission, storage_error) result
   =
   let input_hash = normalized_input_hash input in
   let continuation_channel =
@@ -3600,9 +3604,10 @@ let submit_pending
                    pending_id
                    delivery_id
              }
-         | Ok (Some id), Ok None
+         | Ok (Some id), Ok None ->
+           Ok (`Existing (Submission_pending id))
          | Ok None, Ok (Some id) ->
-           Ok (id, None)
+           Ok (`Existing (Submission_resolved id))
          | Ok None, Ok None ->
            let id = generate_id () in
            if sequence = max_int
@@ -3644,14 +3649,14 @@ let submit_pending
              Atomic.set
                next_sequences
                (SMap.add base_path following_sequence (Atomic.get next_sequences));
-             Ok (id, Some entry))))
+             Ok (`Fresh entry))))
   in
   match stored with
   | Error _ as error -> error
-  | Ok (id, None) -> Ok id
-  | Ok (id, Some entry) ->
+  | Ok (`Existing submission) -> Ok submission
+  | Ok (`Fresh entry) ->
     record_pending entry;
-    Ok id
+    Ok (Submission_pending entry.id)
 ;;
 
 (* ── Resolve (operator action) ────────────────────────────── *)

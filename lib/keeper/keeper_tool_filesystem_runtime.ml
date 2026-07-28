@@ -1118,10 +1118,10 @@ let replay_args_of_gate_input input =
   | _ -> Error "approved Gate input is not a JSON object"
 ;;
 
-(* The opaque Gate operation identity for every local write this module
-   performs. The Gate never parses it; consumers that must recognise the
-   same effect read it from here instead of repeating the literal. *)
-let gate_operation = "filesystem_write"
+(* The closed Gate operation identity for every local write this module
+   performs. The durable wire form is owned by [Keeper_gate]; consumers use
+   this value rather than repeating its storage literal. *)
+let gate_operation = Keeper_gate.Filesystem_write
 
 let file_write_gate_input
       ~gate_effect
@@ -1189,6 +1189,7 @@ let confined_write_is_keeper_playground
 type file_write_attempt =
   | Write_succeeded of string
   | Write_deferred of Keeper_gate_deferred_payload.t
+  | Write_resolved of string
   | Write_failed of
       { payload : string
       ; class_ : Tool_result.tool_failure_class
@@ -1696,6 +1697,8 @@ let file_write_attempt_to_execution = function
   | Write_succeeded payload -> Keeper_tool_execution.success payload
   | Write_deferred deferred ->
     Keeper_gate_deferred_payload.to_execution deferred
+  | Write_resolved approval_id ->
+    Keeper_tool_execution.success (Keeper_gate.resolved_retry_payload approval_id)
   | Write_failed { payload; class_ } -> Keeper_tool_execution.failure ~class_ payload
   | Write_failed_data { message; data; class_ } ->
     Keeper_tool_execution.failure_data ~class_ ~message data
@@ -1975,11 +1978,12 @@ let handle_file_write_with_outcome
         Ok
           (Write_deferred
              (Keeper_gate_deferred_payload.create
-                ~operation:gate_operation
+                ~operation:(Keeper_gate.operation_to_string gate_operation)
                 ~approval_id
                 ~reason
                 ~context:(`Assoc [ "path", `String target ])
                 ()))
+      | Keeper_gate.Resolved { approval_id } -> Ok (Write_resolved approval_id)
       | Keeper_gate.Unavailable reason ->
         Ok
           (Write_failed

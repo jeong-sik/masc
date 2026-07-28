@@ -56,7 +56,7 @@ let sandbox_target_label = function
 
 (* The Gate operation name this runtime submits under. Shared with the replay
    path so the two cannot drift apart into a silent Not_applicable. *)
-let gate_operation = "tool_execute"
+let gate_operation = Keeper_gate.Tool_execute
 
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc
@@ -348,12 +348,15 @@ let handle_tool_execute_typed
          with
          | Keeper_gate.Deferred { approval_id; reason } ->
            Keeper_gate_deferred_payload.create
-             ~operation:gate_operation
+             ~operation:(Keeper_gate.operation_to_string gate_operation)
              ~approval_id
              ~reason
              ~context:(`Assoc typed_context_fields)
              ()
            |> Keeper_gate_deferred_payload.to_execution
+         | Keeper_gate.Resolved { approval_id } ->
+           Keeper_tool_execution.success
+             (Keeper_gate.resolved_retry_payload approval_id)
          | Keeper_gate.Unavailable reason ->
            typed_error_json
              ~extra_fields:

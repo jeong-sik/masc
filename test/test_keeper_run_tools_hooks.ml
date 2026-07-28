@@ -297,6 +297,54 @@ let test_partition_bare_relative_outside_repos_is_base_unresolved () =
 
 module Setup = Masc.Keeper_run_tools_setup
 
+let before_turn_params_event current_params =
+  Agent_sdk.Hooks.BeforeTurnParams
+    { turn = 1
+    ; messages = []
+    ; last_tool_results = []
+    ; current_params
+    ; reasoning = Agent_sdk.Hooks.empty_reasoning_summary
+    }
+;;
+
+let test_request_shaping_hooks_fail_closed_then_replay_capture () =
+  let captured_turn_params : Agent_sdk.Hooks.turn_params option ref = ref None in
+  let hooks =
+    Masc.Keeper_run_tools_hooks.request_shaping_hooks_of_captured_turn_params
+      captured_turn_params
+  in
+  let invoke current_params =
+    match hooks.Agent_sdk.Hooks.before_turn_params with
+    | Some hook -> hook (before_turn_params_event current_params)
+    | None -> fail "request-shaping hook is missing"
+  in
+  (match invoke Agent_sdk.Hooks.default_turn_params with
+   | Agent_sdk.Hooks.HookFailed
+       { stage = Agent_sdk.Hooks.Before_turn_params; _ } ->
+     ()
+   | _ -> fail "uncaptured request shaping did not fail closed");
+  let expected =
+    { Agent_sdk.Hooks.default_turn_params with
+      thinking_budget = Some 321
+    ; extra_system_context = Some "captured request-only context"
+    }
+  in
+  captured_turn_params := Some expected;
+  match invoke Agent_sdk.Hooks.default_turn_params with
+  | Agent_sdk.Hooks.AdjustParams actual ->
+    check
+      (option int)
+      "captured thinking budget"
+      expected.thinking_budget
+      actual.thinking_budget;
+    check
+      (option string)
+      "captured extra system context"
+      expected.extra_system_context
+      actual.extra_system_context
+  | _ -> fail "captured request shaping was not replayed"
+;;
+
 let encoded_bytes jsons =
   List.fold_left
     (fun acc json -> acc + String.length (Yojson.Safe.to_string json))
@@ -419,6 +467,12 @@ let () =
             test_files_list_uses_first_object_file_path
         ; test_case "missing path falls back to base_path" `Quick
             test_missing_path_falls_back_to_base_path
+        ] )
+    ; ( "request_shaping"
+      , [ test_case
+            "fails closed before capture and replays exact params"
+            `Quick
+            test_request_shaping_hooks_fail_closed_then_replay_capture
         ] )
     ; ( "gate_history_slice"
       , [ test_case "captures only request-local causal fields" `Quick

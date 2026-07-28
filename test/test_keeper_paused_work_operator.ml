@@ -259,6 +259,16 @@ let test_source_terminal_outcome_is_ack_boundary () =
     in
     let json = Operator.outcome_to_yojson outcome in
     let open Yojson.Safe.Util in
+    let receipt_fields =
+      match json |> member "receipt" with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "operator response omitted durable source-ACK receipt"
+    in
+    let source_terminal_fields =
+      match List.assoc_opt "source_terminal" receipt_fields with
+      | Some (`Assoc fields) -> fields
+      | _ -> Alcotest.fail "durable source-ACK receipt omitted source_terminal"
+    in
     Alcotest.(check bool)
       "source-terminal outcome projection is complete"
       true
@@ -271,12 +281,12 @@ let test_source_terminal_outcome_is_ack_boundary () =
       "durable receipt names source ACK"
       "ack_source_terminal"
       (json |> member "receipt" |> member "operation" |> to_string);
-    Alcotest.(check bool)
-      "durable source-terminal receipt has no settled_at"
-      true
-      (match json |> member "receipt" |> member "source_terminal" |> member "settled_at" with
-       | `Null -> true
-       | _ -> false))
+    Alcotest.(check (list string))
+      "durable source-terminal receipt has the exact hard-cut fields"
+      [ "source"; "source_receipt_kind"; "source_revision" ]
+      (source_terminal_fields
+       |> List.map fst
+       |> List.sort String.compare))
 ;;
 
 let test_inventory_exposes_exact_durable_fences () =

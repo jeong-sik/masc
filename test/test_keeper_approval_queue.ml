@@ -97,6 +97,7 @@ let drop_resolution ~base_path ~keeper_name resolution =
 
 
 let submit_with_context
+      ?tool_call_id
       ?turn_id
       ?request_context
       ?task_id
@@ -112,6 +113,7 @@ let submit_with_context
     AQ.submit_pending
       ~keeper_name
       ~tool_name:"external-effect"
+      ?tool_call_id
       ~input
       ~base_path
       ?turn_id
@@ -170,7 +172,7 @@ let test_pending_store_lock_serializes_eio_fibers () =
     (List.rev !order)
 ;;
 
-let test_dedup_never_merges_distinct_origins () =
+let test_tool_call_identity_controls_pending_deduplication () =
   let base_path = temp_dir () in
   let keeper_name = "queue-distinct-origin" in
   Fun.protect
@@ -188,6 +190,7 @@ let test_dedup_never_merges_distinct_origins () =
        in
        let first =
          submit_with_context
+           ~tool_call_id:"tool-call-1"
            ~turn_id:1
            ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
@@ -198,6 +201,7 @@ let test_dedup_never_merges_distinct_origins () =
        in
        let same =
          submit_with_context
+           ~tool_call_id:"tool-call-1"
            ~turn_id:1
            ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
@@ -207,8 +211,27 @@ let test_dedup_never_merges_distinct_origins () =
            ()
        in
        Alcotest.(check string) "same origin deduplicates" first same;
+       (match
+          AQ.submit_pending
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~tool_call_id:"tool-call-1"
+            ~input:(`Assoc [ "target", `String "different-action" ])
+            ~base_path
+            ()
+        with
+        | Error error ->
+          Alcotest.(check bool)
+            "tool call identity collision fails closed"
+            true
+            (String.starts_with ~prefix:"tool_call_id" error.reason)
+        | Ok id ->
+          Alcotest.failf
+            "tool call identity collision created approval %s"
+            id);
        let another_turn =
          submit_with_context
+           ~tool_call_id:"tool-call-2"
            ~turn_id:2
            ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
@@ -219,6 +242,7 @@ let test_dedup_never_merges_distinct_origins () =
        in
        let another_channel =
          submit_with_context
+           ~tool_call_id:"tool-call-3"
            ~turn_id:1
            ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_b
@@ -229,6 +253,7 @@ let test_dedup_never_merges_distinct_origins () =
        in
        let another_goal_context =
          submit_with_context
+           ~tool_call_id:"tool-call-4"
            ~turn_id:1
            ~goal_ids:[ "goal-b" ]
            ~continuation_channel:dashboard_a
@@ -237,13 +262,43 @@ let test_dedup_never_merges_distinct_origins () =
            ~input
            ()
        in
+       let without_identity_first =
+         submit_with_context
+           ~turn_id:1
+           ~goal_ids:[ "goal-a" ]
+           ~continuation_channel:dashboard_a
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       let without_identity_second =
+         submit_with_context
+           ~turn_id:1
+           ~goal_ids:[ "goal-a" ]
+           ~continuation_channel:dashboard_a
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check bool)
+         "missing tool call identity never deduplicates by input"
+         true
+         (not (String.equal without_identity_first without_identity_second));
        List.iter
          (fun id ->
             Alcotest.(check bool) "distinct origin has its own request" true
               (not (String.equal first id)))
          [ another_turn; another_channel; another_goal_context ];
        List.iter (reject_and_cleanup ~base_path)
-         [ first; another_turn; another_channel; another_goal_context ])
+         [ first
+         ; another_turn
+         ; another_channel
+         ; another_goal_context
+         ; without_identity_first
+         ; without_identity_second
+         ])
 ;;
 
 let check_update label expected = function
@@ -547,6 +602,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        in
        let first =
          submit_with_context
+           ~tool_call_id:"tool-call-exact"
            ~turn_id:12
            ~request_context
            ~base_path
@@ -562,6 +618,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        in
        let same =
          submit_with_context
+           ~tool_call_id:"tool-call-exact"
            ~turn_id:12
            ~request_context
            ~base_path
@@ -577,6 +634,10 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
          |> to_list
          |> List.find (fun entry -> String.equal (entry |> member "id" |> to_string) first)
        in
+       Alcotest.(check string)
+         "tool call identity is durable"
+         "tool-call-exact"
+         (persisted_entry |> member "tool_call_id" |> to_string);
        Alcotest.(check int)
          "exact context wire version"
          1
@@ -983,6 +1044,7 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
+            ~tool_call_id:None
             ~input:(`Assoc [ "target", `String "other" ])
         with
         | Ok AQ.Consumption_not_matching -> ()
@@ -995,6 +1057,7 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
+            ~tool_call_id:None
             ~input
         with
         | Ok AQ.Consumption_committed -> ()
@@ -1243,7 +1306,11 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          ; input
          ; base_path
          ; causal_context =
-             Some { Gate.turn_id = Some 99; snapshot = `Assoc [] }
+             Some
+               { Gate.turn_id = Some 99
+               ; tool_call_id = None
+               ; snapshot = `Assoc []
+               }
          ; task_id
          ; goal_ids
          ; continuation_channel = None
@@ -3014,6 +3081,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
+            ~tool_call_id:None
             ~input:(`Assoc [ "target", `String "replay" ])
         with
         | Ok AQ.Consumption_committed -> ()
@@ -3138,6 +3206,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
+            ~tool_call_id:None
             ~input
         with
         | Ok AQ.Consumption_committed -> ()
@@ -3276,7 +3345,11 @@ let test_default_auto_judge_defers_without_blocking () =
          ; input = `Assoc [ "target", `String "auto-judge" ]
          ; base_path
          ; causal_context =
-             Some { Gate.turn_id = Some 9; snapshot = `Assoc [] }
+             Some
+               { Gate.turn_id = Some 9
+               ; tool_call_id = None
+               ; snapshot = `Assoc []
+               }
          ; task_id = Some "task-auto-judge"
          ; goal_ids = [ "goal-auto-judge" ]
          ; continuation_channel = None
@@ -3520,9 +3593,9 @@ let () =
             `Quick
             test_different_owners_claim_in_parallel
         ; Alcotest.test_case
-            "dedup keeps distinct origins"
+            "tool call identity controls dedup"
             `Quick
-            test_dedup_never_merges_distinct_origins
+            test_tool_call_identity_controls_pending_deduplication
         ; Alcotest.test_case
             "resolution wakes only origin"
             `Quick

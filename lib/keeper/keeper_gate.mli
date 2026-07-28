@@ -6,6 +6,9 @@
 
 type causal_context =
   { turn_id : int option
+  (** Provider/OAS tool-use identity. [None] is legacy or non-provider input;
+      it is never used to infer request deduplication. *)
+  ; tool_call_id : string option
   ; snapshot : Yojson.Safe.t
   }
 (** Exact outer-turn evidence captured before the tool call. The Gate stores

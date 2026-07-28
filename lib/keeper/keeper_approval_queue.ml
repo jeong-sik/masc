@@ -58,6 +58,7 @@ type exact_attempt_transition =
 type approved_resolution_request =
   { keeper_name : string
   ; tool_name : string
+  ; tool_call_id : string option
   ; input : Yojson.Safe.t
   }
 
@@ -391,6 +392,7 @@ let pending_entry_to_yojson
     [ "id", `String entry.id
     ; "keeper_name", `String entry.keeper_name
     ; "tool_name", `String entry.tool_name
+    ; "tool_call_id", Json_util.string_opt_to_json entry.tool_call_id
     ; "input_hash", `String entry.input_hash
     ; "input", entry.input
     ; "sequence", `Int entry.sequence
@@ -845,6 +847,7 @@ let pending_entry_of_yojson ~base_path json =
           [ "id"
           ; "keeper_name"
           ; "tool_name"
+          ; "tool_call_id"
           ; "input_hash"
           ; "input"
           ; "sequence"
@@ -865,6 +868,7 @@ let pending_entry_of_yojson ~base_path json =
     let* id = required_string ~surface "id" fields in
     let* keeper_name = required_string ~surface "keeper_name" fields in
     let* tool_name = required_string ~surface "tool_name" fields in
+    let* tool_call_id = optional_string ~surface "tool_call_id" fields in
     let* input_hash = required_string ~surface "input_hash" fields in
     let* input = required_member ~surface "input" fields in
     let expected_hash = request_fingerprint input in
@@ -932,18 +936,19 @@ let pending_entry_of_yojson ~base_path json =
       in
       Ok
         { id
-      ; keeper_name
-      ; tool_name
-      ; input_hash
-      ; input
-      ; sequence
-      ; requested_at
-      ; turn_id
-      ; request_context
-      ; task_id
-      ; goal_id
-      ; goal_ids
-      ; continuation_channel
+        ; keeper_name
+        ; tool_name
+        ; tool_call_id
+        ; input_hash
+        ; input
+        ; sequence
+        ; requested_at
+        ; turn_id
+        ; request_context
+        ; task_id
+        ; goal_id
+        ; goal_ids
+        ; continuation_channel
         ; audit_base_path = base_path
         ; summary_status
         ; exact_attempt
@@ -2068,6 +2073,7 @@ let approved_resolution_request ~base_path ~id =
         (Some
            { keeper_name = delivery.entry.keeper_name
            ; tool_name = delivery.entry.tool_name
+           ; tool_call_id = delivery.entry.tool_call_id
            ; input = delivery.entry.input
            }))
 ;;
@@ -2155,6 +2161,7 @@ let consume_approved_resolution
       ~id
       ~keeper_name
       ~tool_name
+      ~tool_call_id
       ~input
   =
   let result =
@@ -2169,6 +2176,7 @@ let consume_approved_resolution
           not
             (String.equal entry.keeper_name keeper_name
              && String.equal entry.tool_name tool_name
+             && entry.tool_call_id = tool_call_id
              && String.equal entry.input_hash (normalized_input_hash input))
         then Ok (Consumption_without_audit Consumption_not_matching)
         else
@@ -2224,6 +2232,7 @@ let create_entry
       ~sequence
       ~keeper_name
       ~tool_name
+      ?tool_call_id
       ~input
       ?turn_id
       ?request_context
@@ -2238,6 +2247,7 @@ let create_entry
   { id
   ; keeper_name
   ; tool_name
+  ; tool_call_id
   ; input_hash
   ; input
   ; sequence
@@ -2262,6 +2272,7 @@ let pending_entry_json_fields
   [ "id", `String entry.id
   ; "keeper_name", `String entry.keeper_name
   ; "tool_name", `String entry.tool_name
+  ; "tool_call_id", Json_util.string_opt_to_json entry.tool_call_id
   ; "input_hash", `String entry.input_hash
   ; "sequence", `Int entry.sequence
   ; "requested_at", `Float entry.requested_at
@@ -3361,24 +3372,32 @@ let pending_entry_matches
       ~base_path
       ~keeper_name
       ~tool_name
+      ~tool_call_id
       ~input_hash
-      ~turn_id
-      ~task_id
-      ~goal_id
-      ~goal_ids
-      ~continuation_channel
   =
   String.equal entry.audit_base_path base_path
   && String.equal entry.keeper_name keeper_name
   && String.equal entry.tool_name tool_name
+  && (match tool_call_id with
+      | None -> false
+      | Some tool_call_id -> entry.tool_call_id = Some tool_call_id)
   && String.equal entry.input_hash input_hash
-  && entry.turn_id = turn_id
-  && entry.task_id = task_id
-  && entry.goal_id = goal_id
-  && entry.goal_ids = goal_ids
-  && Yojson.Safe.equal
-       (Keeper_continuation_channel.to_yojson entry.continuation_channel)
-       (Keeper_continuation_channel.to_yojson continuation_channel)
+;;
+
+let pending_entry_owns_tool_call_id
+      (entry : pending_approval)
+      ~base_path
+      ~keeper_name
+      ~tool_name
+      ~tool_call_id
+  =
+  match tool_call_id with
+  | None -> false
+  | Some tool_call_id ->
+    String.equal entry.audit_base_path base_path
+    && String.equal entry.keeper_name keeper_name
+    && String.equal entry.tool_name tool_name
+    && entry.tool_call_id = Some tool_call_id
 ;;
 
 let find_pending_id_in_map
@@ -3386,34 +3405,35 @@ let find_pending_id_in_map
       ~base_path
       ~keeper_name
       ~tool_name
+      ~tool_call_id
       ~input_hash
-      ~turn_id
-      ~task_id
-      ~goal_id
-      ~goal_ids
-      ~continuation_channel
   =
   SMap.fold
     (fun id (entry : pending_approval) acc ->
        match acc with
-       | Some _ -> acc
-       | None ->
+       | Error _ as error -> error
+       | Ok (Some _) as found -> found
+       | Ok None ->
          if
-           pending_entry_matches
+           pending_entry_owns_tool_call_id
              entry
              ~base_path
              ~keeper_name
              ~tool_name
-             ~input_hash
-             ~turn_id
-             ~task_id
-             ~goal_id
-             ~goal_ids
-             ~continuation_channel
-         then Some id
-         else None)
+             ~tool_call_id
+         then
+           if pending_entry_matches entry ~base_path ~keeper_name ~tool_name
+                ~tool_call_id ~input_hash
+           then Ok (Some id)
+           else
+             Error
+               (Printf.sprintf
+                  "tool_call_id %s is already pending for a different canonical request (approval %s)"
+                  (Option.get tool_call_id)
+                  id)
+         else Ok None)
     map
-    None
+    (Ok None)
 ;;
 
 (* ── Nonblocking submission ───────────────────────────────── *)
@@ -3421,6 +3441,7 @@ let find_pending_id_in_map
 let submit_pending
       ~keeper_name
       ~tool_name
+      ?tool_call_id
       ~input
       ~base_path
       ?turn_id
@@ -3454,15 +3475,13 @@ let submit_pending
              ~base_path
              ~keeper_name
              ~tool_name
+             ~tool_call_id
              ~input_hash
-             ~turn_id
-             ~task_id
-             ~goal_id
-             ~goal_ids
-             ~continuation_channel
          with
-         | Some id -> Ok (id, None)
-         | None ->
+         | Error reason ->
+           Error { path = pending_store_path ~base_path; reason }
+         | Ok (Some id) -> Ok (id, None)
+         | Ok None ->
            let id = generate_id () in
            if sequence = max_int
            then
@@ -3478,6 +3497,7 @@ let submit_pending
                  ~keeper_name
                  ~tool_name
                  ~input
+                 ?tool_call_id
                  ?turn_id
               ?request_context
               ?task_id

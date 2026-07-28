@@ -443,6 +443,23 @@ let replay_approved_effect
       }
   | Ok None -> Not_applicable
   | Ok (Some request) ->
+    let replay_gate_context =
+      match request.tool_call_id with
+      | None -> gate_context
+      | Some tool_call_id ->
+        Some
+          (fun () ->
+            let base_context =
+              match gate_context with
+              | Some current -> current ()
+              | None ->
+                { Keeper_gate.turn_id = None
+                ; tool_call_id = None
+                ; snapshot = `Assoc []
+                }
+            in
+            { base_context with tool_call_id = Some tool_call_id })
+    in
     let replay operation decode run =
       match decode request.input with
       | Error detail ->
@@ -468,7 +485,7 @@ let replay_approved_effect
            ~meta
            ~publication_recovery
            ?continuation_channel
-           ?gate_context
+           ?gate_context:replay_gate_context
            ~gate_grant:grant
            ~args
            ())
@@ -479,7 +496,7 @@ let replay_approved_effect
            ~config
            ~meta
            ?continuation_channel
-           ?gate_context
+           ?gate_context:replay_gate_context
            ~gate_grant:grant
            ~args
            ())

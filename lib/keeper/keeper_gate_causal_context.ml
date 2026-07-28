@@ -46,6 +46,7 @@ let snapshot t : Keeper_gate.causal_context =
     |> List.rev_map completed_call_to_yojson
   in
   { turn_id = t.turn_id
+  ; tool_call_id = None
   ; snapshot =
       `Assoc
         [ "initial", t.initial

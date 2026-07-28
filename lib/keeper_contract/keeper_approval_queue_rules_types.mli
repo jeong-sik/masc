@@ -99,6 +99,7 @@ type pending_approval =
   { id : string
   ; keeper_name : string
   ; tool_name : string
+  ; tool_call_id : string option
   ; input_hash : string
   ; input : Yojson.Safe.t
   ; sequence : int

@@ -14,6 +14,38 @@ let producer_payload ~raw = function
   | None -> `String raw
 ;;
 
+(* The provider's tool-use identity is available at the OAS boundary, before
+   the producer runtime evaluates the Gate. Carry it through the existing
+   causal-context channel so every Gate-backed tool receives the same durable
+   identity without teaching individual tool handlers about OAS. *)
+let gate_context_for_invocation ~gate_context ~oas_invocation =
+  match oas_invocation with
+  | None -> gate_context
+  | Some invocation ->
+    let raw_tool_call_id =
+      Agent_sdk.Tool_contract.Invocation.tool_use_id invocation
+    in
+    let tool_call_id =
+      if String.trim raw_tool_call_id = "" then None else Some raw_tool_call_id
+    in
+    (match tool_call_id, gate_context with
+     | None, None -> None
+     | _ ->
+       Some
+         (fun () ->
+           let base_context =
+             match gate_context with
+             | Some current -> current ()
+             | None ->
+               { Keeper_gate.turn_id =
+                   Some (Agent_sdk.Tool_contract.Invocation.turn invocation)
+               ; tool_call_id = None
+               ; snapshot = `Assoc []
+               }
+           in
+           { base_context with tool_call_id }))
+;;
+
 let execute_with_observers
       ~(name : string)
       ~(config : Workspace.config)
@@ -38,6 +70,9 @@ let execute_with_observers
   =
   let t0 = Time_compat.now () in
   let invocation_fields = oas_invocation_fields oas_invocation in
+  let dispatch_gate_context =
+    gate_context_for_invocation ~gate_context ~oas_invocation
+  in
   try
     let result, duration_ms =
       Inference_utils.timed (fun () ->
@@ -54,7 +89,7 @@ let execute_with_observers
           ?net
           ?mcp_session_id
           ?continuation_channel
-          ?gate_context
+          ?gate_context:dispatch_gate_context
           ?gate_grant
           ~name
           ~input

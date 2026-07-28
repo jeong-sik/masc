@@ -931,7 +931,19 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
            ~ctx_snapshot:ctx_work
            ()
        in
-       let masc_result = handler input in
+       let invocation =
+         Agent_sdk.Tool_contract.Invocation.create
+           ~tool_use_id:"toolu-gate-identity"
+           ~turn:17
+           ~completion:Agent_sdk.Tool_contract.Continue_after_success
+           ~schedule:
+             { planned_index = 0
+             ; batch_index = 0
+             ; batch_size = 1
+             ; execution_mode = Agent_sdk.Tool_contract.Serial
+             }
+       in
+       let masc_result = handler ~oas_invocation:invocation input in
        (match masc_result with
         | Tool_result.Deferred output ->
           check bool
@@ -953,6 +965,19 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
               (output.data |> member "gate" |> member "decision" |> to_string)
         | Tool_result.Completed _ -> fail "Gate deferral became Completed"
         | Tool_result.Failed _ -> fail "Gate deferral became Failed");
+       (match
+          Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+            ~base_path:config.base_path
+        with
+        | Ok [ entry ] ->
+          check (option string)
+            "OAS tool_use_id is persisted on the approval"
+            (Some "toolu-gate-identity")
+            entry.Masc.Keeper_approval_queue.tool_call_id
+        | Ok entries ->
+          failf "expected one pending approval, got %d" (List.length entries)
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.storage_error_to_string error));
        (match Masc.Tool_bridge.to_oas_typed_result masc_result with
         | Ok { _meta = Some (`Assoc fields); _ } ->
           check (option string)

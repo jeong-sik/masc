@@ -253,11 +253,47 @@ let test_no_goal_prompt_blocks_repo_creation_question () =
        ~needle:"Do not ask the operator what repo, goal, or task to create"
        system)
 
+(* The section is rendered from Keeper_sandbox, so the assertion compares
+   against that SSOT rather than a sentence. Rewording the prompt keeps this
+   green; regressing the projection so a Docker keeper is handed the host
+   root -- the #10650 failure -- does not. *)
+let sandbox_root_for profile =
+  let meta = { meta with Masc.Keeper_meta_contract.sandbox_profile = profile } in
+  let base_path = "/tmp/unused" in
+  let config = Masc.Workspace.default_config base_path in
+  let { Prompt.system_prompt; _ } =
+    Prompt.build_prompt ~meta ~base_path ~observation:base_observation ()
+  in
+  (system_prompt, Masc.Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+
+let test_docker_keeper_sees_its_container_root () =
+  with_repo_prompt_config (fun () ->
+    let rendered, visible_root =
+      sandbox_root_for Masc.Keeper_types_profile.Docker
+    in
+    check bool "container root is in the prompt" true
+      (contains ~needle:visible_root rendered))
+
+let test_local_keeper_sees_its_host_root () =
+  with_repo_prompt_config (fun () ->
+    let rendered, visible_root =
+      sandbox_root_for Masc.Keeper_types_profile.Local
+    in
+    check bool "host root is in the prompt" true
+      (contains ~needle:visible_root rendered))
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
   run "keeper_surface_presence_prompt"
     [
+      ( "sandbox paths",
+        [
+          test_case "docker keeper sees its container root" `Quick
+            test_docker_keeper_sees_its_container_root;
+          test_case "local keeper sees its host root" `Quick
+            test_local_keeper_sees_its_host_root;
+        ] );
       ( "connected surfaces section",
         [
           test_case "bound keeper sees presence section" `Quick

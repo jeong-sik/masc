@@ -618,8 +618,9 @@ let () =
      event and whether it reaches [Keeper_contract_classifier]'s
      [board_activity_count]. Classifying a reconciliation wake as scheduled
      work compiles cleanly but drops it from the Board Activity prompt section
-     and from [board_activity_count] (receipt metadata only — the turn still
-     runs), so pin both sides here. *)
+     and from [board_activity_count]; when the event is isolated, it also
+     removes [Board_event_pending] and suppresses the intended reactive turn,
+     so pin both sides here. *)
   assert (Masc.Keeper_world_observation.is_board_activity_event prompt_event);
   assert (
     not

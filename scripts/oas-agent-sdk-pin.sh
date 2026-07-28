@@ -10,8 +10,9 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.230.0"
 # Previous pin: v0.229.0 (6bf1751a).
 # MASC consumes only the public Agent SDK contract; Keeper, Gate, Board, and
 # product operation ownership remain MASC concepts.
-# The reachability guard in check-oas-pin.sh tracks main; oas-drift-check.sh
-# reports the public-surface delta at pin-bump time.
+# The reachability guards in check-oas-pin.sh and oas-drift-check.sh track
+# main; oas-drift-check.sh also reports the public-surface delta at pin-bump
+# time.
 # Pinned to the v0.230.0 release commit.
 readonly OAS_AGENT_SDK_DECLARED_VERSION="0.230.0"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /

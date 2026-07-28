@@ -301,6 +301,7 @@ type extraction_error =
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Domain_output_invalid of string
+  | Pending_publication_blocked of Recognition_ledger.recovery_error
   | Memory_apply_failed of string
 
 type extraction_error_kind =
@@ -311,6 +312,7 @@ type extraction_error_kind =
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
+  | Pending_publication_blocked
   | Memory_apply_failure
 
 let extraction_error_kind = function
@@ -321,6 +323,7 @@ let extraction_error_kind = function
   | Exact_setup_failed _ -> Exact_setup_failure
   | Exact_execution_failed _ -> Exact_execution_failure
   | Domain_output_invalid _ -> Domain_output_invalid
+  | Pending_publication_blocked _ -> Pending_publication_blocked
   | Memory_apply_failed _ -> Memory_apply_failure
 ;;
 
@@ -391,6 +394,9 @@ let extraction_error_to_string = function
       detail
   | Domain_output_invalid msg ->
     "librarian domain output invalid: " ^ msg
+  | Pending_publication_blocked error ->
+    "memory os recognition publication blocked: "
+    ^ Recognition_ledger.recovery_error_to_string error
   | Memory_apply_failed msg -> "memory os recognition apply failed: " ^ msg
 ;;
 
@@ -399,6 +405,7 @@ let should_record_cadence_backoff_after_error = function
   | Exact_execution_failed { outward_effect = No_outward_effect; _ } -> false
   | Exact_setup_failed (Exact_previous_attempt_unsettled _) -> true
   | Domain_output_invalid _ -> true
+  | Pending_publication_blocked _ -> true
   | Execution_clock_unavailable
   | Prompt_render_failed _
   | Store_read_failed _
@@ -1238,40 +1245,89 @@ let reserve_recognition_input ~keeper_id (inp : Keeper_librarian.input) =
   generation, { inp with Keeper_librarian.generation }
 ;;
 
-module For_testing = struct
-  let apply_and_persist = apply_and_persist
-  let persist_cadence_backoff = persist_cadence_backoff
-  let reserve_recognition_input = reserve_recognition_input
-end
+let repair_pending_publication
+      ?clock
+      ~base_path
+      ~keeper_id
+      ~action
+      ()
+  =
+  let masc_root =
+    Workspace_utils.masc_root_dir_from
+      ~base_path
+      ~cluster_name:(Env_config_core.cluster_name ())
+  in
+  Keeper_memory_os_io.with_recognition_fact_transaction
+    ?clock
+    ~masc_root
+    ~keeper_id
+    ~on_timeout:(fun detail ->
+      Error (Recognition_ledger.Pending_repair_io_failed detail))
+    (fun ~rewrite ~masc_root:_ ->
+       Recognition_ledger.repair_pending
+         ~masc_root
+         ~keeper_id
+       ~rewrite:(fun facts ->
+           try
+             rewrite facts;
+             Ok ()
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> Error (Printexc.to_string exn))
+         ~action
+         (* NDT-OK: operator-repair audit timestamps are provenance metadata. *)
+         ~now:(Unix.gettimeofday ())
+         ())
+;;
 
-let extract_and_append_with_exact_output_classified
+let preflight_recognition_store ?clock ~base_path ~keeper_id () =
+  let masc_root =
+    Workspace_utils.masc_root_dir_from
+      ~base_path
+      ~cluster_name:(Env_config_core.cluster_name ())
+  in
+  Keeper_memory_os_io.with_recognition_fact_transaction
+    ?clock
+    ~masc_root
+    ~keeper_id
+    ~on_timeout:(fun detail -> Error (Memory_apply_failed detail))
+    (fun ~rewrite:_ ~masc_root:_ ->
+       match Keeper_memory_os_io.read_facts_all_strict_offloaded ~keeper_id with
+       | Error detail -> Error (Store_read_failed detail)
+       | Ok store ->
+         (match
+            Recognition_ledger.recover_pending_classified
+              ~masc_root
+              ~keeper_id
+              ~current_store:store
+              (* NDT-OK: recovery terminal timestamps are provenance metadata. *)
+              ~now:(Unix.gettimeofday ())
+              ()
+          with
+          | Ok _ -> Ok store
+          | Error error -> Error (Pending_publication_blocked error)))
+;;
+
+let extract_and_append_with
     ?clock
     ~base_path
-    ~net
     ~keeper_id
+    ~extract
     inp
   : (recognition_write, extraction_error) result =
   match clock with
   | None -> Error Execution_clock_unavailable
   | Some _ ->
-    (* The store snapshot is read here, outside any lock, and rides the input
-       into both the prompt (numbered rendering) and the post-provider CAS
-       revalidation in [apply_and_persist]. Offloaded: a large fact file must
-       not run blocking channel IO on the calling Eio fiber. *)
-    (match Keeper_memory_os_io.read_facts_all_strict_offloaded ~keeper_id with
-     | Error msg -> Error (Store_read_failed msg)
+    (* Recovery is an admission boundary: never start a paid provider request
+       while an earlier publication is unsettled. The returned store snapshot
+       rides the prompt and is revalidated under the facts lock after the
+       provider call. *)
+    (match preflight_recognition_store ?clock ~base_path ~keeper_id () with
+     | Error _ as error -> error
      | Ok store ->
        let inp = { inp with Keeper_librarian.store } in
        let generation, inp = reserve_recognition_input ~keeper_id inp in
-       (match
-          extract_with_exact_output_classified
-            ?clock
-            ~base_path
-            ~net
-            ~keeper_id
-            ~generation
-            inp
-        with
+       (match extract ~generation inp with
         | Error _ as error -> error
         | Ok recognition ->
           apply_and_persist
@@ -1281,6 +1337,35 @@ let extract_and_append_with_exact_output_classified
             ~generation
             inp
             recognition))
+;;
+
+module For_testing = struct
+  let apply_and_persist = apply_and_persist
+  let persist_cadence_backoff = persist_cadence_backoff
+  let reserve_recognition_input = reserve_recognition_input
+  let extract_and_append_with = extract_and_append_with
+end
+
+let extract_and_append_with_exact_output_classified
+    ?clock
+    ~base_path
+    ~net
+    ~keeper_id
+    inp
+  =
+  extract_and_append_with
+    ?clock
+    ~base_path
+    ~keeper_id
+    ~extract:(fun ~generation inp ->
+      extract_with_exact_output_classified
+        ?clock
+        ~base_path
+        ~net
+        ~keeper_id
+        ~generation
+        inp)
+    inp
 ;;
 
 let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =

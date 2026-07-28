@@ -72,6 +72,9 @@ val create :
 val base_dir : t -> string
 (** Return the base directory of this store. *)
 
+val current_file_path : t -> string
+(** Return today's [YYYY-MM/DD.jsonl] path without creating it. *)
+
 val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)

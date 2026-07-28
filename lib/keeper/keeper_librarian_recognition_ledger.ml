@@ -190,12 +190,10 @@ let pending_path ~masc_root ~keeper_id =
 
 let append_json ~masc_root entry =
   try
-    let dated =
-      Jsonl_writer.dated_path_now ~base_dir:(base_dir ~masc_root)
-    in
+    let path = make_store ~masc_root () |> Dated_jsonl.current_file_path in
     let suffix = Yojson.Safe.to_string entry ^ "\n" in
     match
-      Fs_compat.append_private_jsonl_durable_locked_result dated.path suffix
+      Fs_compat.append_private_jsonl_durable_locked_result path suffix
     with
     | Fs_compat.Private_file_succeeded () -> Ok ()
     | Fs_compat.Private_file_succeeded_with_cleanup_failure
@@ -388,6 +386,8 @@ type pending_publication =
   ; generation : int
   ; store_before_digest : string
   ; store_after_digest : string
+  ; store_before : fact list
+  ; store_after : fact list
   ; episode : episode
   ; facts_rewrite_required : bool
   ; prepared_json : Yojson.Safe.t
@@ -398,6 +398,53 @@ type recovery_outcome =
   | No_pending_publication
   | Recovered_committed of string * terminal_write_outcome
   | Recovered_aborted of string * terminal_write_outcome
+
+type recovery_error =
+  | Pending_marker_invalid of string
+  | Prepared_evidence_recovery_failed of string
+  | Abort_marker_recovery_failed of string
+  | Episode_recovery_failed of string
+  | Event_recovery_failed of string
+  | Commit_marker_recovery_failed of string
+  | Pending_publication_third_state of
+      { publication_id : string
+      ; current_store_digest : string
+      ; store_before_digest : string
+      ; store_after_digest : string
+      ; facts_rewrite_required : bool
+      }
+  | Recovery_io_failed of string
+
+let recovery_error_to_string = function
+  | Pending_marker_invalid detail -> detail
+  | Prepared_evidence_recovery_failed detail ->
+    "recognition prepared evidence recovery failed: " ^ detail
+  | Abort_marker_recovery_failed detail ->
+    "recognition abort marker write failed: " ^ detail
+  | Episode_recovery_failed detail ->
+    "recognition episode recovery failed: " ^ detail
+  | Event_recovery_failed detail ->
+    "recognition event recovery failed: " ^ detail
+  | Commit_marker_recovery_failed detail ->
+    "recognition commit recovery failed: " ^ detail
+  | Pending_publication_third_state
+      { publication_id
+      ; current_store_digest
+      ; store_before_digest
+      ; store_after_digest
+      ; facts_rewrite_required
+      } ->
+    Printf.sprintf
+      "pending recognition publication %s matches neither canonical transition \
+       state nor its publication mode; repair is required \
+       (current=%s before=%s after=%s facts_rewrite_required=%b)"
+      publication_id
+      current_store_digest
+      store_before_digest
+      store_after_digest
+      facts_rewrite_required
+  | Recovery_io_failed detail -> detail
+;;
 
 let string_field key fields =
   match List.assoc_opt key fields with
@@ -482,6 +529,8 @@ let pending_of_fields ~keeper_id ~prepared_json ~prepared_logged fields =
          ; generation
          ; store_before_digest
          ; store_after_digest
+         ; store_before
+         ; store_after
          ; episode
          ; facts_rewrite_required
          ; prepared_json
@@ -537,10 +586,10 @@ let load_pending_marker ~masc_root ~keeper_id =
     | exn -> Error (Printexc.to_string exn)
 ;;
 
-let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
+let recover_pending_classified ~masc_root ~keeper_id ~current_store ~now () =
   try
     match load_pending_marker ~masc_root ~keeper_id with
-    | Error _ as error -> error
+    | Error detail -> Error (Pending_marker_invalid detail)
     | Ok None -> Ok No_pending_publication
     | Ok (Some publication) ->
       (* The dated audit retention sweep can remove an old prepared row while
@@ -562,7 +611,7 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
       in
       (match prepared_ready with
        | Error detail ->
-         Error ("recognition prepared evidence recovery failed: " ^ detail)
+         Error (Prepared_evidence_recovery_failed detail)
        | Ok () ->
             let current_digest = facts_digest current_store in
             let before_matches =
@@ -586,7 +635,7 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
                | Ok outcome ->
                  Ok (Recovered_aborted (publication.publication_id, outcome))
                | Error detail ->
-                 Error ("recognition abort marker write failed: " ^ detail))
+                 Error (Abort_marker_recovery_failed detail))
             else if
               after_matches
               && ((not publication.facts_rewrite_required)
@@ -599,7 +648,7 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
                    publication.episode
                with
                | Error detail ->
-                 Error ("recognition episode recovery failed: " ^ detail)
+                 Error (Episode_recovery_failed detail)
                | Ok () ->
                  (match
                     Keeper_memory_os_io.ensure_recognition_event
@@ -608,7 +657,7 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
                       publication.episode
                   with
                   | Error detail ->
-                    Error ("recognition event recovery failed: " ^ detail)
+                    Error (Event_recovery_failed detail)
                   | Ok () ->
                     (match
                        append_committed
@@ -625,14 +674,124 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
                          (Recovered_committed
                             (publication.publication_id, outcome))
                      | Error detail ->
-                       Error ("recognition commit recovery failed: " ^ detail))))
+                       Error (Commit_marker_recovery_failed detail))))
             else
               Error
-                "pending recognition publication matches neither canonical \
-                 transition state nor its publication mode; repair is required")
+                (Pending_publication_third_state
+                   { publication_id = publication.publication_id
+                   ; current_store_digest = current_digest
+                   ; store_before_digest = publication.store_before_digest
+                   ; store_after_digest = publication.store_after_digest
+                   ; facts_rewrite_required =
+                       publication.facts_rewrite_required
+                   }))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printexc.to_string exn)
+  | exn -> Error (Recovery_io_failed (Printexc.to_string exn))
+;;
+
+let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
+  recover_pending_classified ~masc_root ~keeper_id ~current_store ~now ()
+  |> Result.map_error recovery_error_to_string
+;;
+
+type pending_repair =
+  | Abort_preserving_current
+  | Restore_store_before
+  | Settle_store_after
+
+type repair_outcome =
+  | Repaired_aborted of string * terminal_write_outcome
+  | Repaired_committed of string * terminal_write_outcome
+
+type repair_error =
+  | No_pending_publication_to_repair
+  | Pending_repair_marker_invalid of string
+  | Pending_repair_prepared_failed of string
+  | Pending_repair_rewrite_failed of string
+  | Pending_repair_episode_failed of string
+  | Pending_repair_event_failed of string
+  | Pending_repair_terminal_failed of string
+  | Pending_repair_io_failed of string
+
+let repair_pending
+      ~masc_root
+      ~keeper_id
+      ~rewrite
+      ~action
+      ~now
+      ()
+  =
+  try
+    match load_pending_marker ~masc_root ~keeper_id with
+    | Error detail -> Error (Pending_repair_marker_invalid detail)
+    | Ok None -> Error No_pending_publication_to_repair
+    | Ok (Some publication) ->
+      (match append_json ~masc_root publication.prepared_json with
+       | Error detail -> Error (Pending_repair_prepared_failed detail)
+       | Ok () ->
+         let abort () =
+           match
+             append_aborted
+               ~masc_root
+               ~publication_id:publication.publication_id
+               ~keeper_id
+               ~trace_id:publication.trace_id
+               ~generation:publication.generation
+               ~now
+               ()
+           with
+           | Ok outcome ->
+             Ok (Repaired_aborted (publication.publication_id, outcome))
+           | Error detail -> Error (Pending_repair_terminal_failed detail)
+         in
+         let settle () =
+           match
+             Keeper_memory_os_io.ensure_recognition_episode
+               ~keeper_id
+               ~publication_id:publication.publication_id
+               publication.episode
+           with
+           | Error detail -> Error (Pending_repair_episode_failed detail)
+           | Ok () ->
+             (match
+                Keeper_memory_os_io.ensure_recognition_event
+                  ~keeper_id
+                  ~publication_id:publication.publication_id
+                  publication.episode
+              with
+              | Error detail -> Error (Pending_repair_event_failed detail)
+              | Ok () ->
+                (match
+                   append_committed
+                     ~masc_root
+                     ~publication_id:publication.publication_id
+                     ~keeper_id
+                     ~trace_id:publication.trace_id
+                     ~generation:publication.generation
+                     ~now
+                     ()
+                 with
+                 | Ok outcome ->
+                   Ok
+                     (Repaired_committed
+                        (publication.publication_id, outcome))
+                 | Error detail ->
+                   Error (Pending_repair_terminal_failed detail)))
+         in
+         match action with
+         | Abort_preserving_current -> abort ()
+         | Restore_store_before ->
+           (match rewrite publication.store_before with
+            | Error detail -> Error (Pending_repair_rewrite_failed detail)
+            | Ok () -> abort ())
+         | Settle_store_after ->
+           (match rewrite publication.store_after with
+            | Error detail -> Error (Pending_repair_rewrite_failed detail)
+            | Ok () -> settle ()))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Pending_repair_io_failed (Printexc.to_string exn))
 ;;
 
 type publication_failure =

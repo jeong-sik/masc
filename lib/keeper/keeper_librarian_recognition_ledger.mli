@@ -100,6 +100,24 @@ type recovery_outcome =
   | Recovered_committed of string * terminal_write_outcome
   | Recovered_aborted of string * terminal_write_outcome
 
+type recovery_error =
+  | Pending_marker_invalid of string
+  | Prepared_evidence_recovery_failed of string
+  | Abort_marker_recovery_failed of string
+  | Episode_recovery_failed of string
+  | Event_recovery_failed of string
+  | Commit_marker_recovery_failed of string
+  | Pending_publication_third_state of
+      { publication_id : string
+      ; current_store_digest : string
+      ; store_before_digest : string
+      ; store_after_digest : string
+      ; facts_rewrite_required : bool
+      }
+  | Recovery_io_failed of string
+
+val recovery_error_to_string : recovery_error -> string
+
 (** Settle the one serialized pending publication against the canonical fact
     store while the caller holds the episode-bundle and facts locks. If current
     facts equal its [store_after] digest, idempotently ensure the prepared
@@ -118,6 +136,50 @@ val recover_pending
   -> now:float
   -> unit
   -> (recovery_outcome, string) result
+
+val recover_pending_classified
+  :  masc_root:string
+  -> keeper_id:string
+  -> current_store:fact list
+  -> now:float
+  -> unit
+  -> (recovery_outcome, recovery_error) result
+(** Typed variant of {!recover_pending}. A third-state latch includes all
+    digests needed for operator diagnosis and cannot be mistaken for a
+    transient provider failure. *)
+
+type pending_repair =
+  | Abort_preserving_current
+  | Restore_store_before
+  | Settle_store_after
+
+type repair_outcome =
+  | Repaired_aborted of string * terminal_write_outcome
+  | Repaired_committed of string * terminal_write_outcome
+
+type repair_error =
+  | No_pending_publication_to_repair
+  | Pending_repair_marker_invalid of string
+  | Pending_repair_prepared_failed of string
+  | Pending_repair_rewrite_failed of string
+  | Pending_repair_episode_failed of string
+  | Pending_repair_event_failed of string
+  | Pending_repair_terminal_failed of string
+  | Pending_repair_io_failed of string
+
+val repair_pending
+  :  masc_root:string
+  -> keeper_id:string
+  -> rewrite:(fact list -> (unit, string) result)
+  -> action:pending_repair
+  -> now:float
+  -> unit
+  -> (repair_outcome, repair_error) result
+(** Explicit operator repair while the caller holds the recognition bundle and
+    facts locks. [Abort_preserving_current] clears the latch without changing
+    facts, [Restore_store_before] restores the prepared before-image and
+    aborts, and [Settle_store_after] restores the after-image and completes the
+    episode/event/commit boundary. No action is selected heuristically. *)
 
 type publication_failure =
   | Prepare_failed of string

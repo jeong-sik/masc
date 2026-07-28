@@ -14,6 +14,8 @@ open Alcotest
 module Recognition = Masc.Keeper_librarian_recognition
 module Consolidation = Masc.Keeper_memory_os_consolidation
 module Ledger = Masc.Keeper_librarian_recognition_ledger
+module Librarian = Masc.Keeper_librarian
+module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Memory_io = Masc.Keeper_memory_os_io
 module Recall = Masc.Keeper_memory_os_recall
 module Types = Masc.Keeper_memory_os_types
@@ -558,7 +560,7 @@ let test_zero_op_read_admission_completes_equal_digest_publication () =
         (match
            Memory_io.ensure_recognition_event ~keeper_id ~publication_id episode
          with
-         | Ok () -> ()
+         | Ok _ -> ()
          | Error detail -> fail ("zero-op event fixture failed: " ^ detail));
       if String.equal boundary "after_commit"
       then
@@ -569,10 +571,10 @@ let test_zero_op_read_admission_completes_equal_digest_publication () =
              ~keeper_id
              ~trace_id:episode.trace_id
              ~generation:episode.generation
-             ~now
+           ~now
              ()
          with
-         | Ok () -> ()
+         | Ok _ -> ()
          | Error detail -> fail ("zero-op commit fixture failed: " ^ detail));
       List.iter
         (fun turn ->
@@ -759,11 +761,8 @@ let test_recovery_reasserts_prepared_after_retention_prune () =
         with
         | Ok () -> ()
         | Error detail -> fail ("prepare fixture failed: " ^ detail));
-       let dated =
-         Jsonl_writer.dated_path_now
-           ~base_dir:(Ledger.base_dir ~masc_root)
-       in
-       Sys.remove dated.path;
+       let audit = Dated_jsonl.create ~base_dir:(Ledger.base_dir ~masc_root) () in
+       Sys.remove (Dated_jsonl.current_file_path audit);
        (match Ledger.read_all_canonical ~masc_root with
         | Ok [] -> ()
         | Ok rows ->
@@ -802,6 +801,192 @@ let test_recovery_reasserts_prepared_after_retention_prune () =
            "recovery restores prepared evidence before terminal row"
            [ "prepared"; "committed" ]
            states)
+;;
+
+let test_explicit_operator_repair_actions_settle_pending_third_state () =
+  let run action expected_claims expected_state expected_artifacts =
+    let base_path = Filename.temp_file "recognition-third-state-repair" ".tmp" in
+    Sys.remove base_path;
+    let masc_root =
+      Masc.Workspace_utils.masc_root_dir_from
+        ~base_path
+        ~cluster_name:(Masc.Env_config_core.cluster_name ())
+    in
+    let keepers_dir = Filename.concat base_path "keepers" in
+    Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+      let keeper_id = "keeper-third-state-repair" in
+      let before = [ fact ~claim:"before" () ] in
+      let operation = Recognition.Add (fact ~claim:"after" ()) in
+      let applied = apply [ operation ] before in
+      let event = episode ~claims:applied.Recognition.recognized_facts () in
+      let publication_id =
+        Ledger.publication_id
+          ~keeper_id
+          ~trace_id:event.trace_id
+          ~generation:event.generation
+          ~store_before:before
+          ~operations:[ operation ]
+          ~dispositions:applied.Recognition.dispositions
+          ~store_after:applied.Recognition.facts
+          ~episode:event
+          ~facts_rewrite_required:true
+      in
+      let third_state = [ fact ~claim:"operator-observed-third-state" () ] in
+      Memory_io.rewrite_facts_atomically ~keeper_id third_state;
+      (match
+       Ledger.append_prepared
+           ~masc_root
+           ~publication_id
+           ~keeper_id
+           ~trace_id:event.trace_id
+           ~generation:event.generation
+           ~store_before:before
+           ~operations:[ operation ]
+           ~dispositions:applied.Recognition.dispositions
+           ~store_after:applied.Recognition.facts
+           ~episode:event
+           ~facts_rewrite_required:true
+           ~now
+           ()
+       with
+       | Ok () -> ()
+       | Error detail -> fail ("third-state fixture failed: " ^ detail));
+      (match
+         Ledger.recover_pending_classified
+           ~masc_root
+           ~keeper_id
+           ~current_store:third_state
+           ~now:(now +. 1.0)
+           ()
+       with
+       | Error (Ledger.Pending_publication_third_state _) -> ()
+       | Error error ->
+         fail
+           ("wrong recovery classification: "
+            ^ Ledger.recovery_error_to_string error)
+       | Ok _ -> fail "third-state publication recovered heuristically");
+      (match
+         Librarian_runtime.repair_pending_publication
+           ~base_path
+           ~keeper_id
+           ~action
+           ()
+       with
+       | Ok (Ledger.Repaired_aborted (repaired_id, _))
+       | Ok (Ledger.Repaired_committed (repaired_id, _)) ->
+         check string "same publication repaired" publication_id repaired_id
+       | Error _ -> fail "explicit repair failed");
+      check (list string) "repair selected exact store image"
+        expected_claims
+        (claims (Memory_io.read_facts_all ~keeper_id));
+      (match
+         Ledger.recover_pending
+           ~masc_root
+           ~keeper_id
+           ~current_store:(Memory_io.read_facts_all ~keeper_id)
+           ~now:(now +. 3.0)
+           ()
+       with
+       | Ok Ledger.No_pending_publication -> ()
+       | Ok _ -> fail "restart found a repaired pending publication"
+       | Error detail -> fail ("repaired restart failed: " ^ detail));
+      (match Ledger.read_all_canonical ~masc_root with
+       | Ok rows ->
+         let states =
+           List.map
+             Yojson.Safe.Util.(fun row -> row |> member "publication_state" |> to_string)
+             rows
+         in
+         check (list string) "repair audit is terminal"
+           [ "prepared"; expected_state ]
+           states
+       | Error detail -> fail ("repair audit read failed: " ^ detail));
+      check int "repair artifact count" expected_artifacts
+        (List.length (Memory_io.read_events_tail ~keeper_id ~n:10)))
+  in
+  run Ledger.Abort_preserving_current
+    [ "operator-observed-third-state" ] "aborted" 0;
+  run Ledger.Restore_store_before [ "before" ] "aborted" 0;
+  run Ledger.Settle_store_after [ "before"; "after" ] "committed" 1
+;;
+
+let test_pending_third_state_blocks_provider_admission () =
+  let base_path = Filename.temp_file "recognition-preflight-latch" ".tmp" in
+  Sys.remove base_path;
+  let masc_root =
+    Masc.Workspace_utils.masc_root_dir_from
+      ~base_path
+      ~cluster_name:(Masc.Env_config_core.cluster_name ())
+  in
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+    let keeper_id = "keeper-preflight-latch" in
+    let before = [ fact ~claim:"before" () ] in
+    let operation = Recognition.Add (fact ~claim:"after" ()) in
+    let applied = apply [ operation ] before in
+    let event = episode ~claims:applied.Recognition.recognized_facts () in
+    let publication_id =
+      Ledger.publication_id
+        ~keeper_id
+        ~trace_id:event.trace_id
+        ~generation:event.generation
+        ~store_before:before
+        ~operations:[ operation ]
+        ~dispositions:applied.Recognition.dispositions
+        ~store_after:applied.Recognition.facts
+        ~episode:event
+        ~facts_rewrite_required:true
+    in
+    Memory_io.rewrite_facts_atomically
+      ~keeper_id
+      [ fact ~claim:"third-state" () ];
+    (match
+       Ledger.append_prepared
+         ~masc_root
+         ~publication_id
+         ~keeper_id
+         ~trace_id:event.trace_id
+         ~generation:event.generation
+         ~store_before:before
+         ~operations:[ operation ]
+         ~dispositions:applied.Recognition.dispositions
+         ~store_after:applied.Recognition.facts
+         ~episode:event
+         ~facts_rewrite_required:true
+         ~now
+         ()
+     with
+     | Ok () -> ()
+     | Error detail -> fail ("preflight latch fixture failed: " ^ detail));
+    let provider_calls = ref 0 in
+    Eio_main.run
+    @@ fun env ->
+    let input : Librarian.input =
+      { trace_id = "preflight-must-not-dispatch"
+      ; generation = 1
+      ; messages = []
+      ; store = []
+      }
+    in
+    match
+      Librarian_runtime.For_testing.extract_and_append_with
+        ~clock:(Eio.Stdenv.clock env)
+        ~base_path
+        ~keeper_id
+        ~extract:(fun ~generation:_ _ ->
+          incr provider_calls;
+          fail "provider callback crossed a pending-publication latch")
+        input
+    with
+    | Error error
+      when Librarian_runtime.extraction_error_kind error
+           = Librarian_runtime.Pending_publication_blocked ->
+      check int "provider was not called" 0 !provider_calls
+    | Error error ->
+      fail
+        ("wrong preflight error: "
+         ^ Librarian_runtime.extraction_error_to_string error)
+    | Ok _ -> fail "third-state preflight admitted provider extraction")
 ;;
 
 let test_pending_guard_uses_authoritative_root_matrix () =
@@ -1116,6 +1301,14 @@ let () =
             "recovery reasserts prepared after retention prune"
             `Quick
             test_recovery_reasserts_prepared_after_retention_prune;
+          test_case
+            "operator repair explicitly settles pending third state"
+            `Quick
+            test_explicit_operator_repair_actions_settle_pending_third_state;
+          test_case
+            "pending third state blocks provider admission"
+            `Quick
+            test_pending_third_state_blocks_provider_admission;
           test_case
             "pending guard uses authoritative root matrix"
             `Quick

@@ -78,6 +78,10 @@ let layout_entry_kind_to_string = function
   | Day_file -> "DD.jsonl day file"
 ;;
 
+let current_file_path t =
+  (Jsonl_writer.dated_path_now ~base_dir:t.base_dir).path
+;;
+
 let non_regular_file_kind_to_string = function
   | Directory -> "directory"
   | Symbolic_link -> "symbolic link"

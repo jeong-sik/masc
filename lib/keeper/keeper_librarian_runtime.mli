@@ -121,6 +121,7 @@ type extraction_error_kind =
   | Exact_setup_failure
   | Exact_execution_failure
   | Domain_output_invalid
+  | Pending_publication_blocked
   | Memory_apply_failure
 
 val extraction_error_kind : extraction_error -> extraction_error_kind
@@ -179,7 +180,33 @@ module For_testing : sig
     keeper_id:string
     -> Keeper_librarian.input
     -> int * Keeper_librarian.input
+
+  val extract_and_append_with
+    :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> base_path:string
+    -> keeper_id:string
+    -> extract:
+         (generation:int
+          -> Keeper_librarian.input
+          -> (Keeper_librarian.recognition_output, extraction_error) result)
+    -> Keeper_librarian.input
+    -> (recognition_write, extraction_error) result
+  (** Test seam around the production preflight/reserve/apply ordering. The
+      callback stands only for the provider extraction boundary. *)
 end
+
+val repair_pending_publication
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> base_path:string
+  -> keeper_id:string
+  -> action:Keeper_librarian_recognition_ledger.pending_repair
+  -> unit
+  -> ( Keeper_librarian_recognition_ledger.repair_outcome
+       , Keeper_librarian_recognition_ledger.repair_error )
+       result
+(** Operator-owned resolution for a latched recognition publication. Acquires
+    the episode-bundle and facts locks, then performs exactly the explicit
+    ledger repair action; it never selects restore/abort/settle heuristically. *)
 
 val extract_and_append_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -188,8 +215,9 @@ val extract_and_append_with_exact_output_classified
   -> keeper_id:string
   -> Keeper_librarian.input
   -> (recognition_write, extraction_error) result
-(** Full recognition write (masc#26122): snapshot the fact store, run the
-    exact-output pass with the snapshot in the prompt, revalidate the snapshot
+(** Full recognition write (masc#26122): settle any pending publication under
+    the recognition transaction before provider admission, snapshot the fact
+    store, run the exact-output pass with the snapshot in the prompt, revalidate the snapshot
     under the facts lock ([same_fact_snapshot] CAS), apply the typed
     operations ({!Keeper_librarian_recognition.apply} — the store can shrink),
     persist the episode bundle, and append the recognition evidence row

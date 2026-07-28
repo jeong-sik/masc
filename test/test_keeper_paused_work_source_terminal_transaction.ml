@@ -153,7 +153,30 @@ let test_exact_terminal_receipt_acks_pending () =
         ~keeper_name
       |> require_ok "load source-terminal ACK"
     in
-    Alcotest.(check int) "source removed" 0 (Queue.length (State.pending state)))
+    Alcotest.(check int) "source removed" 0 (Queue.length (State.pending state));
+    let replay =
+      Transaction.ack_pending config ~keeper_name request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "replay Ack_source_terminal"
+    in
+    (match replay.commit_status with
+     | Transaction.Already_committed -> ()
+     | Transaction.Committed -> Alcotest.fail "replay replaced the source-terminal receipt");
+    check_applied replay.projection;
+    let replayed_state =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load replayed source-terminal ACK"
+    in
+    Alcotest.(check int64)
+      "replay does not append a second terminal transition"
+      (State.revision state)
+      (State.revision replayed_state);
+    Alcotest.(check int)
+      "replay keeps source removed"
+      0
+      (Queue.length (State.pending replayed_state)))
 ;;
 
 let test_source_terminal_busy_has_zero_mutation () =

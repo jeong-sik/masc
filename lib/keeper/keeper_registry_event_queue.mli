@@ -144,7 +144,7 @@ type settlement = Keeper_event_queue_persistence.settlement =
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
-  | Settle_from_source_terminal of accepted_source_terminal
+  | Ack_source_terminal of accepted_source_terminal
   | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
@@ -159,6 +159,15 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
   | Committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
+
+type source_ack_result =
+  | Acked of transition_receipt
+  | Already_acked of transition_receipt
+  | Ack_committed_followup_failed of
       { receipt : transition_receipt
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
@@ -211,13 +220,16 @@ val transfer_pending_accepted_result :
 (** Commit an exact pending accepted transfer settlement and publish the
     post-commit source pending projection when the owner is registered. *)
 
-val settle_pending_from_source_terminal_result :
+val ack_pending_source_terminal_result :
   base_path:string ->
   string ->
   current_owner_nonce:int ->
-  settled_at:float ->
+  acked_at:float ->
   source_terminal:accepted_source_terminal ->
-  (settle_result, string) result
+  (source_ack_result, string) result
+(** Commit one exact terminal source ACK and publish the post-commit pending
+    projection when the owner is registered. Generic queue settlement terms do
+    not cross this source-ACK boundary. *)
 
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later

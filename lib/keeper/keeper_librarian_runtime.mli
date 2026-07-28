@@ -75,15 +75,20 @@ val cadence_counter_entries : unit -> int
     while focused pre-Eio tests keep a direct single-threaded path. *)
 
 val durable_cadence_due :
-  base_path:string -> keeper_id:string -> (bool, string) result
+  base_path:string -> keeper_id:string -> trace_id:string -> (bool, string) result
 (** Advance the restart-safe cadence state for one keeper turn. Runtime
     admission uses this durable state; an unreadable or unwritable state fails
-    closed so a restart cannot create an unbounded provider burst. *)
+    closed so a restart cannot create an unbounded provider burst. The state is
+    paired with the trace it was accumulated in ([cadence_step_keyed]): a
+    counter left by a rotated trace does not schedule the new trace, so a short
+    trace cannot silently finish without any extraction ever becoming due. *)
 
 val durable_cadence_record_completed_attempt :
-  base_path:string -> keeper_id:string -> (unit, string) result
+  base_path:string -> keeper_id:string -> trace_id:string -> (unit, string) result
 (** Reset the restart-safe cadence state after a completed provider attempt,
-    whether the structured result was accepted or rejected. *)
+    whether the structured result was accepted or rejected. The reset is
+    recorded against [trace_id], so it only delays subsequent turns of the
+    same trace. *)
 
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The

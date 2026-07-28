@@ -136,6 +136,28 @@ let test_revise_null_semantics_clear_expiry () =
   check (option (float 0.0)) "explicit null clears expiry" None revised.Types.valid_until
 ;;
 
+let test_revise_null_claim_id_clears_stale_slug () =
+  (* The slug identifies the conclusion and revise means the conclusion
+     changed: a null claim_id is "no stable slug for the corrected
+     conclusion", never "inherit the superseded conclusion's identity". *)
+  let store = [ fact ~claim:"old conclusion" ~claim_id:"old-slug" () ] in
+  let result =
+    apply
+      [ Recognition.Revise
+          { index = 0
+          ; claim = "corrected conclusion"
+          ; category = None
+          ; claim_id = None
+          ; valid_until_update = Recognition.Keep_valid_until
+          }
+      ]
+      store
+  in
+  let revised = List.hd result.Recognition.facts in
+  check (option string) "stale slug does not survive the revision" None
+    revised.Types.claim_id
+;;
+
 let test_recalled_reinforcement_is_rejected_by_provenance () =
   let store = [ fact ~claim:"recalled" ~reinforcement_count:3 () ] in
   let result =
@@ -351,6 +373,8 @@ let () =
           test_case "revise rewrites in place" `Quick test_revise_rewrites_in_place;
           test_case "revise null clears expiry" `Quick
             test_revise_null_semantics_clear_expiry;
+          test_case "revise null claim_id clears the stale slug" `Quick
+            test_revise_null_claim_id_clears_stale_slug;
           test_case "recalled reinforcement is rejected by provenance" `Quick
             test_recalled_reinforcement_is_rejected_by_provenance;
           test_case "add appends" `Quick test_add_appends;

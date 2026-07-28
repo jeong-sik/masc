@@ -595,6 +595,14 @@ let emit_fact sink (value : Types.fact) =
      Canonical_bytes.json_string
        sink
        (Types.claim_kind_to_string claim_kind));
+  (* Mirrors [Types.fact_to_json]: emitted only when positive, so digests of
+     pre-reinforcement stores are byte-identical to before the field existed. *)
+  (match value.reinforcement_count with
+   | 0 -> ()
+   | n when n > 0 ->
+     Canonical_bytes.field sink ~first:false "reinforcement_count";
+     Canonical_bytes.int_value sink n
+   | _ -> invalid_arg "memory fact reinforcement_count must be >= 0");
   Canonical_bytes.write sink "}"
 ;;
 

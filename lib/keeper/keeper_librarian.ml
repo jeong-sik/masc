@@ -240,6 +240,17 @@ let claim_id_field fields =
   | value -> value
 ;;
 
+(* Revise category is tri-state like [claim_id_field]: absent/null means
+   "keep the stored category", a non-empty string means "replace it", and a
+   blank string or non-string JSON type rejects the candidate. The lenient
+   [optional_string_field] collapsed the invalid shapes into "keep", which
+   let a malformed candidate terminalize as an accepted operation. *)
+let revise_category_field fields =
+  match optional_string_field_strict wire_field_category fields with
+  | Some (Some value) when String.equal (String.trim value) "" -> None
+  | value -> value
+;;
+
 (* Producer-declared lifetime in whole days, same contract as the explicit
    keeper_memory_write surface (RFC-0351 S2). Absent/null = durable. A
    present value outside [1, max_valid_for_days] or of the wrong JSON type
@@ -425,7 +436,8 @@ let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
                 , string_field wire_field_claim fields
                 , string_field wire_field_category fields )
               with
-              | Some (_ :: _ :: _ as member_indices), Some claim, Some category ->
+              | Some (_ :: _ :: _ as member_indices), Some claim, Some category
+                when List.length (List.sort_uniq Int.compare member_indices) >= 2 ->
                 Ok
                   (Recognition.Merge
                      { member_indices
@@ -435,7 +447,7 @@ let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
               | _ ->
                 operation_mismatch
                   op
-                  "requires member_indices (>= 2), claim, and category"))
+                  "requires member_indices (>= 2 distinct), claim, and category"))
         | Some op when String.equal op Keeper_memory_os_types.wire_op_revise ->
           (match
              first_foreign_non_null_field
@@ -453,11 +465,11 @@ let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
              (match
                 ( index_field fields
                 , string_field wire_field_claim fields
-                , optional_string_field wire_field_category fields
+                , revise_category_field fields
                 , claim_id_field fields
                 , revise_valid_until_update_field fields )
               with
-              | Some index, Some claim, category, Some claim_id, Some valid_until_update ->
+              | Some index, Some claim, Some category, Some claim_id, Some valid_until_update ->
                 Ok
                   (Recognition.Revise
                      { index

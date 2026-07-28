@@ -169,10 +169,13 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
           ; (* DET-OK: typed optional op payload — the wire contract defines
                null as "keep the row's value"; parser rejected malformed. *)
             category = Option.value category ~default:row.category
-          ; claim_id =
-              (match claim_id with
-               | Some id -> Some id
-               | None -> row.claim_id)
+          ; (* claim_id is NOT null-keeps: the slug identifies the CONCLUSION
+               and revise means the conclusion changed, so the prompt requires
+               the librarian to re-supply it (same slug = re-stated, new slug =
+               changed, null = no stable slug). Inheriting the superseded
+               conclusion's slug would alias two different conclusions under
+               one claim identity. *)
+            claim_id
           ; valid_until =
               (match valid_until_update with
                | Keep_valid_until -> row.valid_until

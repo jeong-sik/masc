@@ -243,17 +243,27 @@ let test_durable_cadence_survives_a_fresh_read () =
     (fun () ->
        Unix.mkdir base_path 0o700;
        let keeper_id = "durable-cadence" in
-       (match R.durable_cadence_due ~base_path ~keeper_id with
+       let trace_id = "trace-a" in
+       (match R.durable_cadence_due ~base_path ~keeper_id ~trace_id with
         | Ok true -> ()
         | Ok false -> Alcotest.fail "fresh durable cadence should be due"
         | Error detail -> Alcotest.fail detail);
-       (match R.durable_cadence_record_completed_attempt ~base_path ~keeper_id with
+       (match
+          R.durable_cadence_record_completed_attempt ~base_path ~keeper_id ~trace_id
+        with
         | Ok () -> ()
         | Error detail -> Alcotest.fail detail);
-       (match R.durable_cadence_due ~base_path ~keeper_id with
+       (match R.durable_cadence_due ~base_path ~keeper_id ~trace_id with
         | Ok due ->
           check bool "persisted reset delays the next provider attempt"
             (R.cadence_turns () <= 1) due
+        | Error detail -> Alcotest.fail detail);
+       (* A rotated trace must not inherit the previous trace's schedule:
+          fresh means due immediately, at any configured cadence. *)
+       (match R.durable_cadence_due ~base_path ~keeper_id ~trace_id:"trace-b" with
+        | Ok true -> ()
+        | Ok false ->
+          Alcotest.fail "a new trace should be due immediately, not inherit"
         | Error detail -> Alcotest.fail detail))
 
 (* Strict parsing with bounded compatibility for real-world librarian provider
@@ -469,6 +479,56 @@ let test_rejects_single_member_merge () =
        ())
 ;;
 
+let test_rejects_duplicate_member_merge () =
+  (* [3; 3] names one stored fact: the >= 2 length check alone would accept it
+     at the parse boundary and only Recognition.apply would reject it, after
+     the exact-output candidate has already terminalized. *)
+  rejects
+    "merge with duplicate members"
+    (output_json_string
+       ~operations:
+         [ `Assoc
+             [ field_op, `String "merge"
+             ; Lib.wire_field_member_indices, `List [ `Int 3; `Int 3 ]
+             ; field_claim, `String "m"
+             ; field_category, `String "fact"
+             ]
+         ]
+       ())
+;;
+
+let test_rejects_non_string_revise_category () =
+  (* A wrong-typed category must reject the candidate, not silently mean
+     "keep the stored category" the way an intentional null does. *)
+  rejects
+    "revise with non-string category"
+    (output_json_string
+       ~operations:
+         [ `Assoc
+             [ field_op, `String "revise"
+             ; field_index, `Int 0
+             ; field_claim, `String "corrected"
+             ; field_category, `Int 3
+             ]
+         ]
+       ())
+;;
+
+let test_rejects_blank_revise_category () =
+  rejects
+    "revise with blank category"
+    (output_json_string
+       ~operations:
+         [ `Assoc
+             [ field_op, `String "revise"
+             ; field_index, `Int 0
+             ; field_claim, `String "corrected"
+             ; field_category, `String "  "
+             ]
+         ]
+       ())
+;;
+
 let test_rejects_unknown_op () =
   rejects
     "unknown op token"
@@ -582,6 +642,12 @@ let () =
           test_case "revise null clears expiry" `Quick
             test_revise_null_clears_expiry_instead_of_preserving_it;
           test_case "rejects single-member merge" `Quick test_rejects_single_member_merge;
+          test_case "rejects duplicate-member merge" `Quick
+            test_rejects_duplicate_member_merge;
+          test_case "rejects non-string revise category" `Quick
+            test_rejects_non_string_revise_category;
+          test_case "rejects blank revise category" `Quick
+            test_rejects_blank_revise_category;
           test_case "rejects unknown op" `Quick test_rejects_unknown_op;
           test_case "parses JSON-string-wrapped object" `Quick test_parses_json_string_wrapping;
           test_case "rejects string source_turn" `Quick test_rejects_string_source_turn;

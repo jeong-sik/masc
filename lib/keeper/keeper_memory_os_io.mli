@@ -133,6 +133,11 @@ val read_facts_all_for_keepers_dir : keepers_dir:string -> keeper_id:string -> f
 val read_facts_all_strict : keeper_id:string -> (fact list, string) result
 val read_facts_all_strict_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (fact list, string) result
+val read_facts_all_strict_offloaded : keeper_id:string -> (fact list, string) result
+(** [read_facts_all_strict], with the blocking full read + strict parse
+    submitted to the IO domain pool (inline in tests) instead of running on
+    the calling Eio fiber — same offload contract as [read_facts_for_rewrite].
+    A pool submission failure surfaces as an ordinary read [Error]. *)
 val read_facts_tail : keeper_id:string -> n:int -> fact list
 val read_facts_tail_for_base_path : base_path:string -> keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list

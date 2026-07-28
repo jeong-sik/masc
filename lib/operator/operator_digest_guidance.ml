@@ -1,8 +1,8 @@
 (** Active-guidance layer for operator digest.
 
     Resolves whether a fresh operator judgment exists for the given
-    surface and builds the guidance fields accordingly.  Falls back to
-    deterministic recommendations when no judgment is available. *)
+    surface and builds the guidance fields accordingly.  Without one,
+    exposes only the deterministic observation summary. *)
 
 module U = Yojson.Safe.Util
 
@@ -56,8 +56,8 @@ let judgment_recommendation_summary_json actions =
    OCaml (action_type="keeper_probe", reason="Inspect pending external
    attention") and hand it to the model as though a decision had been made;
    the summary below states the observed condition instead. *)
-let active_guidance ~config ~target_type ~target_id ~fallback_recommendations
-    ~fallback_summary =
+let active_guidance ~config ~target_type ~target_id ~fallback_observation_summary
+    ~empty_recommendation_summary =
   match fresh_operator_judgment config ~target_type ~target_id with
   | Some judgment_json ->
       let recommended_actions =
@@ -90,10 +90,10 @@ let active_guidance ~config ~target_type ~target_id ~fallback_recommendations
             ("authoritative_judgment_available", `Bool false);
             ("judgment", `Null);
             ("active_guidance_layer", `String "fallback");
-            ("active_summary", fallback_summary);
+            ("active_summary", fallback_observation_summary);
             ("active_recommended_actions", `List []);
-            ("active_recommendation_summary", fallback_summary);
+            ("active_recommendation_summary", empty_recommendation_summary);
           ];
-        recommended_actions = fallback_recommendations;
-        recommendation_summary = fallback_summary;
+        recommended_actions = [];
+        recommendation_summary = empty_recommendation_summary;
       }

@@ -12,9 +12,20 @@
       ([Keeper_shutdown_finalize.For_testing.dead_tombstone_meta])
       -> [Dead_tombstone]
 
-    Observability only: these tests assert the {i reason} annotation, not
-    any change to the pause/resume decision (which stays carried by
-    [meta.paused]). *)
+    The latch is no longer observability-only. It began that way — these tests
+    originally asserted the {i reason} annotation and nothing about the
+    pause/resume decision, which [meta.paused] carried alone. Since then
+    admission denies by latch identity and
+    [Keeper_meta_contract.mark_resumed] refuses
+    [Transcript_corruption_reset_required] and [Dead_tombstone] outright, so
+    the reason decides which recovery paths stay open.
+
+    The writers were not upgraded with it, and overwriting an authority is a
+    privilege change where overwriting a label was harmless: an operator pause
+    could relabel a reset-required latch as ordinary and re-arm generic resume
+    against a checkpoint admission still rejects (live 2026-07-27, rondo). The
+    "operator pause never downgrades a stronger latch" section below pins that
+    consequence, not just the annotation. *)
 
 open Alcotest
 module Keeper_meta_contract = Masc.Keeper_meta_contract
@@ -28,15 +39,23 @@ module Keeper_turn_lifecycle = Masc.Keeper_turn_lifecycle
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_supervisor_types = Masc.Keeper_supervisor_types
 
+(* [agent_name] is derived, not spelled: the decoder rejects any value that is
+   not [Keeper_identity.keeper_agent_name name]. Building it from the same
+   function keeps the fixture correct if that convention changes. *)
 let base_json name =
   `Assoc
     [ "name", `String name
-    ; "agent_name", `String (name ^ "-agent")
+    ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
     ; "trace_id", `String ("trace-" ^ name)
     ]
 
+(* [Keeper_meta_json_parse.meta_of_json] decodes the exact current shape, so a
+   three-field literal no longer parses and every test in this file failed at
+   the fixture ("missing required fields ... runtime reset required") — before
+   asserting anything. [Masc_test_deps.meta_of_json_fixture] fills the current
+   required set, which is what the sibling suites already use. *)
 let make_meta name =
-  match Keeper_meta_json_parse.meta_of_json (base_json name) with
+  match Masc_test_deps.meta_of_json_fixture (base_json name) with
   | Ok meta -> meta
   | Error err -> failf "parse base meta: %s" err
 
@@ -114,11 +133,16 @@ let test_no_latched_reason_serializes_as_null () =
   check (option string) "unset latched_reason round-trips to None" None
     (latched_reason_wire reparsed)
 
-let test_retired_auto_resume_field_is_diagnostic_only () =
-  let before =
-    Masc.Otel_metric_store.metric_total
-      Keeper_metrics.(to_string MetaReadFailures)
-  in
+(* The invariant is unchanged — a retired field must never manufacture
+   lifecycle state — but the mechanism is stronger than when this test was
+   written. [meta_of_json] used to accept the record and ignore the unknown
+   key, emitting a diagnostic; it now decodes only the exact current shape, so
+   the record is rejected outright (see the comment at
+   [Keeper_meta_store.read_meta_file_path], which states that the separate
+   unknown-key pre-scan was removed for exactly this reason). Rejection
+   subsumes the old assertion: a record that never becomes a [keeper_meta]
+   cannot invent a pause or a latch. *)
+let test_retired_auto_resume_field_is_rejected () =
   let json =
     match base_json "retired-auto-resume-field" with
     | `Assoc fields ->
@@ -128,20 +152,18 @@ let test_retired_auto_resume_field_is_diagnostic_only () =
          :: fields)
     | _ -> fail "base_json must be an object"
   in
-  let parsed =
-    match Keeper_meta_json_parse.meta_of_json json with
-    | Ok meta -> meta
-    | Error error -> failf "retired field parse failed: %s" error
-  in
-  let after =
-    Masc.Otel_metric_store.metric_total
-      Keeper_metrics.(to_string MetaReadFailures)
-  in
-  check bool "retired field does not activate paused keeper" true parsed.paused;
-  check (option string) "retired field does not invent a latch" None
-    (latched_reason_wire parsed);
-  check (float 0.001) "retired field emits migration-needed diagnostic"
-    (before +. 1.0) after
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error error ->
+    check
+      bool
+      "the rejection names the retired field"
+      true
+      (Astring.String.is_infix ~affix:"auto_resume_after_sec" error)
+  | Ok meta ->
+    failf
+      "a retired field must not decode into lifecycle state (paused=%b, latch=%s)"
+      meta.paused
+      (Option.value ~default:"none" (latched_reason_wire meta))
 
 (* ── Status bridge surfacing ────────────────────────────────── *)
 
@@ -405,8 +427,8 @@ let () =
             test_latched_reason_survives_serialization
         ; test_case "unset reason serializes as null and round-trips to None" `Quick
             test_no_latched_reason_serializes_as_null
-        ; test_case "retired auto-resume field is diagnostic only" `Quick
-            test_retired_auto_resume_field_is_diagnostic_only
+        ; test_case "retired auto-resume field is rejected" `Quick
+            test_retired_auto_resume_field_is_rejected
         ] )
     ; ( "status bridge"
       , [ test_case "attention fields surface the typed pause reason wire" `Quick

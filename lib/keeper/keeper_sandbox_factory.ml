@@ -90,34 +90,20 @@ let resolve_opt t_opt ~cwd =
   | None -> No_factory
   | Some t -> resolve t ~cwd
 
+(* Delegates to the one projection in Keeper_sandbox. This used to carry its
+   own copy of the exact/prefix/suffix walk plus a container-side passthrough
+   check, which is what [visible_path_of_raw] now does in one place.
+
+   The unmappable case keeps its previous answer, the sandbox root, rather
+   than propagating the [Error]: this returns a plain string to callers that
+   have no way to render a failure, so widening the type is its own change.
+   Deciding that here at least confines the substitute to one site instead of
+   leaving it implied by a [| None ->] branch. *)
 let container_cwd_of_host t ~host_cwd =
-  let meta = t.meta in
-  let host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
-    |> normalize
-  in
-  let container_root =
-    Keeper_sandbox.container_root meta.name
-    |> strip_trailing_slashes
-  in
-  let host_norm = normalize host_cwd in
-  if String.equal host_norm host_root then container_root
-  else if String.starts_with ~prefix:(host_root ^ "/") host_norm then (
-    let suffix =
-      String.sub
-        host_norm
-        (String.length host_root + 1)
-        (String.length host_norm - String.length host_root - 1)
-    in
-    Filename.concat container_root suffix)
-  else
-    match
-      Keeper_cwd_response.profile_independent_cwd
-        ~container_root
-        ~host_cwd
-    with
-    | Some cwd -> cwd
-    | None -> container_root
+  let sandbox = Keeper_sandbox.of_meta ~config:t.config ~meta:t.meta in
+  match Keeper_sandbox.visible_path_of_raw sandbox host_cwd with
+  | Ok visible -> Keeper_sandbox.Path.visible_to_string visible
+  | Error _ -> Keeper_sandbox.keeper_visible_root_abs sandbox
 
 let container_cwd_of_host_opt t_opt ~host_cwd =
   Option.map (fun t -> container_cwd_of_host t ~host_cwd) t_opt

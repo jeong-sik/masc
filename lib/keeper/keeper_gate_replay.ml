@@ -238,7 +238,7 @@ type pending_repair =
    commit together. Each retained wake makes exactly one persistence-repair
    attempt and never re-runs the effect. This is deliberately process-local:
    after a restart, the missing outcome is delivered as an explicit
-   indeterminate approval result instead of guessing that the effect may be
+   indeterminate HITL message instead of guessing that the effect may be
    repeated. *)
 let pending_repairs = Atomic.make Repair_map.empty
 

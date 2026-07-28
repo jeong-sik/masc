@@ -614,6 +614,18 @@ let () =
     contains_substring
       ~needle:"Re-read Goal and Task SSOT"
       prompt_event.preview);
+  (* The Board-activity partition decides which prompt section renders this
+     event and whether it reaches [Keeper_contract_classifier]'s
+     [board_activity_count]. Classifying a reconciliation wake as scheduled
+     work compiles cleanly but leaves a keeper woken by it alone at
+     [No_actionable_signal], so pin both sides here. *)
+  assert (Masc.Keeper_world_observation.is_board_activity_event prompt_event);
+  assert (
+    not
+      (Masc.Keeper_world_observation.is_board_activity_event
+         { prompt_event with
+           event_kind = Masc.Keeper_world_observation.Schedule_due
+         }));
   (* Producer diff is edge-only: additions wake, removals and unchanged ids
      never do. *)
   assert (

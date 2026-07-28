@@ -56,6 +56,10 @@ let is_board_activity_event (event : pending_board_event) =
   | Bg_completed
   | External_attention
   | Goal_assigned
+  (* Goal-lifecycle signal, not a schedule dispatch, so it sits with
+     [Goal_assigned]. The [false] arm would also compile but would route the
+     event to the Scheduled Automation renderer and drop it from
+     [board_activity_count]. *)
   | Goal_reconciliation_ready -> true
 ;;
 

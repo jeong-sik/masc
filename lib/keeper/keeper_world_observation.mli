@@ -52,7 +52,18 @@ type pending_board_event = {
 }
 
 (** [false] only for a scheduled-work carrier that shares the historical
-    observation container but must not be projected as Board activity. *)
+    observation container but must not be projected as Board activity.
+
+    This is a partition, not an advisory flag. {!Keeper_unified_prompt} renders
+    the [false] events under Scheduled Automation and the [true] events under
+    Board Activity, and {!Keeper_contract_classifier} counts only the [true]
+    ones into [board_activity_count] — an observation classified [false]
+    contributes no actionable signal, so a keeper woken by that event alone
+    reaches [No_actionable_signal] and does not act.
+
+    A new event kind placed on the wrong side compiles cleanly and fails
+    silently. Classify by whether the event carries scheduled-work dispatch,
+    and pin the answer in a test. *)
 val is_board_activity_event : pending_board_event -> bool
 
 (** Read-only projection of one schedule row that needs keeper attention. *)

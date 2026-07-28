@@ -188,7 +188,6 @@ let rec take_matching_cycle_grant grant request =
         ~id:entry.approval_id
         ~keeper_name:request.keeper_name
         ~tool_name:request.operation
-        ~tool_call_id:(Option.bind request.causal_context (fun context -> context.tool_call_id))
         ~input:request.input
       with
       | Error error ->

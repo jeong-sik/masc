@@ -289,7 +289,16 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 8
+(* v9 adds [tool_call_id] to every pending and delivery entry. The reader below
+   still accepts v8 snapshots, where the field is simply absent and decodes to
+   [None]; that is what keeps an upgrade from stranding in-flight operator
+   approvals. The number is bumped anyway so the version identifies the record
+   shape: a binary predating this change reports "version 9 is unsupported
+   (current 8); reset runtime state" instead of failing per entry on an unknown
+   field, which is the difference between a diagnosable rollback and an opaque
+   one. *)
+let pending_store_version = 9
+let pending_store_read_versions = [ 8; 9 ]
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -1248,14 +1257,18 @@ let snapshot_of_yojson ~base_path json =
     in
     let* () =
         match List.assoc_opt "version" fields with
-        | Some (`Int version) when version = pending_store_version -> Ok ()
+        | Some (`Int version) when List.mem version pending_store_read_versions
+          -> Ok ()
         | Some (`Int version) ->
           Error
             (Printf.sprintf
-               "%s.version %d is unsupported (current %d); reset runtime state \
-                before restarting MASC"
+               "%s.version %d is unsupported (readable %s, current %d); reset \
+                runtime state before restarting MASC"
                surface
                version
+               (String.concat
+                  ","
+                  (List.map string_of_int pending_store_read_versions))
                pending_store_version)
       | Some _ -> Error (surface ^ ".version must be an integer")
       | None -> Error (surface ^ ".version is required")
@@ -2156,12 +2169,28 @@ let record_consumed_resolution_replay ~base_path ~id ~outcome =
               Ok Replay_recorded)))
 ;;
 
+(* The approval record is the authority for WHICH effect the operator granted:
+   keeper, operation, and the canonical input fingerprint. The consuming
+   invocation's own tool-call id is deliberately not part of that check.
+
+   Requiring [entry.tool_call_id = consuming_tool_call_id] made the grant
+   unspendable for every Gate operation that cannot replay. On the replay path
+   the caller injects the approval's own stored id into the causal context
+   before consuming ([Keeper_gate_replay.replay_approved_effect]), so the
+   comparison read a value back out of the record under test and authenticated
+   nothing. Off that path — network_read, connector_post — the model re-emits
+   the call, the provider assigns a fresh tool_use_id, the comparison fails,
+   and the operator's decision is silently discarded and re-requested.
+
+   Double-spend is prevented by [grant_consumed] (one-shot); which approval a
+   cycle may spend is fixed by the Hitl_resolution event carrying
+   [approval_id]. Request identity is enforced where it is meaningful: on
+   submission, where [tool_call_id] is the dedup key. *)
 let consume_approved_resolution
       ~base_path
       ~id
       ~keeper_name
       ~tool_name
-      ~tool_call_id
       ~input
   =
   let result =
@@ -2176,7 +2205,6 @@ let consume_approved_resolution
           not
             (String.equal entry.keeper_name keeper_name
              && String.equal entry.tool_name tool_name
-             && entry.tool_call_id = tool_call_id
              && String.equal entry.input_hash (normalized_input_hash input))
         then Ok (Consumption_without_audit Consumption_not_matching)
         else
@@ -3367,6 +3395,15 @@ let resolve_entry
       exn
 ;;
 
+(* [continuation_channel] stays in the dedup key while turn_id, task_id and the
+   goal fields do not. Those three are context that drifts across a retried
+   invocation, which is exactly what keying on [tool_call_id] exists to ignore.
+   The continuation channel is different in kind: it is where the result of the
+   approved effect is delivered. Not every provider emits a globally unique
+   tool-call id — a short per-response index ("call_0") repeats across turns —
+   so an id collision on the same keeper, operation and canonical input would
+   otherwise merge two genuinely distinct requests and deliver the second one's
+   result to the first one's channel. *)
 let pending_entry_matches
       (entry : pending_approval)
       ~base_path
@@ -3374,6 +3411,7 @@ let pending_entry_matches
       ~tool_name
       ~tool_call_id
       ~input_hash
+      ~continuation_channel
   =
   String.equal entry.audit_base_path base_path
   && String.equal entry.keeper_name keeper_name
@@ -3382,6 +3420,9 @@ let pending_entry_matches
       | None -> false
       | Some tool_call_id -> entry.tool_call_id = Some tool_call_id)
   && String.equal entry.input_hash input_hash
+  && Yojson.Safe.equal
+       (Keeper_continuation_channel.to_yojson entry.continuation_channel)
+       (Keeper_continuation_channel.to_yojson continuation_channel)
 ;;
 
 let pending_entry_owns_tool_call_id
@@ -3407,6 +3448,7 @@ let find_pending_id_in_map
       ~tool_name
       ~tool_call_id
       ~input_hash
+      ~continuation_channel
   =
   SMap.fold
     (fun id (entry : pending_approval) acc ->
@@ -3422,15 +3464,16 @@ let find_pending_id_in_map
              ~tool_name
              ~tool_call_id
          then
-           if pending_entry_matches entry ~base_path ~keeper_name ~tool_name
-                ~tool_call_id ~input_hash
+           if
+             pending_entry_matches entry ~base_path ~keeper_name ~tool_name
+               ~tool_call_id ~input_hash ~continuation_channel
            then Ok (Some id)
            else
              (match tool_call_id with
               | Some tool_call_id ->
                 Error
                   (Printf.sprintf
-                     "tool_call_id %s is already pending for a different canonical request (approval %s)"
+                     "tool_call_id %s is already pending for a different request (approval %s): the canonical input or the continuation channel differs"
                      tool_call_id
                      id)
               | None -> Ok None)
@@ -3492,6 +3535,7 @@ let submit_pending
              ~tool_name
              ~tool_call_id
              ~input_hash
+             ~continuation_channel
          with
          | Error reason ->
            Error { path = pending_store_path ~base_path; reason }

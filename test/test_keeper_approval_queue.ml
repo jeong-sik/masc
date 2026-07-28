@@ -227,6 +227,48 @@ let test_tool_call_identity_controls_pending_deduplication () =
            ()
        in
        Alcotest.(check string) "same origin deduplicates" first same;
+       (* Turn and Goal are context that drifts across a retried invocation;
+          keying on tool_call_id exists precisely to ignore that drift, so the
+          same id and input must still resolve to the one approval. *)
+       let drifted_provenance =
+         submit_with_context
+           ~tool_call_id:"tool-call-1"
+           ~turn_id:9
+           ~goal_ids:[ "goal-z" ]
+           ~continuation_channel:dashboard_a
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check string)
+         "turn and goal drift never split one invocation"
+         first
+         drifted_provenance;
+       (* The continuation channel is not context: it is where the approved
+          effect's result is delivered. A provider that reuses a short
+          per-response id must not merge two requests whose delivery routes
+          differ, so this fails closed rather than binding the second request
+          to the first one's channel. *)
+       (match
+          AQ.submit_pending
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~tool_call_id:"tool-call-1"
+            ~input
+            ~base_path
+            ~continuation_channel:dashboard_b
+            ()
+        with
+        | Error _ -> ()
+        | Ok id when String.equal id first ->
+          Alcotest.fail
+            "reused tool call identity merged across continuation channels"
+        | Ok id ->
+          Alcotest.failf
+            "reused tool call identity created a second approval %s on another \
+             continuation channel"
+            id);
        (match
           AQ.submit_pending
             ~keeper_name
@@ -1066,31 +1108,32 @@ let test_resolution_is_durable_and_origin_scoped () =
           | Ok (AQ.Rule_match_active _) -> true
           | Ok (AQ.Rule_match_expired _ | AQ.Rule_match_absent) -> false
           | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error));
+       (* Changed canonical input must not spend the grant: the input
+          fingerprint is the integrity check on what the operator approved. *)
        (match
           AQ.consume_approved_resolution
             ~base_path
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
-            ~tool_call_id:(Some tool_call_id)
             ~input:(`Assoc [ "target", `String "other" ])
         with
         | Ok AQ.Consumption_not_matching -> ()
         | Ok (AQ.Consumption_committed | AQ.Consumption_already_committed) ->
           Alcotest.fail "changed input consumed the exact grant"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (* A different Keeper must not spend it either. *)
        (match
           AQ.consume_approved_resolution
             ~base_path
             ~id
-            ~keeper_name
+            ~keeper_name:unrelated_keeper
             ~tool_name:"external-effect"
-            ~tool_call_id:None
             ~input
         with
         | Ok AQ.Consumption_not_matching -> ()
         | Ok (AQ.Consumption_committed | AQ.Consumption_already_committed) ->
-          Alcotest.fail "missing tool call identity consumed the exact grant"
+          Alcotest.fail "unrelated Keeper consumed the exact grant"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        (match
           AQ.consume_approved_resolution
@@ -1098,7 +1141,6 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
-            ~tool_call_id:(Some tool_call_id)
             ~input
         with
         | Ok AQ.Consumption_committed -> ()
@@ -3122,7 +3164,6 @@ let test_persisted_delivery_replays_before_origin_wake () =
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
-            ~tool_call_id:None
             ~input:(`Assoc [ "target", `String "replay" ])
         with
         | Ok AQ.Consumption_committed -> ()
@@ -3247,7 +3288,6 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
-            ~tool_call_id:None
             ~input
         with
         | Ok AQ.Consumption_committed -> ()

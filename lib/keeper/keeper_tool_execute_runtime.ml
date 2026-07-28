@@ -26,13 +26,24 @@ let model_execute_location_fields ~config ~meta ~args ~cwd =
   [ "cwd", response_cwd; "execution_location", execution_location ]
 
 let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
+  let code = Keeper_tool_execute_path.execute_cwd_resolution_error_code error in
+  let private_message =
+    Keeper_tool_execute_path.execute_cwd_resolution_error_private_message error
+  in
+  Log.Keeper.warn
+    ~keeper_name:meta.name
+    "execute cwd resolution rejected code=%s detail=%s"
+    code
+    private_message;
   let fields =
-    [ "typed", `Bool true ] @ model_execute_location_fields ~config ~meta ~args ~cwd
+    [ "typed", `Bool true; "code", `String code ]
+    @ model_execute_location_fields ~config ~meta ~args ~cwd
   in
   let message =
     match meta.sandbox_profile with
-    | Docker -> "cwd_resolution_failed: requested cwd is unavailable"
-    | _ -> error
+    | Docker ->
+      Keeper_tool_execute_path.execute_cwd_resolution_error_public_message error
+    | _ -> private_message
   in
   Keeper_tool_execution.failure
     ~class_:Tool_result.Policy_rejection
@@ -127,7 +138,7 @@ let handle_tool_execute_typed
     execute_secret_redaction ~base_path:config.base_path ~keeper_name:meta.name
   in
   match
-    Keeper_tool_execute_path.resolve_tool_execute_cwd
+    Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
       ~config
       ~meta
       (* Keep all keepers on the shared execute-worktree root. The exact

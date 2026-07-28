@@ -231,6 +231,16 @@ let test_typed_execute_response_cwd_uses_container_path () =
       check bool "Docker missing-cwd error does NOT contain host base" false
         (Astring.String.is_infix ~affix:base missing_raw);
       let missing_response = Yojson.Safe.from_string missing_raw in
+      let missing_code =
+        missing_response
+        |> Yojson.Safe.Util.member "code"
+        |> Yojson.Safe.Util.to_string
+      in
+      let missing_error =
+        missing_response
+        |> Yojson.Safe.Util.member "error"
+        |> Yojson.Safe.Util.to_string
+      in
       let missing_cwd =
         missing_response
         |> Yojson.Safe.Util.member "cwd"
@@ -242,12 +252,66 @@ let test_typed_execute_response_cwd_uses_container_path () =
         |> Yojson.Safe.Util.member "cwd"
         |> Yojson.Safe.Util.to_string
       in
+      check string "Docker missing-cwd code is actionable"
+        "cwd_missing"
+        missing_code;
       check string "Docker missing-cwd top-level path is visible"
         (Filename.concat visible_root missing_relative)
         missing_cwd;
       check string "Docker missing-cwd location matches top-level cwd"
         missing_cwd
-        missing_location_cwd)
+        missing_location_cwd;
+      let not_directory = "not-directory" in
+      let host_file = Filename.concat host_root not_directory in
+      let oc = open_out host_file in
+      close_out oc;
+      let not_directory_raw =
+        Keeper_tool_command_runtime.handle_tool_execute
+          ~turn_sandbox_factory:(Some factory)
+          ~config
+          ~meta
+          ~args:
+            (`Assoc
+              [ "argv", `List [ `String "pwd" ]
+              ; "cwd", `String not_directory
+              ])
+          ()
+      in
+      check bool "Docker non-directory error does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base not_directory_raw);
+      let not_directory_response = Yojson.Safe.from_string not_directory_raw in
+      let not_directory_code =
+        not_directory_response
+        |> Yojson.Safe.Util.member "code"
+        |> Yojson.Safe.Util.to_string
+      in
+      let not_directory_error =
+        not_directory_response
+        |> Yojson.Safe.Util.member "error"
+        |> Yojson.Safe.Util.to_string
+      in
+      let not_directory_cwd =
+        not_directory_response
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      let not_directory_location_cwd =
+        not_directory_response
+        |> Yojson.Safe.Util.member "execution_location"
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      check string "Docker non-directory code is actionable"
+        "cwd_not_directory"
+        not_directory_code;
+      check bool "Docker cwd errors keep distinct public messages" false
+        (String.equal missing_error not_directory_error);
+      check string "Docker non-directory top-level path is visible"
+        (Filename.concat visible_root not_directory)
+        not_directory_cwd;
+      check string "Docker non-directory location matches top-level cwd"
+        not_directory_cwd
+        not_directory_location_cwd)
 
 let test_retired_path_jail_env_detection () =
   let configured value =

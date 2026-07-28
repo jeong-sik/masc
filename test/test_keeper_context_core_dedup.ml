@@ -251,6 +251,14 @@ let test_history_persist_once_recovers_from_failure_without_duplication () =
        | Error error ->
          Alcotest.fail
            (C.history_persist_once_error_to_string error));
+      let completed_without_newline =
+        match Fs_compat.file_size history_path with
+        | Some size when size > 0 -> size - 1
+        | Some _
+        | None ->
+          Alcotest.fail "successful history append has no bytes"
+      in
+      Unix.truncate history_path completed_without_newline;
       let restarted = C.create_session ~session_id ~base_dir in
       (match
          C.persist_message_once
@@ -266,7 +274,12 @@ let test_history_persist_once_recovers_from_failure_without_duplication () =
          Alcotest.fail
            (C.history_persist_once_error_to_string error));
       let rows =
-        Fs_compat.load_file history_path
+        let history = Fs_compat.load_file history_path in
+        Alcotest.(check char)
+          "restart repairs a completed row's missing newline"
+          '\n'
+          history.[String.length history - 1];
+        history
         |> String.split_on_char '\n'
         |> List.filter (fun line -> not (String.equal (String.trim line) ""))
         |> List.map Yojson.Safe.from_string

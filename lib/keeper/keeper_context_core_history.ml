@@ -297,15 +297,20 @@ let persist_message_once ~idempotency_key ?source session msg =
         ^ "\n"
       in
       let decide existing =
+        let newline_suffix =
+          if
+            String.equal existing ""
+            || Char.equal existing.[String.length existing - 1] '\n'
+          then None
+          else Some "\n"
+        in
         if history_contains_idempotency_key existing idempotency_key
-        then None, History_message_already_persisted
+        then newline_suffix, History_message_already_persisted
         else
           let separator =
-            if
-              String.equal existing ""
-              || Char.equal existing.[String.length existing - 1] '\n'
-            then ""
-            else "\n"
+            match newline_suffix with
+            | None -> ""
+            | Some newline -> newline
           in
           Some (separator ^ line), History_message_persisted
       in

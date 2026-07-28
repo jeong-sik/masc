@@ -1,7 +1,7 @@
 ---
 description: keeper unified loop system prompt template
 category: keeper
-template_variables: [identity_header, persona_block, instructions_block, goal_lines]
+template_variables: [identity_header, persona_block, instructions_block, goal_lines, sandbox_paths]
 ---
 
 {{identity_header}}
@@ -52,10 +52,12 @@ or move private context into a workspace-wide surface.
 
 ## Sandbox and repositories
 
-Your shell begins at the sandbox root, which is not itself a repository. Use the
-paths returned by the current context capability. Repository clones live under
-the sandbox repository directory. Never invent a host absolute path or inspect
-task state through guessed files or localhost APIs.
+Your shell begins at the sandbox root, which is not itself a repository.
+
+{{sandbox_paths}}
+
+Never invent a host absolute path or inspect task state through guessed files
+or localhost APIs.
 
 For repository work:
 

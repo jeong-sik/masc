@@ -645,6 +645,32 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             Deferring is a valid choice; if you defer, say why explicitly.\n");
       ]
   in
+  (* The section this fills used to say "use the paths returned by the current
+     context capability" and named no path at all. Measured across twelve live
+     checkpoints, the rendered system prompt carried zero path strings, so the
+     only concrete paths a keeper saw arrived inside Gate approval echoes and
+     execution_location payloads — both host-side, and therefore absent inside
+     a Docker keeper's container. That is the shape of #10650.
+
+     Rendered from Keeper_sandbox so this agrees with what the Execute cwd
+     resolver actually accepts, rather than restating it. *)
+  let sandbox_paths =
+    let config = Workspace.default_config base_path in
+    let visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta in
+    let sandbox = Keeper_sandbox.of_meta ~config ~meta in
+    String.concat
+      "\n"
+      [ Printf.sprintf "- Sandbox root: %s" visible_root
+      ; Printf.sprintf
+          "- Repository clones: %s, relative to that root."
+          sandbox.Keeper_sandbox.repos_arg
+      ; Printf.sprintf
+          "- Pass a relative typed cwd (`%s` for the root, `%s/<repository>` for \
+           a clone). Relative argv path operands resolve from that cwd."
+          sandbox.Keeper_sandbox.root_arg
+          sandbox.Keeper_sandbox.repos_arg
+      ]
+  in
   let base_system_prompt =
     match
       Prompt_registry.render_prompt_template Keeper_prompt_names.unified_system
@@ -653,6 +679,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ("persona_block", persona_block);
           ("instructions_block", instructions_block);
           ("goal_lines", goal_lines);
+          ("sandbox_paths", sandbox_paths);
         ]
     with
     | Ok value -> value

@@ -1095,22 +1095,10 @@ export interface MetricsWindow {
   // -- Tool --
   tool_call_count?: number
 
-  // -- Memory --
-  memory_notes_added?: number
-
-  // -- Memory compaction --
-  memory_compaction_events?: number
-  memory_compaction_before_notes?: number
-  memory_compaction_dropped_notes?: number
-  memory_compaction_invalid_dropped?: number
-  memory_compaction_drop_ratio?: number
-  memory_compaction_drop_avg?: number
-
   // -- Top-N lists --
   top_work_kinds?: MetricsWindowTopItem[]
   top_models?: MetricsWindowTopItem[]
   top_tools?: MetricsWindowTopItem[]
-  top_memory_kinds?: MetricsWindowTopItem[]
   top_drift_reasons?: MetricsWindowTopItem[]
   top_compaction_triggers?: MetricsWindowTopItem[]
   generation_equipment?: MetricsWindowTopItem[]

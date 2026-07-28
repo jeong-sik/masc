@@ -875,9 +875,8 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
       ],
     },
     {
-      title: '메모리 & 컴팩션',
+      title: '컴팩션',
       rows: [
-        { label: '컴팩션 드롭 비율', value: formatPct1(mw?.memory_compaction_drop_ratio) },
         { label: '컴팩션 절감', value: formatPct1(mw?.compaction_saved_ratio) },
         { label: '평균 절감 토큰', value: fmtFixed(mw?.avg_compaction_saved_tokens, 0) },
       ],
@@ -917,7 +916,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
               <${TextInput}
                 type="search"
                 class="flex-1 min-w-0 !py-1.5 !px-2 !text-2xs"
-                placeholder="신호 지표 필터 (예: 폴백, 메모리, 컴팩션)"
+                placeholder="신호 지표 필터 (예: 폴백, 컴팩션)"
                 ariaLabel="런타임 신호 지표 필터"
                 value=${signalQuery}
                 onInput=${(event: Event) => {

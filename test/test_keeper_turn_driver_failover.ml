@@ -109,9 +109,11 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
+max-request-body-bytes = 65536
 |}
 
 let runtime_toml_thinking_lane =
@@ -153,9 +155,11 @@ streaming = true
 [thinking.reasoning_big]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 
 [plain.non_reasoning]
 max-concurrent = 1
+max-request-body-bytes = 65536
 |}
 
 let runtime_thinking_lane_model_catalog =
@@ -214,12 +218,15 @@ supports-image-input = true
 [primary.text_model]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 
 [lanevision.vision_model]
 max-concurrent = 1
+max-request-body-bytes = 65536
 
 [outsidevision.vision_model]
 max-concurrent = 1
+max-request-body-bytes = 65536
 |}
 
 let runtime_toml_unknown_lane_candidate =
@@ -275,9 +282,11 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
+max-request-body-bytes = 65536
 |}
 
 let with_runtime_config toml f =
@@ -424,9 +433,11 @@ streaming = true
 [primary.test_model]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 
 [fallback.test_model]
 max-concurrent = 1
+max-request-body-bytes = 65536
 |}
 
 (* Pins the current assignment contract: [runtime.assignments] targets must be
@@ -544,6 +555,60 @@ let test_prior_checkpoint_appends_current_goal_once () =
       "current goal appended exactly once"
       1
       current_goal_count)
+
+let test_deferred_tail_rejects_transformed_uncapped_runtime () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let transformed_urls = ref [] in
+    let deferred_runtime_lane =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"resilient"
+        ~failed_runtime_id:"previous.test_model"
+        ~next_runtime_id:"primary.test_model"
+        ~later_runtime_ids:[ "fallback.test_model" ]
+        ~failure:(retryable_network_error "previous cycle failed")
+    in
+    let result =
+      Driver.run_named
+        ~runtime_id:"resilient"
+        ~keeper_name:"deferred-request-cap"
+        ~base_path:(Filename.get_temp_dir_name ())
+        ~goal:"prove final provider request admission"
+        ~deferred_runtime_lane
+        ~provider_config_transform:(fun provider_config ->
+          transformed_urls := provider_config.base_url :: !transformed_urls;
+          if String.equal provider_config.base_url "http://127.0.0.1:2"
+          then Ok { provider_config with max_request_body_bytes = None }
+          else Ok provider_config)
+        ~body_timeout_s:0.5
+        ~sw
+        ~net:env#net
+        ()
+    in
+    (match result with
+     | Error
+         (Agent_sdk.Error.Config
+           (Agent_sdk.Error.InvalidConfig
+             { field = "max-request-body-bytes"; detail })) ->
+       Alcotest.(check bool)
+         "typed rejection names the deferred tail runtime"
+         true
+         (contains ~needle:"fallback.test_model" detail)
+     | Error error ->
+       Alcotest.failf
+         "expected final request-cap rejection, got %s"
+         (Agent_sdk.Error.to_string error)
+     | Ok _ ->
+       Alcotest.fail
+         "transformed uncapped deferred runtime reached provider execution");
+    Alcotest.(check (list string))
+      "capped next candidate runs, then transformed tail is checked"
+      [ "http://127.0.0.1:1"; "http://127.0.0.1:2" ]
+      (List.rev !transformed_urls))
 
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -1285,6 +1350,10 @@ let () =
             "prior checkpoint appends current goal once"
             `Quick
             test_prior_checkpoint_appends_current_goal_once;
+          Alcotest.test_case
+            "deferred tail rejects transformed uncapped runtime"
+            `Quick
+            test_deferred_tail_rejects_transformed_uncapped_runtime;
           Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick

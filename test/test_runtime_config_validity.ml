@@ -1533,11 +1533,11 @@ let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
 let test_keeper_dispatch_runtime_graph_enumeration () =
   let lanes =
     [ Runtime_lane.make
-        ~id:"lane-primary"
+        ~id:"default-a"
         ~strategy:Runtime_lane.Ordered
-        [ "lane-a"; "lane-b"; "default-a" ]
+        [ "lane-a"; "lane-b" ]
     ; Runtime_lane.make
-        ~id:"lane-secondary"
+        ~id:"dormant-lane"
         ~strategy:Runtime_lane.Ordered
         [ "lane-c"; "lane-b" ]
     ]
@@ -1545,15 +1545,15 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
   let actual =
     Runtime.For_testing.keeper_dispatch_runtime_ids
       ~default_runtime_id:"default-a"
-      ~assignments:[ "keeper-a", "assigned-b"; "keeper-b", "lane-primary" ]
+      ~assignments:[ "keeper-a", "assigned-b" ]
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
   in
   check
     (list string)
-    "default, assignments, every lane candidate, and media failover are \
-     deduplicated in dispatch order"
-    [ "default-a"; "assigned-b"; "lane-a"; "lane-b"; "lane-c"; "media-c" ]
+    "routed lane candidates, assignments, and media failover are deduplicated \
+     without admitting a dormant lane"
+    [ "lane-a"; "lane-b"; "assigned-b"; "media-c" ]
     actual
 ;;
 
@@ -1579,7 +1579,7 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
      [runtime]\n\
      default = \"local.sample\"\n\
      \n\
-     [runtime.lanes.routed]\n\
+     [runtime.lanes.\"local.sample\"]\n\
      strategy = \"ordered\"\n\
      candidates = [\"local.lane\"]\n"
   in
@@ -1602,6 +1602,51 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
            (String_util.contains_substring detail "max-request-body-bytes");
          check bool "typed config diagnostic names the candidate" true
            (String_util.contains_substring detail "local.lane"))
+;;
+
+let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.dormant]\n\
+     api-name = \"dormant\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [local.dormant]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     [runtime.lanes.dormant]\n\
+     strategy = \"ordered\"\n\
+     candidates = [\"local.dormant\"]\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "dormant_uncapped_runtime_" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match Runtime.save_config_text ~runtime_config_path:path content with
+       | Ok () -> ()
+       | Error detail ->
+         failf
+           "uncapped dormant lane must not block unrelated Keeper routing: %s"
+           detail)
 ;;
 
 let test_runtime_toml_rejects_non_positive_max_request_body_bytes () =
@@ -3341,6 +3386,10 @@ let () =
           test_case
             "runtime config rejects uncapped keeper candidate"
             `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
+          test_case
+            "runtime config allows uncapped dormant lane candidate"
+            `Quick
+            test_runtime_config_validation_allows_uncapped_dormant_lane_candidate;
           test_case "non-positive max-request-body-bytes is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case

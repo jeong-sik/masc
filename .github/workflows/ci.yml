@@ -799,6 +799,19 @@ jobs:
       # still compiles every test target; the authoritative runtime, operator,
       # transport, SSE, and contract suites below remain executable gates.
 
+      - name: Run Keeper request-cap suite
+        id: keeper_request_cap_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          request_cap_targets="@test/runtest-test_runtime_config_validity @test/runtest-test_keeper_turn_driver_failover"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${request_cap_targets}"
+
       - name: Run operator control suite
         id: operator_control_suite
         # Run regardless of earlier test failures, but only after a successful

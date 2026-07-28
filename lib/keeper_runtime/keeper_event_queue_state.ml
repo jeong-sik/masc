@@ -866,15 +866,15 @@ let legacy_source_terminal_ack_outbox_entry_json json =
     (match List.assoc_opt "receipt" entry_fields with
      | Some (`Assoc receipt_fields) ->
        (match List.assoc_opt "settlement" receipt_fields with
-        | Some (`Assoc settlement_fields) ->
-          (match List.assoc_opt "kind" settlement_fields with
+        | Some (`Assoc action_fields) ->
+          (match List.assoc_opt "kind" action_fields with
            | Some (`String kind)
              when String.equal kind legacy_source_terminal_kind ->
-             let settlement_fields =
-               replace "kind" (`String "ack_source_terminal") settlement_fields
+             let action_fields =
+               replace "kind" (`String "ack_source_terminal") action_fields
              in
              let receipt_fields =
-               replace "settlement" (`Assoc settlement_fields) receipt_fields
+               replace "settlement" (`Assoc action_fields) receipt_fields
              in
              `Assoc (replace "receipt" (`Assoc receipt_fields) entry_fields)
            | Some _ | None -> json)
@@ -2061,7 +2061,7 @@ let ack_pending_source_terminal
       ~source_terminal
       state
   =
-  let settlement = Ack_source_terminal source_terminal in
+  let ack = Ack_source_terminal source_terminal in
   match accepted_pending_source_terminal_ack_replay source_terminal state with
   | Error _ as error -> error
   | Ok (Some receipt) -> Ok (state, Already_settled receipt)
@@ -2119,7 +2119,7 @@ let ack_pending_source_terminal
          | None ->
            Error "source-terminal ACK did not create its synthetic lease"
        in
-       settle_committed ~settled_at ~lease ~settlement claimed)
+       settle_committed ~settled_at ~lease ~settlement:ack claimed)
 ;;
 
 let accepted_cancellation_replay (lease : lease) cancellation state =

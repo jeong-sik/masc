@@ -152,8 +152,8 @@ let source_ack_wire_fields json =
        (match List.assoc_opt "receipt" outbox_fields with
         | Some (`Assoc receipt_fields) ->
           (match List.assoc_opt "settlement" receipt_fields with
-           | Some (`Assoc settlement_fields) ->
-             state_fields, outbox_fields, receipt_fields, settlement_fields
+           | Some (`Assoc action_fields) ->
+             state_fields, outbox_fields, receipt_fields, action_fields
            | Some _ | None -> Alcotest.fail "source ACK receipt must be an object")
         | Some _ | None -> Alcotest.fail "source ACK outbox receipt must be an object")
      | Some _ | None -> Alcotest.fail "source ACK must retain exactly one durable outbox entry")
@@ -194,7 +194,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
      | State.Settled _ -> ()
      | State.Already_settled _ -> Alcotest.fail "first source ACK was a replay");
     let canonical_json = State.to_yojson acknowledged in
-    let state_fields, outbox_fields, receipt_fields, settlement_fields =
+    let state_fields, outbox_fields, receipt_fields, action_fields =
       source_ack_wire_fields canonical_json
     in
     Alcotest.(check (option string))
@@ -206,7 +206,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     Alcotest.(check (option string))
       "source ACK writes its own durable kind"
       (Some "ack_source_terminal")
-      (match List.assoc_opt "kind" settlement_fields with
+      (match List.assoc_opt "kind" action_fields with
        | Some (`String kind) -> Some kind
        | Some _ | None -> None);
     let canonical_transition_id =
@@ -229,14 +229,14 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       | Some _ | None -> Alcotest.fail "source ACK receipt omitted lease identity"
     in
     let legacy_event_id = "keeper-event-queue-transition:" ^ legacy_transition_id in
-    let legacy_settlement =
-      replace_field "kind" (`String "settle_from_source_terminal") settlement_fields
+    let legacy_action =
+      replace_field "kind" (`String "settle_from_source_terminal") action_fields
     in
     let legacy_receipt =
       receipt_fields
       |> replace_field "transition_id" (`String legacy_transition_id)
       |> replace_field "event_id" (`String legacy_event_id)
-      |> replace_field "settlement" (`Assoc legacy_settlement)
+      |> replace_field "settlement" (`Assoc legacy_action)
     in
     let legacy_outbox = replace_field "receipt" (`Assoc legacy_receipt) outbox_fields in
     let legacy_state =
@@ -247,7 +247,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     in
     let recovered = State.of_yojson legacy_state |> require_ok "recover v8 source ACK outbox" in
     let recovered_json = State.to_yojson recovered in
-    let recovered_fields, _, recovered_receipt, recovered_settlement =
+    let recovered_fields, _, recovered_receipt, recovered_action =
       source_ack_wire_fields recovered_json
     in
     Alcotest.(check (option string))
@@ -259,7 +259,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     Alcotest.(check (option string))
       "recovery removes legacy source-terminal label"
       (Some "ack_source_terminal")
-      (match List.assoc_opt "kind" recovered_settlement with
+      (match List.assoc_opt "kind" recovered_action with
        | Some (`String kind) -> Some kind
        | Some _ | None -> None);
     Alcotest.(check string)
@@ -291,13 +291,13 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       |> require_ok "recover v2 source ACK WAL"
     in
     Alcotest.(check int) "v2 WAL replay removes source" 0 (Queue.length (State.pending recovered_wal));
-    let _, _, recovered_wal_receipt, recovered_wal_settlement =
+    let _, _, recovered_wal_receipt, recovered_wal_action =
       State.to_yojson recovered_wal |> source_ack_wire_fields
     in
     Alcotest.(check (option string))
       "v2 WAL replay canonicalizes to ACK"
       (Some "ack_source_terminal")
-      (match List.assoc_opt "kind" recovered_wal_settlement with
+      (match List.assoc_opt "kind" recovered_wal_action with
        | Some (`String kind) -> Some kind
        | Some _ | None -> None);
     Alcotest.(check string)

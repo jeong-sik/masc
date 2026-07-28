@@ -312,7 +312,10 @@ let recent_transitions ~keeper_name ~limit : transition_record list =
       | Some r -> result := r :: !result
       | None -> ()
     done;
-    !result
+    (* [i = 0] is the newest slot and [::] prepends, so the accumulator ends up
+       oldest-first. Reverse it to honour the newest-first contract in the .mli,
+       which [recent_completed_turns] below already keeps. *)
+    List.rev !result
 ;;
 
 let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
@@ -336,6 +339,10 @@ let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
                Some record
              | _ -> None)
           | _ -> None)
+        (* [read_recent] returns oldest-first, so without this the cap below
+           kept the OLDEST [limit] rows of the scanned window and presented
+           them as "recent". Reverse first: take the newest, newest-first. *)
+        |> List.rev
         |> List.filteri (fun idx _ -> idx < limit)
       in
       `List items)

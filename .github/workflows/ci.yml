@@ -812,6 +812,19 @@ jobs:
           oas_pin_targets="@test/runtest-test_keeper_hooks_oas_introspection @test/runtest-test_keeper_execution_join"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${oas_pin_targets}"
 
+      - name: Run tool blob retention suite
+        id: tool_blob_retention_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          tool_blob_targets="@test/runtest-test_tool_blob_store @test/runtest-test_keeper_tool_call_log"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${tool_blob_targets}"
+
       - name: Run operator control suite
         id: operator_control_suite
         # Run regardless of earlier test failures, but only after a successful

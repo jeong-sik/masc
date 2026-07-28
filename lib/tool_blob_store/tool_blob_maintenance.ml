@@ -130,22 +130,18 @@ let rec references_in_json ~path ~line references = function
               references_in_json ~path ~line current value))
          (Ok references)
          fields)
-  | `List values
-  | `Tuple values ->
+  | `List values ->
     List.fold_left
       (fun result value ->
          Result.bind result (fun current ->
            references_in_json ~path ~line current value))
       (Ok references)
       values
-  | `Variant (_, Some value) ->
-    references_in_json ~path ~line references value
   | `Null
   | `Bool _
   | `Int _
   | `Intlit _
-  | `Float _
-  | `Variant (_, None) ->
+  | `Float _ ->
     Ok references
 ;;
 

@@ -982,20 +982,28 @@ let apply_and_persist
                (match recover_pending current with
                 | Error _ as error -> error
                 | Ok () ->
-                  let publication_id =
-                    Recognition_ledger.publication_id
-                      ~keeper_id
-                      ~trace_id:inp.trace_id
-                      ~generation
-                      ~store_before:current
-                      ~operations:[]
-                      ~dispositions:[]
-                      ~store_after:current
-                      ~episode
-                      ~facts_rewrite_required:false
-                  in
-                  (match
-                     Recognition_ledger.publish
+                  if not (Keeper_memory_os_io.same_fact_snapshot inp.store current)
+                  then
+                    Error
+                      (Store_snapshot_changed
+                         { snapshot = List.length inp.store
+                         ; current = List.length current
+                         })
+                  else
+                    let publication_id =
+                      Recognition_ledger.publication_id
+                        ~keeper_id
+                        ~trace_id:inp.trace_id
+                        ~generation
+                        ~store_before:current
+                        ~operations:[]
+                        ~dispositions:[]
+                        ~store_after:current
+                        ~episode
+                        ~facts_rewrite_required:false
+                    in
+                    (match
+                       Recognition_ledger.publish
                        ~prepare:(fun () ->
                          Recognition_ledger.append_prepared
                            ~masc_root:recognition_masc_root
@@ -1049,12 +1057,12 @@ let apply_and_persist
                      Error
                        (Memory_apply_failed
                           ("recognition event write failed after episode: " ^ detail))
-                   | Error (Recognition_ledger.Commit_failed detail) ->
-                     Error
-                       (Memory_apply_failed
-                          ("recognition commit marker failed; prepared \
-                            publication remains recoverable: "
-                           ^ detail)))))
+                     | Error (Recognition_ledger.Commit_failed detail) ->
+                       Error
+                         (Memory_apply_failed
+                            ("recognition commit marker failed; prepared \
+                              publication remains recoverable: "
+                             ^ detail)))))
     in
     (match recovered with
      | Error _ as error -> error

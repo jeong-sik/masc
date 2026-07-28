@@ -587,6 +587,48 @@ let test_librarian_zero_op_metadata_persists_episode () =
         (List.length (Memory_io.read_facts_all ~keeper_id)))
 ;;
 
+let test_librarian_zero_op_rejects_stale_snapshot () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "zero-op-stale-snapshot" in
+    let current = fact_fixture ~now:1_000_000.0 () in
+    Memory_io.append_fact ~keeper_id current;
+    let inp : Librarian.input =
+      { trace_id = "trace-zero-op-stale"
+      ; generation = 3
+      ; messages = []
+      ; store = []
+      }
+    in
+    let recognition : Librarian.recognition_output =
+      { episode_summary = "The stale snapshot must not advance cadence"
+      ; operations = []
+      ; open_items = []
+      ; constraints = []
+      ; preserved_tool_refs = []
+      }
+    in
+    match
+      Librarian_runtime.For_testing.apply_and_persist
+        ~base_path:"/tmp/librarian-zero-op-stale"
+        ~keeper_id
+        ~generation:4
+        inp
+        recognition
+    with
+    | Error (Librarian_runtime.Store_snapshot_changed { snapshot; current }) ->
+      Alcotest.(check int) "stale snapshot size" 0 snapshot;
+      Alcotest.(check int) "current store size" 1 current;
+      Alcotest.(check int)
+        "stale zero-op creates no event"
+        0
+        (List.length (Memory_io.read_events_tail ~keeper_id ~n:10))
+    | Error error ->
+      Alcotest.fail
+        ("expected stale snapshot rejection: "
+         ^ Librarian_runtime.extraction_error_to_string error)
+    | Ok _ -> Alcotest.fail "stale zero-op result was incorrectly published")
+;;
+
 let test_librarian_recalled_echo_persists_metadata_without_fact_rewrite () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "recalled-echo-metadata" in
@@ -4732,6 +4774,10 @@ let () =
             "librarian zero-op metadata persists an episode"
             `Quick
             test_librarian_zero_op_metadata_persists_episode
+        ; Alcotest.test_case
+            "librarian zero-op rejects a stale snapshot"
+            `Quick
+            test_librarian_zero_op_rejects_stale_snapshot
         ; Alcotest.test_case
             "librarian recalled echo persists metadata without fact rewrite"
             `Quick

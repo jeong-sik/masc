@@ -24,7 +24,7 @@ type repair_stage =
   | Grant_consumption
   | Evidence_storage
   | Replay_journal
-  | Outcome_unknown_after_restart
+  | Replay_effect_indeterminate_after_restart
   | Invalid_resolution_state
 
 type outcome =

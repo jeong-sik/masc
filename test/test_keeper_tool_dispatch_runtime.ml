@@ -3105,7 +3105,7 @@ let test_consumed_without_outcome_requires_operator_repair () =
           ()
       with
       | Masc.Keeper_gate_replay.Repair_required
-          { stage = Masc.Keeper_gate_replay.Outcome_unknown_after_restart; _ } ->
+          { stage = Masc.Keeper_gate_replay.Replay_effect_indeterminate_after_restart; _ } ->
         ()
       | outcome ->
         failf

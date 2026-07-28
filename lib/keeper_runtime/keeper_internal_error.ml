@@ -231,7 +231,7 @@ type gate_replay_repair_stage =
   | Replay_grant_consumption
   | Replay_evidence_storage
   | Replay_journal
-  | Replay_outcome_unknown_after_restart
+  | Replay_effect_indeterminate_after_restart
   | Replay_invalid_resolution_state
 
 let gate_replay_repair_stage_to_string = function
@@ -240,7 +240,7 @@ let gate_replay_repair_stage_to_string = function
   | Replay_grant_consumption -> "grant_consumption"
   | Replay_evidence_storage -> "evidence_storage"
   | Replay_journal -> "replay_journal"
-  | Replay_outcome_unknown_after_restart -> "outcome_unknown_after_restart"
+  | Replay_effect_indeterminate_after_restart -> "effect_indeterminate_after_restart"
   | Replay_invalid_resolution_state -> "invalid_resolution_state"
 ;;
 
@@ -250,8 +250,8 @@ let gate_replay_repair_stage_of_string = function
   | "grant_consumption" -> Some Replay_grant_consumption
   | "evidence_storage" -> Some Replay_evidence_storage
   | "replay_journal" -> Some Replay_journal
-  | "outcome_unknown_after_restart" ->
-    Some Replay_outcome_unknown_after_restart
+  | "effect_indeterminate_after_restart" ->
+    Some Replay_effect_indeterminate_after_restart
   | "invalid_resolution_state" -> Some Replay_invalid_resolution_state
   | _ -> None
 ;;

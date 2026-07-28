@@ -93,7 +93,7 @@ type gate_replay_repair_stage =
   | Replay_grant_consumption
   | Replay_evidence_storage
   | Replay_journal
-  | Replay_outcome_unknown_after_restart
+  | Replay_effect_indeterminate_after_restart
   | Replay_invalid_resolution_state
 
 type masc_internal_error =

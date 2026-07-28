@@ -10,7 +10,7 @@ type repair_stage =
   | Grant_consumption
   | Evidence_storage
   | Replay_journal
-  | Outcome_unknown_after_restart
+  | Replay_effect_indeterminate_after_restart
   | Invalid_resolution_state
 
 type outcome =
@@ -37,7 +37,7 @@ let repair_stage_to_string = function
   | Grant_consumption -> "grant_consumption"
   | Evidence_storage -> "evidence_storage"
   | Replay_journal -> "replay_journal"
-  | Outcome_unknown_after_restart -> "outcome_unknown_after_restart"
+  | Replay_effect_indeterminate_after_restart -> "effect_indeterminate_after_restart"
   | Invalid_resolution_state -> "invalid_resolution_state"
 ;;
 
@@ -597,7 +597,7 @@ let replay_approved_effect
      | None ->
        Repair_required
          { operation = request.tool_name
-         ; stage = Outcome_unknown_after_restart
+         ; stage = Replay_effect_indeterminate_after_restart
          ; detail =
              "authorization is consumed but no durable replay outcome or in-memory repair payload exists"
          })

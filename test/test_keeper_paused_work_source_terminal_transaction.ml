@@ -25,6 +25,34 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let write_json path json =
+  mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun channel ->
+    output_string channel (Yojson.Safe.to_string json))
+;;
+
+let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
+
+let receipt_path config ~keeper_name ~operator_operation_id =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Workspace.masc_root_dir config)
+          "paused-work-dispositions")
+       ("keeper-" ^ sha256 keeper_name))
+    ("operation-" ^ sha256 operator_operation_id ^ ".json")
+;;
+
 let with_source_terminal_lane f =
   let base_path = Filename.temp_dir "keeper-paused-source-terminal" "" in
   Fun.protect
@@ -179,6 +207,88 @@ let test_exact_terminal_receipt_acks_pending () =
       (Queue.length (State.pending replayed_state)))
 ;;
 
+let test_legacy_v3_receipt_file_resumes_ack () =
+  with_source_terminal_lane (fun config keeper_name meta request ->
+    let operation : Receipt.source_terminal_operation =
+      { source = request.source
+      ; source_revision = request.source_revision
+      ; source_receipt = request.source_receipt
+      }
+    in
+    let current : Receipt.t =
+      { keeper_name
+      ; expected_trace_id = meta.runtime.trace_id
+      ; expected_generation = request.owner_nonce
+      ; operator_operation_id = request.operator_operation_id
+      ; requested_at = 2.0
+      ; operation = Receipt.Ack_source_terminal operation
+      }
+    in
+    let legacy =
+      match Receipt.to_yojson current with
+      | `Assoc fields ->
+        let source_terminal =
+          match List.assoc_opt "source_terminal" fields with
+          | Some (`Assoc source_fields) ->
+            `Assoc (("settled_at", `Float 2.0) :: source_fields)
+          | Some _ | None -> Alcotest.fail "source-terminal receipt must be an object"
+        in
+        `Assoc
+          (List.map
+             (function
+               | "operation", _ ->
+                 "operation", `String "settle_from_source_terminal"
+               | "schema", _ ->
+                 "schema", `String "masc.keeper.paused-work-disposition.v3"
+               | "source_terminal", _ -> "source_terminal", source_terminal
+               | field -> field)
+             fields)
+      | _ -> Alcotest.fail "source-terminal receipt must be a JSON object"
+    in
+    (match Receipt.of_yojson legacy with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "public receipt codec accepted recovery-only v3");
+    write_json
+      (receipt_path
+         config
+         ~keeper_name
+         ~operator_operation_id:request.operator_operation_id)
+      legacy;
+    let recovered =
+      Receipt.load
+        config
+        ~keeper_name
+        ~operator_operation_id:request.operator_operation_id
+      |> require_ok "load recovery-only v3 receipt"
+      |> require_some "recovered v3 receipt"
+    in
+    (match recovered.operation with
+     | Receipt.Ack_source_terminal _ -> ()
+     | Receipt.Resume_owner
+     | Receipt.Transfer_owner _ ->
+       Alcotest.fail "v3 receipt did not recover as typed source ACK");
+    let replay =
+      Transaction.ack_pending config ~keeper_name request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "resume ACK from durable v3 receipt"
+    in
+    (match replay.commit_status with
+     | Transaction.Already_committed -> ()
+     | Transaction.Committed ->
+       Alcotest.fail "durable v3 receipt was replaced instead of replayed");
+    check_applied replay.projection;
+    let state =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load source ACK resumed from v3 receipt"
+    in
+    Alcotest.(check int)
+      "recovery-only v3 receipt resumes pending source ACK"
+      0
+      (Queue.length (State.pending state)))
+;;
+
 let test_source_terminal_busy_has_zero_mutation () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
     let base_path = config.Workspace.base_path in
@@ -260,6 +370,10 @@ let () =
             "exact receipt ACKs pending"
             `Quick
             test_exact_terminal_receipt_acks_pending
+        ; Alcotest.test_case
+            "recovery-only v3 receipt resumes ACK"
+            `Quick
+            test_legacy_v3_receipt_file_resumes_ack
         ; Alcotest.test_case
             "admission busy has zero mutation"
             `Quick

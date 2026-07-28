@@ -25,6 +25,34 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let write_json path json =
+  mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun channel ->
+    output_string channel (Yojson.Safe.to_string json))
+;;
+
+let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
+
+let receipt_path config ~keeper_name ~operator_operation_id =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Workspace.masc_root_dir config)
+          "paused-work-dispositions")
+       ("keeper-" ^ sha256 keeper_name))
+    ("operation-" ^ sha256 operator_operation_id ^ ".json")
+;;
+
 let write_meta config ~keeper_name ~trace_id ~generation ~paused =
   let meta =
     Masc_test_deps.meta_of_json_fixture
@@ -191,6 +219,82 @@ let test_transfer_commits_exact_pending_move () =
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "transfer receipt accepted obsolete v2 schema");
     assert_converged config ~from_keeper ~to_keeper request.source)
+;;
+
+let test_legacy_v2_receipt_file_resumes_transfer () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper source_meta target_meta request ->
+  let transfer : Receipt.transfer_owner =
+    { from_keeper
+    ; to_keeper
+    ; target_trace_id = target_meta.runtime.trace_id
+    ; target_generation = request.target_generation
+    ; source = request.source
+    ; source_revision = request.source_revision
+    ; continuation_binding = request.continuation_binding
+    }
+  in
+  let current : Receipt.t =
+    { keeper_name = from_keeper
+    ; expected_trace_id = source_meta.runtime.trace_id
+    ; expected_generation = request.owner_nonce
+    ; operator_operation_id = request.operator_operation_id
+    ; requested_at = 2.0
+    ; operation = Receipt.Transfer_owner transfer
+    }
+  in
+  let legacy =
+    match Receipt.to_yojson current with
+    | `Assoc fields ->
+      let transfer =
+        match List.assoc_opt "transfer" fields with
+        | Some (`Assoc transfer_fields) ->
+          `Assoc (("settled_at", `Float 2.0) :: transfer_fields)
+        | Some _ | None -> Alcotest.fail "transfer receipt must contain an object"
+      in
+      `Assoc
+        (List.map
+           (function
+             | "schema", _ ->
+               "schema", `String "masc.keeper.paused-work-disposition.v2"
+             | "transfer", _ -> "transfer", transfer
+             | field -> field)
+           fields)
+    | _ -> Alcotest.fail "transfer receipt must be a JSON object"
+  in
+  (match Receipt.of_yojson legacy with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "public receipt codec accepted recovery-only v2");
+  write_json
+    (receipt_path
+       config
+       ~keeper_name:from_keeper
+       ~operator_operation_id:request.operator_operation_id)
+    legacy;
+  let recovered =
+    Receipt.load
+      config
+      ~keeper_name:from_keeper
+      ~operator_operation_id:request.operator_operation_id
+    |> require_ok "load recovery-only v2 transfer receipt"
+    |> require_some "recovered v2 transfer receipt"
+  in
+  (match recovered.operation with
+   | Receipt.Transfer_owner _ -> ()
+   | Receipt.Resume_owner
+   | Receipt.Ack_source_terminal _ ->
+     Alcotest.fail "v2 receipt did not recover as typed transfer");
+  let replay =
+    Transaction.transfer_pending config ~from_keeper ~to_keeper request
+    |> Result.map_error Transaction.error_to_string
+    |> require_ok "resume transfer from durable v2 receipt"
+  in
+  (match replay.commit_status with
+   | Transaction.Already_committed -> ()
+   | Transaction.Committed ->
+     Alcotest.fail "durable v2 receipt was replaced instead of replayed");
+  check_applied ~expected_target:Transaction.Enqueued replay.projection;
+  assert_converged config ~from_keeper ~to_keeper request.source
 ;;
 
 let test_transfer_busy_has_zero_mutation () =
@@ -374,6 +478,10 @@ let () =
             "commit exact pending move"
             `Quick
             test_transfer_commits_exact_pending_move
+        ; Alcotest.test_case
+            "recovery-only v2 receipt resumes transfer"
+            `Quick
+            test_legacy_v2_receipt_file_resumes_transfer
         ; Alcotest.test_case
             "admission busy has zero mutation"
             `Quick

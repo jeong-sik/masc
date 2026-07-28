@@ -119,6 +119,21 @@ let test_compaction_decision_value_is_string () =
      = `String "provider_overflow")
 ;;
 
+let test_age_seconds_preserves_missing_timestamp () =
+  Alcotest.check (Alcotest.option (Alcotest.float 0.0001))
+    "zero sentinel becomes missing age"
+    None
+    (Keeper_status_metrics.age_seconds_opt ~now_ts:100.0 0.0);
+  Alcotest.check (Alcotest.option (Alcotest.float 0.0001))
+    "negative sentinel becomes missing age"
+    None
+    (Keeper_status_metrics.age_seconds_opt ~now_ts:100.0 (-1.0));
+  Alcotest.check (Alcotest.option (Alcotest.float 0.0001))
+    "real timestamp remains an age"
+    (Some 25.0)
+    (Keeper_status_metrics.age_seconds_opt ~now_ts:100.0 75.0)
+;;
+
 let () =
   Alcotest.run
     "keeper_status_bridge"
@@ -137,6 +152,12 @@ let () =
             "value decision -> `String"
             `Quick
             test_compaction_decision_value_is_string;
+        ] );
+      ( "timestamp age sentinel SSOT",
+        [ Alcotest.test_case
+            "missing timestamps do not become zero age"
+            `Quick
+            test_age_seconds_preserves_missing_timestamp
         ] );
       ( "profile default override provenance",
         [

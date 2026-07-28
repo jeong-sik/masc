@@ -264,24 +264,20 @@ let keepers_json
                       |> Option.value ~default:0.0
                     in
                     let last_turn_ago_s =
-                      if meta.runtime.usage.last_turn_ts <= 0.0
-                      then 0.0
-                      else now_ts -. meta.runtime.usage.last_turn_ts
+                      Keeper_status_metrics.age_seconds_opt
+                        ~now_ts meta.runtime.usage.last_turn_ts
                     in
                     let last_handoff_ago_s =
-                      if meta.runtime.last_handoff_ts <= 0.0
-                      then 0.0
-                      else now_ts -. meta.runtime.last_handoff_ts
+                      Keeper_status_metrics.age_seconds_opt
+                        ~now_ts meta.runtime.last_handoff_ts
                     in
                     let last_compaction_ago_s =
-                      if meta.runtime.compaction_rt.last_ts <= 0.0
-                      then 0.0
-                      else now_ts -. meta.runtime.compaction_rt.last_ts
+                      Keeper_status_metrics.age_seconds_opt
+                        ~now_ts meta.runtime.compaction_rt.last_ts
                     in
                     let last_proactive_ago_s =
-                      if meta.runtime.proactive_rt.last_ts <= 0.0
-                      then 0.0
-                      else now_ts -. meta.runtime.proactive_rt.last_ts
+                      Keeper_status_metrics.age_seconds_opt
+                        ~now_ts meta.runtime.proactive_rt.last_ts
                     in
                     let last_activity_ts =
                       List.fold_left
@@ -295,7 +291,7 @@ let keepers_json
                         ]
                     in
                     let last_activity_ago_s =
-                      if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
+                      Keeper_status_metrics.age_seconds_opt ~now_ts last_activity_ts
                     in
                     let diagnostic =
                       Keeper_status_runtime.keeper_diagnostic_json
@@ -409,11 +405,11 @@ let keepers_json
                          ; "agent", agent_json
                          ; "generation", `Int meta.runtime.nonce
                          ; "turn_count", `Int meta.runtime.usage.total_turns
-                         ; "last_turn_ago_s", `Float last_turn_ago_s
-                         ; "last_handoff_ago_s", `Float last_handoff_ago_s
-                         ; "last_compaction_ago_s", `Float last_compaction_ago_s
-                         ; "last_proactive_ago_s", `Float last_proactive_ago_s
-                         ; "last_activity_ago_s", `Float last_activity_ago_s
+                         ; "last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s
+                         ; "last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s
+                         ; "last_compaction_ago_s", Json_util.float_opt_to_json last_compaction_ago_s
+                         ; "last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s
+                         ; "last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s
                          ; "last_model_used", `String (Keeper_status_runtime.active_model_of_meta meta)
                          ]
                          @ keeper_runtime_identity_fields meta

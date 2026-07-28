@@ -93,6 +93,9 @@ let empty_tool_audit_snapshot =
     tool_audit_at = None;
   }
 
+let age_seconds_opt ~now_ts timestamp =
+  if timestamp <= 0.0 then None else Some (now_ts -. timestamp)
+
 let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
   let interaction_points = s.turn_points + s.proactive_points in
   let intervention_share =

@@ -912,8 +912,9 @@ let initialize_owner_state_blocking
      two complete startup scans before deletion. A failed scan retains every
      blob and does not make unrelated server startup unavailable. *)
   (match
-     Keeper_wire_capture.prune_expired
-       ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state))
+     Eio_unix.run_in_systhread (fun () ->
+       Keeper_wire_capture.prune_expired
+         ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state)))
    with
    | Error error ->
      Log.Server.warn

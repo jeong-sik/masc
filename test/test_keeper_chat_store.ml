@@ -165,7 +165,7 @@ let test_append_turn_roundtrip () =
       let tool2 = List.nth messages 2 in
       let asst = List.nth messages 3 in
       Alcotest.(check (option string)) "tool id persisted"
-        (Some "toolu_1") tool1.tool_call_id;
+        (Some " toolu_1 ") tool1.tool_call_id;
       Alcotest.(check (option string)) "tool name persisted"
         (Some "Read") tool1.tool_call_name;
       Alcotest.(check string) "tool args persisted" {|{"path":"x"}|} tool1.content;

@@ -48,6 +48,11 @@ let has_finalized_call_id t call_id =
     (fun (_, (call : Keeper_chat_store.tool_call)) -> String.equal call.call_id call_id)
     t.finalized
 
+let has_open_call_id t call_id =
+  List.exists
+    (fun (_, block) -> String.equal block.call_id call_id)
+    t.blocks
+
 let finalize_block t index =
   match block_for_index t index with
   | None -> ()
@@ -105,7 +110,7 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
     else if stream_start_is_tool evt then (
       match tool_id, tool_name with
       | Some raw_call_id, Some raw_call_name ->
-        let call_id = String.trim raw_call_id in
+        let call_id = raw_call_id in
         let call_name = String.trim raw_call_name in
         (match block_for_index t index with
       (* Providers may replay a start event after its JSON deltas. It is the
@@ -119,12 +124,13 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
              && String.equal block.raw_call_name raw_call_name ->
         ()
       | Some _ -> invalidate_index t index
-      | None when has_finalized_call_id t call_id ->
+      | None when has_finalized_call_id t call_id || has_open_call_id t call_id ->
         (* A provider can replay an entire block after its stop. The live
-           dashboard keys completed tool cards by call id, so reopening it
-           here would make durable reload diverge with a duplicate row. Keep
-           the replay index closed until its own terminator too, so a
-           conflicting start cannot resurrect it under a second identity. *)
+           dashboard keys tool cards by call id, so reopening a completed or
+           already-active id here would make durable reload diverge with a
+           duplicate row. Keep the conflicting index closed until its own
+           terminator too, so a later start cannot resurrect it under a
+           second identity. *)
         invalidate_index t index
       | None ->
         let opened_at = t.next_opened_at in

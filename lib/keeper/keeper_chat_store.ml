@@ -782,9 +782,7 @@ let normalize_tool_args args =
   if String.trim args = "" then "{}" else args
 
 let normalize_tool_call_id ~position call_id =
-  match String.trim call_id with
-  | "" -> Printf.sprintf "tc-%d" position
-  | normalized -> normalized
+  if String.trim call_id = "" then Printf.sprintf "tc-%d" position else call_id
 
 (* RFC-0232 §3.3: the append IS the parse boundary.  Mentions are
    derived from the content that is actually persisted (post-redaction),

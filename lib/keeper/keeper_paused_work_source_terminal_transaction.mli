@@ -38,7 +38,7 @@ type commit_status =
   | Already_committed
 
 type projection =
-  | Applied of Keeper_registry_event_queue.source_ack_result
+  | Applied of Keeper_registry_event_queue.settle_result
   | Committed_followup_failed of failure
 
 type success =

@@ -172,7 +172,7 @@ type settlement = State.settlement =
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
-  | Ack_source_terminal of accepted_source_terminal
+  | Settle_from_source_terminal of accepted_source_terminal
   | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
@@ -434,12 +434,9 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let settlement_wal_schema = "masc.keeper_event_queue.settlement.v3"
-let settlement_wal_schema_v2 = "masc.keeper_event_queue.settlement.v2"
-
 let settlement_wal_entry_to_line owner entry =
   `Assoc
-    [ "schema", `String settlement_wal_schema
+    [ "schema", `String "masc.keeper_event_queue.settlement.v2"
     ; "base_path", `String (Owner_lock.base_path owner)
     ; "keeper_name", `String (keeper_name_of_owner owner)
     ; "outbox_entry", State.outbox_entry_to_yojson entry
@@ -452,31 +449,22 @@ let settlement_wal_entry_of_json owner = function
   | `Assoc fields ->
     (match List.assoc_opt "schema" fields with
      | Some (`String schema)
-       when String.equal schema settlement_wal_schema
-            || String.equal schema settlement_wal_schema_v2 ->
-       let outbox_entry_of_yojson =
-         if String.equal schema settlement_wal_schema
-         then State.outbox_entry_of_yojson
-         else State.legacy_source_terminal_ack_outbox_entry_of_yojson
-       in
+       when not (String.equal schema "masc.keeper_event_queue.settlement.v2") ->
+       Error (Printf.sprintf "unsupported settlement WAL schema: %s" schema)
+     | _ ->
        (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
         | [ ("base_path", `String base_path)
           ; ("keeper_name", `String keeper_name)
           ; ("outbox_entry", entry)
-          ; ("schema", `String row_schema)
+          ; ("schema", `String "masc.keeper_event_queue.settlement.v2")
           ] ->
-          if not (String.equal row_schema schema)
-          then Error "settlement WAL schema field changed during decode"
-          else if
+          if
             not
               (String.equal base_path (Owner_lock.base_path owner)
                && String.equal keeper_name (keeper_name_of_owner owner))
           then Error "settlement WAL row owner does not match its Keeper lane"
-          else outbox_entry_of_yojson entry
-        | _ -> Error "settlement WAL row fields are not exact")
-     | Some (`String schema) ->
-       Error (Printf.sprintf "unsupported settlement WAL schema: %s" schema)
-     | Some _ | None -> Error "settlement WAL schema must be a string")
+          else State.outbox_entry_of_yojson entry
+        | _ -> Error "settlement WAL row fields are not exact"))
   | _ -> Error "settlement WAL row must be a JSON object"
 ;;
 
@@ -1126,12 +1114,12 @@ let transfer_pending_accepted_result
             (Printexc.to_string exn)))
 ;;
 
-let ack_pending_source_terminal_result
+let settle_pending_from_source_terminal_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
       ~current_owner_nonce
-      ~acked_at
+      ~settled_at
       ~source_terminal
       ()
   =
@@ -1146,9 +1134,9 @@ let ack_pending_source_terminal_result
            commit_settlement_transition_unlocked
              owner
              ~after_commit
-             (State.ack_pending_source_terminal
+             (State.settle_pending_from_source_terminal
                 ~current_owner_nonce
-                ~settled_at:acked_at
+                ~settled_at
                 ~source_terminal)
              state
            |> Result.map fst)
@@ -1157,7 +1145,7 @@ let ack_pending_source_terminal_result
      | exn ->
        Error
          (Printf.sprintf
-            "event queue pending source-terminal ACK raised keeper=%s: %s"
+            "event queue pending source-terminal settlement raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;

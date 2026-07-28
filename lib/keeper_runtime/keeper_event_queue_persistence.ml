@@ -732,8 +732,20 @@ let commit_transform_unlocked
           (match save_state owner next with
            | Error _ as error -> error
            | Ok () ->
-             after_commit (State.pending next);
-             Ok value)))
+             (* [load_state_unlocked] above replayed the settlement WAL, so
+                [next] already carries that settlement's pending mutation and
+                its transition outbox, and the snapshot just written persists
+                both (schema v8). Retire the WAL here, paired with the revision
+                bump that absorbed it. Leaving it behind is what latches the
+                owner: the next load replays an already-absorbed row against
+                the advanced revision, [settle_committed] rejects it on
+                [source_revision], and no runtime path can clear it because the
+                projector itself starts with [load_state_unlocked] (#26074). *)
+             (match compact_settlement_wal_unlocked owner with
+              | Error _ as error -> error
+              | Ok () ->
+                after_commit (State.pending next);
+                Ok value))))
 ;;
 
 let commit_transform

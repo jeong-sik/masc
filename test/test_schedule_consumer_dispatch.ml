@@ -670,6 +670,34 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists settlement_wal_path
          && String.trim (read_file settlement_wal_path) <> "");
+      (* #26074: projection is driven only by the janitor, so ordinary queue
+         traffic races it. An enqueue between the settlement and the projection
+         bumps the snapshot revision; if the settlement WAL is still on disk at
+         that point, every later load replays a row whose [source_revision] no
+         longer matches and the owner latches into "reset required" with no
+         runtime exit - the projector itself cannot recover because it begins
+         with [load_state_unlocked]. Drive that exact interleaving here. *)
+      let interleaved_stimulus : Keeper_event_queue.stimulus =
+        { cancellation.source with
+          post_id = "interleaved-enqueue-during-settlement"
+        ; arrived_at = 203.5
+        }
+      in
+      Keeper_registry_event_queue.enqueue ~base_path keeper_name interleaved_stimulus;
+      (match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
+       | Ok _ -> ()
+       | Error detail ->
+         failf "enqueue after settlement made the event queue unloadable: %s" detail);
+      (* Withdraw the interleaved stimulus so the assertions below still measure
+         what the cancelled retry produced rather than what this probe added. *)
+      (match
+         Keeper_registry_event_queue.drop_by_post_id
+           ~base_path
+           keeper_name
+           ~post_id:interleaved_stimulus.post_id
+       with
+       | Ok _ -> ()
+       | Error message -> fail ("interleaved stimulus drop failed: " ^ message));
       (match
          Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
        with

@@ -4,4 +4,9 @@
 val dir : base_path:string -> string
 val mode : base_path:string -> string
 val pending : base_path:string -> string
+val replay_results : base_path:string -> string
+(** Durable host-replay outcomes live beside, rather than inside,
+    [pending.json]. A rollback binary can therefore keep decoding the v8
+    pending snapshot while safely ignoring this additive sidecar. *)
+
 val always_allowed : base_path:string -> string

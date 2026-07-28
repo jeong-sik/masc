@@ -86,6 +86,11 @@ type grant_error =
   | Grant_resolution_missing of string
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
+  | Grant_replay_evidence_too_large of
+      { approval_id : string
+      ; actual_bytes : int
+      ; max_bytes : int
+      }
 
 type approved_resolution_state =
   | Resolution_unconsumed
@@ -94,6 +99,12 @@ type approved_resolution_state =
 type resolution_replay_outcome =
   | Replay_applied of string
   | Replay_failed of string
+(** The string is bounded replay evidence, normally a content-addressed
+    {!Tool_output.Stored} marker. The external effect's full bytes live in
+    {!Tool_blob_store}; the approval journal and next model request carry only
+    the recoverable reference and preview. *)
+
+val max_replay_evidence_bytes : int
 
 type approved_resolution_delivery =
   { request : approved_resolution_request
@@ -180,8 +191,10 @@ val consume_approved_resolution :
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
 
-(** Durably attach the exact host replay result to a consumed approval.
-    Identical writes are idempotent; a conflicting result fails closed. *)
+(** Durably attach bounded, recoverable host replay evidence to a consumed
+    approval. Outcomes live in an additive sidecar so the v8 [pending.json]
+    wire shape remains readable by a rollback binary. Identical writes are
+    idempotent; conflicting or oversized evidence fails closed. *)
 val record_consumed_resolution_replay :
   base_path:string ->
   id:string ->
@@ -324,6 +337,7 @@ module For_testing : sig
     after_load:(unit -> unit) ->
     (install_report, install_error) result
   val pending_store_path : base_path:string -> string
+  val replay_results_store_path : base_path:string -> string
   val always_allowed_store_path : base_path:string -> string
 
   val bind_summary_exact_attempt_with_writer :

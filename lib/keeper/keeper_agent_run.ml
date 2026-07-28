@@ -577,6 +577,16 @@ let run_turn
     Keeper_runtime_manifest.Checkpoint_loaded;
   (* Steps 5-6: turn prompt, temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
+  let prompt_user_turn_record =
+    (* Host replay happens during tool setup. Defer this one user-message
+       append so the persisted turn is the post-replay message, not a raw wake
+       marker or a pre-replay one-shot authorization. The typed
+       [user_turn_record] below remains unchanged for checkpoint and memory
+       semantics. *)
+    Keeper_run_prompt.user_turn_record_for_prompt_build
+      ~hitl_resolution_present:(Option.is_some hitl_resolution)
+      ~user_turn_record
+  in
   let prompt_ctx =
     Keeper_run_prompt.build_turn_context
       ~ctx
@@ -585,7 +595,7 @@ let run_turn
       ~config
       ~meta
       ~history_user_source
-      ~user_turn_record
+      ~user_turn_record:prompt_user_turn_record
       ~is_retry
       ~start_turn_count
   in
@@ -641,6 +651,22 @@ let run_turn
   | Error e -> Error e
   | Ok s ->
     let user_message = s.Keeper_run_tools.user_message in
+    let ctx_work =
+      match hitl_resolution with
+      | None -> ctx_work
+      | Some _ ->
+        let user_message = Agent_sdk.Types.user_msg user_message in
+        let ctx_work =
+          Keeper_context_runtime.append ctx_work user_message
+        in
+        if not is_retry
+        then
+          Keeper_context_runtime.persist_message
+            ~source:history_user_source
+            session
+            user_message;
+        ctx_work
+    in
     let prompt_metrics =
       Keeper_agent_prompt_metrics.build_prompt_metrics
         ~system_prompt:turn_system_prompt

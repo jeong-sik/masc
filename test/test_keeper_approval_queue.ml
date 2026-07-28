@@ -1030,8 +1030,64 @@ let test_resolution_is_durable_and_origin_scoped () =
         with
         | Error (AQ.Grant_replay_outcome_conflict actual_id) ->
           Alcotest.(check string) "conflict identifies approval" id actual_id
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
-        | Ok _ -> Alcotest.fail "conflicting replay outcome replaced durable truth");
+       | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+       | Ok _ -> Alcotest.fail "conflicting replay outcome replaced durable truth");
+       let open Yojson.Safe.Util in
+       let delivery_wire =
+         read_pending_snapshot ~base_path
+         |> member "deliveries"
+         |> to_list
+         |> List.find (fun delivery ->
+           String.equal
+             (delivery |> member "entry" |> member "id" |> to_string)
+             id)
+       in
+       (match delivery_wire with
+        | `Assoc fields ->
+          Alcotest.(check bool)
+            "v8 rollback delivery has no replay_outcome field"
+            true
+            (Option.is_none (List.assoc_opt "replay_outcome" fields))
+        | _ -> Alcotest.fail "delivery wire is not an object");
+       let replay_results_path =
+         AQ.For_testing.replay_results_store_path ~base_path
+       in
+       Alcotest.(check bool)
+         "replay outcome is isolated in an additive sidecar"
+         true
+         (Sys.file_exists replay_results_path);
+       let replay_results = Yojson.Safe.from_file replay_results_path in
+       Alcotest.(check int)
+         "replay sidecar v1"
+         1
+         (replay_results |> member "version" |> to_int);
+       let fresh_replay_message =
+         Masc.Keeper_gate_replay.compose_model_message
+           ~base_path
+           ~user_message:"continue"
+           ~hitl_resolution:(Some resolution)
+           ~replay_delivery:
+             (Some
+                ( id
+                , Masc.Keeper_gate_replay.Applied
+                    { operation = "external-effect"
+                    ; output = replay_output
+                    ; journal =
+                        Masc.Keeper_gate_replay.Replay_journal_recorded
+                    } ))
+       in
+       Alcotest.(check bool)
+         "fresh replay replaces pre-replay one-shot authorization"
+         false
+         (String_util.contains_substring
+            fresh_replay_message
+            "The one-shot authorization belongs");
+       Alcotest.(check bool)
+         "fresh replay outcome is model-visible"
+         true
+         (String_util.contains_substring
+            fresh_replay_message
+            "Host Gate replay completed");
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
        (match AQ.approved_resolution_delivery ~base_path ~id with
@@ -1043,6 +1099,26 @@ let test_resolution_is_durable_and_origin_scoped () =
           Alcotest.(check string) "replay output survives restart" replay_output output
         | Ok _ -> Alcotest.fail "restart lost the consumed replay outcome"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let retry_message =
+         Masc.Keeper_gate_replay.compose_model_message
+           ~base_path
+           ~user_message:"continue"
+           ~hitl_resolution:(Some resolution)
+           ~replay_delivery:
+             (Some (id, Masc.Keeper_gate_replay.Not_applicable))
+       in
+       Alcotest.(check bool)
+         "retry reads durable replay evidence without stale authorization"
+         false
+         (String_util.contains_substring
+            retry_message
+            "The one-shot authorization belongs");
+       Alcotest.(check bool)
+         "retry forbids replaying consumed operation"
+         true
+         (String_util.contains_substring
+            retry_message
+            "Do not request this approved operation again");
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
@@ -2789,6 +2865,94 @@ let test_unreadable_snapshot_fails_closed_and_is_preserved () =
          (Sys.file_exists store_path))
 ;;
 
+let test_oversized_replay_evidence_is_rejected_before_sidecar_write () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let keeper_name = "queue-oversized-replay-evidence" in
+       let input = `Assoc [ "target", `String "bounded" ] in
+       let id = submit ~base_path ~keeper_name ~input in
+       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok AQ.Consumption_committed -> ()
+        | Ok _ -> Alcotest.fail "approved grant was not consumed"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let actual_bytes = AQ.max_replay_evidence_bytes + 1 in
+       (match
+          AQ.record_consumed_resolution_replay
+            ~base_path
+            ~id
+            ~outcome:(AQ.Replay_applied (String.make actual_bytes 'x'))
+        with
+        | Error
+            (AQ.Grant_replay_evidence_too_large
+              { approval_id; actual_bytes = actual; max_bytes }) ->
+          Alcotest.(check string) "approval id" id approval_id;
+          Alcotest.(check int) "actual bytes" actual_bytes actual;
+          Alcotest.(check int)
+            "maximum bytes"
+            AQ.max_replay_evidence_bytes
+            max_bytes
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+        | Ok _ -> Alcotest.fail "oversized replay evidence was persisted");
+       Alcotest.(check bool)
+         "rejected evidence creates no sidecar"
+         false
+         (Sys.file_exists
+            (AQ.For_testing.replay_results_store_path ~base_path)))
+;;
+
+let test_malformed_replay_sidecar_fails_closed_and_is_preserved () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       ignore
+         (submit
+            ~base_path
+            ~keeper_name:"queue-malformed-replay-sidecar"
+            ~input:(`Assoc [ "target", `String "pending" ]));
+       let sidecar_path =
+         AQ.For_testing.replay_results_store_path ~base_path
+       in
+       Out_channel.with_open_text sidecar_path (fun channel ->
+         output_string channel "{not-json");
+       AQ.For_testing.reset_runtime_state ();
+       (match AQ.install_persistence ~base_path with
+        | Error
+            (AQ.Install_storage_failed { path; _ }) ->
+          Alcotest.(check string)
+            "malformed sidecar owns the failure path"
+            sidecar_path
+            path
+        | Ok _ -> Alcotest.fail "malformed replay sidecar installed"
+       );
+       Alcotest.(check bool)
+         "malformed sidecar remains for operator repair"
+         true
+         (Sys.file_exists sidecar_path);
+       Alcotest.(check string)
+         "malformed sidecar is preserved byte-for-byte"
+         "{not-json"
+         (In_channel.with_open_bin sidecar_path In_channel.input_all))
+;;
+
 let test_persisted_delivery_replays_before_origin_wake () =
   let base_path = temp_dir () in
   let keeper_name = "queue-replay-origin" in
@@ -3435,6 +3599,14 @@ let () =
             "unreadable current snapshot is preserved"
             `Quick
             test_unreadable_snapshot_fails_closed_and_is_preserved
+        ; Alcotest.test_case
+            "oversized replay evidence is rejected"
+            `Quick
+            test_oversized_replay_evidence_is_rejected_before_sidecar_write
+        ; Alcotest.test_case
+            "malformed replay sidecar is preserved"
+            `Quick
+            test_malformed_replay_sidecar_fails_closed_and_is_preserved
         ; Alcotest.test_case
             "delivery journal replays"
             `Quick

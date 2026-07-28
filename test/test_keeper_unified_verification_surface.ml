@@ -472,6 +472,16 @@ let test_bare_autonomous_wake_is_not_recorded () =
      = Masc.Keeper_run_prompt.Skip_uninformative_wake);
   check bool "a turn carrying a HITL resolution is recorded" true
     (Masc.Keeper_run_prompt.user_turn_record_of_hitl_resolution (Some ())
+     = Masc.Keeper_run_prompt.Record_user_turn);
+  check bool "HITL persistence waits for post-replay message" true
+    (Masc.Keeper_run_prompt.user_turn_record_for_prompt_build
+       ~hitl_resolution_present:true
+       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
+     = Masc.Keeper_run_prompt.Skip_uninformative_wake);
+  check bool "ordinary recorded input is not deferred" true
+    (Masc.Keeper_run_prompt.user_turn_record_for_prompt_build
+       ~hitl_resolution_present:false
+       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
      = Masc.Keeper_run_prompt.Record_user_turn)
 
 (* The transcript fix above stopped the wake marker from accumulating, but the

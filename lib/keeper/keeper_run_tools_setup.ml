@@ -183,14 +183,18 @@ let prepare_agent_setup
       ?hitl_resolution
       ()
   in
+  let replay_delivery =
+    Option.map
+      (fun { Keeper_tools_oas.approval_id; outcome } ->
+         approval_id, outcome)
+      gate_replay_delivery
+  in
   let user_message =
-    match gate_replay_delivery with
-    | None -> user_message
-    | Some { Keeper_tools_oas.approval_id; outcome } ->
-      Keeper_gate_replay.append_model_evidence
-        ~approval_id
-        ~user_message
-        outcome
+    Keeper_gate_replay.compose_model_message
+      ~base_path:config.base_path
+      ~user_message
+      ~hitl_resolution
+      ~replay_delivery
   in
   let prompt_metrics =
     Keeper_agent_prompt_metrics.build_prompt_metrics

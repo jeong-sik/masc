@@ -2532,9 +2532,25 @@ let test_approved_web_search_replays_without_model_resubmission () =
            ; _
            } ->
          check bool
-           "replayed WebSearch output survives in the durable approval journal"
+           "replayed WebSearch artifact preview survives in the durable approval journal"
            true
            (contains_substring output "Replayed result");
+         (match Tool_output.decode_from_oas output with
+          | Tool_output.Decoded artifact ->
+            let store = Tool_blob_store.create ~base_path:config.base_path in
+            (match Tool_blob_store.fetch store ~sha256:artifact.sha256 with
+             | Ok (Some restored) ->
+               check bool
+                 "full replay output is recoverable from its artifact"
+                 true
+                 (contains_substring restored "Replayed result")
+             | Ok None -> fail "replayed WebSearch artifact is missing"
+             | Error error ->
+               fail (Tool_blob_store.fetch_error_to_string error))
+          | Tool_output.Not_marker ->
+            fail "replayed WebSearch output stayed inline"
+          | Tool_output.Invalid_marker { detail } ->
+            fail ("replayed WebSearch artifact marker is invalid: " ^ detail));
          let model_message =
            Masc.Keeper_unified_turn.user_message_with_hitl_resolution
              ~base_path:config.base_path
@@ -2542,9 +2558,15 @@ let test_approved_web_search_replays_without_model_resubmission () =
              (Some resolution)
          in
          check bool
-           "durable replay output reaches the next model turn"
+           "durable replay artifact preview reaches the next model turn"
            true
            (contains_substring model_message "Replayed result");
+         check bool
+           "durable replay prompt has no stale one-shot authorization"
+           false
+           (contains_substring
+              model_message
+              "The one-shot authorization belongs");
          check bool
            "model is forbidden to request the consumed operation again"
            true

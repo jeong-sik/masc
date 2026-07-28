@@ -34,15 +34,36 @@ type outcome =
       }
 
 val outcome_to_string : outcome -> string
-(** Render operation, journal state, payload byte count, and SHA-256 only. Exact
-    replay output remains in the typed outcome and durable approval journal; it
-    is never copied into operational logs by this renderer. *)
+(** Render operation, journal state, bounded evidence byte count, and SHA-256
+    only. Full replay output lives in the content-addressed tool blob store and
+    is never copied into operational logs. *)
 
 val append_model_evidence :
   approval_id:string -> user_message:string -> outcome -> string
-(** Append exact host replay evidence to the current model turn. Applied tool
-    output is labelled as untrusted data, and both outcomes explicitly forbid
-    blindly requesting the same approved operation again. *)
+(** Append bounded host replay evidence to the current model turn. Applied
+    output is an artifact reference plus preview labelled as untrusted data,
+    and both outcomes explicitly forbid blindly requesting the same approved
+    operation again. An accidentally oversized value is replaced with visible
+    byte-count/SHA evidence rather than copied into the request. *)
+
+val user_message_with_hitl_resolution :
+  base_path:string ->
+  user_message:string ->
+  Keeper_event_queue.hitl_resolution option ->
+  string
+(** Render a durable HITL resolution that was not freshly replayed in this
+    setup. Consumed approvals expose only their durable bounded evidence. *)
+
+val compose_model_message :
+  base_path:string ->
+  user_message:string ->
+  hitl_resolution:Keeper_event_queue.hitl_resolution option ->
+  replay_delivery:(string * outcome) option ->
+  string
+(** Build the model message once, after host replay. A fresh replay starts from
+    the undecorated user message, so the pre-replay one-shot authorization
+    cannot survive beside a consumed result. [Not_applicable] falls back to the
+    durable resolution renderer for retries and non-replayable operations. *)
 
 (** Reconstruct the write tool arguments from the approved Gate input.
 
@@ -102,3 +123,8 @@ val replay_approved_effect :
   approval_id:string ->
   unit ->
   outcome
+
+module For_testing : sig
+  val persist_bounded_replay_evidence :
+    base_path:string -> string -> string
+end

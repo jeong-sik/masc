@@ -8,6 +8,27 @@ let result_json =
   Alcotest.result json (Alcotest.testable Fmt.string String.equal)
 ;;
 
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_gate_replay_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+let cleanup_dir dir =
+  let rec remove path =
+    if Sys.is_directory path
+    then (
+      Array.iter
+        (fun name -> remove (Filename.concat path name))
+        (Sys.readdir path);
+      Unix.rmdir path)
+    else Sys.remove path
+  in
+  try remove dir with
+  | Sys_error _ -> ()
+;;
+
 (* The pinned resource identity stays in the approved input and is
    deliberately absent from the reconstructed arguments: the write handler
    re-derives it, so a target replaced between approval and replay produces a
@@ -270,9 +291,10 @@ let test_applied_replay_result_is_model_visible () =
   in
   Alcotest.check
     Alcotest.string
-    "exact replay output reaches the current model turn"
+    "bounded replay evidence reaches the current model turn"
     output
-    Yojson.Safe.Util.(evidence |> member "untrusted_tool_output" |> to_string);
+    Yojson.Safe.Util.(
+      evidence |> member "untrusted_tool_output_ref" |> to_string);
   Alcotest.check
     Alcotest.bool
     "current model turn cannot request the approved effect again"
@@ -280,6 +302,80 @@ let test_applied_replay_result_is_model_visible () =
     (String_util.contains_substring
        message
        "Do not request the approved operation again")
+;;
+
+let test_large_replay_result_is_recoverable_but_request_bounded () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let raw_output =
+         "LARGE-REPLAY-BEGIN\n"
+         ^ String.make (512 * 1024) 'x'
+         ^ "\nLARGE-REPLAY-END"
+       in
+       let evidence =
+         Masc.Keeper_gate_replay.For_testing.persist_bounded_replay_evidence
+           ~base_path
+           raw_output
+       in
+       Alcotest.check
+         Alcotest.bool
+         "artifact evidence is bounded"
+         true
+         (String.length evidence
+          < Masc.Keeper_approval_queue.max_replay_evidence_bytes);
+       let artifact =
+         match Tool_output.decode_from_oas evidence with
+         | Tool_output.Decoded artifact -> artifact
+         | Tool_output.Not_marker ->
+           Alcotest.fail "large replay evidence stayed inline"
+         | Tool_output.Invalid_marker { detail } ->
+           Alcotest.fail ("invalid replay artifact marker: " ^ detail)
+       in
+       Alcotest.check
+         Alcotest.int
+         "artifact retains exact byte count"
+         (String.length raw_output)
+         artifact.bytes;
+       let store = Tool_blob_store.create ~base_path in
+       (match Tool_blob_store.fetch store ~sha256:artifact.sha256 with
+        | Ok (Some restored) ->
+          Alcotest.check
+            Alcotest.string
+            "artifact restores full replay output"
+            raw_output
+            restored
+        | Ok None -> Alcotest.fail "replay artifact is missing"
+        | Error error ->
+          Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
+       let message =
+         Masc.Keeper_gate_replay.append_model_evidence
+           ~approval_id:"approval-large"
+           ~user_message:"continue"
+           (Masc.Keeper_gate_replay.Applied
+              { operation = "network_read"
+              ; output = evidence
+              ; journal =
+                  Masc.Keeper_gate_replay.Replay_journal_recorded
+              })
+       in
+       Alcotest.check
+         Alcotest.bool
+         "large replay cannot inflate the next model request"
+         true
+         (String.length message
+          < Masc.Keeper_approval_queue.max_replay_evidence_bytes);
+       Alcotest.check
+         Alcotest.bool
+         "model receives artifact identity"
+         true
+         (String_util.contains_substring message artifact.sha256);
+       Alcotest.check
+         Alcotest.bool
+         "model request excludes the full replay tail"
+         false
+         (String_util.contains_substring message "LARGE-REPLAY-END"))
 ;;
 
 
@@ -373,6 +469,10 @@ let () =
             "applied result reaches current model turn"
             `Quick
             test_applied_replay_result_is_model_visible
+        ; Alcotest.test_case
+            "large result is recoverable and request-bounded"
+            `Quick
+            test_large_replay_result_is_recoverable_but_request_bounded
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case

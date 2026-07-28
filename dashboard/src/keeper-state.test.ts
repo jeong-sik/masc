@@ -827,7 +827,7 @@ describe('thread history merge & persistence', () => {
     expect(tool?.delivery).toBe('history')
   })
 
-  it('normalizes persisted tool identity to the live stream convention', () => {
+  it('preserves opaque persisted tool identity at the live stream convention', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {
         role: 'tool',
@@ -838,7 +838,7 @@ describe('thread history merge & persistence', () => {
       },
     ])
     expect(entries).toHaveLength(1)
-    expect(entries[0]?.id).toBe('tool-toolu_trimmed')
+    expect(entries[0]?.id).toBe('tool- toolu_trimmed ')
     expect(entries[0]?.label).toBe('Read')
   })
 

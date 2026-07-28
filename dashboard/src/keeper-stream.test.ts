@@ -833,6 +833,39 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(finished?.streamState).toBeNull()
   })
 
+  it('preserves opaque provider tool-call ids throughout the live stream', () => {
+    assistantEntry()
+    const toolCallId = '  tc-opaque \t'
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId,
+      toolCallName: 'masc_status',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      toolCallId,
+      delta: '{}',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      toolCallId,
+    })
+
+    const thread = keeperThreads.value.sangsu ?? []
+    expect(thread.find(entry => entry.id === `tool-${toolCallId}`)).toMatchObject({
+      text: '{}',
+      delivery: 'delivered',
+    })
+    expect(thread.find(entry => entry.id === 'reply-1')?.traceSteps).toEqual([
+      expect.objectContaining({
+        kind: 'tool',
+        toolCallId,
+        status: 'ok',
+        args: '{}',
+      }),
+    ])
+  })
+
   it('replaces tool-call args when OAS emits argument snapshots', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {

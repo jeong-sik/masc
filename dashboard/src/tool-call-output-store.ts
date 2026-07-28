@@ -29,8 +29,10 @@ export function toolCallIdFromToolEntryId(entryId: string): string | null {
     : null
 }
 
-function nonBlankToolCallId(toolCallId: string): string | null {
-  return toolCallId.trim() ? toolCallId : null
+export function nonBlankToolCallId(
+  toolCallId: string | null | undefined,
+): string | null {
+  return toolCallId?.trim() ? toolCallId : null
 }
 
 // Global join table: tool_use_id → the tool-call IO entry (input + output).
@@ -202,9 +204,7 @@ export function recordToolCallOutputs(entries: readonly ToolCallEntry[]): void {
   let changed = false
   const next = new Map(toolCallOutputsById.value)
   for (const entry of entries) {
-    const toolUseId = entry.tool_use_id
-      ? nonBlankToolCallId(entry.tool_use_id)
-      : null
+    const toolUseId = nonBlankToolCallId(entry.tool_use_id)
     if (!toolUseId) continue
     next.set(toolUseId, entry)
     changed = true

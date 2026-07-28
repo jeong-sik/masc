@@ -6,8 +6,10 @@
 
 type open_block = {
   opened_at : int;
-  call_id : string option;
-  call_name : string option;
+  raw_call_id : string;
+  raw_call_name : string;
+  call_id : string;
+  call_name : string;
   (* Fragments arrive in order and are concatenated at finalize; a snapshot
      replaces them because the provider sends it as the whole argument object,
      not as one more fragment. *)
@@ -41,25 +43,16 @@ let invalidate_index t index =
 let clear_invalid_index t index =
   t.invalid_indices <- List.filter (fun invalid -> invalid <> index) t.invalid_indices
 
-(* A block with no call id cannot be joined to its output row, so it is dropped
-   rather than persisted as an anonymous step. The name alone does not identify
-   which of several same-named calls produced which result. *)
 let finalize_block t index =
   match block_for_index t index with
   | None -> ()
   | Some block ->
     drop_block t index;
-    (match block.call_id, block.call_name with
-     | Some call_id, Some call_name ->
-       let args = String.concat "" (List.rev block.args_fragments) in
-       let call : Keeper_chat_store.tool_call =
-         { call_id
-         ; call_name
-         ; args
-         }
-       in
-       t.finalized <- (block.opened_at, call) :: t.finalized
-     | None, _ | _, None -> ())
+    let args = String.concat "" (List.rev block.args_fragments) in
+    let call : Keeper_chat_store.tool_call =
+      { call_id = block.call_id; call_name = block.call_name; args }
+    in
+    t.finalized <- (block.opened_at, call) :: t.finalized
 
 let append_fragment t index fragment =
   match block_for_index t index with
@@ -105,25 +98,37 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
     if List.mem index t.invalid_indices
     then ()
     else if stream_start_is_tool evt then (
-      let call_id = Option.map String.trim tool_id in
-      let call_name = Option.map String.trim tool_name in
-      match block_for_index t index, call_id, call_name with
+      match tool_id, tool_name with
+      | Some raw_call_id, Some raw_call_name ->
+        let call_id = String.trim raw_call_id in
+        let call_name = String.trim raw_call_name in
+        (match block_for_index t index with
       (* Providers may replay a start event after its JSON deltas. It is the
          same open block, not a replacement, so retaining it preserves the
          already received fragments. A conflicting replay is malformed and is
          dropped rather than combining two calls under one block index. *)
       (* DET-OK: these are exact equality checks on the provider's opaque
          identifiers; neither absence nor a new identity is defaulted. *)
-      | Some block, Some call_id, Some call_name
-        when Option.equal String.equal block.call_id (Some call_id)
-             && Option.equal String.equal block.call_name (Some call_name) ->
+      | Some block
+        when String.equal block.raw_call_id raw_call_id
+             && String.equal block.raw_call_name raw_call_name ->
         ()
-      | Some _, _, _ -> invalidate_index t index
-      | None, _, _ ->
+      | Some _ -> invalidate_index t index
+      | None ->
         let opened_at = t.next_opened_at in
         t.next_opened_at <- opened_at + 1;
         replace_block t index
-          { opened_at; call_id; call_name; args_fragments = [] })
+          { opened_at
+          ; raw_call_id
+          ; raw_call_name
+          ; call_id
+          ; call_name
+          ; args_fragments = []
+          })
+      | None, _ | _, None ->
+        (* [stream_start_is_tool] proves this arm unreachable, but keep the
+           malformed event fail-closed if the shared predicate changes. *)
+        invalidate_index t index)
     else if stream_start_is_tool_progress evt
     then
       (* Deliverable tool-use content type but missing/blank identity: the

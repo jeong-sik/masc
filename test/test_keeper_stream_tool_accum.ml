@@ -102,6 +102,18 @@ let test_tool_identity_is_trimmed_before_persistence () =
     [ { call_id = "call-trimmed"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
     (A.to_tool_calls t)
 
+let test_replay_identity_is_compared_before_trimming () =
+  let t = A.create () in
+  A.on_event t
+    (start ~index:0 ~tool_id:(Some "call-raw") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":");
+  A.on_event t
+    (start ~index:0 ~tool_id:(Some " call-raw ") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "\"a.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "whitespace identity drift conflicts like live bridge"
+    [] (A.to_tool_calls t)
+
 let test_conflicting_start_cannot_reopen_until_stop () =
   let t = A.create () in
   A.on_event t (start ~index:0 ~tool_id:(Some "call-a") ~tool_name:(Some "Read"));
@@ -257,6 +269,8 @@ let () =
         ; test_case "replayed start keeps fragments" `Quick test_replayed_start_keeps_received_fragments
         ; test_case "tool identity is trimmed before persistence" `Quick
             test_tool_identity_is_trimmed_before_persistence
+        ; test_case "replay identity compares raw provider values" `Quick
+            test_replay_identity_is_compared_before_trimming
         ; test_case "conflicting start stays closed until stop" `Quick test_conflicting_start_cannot_reopen_until_stop
         ; test_case "block without call id is dropped" `Quick test_block_without_call_id_is_dropped
         ; test_case "message stop finalizes open blocks" `Quick test_message_stop_finalizes_open_blocks

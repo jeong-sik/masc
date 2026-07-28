@@ -1228,9 +1228,20 @@ let persist_cadence_backoff ~should_defer ~write =
     | Error detail -> Error detail
 ;;
 
+let reserve_recognition_input ~keeper_id (inp : Keeper_librarian.input) =
+  let generation =
+    Keeper_memory_os_io.next_generation_with_floor
+      ~floor:inp.generation
+      ~keeper_id
+      ~trace_id:inp.trace_id
+  in
+  generation, { inp with Keeper_librarian.generation }
+;;
+
 module For_testing = struct
   let apply_and_persist = apply_and_persist
   let persist_cadence_backoff = persist_cadence_backoff
+  let reserve_recognition_input = reserve_recognition_input
 end
 
 let extract_and_append_with_exact_output_classified
@@ -1251,12 +1262,7 @@ let extract_and_append_with_exact_output_classified
      | Error msg -> Error (Store_read_failed msg)
      | Ok store ->
        let inp = { inp with Keeper_librarian.store } in
-       let generation =
-         Keeper_memory_os_io.next_generation_with_floor
-           ~floor:inp.Keeper_librarian.generation
-           ~keeper_id
-           ~trace_id:inp.Keeper_librarian.trace_id
-       in
+       let generation, inp = reserve_recognition_input ~keeper_id inp in
        (match
           extract_with_exact_output_classified
             ?clock

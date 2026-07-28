@@ -8,8 +8,10 @@
     never a false claim that the whole bundle was published. A per-keeper atomic
     pending pointer is the O(1) recovery authority; the dated JSONL remains the
     append-only audit history and is never scanned on the pre-turn hot path.
-    Audit rows are at-least-once across crash reconciliation; consumers dedupe
-    by [(publication_id, publication_state)].
+    Recovery reasserts the prepared row before terminalization so retention
+    cannot leave a terminal-only audit. Audit rows are at-least-once across
+    crash reconciliation; {!read_all_canonical} dedupes by
+    [(publication_id, publication_state)].
 
     Row size is O(store) by design — the issue's anti-black-box requirement
     persists both full snapshots, deliberately unlike the recall ledger's
@@ -104,9 +106,11 @@ type recovery_outcome =
     episode and event before appending the missing committed marker; if they
     equal [store_before] for a fact-mutating publication, append an aborted
     marker. A metadata-only publication has equal before/after digests and is
-    completed rather than aborted. Any third state fails closed. Repeated calls
-    are idempotent because artifact writes are identity-checked and terminal
-    markers remove the per-keeper pointer. *)
+    completed rather than aborted. The exact prepared evidence is reasserted
+    from the marker first, even when its prior dated row was pruned. Any third
+    state fails closed. Repeated calls are logically idempotent because
+    artifact writes are identity-checked, canonical audit reads dedupe physical
+    retries, and terminal markers remove the per-keeper pointer. *)
 val recover_pending
   :  masc_root:string
   -> keeper_id:string

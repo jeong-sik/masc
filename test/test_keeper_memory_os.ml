@@ -498,6 +498,51 @@ let test_librarian_store_page_is_bounded_and_keeps_snapshot_indices () =
     (contains "40: [preference]" (current_store later))
 ;;
 
+let test_reserved_recognition_generation_advances_bounded_page () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "bounded-page-generation" in
+    let store =
+      List.init 100 (fun index ->
+        { (fact_fixture ~now:1_000_000.0 ()) with
+          Types.claim =
+            Printf.sprintf
+              "reserved-page-%03d-%s"
+              index
+              (String.make 900 'x')
+        })
+    in
+    let initial : Librarian.input =
+      { trace_id = "trace-bounded-page-reservation"
+      ; generation = 0
+      ; messages = []
+      ; store
+      }
+    in
+    let first_generation, first =
+      Librarian_runtime.For_testing.reserve_recognition_input
+        ~keeper_id
+        initial
+    in
+    let second_generation, second =
+      Librarian_runtime.For_testing.reserve_recognition_input
+        ~keeper_id
+        initial
+    in
+    Alcotest.(check int)
+      "first prompt carries its reserved generation"
+      first_generation
+      first.Librarian.generation;
+    Alcotest.(check int)
+      "second cadence reserves the next generation"
+      (first_generation + 1)
+      second_generation;
+    Alcotest.(check bool)
+      "successive reserved generations advance the bounded page"
+      true
+      (Librarian.visible_store_indices first
+       <> Librarian.visible_store_indices second))
+;;
+
 let test_librarian_zero_op_metadata_persists_episode () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "zero-op-metadata" in
@@ -4679,6 +4724,10 @@ let () =
             "librarian store page is bounded with stable indices"
             `Quick
             test_librarian_store_page_is_bounded_and_keeps_snapshot_indices
+        ; Alcotest.test_case
+            "reserved recognition generation advances bounded page"
+            `Quick
+            test_reserved_recognition_generation_advances_bounded_page
         ; Alcotest.test_case
             "librarian zero-op metadata persists an episode"
             `Quick

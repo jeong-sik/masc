@@ -719,6 +719,91 @@ let test_canonical_audit_reader_deduplicates_crash_window_rows () =
       (List.length rows)
 ;;
 
+let test_recovery_reasserts_prepared_after_retention_prune () =
+  let masc_root = Filename.temp_file "recognition-pruned-prepared" ".tmp" in
+  Sys.remove masc_root;
+  let keepers_dir = Filename.concat masc_root "config/keepers" in
+  Memory_io.For_testing.with_memory_roots
+    ~keepers_dir
+    ~masc_root
+    (fun () ->
+       let keeper_id = "pruned-prepared" in
+       let event = episode () in
+       let publication_id =
+         Ledger.publication_id
+           ~keeper_id
+           ~trace_id:event.trace_id
+           ~generation:event.generation
+           ~store_before:[]
+           ~operations:[]
+           ~dispositions:[]
+           ~store_after:[]
+           ~episode:event
+           ~facts_rewrite_required:false
+       in
+       (match
+          Ledger.append_prepared
+            ~masc_root
+            ~publication_id
+            ~keeper_id
+            ~trace_id:event.trace_id
+            ~generation:event.generation
+            ~store_before:[]
+            ~operations:[]
+            ~dispositions:[]
+            ~store_after:[]
+            ~episode:event
+            ~facts_rewrite_required:false
+            ~now
+            ()
+        with
+        | Ok () -> ()
+        | Error detail -> fail ("prepare fixture failed: " ^ detail));
+       let dated =
+         Jsonl_writer.dated_path_now
+           ~base_dir:(Ledger.base_dir ~masc_root)
+       in
+       Sys.remove dated.path;
+       (match Ledger.read_all_canonical ~masc_root with
+        | Ok [] -> ()
+        | Ok rows ->
+          failf "prune fixture left %d audit rows" (List.length rows)
+        | Error detail -> fail ("post-prune audit read failed: " ^ detail));
+       (match
+          Ledger.recover_pending
+            ~masc_root
+            ~keeper_id
+            ~current_store:[]
+            ~now:(now +. 1.0)
+            ()
+        with
+        | Ok (Ledger.Recovered_committed (recovered_id, _)) ->
+          check string "same pending publication recovered"
+            publication_id recovered_id
+        | Ok Ledger.No_pending_publication ->
+          fail "pruned prepared row made pending publication disappear"
+        | Ok (Ledger.Recovered_aborted _) ->
+          fail "metadata-only pending publication was aborted"
+        | Error detail -> fail ("recovery failed: " ^ detail));
+       match Ledger.read_all_canonical ~masc_root with
+       | Error detail -> fail ("canonical audit read failed: " ^ detail)
+       | Ok rows ->
+         let states =
+           List.map
+             (function
+               | `Assoc fields ->
+                 (match List.assoc_opt "publication_state" fields with
+                  | Some (`String state) -> state
+                  | Some _ | None -> fail "audit row has no publication state")
+               | _ -> fail "audit row is not an object")
+             rows
+         in
+         check (list string)
+           "recovery restores prepared evidence before terminal row"
+           [ "prepared"; "committed" ]
+           states)
+;;
+
 let test_pending_guard_uses_authoritative_root_matrix () =
   let base = Filename.temp_file "recognition-root-matrix" ".tmp" in
   Sys.remove base;
@@ -1027,6 +1112,10 @@ let () =
             "canonical audit reader deduplicates crash-window rows"
             `Quick
             test_canonical_audit_reader_deduplicates_crash_window_rows;
+          test_case
+            "recovery reasserts prepared after retention prune"
+            `Quick
+            test_recovery_reasserts_prepared_after_retention_prune;
           test_case
             "pending guard uses authoritative root matrix"
             `Quick

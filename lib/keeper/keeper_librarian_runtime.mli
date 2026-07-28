@@ -174,6 +174,11 @@ module For_testing : sig
     :  should_defer:bool
     -> write:(unit -> (unit, string) result)
     -> (bool, string) result
+
+  val reserve_recognition_input :
+    keeper_id:string
+    -> Keeper_librarian.input
+    -> int * Keeper_librarian.input
 end
 
 val extract_and_append_with_exact_output_classified

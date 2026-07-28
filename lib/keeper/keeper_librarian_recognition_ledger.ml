@@ -543,13 +543,17 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
     | Error _ as error -> error
     | Ok None -> Ok No_pending_publication
     | Ok (Some publication) ->
+      (* The dated audit retention sweep can remove an old prepared row while
+         its O(1) pending marker remains. Reassert the exact prepared payload on
+         every recovery before writing a terminal state. At-least-once physical
+         duplicates are collapsed by [read_all_canonical]. *)
       let prepared_ready =
-        if publication.prepared_logged
-        then Ok ()
-        else
-          match append_json ~masc_root publication.prepared_json with
-          | Error _ as error -> error
-          | Ok () ->
+        match append_json ~masc_root publication.prepared_json with
+        | Error _ as error -> error
+        | Ok () ->
+          if publication.prepared_logged
+          then Ok ()
+          else
             save_pending_marker
               ~masc_root
               ~keeper_id

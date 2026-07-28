@@ -1314,6 +1314,85 @@ let test_suspended_streak_refuses_reactive_prepare () =
     ]
 ;;
 
+let test_readmission_evidence_matches_trigger_axis () =
+  let evidence : Runtime_agent.capacity_readmission_evidence =
+    { serialized_body_limit_bytes = Some 1_048_576
+    ; token_fit_limit_tokens = Some 4_096
+    ; serving_constraint_admitted = false
+    }
+  in
+  let expect_ok label trigger evidence =
+    match
+      Post_turn.For_testing.readmission_evidence_for_trigger trigger evidence
+    with
+    | Ok () -> ()
+    | Error _ -> failf "%s: expected admitted evidence" label
+  in
+  let expect_failed label trigger evidence =
+    match
+      Post_turn.For_testing.readmission_evidence_for_trigger trigger evidence
+    with
+    | Error (Runtime_agent.Readmission_failed _) -> ()
+    | Error (Runtime_agent.Still_over_capacity _) ->
+      failf "%s: evidence mismatch became an observed capacity refusal" label
+    | Ok () -> failf "%s: unproven evidence was admitted" label
+  in
+  expect_ok
+    "body cap matches failed boundary"
+    (Compaction_trigger.Request_body_over_capacity
+       { actual_bytes = 2_000_000; limit_bytes = 1_048_576 })
+    evidence;
+  expect_failed
+    "body cap is looser than failed boundary"
+    (Compaction_trigger.Request_body_over_capacity
+       { actual_bytes = 1_048_577; limit_bytes = 1_048_576 })
+    { evidence with serialized_body_limit_bytes = Some 2_000_000 };
+  expect_failed
+    "body cap is absent"
+    (Compaction_trigger.Request_body_over_capacity
+       { actual_bytes = 1_048_577; limit_bytes = 1_048_576 })
+    { evidence with serialized_body_limit_bytes = None };
+  expect_ok
+    "token admission matches provider boundary"
+    (Compaction_trigger.Provider_overflow { limit_tokens = Some 4_096 })
+    evidence;
+  expect_failed
+    "token admission is looser than provider boundary"
+    (Compaction_trigger.Provider_overflow { limit_tokens = Some 4_095 })
+    evidence;
+  expect_failed
+    "provider boundary is unknown"
+    (Compaction_trigger.Provider_overflow { limit_tokens = None })
+    evidence;
+  expect_failed
+    "provider body refusal exposes no local proof"
+    (Compaction_trigger.Request_body_refused_by_provider { status = 413 })
+    evidence;
+  let serving_trigger =
+    Compaction_trigger.Serving_input_capacity
+      (Compaction_trigger.Input_rejected
+         { input_tokens = 4_097
+         ; accepted_through = 4_095
+         ; rejected_from = 4_096
+         })
+  in
+  expect_failed "serving constraint not admitted" serving_trigger evidence;
+  expect_ok
+    "serving constraint admitted"
+    serving_trigger
+    { evidence with serving_constraint_admitted = true };
+  expect_ok "manual trigger needs no failed-request proof" Compaction_trigger.Manual evidence;
+  let terminal =
+    Post_turn.For_testing.readmission_terminal_cause_of_failure
+      (Runtime_agent.Still_over_capacity
+         (Agent_sdk.Error.Internal "typed capacity refusal"))
+  in
+  check bool
+    "typed capacity refusal keeps its durable cause"
+    true
+    (terminal = Keeper_event_queue_state.Failed_request_still_over_capacity)
+;;
+
 let () =
   run "post-turn durability" [
     "durable compaction", [
@@ -1346,6 +1425,8 @@ let () =
         `Quick test_post_dispatch_non_reducing_output_is_quarantined;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
+      test_case "readmission evidence matches trigger axis"
+        `Quick test_readmission_evidence_matches_trigger_axis;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

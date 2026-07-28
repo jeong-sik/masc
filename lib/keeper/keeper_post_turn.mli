@@ -148,6 +148,15 @@ val commit_prepared_compaction :
   prepared_compaction -> prepared_commit_outcome
 
 module For_testing : sig
+  val readmission_terminal_cause_of_failure :
+    Runtime_agent.capacity_readmission_failure ->
+    Keeper_event_queue_state.exact_execution_terminal_cause
+
+  val readmission_evidence_for_trigger :
+    Compaction_trigger.t ->
+    Runtime_agent.capacity_readmission_evidence ->
+    (unit, Runtime_agent.capacity_readmission_failure) result
+
   val commit_prepared_compaction_with_history :
     ?after_checkpoint_installed:(unit -> unit) ->
     ?complete_post_success_commit:

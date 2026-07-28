@@ -343,9 +343,52 @@ let test_tool_call_identity_controls_pending_deduplication () =
             Alcotest.(check bool) "distinct origin has its own request" true
               (not (String.equal first id)))
          [ another_turn; another_channel; another_goal_context ];
+       (match
+          AQ.resolve_with_policy
+            ~base_path
+            ~id:first
+            ~decision:AQ.Decision.Approve
+            ~source:AQ.Auto_judge
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolved_retry =
+         submit_with_context
+           ~tool_call_id:"tool-call-1"
+           ~turn_id:42
+           ~goal_ids:[ "goal-after-resolution" ]
+           ~continuation_channel:dashboard_b
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check string)
+         "resolved execution identity cannot create another approval"
+         first
+         resolved_retry;
+       (match
+          AQ.submit_pending
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~tool_call_id:"tool-call-1"
+            ~input:(`Assoc [ "target", `String "changed-after-resolution" ])
+            ~base_path
+            ()
+        with
+        | Error error ->
+          Alcotest.(check bool)
+            "resolved identity collision still fails closed"
+            true
+            (String.starts_with ~prefix:"tool_call_id" error.reason)
+        | Ok id ->
+          Alcotest.failf
+            "resolved identity collision created approval %s"
+            id);
        List.iter (reject_and_cleanup ~base_path)
-         [ first
-         ; another_turn
+         [ another_turn
          ; another_channel
          ; another_goal_context
          ; without_identity_first

@@ -3451,8 +3451,9 @@ let pending_entry_owns_tool_call_id
     && entry.tool_call_id = Some tool_call_id
 ;;
 
-let find_pending_id_in_map
-      (map : pending_approval SMap.t)
+let find_request_id_in_map
+      map
+      ~entry_of
       ~base_path
       ~keeper_name
       ~tool_name
@@ -3465,7 +3466,8 @@ let find_pending_id_in_map
       ~continuation_channel
   =
   SMap.fold
-    (fun id (entry : pending_approval) acc ->
+    (fun id stored acc ->
+       let entry = entry_of stored in
        match acc with
        | Error _ as error -> error
        | Ok (Some _) as found -> found
@@ -3548,24 +3550,56 @@ let submit_pending
           }
       | Unavailable error -> Error error
       | Ready sequence ->
-        (match
-           find_pending_id_in_map
-             map
-             ~base_path
-             ~keeper_name
-             ~tool_name
-             ~tool_call_id
-             ~input_hash
-             ~turn_id
-             ~task_id
-             ~goal_id
-             ~goal_ids
-             ~continuation_channel
-         with
-         | Error reason ->
+        let pending_match =
+          find_request_id_in_map
+            map
+            ~entry_of:(fun entry -> entry)
+            ~base_path
+            ~keeper_name
+            ~tool_name
+            ~tool_call_id
+            ~input_hash
+            ~turn_id
+            ~task_id
+            ~goal_id
+            ~goal_ids
+            ~continuation_channel
+        in
+        let delivery_match =
+          match tool_call_id with
+          | None -> Ok None
+          | Some _ ->
+            find_request_id_in_map
+              (Atomic.get deliveries)
+              ~entry_of:(fun (delivery : persisted_delivery) -> delivery.entry)
+              ~base_path
+              ~keeper_name
+              ~tool_name
+              ~tool_call_id
+              ~input_hash
+              ~turn_id
+              ~task_id
+              ~goal_id
+              ~goal_ids
+              ~continuation_channel
+        in
+        (match pending_match, delivery_match with
+         | Error reason, _
+         | _, Error reason ->
            Error { path = pending_store_path ~base_path; reason }
-         | Ok (Some id) -> Ok (id, None)
-         | Ok None ->
+         | Ok (Some pending_id), Ok (Some delivery_id) ->
+           Error
+             { path = pending_store_path ~base_path
+             ; reason =
+                 Printf.sprintf
+                   "tool_call_id belongs to both pending approval %s and resolved approval %s"
+                   pending_id
+                   delivery_id
+             }
+         | Ok (Some id), Ok None
+         | Ok None, Ok (Some id) ->
+           Ok (id, None)
+         | Ok None, Ok None ->
            let id = generate_id () in
            if sequence = max_int
            then

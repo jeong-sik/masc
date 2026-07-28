@@ -403,10 +403,12 @@ end
 (** Durably enqueue an exact request without suspending the caller. When
     supplied, [tool_call_id] must be non-blank. An existing id is reused for
     the same durable [tool_call_id], Keeper, operation identity, and canonical
-    input. When it is absent, legacy callers retain their complete
-    turn/task/goal/channel request identity, so a retry does not create another
-    pending approval. A deduplicated request does not consume a durable queue
-    sequence. *)
+    input, including when that execution occurrence is already in the resolved
+    delivery journal. When it is absent, legacy callers retain their complete
+    turn/task/goal/channel request identity only while pending, so a retry does
+    not create another pending approval without suppressing a later
+    indistinguishable legacy occurrence. A deduplicated request does not
+    consume a durable queue sequence. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->

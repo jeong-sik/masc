@@ -1,11 +1,12 @@
 (** Env-gated capture of the MASC->OAS request boundary (redacted).
 
     Records the effective request parameters MASC hands to OAS per SDK turn —
-    system prompt, extra system context, user message, and the replayed
-    conversation history ([initial_messages]) — so degenerate-repetition
-    feedback loops can be diagnosed from the actual input rather than from
-    digests/sizes (the only signal available today). String content is passed
-    through {!Llm_provider.Secret_redactor} and the exact
+    system prompt, extra system context, tool schemas, user message, and the
+    replayed conversation history ([initial_messages]) — so
+    degenerate-repetition feedback loops can be diagnosed from the actual
+    input rather than from digests/sizes. Tool schemas use the same
+    {!Agent_sdk.Tool.schema_to_json} projection OAS prepares for the provider.
+    String content is passed through {!Llm_provider.Secret_redactor} and the exact
     {!Keeper_secret_redaction} projection snapshot before it is written.
 
     Writes are best-effort and dated under
@@ -42,18 +43,22 @@ val capture_request :
   extra_system_context:string option ->
   user_message:string ->
   history_messages:Agent_sdk.Types.message list ->
+  tools:Agent_sdk.Tool.t list ->
   ?trace_id:Keeper_id.Trace_id.t ->
   unit ->
   unit
 (** [capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
-    ~extra_system_context ~user_message ~history_messages ~trace_id ()] appends
-    one redacted request record ([kind:"request"]). No-op unless {!enabled}.
+    ~extra_system_context ~user_message ~history_messages ~tools ~trace_id ()]
+    appends one redacted request record ([kind:"request"]). No-op unless
+    {!enabled}.
     [turn_id] is the 1-based keeper turn index; [sdk_turn] disambiguates
     multiple OAS/provider calls inside that keeper turn. [trace_id] is the
     keeper runtime trace id passed to OAS as [session_id] for raw-trace
     correlation. [base_path] selects the exact Keeper secret projection
     snapshot; [masc_root] must already be the effective cluster-aware MASC
-    root. *)
+    root. [tool_schema_bytes] records the byte length of the exact unredacted
+    compact JSON schema array while [tools] stores its recursively redacted
+    content. *)
 
 val capture_response :
   base_path:string ->

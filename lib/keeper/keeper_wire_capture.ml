@@ -104,13 +104,38 @@ let json_string_opt redaction = function
   | Some value -> `String (redact redaction value)
   | None -> `Null
 
+let rec redact_json_strings
+          redaction
+          (json : Yojson.Safe.t)
+  : Yojson.Safe.t
+  =
+  match json with
+  | `String value -> `String (redact redaction value)
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) -> key, redact_json_strings redaction value)
+         fields)
+  | `List values ->
+    `List (List.map (redact_json_strings redaction) values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
+
 let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
-    ~system_prompt ~extra_system_context ~user_message ~history_messages ?trace_id
-    () =
+    ~system_prompt ~extra_system_context ~user_message ~history_messages ~tools
+    ?trace_id () =
   if not (enabled ()) then ()
   else
     best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_id (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let raw_tools =
+        List.map Agent_sdk.Tool.schema_to_json tools
+      in
+      let tool_schema_bytes =
+        Yojson.Safe.to_string (`List raw_tools) |> String.length
+      in
+      let redacted_tools =
+        List.map (redact_json_strings redaction) raw_tools
+      in
       let history =
         List.map
           (fun (m : Agent_sdk.Types.message) ->
@@ -138,6 +163,13 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
             , json_string_opt redaction extra_system_context )
           ; ( "extra_system_context_present"
             , `Bool (Option.is_some extra_system_context) )
+          ; ( "extra_system_context_bytes"
+            , match extra_system_context with
+              | Some context -> `Int (String.length context)
+              | None -> `Null )
+          ; ("tool_count", `Int (List.length tools))
+          ; ("tool_schema_bytes", `Int tool_schema_bytes)
+          ; ("tools", `List redacted_tools)
           ; ("user_message", `String (redact redaction user_message))
           ; ("history_message_count", `Int (List.length history_messages))
           ; ("history", `List history)

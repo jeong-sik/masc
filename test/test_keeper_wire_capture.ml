@@ -215,7 +215,7 @@ let disabled_is_noop () =
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:1
       ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
-      ~user_message:"u" ~history_messages:[] ();
+      ~user_message:"u" ~history_messages:[] ~tools:[] ();
     Alcotest.(check (list string))
       "no jsonl written when disabled" [] (find_jsonl base))
 
@@ -234,7 +234,7 @@ let enabled_writes_redacted () =
       ~sdk_turn:3
       ~system_prompt:("token " ^ projected_secret ^ " end")
       ~extra_system_context:(Some "dynamic context")
-      ~user_message:"hello world" ~history_messages:history ();
+      ~user_message:"hello world" ~history_messages:history ~tools:[] ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
@@ -252,6 +252,14 @@ let enabled_writes_redacted () =
       "dynamic context" json;
     check_json_bool "extra context presence recorded"
       "extra_system_context_present" true json;
+    check_json_int "extra context bytes recorded"
+      "extra_system_context_bytes"
+      (String.length "dynamic context")
+      json;
+    check_json_int "empty tool count recorded" "tool_count" 0 json;
+    check_json_int "empty tool schema bytes recorded" "tool_schema_bytes"
+      (String.length "[]") json;
+    check_json_list_length "empty tool schemas recorded" "tools" 0 json;
     check_json_string "user message recorded" "user_message" "hello world" json;
     check_json_int "history_message_count recorded" "history_message_count" 2
       json;
@@ -266,6 +274,54 @@ let enabled_writes_redacted () =
        check_json_string "user text recorded" "text" "continue" user
      | _ -> Alcotest.fail "history shape should have been checked above"))
 
+let request_captures_exact_redacted_tool_schemas () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_tools" "" in
+    install_projected_secret ~base_path:base ~keeper_name:"sangsu";
+    let tool =
+      Agent_sdk.Tool.create
+        ~name:"probe_tool"
+        ~description:("search with " ^ projected_secret)
+        ~parameters:
+          [ { Agent_sdk.Types.name = "query"
+            ; description = "query " ^ projected_secret
+            ; param_type = Agent_sdk.Types.String
+            ; required = true
+            }
+          ]
+        (fun _input -> Ok { Agent_sdk.Types.content = "ok"; _meta = None })
+    in
+    let raw_tools = `List [ Agent_sdk.Tool.schema_to_json tool ] in
+    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+      ~turn_id:8
+      ~sdk_turn:2 ~system_prompt:"sys" ~extra_system_context:None
+      ~user_message:"hello" ~history_messages:[] ~tools:[ tool ] ();
+    let files = find_jsonl base in
+    Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
+    let content = read_file (List.hd files) in
+    let json = parse_single_jsonl content in
+    Alcotest.(check bool) "tool schema secret is redacted" false
+      (contains ~needle:projected_secret content);
+    check_json_int "tool count recorded" "tool_count" 1 json;
+    check_json_int "pre-redaction tool schema bytes recorded"
+      "tool_schema_bytes"
+      (Yojson.Safe.to_string raw_tools |> String.length)
+      json;
+    match json_list "tools" json with
+    | [ tool_json ] ->
+      check_json_string "tool name recorded" "name" "probe_tool" tool_json;
+      Alcotest.(check bool) "tool description redaction marker present" true
+        (contains ~needle:"[REDACTED]" (json_string "description" tool_json));
+      let query_schema =
+        json_member "input_schema" tool_json
+        |> json_member "properties"
+        |> json_member "query"
+      in
+      Alcotest.(check bool) "parameter description is recursively redacted" true
+        (contains ~needle:"[REDACTED]"
+           (json_string "description" query_schema))
+    | _ -> Alcotest.fail "tool schema list shape should have been checked above")
+
 let request_trace_id_emitted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_req_trace" "" in
@@ -273,7 +329,7 @@ let request_trace_id_emitted () =
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:1
       ~trace_id ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
-      ~user_message:"hello" ~history_messages:[] ();
+      ~user_message:"hello" ~history_messages:[] ~tools:[] ();
     let json = read_single_json_record base in
     check_json_string "request trace_id string recorded" "trace_id"
       "trace-req-abc" json)
@@ -294,7 +350,7 @@ let request_capture_failure_is_best_effort () =
         Wire.capture_request ~base_path:root_file ~masc_root:root_file ~keeper_name
           ~turn_id
           ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
-          ~user_message:"hello" ~history_messages:[] ()))
+          ~user_message:"hello" ~history_messages:[] ~tools:[] ()))
 
 let response_disabled_is_noop () =
   with_flag "" (fun () ->
@@ -533,6 +589,8 @@ let () =
           Alcotest.test_case "disabled is a no-op" `Quick disabled_is_noop;
           Alcotest.test_case "enabled writes redacted jsonl" `Quick
             enabled_writes_redacted;
+          Alcotest.test_case "captures exact redacted tool schemas" `Quick
+            request_captures_exact_redacted_tool_schemas;
           Alcotest.test_case "write failure is best effort" `Quick
             request_capture_failure_is_best_effort;
           Alcotest.test_case "trace_id is emitted when provided" `Quick

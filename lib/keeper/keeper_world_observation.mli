@@ -54,12 +54,18 @@ type pending_board_event = {
 (** [false] only for a scheduled-work carrier that shares the historical
     observation container but must not be projected as Board activity.
 
-    This is a partition, not an advisory flag. {!Keeper_unified_prompt} renders
-    the [false] events under Scheduled Automation and the [true] events under
-    Board Activity, and {!Keeper_contract_classifier} counts only the [true]
-    ones into [board_activity_count] — an observation classified [false]
-    contributes no actionable signal, so a keeper woken by that event alone
-    reaches [No_actionable_signal] and does not act.
+    This partition decides classification and prompt placement, not turn
+    admission. {!Keeper_unified_prompt} renders the [false] events under
+    Scheduled Automation and the [true] events under Board Activity, and
+    {!Keeper_contract_classifier} counts only the [true] ones into
+    [board_activity_count] — an observation classified [false] yields
+    [No_actionable_signal] there, which is captured as receipt metadata and
+    does not authorize or block the turn
+    (see [Keeper_execution_receipt_types.t.actionable_signal]).
+    Wake itself is unaffected: [actionable_signal_present] treats any pending
+    event as actionable, and scheduled stimuli carry their own trigger via
+    [scheduled_automation.due_ready_count]. A misplaced event kind therefore
+    loses its Board classification and prompt section, not its wake.
 
     A new event kind placed on the wrong side compiles cleanly and fails
     silently. Classify by whether the event carries scheduled-work dispatch,

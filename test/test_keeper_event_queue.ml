@@ -617,8 +617,9 @@ let () =
   (* The Board-activity partition decides which prompt section renders this
      event and whether it reaches [Keeper_contract_classifier]'s
      [board_activity_count]. Classifying a reconciliation wake as scheduled
-     work compiles cleanly but leaves a keeper woken by it alone at
-     [No_actionable_signal], so pin both sides here. *)
+     work compiles cleanly but drops it from the Board Activity prompt section
+     and from [board_activity_count] (receipt metadata only — the turn still
+     runs), so pin both sides here. *)
   assert (Masc.Keeper_world_observation.is_board_activity_event prompt_event);
   assert (
     not

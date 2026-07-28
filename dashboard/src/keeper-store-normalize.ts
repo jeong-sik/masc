@@ -620,7 +620,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         agentRaw
           ? {
               name: asString(agentRaw.name),
-              exists: typeof agentRaw.exists === 'boolean' ? agentRaw.exists : undefined,
               error: asString(agentRaw.error),
               agent_type: asString(agentRaw.agent_type),
               status: asString(agentRaw.status),

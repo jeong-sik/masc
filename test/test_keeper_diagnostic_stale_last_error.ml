@@ -9,10 +9,10 @@
 
     Production shape matters here: keepers do NOT publish an external
     agent-registry record ([.masc/agents/<agent_name>.json] is absent), so the
-    real [agent_status] passed in is [{exists=false}]. The supersede therefore
+    real [agent_status] passed in is an empty registry projection. The supersede therefore
     has to fire on the keeper's OWN signal — a turn completed after the
     erroring proactive cycle ([usage.last_turn_ts] > [proactive_rt.last_ts]).
-    The tests pin both: the keeper-self path with the production [{exists=false}]
+    The tests pin both: the keeper-self path with the production empty projection
     status, and the external-registry path for non-keeper participants.
 
     The error reason modelled here is the deleted tool-retry-budget bug
@@ -56,7 +56,6 @@ let meta_with_persisted_error ~proactive_ts ~last_turn_ts =
         [ ("name", `String "stalekeeper")
         ; ("agent_name", `String "keeper-stalekeeper-agent")
         ; ("trace_id", `String "trace-stalekeeper")
-        ; ("runtime_id", `String "ollama_cloud.deepseek-v4-flash")
         ; ("last_proactive_outcome", `String "error")
         ; ("last_proactive_reason", `String error_reason)
         ; ("last_proactive_ts", `Float proactive_ts)
@@ -69,14 +68,13 @@ let meta_with_persisted_error ~proactive_ts ~last_turn_ts =
   | Error err -> Alcotest.failf "meta_of_json_fixture failed: %s" err
 ;;
 
-(* The real agent_status a keeper gets: no agent-registry file -> exists=false. *)
-let keeper_agent_status = `Assoc [ ("exists", `Bool false) ]
+(* The real agent_status a keeper gets: no agent-registry file -> empty projection. *)
+let keeper_agent_status = `Assoc []
 
 (* A non-keeper participant that publishes a fresh live agent record. *)
 let external_live_agent_status ~last_seen =
   `Assoc
-    [ ("exists", `Bool true)
-    ; ("status", `String "active")
+    [ ("status", `String "active")
     ; ("last_seen_ago_s", `Float 5.0)
     ; ("last_seen", `String last_seen)
     ]
@@ -101,7 +99,7 @@ let diagnostic_of ~meta ~agent_status ~keepalive_running =
     ~now_ts
 ;;
 
-(* Production case: keeper (exists=false agent_status) that turned after its
+(* Production case: keeper with no registry projection that turned after its
    erroring proactive cycle. This is the case that previously kept showing
    "이전 오류" across restarts and that the external-signal-only guard could
    never clear. *)

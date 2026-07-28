@@ -8,6 +8,8 @@ val next_model_hint_of_meta : keeper_meta -> string option
 val string_of_fiber_health : fiber_health -> string
 (** Parse the "status" field of an agent-status snapshot blob (produced by
     {!parse_agent_status}) into the closed [Masc_domain.agent_status] ADT.
+    An absent agent-registry record is represented by an empty object; the
+    snapshot has no separate existence flag.
     Returns [None] when the field is absent or not one of the four canonical
     lowercase labels, so callers classify the closed domain exhaustively
     instead of comparing string literals. *)

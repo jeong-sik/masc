@@ -1303,7 +1303,6 @@ export interface Keeper {
   metrics_window?: MetricsWindow
   agent?: {
     name?: string
-    exists?: boolean
     error?: string
     agent_type?: string
     status?: string

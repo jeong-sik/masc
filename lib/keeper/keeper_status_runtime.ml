@@ -98,15 +98,15 @@ let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojs
     Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent_name ^ ".json")
   in
   if not (Workspace.path_exists config agent_file) then
-    `Assoc [ ("exists", `Bool false) ]
+    `Assoc []
   else (
     match Workspace.read_json_opt config agent_file with
     | None ->
-        `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_read") ]
+        `Assoc [ ("error", `String "failed_to_read") ]
     | Some json -> (
         match Masc_domain.agent_of_yojson json with
         | Error _ ->
-            `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_parse") ]
+            `Assoc [ ("error", `String "failed_to_parse") ]
         | Ok (agent : Masc_domain.agent) ->
             let now_ts = Time_compat.now () in
             let session_bound_ts =
@@ -123,7 +123,6 @@ let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojs
             in
             `Assoc
               [
-                ("exists", `Bool true);
                 ("name", `String agent.name);
                 ("agent_type", `String agent.agent_type);
                 ("status", `String (Masc_domain.string_of_agent_status agent.status));
@@ -137,9 +136,6 @@ let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojs
               ]))
 
 let json_string_opt key json = Json_util.get_string_nonempty json key
-
-let json_bool key json default =
-  Safe_ops.json_bool ~default key json
 
 let json_float_opt key json =
   Safe_ops.json_float_opt key json
@@ -297,8 +293,7 @@ let live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~met
       proactive_error_ts > 0.0 && last_turn_ts > proactive_error_ts
     in
     let external_live_signal =
-      json_bool "exists" agent_status false
-      && agent_runtime_has_live_signal agent_status
+      agent_runtime_has_live_signal agent_status
       &&
       match agent_last_seen_ts_opt agent_status with
       | Some last_seen_ts -> last_seen_ts > max proactive_error_ts last_turn_ts
@@ -344,8 +339,8 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   | Fiber_zombie -> KH_zombie
   | Fiber_dead -> KH_dead
   | Fiber_alive | Fiber_unknown ->
-  let agent_exists = json_bool "exists" agent_status false in
   let agent_runtime_status = agent_runtime_status_opt agent_status in
+  let agent_registry_status_present = Option.is_some agent_runtime_status in
   let last_seen_ago_s =
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
@@ -353,10 +348,13 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   let _ = now_ts in
   if
     (not keepalive_running)
-    && (not agent_exists || agent_runtime_status = Some Masc_domain.Inactive)
+    &&
+    (not agent_registry_status_present
+    || agent_runtime_status = Some Masc_domain.Inactive)
   then KH_offline
   else if keepalive_running then
-    if agent_exists && last_seen_ago_s > 2.0 *. keepalive_interval_s then KH_stale
+    if agent_registry_status_present && last_seen_ago_s > 2.0 *. keepalive_interval_s
+    then KH_stale
     else
       (match quiet_reason with
     | Some "graphql_error" | Some "model_error" -> KH_degraded

@@ -412,7 +412,7 @@ val probe_blocks_admission :
   stream:bool ->
   continuation:bool ->
   Agent_sdk.Types.content_block list ->
-  (unit, capacity_readmission_failure) result
+  (capacity_readmission_evidence, capacity_readmission_failure) result
 (** Execute the exact OAS preparation, provider-native measurement, and
     admission path with a local completion-transport sentinel. Provider-native
     admission may call a measurement endpoint; the sentinel prevents a

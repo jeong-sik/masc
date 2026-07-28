@@ -383,6 +383,32 @@ let test_oldest_pending_row_is_admitted_alone () =
        pending)
 ;;
 
+let test_snapshot_backlog_signal_does_not_ack_unseen_rows () =
+  let a = msg ~id:"a" ~role:Store.Role.User "@alice initial request" in
+  let b = msg ~id:"b" ~role:Store.Role.User "@alice correction before snapshot" in
+  let c = msg ~id:"c" ~role:Store.Role.User "@alice arrived during turn" in
+  let snapshot_ab = MS.pending_snapshot_of_messages ~targets [ a; b ] in
+  check (list string) "snapshot admits only A" [ "a" ]
+    (List.map (fun (message : MS.pending_message) -> message.message_id)
+       snapshot_ab.admitted);
+  check int "B remains behind admitted A" 1 snapshot_ab.backlog.remaining_count;
+  check (option string) "latest pre-snapshot correction is visible" (Some "b")
+    (Option.map
+       (fun (message : MS.pending_message) -> message.message_id)
+       snapshot_ab.backlog.latest_pending);
+  let after_success =
+    MS.pending_snapshot_of_messages ~ack_id:"a" ~targets [ a; b; c ]
+  in
+  check (list string) "success watermark advances through A only" [ "b" ]
+    (List.map (fun (message : MS.pending_message) -> message.message_id)
+       after_success.admitted);
+  check int "C remains unacknowledged" 1 after_success.backlog.remaining_count;
+  check (option string) "C is the new latest pending signal" (Some "c")
+    (Option.map
+       (fun (message : MS.pending_message) -> message.message_id)
+       after_success.backlog.latest_pending)
+;;
+
 let () =
   run "keeper_mention_scope"
     [ ( "boundary_mention_match"
@@ -425,6 +451,8 @@ let () =
             test_ack_clears_only_injected_prefix
         ; test_case "oldest_row_only" `Quick
             test_oldest_pending_row_is_admitted_alone
+        ; test_case "snapshot_backlog_does_not_ack_unseen" `Quick
+            test_snapshot_backlog_signal_does_not_ack_unseen_rows
         ] )
     ]
 ;;

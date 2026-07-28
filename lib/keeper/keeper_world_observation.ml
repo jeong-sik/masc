@@ -85,6 +85,8 @@ let empty_scheduled_automation_observation =
 
 type world_observation =
   { pending_messages : Keeper_world_observation_message_scope.pending_message list
+  ; pending_message_backlog :
+      Keeper_world_observation_message_scope.pending_backlog
   ; pending_board_events : pending_board_event list
   ; idle_seconds : int
   ; active_goals : string list
@@ -1031,7 +1033,9 @@ let observe
       ~(meta : keeper_meta)
   : world_observation
   =
-  let pending_messages = collect_message_scope ~config ~meta in
+  let pending_snapshot = collect_message_scope ~config ~meta in
+  let pending_messages = pending_snapshot.Message_scope.admitted in
+  let pending_message_backlog = pending_snapshot.Message_scope.backlog in
   let ( unclaimed_task_count
       , claimable_task_count
       , failed_task_count
@@ -1061,6 +1065,7 @@ let observe
     Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   in
   { pending_messages
+  ; pending_message_backlog
   ; pending_board_events
   ; idle_seconds
   ; active_goals = meta.active_goal_ids
@@ -1097,6 +1102,8 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
     Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   in
   { pending_messages = []
+  ; pending_message_backlog =
+      { Message_scope.remaining_count = 0; latest_pending = None }
   ; pending_board_events = []
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids

@@ -80,6 +80,11 @@ type world_observation = {
   pending_messages : Keeper_world_observation_message_scope.pending_message list;
   (** Unacknowledged mention/scope rows in durable source order. *)
 
+  pending_message_backlog :
+    Keeper_world_observation_message_scope.pending_backlog;
+  (** Rows observed after the single admitted row. Observation only: this does
+      not grant success-path acknowledgement authority. *)
+
   pending_board_events : pending_board_event list;
   (** Structured board events needing triage. *)
 

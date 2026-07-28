@@ -34,6 +34,7 @@ let () =
 let base_observation : WO.world_observation =
   {
     pending_messages = [];
+    pending_message_backlog = { remaining_count = 0; latest_pending = None };
     pending_board_events = [];
     idle_seconds = 0;
     active_goals = [];

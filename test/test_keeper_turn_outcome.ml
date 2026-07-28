@@ -288,6 +288,7 @@ let test_cooperative_yield_ignores_only_active_source_identity () =
 
 let inert_world_observation : Observation.world_observation =
   { pending_messages = []
+  ; pending_message_backlog = { remaining_count = 0; latest_pending = None }
   ; pending_board_events = []
   ; idle_seconds = 0
   ; active_goals = []

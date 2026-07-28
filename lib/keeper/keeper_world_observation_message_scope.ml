@@ -45,6 +45,16 @@ type pending_message =
   ; kind : pending_kind
   }
 
+type pending_backlog =
+  { remaining_count : int
+  ; latest_pending : pending_message option
+  }
+
+type pending_snapshot =
+  { admitted : pending_message list
+  ; backlog : pending_backlog
+  }
+
 let kind_equal left right =
   match left, right with
   | Mention, Mention | Scope, Scope -> true
@@ -341,6 +351,30 @@ let pending_messages_of_messages
   | oldest :: _ -> [ oldest ]
 ;;
 
+let pending_snapshot_of_messages
+      ?ack_id
+      ~(targets : string list)
+      (messages : Keeper_chat_store.chat_message list)
+  =
+  match all_pending_messages_of_messages ?ack_id ~targets messages with
+  | [] ->
+    { admitted = []
+    ; backlog = { remaining_count = 0; latest_pending = None }
+    }
+  | oldest :: remaining ->
+    let latest_pending =
+      match List.rev remaining with
+      | [] -> None
+      | latest :: _ -> Some latest
+    in
+    { admitted = [ oldest ]
+    ; backlog =
+        { remaining_count = List.length remaining
+        ; latest_pending
+        }
+    }
+;;
+
 (* RFC-0230 P2 — scope messages: a keeper's lane is, in practice, an operator
    (Owner) conversation. The operator often addresses the keeper without an
    "@name", so an unanswered Owner line that is not already a mention is a scope
@@ -368,13 +402,13 @@ let pending_mentions_of_messages
 ;;
 
 let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
-  : pending_message list
+  : pending_snapshot
   =
   let messages =
     Keeper_chat_store.load_all ~base_dir:config.base_path ~keeper_name:meta.name
   in
   let targets = message_feed_targets meta in
-  pending_messages_of_messages
+  pending_snapshot_of_messages
     ?ack_id:meta.runtime.message_scope_ack_id
     ~targets
     messages

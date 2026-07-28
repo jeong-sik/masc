@@ -130,6 +130,7 @@ let external_attention_item ?(urgency = A.Ambient) ?(preview = "ambient TOKEN-12
    the ONLY reactive trigger is the injected event-queue one. *)
 let quiet_obs : WO.world_observation =
   { pending_messages = []
+  ; pending_message_backlog = { remaining_count = 0; latest_pending = None }
   ; pending_board_events = []
   ; idle_seconds = 0
   ; active_goals = []

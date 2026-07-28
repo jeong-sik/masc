@@ -64,6 +64,7 @@ let with_repo_prompt_config f =
 let base_observation : WO.world_observation =
   {
     pending_messages = [];
+    pending_message_backlog = { remaining_count = 0; latest_pending = None };
     pending_board_events = [];
     idle_seconds = 0;
     active_goals = [];
@@ -242,6 +243,38 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries observation
   in
   user
 
+let test_pending_backlog_signal_renders_latest_context () =
+  let module Scope = Masc.Keeper_world_observation_message_scope in
+  let admitted : Scope.pending_message =
+    { message_id = "a"
+    ; speaker = "owner"
+    ; content = "initial request"
+    ; kind = Scope.Mention
+    }
+  in
+  let correction : Scope.pending_message =
+    { message_id = "b"
+    ; speaker = "owner"
+    ; content = "correction before snapshot"
+    ; kind = Scope.Mention
+    }
+  in
+  let observation =
+    { base_observation with
+      pending_messages = [ admitted ]
+    ; pending_message_backlog =
+        { remaining_count = 1; latest_pending = Some correction }
+    }
+  in
+  let rendered = user_message observation in
+  check bool "admitted row renders" true
+    (contains ~needle:"initial request" rendered);
+  check bool "remaining count renders" true
+    (contains ~needle:"1 additional pending row(s)" rendered);
+  check bool "latest correction renders without admission" true
+    (contains ~needle:"correction before snapshot" rendered)
+;;
+
 (* --- 1. Current Task layer --- *)
 
 let test_current_task_section_renders () =
@@ -398,6 +431,11 @@ let () =
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick
             test_current_task_section_absent_without_task;
+        ] );
+      ( "pending message backlog",
+        [
+          test_case "renders remaining count and latest context" `Quick
+            test_pending_backlog_signal_renders_latest_context;
         ] );
       ( "threaded turn decision",
         [

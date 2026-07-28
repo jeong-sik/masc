@@ -33,6 +33,19 @@ type pending_message = {
 (** One unacknowledged lane row. Stable [message_id] is the exact durable
     acknowledgement cursor; list order is persisted source order. *)
 
+type pending_backlog = {
+  remaining_count : int;
+  latest_pending : pending_message option;
+}
+(** Snapshot-only signal for rows after the single admitted row.
+    [latest_pending] exposes the newest correction/context without transferring
+    acknowledgement authority for it. *)
+
+type pending_snapshot = {
+  admitted : pending_message list;
+  backlog : pending_backlog;
+}
+
 val pairs_of_kind : pending_kind -> pending_message list -> (string * string) list
 val has_kind : pending_kind -> pending_message list -> bool
 
@@ -89,6 +102,15 @@ val pending_messages_of_messages
   -> Keeper_chat_store.chat_message list
   -> pending_message list
 
+val pending_snapshot_of_messages
+  :  ?ack_id:string
+  -> targets:string list
+  -> Keeper_chat_store.chat_message list
+  -> pending_snapshot
+(** Captures admitted row and backlog metadata from one immutable source
+    snapshot. Exactly the row in [admitted] may advance the success watermark;
+    [backlog.latest_pending] is observation only. *)
+
 val pending_mentions_of_messages
   :  ?ack_id:string
   -> targets:string list
@@ -112,4 +134,4 @@ val pending_scope_of_messages
 val collect_message_scope
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> pending_message list
+  -> pending_snapshot

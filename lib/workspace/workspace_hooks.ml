@@ -53,6 +53,13 @@ let runtime_agents_fn
   : (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t
   = Atomic.make (fun _config -> [])
 
+(* Default allows every target so embedded contexts without the runtime wiring
+   keep creating schedules; the runtime installs the durable-metadata reader at
+   boot. Tool_schedule stays free of static keeper dependencies (RFC-0194). *)
+let schedule_wake_target_registered_fn
+  : (Workspace_utils_backend_setup.config -> string -> (bool, string) result) Atomic.t
+  = Atomic.make (fun _config _keeper_name -> Ok true)
+
 (** Relation materializer: agent session end — wraps Relation_materializer.on_agent_session_ended. *)
 let relation_on_leave_fn
   : (leaving_agent:string -> active_agents:string list -> unit) Atomic.t

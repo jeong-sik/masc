@@ -11,6 +11,22 @@ let rec rm_rf path =
       Sys.remove path
 ;;
 
+let register_wake_target config keeper_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
+        ; "trace_id", `String ("trace-" ^ keeper_name)
+        ])
+  with
+  | Error msg -> fail ("keeper meta parse failed: " ^ msg)
+  | Ok meta ->
+    (match Keeper_meta_store.write_meta config meta with
+     | Ok () -> ()
+     | Error detail -> fail ("keeper meta write failed: " ^ detail))
+;;
+
 let with_config f =
   Eio_main.run
   @@ fun env ->
@@ -21,6 +37,12 @@ let with_config f =
   Eio.Switch.on_release sw (fun () -> rm_rf path);
   let config = Workspace.default_config path in
   ignore (Workspace.init config ~agent_name:(Some "schedule-test"));
+  Atomic.set Workspace_hooks.schedule_wake_target_registered_fn (fun config keeper_name ->
+    match Keeper_meta_store.read_effective_meta config keeper_name with
+    | Ok (Some _) -> Ok true
+    | Ok None -> Ok false
+    | Error detail -> Error detail);
+  register_wake_target config "schedule-keeper";
   f config
 ;;
 
@@ -208,6 +230,39 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
     (List.length (Schedule_store.read_state config).schedules)
 ;;
 
+let test_unregistered_wake_target_rejected () =
+  with_config
+  @@ fun config ->
+  let ghost_args allow =
+    `Assoc
+      ([ "schedule_id", `String "sched-ghost-target"
+       ; "due_at_unix", `Float 200.0
+       ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
+       ; ( "payload_body"
+         , `Assoc
+             [ "keeper_name", `String "ghost-keeper"
+             ; "message", `String "wake for a keeper that does not exist"
+             ] )
+       ; "requested_by_id", `String "operator"
+       ; "scheduled_by_id", `String "scheduler-agent"
+       ]
+       @ if allow then [ "allow_unregistered_keeper", `Bool true ] else [])
+  in
+  let rejected = dispatch_exn config Tool_schemas_schedule.Create_request (ghost_args false) in
+  check bool "unregistered wake target rejected" false (Tool_result.is_success rejected);
+  check bool "rejection names the missing keeper metadata" true
+    (String_util.contains_substring
+       (Tool_result.message rejected)
+       "has no durable metadata");
+  check int "rejected schedule is not persisted" 0
+    (List.length (Schedule_store.read_state config).schedules);
+  let allowed = dispatch_exn config Tool_schemas_schedule.Create_request (ghost_args true) in
+  check bool "explicit opt-in schedules the unregistered target" true
+    (Tool_result.is_success allowed);
+  check int "opted-in schedule persisted" 1
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
 let test_unknown_payload_is_rejected_before_persistence () =
   with_config
   @@ fun config ->
@@ -359,6 +414,8 @@ let () =
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
         ; test_case "removed convenience input does not synthesize payload" `Quick
             test_removed_convenience_input_does_not_synthesize_payload
+        ; test_case "unregistered wake target rejected" `Quick
+            test_unregistered_wake_target_rejected
         ; test_case "unknown payload rejected before persistence" `Quick
             test_unknown_payload_is_rejected_before_persistence
         ; test_case "payload contracts are schema only" `Quick

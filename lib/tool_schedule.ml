@@ -169,6 +169,49 @@ let validate_known_payload_request ~payload =
     Error (Schedule_payload_projection.creation_rejection_message rejection)
 ;;
 
+(* A keeper_wake schedule whose target has no durable metadata can never be
+   settled: dispatch defers activation with owner_unknown and no Keeper turn
+   ever closes the occurrence (#26092). Reject at creation unless the caller
+   explicitly schedules for a keeper that will be registered later. The
+   registry lookup arrives via [Workspace_hooks] so this tool module keeps no
+   static keeper dependency (RFC-0194). *)
+let allow_unregistered_keeper_of_args args =
+  match Json_util.assoc_member_opt "allow_unregistered_keeper" args with
+  | None | Some `Null -> Ok false
+  | Some (`Bool value) -> Ok value
+  | Some _ -> Error "allow_unregistered_keeper must be a boolean"
+;;
+
+let validate_keeper_wake_target ctx ~payload args =
+  match Schedule_payload_projection.creation_keeper_wake_target ~payload with
+  | Error msg -> Error msg
+  | Ok None -> Ok ()
+  | Ok (Some keeper_name) ->
+    let* allow_unregistered = allow_unregistered_keeper_of_args args in
+    if allow_unregistered
+    then Ok ()
+    else (
+      match
+        (Atomic.get Workspace_hooks.schedule_wake_target_registered_fn)
+          ctx.config
+          keeper_name
+      with
+      | Ok true -> Ok ()
+      | Ok false ->
+        Error
+          (Printf.sprintf
+             "schedule target keeper '%s' has no durable metadata; register the \
+              keeper first or pass allow_unregistered_keeper=true to schedule for \
+              a keeper that will be created later"
+             keeper_name)
+      | Error detail ->
+        Error
+          (Printf.sprintf
+             "schedule target keeper '%s' metadata read failed: %s"
+             keeper_name
+             detail))
+;;
+
 let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
   let next_due_at =
     match request.status with
@@ -279,6 +322,7 @@ let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
     let* () = validate_known_payload_request ~payload in
+    let* () = validate_keeper_wake_target ctx ~payload args in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
     let requested_at =

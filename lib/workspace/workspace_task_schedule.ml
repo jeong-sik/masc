@@ -247,8 +247,8 @@ let claim_next_r
              { agent with status = Busy; current_task = Some prev.id });
            let message =
              Printf.sprintf
-               "%s already holds [P%d] %s: %s. ACTION: Resume this task; do not call \
-                claim_next again until it is done or explicitly released."
+               "%s already holds [P%d] %s: %s. claim_next is unavailable until the held \
+                task is done or explicitly released."
                agent_name
                prev.priority
                prev.id

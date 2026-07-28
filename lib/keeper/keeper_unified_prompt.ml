@@ -95,10 +95,7 @@ let format_current_task (task : Masc_domain.task) : string =
               (Printf.sprintf "- Suggested next step: %s\n" step)
         | Some _ | None -> ())
    | Some _ | None -> ());
-  Buffer.add_string buf
-    "- Continue this task this turn. If you cannot progress it, state the \
-     blocker and use the visible task-lifecycle capability to release it with \
-     a handoff summary so another keeper can take over.\n\n";
+  Buffer.add_string buf "\n";
   Buffer.contents buf
 
 (** Format one connected-surface presence line (RFC-0223 P2).

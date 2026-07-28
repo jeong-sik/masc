@@ -533,6 +533,84 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
          r.model.id)
 ;;
 
+(* Keeper provider attempts can originate at the configured default, an
+   explicit keeper assignment, or any declared failover lane. Explicit media
+   failover runtimes are separate request-producing Keeper paths and therefore
+   share the same serialized-request admission contract. Expand lane ids with
+   the same lane-over-runtime precedence as [resolve_assignment], then preserve
+   first occurrence order. No provider/model names live in this policy. *)
+let keeper_dispatch_runtime_ids
+    ~(default_runtime_id : string)
+    ~(assignments : (string * string) list)
+    ~(media_failover : string list)
+    ~(lanes : Runtime_lane.t list)
+  =
+  let expand id =
+    match find_declared_lane lanes id with
+    | Some lane -> Runtime_lane.ordered_candidates lane
+    | None -> [ id ]
+  in
+  let routed_roots =
+    default_runtime_id :: List.map snd assignments
+    |> List.concat_map expand
+  in
+  let declared_lane_candidates =
+    lanes |> List.concat_map Runtime_lane.ordered_candidates
+  in
+  let rec dedupe seen acc = function
+    | [] -> List.rev acc
+    | id :: rest when List.mem id seen -> dedupe seen acc rest
+    | id :: rest -> dedupe (id :: seen) (id :: acc) rest
+  in
+  dedupe [] [] (routed_roots @ declared_lane_candidates @ media_failover)
+;;
+
+let validate_keeper_dispatch_request_caps
+    ~(config_path : string)
+    ( runtimes
+    , (default_runtime : t)
+    , assignments
+    , _memory_os_consolidation_id
+    , _structured_judge_id
+    , _cross_verifier_id
+    , media_failover
+    , lanes )
+  =
+  let ids =
+    keeper_dispatch_runtime_ids
+      ~default_runtime_id:default_runtime.id
+      ~assignments
+      ~media_failover
+      ~lanes
+  in
+  let runtime_by_id id =
+    List.find_opt (fun (runtime : t) -> String.equal runtime.id id) runtimes
+  in
+  match
+    List.find_map
+      (fun id ->
+         match runtime_by_id id with
+         | None -> None
+         | Some runtime ->
+           (match runtime.binding.max_request_body_bytes with
+            | Some cap when cap > 0 -> None
+            | None | Some _ -> Some runtime))
+      ids
+  with
+  | None -> Ok ()
+  | Some runtime ->
+    Error
+      (Printf.sprintf
+         "%s: Keeper-dispatch runtime %S has no positive \
+          max-request-body-bytes; declare [%s.%s].max-request-body-bytes before \
+          dispatch so the exact serialized request has an explicit admission \
+          ceiling"
+         config_path
+         runtime.id
+         runtime.binding.provider_id
+         runtime.binding.model_id)
+;;
+
 (* Every runtime binding's provider/model pair must be known to the OAS
    capability catalog. Use the materialized [Provider_config.t] so
    provider-qualified catalog rows are considered before bare model rows; this
@@ -1043,8 +1121,11 @@ let init_default_strict_report ~config_path =
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
-       set_loaded ~config_path loaded;
-       Ok ())
+       (match validate_keeper_dispatch_request_caps ~config_path loaded with
+        | Error msg -> Error (Runtime_config_error msg)
+        | Ok () ->
+          set_loaded ~config_path loaded;
+          Ok ()))
 
 let init_default_strict ~config_path =
   init_default_strict_report ~config_path
@@ -1059,8 +1140,11 @@ let init_default_degraded_report ~config_path =
        (match validate_runtime_max_context ~config_path runtimes with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok () ->
-          set_loaded ~config_path loaded;
-          Ok Initialized)
+          (match validate_keeper_dispatch_request_caps ~config_path loaded with
+           | Error msg -> Error (Runtime_config_error msg)
+           | Ok () ->
+             set_loaded ~config_path loaded;
+             Ok Initialized))
      | Some report ->
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
@@ -1070,11 +1154,18 @@ let init_default_degraded_report ~config_path =
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
-             set_loaded
-               ~startup_degradation:degradation
-               ~config_path
-               degraded_loaded;
-             Ok (Initialized_degraded degradation))))
+             (match
+                validate_keeper_dispatch_request_caps
+                  ~config_path
+                  degraded_loaded
+              with
+              | Error msg -> Error (Runtime_config_error msg)
+              | Ok () ->
+                set_loaded
+                  ~startup_degradation:degradation
+                  ~config_path
+                  degraded_loaded;
+                Ok (Initialized_degraded degradation)))))
 
 let runtime_state () = Atomic.get loaded_state_ref
 
@@ -1636,8 +1727,10 @@ let materialize_runtime_config_text ~config_path content =
 ;;
 
 let validate_runtime_config_text ~config_path content =
-  let* _loaded = materialize_runtime_config_text ~config_path content in
-  Ok ()
+  let* loaded, _exact_output_lanes =
+    materialize_runtime_config_text ~config_path content
+  in
+  validate_keeper_dispatch_request_caps ~config_path loaded
 ;;
 
 let runtime_config_write_mutex = Mutex.create ()
@@ -1693,6 +1786,7 @@ let commit_runtime_config_text
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path:path content
   in
+  let* () = validate_keeper_dispatch_request_caps ~config_path:path loaded in
   match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
   with
@@ -1760,6 +1854,7 @@ module For_testing = struct
 
   let snapshot () = runtime_state ()
   let restore snapshot = Atomic.set loaded_state_ref snapshot
+  let keeper_dispatch_runtime_ids = keeper_dispatch_runtime_ids
 
   let save_config_text_with_sync_parent
       ?runtime_config_path

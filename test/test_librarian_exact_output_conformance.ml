@@ -124,22 +124,30 @@ let librarian_input trace_id =
   { Librarian.trace_id
   ; generation = 1
   ; messages = [ text_message "Remember the exact-output boundary." ]
+  ; store = []
   }
 ;;
 
+(* masc#26122: the wire's top-level [claims] array is gone. The librarian now
+   returns typed [operations]; an [add] operation wraps the same claim-shaped
+   payload the old [claims] entries carried. *)
 let valid_output =
   `Assoc
     [ "episode_summary", `String "OAS exact output succeeded."
-    ; ( "claims"
+    ; ( "operations"
       , `List
           [ `Assoc
-              [ "claim", `String "OAS owns exact-output provider admission."
-              ; "category", `String "constraint"
-              ; "source_turn", `Int 0
-              ; "source_tool_call_id", `Null
-              ; "claim_id", `String "oas-exact-output-owns-admission"
-              ; "claim_kind", `String "durable_knowledge"
-              ; "valid_for_days", `Null
+              [ "op", `String "add"
+              ; ( "fact"
+                , `Assoc
+                    [ "claim", `String "OAS owns exact-output provider admission."
+                    ; "category", `String "constraint"
+                    ; "source_turn", `Int 0
+                    ; "source_tool_call_id", `Null
+                    ; "claim_id", `String "oas-exact-output-owns-admission"
+                    ; "claim_kind", `String "durable_knowledge"
+                    ; "valid_for_days", `Null
+                    ] )
               ]
           ] )
     ; "open_items", `List []
@@ -494,7 +502,21 @@ let test_missing_clock_fails_before_dispatch () =
       | Ok _ -> Alcotest.fail "missing clock must fail closed")))
 ;;
 
-let test_fact_upsert_failure_does_not_publish_episode () =
+(* masc#26122: storage is recognition, so the fact store is now read (for the
+   recognition-prompt snapshot) BEFORE any provider dispatch, and re-read
+   under the facts lock for the CAS check in [apply_and_persist] — both
+   through [Keeper_memory_os_io.read_facts_all_strict]. That function does
+   not catch [Sys_error]; it only returns a typed [Error] for a malformed
+   JSONL line ([parse_fact_json_line_strict]). Shadowing the facts file with
+   a directory (the old write-failure trick) now raises an uncaught
+   [Sys_error "Is a directory"] out of the pre-dispatch read instead of
+   producing a typed [Memory_apply_failed] — so this test is retargeted to
+   the read failure the new architecture can actually surface: a corrupted
+   facts.jsonl line, which fails closed before the first network call.
+   [Memory_apply_failed] itself is only reachable via a facts-lock
+   acquisition timeout ([Keeper_memory_os_io.with_facts_lock]'s
+   [on_timeout]), not via a store I/O failure. *)
+let test_store_read_failure_does_not_publish_episode () =
   with_prompt_registry (fun () ->
   with_temp_keepers_dir (fun _ ->
     run_eio (fun ~sw ~net ~clock ->
@@ -506,28 +528,34 @@ let test_fact_upsert_failure_does_not_publish_episode () =
           (Fixture.Reply (Fixture.openai_response valid_output))
       in
       let slot : Fixture.target_fixture =
-        { id = "librarian-fact-write-failure"; base_url = server.base_url }
+        { id = "librarian-store-read-failure"; base_url = server.base_url }
       in
       publish_lane [ slot ];
-      let keeper_id = "librarian-fact-write-failure-keeper" in
-      Unix.mkdir (Memory_io.facts_path ~keeper_id) 0o700;
+      let keeper_id = "librarian-store-read-failure-keeper" in
+      Out_channel.with_open_bin
+        (Memory_io.facts_path ~keeper_id)
+        (fun channel -> output_string channel "not-json\n");
       match
         extract_and_append_with_exact_output
           ~clock
           ~net
           ~keeper_id
-          (librarian_input "trace-fact-write-failure")
+          (librarian_input "trace-store-read-failure")
       with
       | Error error ->
         Alcotest.(check bool)
-          "typed write error is returned"
+          "typed read error is returned"
           true
-          (String.starts_with ~prefix:"memory os fact upsert failed:" error);
+          (String.starts_with ~prefix:"memory os fact store read failed:" error);
+        Alcotest.(check int)
+          "no provider request before a readable snapshot"
+          0
+          (Fixture.post_count server);
         Alcotest.(check int)
           "episode commit marker was not published"
           0
           (List.length (Memory_io.read_events_tail ~keeper_id ~n:10))
-      | Ok _ -> Alcotest.fail "fact upsert failure must block episode publication")))
+      | Ok _ -> Alcotest.fail "store read failure must block episode publication")))
 ;;
 
 let test_zero_dispatch_failure_advances_to_next_candidate () =
@@ -722,9 +750,9 @@ let () =
             `Quick
             test_missing_clock_fails_before_dispatch
         ; Alcotest.test_case
-            "fact upsert failure does not publish episode"
+            "store read failure does not publish episode"
             `Quick
-            test_fact_upsert_failure_does_not_publish_episode
+            test_store_read_failure_does_not_publish_episode
         ; Alcotest.test_case
             "zero-dispatch failure advances to next candidate"
             `Quick

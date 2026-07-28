@@ -43,6 +43,7 @@
   test_keeper_chat_delivery_identity
   test_keeper_chat_direct_delivery
   test_keeper_librarian_retry
+  test_keeper_librarian_recognition
   test_surface_ref
   test_inference_inflight_observation
   test_audit_projection
@@ -350,6 +351,7 @@
   test_keeper_chat_delivery_identity
   test_keeper_chat_direct_delivery
   test_keeper_librarian_retry
+  test_keeper_librarian_recognition
   test_surface_ref
   test_inference_inflight_observation
   test_audit_projection

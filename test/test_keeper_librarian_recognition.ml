@@ -1,0 +1,285 @@
+(* Recognition apply semantics (masc#26122 acceptance criteria):
+   - Reinforce updates the existing row in place (no new row; last_verified_at
+     and reinforcement_count move) — re-observation is NOT an append;
+   - Forget removes a row and Merge collapses rows — the store can shrink
+     (no monotonic-growth invariant);
+   - Add appends; Revise rewrites in place preserving first_seen;
+   - out-of-range and doubly-targeted indices are typed rejections leaving
+     the store unchanged;
+   - merge gates (claim_kind / valid_until representability) reject without
+     collapsing metadata.
+   All checks drive the pure [Keeper_librarian_recognition.apply]; no IO. *)
+
+open Alcotest
+module Recognition = Masc.Keeper_librarian_recognition
+module Consolidation = Masc.Keeper_memory_os_consolidation
+module Types = Masc.Keeper_memory_os_types
+
+let now = 2_000_000.0
+
+let fact ?(claim = "c") ?(category = Types.Fact) ?claim_kind ?claim_id
+      ?(first_seen = 1_000_000.0) ?valid_until ?(reinforcement_count = 0) ()
+  : Types.fact
+  =
+  { Types.claim
+  ; category
+  ; claim_kind
+  ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
+  ; observed_by = []
+  ; first_seen
+  ; valid_until
+  ; last_verified_at = None
+  ; schema_version = Types.schema_version
+  ; claim_id
+  ; reinforcement_count
+  }
+;;
+
+let claims facts = List.map (fun (f : Types.fact) -> f.Types.claim) facts
+
+let apply operations facts = Recognition.apply ~now ~operations facts
+
+let test_reinforce_updates_in_place () =
+  let store = [ fact ~claim:"a" (); fact ~claim:"b" ~reinforcement_count:2 () ] in
+  let result = apply [ Recognition.Reinforce { index = 1; source_turn = 9 } ] store in
+  check int "row count unchanged" 2 (List.length result.Recognition.facts);
+  check (list string) "claims unchanged" [ "a"; "b" ] (claims result.Recognition.facts);
+  let reinforced = List.nth result.Recognition.facts 1 in
+  check int "reinforcement_count incremented" 3 reinforced.Types.reinforcement_count;
+  check (option (float 0.0)) "last_verified_at set to now" (Some now)
+    reinforced.Types.last_verified_at;
+  check (float 0.0) "first_seen preserved" 1_000_000.0 reinforced.Types.first_seen;
+  check int "reinforce produces no episode claims" 0
+    (List.length result.Recognition.recognized_facts);
+  check (list string) "applied" [ "applied" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_forget_shrinks_store () =
+  let store = [ fact ~claim:"keep" (); fact ~claim:"drop" () ] in
+  let result = apply [ Recognition.Forget { index = 1; reason = "superseded" } ] store in
+  check (list string) "store shrank to the survivor" [ "keep" ]
+    (claims result.Recognition.facts)
+;;
+
+let test_merge_collapses_rows () =
+  let store =
+    [ fact ~claim:"first wording" ~first_seen:1_000.0 ~reinforcement_count:1 ()
+    ; fact ~claim:"untouched" ()
+    ; fact ~claim:"second wording" ~first_seen:2_000.0 ~reinforcement_count:2 ()
+    ]
+  in
+  let result =
+    apply
+      [ Recognition.Merge
+          { Consolidation.member_indices = [ 0; 2 ]
+          ; consolidated_claim = "one merged claim"
+          ; category = Types.Lesson
+          }
+      ]
+      store
+  in
+  (* 3 -> 2: merged row takes the earliest member's slot. *)
+  check (list string) "merged row anchors at earliest member"
+    [ "one merged claim"; "untouched" ]
+    (claims result.Recognition.facts);
+  let merged = List.hd result.Recognition.facts in
+  check (float 0.0) "first_seen is min of members" 1_000.0 merged.Types.first_seen;
+  check int "reinforcement history converges (1+2)" 3 merged.Types.reinforcement_count;
+  check (list string) "merged row is the episode claim" [ "one merged claim" ]
+    (claims result.Recognition.recognized_facts)
+;;
+
+let test_revise_rewrites_in_place () =
+  let store = [ fact ~claim:"old conclusion" ~claim_id:"old-slug" () ] in
+  let result =
+    apply
+      [ Recognition.Revise
+          { index = 0
+          ; claim = "new conclusion"
+          ; category = None
+          ; claim_id = Some "new-slug"
+          ; valid_for_days = Some 7
+          }
+      ]
+      store
+  in
+  check int "row count unchanged" 1 (List.length result.Recognition.facts);
+  let revised = List.hd result.Recognition.facts in
+  check string "claim rewritten" "new conclusion" revised.Types.claim;
+  check (option string) "claim_id replaced" (Some "new-slug") revised.Types.claim_id;
+  check (float 0.0) "first_seen preserved" 1_000_000.0 revised.Types.first_seen;
+  check bool "valid_until derived from valid_for_days" true
+    (revised.Types.valid_until = Some (Types.valid_until_of_days ~now 7));
+  check (list string) "revised row is the episode claim" [ "new conclusion" ]
+    (claims result.Recognition.recognized_facts)
+;;
+
+let test_add_appends () =
+  let store = [ fact ~claim:"existing" () ] in
+  let result = apply [ Recognition.Add (fact ~claim:"brand new" ()) ] store in
+  check (list string) "added at the end" [ "existing"; "brand new" ]
+    (claims result.Recognition.facts)
+;;
+
+let test_out_of_range_rejects_without_change () =
+  let store = [ fact ~claim:"only" () ] in
+  let result =
+    apply
+      [ Recognition.Forget { index = 5; reason = "r" }
+      ; Recognition.Reinforce { index = -1; source_turn = 0 }
+      ]
+      store
+  in
+  check (list string) "store unchanged" [ "only" ] (claims result.Recognition.facts);
+  check (list string) "both rejected"
+    [ "rejected_index_out_of_bounds"; "rejected_index_out_of_bounds" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_double_target_first_op_wins () =
+  let store = [ fact ~claim:"contested" () ] in
+  let result =
+    apply
+      [ Recognition.Reinforce { index = 0; source_turn = 1 }
+      ; Recognition.Forget { index = 0; reason = "r" }
+      ]
+      store
+  in
+  check (list string) "first op won; row survives reinforced" [ "contested" ]
+    (claims result.Recognition.facts);
+  check (list string) "second reference rejected"
+    [ "applied"; "rejected_target_consumed" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_merge_kind_mismatch_rejected () =
+  let store =
+    [ fact ~claim:"a" ~claim_kind:Types.Durable_knowledge ()
+    ; fact ~claim:"b" ~claim_kind:Types.Self_observation ()
+    ]
+  in
+  let result =
+    apply
+      [ Recognition.Merge
+          { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "m"
+          ; category = Types.Fact
+          }
+      ]
+      store
+  in
+  check (list string) "kind mismatch preserves both members" [ "a"; "b" ]
+    (claims result.Recognition.facts);
+  check (list string) "typed rejection" [ "rejected_kind_mismatch" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_merge_valid_until_mismatch_rejected () =
+  let store =
+    [ fact ~claim:"a" ~valid_until:3_000_000.0 (); fact ~claim:"b" () ]
+  in
+  let result =
+    apply
+      [ Recognition.Merge
+          { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "m"
+          ; category = Types.Fact
+          }
+      ]
+      store
+  in
+  check (list string) "valid_until mismatch preserves both members" [ "a"; "b" ]
+    (claims result.Recognition.facts);
+  check (list string) "typed rejection" [ "rejected_valid_until_mismatch" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_merge_with_consumed_member_rejects_too_few () =
+  let store = [ fact ~claim:"a" (); fact ~claim:"b" () ] in
+  let result =
+    apply
+      [ Recognition.Forget { index = 0; reason = "r" }
+      ; Recognition.Merge
+          { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "m"
+          ; category = Types.Fact
+          }
+      ]
+      store
+  in
+  (* Index 0 was consumed by Forget, leaving the merge one free member. *)
+  check (list string) "merge fell below two free members" [ "b" ]
+    (claims result.Recognition.facts);
+  check (list string) "dispositions"
+    [ "applied"; "rejected_too_few_members" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_mixed_pass_shrinks_store () =
+  (* One realistic pass over five rows: reinforce one, merge two, forget one,
+     add one -> net 5 - 2 + 1 = 4 rows, proving write-side refinement. *)
+  let store =
+    [ fact ~claim:"stable lesson" ()
+    ; fact ~claim:"dup wording 1" ()
+    ; fact ~claim:"stale queue state" ()
+    ; fact ~claim:"dup wording 2" ()
+    ; fact ~claim:"still true constraint" ()
+    ]
+  in
+  let result =
+    apply
+      [ Recognition.Reinforce { index = 0; source_turn = 3 }
+      ; Recognition.Merge
+          { Consolidation.member_indices = [ 1; 3 ]
+          ; consolidated_claim = "the deduplicated lesson"
+          ; category = Types.Lesson
+          }
+      ; Recognition.Forget { index = 2; reason = "queue state is ephemeral" }
+      ; Recognition.Add (fact ~claim:"new external fact" ())
+      ]
+      store
+  in
+  check (list string) "refined store"
+    [ "stable lesson"
+    ; "the deduplicated lesson"
+    ; "still true constraint"
+    ; "new external fact"
+    ]
+    (claims result.Recognition.facts);
+  check (list string) "all applied"
+    [ "applied"; "applied"; "applied"; "applied" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_empty_operations_identity () =
+  let store = [ fact ~claim:"a" (); fact ~claim:"b" () ] in
+  let result = apply [] store in
+  check (list string) "no ops, identical store" [ "a"; "b" ]
+    (claims result.Recognition.facts);
+  check int "no dispositions" 0 (List.length result.Recognition.dispositions)
+;;
+
+let () =
+  run "keeper_librarian_recognition"
+    [
+      ( "apply",
+        [
+          test_case "reinforce updates in place, adds no row" `Quick
+            test_reinforce_updates_in_place;
+          test_case "forget shrinks the store" `Quick test_forget_shrinks_store;
+          test_case "merge collapses rows" `Quick test_merge_collapses_rows;
+          test_case "revise rewrites in place" `Quick test_revise_rewrites_in_place;
+          test_case "add appends" `Quick test_add_appends;
+          test_case "out-of-range rejects without change" `Quick
+            test_out_of_range_rejects_without_change;
+          test_case "double target: first op wins" `Quick test_double_target_first_op_wins;
+          test_case "merge kind mismatch rejected" `Quick test_merge_kind_mismatch_rejected;
+          test_case "merge valid_until mismatch rejected" `Quick
+            test_merge_valid_until_mismatch_rejected;
+          test_case "merge below two free members rejected" `Quick
+            test_merge_with_consumed_member_rejects_too_few;
+          test_case "mixed pass refines and shrinks" `Quick test_mixed_pass_shrinks_store;
+          test_case "empty operations are identity" `Quick test_empty_operations_identity;
+        ] );
+    ]

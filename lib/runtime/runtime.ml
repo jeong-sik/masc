@@ -533,12 +533,15 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
          r.model.id)
 ;;
 
-(* Keeper provider attempts can originate at the configured default, an
-   explicit keeper assignment, or any declared failover lane. Explicit media
-   failover runtimes are separate request-producing Keeper paths and therefore
-   share the same serialized-request admission contract. Expand lane ids with
-   the same lane-over-runtime precedence as [resolve_assignment], then preserve
-   first occurrence order. No provider/model names live in this policy. *)
+(* Keeper provider attempts originate at the configured default, an explicit
+   keeper assignment, or an explicit media-failover runtime. A lane is
+   reachable only when its id shadows one of the default/assignment runtime
+   roots; a merely declared lane is dormant until a routed root names it.
+   Expand routed roots with the same lane-over-runtime precedence as
+   [resolve_assignment], keep media_failover runtime-only, then preserve first
+   occurrence order. Every attempt is checked again after its final provider
+   config transform in Keeper_turn_driver. No provider/model names live in
+   this policy. *)
 let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
@@ -554,15 +557,12 @@ let keeper_dispatch_runtime_ids
     default_runtime_id :: List.map snd assignments
     |> List.concat_map expand
   in
-  let declared_lane_candidates =
-    lanes |> List.concat_map Runtime_lane.ordered_candidates
-  in
   let rec dedupe seen acc = function
     | [] -> List.rev acc
     | id :: rest when List.mem id seen -> dedupe seen acc rest
     | id :: rest -> dedupe (id :: seen) (id :: acc) rest
   in
-  dedupe [] [] (routed_roots @ declared_lane_candidates @ media_failover)
+  dedupe [] [] (routed_roots @ media_failover)
 ;;
 
 let validate_keeper_dispatch_request_caps

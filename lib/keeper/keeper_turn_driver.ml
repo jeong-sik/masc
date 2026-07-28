@@ -239,22 +239,31 @@ let runtime_candidate_missing_error id =
        "keeper_turn_driver: lane candidate %S disappeared from runtimes"
        id)
 
-let runtime_candidate_missing_request_cap_error (runtime : Runtime.t) =
+let runtime_candidate_missing_request_cap_error ~runtime_id =
   Agent_sdk.Error.Config
     (Agent_sdk.Error.InvalidConfig
        { field = "max-request-body-bytes"
        ; detail =
            Printf.sprintf
              "Keeper runtime %S has no positive serialized-request ceiling"
-             runtime.id
+             runtime_id
        })
+
+let validate_provider_request_cap ~runtime_id
+    (provider_config : Llm_provider.Provider_config.t) =
+  match provider_config.max_request_body_bytes with
+  | Some cap when cap > 0 -> Ok ()
+  | None | Some _ -> Error (runtime_candidate_missing_request_cap_error ~runtime_id)
 
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
   | Some runtime ->
-    (match runtime.Runtime.binding.max_request_body_bytes with
-     | Some cap when cap > 0 -> Ok runtime
-     | None | Some _ -> Error (runtime_candidate_missing_request_cap_error runtime))
+    let* () =
+      validate_provider_request_cap
+        ~runtime_id:runtime.id
+        runtime.Runtime.provider_config
+    in
+    Ok runtime
   | None -> Error (runtime_candidate_missing_error id)
 
 let resolve_runtime_candidate_for_attempt ?on_missing id =
@@ -656,11 +665,20 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         Error err, None
       | Ok provider_config ->
-        let candidate = Runtime_candidate.of_provider_config provider_config in
-        (* Cached provider health is observation only. Every eligible runtime
-           reaches the real provider boundary; only the resulting typed error
-           may drive fallback. *)
-        let name = Printf.sprintf "oas-%s" attempt_runtime_id in
+        (match
+           validate_provider_request_cap
+             ~runtime_id:attempt_runtime_id
+             provider_config
+         with
+         | Error err ->
+           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+           Error err, None
+         | Ok () ->
+          let candidate = Runtime_candidate.of_provider_config provider_config in
+          (* Cached provider health is observation only. Every eligible runtime
+             reaches the real provider boundary; only the resulting typed error
+             may drive fallback. *)
+          let name = Printf.sprintf "oas-%s" attempt_runtime_id in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
@@ -717,7 +735,7 @@ let run_named
               ~replay_prefix_projection
               provider_result
           in
-          outcomes.turn_result, checkpoint_after)
+          outcomes.turn_result, checkpoint_after))
     attempt_candidates
 
 

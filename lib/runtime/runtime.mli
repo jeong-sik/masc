@@ -180,8 +180,9 @@ module For_testing : sig
     media_failover:string list ->
     lanes:Runtime_lane.t list ->
     string list
-  (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment,
-      declared lane failover, and explicit media failover routing. *)
+  (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment
+      roots (including a same-named lane's candidates) and explicit
+      runtime-only media failover routing. Dormant declared lanes are excluded. *)
 
   val save_config_text_with_sync_parent :
     ?runtime_config_path:string ->

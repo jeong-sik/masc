@@ -108,7 +108,7 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
     | UT.Turn_skipped _ ->
       fail "runtime stop reason mapped outside the executed turn outcomes"
   in
-  check bool "completed turn settles durable source" true
+  check bool "completed turn ACKs durable source" true
     (Heartbeat.cycle_outcome_acks_source
        (cycle_of_stop_reason Runtime_agent.Completed));
   check bool "chat yield retains durable source" false
@@ -119,7 +119,7 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
     (Heartbeat.cycle_outcome_acks_source
        (cycle_of_stop_reason
           (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 })));
-  check bool "durable Gate handoff settles triggering source" true
+  check bool "durable Gate handoff ACKs triggering source" true
     (Heartbeat.cycle_outcome_acks_source
        (cycle_of_stop_reason
           (Runtime_agent.Awaiting_external_effect { turns_used = 2 })));

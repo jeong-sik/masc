@@ -43,14 +43,15 @@ let handle_keeper_list ctx args : tool_result =
           let created_ts =
             Workspace_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
           in
-          let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-          let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
+          let keeper_age_s = Keeper_status_metrics.age_seconds_opt ~now_ts created_ts in
+          let last_turn_ago_s =
+            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.usage.last_turn_ts
+          in
           let last_proactive_ago_s =
-            if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
+            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_ts
           in
           let last_visible_proactive_ago_s =
-            if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
-            else now_ts -. m.runtime.proactive_rt.last_visible_ts
+            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_visible_ts
           in
           let active_model = active_model_of_meta m in
           let next_model_hint = next_model_hint_of_meta m in
@@ -153,9 +154,9 @@ let handle_keeper_list ctx args : tool_result =
               ("run_state", run_state_json);
               ("active_model", `String active_model);
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
-              ("keeper_age_s", `Float keeper_age_s);
-              ("last_turn_ago_s", `Float last_turn_ago_s);
-              ("last_proactive_ago_s", `Float last_proactive_ago_s);
+              ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
+              ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
+              ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
               ("trace_history_count", `Int trace_history_count);
               ("handoff_count_total", `Int trace_history_count);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
@@ -175,7 +176,7 @@ let handle_keeper_list ctx args : tool_result =
                 compaction_decision_json_or_null m.runtime.compaction_rt.last_decision );
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
               ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
-              ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
+              ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
               ( "last_proactive_outcome"
               , `String
                   (proactive_cycle_outcome_to_string

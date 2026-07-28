@@ -377,20 +377,21 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             Workspace_resilience.Time.parse_iso8601_opt m.created_at
             |> Option.value ~default:0.0
           in
-          let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-          let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
+          let keeper_age_s = Keeper_status_metrics.age_seconds_opt ~now_ts created_ts in
+          let last_turn_ago_s =
+            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.usage.last_turn_ts
+          in
           let last_handoff_ago_s =
-            if m.runtime.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.runtime.last_handoff_ts
+            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.last_handoff_ts
           in
           let last_compaction_ago_s =
-            if m.runtime.compaction_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.compaction_rt.last_ts
+            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.compaction_rt.last_ts
           in
           let last_proactive_ago_s =
-            if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
+            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_ts
           in
           let last_visible_proactive_ago_s =
-            if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
-            else now_ts -. m.runtime.proactive_rt.last_visible_ts
+            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_visible_ts
           in
           (* C-3 fix: compute last_activity from the most recent activity timestamp
              to avoid showing misleading staleness when agent is actually active *)
@@ -415,7 +416,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             | None -> 0.0
           in
           let last_activity_ago_s =
-            if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
+            Keeper_status_metrics.age_seconds_opt ~now_ts last_activity_ts
           in
           let live_activity_fields =
             let source_json =
@@ -920,14 +921,17 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 `String
                   (Keeper_status_runtime.keeper_surface_status ~agent_status:agent
                      ~diagnostic) );
-              ("keeper_age_s", `Float keeper_age_s);
-              ("uptime_hours", `Float (keeper_age_s /. Masc_time_constants.hour));
-              ("last_turn_ago_s", `Float last_turn_ago_s);
-              ("last_handoff_ago_s", `Float last_handoff_ago_s);
-              ("last_compaction_ago_s", `Float last_compaction_ago_s);
-              ("last_proactive_ago_s", `Float last_proactive_ago_s);
-              ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
-              ("last_activity_ago_s", `Float last_activity_ago_s);
+              ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
+              ( "uptime_hours"
+              , Json_util.option_to_yojson
+                  (fun age_s -> `Float (age_s /. Masc_time_constants.hour))
+                  keeper_age_s );
+              ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
+              ("last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s);
+              ("last_compaction_ago_s", Json_util.float_opt_to_json last_compaction_ago_s);
+              ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
+              ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
+              ("last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s);
               ("handoff_count_total", `Int trace_history_count);
               ("total_turns", `Int m.runtime.usage.total_turns);
               ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);

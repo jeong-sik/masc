@@ -410,16 +410,21 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let created_ts =
            Workspace_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
          in
-         let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-         let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
-         let last_handoff_ago_s = if m.runtime.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.runtime.last_handoff_ts in
-         let last_compaction_ago_s = if m.runtime.compaction_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.compaction_rt.last_ts in
+         let keeper_age_s = Keeper_status_metrics.age_seconds_opt ~now_ts created_ts in
+         let last_turn_ago_s =
+           Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.usage.last_turn_ts
+         in
+         let last_handoff_ago_s =
+           Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.last_handoff_ts
+         in
+         let last_compaction_ago_s =
+           Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.compaction_rt.last_ts
+         in
          let last_proactive_ago_s =
-           if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
+           Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_ts
          in
          let last_visible_proactive_ago_s =
-           if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
-           else now_ts -. m.runtime.proactive_rt.last_visible_ts
+           Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_visible_ts
          in
          let trace_history_count = List.length m.runtime.trace_history in
          let runtime_runtime_metrics = `Null in
@@ -801,12 +806,12 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
            ("agent", agent_status);
-           ("keeper_age_s", `Float keeper_age_s);
-           ("last_turn_ago_s", `Float last_turn_ago_s);
-           ("last_handoff_ago_s", `Float last_handoff_ago_s);
-           ("last_compaction_ago_s", `Float last_compaction_ago_s);
-           ("last_proactive_ago_s", `Float last_proactive_ago_s);
-           ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
+           ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
+           ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
+           ("last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s);
+           ("last_compaction_ago_s", Json_util.float_opt_to_json last_compaction_ago_s);
+           ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
+           ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
            ("active_model", `Null);
            ("disposition", Json_util.string_opt_to_json disposition);
            ("disposition_reason", Json_util.string_opt_to_json disposition_reason);
@@ -835,16 +840,21 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("lifecycle", `Assoc [
              ("created_at", `String m.created_at);
              ("updated_at", `String m.updated_at);
-             ("uptime_hours", `Float (keeper_age_s /. Masc_time_constants.hour));
+             ( "uptime_hours"
+             , Json_util.option_to_yojson
+                 (fun age_s -> `Float (age_s /. Masc_time_constants.hour))
+                 keeper_age_s );
            ]);
            ("proactive", `Assoc [
              ("enabled", `Bool m.proactive.enabled);
              ("count_total", `Int m.runtime.proactive_rt.count_total);
              ("visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
              ("last_ts", `Float m.runtime.proactive_rt.last_ts);
-             ("last_ago_s", `Float last_proactive_ago_s);
+             ( "last_ago_s"
+             , Json_util.float_opt_to_json last_proactive_ago_s );
              ("last_visible_ts", `Float m.runtime.proactive_rt.last_visible_ts);
-             ("last_visible_ago_s", `Float last_visible_proactive_ago_s);
+             ( "last_visible_ago_s"
+             , Json_util.float_opt_to_json last_visible_proactive_ago_s );
              ( "last_outcome"
              , `String
                  (proactive_cycle_outcome_to_string

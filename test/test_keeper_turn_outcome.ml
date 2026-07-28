@@ -186,6 +186,49 @@ let test_external_effect_wait_acknowledgement_is_visible () =
     TO.Visible_reply
     (TO.of_result_surface ~response_text:acknowledgement stop_reason)
 
+let test_external_effect_acknowledgement_survives_server_projection () =
+  let acknowledgement = Response_text.external_effect_deferred_acknowledgement in
+  let turn_outcome =
+    TO.of_result_surface
+      ~response_text:acknowledgement
+      (Runtime_agent.Awaiting_external_effect { turns_used = 2 })
+  in
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"gate-ack" ~absolute_turn:2 in
+  let body =
+    `Assoc
+      [ "reply", `String acknowledgement
+      ; TO.wire_key, `String (TO.to_label turn_outcome)
+      ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match
+    Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id body
+  with
+  | Error error ->
+    fail
+      (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+         error)
+  | Ok canonical ->
+    check outcome "server preserves visible Gate acknowledgement" TO.Visible_reply
+      canonical.turn_outcome;
+    check string "server preserves acknowledgement" acknowledgement canonical.visible_reply;
+    check (option string) "server does not turn acknowledgement into a terminal error"
+      None
+      (Stream.For_testing.direct_reply_terminal_error
+         (Some canonical.payload_json)
+         canonical.visible_reply);
+    match
+      Stream.For_testing.queued_delivery_outcome_of_turn_ref
+        (Some canonical.turn_ref)
+    with
+    | Stream.Delivered { outcome_ref } ->
+      check string "queued delivery keeps the exact Gate turn ref"
+        (Ids.Turn_ref.to_string turn_ref)
+        outcome_ref
+    | Stream.Failed _ | Stream.Deferred _ ->
+      fail "Gate acknowledgement did not remain deliverable for a queued turn"
+
 let test_terminal_effect_defer_kinds_remain_distinct () =
   let expect_yield label state expected =
     match Masc.Keeper_agent_run.terminal_effect_boundary_decision state with
@@ -506,6 +549,8 @@ let () =
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "external effect wait acknowledgement is visible" `Quick
             test_external_effect_wait_acknowledgement_is_visible;
+          test_case "external effect acknowledgement survives server projection" `Quick
+            test_external_effect_acknowledgement_survives_server_projection;
           test_case "terminal effect defer kinds remain distinct" `Quick
             test_terminal_effect_defer_kinds_remain_distinct;
           test_case "repeated exact tool call boundary" `Quick

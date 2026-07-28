@@ -191,8 +191,7 @@ let direct_no_progress_retry_decision
 let run_direct_no_progress_retry_loop
       ~keeper_name
       ~base_runtime
-      ~initial_runtime
-      ~initial_max_context
+      ~(initial_execution : runtime_execution)
       ~current_turn_phase_elapsed_ms
       ~now_s
       ~(setup_retry_runtime :
@@ -207,7 +206,7 @@ let run_direct_no_progress_retry_loop
   =
   let rec run_attempt
       ~runtime_id
-      ?runtime_execution
+      ~(runtime_execution : runtime_execution)
       ~attempted_runtimes
       ?degraded_retry
       ~runtime_rotation_attempts
@@ -224,11 +223,7 @@ let run_direct_no_progress_retry_loop
       Option.map (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
         degraded_retry
     in
-    let attempt_max_context =
-      match runtime_execution with
-      | Some execution -> execution.max_context
-      | None -> initial_max_context
-    in
+    let attempt_max_context = runtime_execution.max_context in
     match
       run_once
         ~runtime_id
@@ -326,9 +321,9 @@ let run_direct_no_progress_retry_loop
             | Some requested -> string_of_int requested
             | None -> "none");
          before_retry ();
-         run_attempt
-           ~runtime_id:next_execution.runtime_id
-           ~runtime_execution:next_execution
+        run_attempt
+          ~runtime_id:next_execution.runtime_id
+          ~runtime_execution:next_execution
            ~attempted_runtimes:(next_execution.runtime_id :: attempted_runtimes)
            ~degraded_retry:retry
            ~runtime_rotation_attempts:(rotation_attempt :: runtime_rotation_attempts)
@@ -338,8 +333,9 @@ let run_direct_no_progress_retry_loop
            ())
   in
   run_attempt
-    ~runtime_id:initial_runtime
-    ~attempted_runtimes:[ initial_runtime ]
+    ~runtime_id:initial_execution.runtime_id
+    ~runtime_execution:initial_execution
+    ~attempted_runtimes:[ initial_execution.runtime_id ]
     ~runtime_rotation_attempts:[]
     ~attempt:1
     ~retry_phase_started_at:None

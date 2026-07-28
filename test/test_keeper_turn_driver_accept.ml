@@ -868,12 +868,14 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       ; temperature = 0.0
       }
     in
+    let initial_execution =
+      retry_execution "runtime.direct-empty"
+    in
     let result =
       Masc.Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
         ~keeper_name:"keeper-test"
         ~base_runtime:"test_provider.test_model"
-        ~initial_runtime:"runtime.direct-empty"
-        ~initial_max_context:1024
+        ~initial_execution
         ~current_turn_phase_elapsed_ms:(function
           | None -> 7, None
           | Some _ -> 7, Some 0)
@@ -1008,14 +1010,27 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
 
 let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
   let terminal_err = Agent_sdk.Error.Internal "not retryable" in
+  let initial_execution : Masc.Keeper_turn_runtime_budget.runtime_execution =
+    { runtime_id = "runtime.initial"
+    ; max_context_resolution =
+        { requested_override = None
+        ; primary_budget = 2048
+        ; runtime_budget = 2048
+        ; runtime_budget_source = Some Runtime.Capability
+        ; requested_context_window = 2048
+        ; effective_budget = 2048
+        }
+    ; max_context = 2048
+    ; temperature = 0.0
+    }
+  in
   let published = ref [] in
   let run_count = ref 0 in
   let result =
-    Masc.Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
+      Masc.Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
       ~keeper_name:"keeper-test"
       ~base_runtime:"runtime.initial"
-      ~initial_runtime:"runtime.initial"
-      ~initial_max_context:2048
+      ~initial_execution
       ~current_turn_phase_elapsed_ms:(fun _ -> 3, None)
       ~now_s:(fun () -> 10.0)
       ~setup_retry_runtime:(fun _ ->

@@ -132,8 +132,7 @@ val direct_no_progress_retry_decision :
 val run_direct_no_progress_retry_loop :
   keeper_name:string ->
   base_runtime:string ->
-  initial_runtime:string ->
-  initial_max_context:int ->
+  initial_execution:runtime_execution ->
   current_turn_phase_elapsed_ms:(float option -> int * int option) ->
   now_s:(unit -> float) ->
   setup_retry_runtime:
@@ -167,8 +166,11 @@ val run_direct_no_progress_retry_loop :
   unit ->
   ('a * int, Agent_sdk.Error.sdk_error) result
 (** Execute the direct-message no-progress retry loop with injected side
-    effects. Rotation is bounded only by the typed, finite runtime candidate
-    set; no numeric Keeper budget participates in admission or retry. *)
+    effects. The initial provider attempt receives the same typed runtime
+    execution record as every retry, so its context budget cannot diverge from
+    pre-dispatch resolution. Rotation is bounded only by the typed, finite
+    runtime candidate set; no numeric Keeper budget participates in admission
+    or retry. *)
 
 type turn_event_bus_summary = {
   correlation_id : string option;

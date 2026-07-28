@@ -1416,6 +1416,7 @@ let audit_approval_event
       ~id
       ~keeper_name
       ~tool_name
+      ?tool_call_id
       ?turn_id
       ?task_id
       ?goal_id
@@ -1446,6 +1447,7 @@ let audit_approval_event
          ; "id", `String id
          ; "keeper", `String keeper_name
          ; "tool", `String tool_name
+         ; "tool_call_id", Json_util.string_opt_to_json tool_call_id
          ; "decision", `String decision
          ; "turn_id", Json_util.int_opt_to_json turn_id
          ; "task_id", Json_util.string_opt_to_json task_id
@@ -1580,6 +1582,7 @@ let resolved_approval_json_of_audit_event json =
     ; "event", `String (Safe_ops.json_string ~default:"" "event" json)
     ; "keeper_name", `String (Safe_ops.json_string ~default:"" "keeper" json)
     ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
+    ; "tool_call_id", json_member_or_null "tool_call_id" json
     ; "decision", Json_util.string_opt_to_json_trimmed (Safe_ops.json_string_opt "decision" json)
     ; "decision_kind", Json_util.string_opt_to_json_trimmed (resolved_approval_decision_kind json)
     ; "decision_reason", json_member_or_null "decision_reason" json
@@ -1858,6 +1861,7 @@ let consume_approved_resolution
       ~id
       ~keeper_name:entry.keeper_name
       ~tool_name:entry.tool_name
+      ?tool_call_id:entry.tool_call_id
       ?turn_id:entry.turn_id
       ?task_id:entry.task_id
       ?goal_id:entry.goal_id
@@ -1985,6 +1989,7 @@ let record_pending (entry : pending_approval) =
     ~id:entry.id
     ~keeper_name:entry.keeper_name
     ~tool_name:entry.tool_name
+    ?tool_call_id:entry.tool_call_id
     ?turn_id:entry.turn_id
     ?task_id:entry.task_id
     ?goal_id:entry.goal_id
@@ -2986,6 +2991,7 @@ let resolve_entry
     ~id:entry.id
     ~keeper_name:entry.keeper_name
     ~tool_name:entry.tool_name
+    ?tool_call_id:entry.tool_call_id
     ?turn_id:entry.turn_id
     ?task_id:entry.task_id
     ?goal_id:entry.goal_id
@@ -3005,6 +3011,7 @@ let resolve_entry
                 [ "id", `String entry.id
                 ; "keeper_name", `String entry.keeper_name
                 ; "tool_name", `String entry.tool_name
+                ; "tool_call_id", Json_util.string_opt_to_json entry.tool_call_id
                 ; "decision", `String decision_str
                 ] )
           ])
@@ -3019,15 +3026,6 @@ let resolve_entry
       exn
 ;;
 
-(* [continuation_channel] stays in the dedup key while turn_id, task_id and the
-   goal fields do not. Those three are context that drifts across a retried
-   invocation, which is exactly what keying on [tool_call_id] exists to ignore.
-   The continuation channel is different in kind: it is where the result of the
-   approved effect is delivered. Not every provider emits a globally unique
-   tool-call id — a short per-response index ("call_0") repeats across turns —
-   so an id collision on the same keeper, operation and canonical input would
-   otherwise merge two genuinely distinct requests and deliver the second one's
-   result to the first one's channel. *)
 let pending_entry_matches
       (entry : pending_approval)
       ~base_path
@@ -3035,7 +3033,6 @@ let pending_entry_matches
       ~tool_name
       ~tool_call_id
       ~input_hash
-      ~continuation_channel
   =
   String.equal entry.audit_base_path base_path
   && String.equal entry.keeper_name keeper_name
@@ -3044,9 +3041,6 @@ let pending_entry_matches
       | None -> false
       | Some tool_call_id -> entry.tool_call_id = Some tool_call_id)
   && String.equal entry.input_hash input_hash
-  && Yojson.Safe.equal
-       (Keeper_continuation_channel.to_yojson entry.continuation_channel)
-       (Keeper_continuation_channel.to_yojson continuation_channel)
 ;;
 
 let pending_entry_owns_tool_call_id
@@ -3072,7 +3066,6 @@ let find_pending_id_in_map
       ~tool_name
       ~tool_call_id
       ~input_hash
-      ~continuation_channel
   =
   SMap.fold
     (fun id (entry : pending_approval) acc ->
@@ -3090,14 +3083,14 @@ let find_pending_id_in_map
          then
            if
              pending_entry_matches entry ~base_path ~keeper_name ~tool_name
-               ~tool_call_id ~input_hash ~continuation_channel
-           then Ok (Some id)
+               ~tool_call_id ~input_hash
+            then Ok (Some id)
            else
              (match tool_call_id with
               | Some tool_call_id ->
                 Error
                   (Printf.sprintf
-                     "tool_call_id %s is already pending for a different request (approval %s): the canonical input or the continuation channel differs"
+                     "tool_call_id %s is already pending for a different canonical request (approval %s)"
                      tool_call_id
                      id)
               | None -> Ok None)
@@ -3159,7 +3152,6 @@ let submit_pending
              ~tool_name
              ~tool_call_id
              ~input_hash
-             ~continuation_channel
          with
          | Error reason ->
            Error { path = pending_store_path ~base_path; reason }

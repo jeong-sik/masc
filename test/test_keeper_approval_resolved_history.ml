@@ -62,7 +62,8 @@ let append_row ~base_path ~ts (row : Yojson.Safe.t) =
 (* A resolved decision as the audit writer records it. [?ts_field:false] drops
    the timestamp to exercise the undated-row boundary. *)
 let seed_resolved ~base_path ~ts ~id ?(keeper = "rondo") ?(tool = "tool_execute")
-      ?(decision = "approve") ?(source = "auto_judge") ?(ts_field = true) ()
+      ?(decision = "approve") ?(source = "auto_judge") ?tool_call_id
+      ?(ts_field = true) ()
   =
   let fields =
     [ "event", `String "resolved"
@@ -72,6 +73,11 @@ let seed_resolved ~base_path ~ts ~id ?(keeper = "rondo") ?(tool = "tool_execute"
     ; "decision", `String decision
     ; "decision_source", `String source
     ]
+  in
+  let fields =
+    match tool_call_id with
+    | Some tool_call_id -> ("tool_call_id", `String tool_call_id) :: fields
+    | None -> fields
   in
   let fields = if ts_field then ("ts", `Float ts) :: fields else fields in
   append_row ~base_path ~ts (`Assoc fields)
@@ -274,6 +280,43 @@ let test_judge_evidence_passes_through base_path =
   check yojson "legacy exact_attempt is null" `Null (member "exact_attempt" (find "legacy"))
 ;;
 
+let test_resolved_identity_projects_to_history_and_timeline base_path =
+  let tool_call_id = "keeper-tool-call/v1|scope" in
+  seed_resolved ~base_path ~ts:(now -. minutes 5) ~id:"scoped" ~tool_call_id ();
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now () in
+  let resolved_row =
+    match history.resolved_rows with
+    | [ `Assoc fields ] -> fields
+    | rows -> failf "expected one resolved history row, got %d" (List.length rows)
+  in
+  let string_field fields name =
+    match List.assoc_opt name fields with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
+  in
+  check (option string)
+    "resolved history keeps the execution-scoped tool identity"
+    (Some tool_call_id)
+    (string_field resolved_row "tool_call_id");
+  let timeline =
+    Masc.Keeper_runtime_trust_timeline.approval_event_timeline_event
+      (`Assoc
+         [ "ts", `Float now
+         ; "event", `String "resolved"
+         ; "tool", `String "tool_execute"
+         ; "tool_call_id", `String tool_call_id
+         ])
+  in
+  match timeline with
+  | Some (`Assoc fields) ->
+    check (option string)
+      "trust timeline keeps the execution-scoped tool identity"
+      (Some tool_call_id)
+      (string_field fields "tool_call_id")
+  | Some _ -> fail "trust timeline event is not an object"
+  | None -> fail "approval event did not project to the trust timeline"
+;;
+
 let test_bounds_are_clamped base_path =
   let over = AQ.list_recent_resolved ~base_path ~now_ts:now ~limit:100_000 ~window_minutes:999_999 () in
   check int "limit clamped to the max" AQ.recent_resolved_max_limit over.resolved_limit;
@@ -311,6 +354,8 @@ let () =
             (with_store test_undated_decision_is_excluded)
         ; test_case "empty store is an empty page" `Quick
             (with_store test_empty_store_is_an_empty_page)
+        ; test_case "resolved identity projects to history and timeline" `Quick
+            (with_store test_resolved_identity_projects_to_history_and_timeline)
         ] )
     ; ( "judge evidence"
       , [ test_case "judge evidence passes through, legacy rows project null" `Quick

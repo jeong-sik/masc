@@ -212,6 +212,7 @@ val audit_approval_event :
   id:string ->
   keeper_name:string ->
   tool_name:string ->
+  ?tool_call_id:string ->
   ?turn_id:int ->
   ?task_id:string ->
   ?goal_id:string ->

@@ -28,6 +28,7 @@ val keeper_turn_id_of_json : Yojson.Safe.t -> int option
 val timeline_event_json :
   ?trace_id:string ->
   ?keeper_turn_id:int ->
+  ?tool_call_id:string ->
   ?task_id:string ->
   ?goal_ids:string list ->
   ?next_human_action:string ->

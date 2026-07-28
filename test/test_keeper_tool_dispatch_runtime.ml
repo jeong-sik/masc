@@ -970,12 +970,49 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
             ~base_path:config.base_path
         with
         | Ok [ entry ] ->
-          check (option string)
-            "OAS tool_use_id is persisted on the approval"
-            (Some "toolu-gate-identity")
-            entry.Masc.Keeper_approval_queue.tool_call_id
+          (match entry.Masc.Keeper_approval_queue.tool_call_id with
+           | Some identity ->
+             check bool
+               "the raw OAS tool_use_id is not used as a durable identity"
+               true
+               (not (String.equal identity "toolu-gate-identity"))
+           | None -> fail "OAS execution occurrence identity was not persisted")
         | Ok entries ->
           failf "expected one pending approval, got %d" (List.length entries)
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.storage_error_to_string error));
+       let later_invocation =
+         Agent_sdk.Tool_contract.Invocation.create
+           ~tool_use_id:"toolu-gate-identity"
+           ~turn:18
+           ~completion:Agent_sdk.Tool_contract.Continue_after_success
+           ~schedule:
+             { planned_index = 0
+             ; batch_index = 0
+             ; batch_size = 1
+             ; execution_mode = Agent_sdk.Tool_contract.Serial
+             }
+       in
+       (match handler ~oas_invocation:later_invocation input with
+        | Tool_result.Deferred _ -> ()
+        | Tool_result.Completed _ | Tool_result.Failed _ ->
+          fail "later OAS occurrence did not remain Gate-deferred");
+       (match
+          Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+            ~base_path:config.base_path
+        with
+        | Ok entries ->
+          let identities =
+            entries
+            |> List.filter_map
+                 (fun (entry : Masc.Keeper_approval_queue.pending_approval) ->
+                    entry.tool_call_id)
+            |> List.sort_uniq String.compare
+          in
+          check int
+            "a reused raw provider ID in a later OAS turn creates a new approval"
+            2
+            (List.length identities)
         | Error error ->
           fail (Masc.Keeper_approval_queue.storage_error_to_string error));
        (match Masc.Tool_bridge.to_oas_typed_result masc_result with

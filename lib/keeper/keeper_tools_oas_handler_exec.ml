@@ -14,36 +14,43 @@ let producer_payload ~raw = function
   | None -> `String raw
 ;;
 
-(* The provider's tool-use identity is available at the OAS boundary, before
-   the producer runtime evaluates the Gate. Carry it through the existing
-   causal-context channel so every Gate-backed tool receives the same durable
-   identity without teaching individual tool handlers about OAS. *)
-let gate_context_for_invocation ~gate_context ~oas_invocation =
+(* OAS documents [tool_use_id] as batch-scoped, not history-global. Scope it
+   with MASC's durable execution coordinates at the one OAS boundary rather
+   than teaching each Gate-backed producer about provider semantics. *)
+let gate_context_for_invocation
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~gate_context
+      ~oas_invocation
+  =
   match oas_invocation with
   | None -> gate_context
   | Some invocation ->
     let raw_tool_call_id =
       Agent_sdk.Tool_contract.Invocation.tool_use_id invocation
     in
-    let tool_call_id =
-      if String.trim raw_tool_call_id = "" then None else Some raw_tool_call_id
-    in
-    (match tool_call_id, gate_context with
-     | None, None -> None
-     | _ ->
-       Some
-         (fun () ->
-           let base_context =
-             match gate_context with
-             | Some current -> current ()
-             | None ->
-               { Keeper_gate.turn_id =
-                   Some (Agent_sdk.Tool_contract.Invocation.turn invocation)
-               ; tool_call_id = None
-               ; snapshot = `Assoc []
-               }
-           in
-           { base_context with tool_call_id }))
+    Some
+      (fun () ->
+         let base_context =
+           match gate_context with
+           | Some current -> current ()
+           | None ->
+             { Keeper_gate.turn_id = None
+             ; tool_call_id = None
+             ; snapshot = `Assoc []
+             }
+         in
+         let tool_call_id =
+           if String.trim raw_tool_call_id = ""
+           then None
+           else
+             Some
+               (Keeper_tool_call_identity.create
+                  ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                  ?keeper_turn_id:base_context.turn_id
+                  invocation
+                |> Keeper_tool_call_identity.to_string)
+         in
+         { base_context with tool_call_id })
 ;;
 
 let execute_with_observers
@@ -71,7 +78,7 @@ let execute_with_observers
   let t0 = Time_compat.now () in
   let invocation_fields = oas_invocation_fields oas_invocation in
   let dispatch_gate_context =
-    gate_context_for_invocation ~gate_context ~oas_invocation
+    gate_context_for_invocation ~meta ~gate_context ~oas_invocation
   in
   try
     let result, duration_ms =

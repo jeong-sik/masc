@@ -1,0 +1,32 @@
+type enqueue_outcome =
+  | Not_ready
+  | No_keeper_target of { goal_id : string }
+  | Enqueued of { goal_id : string; keeper_name : string }
+  | Already_present of { goal_id : string; keeper_name : string }
+  | Enqueue_failed of { goal_id : string; keeper_name : string; detail : string }
+
+type reconciliation_summary = {
+  ready_count : int;
+  enqueued_count : int;
+  already_present_count : int;
+  unresolved_count : int;
+  failed_count : int;
+}
+
+val enqueue_if_ready :
+  config:Workspace.config ->
+  completing_agent_name:string ->
+  task_id:string ->
+  enqueue_outcome
+(** Re-read canonical Goal/Task state after a terminal Task commit, durably
+    enqueue one typed reconciliation stimulus, then wake its Keeper. The
+    completing Keeper is preferred; an external completion may target the sole
+    durable Keeper whose [active_goal_ids] contains the Goal. The function
+    never mutates Goal phase. *)
+
+val reconcile_startup :
+  config:Workspace.config -> reconciliation_summary
+(** Re-scan canonical Goal, Task, and link state and atomically restore missing
+    reconciliation stimuli. Safe to call on every existing supervisor
+    reconciliation pass: accounted stimuli are reported as already present,
+    storage failures remain visible and retryable, and no Goal state changes. *)

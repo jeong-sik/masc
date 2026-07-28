@@ -156,6 +156,8 @@ let board_event_kind_label = function
   | Keeper_world_observation.Schedule_due -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
   | Keeper_world_observation.Goal_assigned -> "goal_assigned"
+  | Keeper_world_observation.Goal_reconciliation_ready ->
+    "goal_reconciliation_ready"
 ;;
 
 let quote_prompt_field value =
@@ -200,7 +202,8 @@ let board_event_note = function
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due
-  | Keeper_world_observation.Goal_assigned -> ""
+  | Keeper_world_observation.Goal_assigned
+  | Keeper_world_observation.Goal_reconciliation_ready -> ""
 ;;
 
 let format_board_event_text
@@ -304,6 +307,38 @@ let format_scheduled_automation_summary
          Schedule wakes the Keeper lane and grants no effect authority.\n");
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
+;;
+
+let format_scheduled_wake_observations
+    (events : Keeper_world_observation.pending_board_event list) =
+  if events = []
+  then None
+  else (
+    let ubuf = Buffer.create 512 in
+    Buffer.add_string ubuf
+      (Printf.sprintf "### Scheduled Wake (%d due)\n" (List.length events));
+    Buffer.add_string ubuf
+      "Rows below are scheduled work requests, not Board posts. Execute the \
+       requested work with the visible capabilities. The occurrence_id is \
+       correlation metadata only: never pass it to a Board tool. External \
+       effects still cross the Gate.\n";
+    List.iter
+      (fun (event : Keeper_world_observation.pending_board_event) ->
+         Buffer.add_string ubuf
+           (Printf.sprintf
+              "- occurrence_id=%s title=%s message=%s\n"
+              event.post_id
+              (quote_prompt_field event.title)
+              (quote_prompt_field event.preview)))
+      events;
+    Buffer.add_char ubuf '\n';
+    Some (Buffer.contents ubuf))
+;;
+
+let combine_prompt_sections sections =
+  match List.filter_map Fun.id sections with
+  | [] -> None
+  | values -> Some (String.concat "" values)
 ;;
 
 (* Every Board row crosses one neutral observation boundary. Author, post kind,
@@ -774,11 +809,18 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ^ String.concat "\n" autonomous_trigger
           ^ "\n")
       else None
-    (* 5. Scheduled automation — durable MASC schedule store, not OAS/provider
-       state. Shows only identifiers and execution state so payload content does
-       not become trusted instruction text. *)
+    (* 5. Scheduled automation — durable MASC schedule store plus the exact
+       message carried by a consumed Schedule_due stimulus. The request is work
+       context, while effect authority remains exclusively Gate-owned. *)
     | Keeper_context_layers.Scheduled_automation ->
-      format_scheduled_automation_summary observation.scheduled_automation
+      combine_prompt_sections
+        [ format_scheduled_automation_summary observation.scheduled_automation
+        ; format_scheduled_wake_observations
+            (List.filter
+               (fun event ->
+                  not (Keeper_world_observation.is_board_activity_event event))
+               observation.pending_board_events)
+        ]
     (* Pending lane rows are rendered once in exact source order. Mention and
        scope remain typed for wake metrics, but splitting them into two prompt
        sections would reorder interleaved arrivals. *)
@@ -809,13 +851,18 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
        one neutral observation renderer. Exact mention remains routing context;
        it never promotes Board content to instruction authority. *)
     | Keeper_context_layers.Board_activity ->
-      if observation.pending_board_events <> [] then (
+      let board_events =
+        List.filter
+          Keeper_world_observation.is_board_activity_event
+          observation.pending_board_events
+      in
+      if board_events <> [] then (
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf
           (Printf.sprintf "### Board Activity (%d new)\n"
-             (List.length observation.pending_board_events));
+             (List.length board_events));
         Buffer.add_string ubuf
-          (render_board_observations observation.pending_board_events);
+          (render_board_observations board_events);
         Buffer.add_string ubuf "\n\n";
         Some (Buffer.contents ubuf))
       else None

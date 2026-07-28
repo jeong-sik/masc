@@ -37,6 +37,8 @@ module Observations = Keeper_heartbeat_loop_observations
 
 type cycle_outcome =
   | Completed of keeper_meta
+  | Checkpointed of keeper_meta
+  | Input_required of keeper_meta
   | Cancelled of keeper_meta
   | Skipped of keeper_meta
   | Failed of
@@ -62,6 +64,8 @@ type cycle_outcome =
 
 let rec meta = function
   | Completed meta
+  | Checkpointed meta
+  | Input_required meta
   | Cancelled meta
   | Skipped meta
   | Failed { meta; _ }
@@ -75,22 +79,25 @@ let rec meta = function
 let rec turn_failure = function
   | Failed { failure; _ } -> Some failure
   | Manual_compaction_applied { followup; _ } -> turn_failure followup
-  | Completed _ | Cancelled _ | Skipped _ | Busy _ | Manual_compaction_failed _
-  | Manual_compaction_not_applied _ -> None
+  | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
+  | Busy _ | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
+    None
 ;;
 
 let manual_compaction_followup_failure = function
   | Manual_compaction_applied { followup; _ } -> turn_failure followup
-  | Completed _ | Cancelled _ | Skipped _ | Failed _ | Busy _
-  | Manual_compaction_failed _
-  | Manual_compaction_not_applied _ -> None
+  | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
+  | Failed _ | Busy _ | Manual_compaction_failed _ | Manual_compaction_not_applied _
+    ->
+    None
 ;;
 
 let rec deferred_runtime_lane = function
   | Failed { failure; _ } -> failure.Keeper_unified_turn.deferred_runtime_lane
   | Manual_compaction_applied { followup; _ } -> deferred_runtime_lane followup
-  | Completed _ | Cancelled _ | Skipped _ | Busy _ | Manual_compaction_failed _
-  | Manual_compaction_not_applied _ -> None
+  | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
+  | Busy _ | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
+    None
 ;;
 
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
@@ -105,6 +112,7 @@ let run_keeper_cycle_admitted
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
+      ?active_source_stimuli
       ~ctx
       ~meta_after_triage
       ~stop
@@ -130,6 +138,7 @@ let run_keeper_cycle_admitted
         ~channel:turn_decision.channel
         ?hitl_resolution
         ?continuation_delivery_channel
+        ?active_source_stimuli
         (* RFC-0315: pass the whole decision, not just its channel — the
            prompt renders the verdict reasons so the turn knows why it woke. *)
         ~turn_decision
@@ -194,6 +203,8 @@ let run_keeper_cycle_admitted
     in
     Failed { meta; failure }
   | Ok (Keeper_unified_turn.Turn_completed updated) -> Completed updated
+  | Ok (Keeper_unified_turn.Turn_checkpointed updated) -> Checkpointed updated
+  | Ok (Keeper_unified_turn.Turn_input_required updated) -> Input_required updated
   | Ok (Keeper_unified_turn.Turn_cancelled meta) -> Cancelled meta
   | Ok (Keeper_unified_turn.Turn_skipped meta) -> Skipped meta
 ;;
@@ -207,6 +218,7 @@ let run_keeper_cycle_with
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
+      ?active_source_stimuli
       ~ctx
       ~meta_after_triage
       ~stop
@@ -268,6 +280,7 @@ let run_keeper_cycle_with
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
+      ?active_source_stimuli
       ()
   in
   match manual_compaction_requested with
@@ -318,6 +331,7 @@ let run_keeper_cycle
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
+      ?active_source_stimuli
       ~ctx
       ~meta_after_triage
       ~stop
@@ -352,6 +366,7 @@ run_keeper_cycle_with
     ?event_bus
     ?hitl_resolution
     ?continuation_delivery_channel
+    ?active_source_stimuli
     ~ctx
     ~meta_after_triage
     ~stop

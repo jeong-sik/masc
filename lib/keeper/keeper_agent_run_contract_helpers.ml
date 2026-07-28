@@ -28,7 +28,8 @@ let observed_completion_evidence
   match stop_reason with
   | Runtime_agent.InputRequired _
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
     Keeper_execution_receipt.Completion_observation_unknown
   | Runtime_agent.Completed ->
     if actual_keeper_tool_names <> []

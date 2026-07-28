@@ -402,6 +402,64 @@ let test_startup_recovery_returns_only_running_schedule_to_due () =
     (read_state config).version
 ;;
 
+let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"clock-rollback"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:300.0 ~schedule_id:request.schedule_id);
+  let advanced =
+    match accept_running config ~now:301.0 ~schedule_id:request.schedule_id () with
+    | Ok stored -> stored
+    | Error err -> fail (store_error_to_string err)
+  in
+  check_status "older occurrence was dispatched" Scheduled advanced.status;
+  ignore (refresh_due config ~now:advanced.due_at);
+  let current =
+    match start_due_candidate config ~now:100.0 ~schedule_id:request.schedule_id with
+    | Ok stored -> stored
+    | Error err -> fail (store_error_to_string err)
+  in
+  check_status "clock-rollback occurrence is running" Running current.status;
+  (match recover_running_on_startup config ~now:101.0 with
+   | Ok (_, recovered) ->
+     check int "exact current occurrence recovered" 1 recovered
+   | Error err -> fail (store_error_to_string err));
+  let state = read_state config in
+  (match get_schedule config ~schedule_id:request.schedule_id with
+   | Some stored -> check_status "current occurrence returned to due" Due stored.status
+   | None -> fail "clock-rollback schedule missing");
+  let digest = payload_digest request.payload in
+  (match
+     execution_for_occurrence
+       state
+       ~schedule_id:request.schedule_id
+       ~due_at:advanced.due_at
+       ~payload_digest:digest
+   with
+   | Some execution ->
+     check string "newer prepended occurrence failed" "failed"
+       (execution_status_to_string execution.status)
+   | None -> fail "current clock-rollback execution missing");
+  match
+    execution_for_occurrence
+      state
+      ~schedule_id:request.schedule_id
+      ~due_at:request.due_at
+      ~payload_digest:digest
+  with
+  | Some execution ->
+    check string "older dispatched occurrence remains dispatched" "dispatched"
+      (execution_status_to_string execution.status)
+  | None -> fail "older dispatched execution missing"
+;;
+
 let test_startup_recovery_refuses_corrupt_ledger () =
   with_workspace
   @@ fun config ->
@@ -479,6 +537,192 @@ let test_start_and_complete_persist_execution_record () =
         | Some (`String kind) -> check string "detail kind" "test.done" kind
         | _ -> fail "detail kind missing")
      | _ -> fail "detail missing")
+;;
+
+let test_accept_running_persists_unfinished_dispatched_execution () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"accepted-1" () in
+  ignore (insert_ok config request);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match
+     accept_running config ~now:203.0 ~schedule_id:request.schedule_id
+       ~detail:(`Assoc [ "kind", `String "consumer.accepted" ])
+       ()
+   with
+   | Ok stored -> check_status "one-shot remains running" Running stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match
+     last_execution_for_schedule
+       (read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "accepted execution missing"
+   | Some execution ->
+     check string "accepted execution is dispatched" "dispatched"
+       (execution_status_to_string execution.status);
+     check (option (float 0.001)) "accepted execution is unfinished" None
+       execution.finished_at);
+  (match recover_running_on_startup config ~now:204.0 with
+   | Ok (_, recovered) ->
+     check int "accepted work is not redispatched after restart" 0 recovered
+   | Error err -> fail (store_error_to_string err))
+;;
+
+let test_dispatched_one_shot_completes_by_exact_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"accepted-complete-1" () in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
+  let digest = payload_digest request.payload in
+  (match
+     complete_dispatched_occurrence
+       config
+       ~now:204.0
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~payload_digest:digest
+       ~detail:(`Assoc [ "kind", `String "keeper.turn_completed" ])
+       ()
+   with
+   | Ok stored -> check_status "one-shot terminal success" Succeeded stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match
+     execution_for_occurrence
+       (read_state config)
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~payload_digest:digest
+   with
+   | Some execution ->
+     check string "exact execution succeeded" "succeeded"
+       (execution_status_to_string execution.status);
+     check (option (float 0.001)) "exact execution finished" (Some 204.0)
+       execution.finished_at
+   | None -> fail "exact execution missing");
+  (match
+     complete_dispatched_occurrence
+       config
+       ~now:205.0
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~payload_digest:digest
+       ()
+   with
+   | Ok stored ->
+     check_status "duplicate completion is idempotent" Succeeded stored.status
+   | Error err -> fail (store_error_to_string err))
+;;
+
+let test_recurring_dispatched_completion_preserves_next_occurrence () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"accepted-recurring-1"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  let accepted =
+    match accept_running config ~now:203.0 ~schedule_id:request.schedule_id () with
+    | Ok stored -> stored
+    | Error err -> fail (store_error_to_string err)
+  in
+  check_status "recurring advanced after acceptance" Scheduled accepted.status;
+  let next_due_at = accepted.due_at in
+  let digest = payload_digest request.payload in
+  (match
+     complete_dispatched_occurrence
+       config
+       ~now:204.0
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~payload_digest:digest
+       ()
+   with
+   | Ok stored ->
+     check_status "recurring remains scheduled" Scheduled stored.status;
+     check (float 0.001) "next occurrence retained" next_due_at stored.due_at
+   | Error err -> fail (store_error_to_string err));
+  match
+    execution_for_occurrence
+      (read_state config)
+      ~schedule_id:request.schedule_id
+      ~due_at:request.due_at
+      ~payload_digest:digest
+  with
+  | Some execution ->
+    check string "prior recurring occurrence succeeded" "succeeded"
+      (execution_status_to_string execution.status)
+  | None -> fail "recurring execution missing"
+;;
+
+let test_completion_before_acceptance_is_idempotent () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"accept-race-1" () in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  let digest = payload_digest request.payload in
+  ignore
+    (complete_dispatched_occurrence
+       config
+       ~now:202.5
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~payload_digest:digest
+       ());
+  match accept_running config ~now:203.0 ~schedule_id:request.schedule_id () with
+  | Ok stored ->
+    check_status "late acceptance preserves terminal outcome" Succeeded stored.status
+  | Error err -> fail (store_error_to_string err)
+;;
+
+let test_dispatched_one_shot_failure_is_terminal () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"accepted-fail-1" () in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id);
+  ignore (accept_running config ~now:203.0 ~schedule_id:request.schedule_id ());
+  let digest = payload_digest request.payload in
+  (match
+     fail_dispatched_occurrence
+       config
+       ~now:204.0
+       ~schedule_id:request.schedule_id
+       ~due_at:request.due_at
+       ~payload_digest:digest
+       ~error:"keeper turn failed"
+   with
+   | Ok stored -> check_status "one-shot terminal failure" Failed stored.status
+   | Error err -> fail (store_error_to_string err));
+  match
+    execution_for_occurrence
+      (read_state config)
+      ~schedule_id:request.schedule_id
+      ~due_at:request.due_at
+      ~payload_digest:digest
+  with
+  | Some execution ->
+    check string "exact execution failed" "failed"
+      (execution_status_to_string execution.status);
+    check (option string) "failure retained" (Some "keeper turn failed")
+      execution.error
+  | None -> fail "failed exact execution missing"
 ;;
 
 let test_fail_due_candidate_records_failed_execution () =
@@ -714,8 +958,20 @@ let () =
             test_reschedule_due_cron_advances_to_next_match;
           test_case "start and complete persist execution record" `Quick
             test_start_and_complete_persist_execution_record;
+          test_case "accepted work remains unfinished across restart" `Quick
+            test_accept_running_persists_unfinished_dispatched_execution;
+          test_case "accepted one-shot completes by exact occurrence" `Quick
+            test_dispatched_one_shot_completes_by_exact_occurrence;
+          test_case "recurring completion preserves next occurrence" `Quick
+            test_recurring_dispatched_completion_preserves_next_occurrence;
+          test_case "completion before acceptance is idempotent" `Quick
+            test_completion_before_acceptance_is_idempotent;
+          test_case "accepted one-shot failure is terminal" `Quick
+            test_dispatched_one_shot_failure_is_terminal;
           test_case "startup recovery returns only running schedule to due" `Quick
             test_startup_recovery_returns_only_running_schedule_to_due;
+          test_case "startup recovery ignores wall-clock rollback" `Quick
+            test_startup_recovery_uses_exact_occurrence_across_clock_rollback;
           test_case "fail due candidate records failed execution" `Quick
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring occurrences remain dispatchable" `Quick

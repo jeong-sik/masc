@@ -27,6 +27,7 @@ type pending_board_event_kind =
   | Schedule_due
   | External_attention
   | Goal_assigned
+  | Goal_reconciliation_ready
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -44,6 +45,18 @@ type pending_board_event =
   ; latest_external_author : string option
   ; latest_external_preview : string option
   }
+
+let is_board_activity_event (event : pending_board_event) =
+  match event.event_kind with
+  | Schedule_due -> false
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed _
+  | Fusion_completed
+  | Bg_completed
+  | External_attention
+  | Goal_assigned -> true
+;;
 
 type scheduled_automation_item =
   { schedule_id : string
@@ -492,7 +505,7 @@ let pending_board_event_of_scheduled_wake
   ; post_id
   ; author = scheduled_automation_actor
   ; title
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len sw.message
+  ; preview = sw.message
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -588,6 +601,36 @@ let pending_board_event_of_goal_assignment
   }
 ;;
 
+let pending_board_event_of_goal_reconciliation_ready
+      ~meta
+      ~(arrived_at : float)
+      (ready : Keeper_event_queue.goal_reconciliation_ready)
+  : pending_board_event
+  =
+  { event_kind = Goal_reconciliation_ready
+  ; post_id = Keeper_event_queue.goal_reconciliation_ready_post_id ready
+  ; author = "masc"
+  ; title = Printf.sprintf "Goal reconciliation ready: %s" ready.gr_goal_id
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Task %s made every linked Task terminal. Re-read Goal and Task SSOT; \
+            choose masc_goal_transition request_complete or block, or create a \
+            follow-up Task. Do not infer Goal completion from task counts."
+           ready.gr_triggering_task_id)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = true
+  ; matched_targets = [ meta.name; ready.gr_goal_id ]
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
@@ -631,6 +674,13 @@ let pending_board_event_of_stimulus
             ~meta
             ~arrived_at:stimulus.arrived_at
             ga))
+  | Keeper_event_queue.Goal_reconciliation_ready ready ->
+    Ok
+      (Some
+         (pending_board_event_of_goal_reconciliation_ready
+            ~meta
+            ~arrived_at:stimulus.arrived_at
+            ready))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
@@ -1085,6 +1135,10 @@ let actionable_signal_present (observation : world_observation) =
   || observation.scheduled_automation.due_ready_count > 0
 ;;
 
+let has_pending_board_activity (observation : world_observation) =
+  List.exists is_board_activity_event observation.pending_board_events
+;;
+
 let keeper_cycle_decision
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
@@ -1113,7 +1167,7 @@ let keeper_cycle_decision
     [ (if Message_scope.has_kind Message_scope.Mention observation.pending_messages
        then Some Mention_pending
        else None)
-    ; (if observation.pending_board_events <> [] then Some Board_event_pending else None)
+    ; (if has_pending_board_activity observation then Some Board_event_pending else None)
     ; (if Message_scope.has_kind Message_scope.Scope observation.pending_messages
        then Some Scope_message_pending
        else None)

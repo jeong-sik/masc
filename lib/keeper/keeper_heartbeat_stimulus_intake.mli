@@ -76,6 +76,19 @@ val consume_board_stimulus_batch
   -> Keeper_event_queue.stimulus list
   -> Keeper_world_observation.pending_board_event list
 
+type terminal_schedule_reconciliation =
+  | Not_terminal_schedule
+  | Terminal_schedule_acknowledged
+
+val reconcile_terminal_schedule_selection
+  :  config:Workspace_utils.config
+  -> keeper_name:string
+  -> Keeper_registry_event_queue.pending_selection
+  -> (terminal_schedule_reconciliation, string) result
+(** Atomically acknowledges an exact schedule stimulus only when its execution
+    is terminal. The schedule ledger remains locked through the queue ACK, so a
+    same-occurrence retry cannot start between the observation and deletion. *)
+
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
     drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges

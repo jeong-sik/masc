@@ -40,16 +40,16 @@ let make_docker_meta ~name : Keeper_meta_contract.keeper_meta =
     `Assoc
       [
         ("name", `String name);
-        ("agent_name", `String ("agent-" ^ name));
+        ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String ("trace-" ^ name));
         ("allowed_paths", `List [ `String "*" ]);
-        ( "sandbox_profile"
-        , `String
-            (Keeper_types_profile_sandbox.sandbox_profile_to_string Keeper_types_profile_sandbox.Docker) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta ->
+    { meta with
+      sandbox_profile = Keeper_types_profile_sandbox.Docker
+    }
   | Error e -> Alcotest.fail e
 
 let test_container_path_translation_under_sandbox () =
@@ -92,7 +92,41 @@ let test_container_path_translation_under_sandbox () =
         (Astring.String.is_infix ~affix:container_cwd json_str);
       check string "operator_host accessor returns the host_cwd"
         host_cwd
-        (Keeper_cwd_response.operator_host cwd_response))
+        (Keeper_cwd_response.operator_host cwd_response);
+      let explicit_cwd =
+        Keeper_sandbox_repo_path.normalize_path
+          (Filename.concat base "explicit-local-allowed")
+      in
+      Unix.mkdir explicit_cwd 0o755;
+      let local_meta =
+        { (make_docker_meta ~name:"local-explicit-path") with
+          sandbox_profile = Keeper_types_profile_sandbox.Local
+        ; allowed_paths = [ explicit_cwd ]
+        }
+      in
+      let raw =
+        Keeper_tool_command_runtime.handle_tool_execute
+          ~turn_sandbox_factory:None
+          ~config
+          ~meta:local_meta
+          ~args:
+            (`Assoc
+              [ "argv", `List []
+              ; "cwd", `String explicit_cwd
+              ])
+          ()
+      in
+      let response = Yojson.Safe.from_string raw in
+      let open Yojson.Safe.Util in
+      check string "Local explicit cwd remains visible at top level"
+        explicit_cwd
+        (response |> member "cwd" |> to_string);
+      check string "Local explicit cwd remains visible in execution_location"
+        explicit_cwd
+        (response
+         |> member "execution_location"
+         |> member "cwd"
+         |> to_string))
 
 let test_typed_execute_response_cwd_uses_container_path () =
   Eio_main.run @@ fun _env ->
@@ -106,32 +140,178 @@ let test_typed_execute_response_cwd_uses_container_path () =
       cleanup_dir base)
     (fun () ->
        let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-       let host_cwd =
-         Filename.concat host_root "repos/masc/.worktrees/task-cwd-pin"
-       in
-       let response_cwd =
-         Keeper_tool_execute_runtime.For_testing.typed_execute_response_cwd_json
-           ~turn_sandbox_factory:(Some factory)
-           ~cwd:host_cwd
-           ~sandbox_extra_fields:
-             [
-               "requested_sandbox", `String "docker";
-               "via", `String "docker";
-               "sandbox_profile", `String "docker";
-             ]
-       in
-       let json_str = Yojson.Safe.to_string response_cwd in
-       check bool "typed Execute cwd JSON does NOT contain host base" false
-         (Astring.String.is_infix ~affix:base json_str);
+      let host_cwd =
+        Filename.concat host_root "repos/masc/.worktrees/task-cwd-pin"
+      in
+      let visible_root =
+        Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+      in
+      let prompt =
+        Keeper_run_context.build_base_system_prompt
+          ~config
+          ~profile_defaults:
+            Keeper_types_profile_defaults.empty_keeper_profile_defaults
+          ~meta
+      in
+      check bool "Docker prompt does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base prompt);
+      check bool "Docker prompt contains Keeper-visible sandbox root" true
+        (Astring.String.is_infix ~affix:visible_root prompt);
+      check bool "Docker prompt recommends relative argv operands" true
+        (Astring.String.is_infix
+           ~affix:"Prefer relative argv path operands"
+           prompt);
+      check bool "Docker prompt rejects host absolute paths" true
+        (Astring.String.is_infix
+           ~affix:"host absolute paths are unavailable"
+           prompt);
+      let response_fields =
+        Keeper_tool_execute_runtime.For_testing.model_execute_location_fields
+          ~config
+          ~meta
+          ~args:(`Assoc [ "argv", `List [ `String "find"; `String "." ] ])
+          ~cwd:host_cwd
+      in
+      let full_response = `Assoc response_fields in
+      let json_str = Yojson.Safe.to_string full_response in
+      check bool "typed Execute cwd JSON does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base json_str);
        check bool "typed Execute cwd JSON does NOT contain host cwd" false
          (Astring.String.is_infix ~affix:host_cwd json_str);
-       match response_cwd with
-       | `String cwd ->
-         check bool
-           "typed Execute cwd is rooted at /home/keeper/playground"
-           true
-           (Astring.String.is_prefix ~affix:"/home/keeper/playground" cwd)
-       | _ -> fail "typed Execute cwd response should serialize as a string")
+      let response_cwd =
+        full_response
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      check string
+        "typed Execute cwd is projected from the host sandbox root"
+        (Filename.concat visible_root "repos/masc/.worktrees/task-cwd-pin")
+        response_cwd;
+      let error_raw =
+        Keeper_tool_command_runtime.handle_tool_execute
+          ~turn_sandbox_factory:(Some factory)
+          ~config
+          ~meta
+          ~args:(`Assoc [ "argv", `List []; "cwd", `String "." ])
+          ()
+      in
+      check bool "Docker validation error does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base error_raw);
+      let error_response = Yojson.Safe.from_string error_raw in
+      let error_cwd =
+        error_response
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      let error_location_cwd =
+        error_response
+        |> Yojson.Safe.Util.member "execution_location"
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      check string "Docker error top-level cwd uses visible root"
+        visible_root
+        error_cwd;
+      check string "Docker error location cwd matches top-level cwd"
+        error_cwd
+        error_location_cwd;
+      let missing_relative = "missing-relative" in
+      let missing_raw =
+        Keeper_tool_command_runtime.handle_tool_execute
+          ~turn_sandbox_factory:(Some factory)
+          ~config
+          ~meta
+          ~args:
+            (`Assoc
+              [ "argv", `List [ `String "pwd" ]
+              ; "cwd", `String missing_relative
+              ])
+          ()
+      in
+      check bool "Docker missing-cwd error does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base missing_raw);
+      let missing_response = Yojson.Safe.from_string missing_raw in
+      let missing_code =
+        missing_response
+        |> Yojson.Safe.Util.member "code"
+        |> Yojson.Safe.Util.to_string
+      in
+      let missing_error =
+        missing_response
+        |> Yojson.Safe.Util.member "error"
+        |> Yojson.Safe.Util.to_string
+      in
+      let missing_cwd =
+        missing_response
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      let missing_location_cwd =
+        missing_response
+        |> Yojson.Safe.Util.member "execution_location"
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      check string "Docker missing-cwd code is actionable"
+        "cwd_missing"
+        missing_code;
+      check string "Docker missing-cwd top-level path is visible"
+        (Filename.concat visible_root missing_relative)
+        missing_cwd;
+      check string "Docker missing-cwd location matches top-level cwd"
+        missing_cwd
+        missing_location_cwd;
+      let not_directory = "not-directory" in
+      let host_file = Filename.concat host_root not_directory in
+      let oc = open_out host_file in
+      close_out oc;
+      let not_directory_raw =
+        Keeper_tool_command_runtime.handle_tool_execute
+          ~turn_sandbox_factory:(Some factory)
+          ~config
+          ~meta
+          ~args:
+            (`Assoc
+              [ "argv", `List [ `String "pwd" ]
+              ; "cwd", `String not_directory
+              ])
+          ()
+      in
+      check bool "Docker non-directory error does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base not_directory_raw);
+      let not_directory_response = Yojson.Safe.from_string not_directory_raw in
+      let not_directory_code =
+        not_directory_response
+        |> Yojson.Safe.Util.member "code"
+        |> Yojson.Safe.Util.to_string
+      in
+      let not_directory_error =
+        not_directory_response
+        |> Yojson.Safe.Util.member "error"
+        |> Yojson.Safe.Util.to_string
+      in
+      let not_directory_cwd =
+        not_directory_response
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      let not_directory_location_cwd =
+        not_directory_response
+        |> Yojson.Safe.Util.member "execution_location"
+        |> Yojson.Safe.Util.member "cwd"
+        |> Yojson.Safe.Util.to_string
+      in
+      check string "Docker non-directory code is actionable"
+        "cwd_not_directory"
+        not_directory_code;
+      check bool "Docker cwd errors keep distinct public messages" false
+        (String.equal missing_error not_directory_error);
+      check string "Docker non-directory top-level path is visible"
+        (Filename.concat visible_root not_directory)
+        not_directory_cwd;
+      check string "Docker non-directory location matches top-level cwd"
+        not_directory_cwd
+        not_directory_location_cwd)
 
 let test_retired_path_jail_env_detection () =
   let configured value =

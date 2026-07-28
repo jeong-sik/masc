@@ -123,7 +123,7 @@ let replace_json_field key value = function
 let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
   let dispatch_result =
     Option.value
-      ~default:(Ok (`Assoc [ "ok", `Bool true ]))
+      ~default:(Ok (Work_completed (`Assoc [ "ok", `Bool true ])))
       dispatch_result
   in
   { accepts = (fun _request -> accept)
@@ -192,6 +192,89 @@ let test_tick_dispatches_due_candidate_to_success () =
          | Some (`Bool true) -> ()
          | _ -> fail "execution detail missing ok=true")
       | _ -> fail "execution detail missing"))
+;;
+
+let test_tick_records_async_acceptance_without_claiming_work_success () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request = create_ok ~schedule_id:"dispatch-accepted-1" config in
+  let detail = `Assoc [ "kind", `String "consumer.work_accepted" ] in
+  let result =
+    tick_ok config ~now:201.0
+      ~consumer:
+        (accepting_consumer
+           ~dispatch_result:(Ok (Work_accepted detail))
+           calls)
+  in
+  check_dispatch_status "dispatch itself succeeded" Dispatch_succeeded
+    (List.hd result.dispatches).status;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "accepted schedule missing"
+   | Some stored ->
+     check string "one-shot remains running" "running"
+       (schedule_status_to_string stored.status));
+  (match
+     Schedule_store.last_execution_for_schedule
+       (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "accepted execution missing"
+   | Some execution ->
+     check string "accepted work is not succeeded" "dispatched"
+       (Schedule_domain.execution_status_to_string execution.status);
+     check (option (float 0.001)) "accepted work has no finish time" None
+       execution.finished_at);
+  (match Schedule_store.recover_running_on_startup config ~now:202.0 with
+   | Ok (_, recovered) ->
+     check int "restart does not duplicate durably accepted work" 0 recovered
+   | Error err -> fail (Schedule_store.store_error_to_string err))
+;;
+
+let test_tick_records_terminal_work_failure_for_exact_recurrence () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request =
+    create_ok
+      ~schedule_id:"dispatch-work-failed"
+      ~recurrence:(Interval { interval_sec = 60 })
+      config
+  in
+  let detail = `Assoc [ "kind", `String "consumer.work_failed" ] in
+  let result =
+    tick_ok
+      config
+      ~now:201.0
+      ~consumer:
+        (accepting_consumer
+           ~dispatch_result:
+             (Ok (Work_failed { error = "operator cancelled occurrence"; detail }))
+           calls)
+  in
+  let dispatch = List.hd result.dispatches in
+  check_dispatch_status "terminal work failure is visible" Dispatch_failed
+    dispatch.status;
+  check (option string) "terminal work failure reason"
+    (Some "operator cancelled occurrence")
+    dispatch.error;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "failed recurring schedule missing"
+   | Some stored ->
+     check string "recurring intent advances" "scheduled"
+       (schedule_status_to_string stored.status);
+     check (float 0.001) "next occurrence remains scheduled" 260.0 stored.due_at);
+  match
+    Schedule_store.execution_for_occurrence
+      (Schedule_store.read_state config)
+      ~schedule_id:request.schedule_id
+      ~due_at:request.due_at
+      ~payload_digest:(Schedule_domain.payload_digest request.payload)
+  with
+  | None -> fail "failed occurrence execution missing"
+  | Some execution ->
+    check string "exact occurrence failed" "failed"
+      (Schedule_domain.execution_status_to_string execution.status)
 ;;
 
 let test_tick_marks_unsupported_candidate_failed () =
@@ -366,10 +449,10 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
              if !retry_first_attempt then (
                retry_first_attempt := false;
                Error (Retryable_dispatch_failure "queue storage unavailable"))
-             else Ok (`Assoc [ "retried", `Bool true ]))
+             else Ok (Work_completed (`Assoc [ "retried", `Bool true ])))
            else (
              incr healthy_calls;
-             Ok (`Assoc [ "healthy", `Bool true ])))
+             Ok (Work_completed (`Assoc [ "healthy", `Bool true ]))))
     }
   in
   let first = tick_ok config ~now:201.0 ~consumer in
@@ -587,6 +670,10 @@ let () =
             test_tick_emits_due_candidate_once
         ; test_case "dispatches due candidate to success" `Quick
             test_tick_dispatches_due_candidate_to_success
+        ; test_case "records async acceptance without work success" `Quick
+            test_tick_records_async_acceptance_without_claiming_work_success
+        ; test_case "records exact recurring terminal work failure" `Quick
+            test_tick_records_terminal_work_failure_for_exact_recurrence
         ; test_case "marks unsupported candidate failed" `Quick
             test_tick_marks_unsupported_candidate_failed
         ; test_case "reschedules recurring candidate after signal" `Quick

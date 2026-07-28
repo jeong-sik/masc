@@ -15,6 +15,7 @@ type stimulus_kind =
   | Manual_compaction
   | Goal_assigned
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
+  | Goal_reconciliation_ready
 
 type reaction_kind =
   | Turn_started
@@ -45,6 +46,7 @@ let stimulus_kind_to_string = function
   | Hitl_resolved -> "hitl_resolved"
   | Manual_compaction -> "manual_compaction"
   | Goal_assigned -> "goal_assigned"
+  | Goal_reconciliation_ready -> "goal_reconciliation_ready"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -61,6 +63,7 @@ let stimulus_kind_of_string = function
   | "hitl_resolved" -> Some Hitl_resolved
   | "manual_compaction" -> Some Manual_compaction
   | "goal_assigned" -> Some Goal_assigned
+  | "goal_reconciliation_ready" -> Some Goal_reconciliation_ready
   | _ -> None
 ;;
 
@@ -107,6 +110,8 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
   | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
+  | Keeper_event_queue.Goal_reconciliation_ready _ ->
+    Goal_reconciliation_ready
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -212,6 +217,11 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "goal_assigned goal_id=%s assigned_by=%s"
       ga.ga_goal_id
       ga.ga_assigned_by
+  | Keeper_event_queue.Goal_reconciliation_ready ready ->
+    Printf.sprintf
+      "goal_reconciliation_ready goal_id=%s triggering_task_id=%s"
+      ready.gr_goal_id
+      ready.gr_triggering_task_id
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -229,7 +239,8 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Manual_compaction_requested
-    | Keeper_event_queue.Goal_assigned _ -> None
+    | Keeper_event_queue.Goal_assigned _
+    | Keeper_event_queue.Goal_reconciliation_ready _ -> None
   in
   `Assoc
     (base_fields
@@ -996,7 +1007,7 @@ let decode_current_row ~keeper_name row =
       | Board_signal, (Some _ | None)
       | ( Bootstrap | Fusion_completed | Bg_completed | Schedule_due
         | Connector_attention | Hitl_resolved
-        | Manual_compaction | Goal_assigned ),
+        | Manual_compaction | Goal_assigned | Goal_reconciliation_ready ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -1395,7 +1406,7 @@ let board_stimulus_token metadata stimulus_kind =
     Option.map (fun timestamp -> timestamp, post_id) updated_at
   | Bootstrap | Fusion_completed | Bg_completed | Schedule_due
   | Connector_attention | Hitl_resolved
-  | Manual_compaction | Goal_assigned -> None
+  | Manual_compaction | Goal_assigned | Goal_reconciliation_ready -> None
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =

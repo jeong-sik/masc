@@ -61,7 +61,7 @@ let build_base_system_prompt
     ~persona_extended
     ~keeper_name:meta.name
     ~active_goals
-    ~home_ground:config.base_path
+    ~home_ground:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
     ()
 
 let prepare_run_context

@@ -394,7 +394,9 @@ let observed_triggers_of_observation
         (Keeper_world_observation_message_scope.has_kind
            Keeper_world_observation_message_scope.Mention observation.pending_messages)
         "direct_mention";
-      singleton_when (observation.pending_board_events <> []) "board_activity";
+      singleton_when
+        (Keeper_world_observation.has_pending_board_activity observation)
+        "board_activity";
       singleton_when
         (Keeper_world_observation_message_scope.has_kind
            Keeper_world_observation_message_scope.Scope observation.pending_messages)
@@ -418,7 +420,7 @@ let observed_affordances_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
   let affordances = ref [] in
   let add affordance = affordances := affordance :: !affordances in
-  if observation.pending_board_events <> []
+  if Keeper_world_observation.has_pending_board_activity observation
   then (
     add "board_post_or_comment";
     add "board_curation");

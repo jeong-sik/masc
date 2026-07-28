@@ -265,27 +265,6 @@ let keeper_transition ctx args =
   | Some result -> result
   | None -> failwith "Keeper transition dispatch returned None"
 
-let assert_goal_completion_next_action result ~goal_id =
-  if not (Tool_result.is_success result) then
-    failwith (Tool_result.message result);
-  let next_action =
-    Tool_result.data result |> Yojson.Safe.Util.member "next_action"
-  in
-  assert
-    (Yojson.Safe.Util.(next_action |> member "tool" |> to_string)
-     = "masc_goal_transition");
-  assert
-    (Yojson.Safe.Util.(
-       next_action |> member "arguments" |> member "goal_id" |> to_string)
-     = goal_id);
-  assert
-    (Yojson.Safe.Util.(
-       next_action |> member "arguments" |> member "action" |> to_string)
-     = "request_complete");
-  assert
-    (Yojson.Safe.Util.(next_action |> member "reason" |> to_string)
-     = "all_linked_tasks_terminal")
-
 let assert_goal_still_executing ctx ~goal_id =
   match Goal_store.get_goal ctx.Task.Tool.config ~goal_id with
   | Some { phase = Goal_phase.Executing; _ } -> ()
@@ -1591,7 +1570,7 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
     | _ -> failwith "expected verifier approval to complete task"))
 
 let () =
-  test "keeper approved verification cues request_complete after persisted Done"
+  test "keeper approved verification leaves Goal action to durable reconciler"
     (fun () ->
        let worker_ctx = make_test_ctx_with_agent "worker" in
        let verifier_ctx =
@@ -1643,7 +1622,13 @@ let () =
               ; "notes", `String "evidence verified"
               ])
        in
-       assert_goal_completion_next_action result ~goal_id;
+       if not (Tool_result.is_success result) then
+         failwith (Tool_result.message result);
+       assert (
+         match Tool_result.data result with
+         | `Assoc fields -> not (List.mem_assoc "next_action" fields)
+         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+         | `List _ -> true);
        assert_goal_still_executing worker_ctx ~goal_id)
 
 let () = test "handle_claim_sets_planning_current_task" (fun () ->

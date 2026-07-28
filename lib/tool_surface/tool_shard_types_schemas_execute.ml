@@ -46,6 +46,9 @@ let tool_execute_argv_field =
         , `String
             "Typed single-process form: a non-empty process vector. argv[0] is \
              the executable and remaining tokens are arguments, all passed verbatim. \
+             Filesystem arguments use the selected sandbox namespace; relative path \
+             operands resolve against the typed cwd. Docker cannot access host \
+             absolute paths. \
              A literal '|' token is data, not a pipe. Wildcards (*, ?, [...]) are \
              NOT expanded either: there is no shell, so 'foo*.ml' is a literal \
              filename, not a glob. Use exact paths or list a directory first." )
@@ -60,7 +63,9 @@ let tool_execute_pipeline_field =
       ; ( "description"
         , `String
             "Typed pipeline form: ordered exec stages. Use this instead of putting \
-             '|' in argv. Mutually exclusive with top-level argv." )
+             '|' in argv. Stage argv uses the selected sandbox namespace, and relative \
+             path operands resolve against the typed cwd. Mutually exclusive with \
+             top-level argv." )
       ] )
 ;;
 
@@ -83,7 +88,9 @@ let tool_execute_cwd_field =
       ; ( "description"
         , `String
             "Optional working directory for the command. Must stay within the keeper \
-             sandbox or an explicit allowed path." )
+             sandbox or an explicit allowed path. Pass a relative cwd, typically '.'. \
+             The Keeper-visible absolute root is informational, not a cwd input. \
+             Docker host absolute paths are unavailable." )
       ] )
 ;;
 
@@ -180,6 +187,9 @@ let tool_execute_description =
    metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
    objects for redirection and the pipeline field for pipelines. Use Grep for \
    structured file-content search. cwd must resolve inside the Keeper path jail. \
+   Pass a relative cwd (typically '.') and relative filesystem operands, which \
+   resolve against cwd. The Keeper-visible absolute root is informational; Docker \
+   host absolute paths are unavailable. \
    MASC does not interpret program or subcommand \
    meaning: after typed lowering, path containment, sandbox resolution, and the \
    external-effect Gate, the invoked program owns its syntax and exit result."

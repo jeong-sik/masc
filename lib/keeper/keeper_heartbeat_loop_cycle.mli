@@ -2,6 +2,8 @@
 
 type cycle_outcome =
   | Completed of Keeper_meta_contract.keeper_meta
+  | Checkpointed of Keeper_meta_contract.keeper_meta
+  | Input_required of Keeper_meta_contract.keeper_meta
   | Cancelled of Keeper_meta_contract.keeper_meta
   | Skipped of Keeper_meta_contract.keeper_meta
   | Failed of
@@ -49,6 +51,7 @@ val run_keeper_cycle
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
+  -> ?active_source_stimuli:Keeper_event_queue.stimulus list
   -> ctx:_ Keeper_types_profile.context
   -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> stop:bool Atomic.t

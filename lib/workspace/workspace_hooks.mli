@@ -28,6 +28,10 @@ type agent_lifecycle_event =
   | Session_rebound
   | Session_ended
 
+type task_terminal_delivery =
+  | Task_terminal_delivered
+  | Task_terminal_delivery_degraded of { kind : string; detail : string }
+
 val activity_emit_fn : (Workspace_utils_backend_setup.config ->
             actor:activity_entity ->
             ?subject:activity_entity ->
@@ -125,6 +129,12 @@ val record_thompson_result_fn :
 
 val push_task_event_fn :
   (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
+
+val task_terminal_committed_fn :
+  (Workspace_utils_backend_setup.config ->
+   agent_name:string ->
+   task_id:string ->
+   task_terminal_delivery) Atomic.t
 
 val verification_submit_request_fn :
   (Workspace_utils_backend_setup.config ->

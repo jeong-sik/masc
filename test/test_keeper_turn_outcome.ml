@@ -16,6 +16,9 @@ open Alcotest
 module TO = Masc.Keeper_turn_outcome
 module Ops = Masc.Keeper_tool_surface_ops
 module Stream = Server_routes_http_keeper_stream
+module UT = Masc.Keeper_unified_turn
+module Cycle = Masc.Keeper_heartbeat_loop_cycle
+module Heartbeat = Masc.Keeper_heartbeat_loop.For_testing
 
 let outcome : TO.t testable =
   testable
@@ -56,9 +59,106 @@ let test_of_stop_reason () =
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
+  check outcome "repeated tool yield -> checkpoint" TO.Continuation_checkpoint
+    (TO.of_stop_reason
+       (Runtime_agent.Yielded_after_repeated_tool_call
+          { turns_used = 2
+          ; tool_name = "keeper_tasks_list"
+          ; repeated_count = 3
+          }));
   check outcome "typed input required -> visible" TO.Visible_reply
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
+
+let test_runtime_stop_reason_controls_durable_source_completion () =
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String "turn-outcome-source"
+          ; "trace_id", `String "trace-turn-outcome-source"
+          ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  let request : Agent_sdk.Error.input_required =
+    { request_id = "source-input-1"
+    ; participant_name = None
+    ; question = "Need operator input"
+    ; schema = None
+    ; timeout_s = None
+    ; created_at = 1_000.0
+    }
+  in
+  let cycle_of_stop_reason stop_reason =
+    match UT.turn_success_of_stop_reason ~meta stop_reason with
+    | UT.Turn_completed meta -> Cycle.Completed meta
+    | UT.Turn_checkpointed meta -> Cycle.Checkpointed meta
+    | UT.Turn_input_required meta -> Cycle.Input_required meta
+    | UT.Turn_cancelled _
+    | UT.Turn_skipped _ ->
+      fail "runtime stop reason mapped outside the executed turn outcomes"
+  in
+  check bool "completed turn settles durable source" true
+    (Heartbeat.cycle_outcome_acks_source
+       (cycle_of_stop_reason Runtime_agent.Completed));
+  check bool "chat yield retains durable source" false
+    (Heartbeat.cycle_outcome_acks_source
+       (cycle_of_stop_reason
+          (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 })));
+  check bool "durable stimulus yield retains durable source" false
+    (Heartbeat.cycle_outcome_acks_source
+       (cycle_of_stop_reason
+          (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 })));
+  check bool "repeated tool yield retains durable source" false
+    (Heartbeat.cycle_outcome_acks_source
+       (cycle_of_stop_reason
+          (Runtime_agent.Yielded_after_repeated_tool_call
+             { turns_used = 2
+             ; tool_name = "keeper_tasks_list"
+             ; repeated_count = 3
+             })));
+  check bool "input required retains durable source" false
+    (Heartbeat.cycle_outcome_acks_source
+       (cycle_of_stop_reason
+          (Runtime_agent.InputRequired { turns_used = 2; request })))
+
+let test_cooperative_yield_ignores_only_active_source_identity () =
+  let stimulus post_id : Keeper_event_queue.stimulus =
+    { post_id
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 1_000.0
+    ; payload = Keeper_event_queue.Bootstrap
+    }
+  in
+  let active = stimulus "active-source" in
+  let later = stimulus "later-source" in
+  let filter =
+    Masc.Keeper_unified_turn_execution.For_testing
+    .pending_without_active_sources
+      ~active_source_stimuli:[ active ]
+  in
+  let only_active =
+    Keeper_event_queue.enqueue Keeper_event_queue.empty active
+    |> filter
+  in
+  check int "active source does not yield to itself" 0
+    (Keeper_event_queue.length only_active);
+  let with_later =
+    Keeper_event_queue.empty
+    |> fun queue -> Keeper_event_queue.enqueue queue active
+    |> fun queue -> Keeper_event_queue.enqueue queue later
+    |> filter
+    |> Keeper_event_queue.to_list
+  in
+  match with_later with
+  | [ retained ] ->
+    check string "same payload with a different identity still requests yield"
+      later.post_id
+      retained.post_id
+  | retained ->
+    failf "expected one later durable source, got %d" (List.length retained)
 
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply
@@ -66,6 +166,44 @@ let test_of_result_surface () =
   check outcome "completed with empty text -> no visible reply"
     TO.No_visible_reply
     (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
+
+let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
+    : Masc.Keeper_agent_result.tool_call_detail =
+  { tool_name
+  ; provider = "test"
+  ; outcome = "ok"
+  ; execution_outcome = Tool_result.Ok
+  ; typed_outcome = None
+  ; latency_ms = 1.
+  ; task_id = None
+  ; route_evidence = None
+  ; input_fingerprint = input
+  ; output_fingerprint = output
+  }
+
+let test_repeated_exact_tool_call_boundary () =
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+  in
+  check (option (pair string int)) "three exact calls yield"
+    (Some ("keeper_tasks_list", 3))
+    (detect
+       [ tool_call "keeper_tasks_list"
+       ; tool_call "keeper_tasks_list"
+       ; tool_call "keeper_tasks_list"
+       ]);
+  check (option (pair string int)) "changed output proves progress" None
+    (detect
+       [ tool_call ~output:(Some "new") "keeper_tasks_list"
+       ; tool_call ~output:(Some "old") "keeper_tasks_list"
+       ; tool_call ~output:(Some "old") "keeper_tasks_list"
+       ]);
+  check (option (pair string int)) "missing fingerprints never guess" None
+    (detect
+       [ tool_call ~input:None "keeper_tasks_list"
+       ; tool_call ~input:None "keeper_tasks_list"
+       ; tool_call ~input:None "keeper_tasks_list"
+       ])
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
@@ -85,13 +223,34 @@ let test_autonomous_yield_boundary_contract () =
   (match F.runtime_yield_reason chat with
    | Runtime_agent.Chat_waiting -> ()
    | Runtime_agent.Durable_stimulus_waiting
+   | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Terminal_tool_completed ->
      fail "chat request mapped to the durable reason");
   (match F.runtime_yield_reason durable_stimulus with
    | Runtime_agent.Durable_stimulus_waiting -> ()
    | Runtime_agent.Chat_waiting
+   | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Terminal_tool_completed ->
      fail "durable request mapped to the chat reason");
+  check bool "repeated exact call yield preserves its evidence" true
+    (match
+       Runtime_agent.For_testing.stop_reason_of_cooperative_yield
+         ~turns_used:8
+         (Runtime_agent.Repeated_tool_call
+            { tool_name = "keeper_tasks_list"; repeated_count = 3 })
+     with
+     | Runtime_agent.Yielded_after_repeated_tool_call
+         { turns_used = 8
+         ; tool_name = "keeper_tasks_list"
+         ; repeated_count = 3
+         } ->
+       true
+     | Runtime_agent.Completed
+     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Yielded_after_repeated_tool_call _
+     | Runtime_agent.InputRequired _ ->
+       false);
   check bool "terminal tool yield settles as completion" true
     (match
        Runtime_agent.For_testing.stop_reason_of_cooperative_yield
@@ -101,6 +260,7 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed -> true
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.InputRequired _ -> false)
 
 let test_terminal_effect_handler_contract () =
@@ -293,7 +453,13 @@ let () =
       ( "mapping",
         [
           test_case "of_stop_reason" `Quick test_of_stop_reason;
+          test_case "runtime stop reason controls durable source completion" `Quick
+            test_runtime_stop_reason_controls_durable_source_completion;
+          test_case "cooperative yield ignores only active source identity" `Quick
+            test_cooperative_yield_ignores_only_active_source_identity;
           test_case "of_result_surface" `Quick test_of_result_surface;
+          test_case "repeated exact tool call boundary" `Quick
+            test_repeated_exact_tool_call_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
           test_case "terminal effect handler contract" `Quick

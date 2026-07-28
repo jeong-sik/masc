@@ -19,7 +19,14 @@ let of_keeper_world_observation
   =
   {
     unclaimed_task_count = observation.claimable_task_count;
-    board_activity_count = List.length observation.pending_board_events;
+    board_activity_count =
+      List.fold_left
+        (fun count event ->
+           if Keeper_world_observation.is_board_activity_event event
+           then count + 1
+           else count)
+        0
+        observation.pending_board_events;
   }
 
 let classify_actionable_signal o =

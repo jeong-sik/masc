@@ -38,6 +38,18 @@ let sample_board_event : WO.pending_board_event =
     latest_external_preview = None;
   }
 
+let sample_scheduled_wake : WO.pending_board_event =
+  { sample_board_event with
+    event_kind = WO.Schedule_due
+  ; post_id = "schedule-occurrence:2026-07-28T06:22:07+09:00"
+  ; author = "scheduled_automation"
+  ; title = "Hourly research"
+  ; preview =
+      "Search the web for the latest OCaml release notes, then write a cited summary."
+  ; post_kind = Masc.Board.System_post
+  }
+;;
+
 let scheduled_automation_observation : WO.scheduled_automation_observation =
   { active_count = 1
   ; due_ready_count = 1
@@ -332,6 +344,76 @@ let test_scheduled_automation_prompt_section () =
   check bool "prompt includes ready next action" true
     (contains_sub "do not create a duplicate schedule" user_msg)
 
+let test_scheduled_wake_is_not_rendered_as_board_activity () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  init_runtime_default_for_tests ();
+  let obs =
+    { base_observation with
+      pending_board_events = [ sample_board_event; sample_scheduled_wake ]
+    }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
+      ~observation:obs
+      ()
+  in
+  check bool "scheduled wake has dedicated section" true
+    (contains_sub "### Scheduled Wake (1 due)" world_state);
+  check bool "scheduled message remains complete" true
+    (contains_sub sample_scheduled_wake.preview world_state);
+  check bool "occurrence is explicitly not a Board post" true
+    (contains_sub "never pass it to a Board tool" world_state);
+  let board_section =
+    match
+      String.split_on_char '#' world_state
+      |> List.find_opt (contains_sub "Board Activity")
+    with
+    | Some section -> section
+    | None -> fail "expected Board Activity section"
+  in
+  check bool "real Board row remains present" true
+    (contains_sub sample_board_event.post_id board_section);
+  check bool "scheduled occurrence absent from Board section" false
+    (contains_sub sample_scheduled_wake.post_id board_section);
+  let schedule_only_observation =
+    { base_observation with pending_board_events = [ sample_scheduled_wake ] }
+  in
+  check bool "scheduled work is not typed as Board activity" false
+    (WO.has_pending_board_activity schedule_only_observation);
+  let triggers = UM.observed_triggers_of_observation schedule_only_observation in
+  check bool "scheduled work emits no Board trigger" false
+    (List.mem "board_activity" triggers);
+  let affordances =
+    UM.observed_affordances_of_observation schedule_only_observation
+  in
+  check bool "scheduled work emits no Board response affordance" false
+    (List.mem "board_post_or_comment" affordances);
+  check bool "scheduled work emits no Board curation affordance" false
+    (List.mem "board_curation" affordances)
+;;
+
+let test_scheduled_wake_preserves_complete_message () =
+  let exact_message = String.make 520 'x' ^ "SCHEDULE-TAIL-TOKEN" in
+  let wake : Keeper_event_queue.scheduled_wake =
+    { schedule_id = "sched-long-message"
+    ; due_at = 200.0
+    ; payload_digest = "digest-long-message"
+    ; title = Some "Long scheduled work"
+    ; message = exact_message
+    }
+  in
+  let event =
+    WO.pending_board_event_of_scheduled_wake
+      ~meta:minimal_meta
+      ~post_id:"schedule-occurrence:long-message"
+      ~arrived_at:200.0
+      wake
+  in
+  check string "scheduled work message is not truncated" exact_message event.preview
+;;
+
 (* Feedback-loop invariant (#25193): the observation frame must ride the
    ephemeral [world_state] channel, never the persisted [user_message].
    Under the pre-split behaviour (frame concatenated into the user message)
@@ -444,6 +526,12 @@ let () =
           test_case
             "prompt: scheduled automation section renders attention items"
             `Quick test_scheduled_automation_prompt_section;
+          test_case
+            "prompt: scheduled wake is not rendered as board activity"
+            `Quick test_scheduled_wake_is_not_rendered_as_board_activity;
+          test_case
+            "prompt: scheduled wake preserves complete message"
+            `Quick test_scheduled_wake_preserves_complete_message;
           test_case
             "invariant: world-state frame never enters the persisted user message"
             `Quick test_world_state_never_in_persisted_user_message;

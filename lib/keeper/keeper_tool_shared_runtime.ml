@@ -266,7 +266,7 @@ let resolve_keeper_read_cwd
   | Ok path -> Ok path
 ;;
 
-let resolve_keeper_execute_cwd
+let resolve_keeper_execute_cwd_typed
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(raw_path : string)
@@ -280,7 +280,12 @@ let resolve_keeper_execute_cwd
       ~raw_path:(String.trim raw_path)
   with
   | Ok confined -> Ok (Keeper_alerting_path.confined_host_path confined)
-  | Error rejection -> user_message_error rejection
+  | Error rejection -> Error rejection
+;;
+
+let resolve_keeper_execute_cwd ~config ~meta ~raw_path =
+  resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path
+  |> Result.map_error Keeper_alerting_path.rejection_to_user_message
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) = meta.agent_name

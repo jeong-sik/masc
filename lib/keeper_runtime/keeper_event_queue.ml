@@ -76,6 +76,7 @@ type stimulus_payload =
          discovered only if some unrelated stimulus happened to fire.
          Uses the same no-dedicated-reason pattern as async completions:
          turn_reason; the injected pending observation drives the turn. *)
+  | Goal_reconciliation_ready of goal_reconciliation_ready
 
 and board_attention = {
   candidate_id : string;
@@ -159,6 +160,11 @@ and goal_assignment = {
      repeat assignments of the same goal dedup regardless of actor. *)
 }
 
+and goal_reconciliation_ready = {
+  gr_goal_id : string;
+  gr_triggering_task_id : string;
+}
+
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
 let bg_job_completion_post_id (c : bg_job_completion) =
@@ -173,6 +179,9 @@ let goal_assignment_post_id (ga : goal_assignment) =
   (* Stable per goal: re-assigning the same goal before the keeper consumes
      the first wake collapses under queue identity dedup. *)
   "goal-assigned:" ^ ga.ga_goal_id
+
+let goal_reconciliation_ready_post_id (ready : goal_reconciliation_ready) =
+  "goal-reconciliation-ready:" ^ ready.gr_goal_id
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -219,7 +228,7 @@ let identity_payload = function
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-    | Manual_compaction_requested
+    | Manual_compaction_requested | Goal_reconciliation_ready _
     ) as payload ->
     payload
 
@@ -323,12 +332,14 @@ let payload_kind_label = function
   | Hitl_resolved _ -> "hitl_resolved"
   | Manual_compaction_requested -> "manual_compaction_requested"
   | Goal_assigned _ -> "goal_assigned"
+  | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _ | Bg_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Manual_compaction_requested | Goal_assigned _ ->
+  | Manual_compaction_requested | Goal_assigned _
+  | Goal_reconciliation_ready _ ->
     false
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -555,6 +566,12 @@ let payload_to_yojson = function
       ; "goal_title", `String ga.ga_goal_title
       ; "assigned_by", `String ga.ga_assigned_by
       ]
+  | Goal_reconciliation_ready ready ->
+    `Assoc
+      [ "kind", `String "goal_reconciliation_ready"
+      ; "goal_id", `String ready.gr_goal_id
+      ; "triggering_task_id", `String ready.gr_triggering_task_id
+      ]
 
 let continuation_channel_field fields =
   let* json = required_field ~context:"stimulus.payload" "channel" fields in
@@ -709,6 +726,14 @@ let payload_of_yojson json =
          ; ga_goal_title = goal_title
          ; ga_assigned_by = assigned_by
          })
+  | "goal_reconciliation_ready" ->
+    let* goal_id = string_field ~context "goal_id" fields in
+    let* triggering_task_id =
+      string_field ~context "triggering_task_id" fields
+    in
+    Ok
+      (Goal_reconciliation_ready
+         { gr_goal_id = goal_id; gr_triggering_task_id = triggering_task_id })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =

@@ -131,7 +131,7 @@ let relative_path_of_segments = function
   | [] -> "."
   | segments -> String.concat "/" segments
 
-let execution_location_json
+let host_execution_location_json
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -181,3 +181,57 @@ let execution_location_json
     ; "repo_name", Json_util.string_opt_to_json repo_name
     ; "repo_root", Json_util.string_opt_to_json repo_root
     ]
+
+let execution_location_json ~config ~meta ~args ~cwd =
+  let host_location = host_execution_location_json ~config ~meta ~args ~cwd in
+  match meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Local -> host_location
+  | Keeper_types_profile_sandbox.Docker ->
+    let host_root = normalize_path (playground_root_no_create ~config ~meta) in
+    let visible_root =
+      Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+    in
+    let project_path path =
+      let path = normalize_path path in
+      if String.equal path host_root
+      then `String visible_root
+      else
+        let prefix =
+          if String.equal host_root Filename.dir_sep
+          then host_root
+          else host_root ^ Filename.dir_sep
+        in
+        if String.length path > String.length prefix
+           && String.sub path 0 (String.length prefix) = prefix
+        then
+          `String
+            (Filename.concat
+               visible_root
+               (String.sub
+                  path
+                  (String.length prefix)
+                  (String.length path - String.length prefix)))
+        else if Filename.is_relative path
+        then `String path
+        else `Null
+    in
+    let path_fields =
+      [ "cwd"; "playground_root"; "relative_path_base"; "repo_root" ]
+    in
+    let rec project = function
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+                if List.mem key path_fields
+                then
+                  ( key
+                  , match value with
+                    | `String path -> project_path path
+                    | other -> other )
+                else key, project value)
+             fields)
+      | `List values -> `List (List.map project values)
+      | value -> value
+    in
+    project host_location

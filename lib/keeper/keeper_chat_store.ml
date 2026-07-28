@@ -1039,8 +1039,22 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
            in
            (if additions = [] then None else Some payload), Ok result))
   with
-  | Error detail -> Error detail
-  | Ok result -> result
+  | Private_file_succeeded result -> result
+  | Private_file_succeeded_with_cleanup_failure
+      { value = result; cleanup_failure } ->
+    Log.Keeper.error
+      "keeper_chat_store: provenance batch update succeeded with descriptor settlement failure path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    result
+  | Private_file_failed error ->
+    Error (Fs_compat.durable_append_error_to_string error)
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    Error
+      (Printf.sprintf
+         "%s; descriptor settlement failed: %s"
+         (Fs_compat.durable_append_error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
 ;;
 
 let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key

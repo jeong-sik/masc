@@ -2314,14 +2314,16 @@ let process_single_turn ~user_row_origin ~queued_turn
                               Keeper_chat_direct_delivery.No_assistant_reply
                             |> Result.map (fun () -> None)
                           else
-                            persist_tool_calls_only ()
-                            |> Result.bind (fun () -> broadcast_after_tool_only_persist ())
+                            Result.bind
+                              (persist_tool_calls_only ())
+                              (fun () -> broadcast_after_tool_only_persist ())
                         | None ->
                           if has_visible_blocks || tool_calls <> []
                           then if tool_calls <> [] && not has_visible_blocks
                           then
-                            persist_tool_calls_only ()
-                            |> Result.bind (fun () -> broadcast_after_tool_only_persist ())
+                            Result.bind
+                              (persist_tool_calls_only ())
+                              (fun () -> broadcast_after_tool_only_persist ())
                           else
                             persist_assistant_reply ~assistant_content:""
                             |> Result.map (fun () -> None)
@@ -2353,8 +2355,9 @@ let process_single_turn ~user_row_origin ~queued_turn
                        else if has_visible_blocks || tool_calls <> []
                        then if tool_calls <> [] && not has_visible_blocks
                        then
-                         persist_tool_calls_only ()
-                         |> Result.bind (fun () -> broadcast_after_tool_only_persist ())
+                        Result.bind
+                          (persist_tool_calls_only ())
+                          (fun () -> broadcast_after_tool_only_persist ())
                        else
                          persist_assistant_reply ~assistant_content:""
                          |> delivered_after_persist

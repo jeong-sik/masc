@@ -498,6 +498,48 @@ let test_maintenance_malformed_normalized_blob_fails_closed () =
         (Some "survive malformed normalized ref")
         (fetch_ok store ~sha256:reference.sha256))
 
+let test_maintenance_truncated_normalized_blob_fails_closed () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put store ~bytes:"survive truncated normalized ref" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "unreferenced blob is first recorded"
+        1
+        observed.candidates_recorded;
+      let tool_call_log =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "tool_calls/2026-07/29.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname tool_call_log);
+      let complete_reference =
+        O.normalized_artifact_ref_to_json reference
+        |> Yojson.Safe.to_string
+      in
+      Fs_compat.save_file
+        tool_call_log
+        ("{\"output\":" ^ complete_reference);
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error
+           (M.Malformed_structured_artifact_reference
+             { path; line; _ }) ->
+         Alcotest.(check string) "exact truncated tool-call log" tool_call_log path;
+         Alcotest.(check int) "exact truncated tool-call line" 1 line
+       | Error error ->
+         Alcotest.failf
+           "unexpected truncated-reference error: %s"
+           (M.error_to_string error)
+       | Ok _ ->
+         Alcotest.fail "truncated normalized reference reached deletion");
+      Alcotest.(check (option string))
+        "truncated normalized reference retains every blob"
+        (Some "survive truncated normalized ref")
+        (fetch_ok store ~sha256:reference.sha256))
+
 let test_maintenance_unlink_failure_is_typed () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -802,6 +844,10 @@ let () =
             "maintenance malformed normalized blob fails closed"
             `Quick
             test_maintenance_malformed_normalized_blob_fails_closed;
+          Alcotest.test_case
+            "maintenance truncated normalized blob fails closed"
+            `Quick
+            test_maintenance_truncated_normalized_blob_fails_closed;
           Alcotest.test_case
             "maintenance unlink failure is typed"
             `Quick

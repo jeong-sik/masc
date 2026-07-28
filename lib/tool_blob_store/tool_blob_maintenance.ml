@@ -113,6 +113,19 @@ let add_references ~path ~line references text =
          })
 ;;
 
+let contains_substring ~needle text =
+  let needle_length = String.length needle in
+  let text_length = String.length text in
+  let rec loop offset =
+    if offset + needle_length > text_length
+    then false
+    else if String.sub text offset needle_length = needle
+    then true
+    else loop (offset + 1)
+  in
+  needle_length = 0 || loop 0
+;;
+
 let rec references_in_json ~path ~line references = function
   | `String text -> add_references ~path ~line references text
   | (`Assoc fields as json) ->
@@ -180,12 +193,23 @@ let references_in_file ~ownership_root path =
                       references
                       (Yojson.Safe.from_string line)
                   with
-                  | Yojson.Json_error _ ->
-                    add_references
-                      ~path
-                      ~line:line_number
-                      references
-                      line)
+                  | Yojson.Json_error detail ->
+                    if contains_substring ~needle:"\"_blob\"" line
+                    then
+                      Error
+                        (Malformed_structured_artifact_reference
+                           { path
+                           ; line = line_number
+                           ; detail =
+                               "unparseable durable row contains a _blob key: "
+                               ^ detail
+                           })
+                    else
+                      add_references
+                        ~path
+                        ~line:line_number
+                        references
+                        line)
               in
               line_number + 1, next)
            (1, Ok String_set.empty)
@@ -376,13 +400,64 @@ let load_candidate_snapshot ~base_path =
 
 let save_candidate_snapshot ~base_path candidates =
   let path = candidate_snapshot_path ~base_path in
-  Fs_compat.mkdir_p (Filename.dirname path);
+  let parent = Filename.dirname path in
   let payload =
     candidate_snapshot_to_json candidates
     |> Yojson.Safe.pretty_to_string
   in
-  match Fs_compat.save_file_atomic path payload with
-  | Ok () -> Ok ()
+  let inspect_parent () =
+    match
+      Fs_compat.inspect_owned_directory_chain
+        ~ownership_root:base_path
+        parent
+    with
+    | Ok observation -> Ok observation
+    | Error rejection ->
+      Error
+        (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+  in
+  let open Result.Syntax in
+  let* before =
+    match inspect_parent () with
+    | Error detail ->
+      Error (Candidate_snapshot_write_failed { path; detail })
+    | Ok Fs_compat.Owned_directory_missing ->
+      (try
+         Fs_compat.mkdir_p parent;
+         match inspect_parent () with
+         | Ok (Fs_compat.Owned_directory stats) -> Ok stats
+         | Ok Fs_compat.Owned_directory_missing ->
+           Error
+             (Candidate_snapshot_write_failed
+                { path; detail = "candidate snapshot parent was not created" })
+         | Error detail ->
+           Error (Candidate_snapshot_write_failed { path; detail })
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Error
+           (Candidate_snapshot_write_failed
+              { path; detail = Printexc.to_string exn }))
+    | Ok (Fs_compat.Owned_directory stats) -> Ok stats
+  in
+  let* () =
+    match Fs_compat.save_file_atomic_strict path payload with
+    | Ok () -> Ok ()
+    | Error detail ->
+      Error (Candidate_snapshot_write_failed { path; detail })
+  in
+  match inspect_parent () with
+  | Ok (Fs_compat.Owned_directory after)
+    when before.st_dev = after.st_dev && before.st_ino = after.st_ino ->
+    Ok ()
+  | Ok (Fs_compat.Owned_directory _) ->
+    Error
+      (Candidate_snapshot_write_failed
+         { path; detail = "candidate snapshot parent identity changed" })
+  | Ok Fs_compat.Owned_directory_missing ->
+    Error
+      (Candidate_snapshot_write_failed
+         { path; detail = "candidate snapshot parent disappeared" })
   | Error detail ->
     Error (Candidate_snapshot_write_failed { path; detail })
 ;;

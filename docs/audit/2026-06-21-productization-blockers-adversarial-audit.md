@@ -10,7 +10,6 @@ code_refs:
   - lib/config/feature_flag_registry.ml
   - lib/config/env_config_sandbox.ml
   - lib/keeper/keeper_tool_surface_ops.ml
-  - lib/keeper/keeper_memory_bank_env.ml
   - lib/workspace/workspace_gc.ml
   - lib/workspace/workspace_utils_paths_backend.ml
   - lib/keeper/keeper_chat_queue.ml
@@ -146,7 +145,7 @@ The repo has correctly moved toward `<base-path>/.masc`, but current gates mostl
 **Evidence**:
 
 - `lib/keeper/keeper_tool_surface_ops.ml:38-65` defines local TTL parsing over `Sys.getenv_opt`.
-- `lib/keeper/keeper_memory_bank_env.ml:14-67` defines a separate keeper-memory env parser family.
+- `lib/keeper/keeper_memory_bank_env.ml` defined a separate keeper-memory env parser family (module removed 2026-07-28 with the memory bank, #26128; the shared parser is `Env_config_memory`).
 
 **Impact**:
 

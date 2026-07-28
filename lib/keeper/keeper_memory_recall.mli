@@ -1,4 +1,8 @@
-(** Keeper_memory_recall — memory recall and memory evaluation. *)
+(** Keeper_memory_recall — history/tail JSONL reading for memory surfaces.
+
+    The keyword-classifier recall eval was removed with the legacy memory
+    bank: recall is the keeper's own judgment via the [keeper_memory_search]
+    tool, not a substring heuristic. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -48,11 +52,6 @@ val recent_lines_or_record :
     {!Eio.Cancel.Cancelled} is re-raised verbatim (RFC-0106).  Shared by the
     operator tool-audit and keeper status-metrics snapshot paths. *)
 
-(** {1 Query Detection} *)
-
-val is_memory_recall_query : string -> bool
-val expected_topic_hint : string -> string option
-
 (** {1 User Message Extraction} *)
 
 val recent_user_messages :
@@ -62,51 +61,8 @@ val load_history_user_messages_result :
   path:string ->
   max_n:int ->
   (string list, Keeper_memory_recall_exn_class.t) result
-(** Result-returning variant of {!load_history_user_messages}.  On
-    [Error class] the caller can distinguish "no user messages in the
-    history file" ([Ok []]) from "the history file read failed"
-    ([Error class]).
+(** Typed history loader.  On [Error class] the caller can distinguish
+    "no user messages in the history file" ([Ok []]) from "the history
+    file read failed" ([Error class]).
 
     @since RFC-0149 §3.1 *)
-
-val recall_candidates_with_history :
-  checkpoint_messages:Agent_sdk.Types.message list ->
-  history_path:string ->
-  max_checkpoint:int ->
-  max_history:int ->
-  string list
-
-(** {1 Memory Recall Evaluation} *)
-
-type memory_recall_eval = {
-  performed : bool;
-  query_kind : string;
-  expected_topic : string option;
-  candidate_count : int;
-  initial_score : float;
-  final_score : float;
-  threshold : float;
-  passed : bool;
-  best_match : string option;
-}
-
-val evaluate_memory_recall :
-  user_message:string ->
-  assistant_reply:string ->
-  candidates:string list ->
-  memory_recall_eval
-
-val memory_eval_to_json :
-  memory_recall_eval ->
-  correction_applied:bool ->
-  correction_success:bool ->
-  correction_skipped_budget:bool ->
-  prompt_fallback_applied:bool ->
-  prompt_fallback_success:bool ->
-  prompt_fallback_skipped_budget:bool ->
-  postpass_budget_ms:int ->
-  postpass_budget_remaining_ms:int ->
-  recall_fallback_applied:bool ->
-  Yojson.Safe.t
-
-val work_kind_of_eval : memory_recall_eval -> string

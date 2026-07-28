@@ -14,14 +14,6 @@ type metrics_summary = {
   memory_compaction_before_notes : int;
   memory_compaction_dropped_notes : int;
   memory_compaction_invalid_dropped : int;
-  memory_checks : int;
-  memory_passed : int;
-  memory_failed : int;
-  memory_correction_applied : int;
-  memory_correction_success : int;
-  memory_score_sum : float;
-  memory_weather_checks : int;
-  memory_weather_passed : int;
   last_handoff : Yojson.Safe.t option;
   last_compaction : Yojson.Safe.t option;
 }
@@ -72,14 +64,6 @@ let empty_metrics_summary =
     memory_compaction_before_notes = 0;
     memory_compaction_dropped_notes = 0;
     memory_compaction_invalid_dropped = 0;
-    memory_checks = 0;
-    memory_passed = 0;
-    memory_failed = 0;
-    memory_correction_applied = 0;
-    memory_correction_success = 0;
-    memory_score_sum = 0.0;
-    memory_weather_checks = 0;
-    memory_weather_passed = 0;
     last_handoff = None;
     last_compaction = None;
   }
@@ -109,18 +93,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
   let drift_applied_rate =
     if interaction_points = 0 then 0.0
     else float_of_int s.drift_applied_count /. float_of_int interaction_points
-  in
-  let memory_pass_rate =
-    if s.memory_checks = 0 then 0.0
-    else float_of_int s.memory_passed /. float_of_int s.memory_checks
-  in
-  let memory_avg_score =
-    if s.memory_checks = 0 then 0.0
-    else s.memory_score_sum /. float_of_int s.memory_checks
-  in
-  let memory_weather_pass_rate =
-    if s.memory_weather_checks = 0 then 0.0
-    else float_of_int s.memory_weather_passed /. float_of_int s.memory_weather_checks
   in
   let memory_compaction_drop_ratio =
     if s.memory_compaction_before_notes = 0 then 0.0
@@ -154,16 +126,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
       ("memory_compaction_invalid_dropped", `Int s.memory_compaction_invalid_dropped);
       ("memory_compaction_drop_ratio", `Float memory_compaction_drop_ratio);
       ("memory_compaction_drop_avg", `Float memory_compaction_drop_avg);
-      ("memory_checks", `Int s.memory_checks);
-      ("memory_passed", `Int s.memory_passed);
-      ("memory_failed", `Int s.memory_failed);
-      ("memory_pass_rate", `Float memory_pass_rate);
-      ("memory_avg_score", `Float memory_avg_score);
-      ("memory_correction_applied", `Int s.memory_correction_applied);
-      ("memory_correction_success", `Int s.memory_correction_success);
-      ("memory_weather_checks", `Int s.memory_weather_checks);
-      ("memory_weather_passed", `Int s.memory_weather_passed);
-      ("memory_weather_pass_rate", `Float memory_weather_pass_rate);
       ("last_handoff", match s.last_handoff with Some j -> j | None -> `Null);
       ("last_compaction", match s.last_compaction with Some j -> j | None -> `Null);
     ]
@@ -220,25 +182,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         let to_model = Safe_ops.json_string_opt "to_model" handoff in
         let prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff in
         let new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff in
-        let memory = m "memory_check" in
-        let memory_performed =
-          Safe_ops.json_bool ~default:false "performed" memory
-        in
-        let memory_passed =
-          Safe_ops.json_bool ~default:false "passed" memory
-        in
-        let memory_final_score =
-          Safe_ops.json_float ~default:0.0 "final_score" memory
-        in
-        let memory_correction_applied =
-          Safe_ops.json_bool ~default:false "correction_applied" memory
-        in
-        let memory_correction_success =
-          Safe_ops.json_bool ~default:false "correction_success" memory
-        in
-        let memory_expected_topic =
-          Safe_ops.json_string_opt "expected_topic" memory
-        in
         let memory_compaction_performed =
           Safe_ops.json_bool ~default:false "memory_compaction_performed" j
         in
@@ -254,9 +197,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         let drift = m "drift" in
         let drift_applied_now =
           Safe_ops.json_bool ~default:false "applied" drift
-        in
-        let memory_is_weather =
-          match memory_expected_topic with Some "weather" -> true | _ -> false
         in
         let handoff_json =
           if handoff_performed then
@@ -321,29 +261,6 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           memory_compaction_invalid_dropped =
             acc.memory_compaction_invalid_dropped
             + (if is_interaction && memory_compaction_performed then memory_compaction_invalid_now else 0);
-          memory_checks =
-            acc.memory_checks + (if is_interaction && memory_performed then 1 else 0);
-          memory_passed =
-            acc.memory_passed
-            + (if is_interaction && memory_performed && memory_passed then 1 else 0);
-          memory_failed =
-            acc.memory_failed
-            + (if is_interaction && memory_performed && not memory_passed then 1 else 0);
-          memory_correction_applied =
-            acc.memory_correction_applied
-            + (if is_interaction && memory_performed && memory_correction_applied then 1 else 0);
-          memory_correction_success =
-            acc.memory_correction_success
-            + (if is_interaction && memory_performed && memory_correction_success then 1 else 0);
-          memory_score_sum =
-            acc.memory_score_sum
-            +. (if is_interaction && memory_performed then memory_final_score else 0.0);
-          memory_weather_checks =
-            acc.memory_weather_checks
-            + (if is_interaction && memory_performed && memory_is_weather then 1 else 0);
-          memory_weather_passed =
-            acc.memory_weather_passed
-            + (if is_interaction && memory_performed && memory_is_weather && memory_passed then 1 else 0);
           last_handoff = handoff_json;
           last_compaction = compaction_json;
         }

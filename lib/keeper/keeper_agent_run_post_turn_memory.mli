@@ -14,7 +14,6 @@ val run :
   generation:int ->
   turn:int ->
   oas_turn_count:int ->
-  response_text:string ->
   actual_tools:string list ->
   librarian_messages:Agent_sdk.Types.message list ->
   memory_extraction_record:Keeper_run_prompt.memory_extraction_record ->

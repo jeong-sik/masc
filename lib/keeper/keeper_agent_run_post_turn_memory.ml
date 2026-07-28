@@ -9,7 +9,6 @@ let run
   ~generation
   ~turn
   ~oas_turn_count
-  ~response_text
   ~actual_tools
   ~librarian_messages
   ~(memory_extraction_record : Keeper_run_prompt.memory_extraction_record)
@@ -109,49 +108,13 @@ let run
        Keeper_metrics.(to_string MemoryOsInertTurnExtractionSkipped)
        ~labels:[ "keeper", meta.name ]
        ());
-  (* Post-turn memory recall evidence is logged to decisions.jsonl. *)
+  (* Post-turn timing evidence is logged to decisions.jsonl. The keyword
+     recall eval that used to ride along here was removed: it was called
+     with an empty user message, so it short-circuited to a constant
+     [performed=false] while re-reading 50 history lines per turn. *)
   (try
      let used_search =
        List.exists (fun t -> t = "keeper_memory_search") actual_tools
-     in
-     let recall_eval =
-       if used_search
-       then (
-         (* Use session history (role+content), not decision log records
-            (kind+text+priority). Those fields caused 60 Type_error
-            WARN/cycle — every line skipped because [load_history_user_messages]
-            expects [role] and [content] fields. *)
-         let history_path =
-           Keeper_types_support.keeper_history_path config
-             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-         in
-         let candidates =
-           match
-             Keeper_memory_recall.load_history_user_messages_result
-               ~path:history_path
-               ~max_n:50
-           with
-           | Ok msgs -> msgs
-           | Error exn_class ->
-             let exn_label =
-               Keeper_memory_recall_exn_class.to_label exn_class
-             in
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string DispatchEventFailures)
-               ~labels:
-                 [ "keeper", meta.name; "site", "memory_recall" ]
-               ();
-             Log.Keeper.warn ~keeper_name:meta.name
-               "memory recall history load failed: <error class=%s>"
-               exn_label;
-             []
-         in
-         Some
-           (Keeper_memory_recall.evaluate_memory_recall
-              ~user_message:""
-              ~assistant_reply:response_text
-              ~candidates))
-       else None
      in
      let post_turn_ms =
        Keeper_timing.round1
@@ -171,14 +134,6 @@ let run
              | Some t ->
                [ ( "inference_telemetry"
                  , Keeper_hooks_oas.inference_telemetry_to_runtime_json t )
-               ]
-             | None -> [])
-          @ (match recall_eval with
-             | Some e ->
-               [ "memory_recall_performed", `Bool e.performed
-               ; "memory_recall_passed", `Bool e.passed
-               ; "memory_recall_score", `Float e.final_score
-               ; "memory_recall_candidates", `Int e.candidate_count
                ]
              | None -> []))
      in

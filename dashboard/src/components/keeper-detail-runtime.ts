@@ -877,10 +877,6 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     {
       title: '메모리 & 컴팩션',
       rows: [
-        { label: '메모리 통과율', value: formatPct1(mw?.memory_pass_rate) },
-        { label: '메모리 평균 점수', value: fmtFixed(mw?.memory_avg_score) },
-        { label: '메모리 교정', value: fmtCount(mw?.memory_corrections) },
-        { label: '교정 성공', value: fmtCount(mw?.memory_correction_success) },
         { label: '컴팩션 드롭 비율', value: formatPct1(mw?.memory_compaction_drop_ratio) },
         { label: '컴팩션 절감', value: formatPct1(mw?.compaction_saved_ratio) },
         { label: '평균 절감 토큰', value: fmtFixed(mw?.avg_compaction_saved_tokens, 0) },

@@ -30,8 +30,6 @@ type keeper_gen_window_stats = {
   mutable compactions: int;
   mutable memory_compactions: int;
   mutable memory_trimmed: int;
-  mutable memory_checks: int;
-  mutable memory_passed: int;
   mutable memory_notes: int;
   mutable first_ts: float;
   mutable last_ts: float;
@@ -49,8 +47,6 @@ let create_keeper_gen_window_stats () : keeper_gen_window_stats =
     compactions = 0;
     memory_compactions = 0;
     memory_trimmed = 0;
-    memory_checks = 0;
-    memory_passed = 0;
     memory_notes = 0;
     first_ts = 0.0;
     last_ts = 0.0;

@@ -336,6 +336,13 @@ let make_hooks
            cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with
          | Some acc ->
+           (* The accumulator's turn counter had no producer, so every
+              tool-call entry was written with turn = 0 while reasoning
+              entries carried the runtime's real turn. The transcript joins
+              trace rows on that number, so a reload found no tool steps for
+              any turn and the tool timeline disappeared. Adopt the turn the
+              runtime already assigns here; [round] derives from it. *)
+           Trajectory.set_turn acc turn;
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok

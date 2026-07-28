@@ -242,6 +242,18 @@ let handle_tool_execute_typed
                    @ fields)
                 message)
          | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env) ->
+        let dispatched_model_location_fields =
+          match dispatch_sandbox with
+          | Masc_exec.Sandbox_target.Host ->
+            let local_meta =
+              { meta with sandbox_profile = Keeper_types_profile_sandbox.Local }
+            in
+            let local_cwd =
+              normalize_path_for_keeper_tool_execute_shell_ir_containment cwd
+            in
+            model_execute_location_fields ~config ~meta:local_meta ~args ~cwd:local_cwd
+          | Docker _ -> model_location_fields
+        in
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
            inferred authorization semantics. *)
@@ -249,7 +261,7 @@ let handle_tool_execute_typed
         | Error e ->
           let fields =
             [ "typed", `Bool true; "cmd", `String cmd ]
-            @ model_location_fields
+            @ dispatched_model_location_fields
           in
           Keeper_tool_execution.failure
             ~class_:Tool_result.Policy_rejection
@@ -269,7 +281,7 @@ let handle_tool_execute_typed
         in
         let typed_context_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log ]
-          @ model_location_fields
+          @ dispatched_model_location_fields
         in
         let typed_error_json
               ?(class_ = Tool_result.Runtime_failure)
@@ -516,7 +528,7 @@ let handle_tool_execute_typed
                     ]
                     @ failure_error_fields
                     @ sandbox_extra_fields
-                    @ model_location_fields))
+                    @ dispatched_model_location_fields))
             in
             if succeeded
             then Keeper_tool_execution.success payload

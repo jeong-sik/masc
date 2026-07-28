@@ -722,20 +722,22 @@ let test_execute_typed_pipeline_falls_back_to_local_playground () =
       ()
   in
   check_typed_pipeline_response raw;
+  let local_cwd =
+    Keeper_alerting_path.normalize_path_for_check playground
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
   Alcotest.(check (option string)) "requested docker" (Some "docker")
     (parse_string_field raw "requested_sandbox");
   Alcotest.(check (option string)) "fallback local playground"
     (Some "local_playground")
     (parse_string_field raw "sandbox_fallback");
-  Alcotest.(check (option string)) "fallback is not reported as via docker" None
+  Alcotest.(check (option string)) "fallback dispatch identity"
+    (Some "local_fallback")
     (parse_string_field raw "via");
-  let visible_root =
-    Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
-  in
-  Alcotest.(check bool) "fallback response contains no host base" false
+  Alcotest.(check bool) "fallback response exposes actual Local host namespace" true
     (contains_substring raw config.Workspace.base_path);
-  Alcotest.(check (option string)) "fallback top-level cwd is Keeper-visible"
-    (Some visible_root)
+  Alcotest.(check (option string)) "fallback top-level cwd is Local host cwd"
+    (Some local_cwd)
     (parse_string_field raw "cwd");
   let execution_location_cwd =
     try
@@ -748,7 +750,7 @@ let test_execute_typed_pipeline_falls_back_to_local_playground () =
     | Yojson.Json_error _ -> None
   in
   Alcotest.(check (option string)) "fallback nested cwd matches top-level cwd"
-    (Some visible_root)
+    (Some local_cwd)
     execution_location_cwd
 
 let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
@@ -794,7 +796,7 @@ let test_execute_routes_through_docker () =
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~config ~meta
-      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "pwd" ~argv:[])
       ()
   in
   Alcotest.(check (option bool)) "typed Execute succeeds via local fallback" (Some true)
@@ -803,7 +805,39 @@ let test_execute_routes_through_docker () =
     (parse_string_field raw "requested_sandbox");
   Alcotest.(check (option string)) "fallback local playground"
     (Some "local_playground")
-    (parse_string_field raw "sandbox_fallback")
+    (parse_string_field raw "sandbox_fallback");
+  Alcotest.(check (option string)) "fallback dispatch identity"
+    (Some "local_fallback")
+    (parse_string_field raw "via");
+  Alcotest.(check (option string)) "fallback reason is typed"
+    (Some "docker_preflight_unavailable")
+    (parse_string_field raw "fallback_reason");
+  Alcotest.(check bool) "fallback retains private preflight detail" true
+    (Option.is_some (parse_string_field raw "sandbox_fallback_reason"));
+  let stdout =
+    parse_string_field raw "output"
+    |> Option.map String.trim
+  in
+  let local_cwd =
+    Keeper_alerting_path.normalize_path_for_check playground
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  Alcotest.(check (option string)) "fallback stdout reports Local cwd"
+    (Some local_cwd)
+    stdout;
+  Alcotest.(check (option string)) "fallback top-level cwd reports Local namespace"
+    stdout
+    (parse_string_field raw "cwd");
+  let execution_location_cwd =
+    raw
+    |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.member "execution_location"
+    |> Yojson.Safe.Util.member "cwd"
+    |> Yojson.Safe.Util.to_string_option
+  in
+  Alcotest.(check (option string)) "fallback nested cwd reports Local namespace"
+    stdout
+    execution_location_cwd
 
 let test_execute_legacy_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
@@ -1415,8 +1449,9 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
   in
   Alcotest.(check (option bool)) "legacy ok omitted" None
     (parse_bool_field raw "ok");
-  Alcotest.(check bool) "path rejection" true
-    (response_mentions raw "error" "path_outside_sandbox");
+  Alcotest.(check (option string)) "typed path rejection"
+    (Some "cwd_outside_sandbox")
+    (parse_string_field raw "code");
   Alcotest.(check (option string)) "docker not requested" None
     (parse_string_field raw "requested_sandbox");
   let log = if Sys.file_exists log_path then read_file log_path else "" in

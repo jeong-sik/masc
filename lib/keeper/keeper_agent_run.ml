@@ -63,17 +63,64 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_sdk.Raw_trace.t
   | Sink_degraded of Agent_sdk.Error.sdk_error
 
+(* What the queue held when the turn decided to yield. The decision itself is
+   [pending <> empty], so without this the record says a yield happened and
+   nothing about what it yielded to. *)
+type durable_stimulus_summary =
+  { pending_count : int
+  ; head : Keeper_event_queue.stimulus option
+  ; head_age_sec : float
+  ; kinds : Keeper_event_queue.stimulus_payload list
+  }
+
 type autonomous_yield_reason =
   | Chat_waiting
-  | Durable_stimulus_waiting
+  | Durable_stimulus_waiting of durable_stimulus_summary
 
 type autonomous_yield_request =
   { reason : autonomous_yield_reason }
 
+let durable_stimulus_summary ~now (pending : Keeper_event_queue.t) =
+  let stimuli = Keeper_event_queue.to_list pending in
+  let kinds =
+    List.map (fun (s : Keeper_event_queue.stimulus) -> s.payload) stimuli
+  in
+  match stimuli with
+  | [] -> { pending_count = 0; head = None; head_age_sec = 0.; kinds = [] }
+  | head :: _ ->
+    { pending_count = List.length stimuli
+    ; head = Some head
+    ; (* A stimulus stamped by a different clock can sit ahead of [now]. A
+         negative age reads as a stimulus from the future rather than as the
+         clock skew it is. *)
+      head_age_sec = Float.max 0. (now -. head.arrived_at)
+    ; kinds
+    }
+;;
+
+(* Rendering happens here, at the boundary where the value leaves the type
+   system for a log line. The summary itself holds the typed payloads. *)
+let durable_stimulus_summary_to_string summary =
+  let label (payload : Keeper_event_queue.stimulus_payload) =
+    Keeper_event_queue.payload_kind_label payload
+  in
+  Printf.sprintf
+    "pending=%d head=%s head_age_sec=%.1f kinds=[%s]"
+    summary.pending_count
+    (match summary.head with
+     | None -> "none"
+     | Some head -> label head.payload)
+    summary.head_age_sec
+    (summary.kinds
+     |> List.map label
+     |> List.sort_uniq String.compare
+     |> String.concat ",")
+;;
+
 let runtime_yield_reason request =
   match request.reason with
   | Chat_waiting -> Runtime_agent.Chat_waiting
-  | Durable_stimulus_waiting ->
+  | Durable_stimulus_waiting _ ->
     Runtime_agent.Durable_stimulus_waiting
 ;;
 

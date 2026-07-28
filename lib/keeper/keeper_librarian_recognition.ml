@@ -11,6 +11,11 @@
 open Keeper_memory_os_types
 module Consolidation = Keeper_memory_os_consolidation
 
+type valid_until_update =
+  | Keep_valid_until
+  | Clear_valid_until
+  | Set_valid_for_days of int
+
 type operation =
   | Add of fact
     (* New knowledge, fully authored by the librarian. *)
@@ -30,7 +35,7 @@ type operation =
       ; claim : string
       ; category : category option (* None = keep the row's category *)
       ; claim_id : string option (* None = keep the row's claim_id *)
-      ; valid_for_days : int option (* None = keep the row's valid_until *)
+      ; valid_until_update : valid_until_update
       }
     (* The claim at [index] is superseded by a corrected statement. *)
   | Forget of
@@ -48,8 +53,8 @@ let operation_label = function
   | Forget _ -> wire_op_forget
 ;;
 
-(* Structural outcomes only. Every rejection is a representability or
-   referencing failure, never an identity judgment. *)
+(* Typed outcomes only. Rejections are representability/referencing failures
+   or explicit recall-injection provenance, never heuristic identity judgment. *)
 type disposition =
   | Applied
   | Rejected_target_overlap
@@ -58,6 +63,7 @@ type disposition =
   | Rejected_kind_mismatch
   | Rejected_valid_until_mismatch
   | Rejected_too_few_members
+  | Rejected_recalled_echo
 
 let disposition_label = function
   | Applied -> "applied"
@@ -67,6 +73,7 @@ let disposition_label = function
   | Rejected_kind_mismatch -> "rejected_kind_mismatch"
   | Rejected_valid_until_mismatch -> "rejected_valid_until_mismatch"
   | Rejected_too_few_members -> "rejected_too_few_members"
+  | Rejected_recalled_echo -> "rejected_recalled_echo"
 ;;
 
 type apply_result =
@@ -107,7 +114,7 @@ let operations_have_overlapping_targets operations =
    model must not be able to choose a destructive result by merely reordering
    two operations. The wire parser rejects such output before this boundary;
    this pure guard gives the same fail-closed result to direct callers. *)
-let apply ~now ~operations facts =
+let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
   if operations_have_overlapping_targets operations
   then
     { facts
@@ -136,6 +143,8 @@ let apply ~now ~operations facts =
     | Reinforce { index; source_turn = _ } ->
       if not (in_range index)
       then Rejected_index_out_of_bounds
+      else if List.mem index recalled_reinforcement_indices
+      then Rejected_recalled_echo
       else if slot.(index) <> `Free
       then Rejected_target_consumed
       else (
@@ -147,7 +156,7 @@ let apply ~now ~operations facts =
            };
         slot.(index) <- `Touched;
         Applied)
-    | Revise { index; claim; category; claim_id; valid_for_days } ->
+    | Revise { index; claim; category; claim_id; valid_until_update } ->
       if not (in_range index)
       then Rejected_index_out_of_bounds
       else if slot.(index) <> `Free
@@ -165,10 +174,12 @@ let apply ~now ~operations facts =
                | Some id -> Some id
                | None -> row.claim_id)
           ; valid_until =
-              (match valid_for_days with
-               | Some days -> Some (valid_until_of_days ~now days)
-               | None -> row.valid_until)
+              (match valid_until_update with
+               | Keep_valid_until -> row.valid_until
+               | Clear_valid_until -> None
+               | Set_valid_for_days days -> Some (valid_until_of_days ~now days))
           ; last_verified_at = Some now
+          ; reinforcement_count = 0
           }
         in
         facts_arr.(index) <- revised;
@@ -254,7 +265,7 @@ let operation_to_json op : Yojson.Safe.t =
       ; wire_field_claim, `String consolidated_claim
       ; wire_field_category, `String (category_to_string category)
       ]
-    | Revise { index; claim; category; claim_id; valid_for_days } ->
+    | Revise { index; claim; category; claim_id; valid_until_update } ->
       [ wire_field_index, `Int index; wire_field_claim, `String claim ]
       @ (match category with
          | Some c -> [ wire_field_category, `String (category_to_string c) ]
@@ -262,9 +273,10 @@ let operation_to_json op : Yojson.Safe.t =
       @ (match claim_id with
          | Some id -> [ wire_field_claim_id, `String id ]
          | None -> [])
-      @ (match valid_for_days with
-         | Some days -> [ wire_field_valid_for_days, `Int days ]
-         | None -> [])
+      @ (match valid_until_update with
+         | Keep_valid_until -> []
+         | Clear_valid_until -> [ wire_field_valid_for_days, `Null ]
+         | Set_valid_for_days days -> [ wire_field_valid_for_days, `Int days ])
     | Forget { index; reason } ->
       [ wire_field_index, `Int index; wire_field_reason, `String reason ]
   in

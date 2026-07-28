@@ -255,6 +255,19 @@ let valid_for_days_field fields =
   | Some _ -> None
 ;;
 
+(* Revise has different null semantics from Add: omission preserves the
+   existing row, while an explicit null clears its expiry. Keep that distinction
+   at the wire boundary instead of collapsing it into an option. *)
+let revise_valid_until_update_field fields =
+  match List.assoc_opt wire_field_valid_for_days fields with
+  | None -> Some Recognition.Keep_valid_until
+  | Some `Null -> Some Recognition.Clear_valid_until
+  | Some (`Int days)
+    when days >= 1 && days <= Keeper_memory_os_types.max_valid_for_days ->
+    Some (Recognition.Set_valid_for_days days)
+  | Some _ -> None
+;;
+
 let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   match json with
   | `Assoc fields ->
@@ -442,16 +455,16 @@ let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
                 , string_field wire_field_claim fields
                 , optional_string_field wire_field_category fields
                 , claim_id_field fields
-                , valid_for_days_field fields )
+                , revise_valid_until_update_field fields )
               with
-              | Some index, Some claim, category, Some claim_id, Some valid_for_days ->
+              | Some index, Some claim, category, Some claim_id, Some valid_until_update ->
                 Ok
                   (Recognition.Revise
                      { index
                      ; claim
                      ; category = Option.map category_of_string category
                      ; claim_id
-                     ; valid_for_days
+                     ; valid_until_update
                      })
               | _ -> operation_mismatch op "requires index and claim"))
         | Some op when String.equal op Keeper_memory_os_types.wire_op_forget ->

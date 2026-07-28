@@ -21,6 +21,7 @@ let field_claim = Lib.wire_field_claim
 let deprecated_field_confidence = "confidence"
 let field_category = Lib.wire_field_category
 let field_source_turn = Lib.wire_field_source_turn
+let field_valid_for_days = Lib.wire_field_valid_for_days
 let field_open_items = Lib.wire_field_open_items
 let field_constraints = Lib.wire_field_constraints
 let field_preserved_tool_refs = Lib.wire_field_preserved_tool_refs
@@ -433,6 +434,26 @@ let test_parses_all_operation_shapes () =
       labels
 ;;
 
+let test_revise_null_clears_expiry_instead_of_preserving_it () =
+  let raw =
+    output_json_string
+      ~operations:
+        [ `Assoc
+            [ field_op, `String "revise"
+            ; field_index, `Int 0
+            ; field_claim, `String "durable correction"
+            ; field_valid_for_days, `Null
+            ]
+        ]
+      ()
+  in
+  match parse_out raw with
+  | Ok { Lib.operations = [ Recognition.Revise { valid_until_update = Recognition.Clear_valid_until; _ } ]; _ } -> ()
+  | Ok _ -> Alcotest.fail "revise null did not retain its clear-expiry meaning"
+  | Error error ->
+    Alcotest.failf "revise null should parse, got %s" (Lib.parse_error_to_string error)
+;;
+
 let test_rejects_single_member_merge () =
   rejects
     "merge with one member"
@@ -558,6 +579,8 @@ let () =
           test_case "rejects overlapping operation targets" `Quick
             test_rejects_overlapping_operation_targets;
           test_case "parses all operation shapes" `Quick test_parses_all_operation_shapes;
+          test_case "revise null clears expiry" `Quick
+            test_revise_null_clears_expiry_instead_of_preserving_it;
           test_case "rejects single-member merge" `Quick test_rejects_single_member_merge;
           test_case "rejects unknown op" `Quick test_rejects_unknown_op;
           test_case "parses JSON-string-wrapped object" `Quick test_parses_json_string_wrapping;

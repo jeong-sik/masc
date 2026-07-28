@@ -91,7 +91,9 @@ let test_merge_collapses_rows () =
 ;;
 
 let test_revise_rewrites_in_place () =
-  let store = [ fact ~claim:"old conclusion" ~claim_id:"old-slug" () ] in
+  let store =
+    [ fact ~claim:"old conclusion" ~claim_id:"old-slug" ~reinforcement_count:3 () ]
+  in
   let result =
     apply
       [ Recognition.Revise
@@ -99,7 +101,7 @@ let test_revise_rewrites_in_place () =
           ; claim = "new conclusion"
           ; category = None
           ; claim_id = Some "new-slug"
-          ; valid_for_days = Some 7
+          ; valid_until_update = Recognition.Set_valid_for_days 7
           }
       ]
       store
@@ -111,8 +113,43 @@ let test_revise_rewrites_in_place () =
   check (float 0.0) "first_seen preserved" 1_000_000.0 revised.Types.first_seen;
   check bool "valid_until derived from valid_for_days" true
     (revised.Types.valid_until = Some (Types.valid_until_of_days ~now 7));
+  check int "revision resets reinforcement count" 0 revised.Types.reinforcement_count;
   check (list string) "revised row is the episode claim" [ "new conclusion" ]
     (claims result.Recognition.recognized_facts)
+;;
+
+let test_revise_null_semantics_clear_expiry () =
+  let store = [ fact ~valid_until:(Some 9_000_000.0) () ] in
+  let result =
+    apply
+      [ Recognition.Revise
+          { index = 0
+          ; claim = "durable revision"
+          ; category = None
+          ; claim_id = None
+          ; valid_until_update = Recognition.Clear_valid_until
+          }
+      ]
+      store
+  in
+  let revised = List.hd result.Recognition.facts in
+  check (option (float 0.0)) "explicit null clears expiry" None revised.Types.valid_until
+;;
+
+let test_recalled_reinforcement_is_rejected_by_provenance () =
+  let store = [ fact ~claim:"recalled" ~reinforcement_count:3 () ] in
+  let result =
+    Recognition.apply
+      ~recalled_reinforcement_indices:[ 0 ]
+      ~now
+      ~operations:[ Recognition.Reinforce { index = 0; source_turn = 9 } ]
+      store
+  in
+  check int "recalled echo does not refresh count" 3
+    (List.hd result.Recognition.facts).Types.reinforcement_count;
+  check (list string) "recalled echo has typed disposition"
+    [ "rejected_recalled_echo" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
 ;;
 
 let test_add_appends () =
@@ -312,6 +349,10 @@ let () =
           test_case "forget shrinks the store" `Quick test_forget_shrinks_store;
           test_case "merge collapses rows" `Quick test_merge_collapses_rows;
           test_case "revise rewrites in place" `Quick test_revise_rewrites_in_place;
+          test_case "revise null clears expiry" `Quick
+            test_revise_null_semantics_clear_expiry;
+          test_case "recalled reinforcement is rejected by provenance" `Quick
+            test_recalled_reinforcement_is_rejected_by_provenance;
           test_case "add appends" `Quick test_add_appends;
           test_case "out-of-range rejects without change" `Quick
             test_out_of_range_rejects_without_change;

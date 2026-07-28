@@ -11,6 +11,14 @@
 
 open Keeper_memory_os_types
 
+type valid_until_update =
+  | Keep_valid_until
+  (** [valid_for_days] was absent: preserve the existing expiry. *)
+  | Clear_valid_until
+  (** [valid_for_days: null]: make the revised claim durable. *)
+  | Set_valid_for_days of int
+  (** [valid_for_days: n]: derive a new expiry from [n]. *)
+
 type operation =
   | Add of fact
     (** New knowledge, fully authored by the librarian. *)
@@ -29,7 +37,7 @@ type operation =
       ; claim : string
       ; category : category option (** [None] keeps the row's category. *)
       ; claim_id : string option (** [None] keeps the row's claim_id. *)
-      ; valid_for_days : int option (** [None] keeps the row's valid_until. *)
+      ; valid_until_update : valid_until_update
       }
     (** The claim at [index] is superseded by a corrected statement. *)
   | Forget of
@@ -41,8 +49,9 @@ type operation =
 (** The wire token of an operation ([wire_op_add] .. [wire_op_forget]). *)
 val operation_label : operation -> string
 
-(** Structural application outcomes. Every rejection is a representability or
-    referencing failure, never an identity judgment. *)
+(** Typed application outcomes. Rejections are representability/referencing
+    failures or explicit recall-injection provenance; none is a heuristic
+    identity judgment. *)
 type disposition =
   | Applied
   | Rejected_target_overlap
@@ -51,6 +60,7 @@ type disposition =
   | Rejected_kind_mismatch
   | Rejected_valid_until_mismatch
   | Rejected_too_few_members
+  | Rejected_recalled_echo
 
 val disposition_label : disposition -> string
 
@@ -76,7 +86,15 @@ type apply_result =
     input snapshot; a later direct-call reference to a row already consumed by
     a Merge is rejected. The store can shrink: Forget removes rows and Merge
     collapses them — no monotonic-growth invariant. *)
-val apply : now:float -> operations:operation list -> fact list -> apply_result
+val apply :
+  ?recalled_reinforcement_indices:int list ->
+  now:float ->
+  operations:operation list ->
+  fact list ->
+  apply_result
+(** [recalled_reinforcement_indices] is exact provenance from the recall
+    injection boundary. A Reinforce operation against one of those snapshot
+    rows is rejected rather than treated as fresh evidence. *)
 
 (** JSON projection of one operation for the recognition evidence ledger. *)
 val operation_to_json : operation -> Yojson.Safe.t

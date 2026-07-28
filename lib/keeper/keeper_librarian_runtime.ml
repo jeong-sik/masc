@@ -923,8 +923,26 @@ let apply_and_persist
                       ; current = List.length current
                       })
                else (
+                 let recalled_reinforcement_indices =
+                   recognition.operations
+                   |> List.filter_map (function
+                     | Recognition.Reinforce { index; _ } ->
+                       (match List.nth_opt inp.store index with
+                        | Some fact
+                          when
+                            Keeper_recall_injection_window.recently_injected
+                              ~keeper_id
+                              ~key:(Keeper_memory_os_types.claim_identity fact) ->
+                            Some index
+                        | None | Some _ -> None)
+                     | Recognition.Add _
+                     | Recognition.Merge _
+                     | Recognition.Revise _
+                     | Recognition.Forget _ -> None)
+                 in
                  let result =
                    Recognition.apply
+                     ~recalled_reinforcement_indices
                      ~now
                      ~operations:recognition.operations
                      inp.store

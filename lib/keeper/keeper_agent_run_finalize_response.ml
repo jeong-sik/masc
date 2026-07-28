@@ -427,7 +427,6 @@ let finalize
       ~generation
       ~turn:manifest_keeper_turn_id
       ~oas_turn_count:result.turns
-      ~response_text
       ~actual_tools:actual_keeper_tool_names
       ~librarian_messages
       ~memory_extraction_record:

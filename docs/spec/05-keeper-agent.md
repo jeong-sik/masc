@@ -27,7 +27,7 @@ Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, persona, instructions, typed goal/task links)
 - **context**: `working_context` (system prompt + messages + token count + OAS context)
-- **memory**: Memory OS fact/episode store + recall scoring (legacy memory bank 제거 — RFC keeper-memory-consolidation Stage 4)
+- **memory**: Memory OS fact/episode store (legacy memory bank 제거 — RFC keeper-memory-consolidation Stage 4)
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
 
 Keeper는 외부 세계를 관찰(`world_observation`)하고, 프롬프트를 구성하고, OAS `Agent.run`에 위임하고, 결과로부터 메트릭을 갱신하는 루프를 반복한다.
@@ -289,35 +289,25 @@ effect sink 직전에 opaque operation + normalized input으로 Keeper Gate를
 
 ```
 keeper_memory.ml (facade)
-  |-- keeper_memory_recall.ml (recall scoring, history loading, memory eval)
+  |-- keeper_memory_recall.ml (history/tail JSONL reading)
 ```
 
 ### 6.2 Memory Bank (제거됨)
 
 legacy per-keeper memory bank(`.memory.jsonl`, kind/horizon 어휘)는 제거됐다
 (RFC keeper-memory-consolidation Stage 4). durable 기억은 Memory OS fact
-store가 단일 경로다.
-- Placeholder 필터: `"none"`, `"null"`, `"없음"` 등은 무의미로 간주하여 제외
+store가 단일 경로다. profile별 kind cap을 정의하던 memory policy 계층도 bank와
+함께 제거됐다.
 
-### 6.3 Memory Policy
+### 6.3 Memory Recall (키워드 휴리스틱 제거됨)
 
-Profile별 종류당 보존 상한:
+키워드 분류기 기반 recall eval(`is_memory_recall_query`,
+`expected_topic_hint`, `evaluate_memory_recall`)은 제거됐다. 무엇을 회상할지는
+keeper가 `keeper_memory_search` 도구 호출로 스스로 판단한다 — substring 매칭이
+판단을 대신하지 않는다. `keeper_memory_recall.ml`에는 그 도구 경로가 공유하는
+typed history/tail 읽기 기반만 남아 있다.
 
-| Profile | Total cap | Kind caps |
-|---------|----------|-----------|
-| `aggressive` | 낮음 | 종류별 상한 타이트 |
-| `balanced` | 중간 | 기본 |
-| `conservative` | 높음 | 종류별 상한 느슨 |
-
-`select_memory_candidates_by_profile`이 profile에 맞게 메모리를 필터링.
-
-### 6.4 Memory Recall
-
-- `is_memory_recall_query`: 사용자 메시지가 기억 관련 질의인지 감지 (한국어 + 영어 needle 매칭)
-- `expected_topic_hint`: 질의에서 기대 토픽 추출
-- Cost 계산: `cost_usd_of_usage`로 모델별 가격 추정
-
-### 6.5 MASC-Owned Memory
+### 6.4 MASC-Owned Memory
 
 `run_turn`은 더 이상 OAS memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 librarian 추출 경로에서만 수행한다 (Institution memory는 제거됨).
 

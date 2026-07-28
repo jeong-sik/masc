@@ -16,14 +16,6 @@ type metrics_acc = {
   ma_proactive_points : int;
   ma_drift_applied_count : int;
 
-  ma_memory_checks : int;
-  ma_memory_passed : int;
-  ma_memory_corrections : int;
-  ma_memory_correction_success : int;
-  ma_memory_score_sum : float;
-  ma_memory_weather_checks : int;
-  ma_memory_weather_passed : int;
-  ma_memory_threshold : float;
   ma_memory_notes_added : int;
   ma_memory_compaction_events : int;
   ma_memory_compaction_before_notes : int;
@@ -47,14 +39,6 @@ let init_acc = {
   ma_proactive_points = 0;
   ma_drift_applied_count = 0;
 
-  ma_memory_checks = 0;
-  ma_memory_passed = 0;
-  ma_memory_corrections = 0;
-  ma_memory_correction_success = 0;
-  ma_memory_score_sum = 0.0;
-  ma_memory_weather_checks = 0;
-  ma_memory_weather_passed = 0;
-  ma_memory_threshold = 0.18;
   ma_memory_notes_added = 0;
   ma_memory_compaction_events = 0;
   ma_memory_compaction_before_notes = 0;
@@ -141,15 +125,6 @@ let compute_metrics_window
           Keeper_unified_metrics.work_kind_of_json j
           |> Option.value ~default:""
         in
-        let memory_check = j |> m "memory_check" in
-        let memory_performed = Safe_ops.json_bool ~default:false "performed" memory_check in
-        let memory_query_kind = Safe_ops.json_string ~default:"none" "query_kind" memory_check in
-        let memory_passed_now = Safe_ops.json_bool ~default:false "passed" memory_check in
-        let memory_final_score = Safe_ops.json_float ~default:0.0 "final_score" memory_check in
-        let memory_threshold_now = Safe_ops.json_float ~default:0.18 "threshold" memory_check in
-        let memory_correction_applied_now = Safe_ops.json_bool ~default:false "correction_applied" memory_check in
-        let memory_correction_success_now = Safe_ops.json_bool ~default:false "correction_success" memory_check in
-        let memory_expected_topic = Safe_ops.json_string_opt "expected_topic" memory_check in
         let proactive_obj = j |> m "proactive" in
         let proactive_fallback_applied_now = Safe_ops.json_bool ~default:false "fallback_applied" proactive_obj in
 
@@ -178,18 +153,8 @@ let compute_metrics_window
         in
         let tool_call_count_now = Safe_ops.json_int ~default:(List.length tools_used) "tool_call_count" j in
         let metric_event = Safe_ops.json_string ~default:"" "metric_event" j in
-        let memory_is_weather = match memory_expected_topic with Some "weather" -> true | _ -> false in
         let work_kind =
-          if work_kind_raw <> "" then work_kind_raw
-          else if memory_performed then
-            if memory_query_kind <> "" && memory_query_kind <> "none" then memory_query_kind
-            else "memory_recall"
-          else
-            match memory_expected_topic with
-            | Some "weather" -> "weather_answer"
-            | Some "first_question" -> "first_question_answer"
-            | Some topic when topic <> "" -> topic
-            | _ -> "general_chat"
+          if work_kind_raw <> "" then work_kind_raw else "general_chat"
         in
 
         let acc =
@@ -273,25 +238,6 @@ let compute_metrics_window
               (match memory_top_kind_now with
                | Some kind when String.trim kind <> "" -> count_table_incr memory_kind_counts_window kind
                | Some _ | None -> ());
-            
-            let acc =
-              if memory_performed then begin
-                let acc = { acc with
-                  ma_memory_checks = acc.ma_memory_checks + 1;
-                  ma_memory_score_sum = acc.ma_memory_score_sum +. memory_final_score;
-                  ma_memory_threshold = memory_threshold_now;
-                  ma_memory_passed = acc.ma_memory_passed + (if memory_passed_now then 1 else 0);
-                  ma_memory_corrections = acc.ma_memory_corrections + (if memory_correction_applied_now then 1 else 0);
-                  ma_memory_correction_success = acc.ma_memory_correction_success + (if memory_correction_success_now then 1 else 0);
-                } in
-                if memory_is_weather then
-                  { acc with
-                    ma_memory_weather_checks = acc.ma_memory_weather_checks + 1;
-                    ma_memory_weather_passed = acc.ma_memory_weather_passed + (if memory_passed_now then 1 else 0);
-                  }
-                else acc
-              end else acc
-            in
 
             let gen_stats =
               match Hashtbl.find_opt generation_stats gen with
@@ -310,10 +256,6 @@ let compute_metrics_window
             if memory_compaction_performed_now then begin
               gen_stats.memory_compactions <- gen_stats.memory_compactions + 1;
               gen_stats.memory_trimmed <- gen_stats.memory_trimmed + memory_compaction_dropped_notes_now;
-            end;
-            if memory_performed then begin
-              gen_stats.memory_checks <- gen_stats.memory_checks + 1;
-              if memory_passed_now then gen_stats.memory_passed <- gen_stats.memory_passed + 1;
             end;
             gen_stats.memory_notes <- gen_stats.memory_notes + memory_notes_added_now;
             if gen_stats.first_ts <= 0.0 || ts_unix < gen_stats.first_ts then gen_stats.first_ts <- ts_unix;
@@ -375,13 +317,6 @@ let compute_metrics_window
 
               ("drift_applied", `Bool drift_applied_now);
               ("drift_reason", Json_util.string_opt_to_json drift_reason_now);
-              ("memory_performed", `Bool memory_performed);
-              ("memory_query_kind", `String memory_query_kind);
-              ("memory_passed", `Bool memory_passed_now);
-              ("memory_final_score", `Float memory_final_score);
-              ("memory_threshold", `Float memory_threshold_now);
-              ("memory_correction_applied", `Bool memory_correction_applied_now);
-              ("memory_correction_success", `Bool memory_correction_success_now);
               ("memory_notes_added", `Int memory_notes_added_now);
               ("memory_top_kind", Json_util.string_opt_to_json (match memory_top_kind_now with Some s when String.trim s <> "" -> Some s | _ -> None));
               ("memory_note_kinds", `List (List.map (fun s -> `String s) memory_note_kinds));
@@ -389,7 +324,6 @@ let compute_metrics_window
               ("memory_compaction_before_notes", `Int memory_compaction_before_notes_now);
 	              ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);
 	              ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
-	              ("memory_expected_topic", Json_util.string_opt_to_json memory_expected_topic);
               ( "inference_telemetry",
                 j
                 |> m "inference_telemetry"
@@ -449,20 +383,6 @@ let compute_metrics_window
       float_of_int acc.ma_memory_compaction_dropped_notes
       /. float_of_int acc.ma_memory_compaction_events
   in
-  let memory_failed = acc.ma_memory_checks - acc.ma_memory_passed in
-  let memory_pass_rate =
-    if acc.ma_memory_checks = 0 then 0.0
-    else float_of_int acc.ma_memory_passed /. float_of_int acc.ma_memory_checks
-  in
-  let memory_avg_score =
-    if acc.ma_memory_checks = 0 then 0.0
-    else acc.ma_memory_score_sum /. float_of_int acc.ma_memory_checks
-  in
-  let memory_weather_pass_rate =
-    if acc.ma_memory_weather_checks = 0 then 0.0
-    else float_of_int acc.ma_memory_weather_passed /. float_of_int acc.ma_memory_weather_checks
-  in
-
   let top_work_kinds =
     top_counts_json ~limit:5 ~name_key:"kind" work_kind_counts
   in
@@ -487,10 +407,6 @@ let compute_metrics_window
     |> List.of_seq
     |> List.sort (fun (ga, _) (gb, _) -> compare ga gb)
     |> List.map (fun (generation, gs) ->
-         let memory_pass_rate_gen =
-           if gs.memory_checks = 0 then 0.0
-           else float_of_int gs.memory_passed /. float_of_int gs.memory_checks
-         in
          let top_model =
            match top_count_name_and_count gs.models with
            | Some (name, count) -> `Assoc [ ("name", `String name); ("count", `Int count) ]
@@ -511,8 +427,6 @@ let compute_metrics_window
            ("compactions", `Int gs.compactions);
            ("memory_compactions", `Int gs.memory_compactions);
            ("memory_trimmed", `Int gs.memory_trimmed);
-           ("memory_checks", `Int gs.memory_checks);
-           ("memory_pass_rate", `Float memory_pass_rate_gen);
            ("memory_notes", `Int gs.memory_notes);
            ("first_ts_unix", `Float gs.first_ts);
            ("last_ts_unix", `Float gs.last_ts);
@@ -558,14 +472,6 @@ let compute_metrics_window
     ("drift_applied_rate", `Float drift_applied_rate);
 
     ("tool_call_count", `Int acc.ma_tool_call_count);
-    ("memory_checks", `Int acc.ma_memory_checks);
-    ("memory_passed", `Int acc.ma_memory_passed);
-    ("memory_failed", `Int memory_failed);
-    ("memory_pass_rate", `Float memory_pass_rate);
-    ("memory_avg_score", `Float memory_avg_score);
-    ("memory_threshold", `Float acc.ma_memory_threshold);
-    ("memory_corrections", `Int acc.ma_memory_corrections);
-    ("memory_correction_success", `Int acc.ma_memory_correction_success);
     ("memory_notes_added", `Int acc.ma_memory_notes_added);
     ("memory_compaction_events", `Int acc.ma_memory_compaction_events);
     ("memory_compaction_before_notes", `Int acc.ma_memory_compaction_before_notes);
@@ -573,9 +479,6 @@ let compute_metrics_window
     ("memory_compaction_invalid_dropped", `Int acc.ma_memory_compaction_invalid_dropped);
     ("memory_compaction_drop_ratio", `Float memory_compaction_drop_ratio);
     ("memory_compaction_drop_avg", `Float memory_compaction_drop_avg);
-    ("memory_weather_checks", `Int acc.ma_memory_weather_checks);
-    ("memory_weather_passed", `Int acc.ma_memory_weather_passed);
-    ("memory_weather_pass_rate", `Float memory_weather_pass_rate);
     ("top_work_kinds", `List top_work_kinds);
     ("top_models", `List top_models);
     ("top_tools", `List top_tools);

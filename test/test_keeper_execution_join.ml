@@ -146,6 +146,43 @@ let test_tool_completed_without_entry_omits_execution_id () =
   check (option string) "tool_use_id still present" (Some "tu-5")
     (string_of_field (payload_member "tool_use_id" json))
 
+let test_tool_approval_completed_preserves_exact_occurrence () =
+  let json =
+    Bridge.native_event_to_json
+      (mk_event
+         (Agent_sdk.Event_bus.ToolApprovalCompleted
+            { invocation = invocation ~turn:4 ~planned_index:2 "tu-approved"
+            ; agent_name = "keeper-approval"
+            ; tool_name = "Execute"
+            ; approval = Agent_sdk.Hooks.Approved
+            }))
+    |> Option.get
+  in
+  check (option string)
+    "typed event kind"
+    (Some "tool_approval_completed")
+    (string_of_field (member "event_type" json));
+  check (option string)
+    "closed approval result"
+    (Some "approved")
+    (string_of_field (payload_member "approval" json));
+  check (option string)
+    "exact tool occurrence"
+    (Some "tu-approved")
+    (string_of_field (payload_member "tool_use_id" json));
+  check (option int)
+    "exact invocation turn"
+    (Some 4)
+    (int_of_field (payload_member "turn" json));
+  check (option int)
+    "exact invocation index"
+    (Some 2)
+    (int_of_field (payload_member "planned_index" json));
+  check bool
+    "approval event does not copy tool input"
+    true
+    (payload_member "input" json = None)
+
 let test_empty_tool_use_id_omitted_from_payload () =
   Join.For_testing.clear ();
   let json =
@@ -449,6 +486,8 @@ let () =
             test_tool_completed_stamps_execution_id
         ; test_case "non-keeper completion omits execution_id" `Quick
             test_tool_completed_without_entry_omits_execution_id
+        ; test_case "tool approval preserves exact occurrence" `Quick
+            test_tool_approval_completed_preserves_exact_occurrence
         ; test_case "empty tool_use_id omitted" `Quick
             test_empty_tool_use_id_omitted_from_payload
         ; test_case "agent_failed matches typed constructor" `Quick

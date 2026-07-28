@@ -368,12 +368,14 @@ let approval_decision_to_yojson = function
     `Assoc [ "kind", `String "edit"; "input", input ]
 ;;
 
-(* [request_context] is the Auto Judge / HITL summary input: the whole Keeper
-   turn context (history_messages, system prompts, dynamic_context) captured at
-   request time. Its only reader is Hitl_summary_worker, which runs while the
-   entry is still pending. A delivery is already resolved, so the context is
-   dead weight there — and it dominated the store: 71 deliveries held ~30MB of
-   duplicated context against 19 bytes of decision each.
+(* [request_context] is the Auto Judge / HITL summary input: request-local
+   causal evidence (bounded history lead-up, the triggering user message,
+   current dynamic context, and completed tool calls) captured at request time.
+   It is not the whole Keeper turn or its system prompts. Its only reader is
+   Hitl_summary_worker, which runs while the entry is still pending. A delivery
+   is already resolved, so the context is dead weight there — and it dominated
+   the store: 71 deliveries held ~30MB of duplicated context against 19 bytes
+   of decision each.
 
    Dropping it on the delivery wire shape stays decode-compatible: the reader
    treats [request_context] as optional and keys the version field off its

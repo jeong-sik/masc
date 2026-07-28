@@ -76,6 +76,20 @@ let gate_history_slice (messages : Agent_sdk.Types.message list) =
   List.map snd kept, List.length messages - List.length kept
 ;;
 
+let gate_causal_initial
+      ~gate_history
+      ~gate_history_omitted
+      ~user_message
+      ~dynamic_context
+  =
+  `Assoc
+    [ "history_messages", `List gate_history
+    ; "history_messages_omitted", `Int gate_history_omitted
+    ; "user_message", `String user_message
+    ; "dynamic_context", `String dynamic_context
+    ]
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -118,15 +132,11 @@ let prepare_agent_setup
     Keeper_gate_causal_context.create
       ~turn_id:manifest_keeper_turn_id
       ~initial:
-        (`Assoc
-           [ "history_messages", `List gate_history
-           ; "history_messages_omitted", `Int gate_history_omitted
-           ; "base_system_prompt", `String base_system_prompt
-           ; "turn_system_prompt", `String turn_system_prompt
-           ; "user_message", `String user_message
-           ; "dynamic_context", `String dynamic_context
-           ; "runtime_id", `String runtime_id
-           ])
+        (gate_causal_initial
+           ~gate_history
+           ~gate_history_omitted
+           ~user_message
+           ~dynamic_context)
   in
   let agent_name = meta.agent_name in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =

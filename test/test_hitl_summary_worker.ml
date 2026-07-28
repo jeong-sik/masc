@@ -74,11 +74,8 @@ let pending_entry
       [ ( "initial"
         , `Assoc
             [ "history_messages", `List [ `String "older turn" ]
-            ; "base_system_prompt", `String "base policy"
-            ; "turn_system_prompt", `String "turn policy"
             ; "user_message", `String "inspect the exact requested operation"
             ; "dynamic_context", `String "current context"
-            ; "runtime_id", `String "opaque"
             ] )
       ; "completed_tool_calls", `List []
       ]

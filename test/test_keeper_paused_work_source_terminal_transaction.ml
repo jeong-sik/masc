@@ -96,15 +96,116 @@ let with_source_terminal_lane f =
 
 let check_applied = function
   | Transaction.Applied
-      (Keeper_registry_event_queue.Settled _
-      | Keeper_registry_event_queue.Already_settled _) -> ()
+      (Keeper_registry_event_queue.Acked _
+      | Keeper_registry_event_queue.Already_acked _) -> ()
   | Transaction.Applied
-      (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
+      (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ }) ->
     Alcotest.fail detail
   | Transaction.Committed_followup_failed failure ->
     Alcotest.fail
       (Transaction.error_to_string
          { cause = failure; reservation_release = None })
+;;
+
+let replace_field name value fields =
+  List.map (fun (field, current) -> if String.equal field name then field, value else field, current) fields
+;;
+
+let source_ack_wire_fields json =
+  match json with
+  | `Assoc state_fields ->
+    (match List.assoc_opt "transition_outbox" state_fields with
+     | Some (`List [ `Assoc outbox_fields ]) ->
+       (match List.assoc_opt "receipt" outbox_fields with
+        | Some (`Assoc receipt_fields) ->
+          (match List.assoc_opt "settlement" receipt_fields with
+           | Some (`Assoc settlement_fields) -> state_fields, outbox_fields, receipt_fields, settlement_fields
+           | Some _ | None -> Alcotest.fail "source ACK settlement must be an object")
+        | Some _ | None -> Alcotest.fail "source ACK outbox receipt must be an object")
+     | Some _ | None -> Alcotest.fail "source ACK must retain exactly one durable outbox entry")
+  | _ -> Alcotest.fail "source ACK state must be a JSON object"
+;;
+
+let source_ack_transition_state request state =
+  let source_terminal : State.accepted_source_terminal =
+    { source = request.source
+    ; source_revision = request.source_revision
+    ; owner_nonce = request.owner_nonce
+    ; operator_operation_id = request.operator_operation_id
+    ; source_receipt = request.source_receipt
+    }
+  in
+  State.ack_pending_source_terminal
+    ~current_owner_nonce:request.owner_nonce
+    ~settled_at:2.0
+    ~source_terminal
+    state
+  |> require_ok "create source ACK transition"
+;;
+
+let test_source_ack_wire_is_canonical_and_recovers_v8 () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
+    let original =
+      Persistence.load_state_result ~base_path:config.Workspace.base_path ~keeper_name
+      |> require_ok "load source ACK state"
+    in
+    let acknowledged, result = source_ack_transition_state request original in
+    (match result with
+     | State.Settled _ -> ()
+     | State.Already_settled _ -> Alcotest.fail "first source ACK was a replay");
+    let canonical_json = State.to_yojson acknowledged in
+    let state_fields, outbox_fields, receipt_fields, settlement_fields =
+      source_ack_wire_fields canonical_json
+    in
+    Alcotest.(check (option string))
+      "source ACK writes v9 state"
+      (Some State.schema)
+      (match List.assoc_opt "schema" state_fields with
+       | Some (`String schema) -> Some schema
+       | Some _ | None -> None);
+    Alcotest.(check (option string))
+      "source ACK writes its own durable kind"
+      (Some "ack_source_terminal")
+      (match List.assoc_opt "kind" settlement_fields with
+       | Some (`String kind) -> Some kind
+       | Some _ | None -> None);
+    let legacy_transition_id =
+      match List.assoc_opt "lease_id" receipt_fields with
+      | Some (`String lease_id) -> lease_id ^ ":settle_from_source_terminal"
+      | Some _ | None -> Alcotest.fail "source ACK receipt omitted lease identity"
+    in
+    let legacy_event_id = "keeper-event-queue-transition:" ^ legacy_transition_id in
+    let legacy_settlement =
+      replace_field "kind" (`String "settle_from_source_terminal") settlement_fields
+    in
+    let legacy_receipt =
+      receipt_fields
+      |> replace_field "settlement" (`Assoc legacy_settlement)
+      |> replace_field "transition_id" (`String legacy_transition_id)
+      |> replace_field "event_id" (`String legacy_event_id)
+    in
+    let legacy_outbox = replace_field "receipt" (`Assoc legacy_receipt) outbox_fields in
+    let legacy_state =
+      state_fields
+      |> replace_field "schema" (`String "keeper.event_queue.state.v8")
+      |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
+      |> fun fields -> `Assoc fields
+    in
+    let recovered = State.of_yojson legacy_state |> require_ok "recover v8 source ACK outbox" in
+    let recovered_json = State.to_yojson recovered in
+    let recovered_fields, _, _, recovered_settlement = source_ack_wire_fields recovered_json in
+    Alcotest.(check (option string))
+      "recovery rewrites v8 as v9"
+      (Some State.schema)
+      (match List.assoc_opt "schema" recovered_fields with
+       | Some (`String schema) -> Some schema
+       | Some _ | None -> None);
+    Alcotest.(check (option string))
+      "recovery removes legacy source settlement kind"
+      (Some "ack_source_terminal")
+      (match List.assoc_opt "kind" recovered_settlement with
+       | Some (`String kind) -> Some kind
+       | Some _ | None -> None))
 ;;
 
 let test_exact_terminal_receipt_acks_pending () =
@@ -257,6 +358,10 @@ let () =
     "keeper paused-work source-terminal transaction"
     [ ( "Ack_source_terminal"
       , [ Alcotest.test_case
+            "writes ACK wire and recovers v8 outbox"
+            `Quick
+            test_source_ack_wire_is_canonical_and_recovers_v8
+        ; Alcotest.test_case
             "exact receipt ACKs pending"
             `Quick
             test_exact_terminal_receipt_acks_pending

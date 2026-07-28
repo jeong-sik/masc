@@ -36,7 +36,7 @@ type commit_status =
   | Already_committed
 
 type projection =
-  | Applied of Keeper_registry_event_queue.settle_result
+  | Applied of Keeper_registry_event_queue.source_ack_result
   | Committed_followup_failed of failure
 
 type success =
@@ -238,13 +238,13 @@ let project_receipt config receipt =
     |> Result.map_error (fun detail -> Committed_ack_failed detail)
   in
   let* prior =
-    Keeper_event_queue_state.accepted_pending_source_terminal_replay
+    Keeper_event_queue_state.accepted_pending_source_terminal_ack_replay
       source_terminal
       state
     |> Result.map_error (fun detail -> Committed_ack_failed detail)
   in
   match prior with
-  | Some prior -> Ok (Keeper_registry_event_queue.Already_settled prior)
+  | Some prior -> Ok (Keeper_registry_event_queue.Already_acked prior)
   | None ->
     let* current = read_meta config receipt.keeper_name in
     let* () =
@@ -259,11 +259,11 @@ let project_receipt config receipt =
       then Error Durable_owner_identity_changed
       else Ok ()
     in
-    Keeper_registry_event_queue.settle_pending_from_source_terminal_result
+    Keeper_registry_event_queue.ack_pending_source_terminal_result
       ~base_path
       receipt.keeper_name
       ~current_owner_nonce:current.runtime.nonce
-      ~settled_at:receipt.requested_at
+      ~acked_at:receipt.requested_at
       ~source_terminal
     |> Result.map_error (fun detail -> Committed_ack_failed detail)
 ;;

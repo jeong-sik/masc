@@ -1,4 +1,4 @@
-(** Receipt-first terminal settlement for one exact paused-lane source event. *)
+(** Receipt-first source ACK for one exact paused-lane terminal event. *)
 
 type request =
   { source : Keeper_event_queue.stimulus
@@ -6,7 +6,6 @@ type request =
   ; owner_nonce : int
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   ; operator_operation_id : string
-  ; settled_at : float
   }
 
 type failure =
@@ -27,7 +26,7 @@ type failure =
       }
   | Durable_owner_identity_changed
   | Source_queue_validation_failed of string
-  | Committed_settlement_failed of string
+  | Committed_ack_failed of string
 
 type error =
   { cause : failure
@@ -51,11 +50,11 @@ type success =
 
 val error_to_string : error -> string
 
-val settle_pending :
+val ack_pending :
   Workspace.config ->
   keeper_name:string ->
   request ->
   (success, error) result
-(** Persist [Settle_from_source_terminal] before committing the exact
-    source-bearing terminal settlement WAL. Replays never infer terminality
+(** Persist [Ack_source_terminal] before committing the exact source-terminal
+    ACK. Replays never infer terminality
     from time, prose, or an external fallback owner. *)

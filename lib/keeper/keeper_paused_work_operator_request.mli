@@ -13,7 +13,7 @@ type t =
       { to_keeper : string
       ; request : Keeper_paused_work_transfer_transaction.request
       }
-  | Settle_from_source_terminal of
+  | Ack_source_terminal of
       Keeper_paused_work_source_terminal_transaction.request
 
 val schema : string

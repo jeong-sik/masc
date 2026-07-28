@@ -1620,11 +1620,13 @@ let () =
         `Quick test_post_dispatch_non_reducing_output_is_quarantined;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
-      test_case "readmission evidence matches trigger axis"
-        `Quick test_readmission_evidence_matches_trigger_axis;
-      test_case "reactive compaction requires failed-request readmission"
-        `Quick test_reactive_compaction_requires_failed_request_readmission;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
+    ];
+    "failed-request readmission", [
+      test_case "evidence matches trigger axis"
+        `Quick test_readmission_evidence_matches_trigger_axis;
+      test_case "compacted candidate is admitted before commit"
+        `Quick test_reactive_compaction_requires_failed_request_readmission;
     ];
   ]

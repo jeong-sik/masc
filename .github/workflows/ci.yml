@@ -824,6 +824,18 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_runtime_provider_auth_headers"
 
+      - name: Run failed-request readmission suite
+        id: failed_request_readmission_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune exec --root . ./test/test_keeper_post_turn_wirein_order.exe -- test 'failed-request readmission'"
+
       - name: Run operator control suite
         id: operator_control_suite
         # Run regardless of earlier test failures, but only after a successful

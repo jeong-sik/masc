@@ -671,7 +671,8 @@ let () =
       assert success;
       assert (str_contains result "owned=task-001");
       assert (str_contains result "current=task-002");
-      assert_contains result "Do not retry generic masc_plan_init from a drifted surface";
+      assert_contains result "Owned task task-001 has no planning context.";
+      assert (not (str_contains result "Do not retry generic masc_plan_init"));
       assert (not (str_contains result "Suggested next:"));
       assert (str_contains result "planning current_task is unset or drifted")
     | None -> failwith "dispatch returned None")
@@ -778,9 +779,8 @@ let () =
       assert (str_contains result "owned=task-001 | current=task-001");
       assert (str_contains result "Planning: missing=yes | task=task-001");
       assert_contains result "Owned task task-001 has no planning context.";
-      assert (
-        str_contains result "Do not retry generic masc_plan_init from a drifted surface");
-      assert (str_contains result "handoff/worktree/test logs as the temporary SSOT");
+      assert (not (str_contains result "Do not retry generic masc_plan_init"));
+      assert (not (str_contains result "handoff/worktree/test logs as the temporary SSOT"));
       assert (not (str_contains result "Suggested next:"))
     | None -> failwith "dispatch returned None")
 ;;

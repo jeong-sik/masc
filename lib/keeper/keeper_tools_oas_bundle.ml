@@ -25,7 +25,7 @@ let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.k
   let meta = Keeper_current_task_reconcile.sync_current_task_id_from_backlog ~config meta in
   match meta.current_task_id with
   | None ->
-    "No task currently assigned. Use keeper_task_claim or keeper_tasks_list to find one."
+    "No task currently assigned."
   | Some tid ->
     let task_id = Keeper_id.Task_id.to_string tid in
     (match Workspace_backlog.read_backlog_r config with

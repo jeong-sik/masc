@@ -1,7 +1,7 @@
 # Keeper Tool Boundary Matrix
 
 Status: P0 ratchet source for keeper agent tool boundaries.
-Last updated: 2026-07-12.
+Last updated: 2026-07-28.
 
 This matrix freezes the owner map for keeper modules that participate in the
 agent tool path. A new file in scope must be added here with exactly one owner
@@ -156,6 +156,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_persona_audit.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_choice_policy.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_choice_policy.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_progress_identity.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_progress_identity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.ml` - tool-surface-policy

@@ -16,12 +16,6 @@ type metrics_acc = {
   ma_proactive_points : int;
   ma_drift_applied_count : int;
 
-  ma_memory_notes_added : int;
-  ma_memory_compaction_events : int;
-  ma_memory_compaction_before_notes : int;
-  ma_memory_compaction_dropped_notes : int;
-  ma_memory_compaction_invalid_dropped : int;
-
   ma_last_handoff : Yojson.Safe.t option;
   ma_last_compaction : Yojson.Safe.t option;
 }
@@ -38,12 +32,6 @@ let init_acc = {
   ma_heartbeat_points = 0;
   ma_proactive_points = 0;
   ma_drift_applied_count = 0;
-
-  ma_memory_notes_added = 0;
-  ma_memory_compaction_events = 0;
-  ma_memory_compaction_before_notes = 0;
-  ma_memory_compaction_dropped_notes = 0;
-  ma_memory_compaction_invalid_dropped = 0;
 
   ma_last_handoff = None;
   ma_last_compaction = None;
@@ -62,7 +50,6 @@ let compute_metrics_window
   let work_kind_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let model_counts_window : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let tool_counts_window : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let memory_kind_counts_window : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let drift_reason_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let compaction_trigger_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let generation_stats : (int, keeper_gen_window_stats) Hashtbl.t = Hashtbl.create 8 in
@@ -135,17 +122,6 @@ let compute_metrics_window
           |> Option.map String.trim
           |> function Some s when s <> "" -> Some s | _ -> None
         in
-        let memory_notes_added_now = Safe_ops.json_int ~default:0 "memory_notes_added" j in
-        let memory_top_kind_now = Safe_ops.json_string_opt "memory_top_kind" j in
-        let memory_note_kinds =
-          match j |> m "memory_note_kinds" with
-          | `List xs -> List.filter_map (function `String s when String.trim s <> "" -> Some (String.trim s) | _ -> None) xs
-          | _ -> []
-        in
-        let memory_compaction_performed_now = Safe_ops.json_bool ~default:false "memory_compaction_performed" j in
-        let memory_compaction_before_notes_now = Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j in
-        let memory_compaction_dropped_notes_now = Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j in
-        let memory_compaction_invalid_dropped_now = Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j in
         let tools_used =
           match j |> m "tools_used" with
           | `List xs -> List.filter_map (function `String s when String.trim s <> "" -> Some s | _ -> None) xs
@@ -221,24 +197,7 @@ let compute_metrics_window
             List.iter (count_table_incr tool_counts_window) tools_used;
             let acc = { acc with
               ma_tool_call_count = acc.ma_tool_call_count + tool_call_count_now;
-              ma_memory_notes_added = acc.ma_memory_notes_added + memory_notes_added_now;
             } in
-            let acc =
-              if memory_compaction_performed_now then
-                { acc with
-                  ma_memory_compaction_events = acc.ma_memory_compaction_events + 1;
-                  ma_memory_compaction_before_notes = acc.ma_memory_compaction_before_notes + memory_compaction_before_notes_now;
-                  ma_memory_compaction_dropped_notes = acc.ma_memory_compaction_dropped_notes + memory_compaction_dropped_notes_now;
-                  ma_memory_compaction_invalid_dropped = acc.ma_memory_compaction_invalid_dropped + memory_compaction_invalid_dropped_now;
-                }
-              else acc
-            in
-            List.iter (count_table_incr memory_kind_counts_window) memory_note_kinds;
-            if memory_note_kinds = [] then
-              (match memory_top_kind_now with
-               | Some kind when String.trim kind <> "" -> count_table_incr memory_kind_counts_window kind
-               | Some _ | None -> ());
-
             let gen_stats =
               match Hashtbl.find_opt generation_stats gen with
               | Some gs -> gs
@@ -253,11 +212,6 @@ let compute_metrics_window
             gen_stats.total_tokens <- gen_stats.total_tokens + Option.value ~default:0 total_tokens;
             if handoff_performed then gen_stats.handoffs <- gen_stats.handoffs + 1;
             if compacted then gen_stats.compactions <- gen_stats.compactions + 1;
-            if memory_compaction_performed_now then begin
-              gen_stats.memory_compactions <- gen_stats.memory_compactions + 1;
-              gen_stats.memory_trimmed <- gen_stats.memory_trimmed + memory_compaction_dropped_notes_now;
-            end;
-            gen_stats.memory_notes <- gen_stats.memory_notes + memory_notes_added_now;
             if gen_stats.first_ts <= 0.0 || ts_unix < gen_stats.first_ts then gen_stats.first_ts <- ts_unix;
             if ts_unix > gen_stats.last_ts then gen_stats.last_ts <- ts_unix;
             if model_bucket <> "" then count_table_incr gen_stats.models model_bucket;
@@ -317,13 +271,6 @@ let compute_metrics_window
 
               ("drift_applied", `Bool drift_applied_now);
               ("drift_reason", Json_util.string_opt_to_json drift_reason_now);
-              ("memory_notes_added", `Int memory_notes_added_now);
-              ("memory_top_kind", Json_util.string_opt_to_json (match memory_top_kind_now with Some s when String.trim s <> "" -> Some s | _ -> None));
-              ("memory_note_kinds", `List (List.map (fun s -> `String s) memory_note_kinds));
-              ("memory_compaction_performed", `Bool memory_compaction_performed_now);
-              ("memory_compaction_before_notes", `Int memory_compaction_before_notes_now);
-	              ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);
-	              ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
               ( "inference_telemetry",
                 j
                 |> m "inference_telemetry"
@@ -371,18 +318,6 @@ let compute_metrics_window
     if acc.ma_compaction_events = 0 then 0.0 else
       float_of_int acc.ma_compaction_saved_tokens /. float_of_int acc.ma_compaction_events
   in
-  let memory_compaction_drop_ratio =
-    if acc.ma_memory_compaction_before_notes = 0 then 0.0
-    else
-      float_of_int acc.ma_memory_compaction_dropped_notes
-      /. float_of_int acc.ma_memory_compaction_before_notes
-  in
-  let memory_compaction_drop_avg =
-    if acc.ma_memory_compaction_events = 0 then 0.0
-    else
-      float_of_int acc.ma_memory_compaction_dropped_notes
-      /. float_of_int acc.ma_memory_compaction_events
-  in
   let top_work_kinds =
     top_counts_json ~limit:5 ~name_key:"kind" work_kind_counts
   in
@@ -391,9 +326,6 @@ let compute_metrics_window
   in
   let top_tools =
     top_counts_json ~limit:5 ~name_key:"tool" tool_counts_window
-  in
-  let top_memory_kinds =
-    top_counts_json ~limit:5 ~name_key:"kind" memory_kind_counts_window
   in
   let top_drift_reasons =
     top_counts_json ~limit:5 ~name_key:"reason" drift_reason_counts
@@ -425,9 +357,6 @@ let compute_metrics_window
            ("total_tokens", `Int gs.total_tokens);
            ("handoffs", `Int gs.handoffs);
            ("compactions", `Int gs.compactions);
-           ("memory_compactions", `Int gs.memory_compactions);
-           ("memory_trimmed", `Int gs.memory_trimmed);
-           ("memory_notes", `Int gs.memory_notes);
            ("first_ts_unix", `Float gs.first_ts);
            ("last_ts_unix", `Float gs.last_ts);
            ("top_model", top_model);
@@ -472,17 +401,9 @@ let compute_metrics_window
     ("drift_applied_rate", `Float drift_applied_rate);
 
     ("tool_call_count", `Int acc.ma_tool_call_count);
-    ("memory_notes_added", `Int acc.ma_memory_notes_added);
-    ("memory_compaction_events", `Int acc.ma_memory_compaction_events);
-    ("memory_compaction_before_notes", `Int acc.ma_memory_compaction_before_notes);
-    ("memory_compaction_dropped_notes", `Int acc.ma_memory_compaction_dropped_notes);
-    ("memory_compaction_invalid_dropped", `Int acc.ma_memory_compaction_invalid_dropped);
-    ("memory_compaction_drop_ratio", `Float memory_compaction_drop_ratio);
-    ("memory_compaction_drop_avg", `Float memory_compaction_drop_avg);
     ("top_work_kinds", `List top_work_kinds);
     ("top_models", `List top_models);
     ("top_tools", `List top_tools);
-    ("top_memory_kinds", `List top_memory_kinds);
     ("top_drift_reasons", `List top_drift_reasons);
     ("top_compaction_triggers", `List top_compaction_triggers);
     ("generation_equipment", `List generation_equipment);

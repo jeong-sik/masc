@@ -33,9 +33,6 @@ type keeper_gen_window_stats = {
   mutable total_tokens : int;
   mutable handoffs : int;
   mutable compactions : int;
-  mutable memory_compactions : int;
-  mutable memory_trimmed : int;
-  mutable memory_notes : int;
   mutable first_ts : float;
   mutable last_ts : float;
   models : (string, int) Hashtbl.t;

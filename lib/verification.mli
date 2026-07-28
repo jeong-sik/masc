@@ -16,16 +16,6 @@ val equal_criterion : criterion -> criterion -> bool
 val criterion_to_yojson : criterion -> Yojson.Safe.t
 val criterion_of_yojson : Yojson.Safe.t -> (criterion, string) result
 
-type verdict =
-  | Pass
-  | Fail of string
-  | Partial of float * string
-
-val show_verdict : verdict -> string
-val equal_verdict : verdict -> verdict -> bool
-val verdict_to_yojson : verdict -> Yojson.Safe.t
-val verdict_of_yojson : Yojson.Safe.t -> (verdict, string) result
-
 type verification_request = {
   id: string;
   task_id: string;
@@ -40,19 +30,13 @@ type verification_request = {
 val request_to_yojson : verification_request -> Yojson.Safe.t
 val request_of_yojson : Yojson.Safe.t -> (verification_request, string) result
 
-(** {1 Evaluation} *)
-
-val evaluate_criterion : Yojson.Safe.t -> criterion -> verdict
-val evaluate_all : Yojson.Safe.t -> criterion list -> verdict
-val validate_cross_agent : worker:string -> verifier:string -> (unit, string) result
-
 (** {1 Storage} *)
 
 val generate_id : unit -> string
 val save_request : string -> verification_request -> (string, string) result
 
 (** [delete_request base_path req_id] removes the verification record for
-    [req_id]. RFC-0221 §3.1 compensation: undo a record write whose status
+    [req_id]. RFC-0221 §3.1 compensation: undo a record write whose Task status
     commit did not land. A missing record is success (idempotent). *)
 val delete_request : string -> string -> (unit, string) result
 

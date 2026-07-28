@@ -86,90 +86,6 @@ let test_criterion_of_yojson_errors () =
     | Ok _ -> Alcotest.fail (Printf.sprintf "%s should fail" label)
   ) bad_cases
 
-(* --- Verdict tests --- *)
-
-let test_verdict_roundtrip () =
-  let verdicts = [V.Pass; V.Fail "bad output"; V.Partial (0.75, "mostly ok")] in
-  List.iter (fun v ->
-    let json = V.verdict_to_yojson v in
-    match V.verdict_of_yojson json with
-    | Ok result ->
-        Alcotest.(check bool) "verdict roundtrip" true
-          (V.equal_verdict v result)
-    | Error e -> Alcotest.fail e
-  ) verdicts
-
-(* --- Evaluation tests --- *)
-
-let test_evaluate_contains () =
-  let output = `String "hello world" in
-  Alcotest.(check bool) "contains match" true
-    (V.evaluate_criterion output (V.Contains "hello") = V.Pass);
-  Alcotest.(check bool) "contains no match" true
-    (match V.evaluate_criterion output (V.Contains "xyz") with
-     | V.Fail _ -> true | _ -> false)
-
-let test_evaluate_not_contains () =
-  let output = `String "hello world" in
-  Alcotest.(check bool) "not_contains pass" true
-    (V.evaluate_criterion output (V.Not_contains "xyz") = V.Pass);
-  Alcotest.(check bool) "not_contains fail" true
-    (match V.evaluate_criterion output (V.Not_contains "hello") with
-     | V.Fail _ -> true | _ -> false)
-
-let test_evaluate_literal_and_empty_needles () =
-  let output = `String "literal .* needle" in
-  Alcotest.(check bool) "contains treats regex metacharacters literally" true
-    (V.evaluate_criterion output (V.Contains ".*") = V.Pass);
-  Alcotest.(check bool) "contains empty needle stays fail" true
-    (match V.evaluate_criterion output (V.Contains "") with
-     | V.Fail _ -> true | _ -> false);
-  Alcotest.(check bool) "not_contains empty needle stays pass" true
-    (V.evaluate_criterion output (V.Not_contains "") = V.Pass)
-
-let test_evaluate_schema_match () =
-  let output = `Assoc [("key", `String "value")] in
-  Alcotest.(check bool) "schema non-null pass" true
-    (V.evaluate_criterion output (V.Schema_match (`Assoc [])) = V.Pass);
-  Alcotest.(check bool) "schema null fail" true
-    (match V.evaluate_criterion `Null (V.Schema_match (`Assoc [])) with
-     | V.Fail _ -> true | _ -> false)
-
-let test_evaluate_custom () =
-  let output = `String "test" in
-  Alcotest.(check bool) "custom returns partial" true
-    (match V.evaluate_criterion output (V.Custom "check quality") with
-     | V.Partial _ -> true | _ -> false)
-
-let test_evaluate_all_pass () =
-  let output = `String "hello world foo" in
-  let criteria = [V.Contains "hello"; V.Not_contains "error"] in
-  Alcotest.(check bool) "all pass" true
-    (V.evaluate_all output criteria = V.Pass)
-
-let test_evaluate_all_fail () =
-  let output = `String "hello world" in
-  let criteria = [V.Contains "hello"; V.Contains "missing"] in
-  Alcotest.(check bool) "one fail = overall fail" true
-    (match V.evaluate_all output criteria with
-     | V.Fail _ -> true | _ -> false)
-
-let test_evaluate_empty_criteria () =
-  Alcotest.(check bool) "empty criteria = pass" true
-    (V.evaluate_all `Null [] = V.Pass)
-
-(* --- Cross-agent enforcement --- *)
-
-let test_cross_agent_same () =
-  match V.validate_cross_agent ~worker:"claude" ~verifier:"claude" with
-  | Error _ -> ()
-  | Ok () -> Alcotest.fail "same agent should be rejected"
-
-let test_cross_agent_different () =
-  match V.validate_cross_agent ~worker:"claude" ~verifier:"codex" with
-  | Ok () -> ()
-  | Error e -> Alcotest.fail e
-
 (* --- Storage tests --- *)
 
 let test_create_and_load () =
@@ -1078,24 +994,6 @@ let () =
     "criterion", [
       Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;
       Alcotest.test_case "of_yojson errors" `Quick test_criterion_of_yojson_errors;
-    ];
-    "verdict", [
-      Alcotest.test_case "roundtrip" `Quick test_verdict_roundtrip;
-    ];
-    "evaluation", [
-      Alcotest.test_case "contains" `Quick test_evaluate_contains;
-      Alcotest.test_case "not_contains" `Quick test_evaluate_not_contains;
-      Alcotest.test_case "literal and empty needles" `Quick
-        test_evaluate_literal_and_empty_needles;
-      Alcotest.test_case "schema_match" `Quick test_evaluate_schema_match;
-      Alcotest.test_case "custom" `Quick test_evaluate_custom;
-      Alcotest.test_case "all pass" `Quick test_evaluate_all_pass;
-      Alcotest.test_case "all fail" `Quick test_evaluate_all_fail;
-      Alcotest.test_case "empty criteria" `Quick test_evaluate_empty_criteria;
-    ];
-    "cross_agent", [
-      Alcotest.test_case "same agent rejected" `Quick test_cross_agent_same;
-      Alcotest.test_case "different agents ok" `Quick test_cross_agent_different;
     ];
     "id_generation", [
       Alcotest.test_case "vrf- prefix" `Quick test_generate_id_prefix;

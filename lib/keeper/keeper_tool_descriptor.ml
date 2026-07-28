@@ -960,14 +960,7 @@ let base_schema_input name =
     , unavailable_input_schema ("missing base tool schema for " ^ name) )
 
 let tool_search_schema =
-  object_schema
-    ~required:[ "query" ]
-    [ property "query" "string" "Search query for available keeper tools."
-    ; property
-        "max_results"
-        "integer"
-        "Maximum tool schemas to return. Default 5, capped at 10."
-    ]
+  Keeper_tool_registry.keeper_tool_search_schema.input_schema
 ;;
 
 let library_search_schema =

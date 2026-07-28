@@ -151,8 +151,8 @@ let test_contract_observation_preserves_current_turn_suffix () =
     (text_of_last_assistant patched.messages);
   Alcotest.(check bool) "canonical replay clears working context" true
     (patched.working_context = None);
-  Alcotest.(check (option string)) "canonical replay reason"
-    (Some "canonical_success_replay")
+  Alcotest.(check (option string)) "retained replay has no prune reason"
+    None
     (prune_reason_to_string reason)
 ;;
 
@@ -216,8 +216,8 @@ let test_success_preserves_typed_replay_suffix () =
     |> expect_ok
   in
   Alcotest.(check int) "full replay retained" 6 (List.length patched.messages);
-  Alcotest.(check (option string)) "canonicalization reason"
-    (Some "canonical_success_replay")
+  Alcotest.(check (option string)) "retained replay has no prune reason"
+    None
     (prune_reason_to_string reason);
   Alcotest.(check bool) "thinking remains typed" true
     (has_content (function Thinking _ -> true | _ -> false) patched.messages);
@@ -253,7 +253,7 @@ let test_success_appends_missing_final_assistant () =
     (text_of_last_assistant patched.messages)
 ;;
 
-let test_empty_success_drops_current_turn_replay () =
+let test_empty_success_preserves_recorded_user_turn () =
   let open Agent_sdk.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
@@ -268,11 +268,55 @@ let test_empty_success_drops_current_turn_replay () =
       (checkpoint (history @ [ message User [ Text "current user" ] ]))
     |> expect_ok
   in
-  Alcotest.(check int) "empty visible result is not replayed" 2
+  Alcotest.(check int) "recorded user input survives blank completion" 3
     (List.length patched.messages);
   Alcotest.(check bool) "working context cleared on canonical success" true
     (patched.working_context = None);
-  Alcotest.(check (option string)) "canonicalization remains observable"
+  Alcotest.(check (option string)) "nothing was pruned"
+    None
+    (prune_reason_to_string reason)
+;;
+
+let test_empty_success_preserves_tool_execution_suffix () =
+  let open Agent_sdk.Types in
+  let history =
+    [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
+  in
+  let current_turn =
+    [ message User [ Text "current user" ]
+    ; message Assistant
+        [ ToolUse
+            { id = "tool-1"; name = "keeper_context_status"; input = `Assoc [] }
+        ]
+    ; message Tool
+        [ ToolResult
+            { tool_use_id = "tool-1"
+            ; content = "status"
+            ; outcome = Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; message Assistant [ Text "" ]
+    ]
+  in
+  let patched, reason =
+    Finalize.checkpoint_for_replay_persistence
+      ~history_messages:history
+      ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
+      ~session_id:"new-session"
+      ~response_text:""
+      (checkpoint (history @ current_turn))
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "effectful replay survives without the trailing blank assistant"
+    true
+    (patched.messages = history @ List.rev (List.tl (List.rev current_turn)));
+  Alcotest.(check bool) "working context cleared on canonical success" true
+    (patched.working_context = None);
+  Alcotest.(check (option string)) "blank assistant pruning is observable"
     (Some "canonical_success_replay")
     (prune_reason_to_string reason)
 ;;
@@ -480,7 +524,7 @@ let test_skipped_wake_leaves_non_marker_suffix_untouched () =
     (List.length patched.messages)
 ;;
 
-let test_skipped_wake_blank_response_still_drops_whole_suffix () =
+let test_skipped_wake_blank_response_drops_only_inert_suffix () =
   let open Agent_sdk.Types in
   let suffix =
     [ message User [ Text wake_marker_text ]; message Assistant [ Text "" ] ]
@@ -523,9 +567,13 @@ let () =
             `Quick
             test_success_appends_missing_final_assistant
         ; Alcotest.test_case
-            "empty success drops current turn"
+            "empty success preserves recorded user turn"
             `Quick
-            test_empty_success_drops_current_turn_replay
+            test_empty_success_preserves_recorded_user_turn
+        ; Alcotest.test_case
+            "empty success preserves tool execution suffix"
+            `Quick
+            test_empty_success_preserves_tool_execution_suffix
         ; Alcotest.test_case
             "InputRequired preserves exact tool-failure suffix"
             `Quick
@@ -547,9 +595,9 @@ let () =
             `Quick
             test_skipped_wake_leaves_non_marker_suffix_untouched
         ; Alcotest.test_case
-            "skipped wake blank response still drops whole suffix"
+            "skipped wake blank response drops only inert suffix"
             `Quick
-            test_skipped_wake_blank_response_still_drops_whole_suffix
+            test_skipped_wake_blank_response_drops_only_inert_suffix
         ] )
     ]
 ;;

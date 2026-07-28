@@ -55,7 +55,7 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_registry_event_queue.pending_selection option;
-  event_queue_claim_error : string option;
+  event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
@@ -84,6 +84,10 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
 }
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
+
+let should_run_turn_after_event_intake ~scheduled ~event_queue_intake_error =
+  scheduled && Option.is_none event_queue_intake_error
+;;
 
 let provider_timeout_observation_reasons =
   Observations.provider_timeout_observation_reasons
@@ -573,9 +577,15 @@ let run_keepalive_unified_turn
       let manual_compaction_requested =
         manual_compaction_requested_of_stimuli event_intake.consumed_stimuli
       in
-      (match event_intake.event_queue_claim_error with
+      (match event_intake.event_queue_intake_error with
        | None -> ()
-       | Some message -> record_settlement_failure message);
+       | Some error
+         when
+           Stimulus_intake.event_queue_intake_error_counts_as_cycle_failure
+             error ->
+         record_settlement_failure
+           (Stimulus_intake.event_queue_intake_error_to_string error)
+       | Some _ -> ());
       let pending_board_events = event_intake.pending_board_events in
       let obs =
         Keeper_world_observation.observe
@@ -596,8 +606,18 @@ let run_keepalive_unified_turn
          stuck behind sticky blockers. Failed turns record evidence via
          Keeper_registry; recovery is autonomous (next turn's observation)
          or operator-driven (board/keeper_chat), not blocker-driven. *)
-      let should_run_turn = scheduling.should_run_turn in
-      let verdict_strs = scheduling.verdict_reasons in
+      let should_run_turn =
+        should_run_turn_after_event_intake
+          ~scheduled:scheduling.should_run_turn
+          ~event_queue_intake_error:event_intake.event_queue_intake_error
+      in
+      let verdict_strs =
+        match event_intake.event_queue_intake_error with
+        | None -> scheduling.verdict_reasons
+        | Some error ->
+          Stimulus_intake.event_queue_intake_error_reason_label error
+          :: scheduling.verdict_reasons
+      in
       let channel_str = scheduling.channel in
       if not should_run_turn
       then (
@@ -659,7 +679,7 @@ let run_keepalive_unified_turn
           "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] \
            idle=%ds since_last=%s%s"
           meta_after_triage.name
-          turn_decision.should_run
+          should_run_turn
           channel_str
           (String.concat "," verdict_strs)
           obs.idle_seconds

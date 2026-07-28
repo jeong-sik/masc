@@ -10,7 +10,8 @@ val make_tool_bundle
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
-  -> ?search_fn:(unit -> Keeper_tool_execution.t)
+  -> ?search_fn:
+       (query:string -> max_results:int -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:Keeper_gate_causal_context.t
@@ -25,7 +26,8 @@ val make_tools
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
-  -> ?search_fn:(unit -> Keeper_tool_execution.t)
+  -> ?search_fn:
+       (query:string -> max_results:int -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> unit
   -> Agent_sdk.Tool.t list

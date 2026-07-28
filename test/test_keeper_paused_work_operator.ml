@@ -111,7 +111,7 @@ let with_source_terminal_lane f =
          State.source_terminal_receipt_of_stimulus source
          |> require_ok "derive source-terminal receipt"
        in
-       let request =
+       let request : Keeper_paused_work_source_terminal_transaction.request =
          { source
          ; source_revision
          ; owner_nonce = meta.runtime.nonce

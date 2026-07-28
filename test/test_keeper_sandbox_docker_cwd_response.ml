@@ -40,16 +40,16 @@ let make_docker_meta ~name : Keeper_meta_contract.keeper_meta =
     `Assoc
       [
         ("name", `String name);
-        ("agent_name", `String ("agent-" ^ name));
+        ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String ("trace-" ^ name));
         ("allowed_paths", `List [ `String "*" ]);
-        ( "sandbox_profile"
-        , `String
-            (Keeper_types_profile_sandbox.sandbox_profile_to_string Keeper_types_profile_sandbox.Docker) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta ->
+    { meta with
+      sandbox_profile = Keeper_types_profile_sandbox.Docker
+    }
   | Error e -> Alcotest.fail e
 
 let test_container_path_translation_under_sandbox () =
@@ -106,23 +106,58 @@ let test_typed_execute_response_cwd_uses_container_path () =
       cleanup_dir base)
     (fun () ->
        let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-       let host_cwd =
-         Filename.concat host_root "repos/masc/.worktrees/task-cwd-pin"
-       in
-       let response_cwd =
-         Keeper_tool_execute_runtime.For_testing.typed_execute_response_cwd_json
+      let host_cwd =
+        Filename.concat host_root "repos/masc/.worktrees/task-cwd-pin"
+      in
+      let visible_root =
+        Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+      in
+      let prompt =
+        Keeper_run_context.build_base_system_prompt
+          ~config
+          ~profile_defaults:
+            Keeper_types_profile_defaults.empty_keeper_profile_defaults
+          ~meta
+      in
+      check bool "Docker prompt does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base prompt);
+      check bool "Docker prompt contains Keeper-visible sandbox root" true
+        (Astring.String.is_infix ~affix:visible_root prompt);
+      check bool "Docker prompt recommends relative argv operands" true
+        (Astring.String.is_infix
+           ~affix:"Prefer relative argv path operands"
+           prompt);
+      check bool "Docker prompt rejects host absolute paths" true
+        (Astring.String.is_infix
+           ~affix:"host absolute paths are unavailable"
+           prompt);
+      let response_cwd =
+        Keeper_tool_execute_runtime.For_testing.typed_execute_response_cwd_json
            ~turn_sandbox_factory:(Some factory)
            ~cwd:host_cwd
            ~sandbox_extra_fields:
              [
                "requested_sandbox", `String "docker";
                "via", `String "docker";
-               "sandbox_profile", `String "docker";
-             ]
-       in
-       let json_str = Yojson.Safe.to_string response_cwd in
-       check bool "typed Execute cwd JSON does NOT contain host base" false
-         (Astring.String.is_infix ~affix:base json_str);
+             "sandbox_profile", `String "docker";
+           ]
+      in
+      let execution_location =
+        Keeper_sandbox_repo_path.execution_location_json
+          ~config
+          ~meta
+          ~args:(`Assoc [ "argv", `List [ `String "find"; `String "." ] ])
+          ~cwd:host_cwd
+      in
+      let full_response =
+        `Assoc
+          [ "cwd", response_cwd
+          ; "execution_location", execution_location
+          ]
+      in
+      let json_str = Yojson.Safe.to_string full_response in
+      check bool "typed Execute cwd JSON does NOT contain host base" false
+        (Astring.String.is_infix ~affix:base json_str);
        check bool "typed Execute cwd JSON does NOT contain host cwd" false
          (Astring.String.is_infix ~affix:host_cwd json_str);
        match response_cwd with

@@ -189,10 +189,6 @@ let handle_read_resource_eio state id params =
                   ]
               in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | "schema" ->
-              ("text/markdown", Some Mcp_server.schema_markdown)
-          | "schema.json" ->
-              ("application/json", Some (Yojson.Safe.pretty_to_string Mcp_server.schema_json))
           | "institution" ->
               let file = Filename.concat
                 (Common.masc_dir_from_base_path ~base_path:config.base_path)

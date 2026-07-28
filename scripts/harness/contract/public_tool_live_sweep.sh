@@ -319,21 +319,39 @@ next_step "masc_agent_timeline"
 r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,limit:5}')")"
 expect_ok "masc_agent_timeline" "$r_agent_timeline"
 
-next_step "masc_transition done"
-# RFC-0311 Phase 1: the completion gate requires a locally validated
-# evidence_refs entry on done (notes and trace-shaped labels alone no longer
-# satisfy it). Persist a base-path-local proof artifact and submit its relative
-# path so the gate can resolve it deterministically.
-evidence_ref=".masc/harness-evidence/public_tool_live_sweep.json"
-evidence_path="${BASE_PATH}/${evidence_ref}"
-mkdir -p "$(dirname "$evidence_path")"
-jq -cn --arg session_id "$MCP_SESSION_ID" --arg agent_name "$AGENT_NAME" --arg task_id "$task_id" \
-  '{harness:"public_tool_live_sweep",session_id:$session_id,agent_name:$agent_name,task_id:$task_id,status:"completed"}' \
-  >"$evidence_path"
+evidence_ref="note:public MCP tool live sweep verified by producer ${AGENT_NAME}"
 done_notes="Public MCP tool live sweep completed all requested tool calls and verified each response before task completion."
 done_summary="public tool live sweep verified across the public MCP surface"
+
+next_step "masc_transition direct done rejection"
 r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
-expect_ok "masc_transition done" "$r_done"
+if response_transport_ok "$r_done" \
+  && ! response_tool_ok "$r_done" \
+  && [[ "$r_done" == *"Task completion must be submitted for verification"* ]] \
+  && [[ "$r_done" != *"Configured LLM completion verifier"* ]]; then
+  echo "  PASS: masc_transition direct done rejection"
+else
+  mcp_fail_with_context \
+    "masc_transition direct done: expected Verification_submission_required" \
+    "$r_done"
+fi
+
+next_step "masc_transition submit_for_verification"
+r_submit="$(call_tool 5038 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
+expect_ok "masc_transition submit_for_verification" "$r_submit"
+
+next_step "masc_tasks awaiting_verification producer credit"
+r_awaiting="$(call_tool 5039 "masc_tasks" '{"status":"awaiting_verification"}')"
+if response_tool_ok "$r_awaiting" \
+  && [[ "$r_awaiting" == *"$task_id"* ]] \
+  && [[ "$r_awaiting" == *"awaiting_verification"* ]] \
+  && [[ "$r_awaiting" == *"$AGENT_NAME"* ]]; then
+  echo "  PASS: masc_tasks awaiting_verification producer credit"
+else
+  mcp_fail_with_context \
+    "masc_tasks: AwaitingVerification projection did not retain producer credit" \
+    "$r_awaiting"
+fi
 CLEANUP_TASK_FINALIZED=1
 
 echo "PASS: public MCP tool live sweep"

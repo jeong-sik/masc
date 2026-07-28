@@ -227,16 +227,6 @@ export function fetchAuditIntegrity(): Promise<AuditIntegrityResponse> {
 // Route:   GET /api/v1/verification/requests?task_id=&limit=
 // Shape is stable; status values match the Verification state machine's
 // user-visible mapping (pending → approved | rejected, plus a reserved
-// timed_out slot for the deadline watcher).
-
-export type VerificationRequestStatus =
-  | 'pending'
-  | 'approved'
-  | 'rejected'
-  | 'timed_out'
-
-export type VerificationRequestVerdict = 'pass' | 'fail' | 'partial' | null
-
 export interface VerificationRequest {
   request_id: string
   task_id: string
@@ -244,17 +234,12 @@ export interface VerificationRequest {
   request_kind: 'normal' | 'conflict_triage'
   request_summary: string
   next_action: string | null
-  keeper: string | null
-  status: VerificationRequestStatus
   created_at: string
   submitted_by: string
-  approved_by: string | null
   completion_contract: string[]
   required_artifacts: string[]
   submitted_evidence: string[]
   evidence_projection_error: string | null
-  verdict: VerificationRequestVerdict
-  verdict_reason: string
 }
 
 export interface VerificationRequestsResponse {

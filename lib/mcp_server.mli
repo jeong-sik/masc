@@ -24,7 +24,7 @@
     [doc_icon], [icons_for_mime], [server_icons],
     [make_resource_template] (callers use the static
     {!resource_templates} list, not the constructor),
-    [task_fsm_transition_to_json], [supported_protocol_versions],
+    [supported_protocol_versions],
     [default_protocol_version], [is_supported_protocol_version],
     [validate_protocol_version], [jsonrpc_notification]). *)
 
@@ -157,18 +157,6 @@ val read_event_lines :
     activity-events JSONL log under [config].  Lines are
     raw strings — caller decides whether to parse via
     {!Yojson.Safe.from_string} or treat as opaque. *)
-
-(** {1 Task FSM advertisement} *)
-
-val task_fsm_transitions :
-  (string * string list * string * string option) list
-(** Static catalogue of legal task FSM transitions:
-    [(action, valid_from_states, to_state, gate_predicate)].
-    Surfaced through the resource template for
-    [masc://meta/task-fsm.json]. *)
-
-val schema_json : Yojson.Safe.t
-val schema_markdown : string
 
 (** {1 Server state} *)
 

@@ -1,11 +1,8 @@
-(** Pure Task lifecycle transition helper. Semantic completion is authorized by
-    a request-local configured-LLM verdict, never by an actor hierarchy. *)
+(** Pure Task lifecycle transition helper. Producers submit completion evidence
+    for verification; the phase-assigned verifier owns the terminal verdict. *)
 
 type invalid =
-  | Completion_verdict_required
-  | Completion_rejected of string
-  | Completion_verdict_unavailable of string
-  | Completion_verdict_action_mismatch
+  | Verification_submission_required
   | Verification_claim_required
   | Verification_assigned_to of string
   | Verification_self_claim
@@ -39,7 +36,6 @@ val decide
   -> task_status:Masc_domain.task_status
   -> action:Masc_domain.task_action
   -> now:string
-  -> configured_llm_verdict:Masc_domain.configured_llm_completion_verdict option
   -> notes:string
   -> reason:string
   -> (decision, invalid) result

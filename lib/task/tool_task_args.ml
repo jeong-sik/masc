@@ -78,7 +78,7 @@ let synthesize_summary_from_siblings args =
    Exit-class actions:
      Cancel / Release / Submit_for_verification /
      Approve_verification / Reject_verification
-   Actions whose content is judged directly by the configured LLM or has no
+   Actions whose content is judged directly by the assigned verifier or has no
    handoff meaning do not require a local summary: Done_action / Claim / Start.
 
    This split is exhaustive over [Masc_domain.task_action]; adding a
@@ -179,7 +179,5 @@ let transition_known_args =
     "reason";
     "expected_version";
     "agent_name";
-    "completion_contract";
-    "evaluator_runtime";
     "handoff_context";
   ]

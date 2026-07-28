@@ -31,9 +31,7 @@ let handoff_context_description =
      'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
      'note:<text>' for narrative/commit/trace/URL evidence. Bare relative paths \
      and absolute host paths are persisted as typed invalid references. The \
-     list itself is optional — the configured LLM completion \
-     verdict decides the outcome (RFC-0337 withdrew the mandatory evidence \
-     floor). Example: {\"summary\": \"tests green, local proof saved\", \
+     list itself is optional. Example: {\"summary\": \"tests green, local proof saved\", \
      \"evidence_refs\": [\"artifact:artifacts/proof.json\"]}."
 
 let schemas : Masc_domain.tool_schema list = [
@@ -42,8 +40,8 @@ let schemas : Masc_domain.tool_schema list = [
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
-Every Done transition requires the configured LLM completion verdict. \
-submit_for_verification creates an asynchronous review state; any worker may bind it for scheduling, but actor identity never authorizes approve/reject. \
+Completion must be submitted for an assigned verifier's approve/reject verdict. \
+submit_for_verification creates an asynchronous review state; any non-producer may race to claim it, but only the committed phase-assigned distinct verifier may approve/reject. \
 To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
@@ -221,7 +219,7 @@ Tip: Look for status='todo' tasks to claim.";
   {
     name = "masc_transition";
     description =
-      "Move a Task through claim, start, submit_for_verification, approve, reject, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. done/approve/reject invoke the same configured LLM completion reviewer: structured pass reaches done, structured reject leaves or returns work to in_progress, and unavailable evaluation leaves the Task nonterminal with an explicit error. submit_for_verification is an asynchronous scheduling state, not actor approval. Supports expected_version CAS.";
+      "Move a Task through claim, start, submit_for_verification, approve, reject, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Direct done is rejected for active tasks: the assignee submits completion evidence, a distinct verifier claims it, and only that assigned verifier may approve or reject. Supports expected_version CAS.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -243,16 +241,7 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
         ("notes", `Assoc [
           ("type", `String "string");
-          ("description", `String "Completion claim supplied to the configured LLM reviewer for done/approve/reject requests");
-        ]);
-        ("completion_contract", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [ ("type", `String "string") ]);
-          ("description", `String "Optional acceptance checklist that completion notes must satisfy before action='done' is accepted");
-        ]);
-        ("evaluator_runtime", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional evaluator runtime override for anti-rationalization review. Default comes from routes.cross_verifier");
+          ("description", `String "Evidence summary for submit_for_verification, or verifier rationale for approve/reject");
         ]);
         ("reason", `Assoc [
           ("type", `String "string");

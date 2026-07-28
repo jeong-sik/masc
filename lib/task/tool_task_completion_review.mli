@@ -1,7 +1,4 @@
-(** Completion-note review and verification-evidence helpers. *)
-
-val persisted_completion_contract :
-  task_opt:Masc_domain.task option -> string list option
+(** Verification-evidence helpers. *)
 
 val blank_evidence_ref : string -> bool
 (** [true] when the entry trims to the empty string. Shared element-level

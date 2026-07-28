@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Golden Path 1 Contract — Core workspace collaboration e2e verification.
 #
-# Tests the fundamental 8-step MASC workflow:
-#   join → add_task → claim → plan_set_task → heartbeat → broadcast → status → done
+# Tests the fundamental 10-step external MCP workflow:
+#   producer join → add_task → claim → plan_set_task → heartbeat → broadcast
+#   → status → direct-done rejection → submit_for_verification
+#   → awaiting-verification projection
 #
 # This is the minimum viable path that must always work.
 # If this contract fails, MASC workspace collaboration is broken.
 #
 # Usage:
-#   MCP_URL=http://127.0.0.1:8935/mcp ./golden_path_1_contract.sh
-#   MCP_URL=http://127.0.0.1:9935/mcp ./golden_path_1_contract.sh  # dev instance
+#   MCP_URL=http://127.0.0.1:8935/mcp MCP_TOKEN=... ./golden_path_1_contract.sh
 set -euo pipefail
 
 AGENT_NAME="${AGENT_NAME:-${MCP_AGENT_NAME:-golden-path-1-harness}}"
@@ -59,8 +60,8 @@ ensure_contract_goal() {
 step_pass() { PASS=$((PASS + 1)); echo "  PASS"; }
 step_fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
-# ── Step 1/8: start / bind session ──
-echo "[1/8] masc_start"
+# ── Step 1/10: start / bind producer session ──
+echo "[1/10] masc_start (producer)"
 r1="$(call_tool 1001 "masc_start" "$(jq -cn --arg path "$START_PATH" '{path:$path}')")"
 if require_ok "$r1"; then
   step_pass
@@ -76,8 +77,8 @@ fi
 
 ensure_contract_goal
 
-# ── Step 2/8: add_task ──
-echo "[2/8] masc_add_task"
+# ── Step 2/10: add_task ──
+echo "[2/10] masc_add_task"
 task_title="GP1 contract task $(date +%s)"
 r2="$(call_tool 1002 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" --arg task_title "$task_title" '{title: $task_title, goal_id: $goal_id, priority: 2, description: "Automated golden path 1 contract verification"}')")"
 if require_ok "$r2"; then
@@ -96,8 +97,8 @@ if [ -z "$task_id" ]; then
 fi
 echo "  task_id=$task_id"
 
-# ── Step 3/8: claim ──
-echo "[3/8] masc_transition (claim)"
+# ── Step 3/10: claim ──
+echo "[3/10] masc_transition (producer claim)"
 r3="$(call_tool 1003 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"claim\",\"notes\":\"GP1 contract claim\"}")"
 if require_ok "$r3"; then
   step_pass
@@ -107,8 +108,8 @@ else
   exit 1
 fi
 
-# ── Step 4/8: plan_set_task ──
-echo "[4/8] masc_plan_set_task"
+# ── Step 4/10: plan_set_task ──
+echo "[4/10] masc_plan_set_task"
 r4="$(call_tool 1004 "masc_plan_set_task" "{\"task_id\":\"$task_id\"}")"
 if require_ok "$r4"; then
   step_pass
@@ -117,8 +118,8 @@ else
   echo "$r4"
 fi
 
-# ── Step 5/8: heartbeat ──
-echo "[5/8] masc_heartbeat"
+# ── Step 5/10: heartbeat ──
+echo "[5/10] masc_heartbeat"
 r5="$(call_tool 1005 "masc_heartbeat" "{}")"
 if require_ok "$r5"; then
   step_pass
@@ -127,8 +128,8 @@ else
   echo "$r5"
 fi
 
-# ── Step 6/8: broadcast ──
-echo "[6/8] masc_broadcast"
+# ── Step 6/10: broadcast ──
+echo "[6/10] masc_broadcast"
 r6="$(call_tool 1006 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "GP1 contract verification in progress" '{agent_name:$agent_name,message:$message}')")"
 if require_ok "$r6"; then
   step_pass
@@ -137,8 +138,8 @@ else
   echo "$r6"
 fi
 
-# ── Step 7/8: status ──
-echo "[7/8] masc_status"
+# ── Step 7/10: status ──
+echo "[7/10] masc_status"
 r7="$(call_tool 1007 "masc_status" "{}")"
 if require_ok "$r7"; then
   step_pass
@@ -147,34 +148,53 @@ else
   echo "$r7"
 fi
 
-# ── Step 8/8: done ──
-echo "[8/8] masc_transition (done)"
-# RFC-0311 Phase 1: the completion gate requires a locally validated
-# evidence_refs entry on done (notes and trace-shaped labels alone no longer
-# satisfy it). Persist a base-path-local proof artifact and submit its relative
-# path so the gate can resolve it deterministically.
-evidence_ref=".masc/harness-evidence/golden_path_1_contract.json"
-evidence_path="${START_PATH}/${evidence_ref}"
-mkdir -p "$(dirname "$evidence_path")"
-jq -cn --arg session_id "$MCP_SESSION_ID" --arg agent_name "$AGENT_NAME" --arg task_id "$task_id" \
-  '{harness:"golden_path_1_contract",session_id:$session_id,agent_name:$agent_name,task_id:$task_id,status:"completed"}' \
-  >"$evidence_path"
+evidence_ref="note:GP1 contract live MCP transcript verified by producer ${AGENT_NAME}"
 done_notes="Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success."
 done_summary="GP1 contract flow verified end to end via live MCP transcript"
+
+# ── Step 8/10: producer cannot bypass verification with direct done ──
+echo "[8/10] masc_transition (direct done rejection)"
 r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
-if require_ok "$r8"; then
+if require_ok "$r8" >/dev/null 2>&1; then
+  step_fail "direct done unexpectedly succeeded"
+  echo "$r8"
+elif [[ "$r8" == *"Task completion must be submitted for verification"* ]] \
+  && [[ "$r8" != *"Configured LLM completion verifier"* ]]; then
+  step_pass
+else
+  step_fail "direct done did not return Verification_submission_required"
+  echo "$r8"
+fi
+
+# ── Step 9/10: producer submits typed evidence for verification ──
+echo "[9/10] masc_transition (submit_for_verification)"
+r9="$(call_tool 1009 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
+if require_ok "$r9"; then
+  step_pass
+else
+  step_fail "submit_for_verification failed"
+  echo "$r9"
+fi
+
+# ── Step 10/10: submission is awaiting verification and credited to producer ──
+echo "[10/10] masc_tasks (AwaitingVerification producer credit)"
+r10="$(call_tool 1010 "masc_tasks" '{"status":"awaiting_verification"}')"
+if require_ok "$r10" \
+  && [[ "$r10" == *"$task_id"* ]] \
+  && [[ "$r10" == *"awaiting_verification"* ]] \
+  && [[ "$r10" == *"$AGENT_NAME"* ]]; then
   CLEANUP_TASK_FINALIZED=1
   step_pass
 else
-  step_fail "done transition failed"
-  echo "$r8"
+  step_fail "AwaitingVerification projection did not retain producer credit"
+  echo "$r10"
 fi
 
 # ── Summary ──
 echo ""
 echo "=== Golden Path 1 Contract ==="
-echo "  PASS: $PASS / 8"
-echo "  FAIL: $FAIL / 8"
+echo "  PASS: $PASS / 10"
+echo "  FAIL: $FAIL / 10"
 if [ "$FAIL" -gt 0 ]; then
   echo "  STATUS: BROKEN"
   exit 1

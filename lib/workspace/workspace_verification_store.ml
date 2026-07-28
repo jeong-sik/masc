@@ -1,19 +1,8 @@
-type verdict =
-  [ `Pass
-  | `Fail of string
-  | `Partial of float * string ]
-
-type request_status =
-  [ `Pending
-  | `Completed of verdict ]
-
 type request_header = {
   id : string;
   task_id : string;
   worker : string;
-  verifier : string option;
   created_at : float;
-  status : request_status;
 }
 
 type evidence_read_failure =
@@ -208,73 +197,6 @@ let verifications_dir base_path =
 let request_path base_path req_id =
   Filename.concat (verifications_dir base_path) (req_id ^ ".json")
 
-let verdict_of_yojson = function
-  | `Assoc fields ->
-      (match List.assoc_opt "verdict" fields with
-       | Some (`String "pass") -> Ok `Pass
-       | Some (`String "fail") ->
-           let reason =
-             match List.assoc_opt "reason" fields with
-             | Some (`String s) -> s
-             | _ -> "no reason given"
-           in
-           Ok (`Fail reason)
-       | Some (`String "partial") ->
-           let score =
-             match List.assoc_opt "score" fields with
-             | Some (`Float f) -> f
-             | Some (`Int n) -> Float.of_int n
-             | _ -> 0.0
-           in
-           let reason =
-             match List.assoc_opt "reason" fields with
-             | Some (`String s) -> s
-             | _ -> "no reason given"
-           in
-           Ok (`Partial (score, reason))
-       | other ->
-           let got =
-             match other with
-             | Some j -> Printf.sprintf "got %s" (Json_util.excerpt j)
-             | None -> "field missing"
-           in
-           Error
-             (Printf.sprintf
-                "unknown or missing 'verdict' (expected one of: \
-                 pass | fail | partial; %s)"
-                got))
-  | other ->
-      Error
-        (Printf.sprintf
-           "verdict must be a JSON object, got %s: %s"
-           (Json_util.kind_name other)
-           (Json_util.excerpt other))
-
-let request_status_of_yojson = function
-  | `Assoc fields ->
-      (match List.assoc_opt "status" fields with
-       | Some (`String "pending") -> Ok `Pending
-       | Some (`String "completed") ->
-           (match verdict_of_yojson (`Assoc fields) with
-            | Ok verdict -> Ok (`Completed verdict)
-            | Error err -> Error err)
-       | other ->
-           let got =
-             match other with
-             | Some j -> Printf.sprintf "got %s" (Json_util.excerpt j)
-             | None -> "field missing"
-           in
-           Error
-             (Printf.sprintf
-                "unknown 'status' (expected one of: pending | completed; %s)"
-                got))
-  | other ->
-      Error
-        (Printf.sprintf
-           "request status must be a JSON object, got %s: %s"
-           (Json_util.kind_name other)
-           (Json_util.excerpt other))
-
 let request_header_of_yojson = function
   | `Assoc fields ->
       let get_string key =
@@ -290,30 +212,12 @@ let request_header_of_yojson = function
       in
       (match get_string "id", get_string "task_id", get_string "worker" with
        | Some id, Some task_id, Some worker ->
-           let verifier =
-             match List.assoc_opt "verifier" fields with
-             | Some (`String s) -> Some s
-             | _ -> None
-           in
            let created_at =
              match get_float "created_at" with
              | Some f -> f
              | None -> Time_compat.now ()
            in
-           let status_result =
-             match List.assoc_opt "status" fields with
-             | None -> Ok `Pending
-             | Some json -> request_status_of_yojson json
-           in
-           (match status_result with
-            | Ok status ->
-                Ok { id; task_id; worker; verifier; created_at; status }
-            | Error err ->
-                Error
-                  (Printf.sprintf
-                     "verification request '%s' has invalid 'status' field: \
-                      %s"
-                     id err))
+           Ok { id; task_id; worker; created_at }
        | id_opt, task_opt, worker_opt ->
            let missing =
              List.filter_map
@@ -554,20 +458,13 @@ let inspect_submitted_evidence ~base_path ~request_id ~task_id ~task_worker
   match load_request_for_evidence base_path request_id with
   | Error reason -> Evidence_unavailable { request_id; reason }
   | Ok (request, snapshot) ->
-    (match request.status with
-     | `Completed _ ->
-       Evidence_unavailable
-         { request_id
-         ; reason = "verification request is already completed"
-         }
-     | `Pending ->
-       (match task_verifier with
-        | Some task_verifier
-          when String.equal request.task_id task_id
-               && String.equal request.worker task_worker
-               && String.equal task_verifier viewer ->
-          Evidence_available { request; items = snapshot }
-        | Some _ | None -> Evidence_metadata_only { request; viewer }))
+    (match task_verifier with
+     | Some task_verifier
+       when String.equal request.task_id task_id
+            && String.equal request.worker task_worker
+            && String.equal task_verifier viewer ->
+       Evidence_available { request; items = snapshot }
+     | Some _ | None -> Evidence_metadata_only { request; viewer })
 
 let list_request_headers base_path =
   let surface = "verification" in

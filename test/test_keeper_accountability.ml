@@ -171,13 +171,6 @@ let test_stale_completion_claim_is_observed_as_unsupported () =
       let first = List.hd history in
       check string "history status" "unsupported" (string_member "status" first))
 
-let configured_llm_completion_pass : Masc_domain.configured_llm_completion_verdict =
-  { decision = Masc_domain.Completion_pass
-  ; runtime_id = "accountability-test-reviewer"
-  ; rationale = None
-  ; evaluated_at = "2026-07-13T00:00:00Z"
-  }
-
 let test_agent_reputation_observes_unsupported_claims () =
   with_workspace ~agent_name:"keeper-rep-agent" (fun config ->
       ignore
@@ -188,12 +181,24 @@ let test_agent_reputation_observes_unsupported_claims () =
            ~task_id:"task-001");
       (match
          Workspace.transition_task_r config ~agent_name:"keeper-rep-agent"
-           ~task_id:"task-001" ~action:Masc_domain.Done_action
-           ~configured_llm_verdict:configured_llm_completion_pass ()
+           ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
+           ~notes:"accountability task completion evidence"
+           ()
        with
       | Ok _ -> ()
       | Error err ->
-          Alcotest.failf "done transition failed: %s"
+          Alcotest.failf "verification submission failed: %s"
+            (Masc_domain.masc_error_to_string err));
+      ignore
+        (Workspace.claim_task_r config ~agent_name:"admin-board-keeper"
+           ~task_id:"task-001" ());
+      (match
+         Workspace.transition_task_r config ~agent_name:"admin-board-keeper"
+           ~task_id:"task-001" ~action:Masc_domain.Approve_verification ()
+       with
+      | Ok _ -> ()
+      | Error err ->
+          Alcotest.failf "approve transition failed: %s"
             (Masc_domain.masc_error_to_string err));
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))

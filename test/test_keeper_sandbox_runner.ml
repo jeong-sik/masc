@@ -31,15 +31,13 @@ let make_meta ~sandbox : Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [ "name", `String "runner-test"
-      ; "agent_name", `String "runner-test-agent"
       ; "trace_id", `String "runner-test-trace"
       ; "allowed_paths", `List [ `String "*" ]
-      ; ( "sandbox_profile",
-          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta ->
+    { meta with Masc.Keeper_meta_contract.sandbox_profile = sandbox }
   | Error e -> Alcotest.fail e
 
 module Fake_backend = struct

@@ -41,13 +41,8 @@ let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Local) name =
   let json =
     `Assoc
       [ "name", `String name
-      ; "agent_name", `String ("agent-" ^ name)
       ; "trace_id", `String ("trace-" ^ name)
       ; "allowed_paths", `List [ `String "*" ]
-      ; ( "sandbox_profile"
-        , `String
-            (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
-        )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with

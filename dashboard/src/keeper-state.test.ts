@@ -402,6 +402,52 @@ describe('thread history merge & persistence', () => {
     expect(thread.map(e => e.id)).toEqual(['local-legacy', 'hist-legacy'])
   })
 
+  // Live 2026-07-28: a keeper that was busy answered through the queue lane,
+  // so the stream carried KEEPER_CHAT_QUEUED (receipt_id, no request_id) and
+  // died before REPLY_DETAILS. The assistant placeholder therefore holds the
+  // tool trace with a queue receipt and no turnRef, and the REST row carries
+  // the same receipt. Both rendered as separate "턴 타임라인" blocks, and only
+  // the placeholder had per-tool durations.
+  it('converges a queue-lane assistant placeholder that holds the tool trace', () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000002'
+    const traceSteps: ChatTraceStep[] = [
+      { kind: 'tool', name: 'WebSearch', toolCallId: 'call-q1', status: 'ok' },
+      { kind: 'tool', name: 'WebFetch', toolCallId: 'call-q2', status: 'ok' },
+    ]
+    appendThreadEntry('echo', entry({
+      id: 'local-queued-assistant',
+      role: 'assistant',
+      text: '',
+      rawText: '',
+      delivery: 'sending',
+      timestamp: null,
+      turnRef: null,
+      traceSteps,
+      details: { queueReceiptId: receiptId },
+    }))
+
+    const history = chatHistoryEntriesFromRest('echo', [{
+      id: 'history-queued-assistant',
+      role: 'assistant',
+      content: '검색 결과 요약',
+      ts: 1_780_000_002,
+      delivery_key: {
+        kind: 'queue_receipts',
+        receipt_ids: [receiptId],
+      },
+    }])
+
+    mergeServerHistoryEntries('echo', history)
+
+    const assistants = (keeperThreads.value.echo ?? []).filter(candidate => candidate.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(
+      (assistants[0]?.traceSteps ?? [])
+        .filter((step): step is Extract<ChatTraceStep, { kind: 'tool' }> => step.kind === 'tool')
+        .map(step => step.toolCallId),
+    ).toEqual(['call-q1', 'call-q2'])
+  })
+
   it('converges queue-lane user rows through an exact durable receipt', () => {
     const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
     appendThreadEntry('echo', entry({

@@ -5,9 +5,12 @@ module Make (Publish : sig
     Keeper_event_queue_persistence.exact_execution_terminal_cause =
     | Exact_execution_failed
     | Exact_execution_cancelled
-    | Domain_invalid_output
+  | Domain_invalid_output
   | Compaction_produced_no_reduction
   | Compaction_increased_checkpoint
+    | Failed_request_readmission_unavailable
+    | Failed_request_still_over_capacity
+    | Failed_request_readmission_failed
     | Invalid_structural_evidence
     | Invalid_structural_source_after_dispatch
     | Commit_admission_unavailable

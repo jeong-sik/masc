@@ -144,7 +144,6 @@ const STAGES: AssemblyStageSpec[] = [
     promptKeys: [
       'keeper.unified.system',
       'keeper.turn_intent',
-      'keeper.immediate_task_move',
     ],
     computedRows: [
       { id: 'world-observation', promptKey: '(computed:world_observation)' },

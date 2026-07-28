@@ -218,10 +218,7 @@ let handle_plan_get_task ~tool_name ~start_time ctx _args : Tool_result.result =
       ] in
       Tool_result.make_ok ~tool_name ~start_time ~data:response ()
   | None ->
-      let response = `Assoc [
-        ("current_task", `Null);
-        ("message", `String "No current task set. Use masc_plan_set_task first.");
-      ] in
+      let response = `Assoc [ ("current_task", `Null) ] in
       Tool_result.make_ok ~tool_name ~start_time ~data:response ()
 
 let handle_plan_clear_task ~tool_name ~start_time ctx _args : Tool_result.result =

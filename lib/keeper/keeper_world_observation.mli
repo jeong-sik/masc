@@ -63,8 +63,6 @@ type scheduled_automation_item = {
   payload_kind : string option;
   recurrence_summary : string;
   due_at : float;
-  keeper_next_tool : string option;
-  keeper_next_action : string;
 }
 
 (** Durable scheduled-automation summary from the MASC schedule store. *)

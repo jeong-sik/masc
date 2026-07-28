@@ -25,11 +25,9 @@ val handle_claim : tool_name:string -> start_time:float -> context -> Yojson.Saf
 val handle_claim_next : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_release : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_done :
-  ?task_list_projection:Tool_capability_projection.task_list ->
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_cancel_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_transition :
-  ?task_list_projection:Tool_capability_projection.task_list ->
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_update_priority : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
@@ -43,8 +41,8 @@ val dispatch :
   args:Yojson.Safe.t ->
   Tool_result.result option
 
-(** Keeper-model dispatch projects semantic task-list guidance to
-    [keeper_tasks_list] instead of the external [masc_tasks] transport name. *)
+(** Keeper-model dispatch exposes verification evidence through the
+    keeper-scoped task-list projection. *)
 val dispatch_for_keeper :
   created_by:string ->
   context ->

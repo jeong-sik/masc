@@ -22,10 +22,6 @@ type keeper_model_projection =
   | Internal_name
   | Transport_alias of { projected_by : string }
 
-type model_description_projection =
-  | Static_description
-  | Current_task_state
-
 type keeper_tool_group =
   | Execute_group
   | Search_files_group
@@ -97,7 +93,6 @@ type policy =
 type t =
   { id : string
   ; keeper_model_projection : keeper_model_projection
-  ; model_description_projection : model_description_projection
   ; keeper_tool_group : keeper_tool_group
   ; input_schema_source : input_schema_source
   ; public_name : string
@@ -143,9 +138,6 @@ let keeper_model_projection_to_string = function
   | Transport_alias _ -> "transport_alias"
 ;;
 
-let model_description_projection_to_string = function
-  | Static_description -> "static_description"
-  | Current_task_state -> "current_task_state"
 ;;
 
 let keeper_tool_group_to_string = function
@@ -586,7 +578,6 @@ let descriptor_with_public_aliases
   in
   { id
   ; keeper_model_projection
-  ; model_description_projection = Static_description
   ; keeper_tool_group = keeper_tool_group_of_runtime_handler runtime_handler
   ; input_schema_source
   ; public_name
@@ -1229,10 +1220,6 @@ let cluster_descriptor ?(polling_read = false) ~keeper_model_projection ~id ~nam
     ()
 ;;
 
-let with_current_task_state_description descriptor =
-  { descriptor with model_description_projection = Current_task_state }
-;;
-
 let board_descriptor name description ~readonly =
   cluster_descriptor
     ~keeper_model_projection:Internal_name
@@ -1830,9 +1817,8 @@ let internal_descriptors : t list =
       "Read history events for a task." ~readonly:true
   ; masc_task_transport_descriptor "tasks" "masc_tasks"
       "List tasks visible to the caller." ~readonly:true
-  ; (masc_task_descriptor "transition" "masc_transition"
-       "Transition a task to a new status." ~readonly:false
-     |> with_current_task_state_description)
+  ; masc_task_descriptor "transition" "masc_transition"
+      "Transition a task to a new status." ~readonly:false
   ; masc_task_descriptor "update_priority" "masc_update_priority"
       "Update the priority of a task." ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
@@ -2128,10 +2114,7 @@ let discovery_fields d =
   ([ "id", `String d.id
    ; ( "keeper_model_projection"
      , `String (keeper_model_projection_to_string d.keeper_model_projection) )
-   ; ( "model_description_projection"
-     , `String
-         (model_description_projection_to_string d.model_description_projection) )
-   ; "keeper_tool_group", `String (keeper_tool_group_to_string d.keeper_tool_group)
+    ; "keeper_tool_group", `String (keeper_tool_group_to_string d.keeper_tool_group)
    ; "input_schema_source", `String (input_schema_source_to_string d.input_schema_source)
    ; "public_name", `String d.public_name
    ; "public_aliases", Json_util.json_string_list d.public_aliases

@@ -424,22 +424,6 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
             Some
               "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted")
 
-let recommendation (meta : keeper_meta) ~preflight containers =
-  if meta.sandbox_profile = Local then
-    Some "No Docker container is expected for sandbox_profile=local."
-  else if containers <> [] then
-    None
-  else
-    match preflight_ok preflight with
-    | Some false ->
-        Some
-          "Fix Docker preflight first, then rerun masc_keeper_sandbox_status."
-    | _ ->
-        Some
-          (Printf.sprintf
-             "Run masc_keeper_sandbox_start with name=%S only when you need a visible prewarmed container. playground_repos is an observation of cached and filesystem-visible directories, not an access verdict."
-             meta.name)
-
 let identity_json (meta : keeper_meta) =
   let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
   let agent_name_matches = String.equal expected_agent_name meta.agent_name in
@@ -496,12 +480,6 @@ let live_status_json ?(include_preflight = true)
     | Some _ -> Some "docker_container_listing_failed"
     | None -> why_no_container meta ~preflight containers
   in
-  let recommendation =
-    match container_error with
-    | Some _ ->
-        Some "Check Docker daemon availability and retry sandbox status."
-    | None -> recommendation meta ~preflight containers
-  in
   `Assoc
     [
       ("keeper", `String meta.name);
@@ -516,7 +494,6 @@ let live_status_json ?(include_preflight = true)
         if verbose then Json_util.option_to_yojson Fun.id preflight else `Null );
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
-      ("recommendation", Json_util.string_opt_to_json recommendation);
       ( "playground_repos",
         if include_playground_repos then
           playground_repos_json ~config ~meta

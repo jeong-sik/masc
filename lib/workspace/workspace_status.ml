@@ -106,7 +106,7 @@ let status config =
   if List.length active_tasks > max_active_tasks_display then
     Buffer.add_string buf
       (Printf.sprintf
-         "  … and %d more active tasks (use masc_tasks for full list)\n"
+         "  … and %d more active tasks\n"
          (List.length active_tasks - max_active_tasks_display));
   Buffer.add_string buf
     (Printf.sprintf
@@ -117,7 +117,7 @@ let status config =
   let total_messages = max 0 state.message_seq in
   if total_messages > 0 then begin
     Printf.bprintf buf "\nMessages: %d (cumulative)\n" total_messages;
-    Buffer.add_string buf "   Use masc_messages for recent details\n"
+    ()
   end else
     Buffer.add_string buf "\nMessages: 0\n";
 

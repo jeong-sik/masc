@@ -30,17 +30,17 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
       Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
-              "task %s is already done by %s; inspect task history instead of calling masc_transition(action=done) again"
+              "task %s is already done by %s"
               task_id assignee)))
     | Masc_domain.Cancelled { cancelled_by; _ } ->
       Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
-              "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
+              "task %s was cancelled by %s"
               task_id cancelled_by)))
     | Masc_domain.AwaitingVerification { assignee; _ } ->
       Some
         (Masc_domain.Task (Masc_domain.Task_error.InvalidState
            (Printf.sprintf
-              "task %s has a pending verification workflow for %s; resolve it before marking done"
+              "task %s has a pending verification workflow for %s"
               task_id assignee)))

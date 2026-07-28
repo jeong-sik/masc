@@ -22,6 +22,3 @@ val memory_os_recall_context : string
 val memory_os_recall_facts_section : string
 val memory_os_recall_episodes_section : string
 val memory_os_recall_unavailable : string
-
-(** User-prompt "Claimable Work" section template key. *)
-val immediate_task_move : string

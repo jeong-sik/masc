@@ -292,7 +292,7 @@ let planning_context_state
        { planning_missing_task = None; deliverable_conflict_task })
 ;;
 
-let status_summary_string ~task_list_projection (ctx : context) =
+let status_summary_string (ctx : context) =
   Workspace.ensure_initialized ctx.config;
   let state = Workspace.read_state ctx.config in
   let backlog = safe_read_backlog ctx in
@@ -406,7 +406,7 @@ let status_summary_string ~task_list_projection (ctx : context) =
     let items = [] in
     let items =
       if not session_bound
-      then items @ [ "Your agent session is not bound. Call masc_start." ]
+      then items @ [ "Your agent session is not bound." ]
       else items
     in
     let items =
@@ -414,8 +414,7 @@ let status_summary_string ~task_list_projection (ctx : context) =
       then
         items
         @ [ Printf.sprintf
-              "Lifecycle actions are credential-blocked for %s. Mount a valid credential \
-               before claiming or transitioning tasks."
+              "Lifecycle actions are credential-blocked for %s."
               (String.concat "/" credential_state.credential_candidates)
           ]
       else items
@@ -425,9 +424,7 @@ let status_summary_string ~task_list_projection (ctx : context) =
       | Some task_id ->
         items
         @ [ Printf.sprintf
-              "Owned task %s has no planning context. Do not retry generic \
-               masc_plan_init from a drifted surface; use handoff/worktree/test logs as \
-               the temporary SSOT until a credentialed owner repair receipt exists."
+              "Owned task %s has no planning context."
               task_id
           ]
       | None -> items
@@ -438,8 +435,7 @@ let status_summary_string ~task_list_projection (ctx : context) =
         items
         @ [ Printf.sprintf
               "Owned task %s already has a completed-looking deliverable while the task \
-               is still active. Treat this as conflict triage until board, planning, and \
-               control-plane state converge."
+               is still active."
               task_id
           ]
       | None -> items
@@ -448,28 +444,20 @@ let status_summary_string ~task_list_projection (ctx : context) =
       if Option.is_some binding.primary_owned && not binding.current_task_set
       then
         items
-        @ [ "You own a task but planning current_task is unset or drifted. Treat owned \
-             as canonical and call masc_plan_set_task."
-          ]
+        @ [ "You own a task but planning current_task is unset or drifted." ]
       else items
     in
     let items =
       match binding.drift_reason with
       | Some "secondary_assignment" ->
         items
-        @ [ "Multiple assigned tasks detected. Current focus is also assigned; choose or \
-             reconcile the active lane before claiming new work."
-          ]
+        @ [ "Multiple assigned tasks detected. Current focus is also assigned." ]
       | Some "stale_focus" ->
         items
-        @ [ "Owned/current drift detected. Planning current_task is not assigned to you; \
-             treat primary_owned as the safe task lane."
-          ]
+        @ [ "Owned/current drift detected. Planning current_task is not assigned to you." ]
       | Some "no_owned" ->
         items
-        @ [ "Planning current_task is set but no active task is assigned to you; clear \
-             or rebind current_task before following it."
-          ]
+        @ [ "Planning current_task is set but no active task is assigned to you." ]
       | Some _ | None -> items
     in
     let items =
@@ -477,8 +465,7 @@ let status_summary_string ~task_list_projection (ctx : context) =
       then
         items
         @ [ Printf.sprintf
-              "%d todo task(s) have completed-looking planning deliverables; treat them \
-               as control-plane conflicts, not fresh claimable work."
+              "%d todo task(s) have completed-looking planning deliverables."
               todo_conflict_count
           ]
       else items
@@ -491,7 +478,6 @@ let status_summary_string ~task_list_projection (ctx : context) =
     else items
   in
   Workspace_status_rendering.status_summary_string
-    ~task_list_projection
     ~ctx
     ~bound:session_bound
     ~actual_name
@@ -528,7 +514,7 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx _args =
        status_cache
        ~key:cache_key
        ~ttl_s:(status_cache_ttl_s ())
-       (fun () -> status_summary_string ~task_list_projection ctx))
+       (fun () -> status_summary_string ctx))
 ;;
 
 let handle_reset ~tool_name ~start_time ctx args =

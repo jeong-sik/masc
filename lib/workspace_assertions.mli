@@ -87,11 +87,10 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
       `Assoc [
         ("assertions", `List [<per-assertion result>...]);
         ("all_passed", `Bool <all assertions passed>);
-        ("fix_hint", `String | `Null);
       ]
     ]}
-    [fix_hint] is the first failing assertion's hint; when all
-    pass, [fix_hint] is [`Null]. *)
+    A recognized assertion reports only its typed name and boolean result.
+    An unknown assertion also reports [expected_assertions]. *)
 val handle_check
   :  inspect_state:(Workspace_types.context -> agent_state)
   -> tool_name:string

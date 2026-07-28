@@ -25,22 +25,16 @@ let workflow_rejection_result
       ~tool_name
       ~start_time
       ?rule_id
-      ?tool_suggestion
-      ?hint
       ?scope_policy
       ?recoverable
-      ?alternatives
       ?extra_fields
       message
   =
   let data =
     workflow_rejection_payload
       ?rule_id
-      ?tool_suggestion
-      ?hint
       ?scope_policy
       ?recoverable
-      ?alternatives
       ?extra_fields
       message
   in
@@ -51,11 +45,8 @@ let workflow_rejection_result
     ~data
     (Yojson.Safe.to_string data)
 
-let missing_live_task_transition_rejection ~task_list_projection ~tool_name
-      ~start_time ctx ~task_id ~action_s =
-  let task_list_name =
-    Tool_capability_projection.task_list_name task_list_projection
-  in
+let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id
+      ~action_s =
   sync_owner_current_task_binding ctx;
   sync_planning_current_task_with_owned_task ctx;
   task_log_warn ~task_id
@@ -65,13 +56,7 @@ let missing_live_task_transition_rejection ~task_list_projection ~tool_name
     ~tool_name
     ~start_time
     ~rule_id:"stale_task_id_not_found"
-    ~tool_suggestion:task_list_name
-    ~hint:
-      "The requested task_id is absent from the live backlog. Do not retry \
-       this task_id from memory; refresh the projected task-list tool and \
-       choose a live task."
     ~scope_policy:"observe"
-    ~alternatives:[ task_list_name; "keeper_task_claim" ]
     ~extra_fields:
       [ "task_id", `String task_id
       ; "action", `String action_s
@@ -83,12 +68,10 @@ let missing_live_task_transition_rejection ~task_list_projection ~tool_name
         bindings and suppressed transition action=%s."
        task_id action_s)
 
-let rec handle_done
-      ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
-      ~tool_name ~start_time ctx args =
+let rec handle_done ~tool_name ~start_time ctx args =
   let notes = get_string args "notes" "" in
   let evidence_refs = get_string_list args "evidence_refs" in
-  handle_transition ~task_list_projection ~tool_name ~start_time ctx
+  handle_transition ~tool_name ~start_time ctx
     (`Assoc
        [
          ("task_id", Json_util.assoc_member_opt "task_id" args |> Option.value ~default:`Null);
@@ -153,12 +136,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
        task_log_error ~task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
   result_to_response ~tool_name ~start_time result
 
-and handle_transition
-      ?(task_list_projection = Tool_capability_projection.External_masc_tasks)
-      ~tool_name ~start_time ctx args =
-  let task_list_name =
-    Tool_capability_projection.task_list_name task_list_projection
-  in
+and handle_transition ~tool_name ~start_time ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Client_identity and must not
@@ -216,7 +194,6 @@ and handle_transition
   match task_opt with
   | None ->
     missing_live_task_transition_rejection
-      ~task_list_projection
       ~tool_name
       ~start_time
       ctx
@@ -232,9 +209,7 @@ and handle_transition
          let status = Masc_domain.task_status_to_string task.task_status in
          let message =
            Printf.sprintf
-             "Task %s is %s and owned by %s; %s cannot release it. Use \
-              keeper_board_post or masc_board_post to ask the current assignee \
-              for handoff/release, or claim different unowned work."
+             "Task %s is %s and owned by %s; %s cannot release it."
              task_id
              status
              assignee
@@ -245,14 +220,7 @@ and handle_transition
               ~tool_name
               ~start_time
               ~rule_id:"task_release_requires_current_owner"
-              ~tool_suggestion:"keeper_board_post"
-              ~hint:
-                "Do not retry masc_transition(action=release) for a task owned \
-                 by another keeper. Ask the current assignee for handoff/release \
-                 on the board, or inspect and claim different unowned work."
               ~scope_policy:"observe"
-              ~alternatives:
-                [ "keeper_board_post"; "masc_board_post"; task_list_name; "keeper_task_claim" ]
               ~extra_fields:
                 [ "task_id", `String task_id
                 ; "task_status", `String status
@@ -300,48 +268,36 @@ and handle_transition
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name err;
     let message = Masc_domain.masc_error_to_string err in
-    let rule_id, tool_suggestion, hint, alternatives =
+    let rule_id =
+      (* Exhaustive, no catch-all: [completion_state_error] returns only
+         [Task] errors and only four of the five constructors, but a [_] arm
+         here would silently absorb a newly added variant into the generic
+         rule id instead of failing to compile. *)
       match err with
       | Masc_domain.Task (Masc_domain.Task_error.NotClaimed _) ->
-        ( Some "task_done_requires_claimed_or_started"
-        , Some "masc_transition"
-        , Some
-            "The task is still todo. Use masc_transition with action=claim for \
-             this task_id, then call keeper_task_done after the deliverable is \
-             complete."
-        , [ "masc_transition"; "keeper_task_claim"; task_list_name ] )
+        Some "task_done_requires_claimed_or_started"
       | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
-        ( Some "task_done_requires_current_owner"
-        , Some task_list_name
-        , Some
-            "Another agent owns this task. Inspect the task list, ask for handoff, \
-             or claim different unowned work instead of retrying keeper_task_done."
-        , [ task_list_name; "keeper_board_post"; "keeper_task_claim" ] )
+        Some "task_done_requires_current_owner"
       | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
-        ( Some "task_done_invalid_lifecycle_state"
-        , Some task_list_name
-        , Some
-            "The task lifecycle state does not accept keeper_task_done. Inspect \
-             task status and use the valid next lifecycle action."
-        , [ task_list_name; "masc_transition" ] )
-      | _ ->
-        ( Some "task_done_lifecycle_rejected"
-        , Some task_list_name
-        , Some "Inspect the task status before trying another lifecycle action."
-        , [ task_list_name; "masc_transition" ] )
+        Some "task_done_invalid_lifecycle_state"
+      | Masc_domain.Task (Masc_domain.Task_error.NotFound _) ->
+        Some "task_done_task_not_found"
+      | Masc_domain.Task (Masc_domain.Task_error.InvalidId _)
+      | Masc_domain.Agent _
+      | Masc_domain.Auth _
+      | Masc_domain.System _
+      | Masc_domain.RateLimitExceeded _
+      | Masc_domain.CacheError _ -> Some "task_done_lifecycle_rejected"
     in
     workflow_rejection_result
       ~tool_name
       ~start_time
       ?rule_id
-      ?tool_suggestion
-      ?hint
       ?recoverable:
         (match rule_id with
          | Some "task_done_requires_claimed_or_started" -> Some true
          | _ -> None)
       ~scope_policy:"observe"
-      ~alternatives
       message
   | None ->
   match handoff_context with
@@ -574,13 +530,8 @@ and handle_transition
         ~tool_name
         ~start_time
         ~rule_id:"task_transition_invalid_state"
-        ~tool_suggestion:task_list_name
-        ~hint:
-          "The lifecycle decision rejected this transition. Follow the exact \
-           remediation in the error instead of retrying the same transition."
         ~scope_policy:"observe"
         ~recoverable:false
-        ~alternatives:[ task_list_name; "masc_transition" ]
         ~extra_fields:
           [ "task_id", `String task_id
           ; "action", `String action_s
@@ -722,7 +673,6 @@ let dispatch_with_task_list_projection ?created_by task_list_projection ctx ~nam
   | "masc_transition" ->
     Some
       (handle_transition
-         ~task_list_projection
          ~tool_name:name
          ~start_time:start
          ctx

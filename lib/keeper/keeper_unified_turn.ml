@@ -156,7 +156,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          ; "Gate resolution delivered:"
          ; Printf.sprintf "- approval_id: %s" approval_id
          ; "- state: authorization already consumed"
-         ; "This replay grants no authorization. Continue independent work; any new external effect follows the ordinary Gate."
+         ; "This replay grants no authorization; any new external effect follows the ordinary Gate."
          ]
      | Error error ->
        Log.Keeper.error
@@ -168,7 +168,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          [ user_message
          ; ""
          ; Printf.sprintf
-             "Gate resolution %s could not be read from its durable journal. Continue independent work; this event will be retried."
+             "Gate resolution %s could not be read from its durable journal; this event will be retried."
              approval_id
          ])
   | Some
@@ -184,7 +184,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
       ; Printf.sprintf "- approval_id: %s" approval_id
       ; "- decision: rejected"
       ; Printf.sprintf "- rationale: %s" rationale
-      ; "This resolution grants no authorization. Continue independent work or revise the request using the rationale."
+      ; "This resolution grants no authorization."
       ]
   | Some
       { Keeper_event_queue.approval_id
@@ -202,7 +202,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
       ; "```json"
       ; Yojson.Safe.pretty_to_string edited_input
       ; "```"
-      ; "This edit grants no authorization. Treat the edited input as operator guidance; any external effect follows the ordinary Gate independently."
+      ; "This edit grants no authorization; any external effect follows the ordinary Gate independently."
       ]
   | None -> user_message
 ;;

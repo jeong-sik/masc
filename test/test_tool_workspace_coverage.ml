@@ -608,11 +608,17 @@ let () =
       let message = (Tool_result.message result) in
       let json = Yojson.Safe.from_string message in
       assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
+      assert (Json_util.assoc_member_opt "fix_hint" json = None);
+      let assertions =
+        Yojson.Safe.Util.member "assertions" json |> Yojson.Safe.Util.to_list
+      in
       assert (
-        Yojson.Safe.Util.member "fix_hint" json
-        = `String
-            "Call masc_plan_set_task to choose or re-sync the active task when \
-             current_task is unset, stale, or ambiguous")
+        List.exists
+          (fun row ->
+             Yojson.Safe.Util.member "assertion" row
+             = `String "current_task_set"
+             && Yojson.Safe.Util.member "passed" row = `Bool false)
+          assertions)
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -644,11 +650,17 @@ let () =
       let message = (Tool_result.message result) in
       let json = Yojson.Safe.from_string message in
       assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
+      assert (Json_util.assoc_member_opt "fix_hint" json = None);
+      let assertions =
+        Yojson.Safe.Util.member "assertions" json |> Yojson.Safe.Util.to_list
+      in
       assert (
-        Yojson.Safe.Util.member "fix_hint" json
-        = `String
-            "Call masc_plan_set_task to choose or re-sync the active task when \
-             current_task is unset, stale, or ambiguous")
+        List.exists
+          (fun row ->
+             Yojson.Safe.Util.member "assertion" row
+             = `String "current_task_set"
+             && Yojson.Safe.Util.member "passed" row = `Bool false)
+          assertions)
     | None -> failwith "dispatch returned None")
 ;;
 

@@ -446,13 +446,12 @@ let verification_evidence_projection config ~viewer ~(task : task) =
     (match phase with
      | Masc_domain.Awaiting_verifier ->
        Printf.bprintf buf
-         "   └─ ACTION: keeper_task_claim task_id=%s; do not Read producer \
-          paths; claim first to receive the typed submitted_evidence snapshot\n"
+         "   └─ awaiting_verifier task_id=%s\n"
          task.id
      | Masc_domain.Verifier_assigned { verifier }
        when not (Workspace_task_classify.same_task_actor config verifier viewer) ->
        Printf.bprintf buf
-         "   └─ assigned_verifier=%s ACTION: skip; do not Read producer paths\n"
+         "   └─ assigned_verifier=%s\n"
          verifier
      | Masc_domain.Verifier_assigned _ -> ());
     Some (Buffer.contents buf)
@@ -490,9 +489,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status
   in
   if tasks = [] then
     if backlog.tasks = [] then
-      "No tasks. ACTION: STOP calling keeper_tasks_list — the backlog is empty. Move on to other work or end your turn."
+      "No tasks."
     else
-      "No active tasks (all done/cancelled). ACTION: STOP calling keeper_tasks_list — do not re-check. Move on to other work or end your turn."
+      "No active tasks (all done/cancelled)."
   else begin
     let buf = Buffer.create 256 in
     Buffer.add_string buf "Quest Board\n";

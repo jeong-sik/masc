@@ -32,13 +32,6 @@ type keeper_model_projection =
   | Internal_name
   | Transport_alias of { projected_by : string }
 
-(** Descriptor-owned model description enrichment. The dynamic task-state
-    context is explicit metadata rather than an internal-name comparison in
-    the OAS bundle assembler. *)
-type model_description_projection =
-  | Static_description
-  | Current_task_state
-
 (** Typed display group for Keeper capability discovery. *)
 type keeper_tool_group =
   | Execute_group
@@ -114,7 +107,6 @@ type policy =
 type t =
   { id : string
   ; keeper_model_projection : keeper_model_projection
-  ; model_description_projection : model_description_projection
   ; keeper_tool_group : keeper_tool_group
   ; input_schema_source : input_schema_source
   ; public_name : string

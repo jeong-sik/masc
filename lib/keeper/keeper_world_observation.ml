@@ -66,8 +66,6 @@ type scheduled_automation_item =
   ; payload_kind : string option
   ; recurrence_summary : string
   ; due_at : float
-  ; keeper_next_tool : string option
-  ; keeper_next_action : string
   }
 
 type scheduled_automation_observation =
@@ -215,8 +213,6 @@ let schedule_attention_item action (request : Schedule_domain.schedule_request) 
   ; payload_kind = schedule_payload_kind request
   ; recurrence_summary = Schedule_domain.recurrence_summary request.recurrence
   ; due_at = request.due_at
-  ; keeper_next_tool = Schedule_projection.keeper_next_tool_for_attention_action action
-  ; keeper_next_action = Schedule_projection.keeper_next_action_for_attention_action action
   }
 ;;
 
@@ -585,9 +581,7 @@ let pending_board_event_of_goal_assignment
       short_preview
         ~max_len:fusion_result_preview_max_len
         (Printf.sprintf
-           "Goal %s is now in your active goals (assigned by %s). Review it \
-            in Active Goals and either break it into a claimable task or \
-            post your plan."
+           "Goal %s is now in your active goals (assigned by %s)."
            ga.ga_goal_id
            ga.ga_assigned_by)
   ; hearth = None
@@ -616,10 +610,9 @@ let pending_board_event_of_goal_reconciliation_ready
       short_preview
         ~max_len:fusion_result_preview_max_len
         (Printf.sprintf
-           "Task %s made every linked Task terminal. Re-read Goal and Task SSOT; \
-            choose masc_goal_transition request_complete or block, or create a \
-            follow-up Task. Do not infer Goal completion from task counts."
-           ready.gr_triggering_task_id)
+           "Task %s made every linked Task terminal for goal %s."
+           ready.gr_triggering_task_id
+           ready.gr_goal_id)
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -892,7 +885,7 @@ let collect_board_events_with_cursor_policy
                     [false] because a broadcast has no per-keeper mention
                     target. The event's presence in this Deliver branch
                     already marks it as addressed; downstream
-                    ([Keeper_unified_prompt.format_board_event_text])
+                    (the unified-prompt board event renderer)
                     uses the field solely to render a "[mentions ...]"
                     note. *)
                  consume_posts

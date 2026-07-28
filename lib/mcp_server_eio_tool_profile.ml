@@ -13,17 +13,14 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
 let operator_remote_instructions =
   "MASC remote operator profile exposes seven operator tools: \
 masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_board_attention_quarantine_requeue, masc_operator_chat_recovery_resolve, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
-Read raw state with masc_operator_snapshot first when needed, and prefer masc_operator_digest for intervention-oriented supervision. \
-Use masc_operator_action for guided actions only. \
-Use masc_operator_board_attention_quarantine_requeue only with the exact Keeper, partition, candidate, and quarantine id observed from durable state; it never auto-retries. \
-Use masc_operator_chat_recovery_resolve only with the exact receipt_id, revision, and lease_id observed from queue state; it never auto-redelivers. \
-Use masc_operator_task_recovery_resolve only with the exact task owner and backlog version observed from Task state; it performs no liveness inference. \
+masc_operator_board_attention_quarantine_requeue accepts only with the exact Keeper, partition, candidate, and quarantine id observed from durable state; it never auto-retries. \
+masc_operator_chat_recovery_resolve accepts only the exact receipt_id, revision, and lease_id observed from queue state; it never auto-redelivers. \
+masc_operator_task_recovery_resolve accepts only the exact task owner and backlog version observed from Task state; it performs no liveness inference. \
 When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
 Do not assume access to any other MASC tool from this endpoint."
 
 let managed_agent_instructions =
   "MASC managed-agent profile exposes the internal agent control surface. \
-Prefer canonical task-control tools such as masc_status, masc_tasks, keeper_task_claim, masc_transition, and masc_plan_set_task. \
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
 let managed_agent_passthrough_tool_names =
@@ -56,17 +53,11 @@ let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =
   List.rev result
 
 let default_instructions () =
-  Printf.sprintf
-    "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
+  "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
 PROJECT: Agents sharing the same base path (.masc/ folder) align together. \
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool surfaces use the configured cluster/default label). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
-WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
-WORKFLOW: %s. \
-Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
-Prefer worktrees for parallel work. \
-Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
-    (Tool_contract_guidance.task_lifecycle_workflow ())
+WRITE: task state changes are CAS-guarded; pass expected_version."
 
 let tool_schemas_for_profile ?(include_hidden = false)
     ?(include_agent_internal = false) _state

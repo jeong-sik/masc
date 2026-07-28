@@ -94,15 +94,15 @@ module Task_error = struct
   let to_string = function
     | NotFound id ->
         Printf.sprintf
-          "[TaskError] Task not found: %s. Call masc_status to refresh your task list."
+          "[TaskError] Task not found: %s."
           id
     | AlreadyClaimed { task_id; by } ->
         Printf.sprintf
-          "[TaskError] Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
+          "[TaskError] Task %s is currently owned by %s."
           task_id by
     | NotClaimed id ->
         Printf.sprintf
-          "[TaskError] Task %s is still todo. Claim/start it first, then mark it done."
+          "[TaskError] Task %s is still todo."
           id
     | InvalidState msg -> Printf.sprintf "[TaskError] Invalid task state: %s" msg
     | InvalidId reason -> Printf.sprintf "[TaskError] Invalid task ID: %s" reason
@@ -142,7 +142,7 @@ module Auth_error = struct
     | Unauthorized { message; _ } -> Printf.sprintf "[AuthError] Unauthorized: %s" message
     | Forbidden { agent; action } -> Printf.sprintf "[AuthError] Forbidden: %s cannot %s" agent action
     | TokenExpired agent ->
-        Printf.sprintf "[AuthError] Token expired for %s. Use masc_auth_refresh." agent
+        Printf.sprintf "[AuthError] Token expired for %s." agent
     | InvalidToken reason -> Printf.sprintf "[AuthError] Invalid token: %s" reason
 end
 
@@ -163,7 +163,7 @@ module System_error = struct
           "String/Substring 분류기" anti-pattern removal). *)
 
   let to_string = function
-    | NotInitialized -> "[SystemError] MASC not initialized. Use masc_init first."
+    | NotInitialized -> "[SystemError] MASC not initialized."
     | AlreadyInitialized -> "[SystemError] MASC already initialized."
     | InvalidJson msg -> Printf.sprintf "[SystemError] Invalid JSON: %s" msg
     | IoError msg -> Printf.sprintf "[SystemError] IO error: %s" msg

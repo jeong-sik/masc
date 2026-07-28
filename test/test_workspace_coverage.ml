@@ -291,10 +291,28 @@ let test_batch_add_preserves_priorities () =
 (* Claim Next Tests                                              *)
 (* ============================================================ *)
 
+(* [Workspace.claim_next] was a string-rendering convenience over
+   [claim_next_r] with no production caller; its prose told the model what
+   to do next ("ACTION: Stop task-checking"), so it was removed from lib.
+   These assertions predate the typed result and only need the claimed task
+   id or a non-success marker, so the projection lives here in the harness
+   where it reaches no model. *)
+let claim_next config ~agent_name =
+  match Workspace.claim_next_r config ~agent_name () with
+  | Masc_domain.Claim_next_claimed { message; _ } -> message
+  | Masc_domain.Claim_next_no_unclaimed -> "No unclaimed tasks."
+  | Masc_domain.Claim_next_no_eligible { excluded_count; scope_excluded_count; _ } ->
+    Printf.sprintf
+      "No eligible unclaimed tasks. excluded=%d (goal_scope_or_filter=%d)."
+      excluded_count
+      scope_excluded_count
+  | Masc_domain.Claim_next_error e -> Printf.sprintf "Error: %s" e
+;;
+
 let test_claim_next_basic () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test Task" ~priority:1 ~description:"" in
-    let result = Workspace.claim_next config ~agent_name:"claude" in
+    let result = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool) "claim next success" true (contains_check result);
     Alcotest.(check bool) "has task id" true (str_contains result "task-001"))
 ;;
@@ -306,7 +324,7 @@ let test_claim_next_priority_order () =
     let _ = Workspace.add_task config ~title:"High" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Medium" ~priority:3 ~description:"" in
     (* Should claim highest priority (lowest number) first *)
-    let result = Workspace.claim_next config ~agent_name:"claude" in
+    let result = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool)
       "claims high priority first"
       true
@@ -315,7 +333,7 @@ let test_claim_next_priority_order () =
 
 let test_claim_next_empty_backlog () =
   with_test_env (fun config ->
-    let result = Workspace.claim_next config ~agent_name:"claude" in
+    let result = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool) "no tasks message" true (str_contains result "No unclaimed"))
 ;;
 
@@ -323,7 +341,7 @@ let test_claim_next_all_claimed () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Only Task" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
-    let result = Workspace.claim_next config ~agent_name:"claude" in
+    let result = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool) "no unclaimed tasks" true (str_contains result "No unclaimed"))
 ;;
 
@@ -345,7 +363,7 @@ let test_claim_next_skips_done_and_cancelled () =
      with
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
-    let result = Workspace.claim_next config ~agent_name:"claude" in
+    let result = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool)
       "claims the remaining todo task"
       true
@@ -380,7 +398,7 @@ let test_claim_next_terminal_only_backlog () =
      with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
-    let result = Workspace.claim_next config ~agent_name:"claude" in
+    let result = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool)
       "terminal backlog reports no unclaimed tasks"
       true
@@ -391,8 +409,8 @@ let test_claim_next_consecutive () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"First" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Second" ~priority:2 ~description:"" in
-    let r1 = Workspace.claim_next config ~agent_name:"claude" in
-    let r2 = Workspace.claim_next config ~agent_name:"gemini" in
+    let r1 = claim_next config ~agent_name:"claude" in
+    let r2 = claim_next config ~agent_name:"gemini" in
     Alcotest.(check bool) "first claim success" true (contains_check r1);
     Alcotest.(check bool) "second claim success" true (contains_check r2);
     (* Different agents should get different tasks *)
@@ -518,9 +536,9 @@ let test_claim_next_preserves_existing_task () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"First" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Second" ~priority:2 ~description:"" in
-    let r1 = Workspace.claim_next config ~agent_name:"claude" in
+    let r1 = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool) "first claim has task-001" true (str_contains r1 "task-001");
-    let r2 = Workspace.claim_next config ~agent_name:"claude" in
+    let r2 = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool)
       "second claim keeps current task"
       true
@@ -562,9 +580,9 @@ let test_claim_next_preserved_task_not_claimable_by_others () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Task A" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Task B" ~priority:2 ~description:"" in
-    let _ = Workspace.claim_next config ~agent_name:"claude" in
-    let _ = Workspace.claim_next config ~agent_name:"claude" in
-    let r = Workspace.claim_next config ~agent_name:"gemini" in
+    let _ = claim_next config ~agent_name:"claude" in
+    let _ = claim_next config ~agent_name:"claude" in
+    let r = claim_next config ~agent_name:"gemini" in
     Alcotest.(check bool)
       "gemini does not get preserved task"
       false

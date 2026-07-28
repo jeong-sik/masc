@@ -48,13 +48,6 @@ const PROMPTS: DashboardPromptItem[] = [
     char_count: 80,
   }),
   makePrompt({
-    key: 'keeper.immediate_task_move',
-    category: 'keeper',
-    description: 'claimable work guidance',
-    file_path: 'config/prompts/keeper.immediate_task_move.md',
-    char_count: 40,
-  }),
-  makePrompt({
     key: 'keeper.librarian.system',
     category: 'keeper',
     description: 'librarian system',

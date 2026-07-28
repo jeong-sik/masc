@@ -461,7 +461,7 @@ let resolve_task_id (config : Workspace.config) ~task_id : (string, string) resu
   | "" ->
       (match get_current_task config with
        | Some t -> Ok t
-       | None -> Error "No task_id provided and no current task set. Use masc_plan_set_task first.")
+       | None -> Error "No task_id provided and no current task set.")
   | t -> Ok t
 
 (* ===== Display Helpers ===== *)

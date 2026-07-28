@@ -22,46 +22,34 @@ let is_verdict_transition_action = function
 
 let terminal_verdict_noop_message ~task_id ~action ~status =
   Printf.sprintf
-    "Stale verification verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op. Do not retry this verdict; inspect task history or list awaiting_verification tasks instead."
+    "Stale verification verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op."
     task_id status action
 
 let workflow_rejection_payload
       ?rule_id
-      ?tool_suggestion
-      ?hint
       ?scope_policy
       ?recoverable
-      ?(alternatives = [])
       ?extra_fields
       message
   =
   Workflow_rejection_payload.payload
     ?rule_id
-    ?tool_suggestion
-    ?hint
     ?scope_policy
     ?recoverable
-    ~alternatives
     ?extra_fields
     message
 
 let workflow_rejection_payload_json
       ?rule_id
-      ?tool_suggestion
-      ?hint
       ?scope_policy
       ?recoverable
-      ?(alternatives = [])
       ?extra_fields
       message
   =
   workflow_rejection_payload
     ?rule_id
-    ?tool_suggestion
-    ?hint
     ?scope_policy
     ?recoverable
-    ~alternatives
     ?extra_fields
     message
   |> Yojson.Safe.to_string

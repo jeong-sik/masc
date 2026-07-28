@@ -39,8 +39,7 @@ let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.ba
 
 let active_ownership_conflict_message ~agent_name ~requested_task_id task_ids =
   Printf.sprintf
-    "Agent %s has task(s) in progress: %s. Use keeper_task_done (task_id + result + evidence_refs) \
-     to finish them before claiming %s."
+    "Agent %s has task(s) in progress: %s; %s was not claimed."
     agent_name
     (String.concat ", " task_ids)
     requested_task_id
@@ -234,7 +233,7 @@ let claim_task_r config ~agent_name ~task_id ()
                  "verification claim committed without an evidence projection (task=%s)"
                  task_id;
                Printf.sprintf
-                 "verification_request projection unavailable after assignment for %s; ACTION: stop and report this invariant failure"
+                 "verification_request projection unavailable after assignment for %s"
                  task_id
            in
            Ok

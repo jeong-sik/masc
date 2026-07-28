@@ -56,8 +56,22 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
         "Pause the namespace before taking any destructive action."
         Yojson.Safe.Util.
           (digest |> member "active_summary" |> member "summary" |> to_string);
-      Alcotest.(check string) "active recommendation source" "judgment"
-        Yojson.Safe.Util.(digest |> member "active_recommendation_source" |> to_string);
+      let recommended_actions =
+        Yojson.Safe.Util.(digest |> member "recommended_actions" |> to_list)
+      in
+      Alcotest.(check int) "authoritative action reaches top-level projection" 1
+        (List.length recommended_actions);
+      (match recommended_actions with
+       | action :: _ ->
+         Alcotest.(check string) "top-level action comes from judgment"
+           "pause_workspace"
+           Yojson.Safe.Util.(action |> member "action_kind" |> to_string)
+       | [] -> Alcotest.fail "expected one authoritative recommendation");
+      Alcotest.(check bool) "top-level recommendation summary is authoritative"
+        true
+        Yojson.Safe.Util.
+          (digest |> member "recommendation_summary" |> member "authoritative"
+          |> to_bool);
       Alcotest.(check bool) "judgment present" true
         (Yojson.Safe.Util.member "judgment" digest <> `Null))
 
@@ -105,11 +119,12 @@ let test_guidance_ignores_unsupported_target_type () =
         ~summary:"Root guidance must not leak to keeper targets."
         ~fresh_for_sec:90.0 ();
       let fields =
-        Operator_digest_guidance.active_guidance_fields ~config ~actor:"operator"
-          ~target_type:"keeper" ~target_id:None ~fallback_recommendations:[]
+        Operator_digest_guidance.active_guidance ~config
+          ~target_type:"keeper" ~target_id:None
+          ~fallback_recommendations:[]
           ~fallback_summary:(`Assoc [ ("count", `Int 0) ])
       in
-      let guidance = `Assoc fields in
+      let guidance = `Assoc fields.fields in
       Alcotest.(check string) "judgment owner fallback" "fallback_read_model"
         Yojson.Safe.Util.(guidance |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "authoritative judgment unavailable" false

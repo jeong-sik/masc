@@ -112,7 +112,7 @@ exception Not_initialized
 
 let () =
   Printexc.register_printer (function
-    | Not_initialized -> Some "MASC not initialized. Use masc_init first."
+    | Not_initialized -> Some "MASC not initialized."
     | _ -> None)
 
 let ensure_initialized config =

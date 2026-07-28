@@ -77,4 +77,3 @@ val claim_next_r
   -> unit
   -> Masc_domain.claim_next_result
 
-val claim_next : config -> agent_name:string -> string

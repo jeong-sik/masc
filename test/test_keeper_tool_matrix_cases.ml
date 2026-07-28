@@ -232,8 +232,8 @@ let ensure_sample_file fixture =
 let ensure_keeper_claim fixture =
   ignore (Generic.ensure_task fixture.generic);
   ignore
-    (Masc.Workspace.claim_next fixture.config
-       ~agent_name:fixture.meta.agent_name)
+    (Masc.Workspace.claim_next_r fixture.config
+       ~agent_name:fixture.meta.agent_name ())
 
 let ensure_voice_session fixture =
   let mgr = Masc.Keeper_voice_local.get_session_manager () in

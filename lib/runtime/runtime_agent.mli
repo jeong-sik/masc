@@ -23,6 +23,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
   | Completed
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | Yielded_to_external_effect of { turns_used : int }
   | InputRequired of {
       turns_used : int;
       request : Agent_sdk.Error.input_required;
@@ -31,6 +32,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
 type cooperative_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
+  | External_effect_waiting
   | Terminal_tool_completed
 
 type cooperative_yield_decision =

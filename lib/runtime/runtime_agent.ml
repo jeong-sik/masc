@@ -64,6 +64,7 @@ type stop_reason =
   | Completed
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | Yielded_to_external_effect of { turns_used : int }
   | InputRequired of {
       turns_used : int;
       request : Agent_sdk.Error.input_required;
@@ -72,6 +73,7 @@ type stop_reason =
 type cooperative_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
+  | External_effect_waiting
   | Terminal_tool_completed
 
 type cooperative_yield_decision =
@@ -775,6 +777,7 @@ let stop_reason_of_cooperative_yield ~turns_used = function
   | Chat_waiting -> Yielded_to_chat_waiting { turns_used }
   | Durable_stimulus_waiting ->
     Yielded_to_durable_stimulus { turns_used }
+  | External_effect_waiting -> Yielded_to_external_effect { turns_used }
   (* The provider loop yielded at OAS's durable post-tool boundary because
      the typed reply effect already completed. This is successful completion,
      not a continuation checkpoint that should replay on the next cycle. *)
@@ -915,6 +918,8 @@ let dashboard_status_of_stop_reason = function
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
+  | Yielded_to_external_effect _ ->
+      Dashboard_oas_bridge.Cancelled { reason = "yielded_to_external_effect" }
   | InputRequired _ ->
       Dashboard_oas_bridge.Cancelled { reason = "input_required" }
 

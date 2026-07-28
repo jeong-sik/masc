@@ -17,7 +17,17 @@ type stop_reason =
   | Yielded_to_durable_stimulus of { turns_used : int }
     (* The current autonomous cycle completed at least one OAS provider turn,
        then released its lane because another durable stimulus was queued
-       behind the stimulus already leased by this cycle. *)
+       behind the stimulus already leased by this cycle. Resolves on its own:
+       the next cycle drains the queue. *)
+  | Yielded_to_external_effect of { turns_used : int }
+    (* The run released its lane because a tool it invoked is waiting on an
+       external decision — an approval, a gate. Nothing the keeper does
+       advances it; a human or the gate has to resolve it first.
+
+       Distinct from [Yielded_to_durable_stimulus] because the two need
+       opposite operator responses, and folding them together made a keeper
+       blocked on an unanswered approval look like one cooperating with a busy
+       queue. *)
   | InputRequired of
       { turns_used : int
       ; request : Agent_sdk.Error.input_required

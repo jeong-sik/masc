@@ -152,7 +152,8 @@ let apply_accept
   match run_result.stop_reason with
   | Runtime_agent.InputRequired _
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_to_external_effect _ ->
     (* These are typed host-control terminals, not model deliverables. Running
        the normal response accept predicate over their question/blank carrier
        would turn them into [Accept_rejected] and incorrectly rotate providers,

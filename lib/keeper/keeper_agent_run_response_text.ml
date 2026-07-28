@@ -6,7 +6,8 @@ type finalized = {
 
 let stop_reason_suppresses_visible_response = function
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ -> true
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_to_external_effect _ -> true
   | Runtime_agent.Completed
   | Runtime_agent.InputRequired _ ->
     false

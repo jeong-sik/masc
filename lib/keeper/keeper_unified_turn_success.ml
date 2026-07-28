@@ -60,7 +60,8 @@ let terminal_outcome_of_result result =
   | Runtime_agent.Completed -> Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_to_external_effect _ ->
     Terminal_checkpoint
 ;;
 
@@ -256,6 +257,8 @@ let emit_usage_metrics_and_log
       Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
+    | Runtime_agent.Yielded_to_external_effect { turns_used } ->
+      Printf.sprintf "yielded_to_external_effect(%d)" turns_used
     | Runtime_agent.InputRequired { turns_used; _ } ->
       Printf.sprintf "input_required(%d)" turns_used
   in
@@ -268,6 +271,8 @@ let emit_usage_metrics_and_log
        | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
+       | Runtime_agent.Yielded_to_external_effect _ ->
+         "yielded_to_external_effect"
        | Runtime_agent.InputRequired _ -> "input_required"
        | Runtime_agent.Completed -> "success")
   in
@@ -383,6 +388,7 @@ let terminal_reason_of_outcome result = function
     (match result.Keeper_agent_run.stop_reason with
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Yielded_to_external_effect _
      | Runtime_agent.InputRequired _ ->
        Keeper_turn_terminal.of_disposition
          ~source:"runtime_stop_reason"
@@ -459,6 +465,15 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Log.Keeper.info ~keeper_name:updated_meta.name
       "yielded autonomous run for a pending durable stimulus after %d turn(s), \
        checkpoint saved — will resume next cycle"
+      turns_used;
+    reset_failure_state ()
+  | Runtime_agent.Yielded_to_external_effect { turns_used } ->
+    (* Distinct from the durable-stimulus yield above: this one does not
+       resolve on the next cycle. Something outside the keeper — an approval,
+       a gate decision — has to land first. *)
+    Log.Keeper.info ~keeper_name:updated_meta.name
+      "yielded autonomous run waiting on an external effect after %d turn(s), \
+       checkpoint saved — resumes when the effect resolves"
       turns_used;
     reset_failure_state ()
   | Runtime_agent.InputRequired { turns_used; request } ->

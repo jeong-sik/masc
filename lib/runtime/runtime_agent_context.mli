@@ -16,6 +16,11 @@ type stop_reason =
   | Completed
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+      (** Another stimulus was queued behind the one this cycle leased. The
+          next cycle drains it; no operator action is involved. *)
+  | Yielded_to_external_effect of { turns_used : int }
+      (** A tool is waiting on an approval or gate decision. The keeper cannot
+          advance this on its own. *)
   | InputRequired of {
       turns_used : int;
       request : Agent_sdk.Error.input_required;

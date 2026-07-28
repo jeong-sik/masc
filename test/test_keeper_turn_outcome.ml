@@ -85,11 +85,13 @@ let test_autonomous_yield_boundary_contract () =
   (match F.runtime_yield_reason chat with
    | Runtime_agent.Chat_waiting -> ()
    | Runtime_agent.Durable_stimulus_waiting
+   | Runtime_agent.External_effect_waiting
    | Runtime_agent.Terminal_tool_completed ->
      fail "chat request mapped to the durable reason");
   (match F.runtime_yield_reason durable_stimulus with
    | Runtime_agent.Durable_stimulus_waiting -> ()
    | Runtime_agent.Chat_waiting
+   | Runtime_agent.External_effect_waiting
    | Runtime_agent.Terminal_tool_completed ->
      fail "durable request mapped to the chat reason");
   check bool "terminal tool yield settles as completion" true
@@ -101,6 +103,7 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed -> true
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Yielded_to_external_effect _
      | Runtime_agent.InputRequired _ -> false)
 
 let test_terminal_effect_handler_contract () =

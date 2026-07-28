@@ -210,7 +210,12 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
 let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
   | Keeper_tools_oas.External_effect_deferred ->
-    Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting)
+    (* Not a durable-stimulus yield: nothing is queued behind this turn. A
+       tool is parked on an approval or gate decision, and the keeper cannot
+       advance it. Reporting both as [Durable_stimulus_waiting] made a keeper
+       blocked on an unanswered approval indistinguishable from one that
+       simply had work queued. *)
+    Ok (Runtime_agent.Yield Runtime_agent.External_effect_waiting)
   | Keeper_tools_oas.Terminal_effect_completed ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
   | Keeper_tools_oas.Terminal_effect_failed

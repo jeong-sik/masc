@@ -670,6 +670,11 @@
 
 
 (test
+ (name test_keeper_yield_reason_split)
+ (modules test_keeper_yield_reason_split)
+ (libraries alcotest astring masc_test_deps))
+
+(test
  (name test_keeper_yield_observability)
  (modules test_keeper_yield_observability)
  (libraries alcotest astring masc_test_deps))

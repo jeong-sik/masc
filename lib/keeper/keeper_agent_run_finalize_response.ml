@@ -184,7 +184,8 @@ let checkpoint_for_replay_persistence
          "refusing to save input-required checkpoint: messages do not match \
           pre-turn history prefix")
   | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_to_external_effect _ ->
     (* A control-boundary checkpoint retains the current-turn tool result so
        resumption cannot repeat an already committed effect. *)
     observation_replay_checkpoint ~history_messages ~session_id checkpoint

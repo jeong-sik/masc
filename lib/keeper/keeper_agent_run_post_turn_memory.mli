@@ -2,7 +2,7 @@
 
     Extracts deterministic writes, LLM librarian records, and quality metrics
     from Step 8 behind [run ~config ~meta ...]. It does not rewrite or delete
-    memory-bank rows: semantic consolidation requires an explicit typed LLM
+    durable Memory OS records: semantic consolidation requires an explicit typed LLM
     Memory operation, never a storage-pressure survival rule.
 
     Each sub-stage is best-effort: non-cancel exceptions are logged and

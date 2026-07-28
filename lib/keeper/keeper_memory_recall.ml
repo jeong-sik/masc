@@ -387,10 +387,10 @@ let evaluate_memory_recall
     let (best_msg, best_score) =
       match expected_topic, oldest_candidate with
       | Some "first_question", Some target ->
-          (Some target, jaccard_similarity assistant_reply target)
+          (Some target, Text_similarity.jaccard_similarity assistant_reply target)
       | _ ->
           List.fold_left (fun (best_m, best_s) cand ->
-            let score = jaccard_similarity assistant_reply cand in
+            let score = Text_similarity.jaccard_similarity assistant_reply cand in
             if score > best_s then (Some cand, score) else (best_m, best_s)
           ) (None, 0.0) candidates_for_general
     in

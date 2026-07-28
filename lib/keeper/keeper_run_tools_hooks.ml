@@ -540,6 +540,7 @@ let assemble_hooks
                        ~extra_system_context:ctx
                        ~user_message
                        ~history_messages:messages
+                       ~tools
                        ())
                   manifest_keeper_turn_id;
                 Eio.Fiber.yield ();

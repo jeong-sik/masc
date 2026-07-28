@@ -145,16 +145,23 @@ val approved_resolution_state :
   base_path:string -> id:string -> (approved_resolution_state, grant_error) result
 
 (** Atomically consume an approved resolution only when the Keeper, opaque
-    operation identity, durable [tool_call_id] (including its presence or
-    absence), and canonical complete input match its durable request. Turn,
-    Task, Goal, and channel fields remain provenance and never become
-    authorization constraints. *)
+    operation identity, and canonical complete input match its durable
+    request. Turn, Task, Goal, and channel fields remain provenance and never
+    become authorization constraints.
+
+    The consuming invocation's own [tool_call_id] is NOT compared. A grant is
+    spent either by replay — which injects the approval's stored id, so the
+    comparison would read a value back out of the record under test — or by the
+    model re-emitting the call, where the provider assigns a fresh tool_use_id
+    and the comparison could never succeed. Double-spend is prevented by the
+    one-shot [grant_consumed] flag; which approval a cycle may spend is fixed
+    by the Hitl_resolution event carrying its [approval_id]. [tool_call_id] is
+    the request-identity key on {!submit_pending}, where it is meaningful. *)
 val consume_approved_resolution :
   base_path:string ->
   id:string ->
   keeper_name:string ->
   tool_name:string ->
-  tool_call_id:string option ->
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
 

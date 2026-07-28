@@ -258,40 +258,58 @@ let match_signal
     else { explicit_mention = false; matched_targets = [] })
 ;;
 
-(** Check whether this keeper has commented on a post, and whether new
-    external comments arrived after the keeper's latest comment.
-    Uses actual comment stream as ground truth (no proxy like reply_count
-    or updated_at). A prior response is reconsidered only when a new external
-    comment arrives. *)
-let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
+(** Whether this keeper has taken part in a thread, and whether new external
+    comments arrived after it last spoke.
+
+    Participation is authoring the post OR commenting on it. Counting only
+    comments left a post's own author out of its own thread: a keeper that
+    raised a blocker as a post was never woken by the reply, because
+    {!wake_reason} routes the [Thread_participants] audience through here and
+    an author with no comments of its own scored [`Never]. The reaction path
+    ({!reaction_touches_self_activity}) already treated post authorship as self
+    activity; this applies the same rule to comments.
+
+    The post record and the comment stream are the ground truth (no proxy like
+    reply_count or updated_at). A prior response is reconsidered only when a new
+    external comment arrives after the keeper's own latest contribution, where a
+    contribution now includes writing the post. *)
+let check_self_thread_status ~self_ids ~(post_id : string) : comment_status =
+  match Board_dispatch.get_post ~post_id with
+  | Error error -> Unavailable { operation = Get_post; post_id; error }
+  | Ok post ->
   match Board_dispatch.get_comments ~post_id with
   | Error error -> Unavailable { operation = Get_comments; post_id; error }
   | Ok comments ->
-    let my_comments =
-      List.filter
-        (fun (c : Board.comment) ->
-           Message_scope.is_self_author
-             ~self_ids
-             (Board.Agent_id.to_string c.author))
-        comments
+    let is_self_comment (c : Board.comment) =
+      Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string c.author)
     in
-    if my_comments = []
-    then Available `Never
-    else (
-      let my_latest_ts =
-        List.fold_left
-          (fun acc (c : Board.comment) -> max acc c.created_at)
-          0.0
-          my_comments
-      in
+    let self_post_ts =
+      if Message_scope.is_self_author
+           ~self_ids
+           (Board.Agent_id.to_string post.author)
+      then Some post.created_at
+      else None
+    in
+    (* The keeper's own latest contribution to this thread: the post it wrote,
+       its newest comment, or whichever of the two is later. [None] IS
+       non-participation, so there is no seed timestamp to pick and no state
+       where a missing contribution reads as one at epoch zero. *)
+    let my_latest_contribution =
+      List.fold_left
+        (fun acc (c : Board.comment) ->
+           match acc with
+           | None -> Some c.created_at
+           | Some latest -> Some (Float.max latest c.created_at))
+        self_post_ts
+        (List.filter is_self_comment comments)
+    in
+    (match my_latest_contribution with
+     | None -> Available `Never
+     | Some my_latest_ts ->
       let external_after =
         List.filter
           (fun (c : Board.comment) ->
-             (not
-                (Message_scope.is_self_author
-                   ~self_ids
-                   (Board.Agent_id.to_string c.author)))
-             && c.created_at > my_latest_ts)
+             (not (is_self_comment c)) && c.created_at > my_latest_ts)
           comments
       in
       match external_after with
@@ -327,7 +345,7 @@ type wake_reason =
   | Broadcast
       (** The exact [@@all] Keeper Board address selected every non-author
           lane. *)
-  | Thread_reply_after_self_comment
+  | Thread_reply_after_self_activity
       (** A new external comment arrived on a post the keeper had commented on. *)
   | Reaction_after_self_activity
       (** An external reaction landed on a post the keeper authored or a thread
@@ -336,16 +354,8 @@ type wake_reason =
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Broadcast -> "broadcast"
-  | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
+  | Thread_reply_after_self_activity -> "thread_reply_after_self_activity"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
-;;
-
-let self_authored_post ~self_ids ~(post_id : string) =
-  match Board_dispatch.get_post ~post_id with
-  | Error error -> Unavailable { operation = Get_post; post_id; error }
-  | Ok post ->
-    Available
-      (Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string post.author))
 ;;
 
 (* TEL-OK: pure wake predicate; board persistence and keeper wake execution own
@@ -356,14 +366,15 @@ let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_sig
     if Message_scope.is_self_author ~self_ids signal.author
     then Available false
     else (
-      match self_authored_post ~self_ids ~post_id:signal.post_id with
+      (* [check_self_thread_status] now folds post authorship into
+         participation, so the separate post-authorship probe this branch
+         used to run first is redundant: authoring the post no longer scores
+         [`Never]. One definition of "did I take part in this thread", not
+         two. *)
+      match check_self_thread_status ~self_ids ~post_id:signal.post_id with
       | Unavailable _ as unavailable -> unavailable
-      | Available true -> Available true
-      | Available false ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-         | Unavailable _ as unavailable -> unavailable
-         | Available `Never -> Available false
-         | Available (`No_new_external | `New_external _) -> Available true))
+      | Available `Never -> Available false
+      | Available (`No_new_external | `New_external _) -> Available true)
   | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added ->
     Available false
 ;;
@@ -385,9 +396,9 @@ let wake_reason
        | Available true -> Available (Some Reaction_after_self_activity)
        | Available false -> Available None)
     | Board_dispatch.Board_comment_added ->
-      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+      (match check_self_thread_status ~self_ids ~post_id:signal.post_id with
        | Unavailable _ as unavailable -> unavailable
-       | Available (`New_external _) -> Available (Some Thread_reply_after_self_comment)
+       | Available (`New_external _) -> Available (Some Thread_reply_after_self_activity)
        | Available (`Never | `No_new_external) -> Available None)
     | Board_dispatch.Board_post_created -> Available None)
 ;;

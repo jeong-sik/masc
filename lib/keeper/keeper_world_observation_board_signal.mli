@@ -76,7 +76,7 @@ val match_signal
   -> signal:Board_dispatch.board_signal
   -> match_result
 
-val check_self_comment_status
+val check_self_thread_status
   :  self_ids:Keeper_identity.Keeper_id.t list
   -> post_id:string
   -> comment_status
@@ -84,7 +84,7 @@ val check_self_comment_status
 type wake_reason =
   | Explicit_mention
   | Broadcast
-  | Thread_reply_after_self_comment
+  | Thread_reply_after_self_activity
   | Reaction_after_self_activity
 (** Closed set of reasons a keeper wakes for a board signal (RFC-0020).
     Replaces the prior [string option] contract; consumers match exhaustively

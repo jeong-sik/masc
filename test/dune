@@ -2008,6 +2008,8 @@
 
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
+(include stanzas/test_keeper_board_thread_participation.inc)
+
 (include stanzas/test_keeper_toml_parser.inc)
 
 (include stanzas/test_keeper_toml_loader.inc)

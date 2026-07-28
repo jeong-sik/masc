@@ -175,7 +175,7 @@ let read_backlog_counts = Inputs.read_backlog_counts
 let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
 let board_signal_match = Board_signal.match_signal
-let check_self_comment_status = Board_signal.check_self_comment_status
+let check_self_thread_status = Board_signal.check_self_thread_status
 let compare_board_cursor_token = Board_signal.compare_cursor_token
 let board_cursor_token_of_post = Board_signal.cursor_token_of_post
 let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
@@ -359,7 +359,7 @@ let pending_board_event_of_board_signal
       match signal.kind with
       | Board_dispatch.Board_post_created -> Ok (false, 0, None, None)
       | Board_dispatch.Board_comment_added ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+        (match check_self_thread_status ~self_ids ~post_id:signal.post_id with
          | Board_signal.Unavailable unavailable -> Error unavailable
          | Board_signal.Available (`New_external (count, author, preview)) ->
            Ok (true, count, Some author, Some preview)
@@ -368,7 +368,7 @@ let pending_board_event_of_board_signal
          | Board_signal.Available `Never ->
            Ok (false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content)))
       | Board_dispatch.Board_reaction_changed _ ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+        (match check_self_thread_status ~self_ids ~post_id:signal.post_id with
          | Board_signal.Unavailable unavailable -> Error unavailable
          | Board_signal.Available `Never -> Ok (false, 0, None, None)
          | Board_signal.Available (`No_new_external | `New_external _) ->
@@ -796,7 +796,7 @@ let collect_board_events_with_cursor_policy
       | (p : Board.post) :: rest ->
         let post_id = Board.Post_id.to_string p.id in
         let next_cursor = board_cursor_token_of_post p in
-        let comment_status = check_self_comment_status ~self_ids ~post_id in
+        let comment_status = check_self_thread_status ~self_ids ~post_id in
         (match comment_status with
          | Board_signal.Unavailable unavailable ->
            (match log_and_count_unavailable ~context:"comment status" unavailable with

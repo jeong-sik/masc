@@ -356,7 +356,7 @@ let board_signal_stimulus
       (match reason with
        | Board_wake.Explicit_mention | Board_wake.Broadcast ->
          Keeper_event_queue.Immediate
-       | Board_wake.Thread_reply_after_self_comment
+       | Board_wake.Thread_reply_after_self_activity
        | Board_wake.Reaction_after_self_activity ->
          Keeper_event_queue.Normal)
   ; arrived_at = Time_compat.now ()
@@ -680,7 +680,7 @@ let wakeup_relevant_keeper_for_board_signal
                       match reason with
                       | Board_wake.Broadcast -> Keeper_registry.Broadcast_signal
                       | Board_wake.Explicit_mention
-                      | Board_wake.Thread_reply_after_self_comment
+                      | Board_wake.Thread_reply_after_self_activity
                       | Board_wake.Reaction_after_self_activity ->
                         Keeper_registry.Reactive_signal
                     in

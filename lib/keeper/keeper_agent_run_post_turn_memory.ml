@@ -37,7 +37,7 @@ let run
        | Some execution -> (
          match
            Keeper_delegation_request_store.write_execution_result
-             ~base_path:config.base_path
+             ~base_path:config.Workspace.base_path
              ~requester:meta.name
              execution
          with
@@ -46,8 +46,8 @@ let run
            Log.Keeper.info ~keeper_name:meta.name
              "delegation_requests wrote=%d dir=%s"
              (List.length stored)
-             (Keeper_delegation_request_store.requests_dir
-                ~base_path:config.base_path)
+            (Keeper_delegation_request_store.requests_dir
+                ~base_path:config.Workspace.base_path)
          | Error msg ->
            Otel_metric_store.inc_counter
              Keeper_metrics.(to_string DispatchEventFailures)
@@ -77,7 +77,7 @@ let run
       }
     in
     Keeper_librarian_runtime.run_best_effort
-      ~base_path:config.base_path
+      ~base_path:config.Workspace.base_path
       ~keeper_id:meta.name
       librarian_input
   in
@@ -86,7 +86,7 @@ let run
      inline, so no memory work is lost. *)
   let (_ : Keeper_memory_lane.outcome) =
     Keeper_memory_lane.submit
-      ~base_path:config.base_path
+      ~base_path:config.Workspace.base_path
       ~keeper_name:meta.name
       ~lane:Keeper_memory_lane.Deterministic
       det_write_series
@@ -95,7 +95,7 @@ let run
    | Keeper_run_prompt.Extract_turn ->
      let (_ : Keeper_memory_lane.outcome) =
        Keeper_memory_lane.submit
-         ~base_path:config.base_path
+         ~base_path:config.Workspace.base_path
          ~keeper_name:meta.name
          ~lane:Keeper_memory_lane.Librarian
          librarian_series
@@ -117,8 +117,8 @@ let run
      let recall_eval =
        if used_search
        then (
-         (* Use session history (role+content), not the decision memory bank
-            (kind+text+priority).  The bank format caused 60 Type_error
+         (* Use session history (role+content), not decision log records
+            (kind+text+priority). Those fields caused 60 Type_error
             WARN/cycle — every line skipped because [load_history_user_messages]
             expects [role] and [content] fields. *)
          let history_path =

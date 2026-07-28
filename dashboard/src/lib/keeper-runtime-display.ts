@@ -413,13 +413,13 @@ export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
 }
 
 /** Distinguish "never booted" from "was running but stopped" keepers.
- *  Reconciles heartbeat liveness with agent registration status:
- *  if heartbeat is recent but agent is offline, shows phase instead of "offline". */
+ *  A recent heartbeat is authoritative for a live keeper; otherwise activity
+ *  counters distinguish a cold start from a stopped process. */
 function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToken {
   if (!keeper) return 'offline'
 
-  // Heartbeat alive but agent offline — keepalive fiber is running.
-  // Show actual phase instead of misleading "offline".
+  // Heartbeat alive — keepalive fiber is running. Show actual phase instead of
+  // misleading "offline".
   //
   // `keeper.phase` carries the typed `KeeperPhase` PascalCase token
   // (`dashboard/src/types/core.ts:879-892`), normalised by
@@ -450,10 +450,9 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
 
   const generation = keeper.generation ?? 0
   const turnCount = keeper.turn_count ?? 0
-  const agentExists = keeper.agent?.exists ?? false
 
-  // Never ran a single turn or generation — registered but never booted
-  if (generation === 0 && turnCount === 0 && !agentExists) {
+  // Never ran a single turn or generation — never booted
+  if (generation === 0 && turnCount === 0) {
     return 'unbooted'
   }
 

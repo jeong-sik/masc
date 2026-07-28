@@ -58,7 +58,6 @@ describe('keeperDisplayStatus', () => {
         status: 'offline',
         generation: 0,
         turn_count: 0,
-        agent: { exists: false },
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
     })
@@ -68,7 +67,6 @@ describe('keeperDisplayStatus', () => {
         status: 'inactive',
         generation: 0,
         turn_count: 0,
-        agent: { exists: false },
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
     })
@@ -89,18 +87,6 @@ describe('keeperDisplayStatus', () => {
         turn_count: 5,
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
-    })
-
-    it('classifies offline keeper with agent.exists=true but no turns as offline', () => {
-      // agent exists but generation=0, turn_count=0 — doesn't match unbooted
-      // (agent exists) and doesn't match stopped (no turns/generation)
-      const keeper = makeKeeper({
-        status: 'offline',
-        generation: 0,
-        turn_count: 0,
-        agent: { exists: true },
-      })
-      expect(keeperDisplayStatus(keeper)).toBe('offline')
     })
 
     it('classifies offline keeper with all activity signals as stopped', () => {

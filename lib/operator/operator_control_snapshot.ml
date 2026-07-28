@@ -255,9 +255,6 @@ let keepers_json
                       Keeper_status_bridge.runtime_keepalive_started_at config meta
                     in
                     dt_ka := Time_compat.now () -. t_ka;
-                    let agent_exists =
-                      Safe_ops.json_bool ~default:false "exists" agent_json
-                    in
                     let now_ts = Time_compat.now () in
                     let created_ts =
                       Workspace_resilience.Time.parse_iso8601_opt meta.created_at
@@ -328,12 +325,9 @@ let keepers_json
                     in
                     dt_audit := Time_compat.now () -. t_audit;
                     let surface_status =
-                      if not agent_exists
-                      then "offline"
-                      else
-                        Keeper_status_runtime.keeper_surface_status
-                          ~agent_status:agent_json
-                          ~diagnostic
+                      Keeper_status_runtime.keeper_surface_status
+                        ~agent_status:agent_json
+                        ~diagnostic
                     in
                     let aligned_status =
                       if meta.paused

@@ -46,7 +46,29 @@ let test_outside_domain_is_none () =
 
 let test_absent_status_is_none () =
   check bool "blob without status field -> None" true
-    (K.agent_runtime_status_opt (blob [ ("exists", `Bool true) ]) = None)
+    (K.agent_runtime_status_opt (blob []) = None)
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_agent_status_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  try Unix.rmdir dir with Unix.Unix_error _ -> ()
+
+let test_absent_registry_has_no_existence_field () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      match K.parse_agent_status config ~agent_name:"missing-agent" with
+      | `Assoc fields ->
+          check bool "missing registry is an empty projection" true (fields = []);
+          check bool "missing registry has no existence field" false
+            (List.mem_assoc "exists" fields)
+      | _ -> check bool "missing registry is an object" true false)
 
 let test_live_signal () =
   let live s = blob [ ("status", `String s); ("last_seen_ago_s", `Float 1.0) ] in
@@ -70,6 +92,8 @@ let test_surface_status () =
   check string "healthy + active -> active" "active"
     (K.keeper_surface_status ~agent_status:(status "active")
        ~diagnostic:(diag "healthy"));
+  check string "healthy + absent registry -> active" "active"
+    (K.keeper_surface_status ~agent_status:(blob []) ~diagnostic:(diag "healthy"));
   check string "healthy + inactive -> offline" "offline"
     (K.keeper_surface_status ~agent_status:(status "inactive")
        ~diagnostic:(diag "healthy"));
@@ -94,6 +118,8 @@ let () =
           test_case "case-insensitive" `Quick test_case_insensitive;
           test_case "outside-domain -> None" `Quick test_outside_domain_is_none;
           test_case "absent -> None" `Quick test_absent_status_is_none;
+          test_case "absent registry has no exists field" `Quick
+            test_absent_registry_has_no_existence_field;
         ] );
       ( "predicates",
         [

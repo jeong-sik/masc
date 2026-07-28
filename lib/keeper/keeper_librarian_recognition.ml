@@ -156,11 +156,18 @@ let apply ~now ~operations facts =
         slot.(index) <- `Dropped;
         Applied)
     | Merge group ->
-      let members =
-        List.sort_uniq compare group.Consolidation.member_indices
-        |> List.filter target_free
-      in
-      (match members with
+      (* First-op-wins applies to the WHOLE member set, exactly like the
+         single-index operations: a merge whose member was already consumed
+         rejects entirely rather than silently shrinking to the free subset —
+         otherwise the ledger's recorded member_indices would disagree with
+         the provenance actually folded into the merged row, breaking the
+         evidence guarantee this contract exists for. *)
+      let members = List.sort_uniq compare group.Consolidation.member_indices in
+      if List.exists (fun i -> not (in_range i)) members
+      then Rejected_index_out_of_bounds
+      else if not (List.for_all target_free members)
+      then Rejected_target_consumed
+      else (match members with
        | [] | [ _ ] -> Rejected_too_few_members
        | _ :: _ :: _ ->
          let member_facts = List.map (fun i -> facts_arr.(i)) members in

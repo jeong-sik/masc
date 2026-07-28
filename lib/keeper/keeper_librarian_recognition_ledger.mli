@@ -5,7 +5,15 @@
     operation list it returned, the per-operation structural dispositions,
     and the resulting store. Before/After is always reconstructible from
     disk. Append failures degrade to a warning and never propagate into the
-    turn. *)
+    turn.
+
+    Row size is O(store) by design — the issue's anti-black-box requirement
+    persists both full snapshots, deliberately unlike the recall ledger's
+    delta rows (whose materialization needs a replay chain). The bound is
+    structural, not a cap: the store itself is kept small by recognition
+    (Forget/Merge) plus the consolidation pass, an empty-operation pass
+    writes no row at all ([Nothing_recognized]), and dated files fall to
+    [prune_older_than] with the other JSONL ledgers. *)
 
 open Keeper_memory_os_types
 

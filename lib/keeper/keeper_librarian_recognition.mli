@@ -65,12 +65,16 @@ type apply_result =
   }
 
 (** Apply recognition operations to the store snapshot the librarian saw.
-    Deterministic and conservative, mirroring
-    [Keeper_memory_os_consolidation.apply_plan]: indices refer to the input
-    snapshot; each row is the target of at most one operation (first
-    operation wins; later references reject as [Rejected_target_consumed]);
-    an unreferenced row survives unchanged. The store can shrink: Forget
-    removes rows and Merge collapses them — no monotonic-growth invariant. *)
+    Deterministic and conservative: indices refer to the input snapshot;
+    each row is the target of at most one operation (first operation wins;
+    later references reject as [Rejected_target_consumed]); an unreferenced
+    row survives unchanged. First-op-wins covers a Merge's WHOLE member set —
+    one already-consumed or out-of-range member rejects the merge entirely
+    (never a silent shrink to the free subset, unlike
+    [Keeper_memory_os_consolidation.apply_plan]'s first-group-wins), so the
+    ledger's recorded members always equal the provenance actually folded.
+    The store can shrink: Forget removes rows and Merge collapses them — no
+    monotonic-growth invariant. *)
 val apply : now:float -> operations:operation list -> fact list -> apply_result
 
 (** JSON projection of one operation for the recognition evidence ledger. *)

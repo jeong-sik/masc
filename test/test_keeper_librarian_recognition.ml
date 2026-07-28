@@ -195,7 +195,7 @@ let test_merge_valid_until_mismatch_rejected () =
     (List.map Recognition.disposition_label result.Recognition.dispositions)
 ;;
 
-let test_merge_with_consumed_member_rejects_too_few () =
+let test_merge_with_consumed_member_rejects_entirely () =
   let store = [ fact ~claim:"a" (); fact ~claim:"b" () ] in
   let result =
     apply
@@ -208,11 +208,57 @@ let test_merge_with_consumed_member_rejects_too_few () =
       ]
       store
   in
-  (* Index 0 was consumed by Forget, leaving the merge one free member. *)
-  check (list string) "merge fell below two free members" [ "b" ]
+  (* Index 0 was consumed by Forget: first-op-wins covers the whole member
+     set, so the merge rejects entirely and "b" survives untouched. *)
+  check (list string) "merge rejected; survivor untouched" [ "b" ]
     (claims result.Recognition.facts);
   check (list string) "dispositions"
-    [ "applied"; "rejected_too_few_members" ]
+    [ "applied"; "rejected_target_consumed" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_merge_never_shrinks_to_free_subset () =
+  (* F1 regression (PR #26133 review): a 3-member merge with ONE consumed
+     member must reject entirely — never silently merge the free subset,
+     which would make the ledger's recorded members disagree with the
+     provenance actually folded into the merged row. *)
+  let store =
+    [ fact ~claim:"a" (); fact ~claim:"b" (); fact ~claim:"c" () ]
+  in
+  let result =
+    apply
+      [ Recognition.Reinforce { index = 1; source_turn = 2 }
+      ; Recognition.Merge
+          { Consolidation.member_indices = [ 0; 1; 2 ]
+          ; consolidated_claim = "m"
+          ; category = Types.Fact
+          }
+      ]
+      store
+  in
+  check (list string) "no partial merge; all rows survive" [ "a"; "b"; "c" ]
+    (claims result.Recognition.facts);
+  check (list string) "merge rejected as target_consumed"
+    [ "applied"; "rejected_target_consumed" ]
+    (List.map Recognition.disposition_label result.Recognition.dispositions)
+;;
+
+let test_merge_out_of_range_member_rejects_entirely () =
+  let store = [ fact ~claim:"a" (); fact ~claim:"b" () ] in
+  let result =
+    apply
+      [ Recognition.Merge
+          { Consolidation.member_indices = [ 0; 1; 9 ]
+          ; consolidated_claim = "m"
+          ; category = Types.Fact
+          }
+      ]
+      store
+  in
+  check (list string) "out-of-range member rejects the whole merge"
+    [ "a"; "b" ]
+    (claims result.Recognition.facts);
+  check (list string) "typed rejection" [ "rejected_index_out_of_bounds" ]
     (List.map Recognition.disposition_label result.Recognition.dispositions)
 ;;
 
@@ -277,8 +323,12 @@ let () =
           test_case "merge kind mismatch rejected" `Quick test_merge_kind_mismatch_rejected;
           test_case "merge valid_until mismatch rejected" `Quick
             test_merge_valid_until_mismatch_rejected;
-          test_case "merge below two free members rejected" `Quick
-            test_merge_with_consumed_member_rejects_too_few;
+          test_case "merge with consumed member rejects entirely" `Quick
+            test_merge_with_consumed_member_rejects_entirely;
+          test_case "merge never shrinks to free subset" `Quick
+            test_merge_never_shrinks_to_free_subset;
+          test_case "merge with out-of-range member rejects entirely" `Quick
+            test_merge_out_of_range_member_rejects_entirely;
           test_case "mixed pass refines and shrinks" `Quick test_mixed_pass_shrinks_store;
           test_case "empty operations are identity" `Quick test_empty_operations_identity;
         ] );

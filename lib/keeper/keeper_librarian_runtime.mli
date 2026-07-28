@@ -136,13 +136,21 @@ val extract_with_exact_output_classified
     called from contexts that cannot supply an Eio clock; [None] returns a
     typed [Execution_clock_unavailable] classification before OAS I/O. *)
 
+(** What an accepted recognition pass produced. [Nothing_recognized] is the
+    librarian's explicit empty operation list: nothing is persisted — no
+    store rewrite, no episode/event append, no ledger row — so a quiet
+    keeper does not accumulate empty narrative or O(store) evidence dumps. *)
+type recognition_write =
+  | Recognized of Keeper_memory_os_types.episode
+  | Nothing_recognized
+
 val extract_and_append_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
   -> Keeper_librarian.input
-  -> (Keeper_memory_os_types.episode, extraction_error) result
+  -> (recognition_write, extraction_error) result
 (** Full recognition write (masc#26122): snapshot the fact store, run the
     exact-output pass with the snapshot in the prompt, revalidate the snapshot
     under the facts lock ([same_fact_snapshot] CAS), apply the typed

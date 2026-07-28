@@ -790,6 +790,14 @@ let extract_with_exact_output_classified
     inp
 ;;
 
+(* What an accepted recognition pass produced. [Nothing_recognized] is the
+   librarian's explicit "this window established nothing worth remembering":
+   no store rewrite, no episode/event append, no ledger row — a quiet keeper
+   must not accumulate empty narrative or O(store) evidence dumps. *)
+type recognition_write =
+  | Recognized of Keeper_memory_os_types.episode
+  | Nothing_recognized
+
 (* Apply an accepted recognition output and persist the whole bundle.
 
    Optimistic concurrency, mirroring the consolidation rewrite path: the store
@@ -811,68 +819,68 @@ let apply_and_persist
     (inp : Keeper_librarian.input)
     (recognition : Keeper_librarian.recognition_output)
   =
-  (* NDT-OK: application timestamps are provenance/retention metadata only. *)
-  let now = Unix.gettimeofday () in
-  Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
-    let applied =
-      Keeper_memory_os_io.with_facts_lock
-        ?clock
-        ~keeper_id
-        ~on_timeout:(fun msg -> Error (Memory_apply_failed msg))
-        (fun () ->
-           match Keeper_memory_os_io.read_facts_all_strict ~keeper_id with
-           | Error msg -> Error (Store_read_failed msg)
-           | Ok current ->
-             if not (Keeper_memory_os_io.same_fact_snapshot inp.store current)
-             then
-               Error
-                 (Store_snapshot_changed
-                    { snapshot = List.length inp.store
-                    ; current = List.length current
-                    })
-             else (
-               let result =
-                 Recognition.apply
-                   ~now
-                   ~operations:recognition.operations
-                   inp.store
-               in
-               (match recognition.operations with
-                | [] -> ()
-                | _ :: _ ->
-                  Keeper_memory_os_io.rewrite_facts_atomically
-                    ~keeper_id
-                    result.Recognition.facts);
-               Ok result))
-    in
-    match applied with
-    | Error _ as error -> error
-    | Ok result ->
-      let episode =
-        Keeper_librarian.episode_of_recognition
-          ~now
-          ~generation
-          inp
-          recognition
-          ~recognized_facts:result.Recognition.recognized_facts
+  match recognition.Keeper_librarian.operations with
+  | [] -> Ok Nothing_recognized
+  | _ :: _ ->
+    (* NDT-OK: application timestamps are provenance/retention metadata only. *)
+    let now = Unix.gettimeofday () in
+    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
+      let applied =
+        Keeper_memory_os_io.with_facts_lock
+          ?clock
+          ~keeper_id
+          ~on_timeout:(fun msg -> Error (Memory_apply_failed msg))
+          (fun () ->
+             match Keeper_memory_os_io.read_facts_all_strict ~keeper_id with
+             | Error msg -> Error (Store_read_failed msg)
+             | Ok current ->
+               if not (Keeper_memory_os_io.same_fact_snapshot inp.store current)
+               then
+                 Error
+                   (Store_snapshot_changed
+                      { snapshot = List.length inp.store
+                      ; current = List.length current
+                      })
+               else (
+                 let result =
+                   Recognition.apply
+                     ~now
+                     ~operations:recognition.operations
+                     inp.store
+                 in
+                 Keeper_memory_os_io.rewrite_facts_atomically
+                   ~keeper_id
+                   result.Recognition.facts;
+                 Ok result))
       in
-      Keeper_memory_os_io.append_episode ~keeper_id episode;
-      Keeper_memory_os_io.append_event ~keeper_id episode;
-      Recognition_ledger.append
-        ~masc_root:
-          (Workspace_utils.masc_root_dir_from
-             ~base_path
-             ~cluster_name:(Env_config_core.cluster_name ()))
-        ~keeper_id
-        ~trace_id:inp.trace_id
-        ~generation
-        ~store_before:inp.store
-        ~operations:recognition.operations
-        ~dispositions:result.Recognition.dispositions
-        ~store_after:result.Recognition.facts
-        ~now
-        ();
-      Ok episode)
+      match applied with
+      | Error _ as error -> error
+      | Ok result ->
+        let episode =
+          Keeper_librarian.episode_of_recognition
+            ~now
+            ~generation
+            inp
+            recognition
+            ~recognized_facts:result.Recognition.recognized_facts
+        in
+        Keeper_memory_os_io.append_episode ~keeper_id episode;
+        Keeper_memory_os_io.append_event ~keeper_id episode;
+        Recognition_ledger.append
+          ~masc_root:
+            (Workspace_utils.masc_root_dir_from
+               ~base_path
+               ~cluster_name:(Env_config_core.cluster_name ()))
+          ~keeper_id
+          ~trace_id:inp.trace_id
+          ~generation
+          ~store_before:inp.store
+          ~operations:recognition.operations
+          ~dispositions:result.Recognition.dispositions
+          ~store_after:result.Recognition.facts
+          ~now
+          ();
+        Ok (Recognized episode))
 ;;
 
 let extract_and_append_with_exact_output_classified
@@ -881,7 +889,7 @@ let extract_and_append_with_exact_output_classified
     ~net
     ~keeper_id
     inp
-  : (Keeper_memory_os_types.episode, extraction_error) result =
+  : (recognition_write, extraction_error) result =
   match clock with
   | None -> Error Execution_clock_unavailable
   | Some _ ->
@@ -937,7 +945,7 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
              ~keeper_id
              inp
          with
-         | Ok episode ->
+         | Ok (Recognized episode) ->
            cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
            Log.Keeper.info
              ~keeper_name:keeper_id
@@ -945,6 +953,14 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
              episode.Keeper_memory_os_types.trace_id
              episode.generation
              (List.length episode.claims)
+         | Ok Nothing_recognized ->
+           (* A completed pass that recognized nothing: success for cadence
+              (the model did judge the window), zero bytes persisted. *)
+           cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
+           Log.Keeper.info
+             ~keeper_name:keeper_id
+             "memory os librarian recognized nothing trace_id=%s"
+             inp.trace_id
          | Error err ->
            Otel_metric_store.inc_counter
              Keeper_metrics.(to_string EpisodeCreateFailures)

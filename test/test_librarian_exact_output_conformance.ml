@@ -263,7 +263,9 @@ let test_json_only_target_is_admitted_and_persisted () =
             (librarian_input "trace-json-only")
         with
         | Error error -> Alcotest.fail error
-        | Ok episode ->
+        | Ok Librarian_runtime.Nothing_recognized ->
+          Alcotest.fail "an add operation must produce a persisted episode"
+        | Ok (Librarian_runtime.Recognized episode) ->
           Alcotest.(check int) "one claim" 1 (List.length episode.Types.claims);
           Alcotest.(check int) "one provider request" 1 (Fixture.post_count server);
           (match Fixture.request_bodies server with

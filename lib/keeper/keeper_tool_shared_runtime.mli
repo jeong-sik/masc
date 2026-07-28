@@ -113,6 +113,12 @@ val resolve_keeper_read_cwd
   -> (string, string) result
 
 (** [resolve_keeper_read_cwd] for the execute/write boundary. *)
+val resolve_keeper_execute_cwd_typed
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> raw_path:string
+  -> (string, Keeper_path_rejection.keeper_path_rejection) result
+
 val resolve_keeper_execute_cwd
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

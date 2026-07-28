@@ -27,11 +27,12 @@ val handle_tool_execute_with_outcome :
 
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
-  val typed_execute_response_cwd_json :
-    turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  val model_execute_location_fields :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    args:Yojson.Safe.t ->
     cwd:string ->
-    sandbox_extra_fields:(string * Yojson.Safe.t) list ->
-    Yojson.Safe.t
+    (string * Yojson.Safe.t) list
   val execute_gate_input :
     input:Yojson.Safe.t ->
     cwd:string ->

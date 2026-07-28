@@ -190,10 +190,11 @@ let build_keeper_system_prompt
       Printf.sprintf
         "\n\
          <home_ground>\n\
-         - Repository root: %s\n\
-         - All relative paths resolve from this directory.\n\
+         - Keeper-visible sandbox root (informational only): %s\n\
+         - Pass a relative typed `cwd` (usually `.`), not this absolute root.\n\
+         - Relative argv path operands resolve from the typed `cwd`.\n\
          - The working directory persists between tool calls, but shell state does not.\n\
-         - Prefer absolute paths over `cd` to avoid directory confusion.\n\
+         - Prefer relative argv path operands. In Docker, host absolute paths are unavailable.\n\
          </home_ground>\n"
         (String_util.escape_xml home_ground)
   in

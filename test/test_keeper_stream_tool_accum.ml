@@ -91,6 +91,20 @@ let test_replayed_start_keeps_received_fragments () =
     [ { call_id = "call-replayed"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
     (A.to_tool_calls t)
 
+let test_replayed_completed_block_is_not_persisted_twice () =
+  let t = A.create () in
+  A.on_event t (start ~index:1 ~tool_id:(Some "call-complete") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:1 "{\"path\":\"a.ml\"}");
+  A.on_event t (stop ~index:1);
+  (* A reconnect can replay the fully finalized block. Its provider call id is
+     already durable, so it must not open a second transcript tool row. *)
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-complete") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "completed replay remains one call"
+    [ { call_id = "call-complete"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
+    (A.to_tool_calls t)
+
 let test_tool_identity_is_trimmed_before_persistence () =
   let t = A.create () in
   A.on_event t
@@ -267,6 +281,8 @@ let () =
         ; test_case "snapshot replaces fragments" `Quick test_snapshot_replaces_fragments
         ; test_case "parallel blocks keep provider order" `Quick test_parallel_blocks_keep_provider_order
         ; test_case "replayed start keeps fragments" `Quick test_replayed_start_keeps_received_fragments
+        ; test_case "replayed completed block stays deduplicated" `Quick
+            test_replayed_completed_block_is_not_persisted_twice
         ; test_case "tool identity is trimmed before persistence" `Quick
             test_tool_identity_is_trimmed_before_persistence
         ; test_case "replay identity compares raw provider values" `Quick

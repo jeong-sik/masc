@@ -2,6 +2,7 @@ open Alcotest
 
 module Direct = Masc.Keeper_chat_direct_delivery
 module Keeper_chat_store = Masc.Keeper_chat_store
+module Keeper_chat_blocks = Masc.Keeper_chat_blocks
 module Keeper_fs = Masc.Keeper_fs
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_types_profile = Masc.Keeper_types_profile
@@ -257,6 +258,7 @@ let test_direct_transport_failure_keeps_turn_ref _env =
           ; transcript_effect =
               Direct.Transport_failure
                 { content = "Keeper request failed"
+                ; blocks = Some [ Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None } ]
                 ; turn_ref = Some turn_ref
                 ; tool_calls = []
                 }
@@ -274,7 +276,10 @@ let test_direct_transport_failure_keeps_turn_ref _env =
     | [ _user; failure ] ->
       check (option string) "failure row keeps canonical turn provenance"
         (Some "direct-failure#4")
-        (Option.map Ids.Turn_ref.to_string failure.turn_ref)
+        (Option.map Ids.Turn_ref.to_string failure.turn_ref);
+      check bool "failure row keeps generated media"
+        true
+        (Option.is_some failure.blocks)
     | history ->
       failf "expected user and transport failure rows, got %d"
         (List.length history))

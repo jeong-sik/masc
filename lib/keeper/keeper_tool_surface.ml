@@ -690,13 +690,13 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
   | _ -> None
 
-let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~args : tool_result =
+let dispatch_keeper_msg ~submitted_by ?on_event ?continuation_channel ctx ~args : tool_result =
   let name = "masc_keeper_msg" in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   tool_result_with_tool_name
     ~tool_name:name
-    (handle_keeper_msg ?continuation_channel ~submitted_by ctx args)
+    (handle_keeper_msg ?on_event ?continuation_channel ~submitted_by ctx args)
 ;;
 
 (** Private direct-delivery stream used by connector and dashboard adapters. *)

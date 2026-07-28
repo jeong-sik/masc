@@ -26,6 +26,7 @@ type transcript_effect =
       }
   | Transport_failure of
       { content : string
+      ; blocks : Keeper_chat_store.chat_block list option
       ; turn_ref : Ids.Turn_ref.t option
       ; tool_calls : Keeper_chat_store.tool_call list
       }
@@ -388,9 +389,15 @@ let validate_effect (staged : staged_effect) =
        validate_json_text
          "assistant_reply.blocks"
          (Keeper_chat_blocks.blocks_to_yojson blocks))
-  | false, Transport_failure { content; tool_calls; _ } ->
+  | false, Transport_failure { content; blocks; tool_calls; _ } ->
     let* () = validate_utf8 "transport_failure.content" content in
-    validate_tool_calls tool_calls
+    let* () = validate_tool_calls tool_calls in
+    (match blocks with
+     | None -> Ok ()
+     | Some blocks ->
+       validate_json_text
+         "transport_failure.blocks"
+         (Keeper_chat_blocks.blocks_to_yojson blocks))
   | true, Tool_calls_only { tool_calls = _ :: _ as tool_calls; _ } ->
     validate_tool_calls tool_calls
   | true, Tool_calls_only { tool_calls = []; _ } ->
@@ -563,10 +570,14 @@ let transcript_effect_to_yojson = function
         , string_option_to_yojson (Option.map Ids.Turn_ref.to_string turn_ref) )
       ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
       ]
-  | Transport_failure { content; turn_ref; tool_calls } ->
+  | Transport_failure { content; blocks; turn_ref; tool_calls } ->
     `Assoc
       [ "kind", `String "transport_failure"
       ; "content", `String content
+      ; ( "blocks"
+        , match blocks with
+          | None -> `Null
+          | Some blocks -> Keeper_chat_blocks.blocks_to_yojson blocks )
       ; ( "turn_ref"
         , string_option_to_yojson (Option.map Ids.Turn_ref.to_string turn_ref) )
       ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
@@ -900,16 +911,32 @@ let transcript_effect_of_yojson = function
      | "transport_failure" ->
        let tool_calls_json = List.assoc_opt "tool_calls" fields in
        let turn_ref_json = List.assoc_opt "turn_ref" fields in
+       let blocks_json = List.assoc_opt "blocks" fields in
        let* () =
          validate_fields
            ~context:"transport failure effect"
            ~expected:
              ([ "kind"; "content" ]
+              @ (if Option.is_some blocks_json then [ "blocks" ] else [])
               @ (if Option.is_some turn_ref_json then [ "turn_ref" ] else [])
               @ (if Option.is_some tool_calls_json then [ "tool_calls" ] else []))
            fields
        in
        let* content = json_string "content" fields in
+       let* blocks =
+         match blocks_json with
+         | None | Some `Null -> Ok None
+         | Some (`List raw_blocks as json) ->
+           (match Keeper_chat_blocks.blocks_of_yojson json with
+            | Some blocks
+              when List.length blocks = List.length raw_blocks
+                   && Keeper_chat_blocks.blocks_to_yojson blocks = json ->
+              Ok (Some blocks)
+            | Some _ | None ->
+              Error (Decode_failed "transport failure blocks are invalid"))
+         | Some _ ->
+           Error (Decode_failed "transport failure blocks must be a list or null")
+       in
        let* turn_ref =
          match turn_ref_json with
          | None -> Ok None
@@ -928,7 +955,7 @@ let transcript_effect_of_yojson = function
          | None -> Ok []
          | Some json -> tool_calls_of_yojson json
        in
-       Ok (Transport_failure { content; turn_ref; tool_calls })
+       Ok (Transport_failure { content; blocks; turn_ref; tool_calls })
      | "tool_calls_only" ->
        let turn_ref_json = List.assoc_opt "turn_ref" fields in
        let* () =
@@ -1392,10 +1419,25 @@ let redact_effect redaction (staged : staged_effect) =
       in
       let tool_calls = List.map redact_tool_call tool_calls in
       Ok (Assistant_reply { content; blocks; turn_ref; tool_calls })
-    | Transport_failure { content; turn_ref; tool_calls } ->
+    | Transport_failure { content; blocks; turn_ref; tool_calls } ->
+      let* blocks =
+        match blocks with
+        | None -> Ok None
+        | Some blocks ->
+          let json = Keeper_chat_blocks.blocks_to_yojson blocks in
+          let redacted = Keeper_secret_redaction.redact_json redaction json in
+          (match Keeper_chat_blocks.blocks_of_yojson redacted with
+           | Some redacted_blocks when List.length redacted_blocks = List.length blocks ->
+             Ok (Some redacted_blocks)
+           | Some _ | None ->
+             Error
+               (Invalid_effect
+                  "secret redaction could not preserve transport failure block structure"))
+      in
       Ok
         (Transport_failure
            { content = Keeper_secret_redaction.redact_text redaction content
+           ; blocks
            ; turn_ref
            ; tool_calls = List.map redact_tool_call tool_calls
            })
@@ -1643,7 +1685,7 @@ let append_staged_transcript ~base_path existing ~user_row_id staged =
     |> Result.map row_id_of_append_once
     |> Result.map_error (fun detail ->
       Transcript_failed { slot = Assistant_transcript; detail })
-  | Transport_failure { content; turn_ref; tool_calls } ->
+  | Transport_failure { content; blocks; turn_ref; tool_calls } ->
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
       ~keeper_name:existing.payload.keeper_name
@@ -1653,6 +1695,7 @@ let append_staged_transcript ~base_path existing ~user_row_id staged =
       ~surface:existing.payload.surface
       ?conversation_id:existing.payload.conversation_id
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+      ?blocks
       ?turn_ref
       ~stream_lifecycle:
         [ Keeper_chat_store.Run_started

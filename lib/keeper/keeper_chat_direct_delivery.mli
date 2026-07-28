@@ -42,6 +42,7 @@ type transcript_effect =
       }
   | Transport_failure of
       { content : string
+      ; blocks : Keeper_chat_store.chat_block list option
       ; turn_ref : Ids.Turn_ref.t option
       ; tool_calls : Keeper_chat_store.tool_call list
       }

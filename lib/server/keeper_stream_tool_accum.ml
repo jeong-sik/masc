@@ -43,6 +43,11 @@ let invalidate_index t index =
 let clear_invalid_index t index =
   t.invalid_indices <- List.filter (fun invalid -> invalid <> index) t.invalid_indices
 
+let has_finalized_call_id t call_id =
+  List.exists
+    (fun (_, (call : Keeper_chat_store.tool_call)) -> String.equal call.call_id call_id)
+    t.finalized
+
 let finalize_block t index =
   match block_for_index t index with
   | None -> ()
@@ -114,6 +119,11 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
              && String.equal block.raw_call_name raw_call_name ->
         ()
       | Some _ -> invalidate_index t index
+      | None when has_finalized_call_id t call_id ->
+        (* A provider can replay an entire block after its stop. The live
+           dashboard keys completed tool cards by call id, so reopening it
+           here would make durable reload diverge with a duplicate row. *)
+        ()
       | None ->
         let opened_at = t.next_opened_at in
         t.next_opened_at <- opened_at + 1;

@@ -552,6 +552,7 @@ let execute_keeper_stream_tool
       ~sw
       ~clock
       ?auth_token:_
+      ?on_event
       state
       ~agent_name
       ~arguments
@@ -577,6 +578,7 @@ let execute_keeper_stream_tool
       match
         Keeper_tool_surface.dispatch_keeper_msg
           ~submitted_by:agent_name
+          ?on_event
           ~continuation_channel
           keeper_ctx
           ~args:arguments
@@ -1747,7 +1749,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ()
     |> Result.map (fun _ -> ())
   in
-  let append_queued_transport_failure_once ?(tool_calls = []) ?turn_ref content =
+  let append_queued_transport_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
     Keeper_chat_store.append_assistant_message_once
@@ -1758,6 +1760,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~tool_calls
       ~surface:chat_surface
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+      ?blocks
       ?turn_ref
       ~stream_lifecycle:errored_stream_lifecycle
       ()
@@ -1869,15 +1872,15 @@ let process_single_turn ~user_row_origin ~queued_turn
      turn can persist it as reload-visible chat blocks. The bridge surfaces this
      media live over SSE; the persist site records it durably (see the persist arm
      below). Content-addressed, so the two persists reuse one file. *)
-  let worker_media_accum = Keeper_stream_media_accum.create () in
+  let worker_media_accum = ref (Keeper_stream_media_accum.create ()) in
   (* The same stream carries this turn's tool calls. Without collecting them the
      persist site below has nothing to pass as [?tool_calls], so history rows
      hold no tool rows and a reload loses the tool timeline the live stream
      showed. *)
-  let worker_tool_accum = Keeper_stream_tool_accum.create () in
+  let worker_tool_accum = ref (Keeper_stream_tool_accum.create ()) in
   let on_event evt =
-    Keeper_stream_media_accum.on_event worker_media_accum evt;
-    Keeper_stream_tool_accum.on_event worker_tool_accum evt;
+    Keeper_stream_media_accum.on_event !worker_media_accum evt;
+    Keeper_stream_tool_accum.on_event !worker_tool_accum evt;
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
@@ -1898,7 +1901,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       | Keeper_chat_store.Already_persisted_upstream ->
         ()
   in
-  let persist_failure_reply ?turn_ref err =
+  let persist_failure_reply ?blocks ?turn_ref err =
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
        message it failed to answer stays pending for the keeper's next
@@ -1908,7 +1911,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
       ();
     let content = persisted_error_reply err in
-    let tool_calls = Keeper_stream_tool_accum.to_tool_calls worker_tool_accum in
+    let tool_calls = Keeper_stream_tool_accum.to_tool_calls !worker_tool_accum in
     let persisted =
       if Option.is_some !direct_delivery_checkpoint
       then
@@ -1917,9 +1920,9 @@ let process_single_turn ~user_row_origin ~queued_turn
           ~body:err
           ~data:None
           (Keeper_chat_direct_delivery.Transport_failure
-             { content; turn_ref; tool_calls })
+             { content; blocks; turn_ref; tool_calls })
       else if queued_turn
-      then append_queued_transport_failure_once ~tool_calls ?turn_ref content
+      then append_queued_transport_failure_once ~tool_calls ?blocks ?turn_ref content
       else
         match user_row_origin with
         | Keeper_chat_store.Needs_append ->
@@ -1933,6 +1936,7 @@ let process_single_turn ~user_row_origin ~queued_turn
             ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
             ~tool_calls
             ~assistant_content:content
+            ?blocks
             ?turn_ref
             ~stream_lifecycle:errored_stream_lifecycle
             ()
@@ -1945,6 +1949,7 @@ let process_single_turn ~user_row_origin ~queued_turn
             ~tool_calls
             ~surface:chat_surface
             ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+            ?blocks
             ?turn_ref
             ~stream_lifecycle:errored_stream_lifecycle
             ()
@@ -2092,12 +2097,17 @@ let process_single_turn ~user_row_origin ~queued_turn
               then Error (Printexc.to_string exn)
               else
                 (try
+                   (* The failed streaming attempt may have emitted a partial
+                      tool/media sequence. The fallback is a new turn, so its
+                      transcript must be collected from a fresh accumulator. *)
+                   worker_media_accum := Keeper_stream_media_accum.create ();
+                   worker_tool_accum := Keeper_stream_tool_accum.create ();
                    Ok
                      (`Ran
 	                        (execute_keeper_stream_tool ~sw:request_sw ~clock
 	                           ?auth_token
 	                           state ~agent_name ~arguments:args
-                            ~continuation_channel))
+	                            ~on_event ~continuation_channel))
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn2 -> Error (Printexc.to_string exn2))
@@ -2174,7 +2184,7 @@ let process_single_turn ~user_row_origin ~queued_turn
             let blocks =
               match
                 Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
-                  worker_media_accum
+                  !worker_media_accum
               with
               | [] -> None
               | media_blocks -> Some media_blocks
@@ -2215,7 +2225,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
                  let tool_calls =
-                   Keeper_stream_tool_accum.to_tool_calls worker_tool_accum
+                   Keeper_stream_tool_accum.to_tool_calls !worker_tool_accum
                  in
                  let persist_assistant_reply ~assistant_content =
                    if Option.is_some !direct_delivery_checkpoint
@@ -2320,7 +2330,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                        let detail =
                          "queued turn ended with a continuation checkpoint and no delivered reply"
                        in
-                       (match persist_failure_reply ?turn_ref detail with
+                       (match persist_failure_reply ?blocks ?turn_ref detail with
                         | Ok () ->
                             Ok
                               (Some

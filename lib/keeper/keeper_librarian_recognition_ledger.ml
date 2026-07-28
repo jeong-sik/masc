@@ -27,14 +27,44 @@ let field_store_after_digest = "store_after_digest"
 let field_operations = "operations"
 let field_dispositions = "dispositions"
 let field_episode = "episode"
+let field_facts_rewrite_required = "facts_rewrite_required"
 let field_n_before = "n_before"
 let field_n_after = "n_after"
 let field_publication_id = "publication_id"
 let field_publication_state = "publication_state"
+let field_pending_publication = "pending_publication"
+let field_prepared_logged = "prepared_logged"
 let ledger_schema_version = 3
 
 let facts_digest facts =
   `List (List.map fact_to_json facts)
+  |> Yojson.Safe.to_string
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
+let publication_id_from_json
+      ~keeper_id
+      ~trace_id
+      ~generation
+      ~store_before
+      ~operations_json
+      ~dispositions_json
+      ~store_after
+      ~episode
+      ~facts_rewrite_required
+  =
+  `Assoc
+    [ field_keeper_id, `String keeper_id
+    ; field_trace_id, `String trace_id
+    ; field_generation, `Int generation
+    ; field_store_before, `List (List.map fact_to_json store_before)
+    ; field_operations, operations_json
+    ; field_dispositions, dispositions_json
+    ; field_store_after, `List (List.map fact_to_json store_after)
+    ; field_episode, episode_to_json episode
+    ; field_facts_rewrite_required, `Bool facts_rewrite_required
+    ]
   |> Yojson.Safe.to_string
   |> Digestif.SHA256.digest_string
   |> Digestif.SHA256.to_hex
@@ -49,27 +79,25 @@ let publication_id
       ~dispositions
       ~store_after
       ~episode
+      ~facts_rewrite_required
   =
-  `Assoc
-    [ field_keeper_id, `String keeper_id
-    ; field_trace_id, `String trace_id
-    ; field_generation, `Int generation
-    ; field_store_before, `List (List.map fact_to_json store_before)
-    ; field_operations
-      , `List (List.map Keeper_librarian_recognition.operation_to_json operations)
-    ; field_dispositions
-      , `List
-          (List.map
-             (fun disposition ->
-                `String
-                  (Keeper_librarian_recognition.disposition_label disposition))
-             dispositions)
-    ; field_store_after, `List (List.map fact_to_json store_after)
-    ; field_episode, episode_to_json episode
-    ]
-  |> Yojson.Safe.to_string
-  |> Digestif.SHA256.digest_string
-  |> Digestif.SHA256.to_hex
+  publication_id_from_json
+    ~keeper_id
+    ~trace_id
+    ~generation
+    ~store_before
+    ~operations_json:
+      (`List (List.map Keeper_librarian_recognition.operation_to_json operations))
+    ~dispositions_json:
+      (`List
+         (List.map
+            (fun disposition ->
+               `String
+                 (Keeper_librarian_recognition.disposition_label disposition))
+            dispositions))
+    ~store_after
+    ~episode
+    ~facts_rewrite_required
 ;;
 
 let prepared_to_json
@@ -82,6 +110,7 @@ let prepared_to_json
       ~dispositions
       ~store_after
       ~episode
+      ~facts_rewrite_required
       ~now
       ()
   : Yojson.Safe.t
@@ -109,6 +138,7 @@ let prepared_to_json
     ; field_store_before, `List (List.map fact_to_json store_before)
     ; field_store_after, `List (List.map fact_to_json store_after)
     ; field_episode, episode_to_json episode
+    ; field_facts_rewrite_required, `Bool facts_rewrite_required
     ]
 ;;
 
@@ -152,12 +182,67 @@ let aborted_to_json
 
 let make_store ~masc_root () = Dated_jsonl.create ~base_dir:(base_dir ~masc_root) ()
 
+let pending_path ~masc_root ~keeper_id =
+  let keeper_key =
+    Digestif.SHA256.digest_string keeper_id |> Digestif.SHA256.to_hex
+  in
+  Filename.concat
+    (Filename.concat masc_root "librarian_recognition_pending")
+    (keeper_key ^ ".json")
+;;
+
 let append_json ~masc_root entry =
   try
     Dated_jsonl.append (make_store ~masc_root ()) entry;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let pending_marker_to_json ~prepared ~prepared_logged =
+  `Assoc
+    [ field_pending_publication, prepared
+    ; field_prepared_logged, `Bool prepared_logged
+    ]
+;;
+
+let save_pending_marker ~masc_root ~keeper_id ~prepared ~prepared_logged =
+  let path = pending_path ~masc_root ~keeper_id in
+  let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
+  Keeper_fs.save_json_atomic
+    path
+    (pending_marker_to_json ~prepared ~prepared_logged)
+;;
+
+let clear_pending_marker ~masc_root ~keeper_id ~publication_id =
+  let path = pending_path ~masc_root ~keeper_id in
+  try
+    if not (Sys.file_exists path)
+    then Ok ()
+    else (
+      let channel = open_in_bin path in
+      let json =
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr channel)
+          (fun () ->
+             really_input_string channel (in_channel_length channel)
+             |> Yojson.Safe.from_string)
+      in
+      match json with
+      | `Assoc marker_fields ->
+        (match List.assoc_opt field_pending_publication marker_fields with
+         | Some (`Assoc prepared_fields) ->
+           (match List.assoc_opt field_publication_id prepared_fields with
+            | Some (`String stored_id) when String.equal stored_id publication_id ->
+              Sys.remove path;
+              Ok ()
+            | Some (`String _) -> Error "pending recognition publication id changed"
+            | Some _ | None -> Error "pending recognition publication has no id")
+         | Some _ | None -> Error "pending recognition marker has no prepared payload")
+      | _ -> Error "pending recognition marker is not an object")
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 ;;
 
@@ -172,6 +257,7 @@ let append_prepared
       ~dispositions
       ~store_after
       ~episode
+      ~facts_rewrite_required
       ~now
       ()
   =
@@ -186,10 +272,31 @@ let append_prepared
       ~dispositions
       ~store_after
       ~episode
+      ~facts_rewrite_required
       ~now
       ()
   in
-  append_json ~masc_root entry
+  let path = pending_path ~masc_root ~keeper_id in
+  if Sys.file_exists path
+  then Error "a pending recognition publication already exists"
+  else
+    match
+      save_pending_marker
+        ~masc_root
+        ~keeper_id
+        ~prepared:entry
+        ~prepared_logged:false
+    with
+    | Error _ as error -> error
+    | Ok () ->
+      (match append_json ~masc_root entry with
+       | Error _ as error -> error
+       | Ok () ->
+         save_pending_marker
+           ~masc_root
+           ~keeper_id
+           ~prepared:entry
+           ~prepared_logged:true)
 ;;
 
 let append_committed
@@ -201,14 +308,18 @@ let append_committed
       ~now
       ()
   =
-  committed_to_json
-    ~publication_id
-    ~keeper_id
-    ~trace_id
-    ~generation
-    ~now
-    ()
-  |> append_json ~masc_root
+  match
+    committed_to_json
+      ~publication_id
+      ~keeper_id
+      ~trace_id
+      ~generation
+      ~now
+      ()
+    |> append_json ~masc_root
+  with
+  | Error _ as error -> error
+  | Ok () -> clear_pending_marker ~masc_root ~keeper_id ~publication_id
 ;;
 
 let append_aborted
@@ -220,14 +331,18 @@ let append_aborted
       ~now
       ()
   =
-  aborted_to_json
-    ~publication_id
-    ~keeper_id
-    ~trace_id
-    ~generation
-    ~now
-    ()
-  |> append_json ~masc_root
+  match
+    aborted_to_json
+      ~publication_id
+      ~keeper_id
+      ~trace_id
+      ~generation
+      ~now
+      ()
+    |> append_json ~masc_root
+  with
+  | Error _ as error -> error
+  | Ok () -> clear_pending_marker ~masc_root ~keeper_id ~publication_id
 ;;
 
 type pending_publication =
@@ -237,6 +352,9 @@ type pending_publication =
   ; store_before_digest : string
   ; store_after_digest : string
   ; episode : episode
+  ; facts_rewrite_required : bool
+  ; prepared_json : Yojson.Safe.t
+  ; prepared_logged : bool
   }
 
 type recovery_outcome =
@@ -256,6 +374,12 @@ let int_field key fields =
   | Some _ | None -> None
 ;;
 
+let bool_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`Bool value) -> Some value
+  | Some _ | None -> None
+;;
+
 let facts_field key fields =
   let rec decode acc = function
     | [] -> Some (List.rev acc)
@@ -269,7 +393,7 @@ let facts_field key fields =
   | Some _ | None -> None
 ;;
 
-let pending_of_fields fields =
+let pending_of_fields ~keeper_id ~prepared_json ~prepared_logged fields =
   match
     ( string_field field_publication_id fields
     , string_field field_trace_id fields
@@ -278,6 +402,9 @@ let pending_of_fields fields =
     , string_field field_store_after_digest fields
     , facts_field field_store_before fields
     , facts_field field_store_after fields
+    , List.assoc_opt field_operations fields
+    , List.assoc_opt field_dispositions fields
+    , bool_field field_facts_rewrite_required fields
     , List.assoc_opt field_episode fields )
   with
   | ( Some publication_id
@@ -287,11 +414,31 @@ let pending_of_fields fields =
     , Some store_after_digest
     , Some store_before
     , Some store_after
+    , Some (`List _ as operations_json)
+    , Some (`List _ as dispositions_json)
+    , Some facts_rewrite_required
     , Some episode_json ) ->
     (match episode_of_json episode_json with
      | Some episode
        when String.equal store_before_digest (facts_digest store_before)
-            && String.equal store_after_digest (facts_digest store_after) ->
+            && String.equal store_after_digest (facts_digest store_after)
+            && int_field field_schema_version fields = Some ledger_schema_version
+            && String.equal episode.trace_id trace_id
+            && Int.equal episode.generation generation
+            && (facts_rewrite_required
+                || String.equal store_before_digest store_after_digest)
+            && String.equal
+                 publication_id
+                 (publication_id_from_json
+                    ~keeper_id
+                    ~trace_id
+                    ~generation
+                    ~store_before
+                    ~operations_json
+                    ~dispositions_json
+                    ~store_after
+                    ~episode
+                    ~facts_rewrite_required) ->
        Ok
          { publication_id
          ; trace_id
@@ -299,78 +446,91 @@ let pending_of_fields fields =
          ; store_before_digest
          ; store_after_digest
          ; episode
+         ; facts_rewrite_required
+         ; prepared_json
+         ; prepared_logged
          }
      | Some _ ->
-       Error "prepared recognition publication has inconsistent fact digests"
+       Error "prepared recognition publication failed payload integrity checks"
      | None -> Error "prepared recognition publication has invalid episode payload")
   | _ -> Error "prepared recognition publication is missing recovery fields"
 ;;
 
+let load_pending_marker ~masc_root ~keeper_id =
+  let path = pending_path ~masc_root ~keeper_id in
+  if not (Sys.file_exists path)
+  then Ok None
+  else
+    try
+      let channel = open_in_bin path in
+      let json =
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr channel)
+          (fun () ->
+             really_input_string channel (in_channel_length channel)
+             |> Yojson.Safe.from_string)
+      in
+      match json with
+      | `Assoc marker_fields ->
+        (match
+           ( List.assoc_opt field_pending_publication marker_fields
+           , bool_field field_prepared_logged marker_fields )
+         with
+         | Some (`Assoc prepared_fields as prepared_json), Some prepared_logged ->
+           (match
+              ( string_field field_keeper_id prepared_fields
+              , string_field field_publication_state prepared_fields )
+            with
+            | Some row_keeper, Some "prepared"
+              when String.equal row_keeper keeper_id ->
+              Result.map
+                (fun publication -> Some publication)
+                (pending_of_fields
+                   ~keeper_id
+                   ~prepared_json
+                   ~prepared_logged
+                   prepared_fields)
+            | Some _, Some _ | Some _, None | None, _ ->
+              Error "pending recognition marker ownership/state mismatch")
+         | Some _, Some _ | Some _, None | None, _ ->
+           Error "pending recognition marker is missing typed fields")
+      | _ -> Error "pending recognition marker is not an object"
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+;;
+
 let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
-  let pending = ref [] in
-  let failure = ref None in
-  let record_failure detail =
-    match !failure with
-    | None -> failure := Some detail
-    | Some _ -> ()
-  in
-  let consume = function
-    | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-      record_failure
-        (Printf.sprintf
-           "recognition ledger contains malformed JSON at %s%s: %s"
-           path
-           (match line_number with
-            | Some line -> Printf.sprintf ":%d" line
-            | None -> "")
-           detail)
-    | Dated_jsonl.Parsed (`Assoc fields) ->
-      (match string_field field_keeper_id fields with
-       | Some row_keeper when String.equal row_keeper keeper_id ->
-         (match string_field field_publication_state fields with
-          | Some "prepared" ->
-            (match pending_of_fields fields with
-             | Ok publication ->
-               pending :=
-                 publication
-                 :: List.filter
-                      (fun prior ->
-                         not
-                           (String.equal
-                              prior.publication_id
-                              publication.publication_id))
-                      !pending
-             | Error detail -> record_failure detail)
-          | Some ("committed" | "aborted") ->
-            (match string_field field_publication_id fields with
-             | Some publication_id ->
-               pending :=
-                 List.filter
-                   (fun publication ->
-                      not (String.equal publication.publication_id publication_id))
-                   !pending
-             | None -> record_failure "terminal recognition row has no publication id")
-          | Some state ->
-            record_failure ("unknown recognition publication state: " ^ state)
-          | None -> ())
-       | Some _ | None -> ())
-    | Dated_jsonl.Parsed _ ->
-      record_failure "recognition ledger row is not an object"
-  in
   try
-    match Dated_jsonl.iter_all_entries_result (make_store ~masc_root ()) consume with
-    | Error read_error -> Error (Dated_jsonl.read_error_to_string read_error)
-    | Ok () ->
-      (match !failure with
-       | Some detail -> Error detail
-       | None ->
-         (match !pending with
-          | [] -> Ok No_pending_publication
-          | _ :: _ :: _ ->
-            Error "multiple pending recognition publications violate serialization"
-          | [ publication ] ->
+    match load_pending_marker ~masc_root ~keeper_id with
+    | Error _ as error -> error
+    | Ok None -> Ok No_pending_publication
+    | Ok (Some publication) ->
+      let prepared_ready =
+        if publication.prepared_logged
+        then Ok ()
+        else
+          match append_json ~masc_root publication.prepared_json with
+          | Error _ as error -> error
+          | Ok () ->
+            save_pending_marker
+              ~masc_root
+              ~keeper_id
+              ~prepared:publication.prepared_json
+              ~prepared_logged:true
+      in
+      (match prepared_ready with
+       | Error detail ->
+         Error ("recognition prepared evidence recovery failed: " ^ detail)
+       | Ok () ->
             let current_digest = facts_digest current_store in
-            if String.equal current_digest publication.store_before_digest
+            let before_matches =
+              String.equal current_digest publication.store_before_digest
+            in
+            let after_matches =
+              String.equal current_digest publication.store_after_digest
+            in
+            if publication.facts_rewrite_required && before_matches
             then
               (match
                  append_aborted
@@ -385,7 +545,10 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
                | Ok () -> Ok (Recovered_aborted publication.publication_id)
                | Error detail ->
                  Error ("recognition abort marker write failed: " ^ detail))
-            else if String.equal current_digest publication.store_after_digest
+            else if
+              after_matches
+              && ((not publication.facts_rewrite_required)
+                  || not before_matches)
             then
               (match
                  Keeper_memory_os_io.ensure_recognition_episode
@@ -420,7 +583,7 @@ let recover_pending ~masc_root ~keeper_id ~current_store ~now () =
             else
               Error
                 "pending recognition publication matches neither canonical \
-                 before nor after fact digest; repair is required"))
+                 transition state nor its publication mode; repair is required")
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)

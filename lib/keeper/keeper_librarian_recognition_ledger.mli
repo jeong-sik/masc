@@ -5,15 +5,18 @@
     [committed] marker only after facts, the deterministic episode file, and the
     idempotent event are durable. Readers must treat only committed publication
     ids as published; a stranded prepared row is explicit recoverable evidence,
-    never a false claim that the whole bundle was published.
+    never a false claim that the whole bundle was published. A per-keeper atomic
+    pending pointer is the O(1) recovery authority; the dated JSONL remains the
+    append-only audit history and is never scanned on the pre-turn hot path.
 
     Row size is O(store) by design — the issue's anti-black-box requirement
     persists both full snapshots, deliberately unlike the recall ledger's
     delta rows (whose materialization needs a replay chain). The bound is
     structural, not a cap: the store itself is kept small by recognition
-    (Forget/Merge) plus the consolidation pass, an empty-operation pass writes
-    no recognition row (its episode metadata is persisted separately), and
-    dated files fall to [prune_older_than] with the other JSONL ledgers. *)
+    (Forget/Merge) plus the consolidation pass. Empty-operation passes retain
+    identical before/after snapshots so their episode/event metadata has the
+    same recoverable contract. Dated files fall to [prune_older_than] with the
+    other JSONL ledgers. *)
 
 open Keeper_memory_os_types
 
@@ -30,6 +33,7 @@ val publication_id
   -> dispositions:Keeper_librarian_recognition.disposition list
   -> store_after:fact list
   -> episode:episode
+  -> facts_rewrite_required:bool
   -> string
 
 (** Pure serializers exposed for regression tests and audit consumers. *)
@@ -43,6 +47,7 @@ val prepared_to_json
   -> dispositions:Keeper_librarian_recognition.disposition list
   -> store_after:fact list
   -> episode:episode
+  -> facts_rewrite_required:bool
   -> now:float
   -> unit
   -> Yojson.Safe.t
@@ -67,6 +72,7 @@ val append_prepared
   -> dispositions:Keeper_librarian_recognition.disposition list
   -> store_after:fact list
   -> episode:episode
+  -> facts_rewrite_required:bool
   -> now:float
   -> unit
   -> (unit, string) result
@@ -90,9 +96,11 @@ type recovery_outcome =
     store while the caller holds the episode-bundle and facts locks. If current
     facts equal its [store_after] digest, idempotently ensure the prepared
     episode and event before appending the missing committed marker; if they
-    equal [store_before], append an aborted marker. Any third state or multiple
-    unresolved publications fails closed. Repeated calls are idempotent because
-    artifact writes are identity-checked and terminal markers remove the id. *)
+    equal [store_before] for a fact-mutating publication, append an aborted
+    marker. A metadata-only publication has equal before/after digests and is
+    completed rather than aborted. Any third state fails closed. Repeated calls
+    are idempotent because artifact writes are identity-checked and terminal
+    markers remove the per-keeper pointer. *)
 val recover_pending
   :  masc_root:string
   -> keeper_id:string

@@ -951,8 +951,8 @@ let apply_and_persist
   match recognition.Keeper_librarian.operations with
   | [] ->
     (* A schema-valid zero-op result still carries episode metadata authored
-       for this conversation slice. Persist it without touching facts or the
-       O(store) recognition ledger. *)
+       for this conversation slice. Facts remain byte-identical, but the
+       episode/event pair uses the same recoverable publication boundary. *)
     let episode =
       Keeper_librarian.episode_of_recognition
         ~now
@@ -971,14 +971,86 @@ let apply_and_persist
           (fun () ->
              match Keeper_memory_os_io.read_facts_all_strict_offloaded ~keeper_id with
              | Error msg -> Error (Store_read_failed msg)
-             | Ok current -> recover_pending current)
+             | Ok current ->
+               (match recover_pending current with
+                | Error _ as error -> error
+                | Ok () ->
+                  let publication_id =
+                    Recognition_ledger.publication_id
+                      ~keeper_id
+                      ~trace_id:inp.trace_id
+                      ~generation
+                      ~store_before:current
+                      ~operations:[]
+                      ~dispositions:[]
+                      ~store_after:current
+                      ~episode
+                      ~facts_rewrite_required:false
+                  in
+                  (match
+                     Recognition_ledger.publish
+                       ~prepare:(fun () ->
+                         Recognition_ledger.append_prepared
+                           ~masc_root:recognition_masc_root
+                           ~publication_id
+                           ~keeper_id
+                           ~trace_id:inp.trace_id
+                           ~generation
+                           ~store_before:current
+                           ~operations:[]
+                           ~dispositions:[]
+                           ~store_after:current
+                           ~episode
+                           ~facts_rewrite_required:false
+                           ~now
+                           ())
+                       ~rewrite:(fun () -> Ok ())
+                       ~episode:(fun () ->
+                         Keeper_memory_os_io.ensure_recognition_episode
+                           ~keeper_id
+                           ~publication_id
+                           episode)
+                       ~event:(fun () ->
+                         Keeper_memory_os_io.ensure_recognition_event
+                           ~keeper_id
+                           episode)
+                       ~commit:(fun () ->
+                         Recognition_ledger.append_committed
+                           ~masc_root:recognition_masc_root
+                           ~publication_id
+                           ~keeper_id
+                           ~trace_id:inp.trace_id
+                           ~generation
+                           ~now
+                           ())
+                   with
+                   | Ok () -> Ok ()
+                   | Error (Recognition_ledger.Prepare_failed detail) ->
+                     Error
+                       (Memory_apply_failed
+                          ("recognition prepare write failed: " ^ detail))
+                   | Error (Recognition_ledger.Rewrite_failed detail) ->
+                     Error
+                       (Memory_apply_failed
+                          ("recognition metadata transition failed: " ^ detail))
+                   | Error (Recognition_ledger.Episode_failed detail) ->
+                     Error
+                       (Memory_apply_failed
+                          ("recognition episode write failed: " ^ detail))
+                   | Error (Recognition_ledger.Event_failed detail) ->
+                     Error
+                       (Memory_apply_failed
+                          ("recognition event write failed after episode: " ^ detail))
+                   | Error (Recognition_ledger.Commit_failed detail) ->
+                     Error
+                       (Memory_apply_failed
+                          ("recognition commit marker failed; prepared \
+                            publication remains recoverable: "
+                           ^ detail)))))
       in
       match recovered with
       | Error _ as error -> error
-      | Ok () ->
-        Keeper_memory_os_io.append_episode ~keeper_id episode;
-        Keeper_memory_os_io.append_event ~keeper_id episode;
-        Ok (Recognized episode))
+      | Ok () -> Ok (Recognized episode))
   | _ :: _ ->
     Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
       let applied =
@@ -1049,6 +1121,7 @@ let apply_and_persist
                        ~dispositions:result.Recognition.dispositions
                        ~store_after:result.Recognition.facts
                        ~episode
+                       ~facts_rewrite_required:true
                    in
                    (match
                       Recognition_ledger.publish
@@ -1064,6 +1137,7 @@ let apply_and_persist
                             ~dispositions:result.Recognition.dispositions
                             ~store_after:result.Recognition.facts
                             ~episode
+                            ~facts_rewrite_required:true
                             ~now
                             ())
                         ~rewrite:(fun () ->

@@ -280,6 +280,7 @@ let test_publication_rows_distinguish_prepared_from_committed () =
       ~dispositions:applied.Recognition.dispositions
       ~store_after:applied.Recognition.facts
       ~episode
+      ~facts_rewrite_required:true
   in
   let state = function
     | `Assoc fields ->
@@ -299,6 +300,7 @@ let test_publication_rows_distinguish_prepared_from_committed () =
       ~dispositions:applied.Recognition.dispositions
       ~store_after:applied.Recognition.facts
       ~episode
+      ~facts_rewrite_required:true
       ~now
       ()
   in
@@ -337,6 +339,7 @@ let test_read_admission_recovers_every_publication_boundary_exactly_once () =
           ~dispositions:applied.Recognition.dispositions
           ~store_after:applied.Recognition.facts
           ~episode
+          ~facts_rewrite_required:true
       in
       Memory_io.rewrite_facts_atomically ~keeper_id before;
       (match
@@ -351,6 +354,7 @@ let test_read_admission_recovers_every_publication_boundary_exactly_once () =
            ~dispositions:applied.Recognition.dispositions
            ~store_after:applied.Recognition.facts
            ~episode
+           ~facts_rewrite_required:true
            ~now
            ()
        with
@@ -441,6 +445,139 @@ let test_read_admission_recovers_every_publication_boundary_exactly_once () =
   List.iter
     run
     [ "after_prepare"; "after_facts"; "after_episode"; "after_event"; "after_commit" ]
+;;
+
+let test_zero_op_read_admission_completes_equal_digest_publication () =
+  let run boundary =
+    let marker = Filename.temp_file ("recognition-zero-" ^ boundary) ".tmp" in
+    Sys.remove marker;
+    let keepers_dir = Filename.concat marker "keepers" in
+    let masc_root = Filename.concat marker "masc" in
+    Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+      let keeper_id = "keeper-zero-recovery" in
+      let facts = [ fact ~claim:"unchanged" () ] in
+      let episode = episode () in
+      let publication_id =
+        Ledger.publication_id
+          ~keeper_id
+          ~trace_id:episode.trace_id
+          ~generation:episode.generation
+          ~store_before:facts
+          ~operations:[]
+          ~dispositions:[]
+          ~store_after:facts
+          ~episode
+          ~facts_rewrite_required:false
+      in
+      Memory_io.rewrite_facts_atomically ~keeper_id facts;
+      (match
+         Ledger.append_prepared
+           ~masc_root
+           ~publication_id
+           ~keeper_id
+           ~trace_id:episode.trace_id
+           ~generation:episode.generation
+           ~store_before:facts
+           ~operations:[]
+           ~dispositions:[]
+           ~store_after:facts
+           ~episode
+           ~facts_rewrite_required:false
+           ~now
+           ()
+       with
+       | Ok () -> ()
+       | Error detail -> fail ("zero-op prepare fixture failed: " ^ detail));
+      if String.equal boundary "after_episode"
+         || String.equal boundary "after_event"
+         || String.equal boundary "after_commit"
+      then
+        (match
+           Memory_io.ensure_recognition_episode
+             ~keeper_id
+             ~publication_id
+             episode
+         with
+         | Ok () -> ()
+         | Error detail -> fail ("zero-op episode fixture failed: " ^ detail));
+      if String.equal boundary "after_event" || String.equal boundary "after_commit"
+      then
+        (match Memory_io.ensure_recognition_event ~keeper_id episode with
+         | Ok () -> ()
+         | Error detail -> fail ("zero-op event fixture failed: " ^ detail));
+      if String.equal boundary "after_commit"
+      then
+        (match
+           Ledger.append_committed
+             ~masc_root
+             ~publication_id
+             ~keeper_id
+             ~trace_id:episode.trace_id
+             ~generation:episode.generation
+             ~now
+             ()
+         with
+         | Ok () -> ()
+         | Error detail -> fail ("zero-op commit fixture failed: " ^ detail));
+      List.iter
+        (fun turn ->
+           ignore
+             (Recall.render_if_enabled
+                ~keeper_id
+                ~now:(now +. Float.of_int turn)
+                ~trace_id:"zero-restart-read"
+                ~turn
+                ~masc_root
+                ()))
+        [ 1; 2 ];
+      (match
+         Ledger.recover_pending
+           ~masc_root
+           ~keeper_id
+           ~current_store:facts
+           ~now:(now +. 3.0)
+           ()
+       with
+       | Ok Ledger.No_pending_publication -> ()
+       | Ok _ -> fail "zero-op read admission did not settle the publication"
+       | Error detail -> fail ("zero-op publication check failed: " ^ detail));
+      check
+        (list string)
+        "zero-op facts remain byte-equivalent"
+        [ "unchanged" ]
+        (claims (Memory_io.read_facts_all ~keeper_id));
+      (match Memory_io.read_episode_files_all_strict ~keeper_id with
+       | Ok episodes ->
+         check int (boundary ^ " zero-op episode exactly once") 1
+           (List.length episodes)
+       | Error detail -> fail ("zero-op episode read failed: " ^ detail));
+      check int (boundary ^ " zero-op event exactly once") 1
+        (List.length (Memory_io.read_events_tail ~keeper_id ~n:10)))
+  in
+  List.iter run [ "after_prepare"; "after_episode"; "after_event"; "after_commit" ]
+;;
+
+let test_no_pending_recovery_does_not_scan_dated_history () =
+  let marker = Filename.temp_file "recognition-o1-recovery" ".tmp" in
+  Sys.remove marker;
+  Unix.mkdir marker 0o700;
+  let ledger_dir = Ledger.base_dir ~masc_root:marker in
+  Unix.mkdir ledger_dir 0o700;
+  (* A strict Dated_jsonl history scan would reject this non-date directory.
+     With no per-keeper pending pointer, recovery must return in O(1) without
+     opening or validating the append-only audit history. *)
+  Unix.mkdir (Filename.concat ledger_dir "historical-junk") 0o700;
+  match
+    Ledger.recover_pending
+      ~masc_root:marker
+      ~keeper_id:"keeper-without-pending"
+      ~current_store:[]
+      ~now
+      ()
+  with
+  | Ok Ledger.No_pending_publication -> ()
+  | Ok _ -> fail "recovery invented a pending publication"
+  | Error detail -> fail ("recovery scanned unrelated dated history: " ^ detail)
 ;;
 
 let test_recalled_reinforcement_is_rejected_by_provenance () =
@@ -672,6 +809,14 @@ let () =
             "read admission recovers every publication boundary exactly once"
             `Quick
             test_read_admission_recovers_every_publication_boundary_exactly_once;
+          test_case
+            "zero-op read admission completes equal-digest publication"
+            `Quick
+            test_zero_op_read_admission_completes_equal_digest_publication;
+          test_case
+            "no-pending recovery does not scan dated history"
+            `Quick
+            test_no_pending_recovery_does_not_scan_dated_history;
           test_case "recalled reinforcement is rejected by provenance" `Quick
             test_recalled_reinforcement_is_rejected_by_provenance;
           test_case "add appends" `Quick test_add_appends;

@@ -912,6 +912,10 @@ let extract_with_exact_output_classified
 type recognition_write =
   | Recognized of Keeper_memory_os_types.episode
 
+let current_facts_for_recognition ~now facts =
+  List.filter (Keeper_memory_os_types.fact_is_current ~now) facts
+;;
+
 (* Apply an accepted recognition output and persist the whole bundle.
 
    Optimistic concurrency, mirroring the consolidation rewrite path: the store
@@ -982,12 +986,13 @@ let apply_and_persist
                (match recover_pending current with
                 | Error _ as error -> error
                 | Ok () ->
-                  if not (Keeper_memory_os_io.same_fact_snapshot inp.store current)
+                  let current_for_provider = current_facts_for_recognition ~now current in
+                  if not (Keeper_memory_os_io.same_fact_snapshot inp.store current_for_provider)
                   then
                     Error
                       (Store_snapshot_changed
                          { snapshot = List.length inp.store
-                         ; current = List.length current
+                         ; current = List.length current_for_provider
                          })
                   else
                     let publication_id =
@@ -1081,12 +1086,13 @@ let apply_and_persist
                (match recover_pending current with
                 | Error _ as error -> error
                 | Ok () ->
-                  if not (Keeper_memory_os_io.same_fact_snapshot inp.store current)
+                  let current_for_provider = current_facts_for_recognition ~now current in
+                  if not (Keeper_memory_os_io.same_fact_snapshot inp.store current_for_provider)
                   then
                     Error
                       (Store_snapshot_changed
                          { snapshot = List.length inp.store
-                         ; current = List.length current
+                         ; current = List.length current_for_provider
                          })
                   else (
                  let recalled_reinforcement_indices =
@@ -1117,6 +1123,16 @@ let apply_and_persist
                    List.exists
                      (function Recognition.Applied -> true | _ -> false)
                      result.Recognition.dispositions
+                 in
+                 let store_after =
+                   if facts_rewrite_required
+                   then
+                     result.Recognition.facts
+                     @ List.filter
+                         (fun fact ->
+                           not (Keeper_memory_os_types.fact_is_current ~now fact))
+                         current
+                   else current
                  in
                  let recalled_echo_only =
                    result.Recognition.dispositions <> []
@@ -1149,10 +1165,10 @@ let apply_and_persist
                        ~keeper_id
                        ~trace_id:inp.trace_id
                        ~generation
-                       ~store_before:inp.store
+                       ~store_before:current
                        ~operations:recognition.operations
                        ~dispositions:result.Recognition.dispositions
-                       ~store_after:result.Recognition.facts
+                       ~store_after
                        ~episode
                        ~facts_rewrite_required
                    in
@@ -1165,10 +1181,10 @@ let apply_and_persist
                             ~keeper_id
                             ~trace_id:inp.trace_id
                             ~generation
-                            ~store_before:inp.store
+                            ~store_before:current
                             ~operations:recognition.operations
                             ~dispositions:result.Recognition.dispositions
-                            ~store_after:result.Recognition.facts
+                            ~store_after
                             ~episode
                             ~facts_rewrite_required
                             ~now
@@ -1178,7 +1194,7 @@ let apply_and_persist
                           then Ok ()
                           else
                             try
-                              rewrite result.Recognition.facts;
+                              rewrite store_after;
                               Ok ()
                             with
                             | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1313,15 +1329,15 @@ let preflight_recognition_store ?clock ~base_path ~keeper_id () =
       ~base_path
       ~cluster_name:(Env_config_core.cluster_name ())
   in
-  (* NDT-OK: one preflight timestamp defines both recovery and explicit-expiry
-     admission for this serialized fact snapshot. *)
+  (* NDT-OK: one preflight timestamp defines recovery and the provider's
+     read-only explicit-expiry view for this serialized fact snapshot. *)
   let now = Unix.gettimeofday () in
   Keeper_memory_os_io.with_recognition_fact_transaction
     ?clock
     ~masc_root
     ~keeper_id
     ~on_timeout:(fun detail -> Error (Memory_apply_failed detail))
-    (fun ~rewrite ~masc_root:_ ->
+    (fun ~rewrite:_ ~masc_root:_ ->
        match Keeper_memory_os_io.read_facts_all_strict_offloaded ~keeper_id with
        | Error detail -> Error (Store_read_failed detail)
        | Ok store ->
@@ -1334,18 +1350,10 @@ let preflight_recognition_store ?clock ~base_path ~keeper_id () =
               ()
           with
           | Ok _ ->
-            let current_store =
-              List.filter (Keeper_memory_os_types.fact_is_current ~now) store
-            in
-            if Keeper_memory_os_io.same_fact_snapshot store current_store
-            then Ok store
-            else
-              (try
-                 rewrite current_store;
-                 Ok current_store
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> Error (Memory_apply_failed (Printexc.to_string exn)))
+            (* Retention is owned by [Keeper_memory_os_gc].  Recognition only
+               excludes expired facts from the provider's prompt snapshot; it
+               must not create an unreported second canonical-store writer. *)
+            Ok (List.filter (Keeper_memory_os_types.fact_is_current ~now) store)
           | Error error -> Error (Pending_publication_blocked error)))
 ;;
 

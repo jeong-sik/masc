@@ -629,7 +629,7 @@ let test_librarian_zero_op_rejects_stale_snapshot () =
     | Ok _ -> Alcotest.fail "stale zero-op result was incorrectly published")
 ;;
 
-let test_librarian_preflight_prunes_expired_facts_before_prompt_snapshot () =
+let test_librarian_preflight_excludes_expired_facts_from_prompt_snapshot () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "librarian-preflight-expiry" in
     let expired =
@@ -652,10 +652,45 @@ let test_librarian_preflight_prunes_expired_facts_before_prompt_snapshot () =
     | Ok facts ->
       Alcotest.(check int) "expired fact is absent from provider snapshot" 1 (List.length facts);
       Alcotest.(check string) "current fact remains" current.Types.claim (List.hd facts).Types.claim;
+      let inp : Librarian.input =
+        { trace_id = "trace-librarian-preflight-expiry"
+        ; generation = 0
+        ; messages = []
+        ; store = facts
+        }
+      in
+      let recognition : Librarian.recognition_output =
+        { episode_summary = "A live fact received fresh support"
+        ; operations = [ Recognition.Reinforce { index = 0; source_turn = 0 } ]
+        ; open_items = []
+        ; constraints = []
+        ; preserved_tool_refs = []
+        }
+      in
+      (match
+         Librarian_runtime.For_testing.apply_and_persist
+           ~base_path:"/tmp/librarian-preflight-expiry"
+           ~keeper_id
+           ~generation:1
+           inp
+           recognition
+       with
+       | Error error ->
+         Alcotest.fail
+           (Librarian_runtime.extraction_error_to_string error)
+       | Ok (Librarian_runtime.Recognized _) -> ());
       Alcotest.(check int)
-        "expired fact is removed from canonical store"
+        "recognition keeps expired facts for the GC retention writer"
+        2
+        (List.length (Memory_io.read_facts_all ~keeper_id));
+      let stored_live =
+        Memory_io.read_facts_all ~keeper_id
+        |> List.find (Types.fact_is_current ~now:(Unix.gettimeofday ()))
+      in
+      Alcotest.(check int)
+        "live fact was still updated"
         1
-        (List.length (Memory_io.read_facts_all ~keeper_id)))
+        stored_live.Types.reinforcement_count)
 ;;
 
 let test_librarian_recalled_echo_persists_metadata_without_fact_rewrite () =
@@ -4808,9 +4843,9 @@ let () =
             `Quick
             test_librarian_zero_op_rejects_stale_snapshot
         ; Alcotest.test_case
-            "librarian preflight prunes expired facts before the prompt snapshot"
+            "librarian preflight excludes expired facts from the prompt snapshot"
             `Quick
-            test_librarian_preflight_prunes_expired_facts_before_prompt_snapshot
+            test_librarian_preflight_excludes_expired_facts_from_prompt_snapshot
         ; Alcotest.test_case
             "librarian recalled echo persists metadata without fact rewrite"
             `Quick

@@ -586,64 +586,32 @@ let load_pending_marker ~masc_root ~keeper_id =
     | exn -> Error (Printexc.to_string exn)
 ;;
 
-let prepared_evidence_exists ~masc_root ~publication_id ~prepared_json =
-  let found = ref false in
-  let row_error = ref None in
-  match
-    Dated_jsonl.iter_all_entries_result
-      (make_store ~masc_root ())
-      (fun entry ->
-         match !row_error, entry with
-         | Some _, _ -> ()
-         | None, Dated_jsonl.Malformed_json { path; line_number; detail } ->
-           row_error
-           := Some
-                (Printf.sprintf
-                   "%s%s: malformed recognition audit JSON: %s"
-                   path
-                   (match line_number with
-                    | None -> ""
-                    | Some line -> Printf.sprintf ":%d" line)
-                   detail)
-         | None, Dated_jsonl.Parsed (`Assoc fields as json) ->
-           (match
-              string_field field_publication_id fields,
-              string_field field_publication_state fields
-            with
-            | Some row_id, Some "prepared"
-              when String.equal row_id publication_id ->
-              if Yojson.Safe.equal json prepared_json
-              then found := true
-              else
-                row_error
-                := Some
-                     "recognition prepared audit row conflicts with its pending \
-                      publication payload"
-            | Some _, Some _ -> ()
-            | None, _ | _, None ->
-              row_error
-              := Some
-                   "recognition audit row is missing publication identity/state")
-         | None, Dated_jsonl.Parsed _ ->
-           row_error := Some "recognition audit row is not an object")
-  with
-  | Error error -> Error (Dated_jsonl.read_error_to_string error)
-  | Ok () ->
-    (match !row_error with
-     | Some detail -> Error detail
-     | None -> Ok !found)
+type prepared_evidence_status =
+  | Prepared_evidence_reassert_before_terminal
+  | Prepared_evidence_written_now
+
+let ensure_prepared_evidence ~masc_root ~keeper_id publication =
+  if publication.prepared_logged
+  then Ok Prepared_evidence_reassert_before_terminal
+  else
+    match append_json ~masc_root publication.prepared_json with
+    | Error _ as error -> error
+    | Ok () ->
+      (match
+         save_pending_marker
+           ~masc_root
+           ~keeper_id
+           ~prepared:publication.prepared_json
+           ~prepared_logged:true
+       with
+       | Error _ as error -> error
+       | Ok () -> Ok Prepared_evidence_written_now)
 ;;
 
-let ensure_prepared_evidence ~masc_root publication =
-  match
-    prepared_evidence_exists
-      ~masc_root
-      ~publication_id:publication.publication_id
-      ~prepared_json:publication.prepared_json
-  with
-  | Error _ as error -> error
-  | Ok false -> append_json ~masc_root publication.prepared_json
-  | Ok true -> Ok ()
+let reassert_prepared_before_terminal ~masc_root publication = function
+  | Prepared_evidence_written_now -> Ok ()
+  | Prepared_evidence_reassert_before_terminal ->
+    append_json ~masc_root publication.prepared_json
 ;;
 
 let recover_pending_classified ~masc_root ~keeper_id ~current_store ~now () =
@@ -652,27 +620,17 @@ let recover_pending_classified ~masc_root ~keeper_id ~current_store ~now () =
     | Error detail -> Error (Pending_marker_invalid detail)
     | Ok None -> Ok No_pending_publication
     | Ok (Some publication) ->
-      (* The dated audit retention sweep can remove an old prepared row while
-         its O(1) pending marker remains. Reassert the exact prepared payload
-         only when its canonical row is absent; a repeatedly observed
-         third-state latch must not append an O(store) duplicate per read. *)
+      (* The pending marker is the O(1) durable source for an in-flight
+         publication. It avoids scanning a shared audit ledger on the recall
+         path; terminalization reasserts the exact payload once so retention
+         cannot leave a terminal audit row without its before/after evidence. *)
       let prepared_ready =
-        match ensure_prepared_evidence ~masc_root publication with
-        | Error _ as error -> error
-        | Ok () ->
-          if publication.prepared_logged
-          then Ok ()
-          else
-            save_pending_marker
-              ~masc_root
-              ~keeper_id
-              ~prepared:publication.prepared_json
-              ~prepared_logged:true
+        ensure_prepared_evidence ~masc_root ~keeper_id publication
       in
       (match prepared_ready with
        | Error detail ->
          Error (Prepared_evidence_recovery_failed detail)
-       | Ok () ->
+       | Ok prepared_evidence ->
             let current_digest = facts_digest current_store in
             let before_matches =
               String.equal current_digest publication.store_before_digest
@@ -683,19 +641,27 @@ let recover_pending_classified ~masc_root ~keeper_id ~current_store ~now () =
             if publication.facts_rewrite_required && before_matches
             then
               (match
-                 append_aborted
+                 reassert_prepared_before_terminal
                    ~masc_root
-                   ~publication_id:publication.publication_id
-                   ~keeper_id
-                   ~trace_id:publication.trace_id
-                   ~generation:publication.generation
-                   ~now
-                   ()
+                   publication
+                   prepared_evidence
                with
-               | Ok outcome ->
-                 Ok (Recovered_aborted (publication.publication_id, outcome))
-               | Error detail ->
-                 Error (Abort_marker_recovery_failed detail))
+               | Error detail -> Error (Prepared_evidence_recovery_failed detail)
+               | Ok () ->
+                 (match
+                    append_aborted
+                      ~masc_root
+                      ~publication_id:publication.publication_id
+                      ~keeper_id
+                      ~trace_id:publication.trace_id
+                      ~generation:publication.generation
+                      ~now
+                      ()
+                  with
+                  | Ok outcome ->
+                    Ok (Recovered_aborted (publication.publication_id, outcome))
+                  | Error detail ->
+                    Error (Abort_marker_recovery_failed detail)))
             else if
               after_matches
               && ((not publication.facts_rewrite_required)
@@ -720,21 +686,30 @@ let recover_pending_classified ~masc_root ~keeper_id ~current_store ~now () =
                     Error (Event_recovery_failed detail)
                   | Ok () ->
                     (match
-                       append_committed
+                       reassert_prepared_before_terminal
                          ~masc_root
-                         ~publication_id:publication.publication_id
-                         ~keeper_id
-                         ~trace_id:publication.trace_id
-                         ~generation:publication.generation
-                         ~now
-                         ()
+                         publication
+                         prepared_evidence
                      with
-                     | Ok outcome ->
-                       Ok
-                         (Recovered_committed
-                            (publication.publication_id, outcome))
                      | Error detail ->
-                       Error (Commit_marker_recovery_failed detail))))
+                       Error (Prepared_evidence_recovery_failed detail)
+                     | Ok () ->
+                       (match
+                          append_committed
+                            ~masc_root
+                            ~publication_id:publication.publication_id
+                            ~keeper_id
+                            ~trace_id:publication.trace_id
+                            ~generation:publication.generation
+                            ~now
+                            ()
+                        with
+                        | Ok outcome ->
+                          Ok
+                            (Recovered_committed
+                               (publication.publication_id, outcome))
+                        | Error detail ->
+                          Error (Commit_marker_recovery_failed detail)))))
             else
               Error
                 (Pending_publication_third_state
@@ -806,23 +781,31 @@ let repair_pending
     | Error detail -> Error (Pending_repair_marker_invalid detail)
     | Ok None -> Error No_pending_publication_to_repair
     | Ok (Some publication) ->
-      (match ensure_prepared_evidence ~masc_root publication with
+      (match ensure_prepared_evidence ~masc_root ~keeper_id publication with
        | Error detail -> Error (Pending_repair_prepared_failed detail)
-       | Ok () ->
+       | Ok prepared_evidence ->
          let abort () =
            match
-             append_aborted
+             reassert_prepared_before_terminal
                ~masc_root
-               ~publication_id:publication.publication_id
-               ~keeper_id
-               ~trace_id:publication.trace_id
-               ~generation:publication.generation
-               ~now
-               ()
+               publication
+               prepared_evidence
            with
-           | Ok outcome ->
-             Ok (Repaired_aborted (publication.publication_id, outcome))
-           | Error detail -> Error (Pending_repair_terminal_failed detail)
+           | Error detail -> Error (Pending_repair_prepared_failed detail)
+           | Ok () ->
+             (match
+                append_aborted
+                  ~masc_root
+                  ~publication_id:publication.publication_id
+                  ~keeper_id
+                  ~trace_id:publication.trace_id
+                  ~generation:publication.generation
+                  ~now
+                  ()
+              with
+              | Ok outcome ->
+                Ok (Repaired_aborted (publication.publication_id, outcome))
+              | Error detail -> Error (Pending_repair_terminal_failed detail))
          in
          let settle () =
            match
@@ -842,21 +825,29 @@ let repair_pending
               | Error detail -> Error (Pending_repair_event_failed detail)
               | Ok () ->
                 (match
-                   append_committed
+                   reassert_prepared_before_terminal
                      ~masc_root
-                     ~publication_id:publication.publication_id
-                     ~keeper_id
-                     ~trace_id:publication.trace_id
-                     ~generation:publication.generation
-                     ~now
-                     ()
+                     publication
+                     prepared_evidence
                  with
-                 | Ok outcome ->
-                   Ok
-                     (Repaired_committed
-                        (publication.publication_id, outcome))
-                 | Error detail ->
-                   Error (Pending_repair_terminal_failed detail)))
+                 | Error detail -> Error (Pending_repair_prepared_failed detail)
+                 | Ok () ->
+                   (match
+                      append_committed
+                        ~masc_root
+                        ~publication_id:publication.publication_id
+                        ~keeper_id
+                        ~trace_id:publication.trace_id
+                        ~generation:publication.generation
+                        ~now
+                        ()
+                    with
+                    | Ok outcome ->
+                      Ok
+                        (Repaired_committed
+                           (publication.publication_id, outcome))
+                    | Error detail ->
+                      Error (Pending_repair_terminal_failed detail))))
          in
          match action with
          | Abort_preserving_current -> abort ()

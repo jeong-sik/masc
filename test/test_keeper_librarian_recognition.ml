@@ -949,9 +949,14 @@ let test_repeated_third_state_recovery_does_not_grow_prepared_audit () =
        ()
    with
    | Ok () -> ()
-   | Error detail -> fail ("third-state growth fixture failed: " ^ detail));
+  | Error detail -> fail ("third-state growth fixture failed: " ^ detail));
   let audit = Dated_jsonl.create ~base_dir:(Ledger.base_dir ~masc_root) () in
-  check int "one initial physical prepared row" 1
+  (* A different Keeper's damaged shared audit row must not enter this
+     Keeper's marker-owned recovery path. *)
+  Fs_compat.append_file
+    (Dated_jsonl.current_file_path audit)
+    "{not valid recognition audit json\n";
+  check int "fixture has prepared and unrelated malformed rows" 2
     (Dated_jsonl.count_entries_uncached audit);
   List.iter
     (fun attempt ->
@@ -970,7 +975,7 @@ let test_repeated_third_state_recovery_does_not_grow_prepared_audit () =
             ^ Ledger.recovery_error_to_string error)
        | Ok _ -> fail "third-state recovery unexpectedly terminalized")
     [ 1; 2; 3 ];
-  check int "repeated reads do not append duplicate prepared rows" 1
+  check int "repeated reads neither scan nor append audit rows" 2
     (Dated_jsonl.count_entries_uncached audit)
 ;;
 

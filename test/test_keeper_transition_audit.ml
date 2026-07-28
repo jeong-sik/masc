@@ -340,6 +340,81 @@ let test_sync_fallback_appends_inline () =
                   check bool "store written inline" true
                     (Sys.file_exists (default_store_dir base_dir))))))
 
+(* Ordering is a documented contract — keeper_transition_audit.mli:22 promises
+   "recent transitions for a keeper, newest first" — and both read paths used to
+   break it. Nothing asserted order before, only List.length, which is why the
+   store path could also select the OLDEST rows of its scan window and still
+   pass. `keeper_runtime_trust_snapshot` reads it with ~limit:6 and
+   `/api/v1/.../transitions` renders it straight to an operator. *)
+let stamped ts = { (transition ()) with Audit.wall_clock_at_decision = ts }
+
+let stamps_of_json = function
+  | `List items ->
+    List.filter_map
+      (function
+        | `Assoc fields ->
+          (match List.assoc_opt "wall_clock_at_decision" fields with
+           | Some (`Float ts) -> Some ts
+           | Some (`Int ts) -> Some (float_of_int ts)
+           | _ -> None)
+        | _ -> None)
+      items
+  | _ -> []
+
+let test_ring_returns_newest_first () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
+          with_env "MASC_BASE_PATH" base_dir (fun () ->
+              with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
+                  let keeper_name = "ordering-ring-keeper" in
+                  List.iter
+                    (fun ts -> Audit.record_transition ~keeper_name (stamped ts))
+                    [ 100.0; 200.0; 300.0 ];
+                  (* limit < recorded, so this pins selection as well as order:
+                     the oldest record must not appear at all. *)
+                  match Audit.recent_transitions ~keeper_name ~limit:2 with
+                  | [ first; second ] ->
+                      check (float 0.001) "newest first" 300.0
+                        first.Audit.wall_clock_at_decision;
+                      check (float 0.001) "then the next newest" 200.0
+                        second.Audit.wall_clock_at_decision
+                  | other ->
+                      fail
+                        (Printf.sprintf "expected 2 transitions, got %d"
+                           (List.length other))))))
+
+let test_store_fallback_returns_newest_first () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
+          with_env "MASC_BASE_PATH" base_dir (fun () ->
+              with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
+                  let keeper_name = "ordering-store-keeper" in
+                  List.iter
+                    (fun ts -> Audit.record_transition ~keeper_name (stamped ts))
+                    [ 100.0; 200.0; 300.0; 400.0; 500.0 ];
+                  (* Drop the in-memory ring so the JSON reader has to fall
+                     through to the on-disk store, which is the path that
+                     serves an operator after a restart. *)
+                  Audit.For_testing.reset_state ();
+                  let stamps =
+                    stamps_of_json
+                      (Audit.recent_transitions_json ~keeper_name ~limit:2)
+                  in
+                  check (list (float 0.001)) "newest two, newest first"
+                    [ 500.0; 400.0 ] stamps))))
+
 let test_default_transition_append_failure_is_observed_and_ring_retained () =
   Audit.For_testing.reset_state ();
   with_invalid_default_store (fun () ->
@@ -494,6 +569,13 @@ let () =
             test_async_queue_defers_store_write_until_flush;
           test_case "sync fallback appends inline" `Quick
             test_sync_fallback_appends_inline;
+        ] );
+      ( "ordering",
+        [
+          test_case "ring returns the newest transitions, newest first" `Quick
+            test_ring_returns_newest_first;
+          test_case "store fallback returns the newest transitions, newest first"
+            `Quick test_store_fallback_returns_newest_first;
         ] );
       ( "append_failures",
         [

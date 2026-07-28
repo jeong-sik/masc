@@ -176,7 +176,7 @@ let observe_live_cadence ~keeper_id ~counter =
 let update_durable_cadence ~base_path ~keeper_id update =
   let path = durable_cadence_path ~base_path ~keeper_id in
   try
-    ignore (Keeper_fs.ensure_dir (Filename.dirname path));
+    let _ = Keeper_fs.ensure_dir (Filename.dirname path) in
     File_lock_eio.with_lock path (fun () ->
       match load_durable_cadence_counter path with
       | Error _ as error -> error
@@ -200,6 +200,15 @@ let durable_cadence_due ~base_path ~keeper_id =
 
 let durable_cadence_record_completed_attempt ~base_path ~keeper_id =
   update_durable_cadence ~base_path ~keeper_id (fun _ -> 0, ())
+;;
+
+let record_completed_attempt ~base_path ~keeper_id =
+  match durable_cadence_record_completed_attempt ~base_path ~keeper_id with
+  | Ok () -> ()
+  | Error detail ->
+    Log.Keeper.warn ~keeper_name:keeper_id
+      "memory os librarian published, but durable cadence accounting failed: %s"
+      detail
 ;;
 
 let max_messages () =
@@ -1061,7 +1070,7 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
              inp
          with
          | Ok (Recognized episode) ->
-           ignore (durable_cadence_record_completed_attempt ~base_path ~keeper_id);
+           record_completed_attempt ~base_path ~keeper_id;
            Log.Keeper.info
              ~keeper_name:keeper_id
              "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
@@ -1071,7 +1080,7 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
          | Ok Nothing_recognized ->
            (* A completed pass that recognized nothing: success for cadence
               (the model did judge the window), zero bytes persisted. *)
-           ignore (durable_cadence_record_completed_attempt ~base_path ~keeper_id);
+           record_completed_attempt ~base_path ~keeper_id;
            Log.Keeper.info
              ~keeper_name:keeper_id
              "memory os librarian recognized nothing trace_id=%s"

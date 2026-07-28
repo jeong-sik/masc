@@ -1650,7 +1650,7 @@ let test_capacity_readmission_probe_stops_before_transport_when_still_over () =
     | Error (Runtime_agent.Still_over_capacity error)
     | Error (Runtime_agent.Readmission_failed error) ->
       fail (Agent_sdk.Error.to_string error)
-    | Ok () -> fail "over-capacity candidate reached the probe transport"
+    | Ok _ -> fail "over-capacity candidate reached the probe transport"
   in
   check
     (list string)
@@ -1673,7 +1673,14 @@ let test_capacity_readmission_probe_admits_without_completion_dispatch () =
         ~continuation:false
         [ Agent_sdk.Types.Text "same failed request" ]
     with
-    | Ok () -> ()
+    | Ok evidence ->
+      check
+        (option int)
+        "token-fit proof retains the admitted limit"
+        (Some 512)
+        evidence.Runtime_agent.token_fit_limit_tokens;
+      check bool "serialized body was measured" true
+        (evidence.serialized_body_bytes > 0)
     | Error (Runtime_agent.Still_over_capacity error)
     | Error (Runtime_agent.Readmission_failed error) ->
       fail (Agent_sdk.Error.to_string error)
@@ -1715,7 +1722,7 @@ let test_capacity_readmission_stream_continuation_does_not_duplicate_goal () =
         ~continuation:true
         [ Agent_sdk.Types.Text duplicate_marker ]
     with
-    | Ok () -> ()
+    | Ok _ -> ()
     | Error (Runtime_agent.Still_over_capacity error)
     | Error (Runtime_agent.Readmission_failed error) ->
       fail (Agent_sdk.Error.to_string error)
@@ -1759,13 +1766,83 @@ let test_capacity_readmission_sync_continuation_fails_closed () =
     | Error (Runtime_agent.Still_over_capacity error)
     | Error (Runtime_agent.Readmission_failed error) ->
       fail (Agent_sdk.Error.to_string error)
-    | Ok () -> fail "sync continuation silently changed the failed request"
+    | Ok _ -> fail "sync continuation silently changed the failed request"
   in
   check
     (list string)
     "unsupported sync continuation performs no measurement or completion HTTP"
     []
     paths
+
+let test_capacity_readmission_compatibility_path_admits_exact_body () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let checkpoint =
+    { (context_fit_checkpoint ()) with
+      agent_name = "body-cap-fixture"
+    ; model = "qwen"
+    ; system_prompt = Some "stale"
+    }
+  in
+  let config max_request_body_bytes =
+    let provider_cfg =
+      { (provider_cfg ()) with
+        Llm_provider.Provider_config.max_request_body_bytes
+      }
+    in
+    Runtime_agent.default_config
+      ~name:"body-cap-fixture"
+      ~provider_cfg
+      ~system_prompt:"Exercise the compatibility request serializer."
+      ~tools:[]
+  in
+  let probe max_request_body_bytes text =
+    Runtime_agent.probe_blocks_admission
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~config:(config max_request_body_bytes)
+      ~checkpoint
+      ~stream:false
+      ~continuation:false
+      [ Agent_sdk.Types.Text text ]
+  in
+  (match probe (Some 128) (String.make 1_024 'x') with
+   | Error
+       (Runtime_agent.Still_over_capacity
+          (Agent_sdk.Error.Api
+             (Agent_sdk.Retry.InvalidRequest
+                { reason =
+                    Agent_sdk.Retry.Request_body_too_large
+                      { actual_bytes; limit_bytes = 128 }
+                ; _
+                }))) ->
+     check bool "exact compatibility body exceeds the cap" true
+       (actual_bytes > 128)
+   | Error (Runtime_agent.Still_over_capacity error)
+   | Error (Runtime_agent.Readmission_failed error) ->
+     fail (Agent_sdk.Error.to_string error)
+   | Ok _ ->
+     fail
+       "custom probe transport bypassed compatibility serialized-body admission");
+  match probe (Some 1_048_576) "short candidate" with
+  | Ok evidence ->
+    check bool "compatibility body evidence is measured" true
+      (evidence.Runtime_agent.serialized_body_bytes > 0);
+    check
+      (option int)
+      "compatibility body limit is exact"
+      (Some 1_048_576)
+      evidence.serialized_body_limit_bytes;
+    check
+      (option int)
+      "compatibility route fabricates no token proof"
+      None
+      evidence.token_fit_limit_tokens
+  | Error (Runtime_agent.Still_over_capacity error)
+  | Error (Runtime_agent.Readmission_failed error) ->
+    fail (Agent_sdk.Error.to_string error)
 
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
@@ -2011,6 +2088,10 @@ let () =
             "capacity readmission fails closed for sync continuation"
             `Quick
             test_capacity_readmission_sync_continuation_fails_closed
+        ; test_case
+            "capacity readmission compatibility path admits exact body"
+            `Quick
+            test_capacity_readmission_compatibility_path_admits_exact_body
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

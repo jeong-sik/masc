@@ -616,6 +616,74 @@ let readmission_terminal_cause_of_failure = function
     Keeper_event_queue_state.Failed_request_readmission_failed
 ;;
 
+let readmission_evidence_failure detail =
+  Runtime_agent.Readmission_failed (Agent_sdk.Error.Internal detail)
+;;
+
+let readmission_evidence_for_trigger
+      trigger
+      (evidence : Runtime_agent.capacity_readmission_evidence)
+  =
+  match trigger with
+  | Compaction_trigger.Manual -> Ok ()
+  | Compaction_trigger.Request_body_over_capacity { limit_bytes; _ } ->
+    if evidence.serialized_body_bytes <= limit_bytes
+    then Ok ()
+    else
+      Error
+        (Runtime_agent.Still_over_capacity
+           (Agent_sdk.Error.Api
+              (Agent_sdk.Retry.InvalidRequest
+                 { message =
+                     Printf.sprintf
+                       "compacted request still requires %d serialized bytes, \
+                        limit %d"
+                       evidence.serialized_body_bytes
+                       limit_bytes
+                 ; reason =
+                     Agent_sdk.Retry.Request_body_too_large
+                       { actual_bytes = evidence.serialized_body_bytes
+                       ; limit_bytes
+                       }
+                 })))
+  | Compaction_trigger.Request_body_refused_by_provider { status } ->
+    Error
+      (readmission_evidence_failure
+         (Printf.sprintf
+            "provider size refusal status %d exposed no byte boundary; local \
+             serialization cannot prove provider re-admission"
+            status))
+  | Compaction_trigger.Provider_overflow { limit_tokens = None } ->
+    Error
+      (readmission_evidence_failure
+         "provider context overflow exposed no token boundary; local \
+          serialization cannot prove provider re-admission")
+  | Compaction_trigger.Provider_overflow { limit_tokens = Some provider_limit } ->
+    (match evidence.token_fit_limit_tokens with
+     | Some admitted_limit when admitted_limit <= provider_limit -> Ok ()
+     | Some admitted_limit ->
+       Error
+         (readmission_evidence_failure
+            (Printf.sprintf
+               "runtime token admission limit %d is looser than provider \
+                overflow limit %d"
+               admitted_limit
+               provider_limit))
+     | None ->
+       Error
+         (readmission_evidence_failure
+            "runtime route has no supported exact token-fit admission for the \
+             provider overflow boundary"))
+  | Compaction_trigger.Serving_input_capacity _ ->
+    if evidence.serving_constraint_admitted
+    then Ok ()
+    else
+      Error
+        (readmission_evidence_failure
+           "runtime route did not re-admit the candidate against a current \
+            serving constraint")
+;;
+
 let terminalize_failed_readmission
       ~source
       terminalizer
@@ -670,7 +738,14 @@ let validate_failed_request_readmission
          resume_checkpoint_of_context preparation.context
        in
        (match probe candidate_checkpoint with
-        | Ok () -> Ok ()
+        | Ok evidence ->
+          (match readmission_evidence_for_trigger trigger evidence with
+           | Ok () -> Ok ()
+           | Error failure ->
+             terminalize_failed_readmission
+               ~source
+               post_success_terminalizer
+               (readmission_terminal_cause_of_failure failure))
         | Error failure ->
           terminalize_failed_readmission
             ~source

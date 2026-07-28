@@ -1223,6 +1223,13 @@ let test_reactive_compaction_readmits_same_failed_request () =
       let trigger =
         Compaction_trigger.Provider_overflow { limit_tokens = Some 4_096 }
       in
+      let admitted_evidence : Runtime_agent.capacity_readmission_evidence =
+        { serialized_body_bytes = 1_024
+        ; serialized_body_limit_bytes = Some 1_048_576
+        ; token_fit_limit_tokens = Some 4_096
+        ; serving_constraint_admitted = false
+        }
+      in
       let prepare ?candidate_readmission_probe () =
         Post_turn.prepare_compaction
           ~base_path:config.base_path
@@ -1291,13 +1298,19 @@ let test_reactive_compaction_readmits_same_failed_request () =
         ()
       |> expect_terminal
            Keeper_event_queue_state.Failed_request_readmission_failed;
+      prepare
+        ~candidate_readmission_probe:(fun _ ->
+          Ok { admitted_evidence with token_fit_limit_tokens = None })
+        ()
+      |> expect_terminal
+           Keeper_event_queue_state.Failed_request_readmission_failed;
       let probed_checkpoint = ref None in
       let prepared =
         match
           prepare
             ~candidate_readmission_probe:(fun candidate ->
               probed_checkpoint := Some candidate;
-              Ok ())
+              Ok admitted_evidence)
             ()
         with
         | Ok prepared -> prepared
@@ -1327,11 +1340,11 @@ let test_reactive_compaction_readmits_same_failed_request () =
       check
         int
         "every rejected exact attempt is quarantined once"
-        4
+        5
         (List.length !quarantine_causes);
       check int
         "each readmission case executes one compaction plan"
-        4
+        5
         (Exact_fixture.post_count exact_server))
 ;;
 

@@ -136,12 +136,26 @@ type capacity_readmission_failure =
   | Still_over_capacity of Agent_sdk.Error.sdk_error
   | Readmission_failed of Agent_sdk.Error.sdk_error
 
+type capacity_readmission_evidence =
+  { serialized_body_bytes : int
+  ; serialized_body_limit_bytes : int option
+  ; token_fit_limit_tokens : int option
+  ; serving_constraint_admitted : bool
+  }
+(** Exact local evidence observed before the disabled provider transport.
+    [token_fit_limit_tokens = Some limit] means OAS measured this exact request
+    and admitted it against [limit]. [None] means the provider route has no
+    supported token-fit admission; reaching the sentinel proves only the
+    serialized-body boundary. *)
+
 type capacity_readmission_probe =
-  Agent_sdk.Checkpoint.t -> (unit, capacity_readmission_failure) result
+  Agent_sdk.Checkpoint.t ->
+  (capacity_readmission_evidence, capacity_readmission_failure) result
 (** Rebuild and re-admit the same Keeper provider request against a candidate
-    checkpoint. [Ok ()] means OAS reached its admitted completion-transport
-    boundary. Provider-native admission measurement may perform its own HTTP
-    request; the probe transport never sends a completion-generation request. *)
+    checkpoint. [Ok evidence] means the exact final serialized body reached
+    its declared byte admission and records whether OAS also proved token fit.
+    Provider-native admission measurement may perform its own HTTP request; the
+    probe transport never sends a completion-generation request. *)
 
 module Capacity_readmission_for_testing : sig
   val failure_of_error :

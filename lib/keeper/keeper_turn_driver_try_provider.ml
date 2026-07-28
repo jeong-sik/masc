@@ -394,15 +394,16 @@ let run_try_provider
       Ok ()
     in
     Ok
-      { base_config with
-        model_input_projection = Some model_input_projection
-      ; request_wire_observer = Some request_wire_observer
-      }
+      ( { base_config with
+          model_input_projection = Some model_input_projection
+        ; request_wire_observer = Some request_wire_observer
+        }
+      , model_input_projection_for )
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
   match config_result with
   | Error err -> Error err, None, None
-  | Ok config ->
+  | Ok (config, model_input_projection_for) ->
     let goal_blocks =
       match ctx.goal_blocks with
       | Some blocks -> blocks

@@ -903,13 +903,13 @@ let build_with_transport
     ~sw:(_ : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
-    ~(transport : Llm_provider.Llm_transport.t)
+    ~(transport : Llm_provider.Llm_transport.t option)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
   | Error _ as e -> e
   | Ok _ ->
     let builder =
-      Runtime_agent_context.builder ~net ~config ~transport ()
+      Runtime_agent_context.builder ~net ~config ?transport ()
     in
     Agent_sdk.Builder.build_safe builder
 
@@ -1002,7 +1002,7 @@ let resume_from_checkpoint_with_transport
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
     ~(checkpoint : Agent_sdk.Checkpoint.t)
-    ~(transport : Llm_provider.Llm_transport.t)
+    ~(transport : Llm_provider.Llm_transport.t option)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
   | Error _ as e -> e
@@ -1055,8 +1055,16 @@ type capacity_readmission_failure =
   | Still_over_capacity of Agent_sdk.Error.sdk_error
   | Readmission_failed of Agent_sdk.Error.sdk_error
 
+type capacity_readmission_evidence =
+  { serialized_body_bytes : int
+  ; serialized_body_limit_bytes : int option
+  ; token_fit_limit_tokens : int option
+  ; serving_constraint_admitted : bool
+  }
+
 type capacity_readmission_probe =
-  Agent_sdk.Checkpoint.t -> (unit, capacity_readmission_failure) result
+  Agent_sdk.Checkpoint.t ->
+  (capacity_readmission_evidence, capacity_readmission_failure) result
 
 let capacity_readmission_failure_of_error error =
   match error with
@@ -1108,21 +1116,75 @@ module Capacity_readmission_for_testing = struct
   let failure_of_error = capacity_readmission_failure_of_error
 end
 
+let probe_request_admission ~stream request =
+  let prepared =
+    Llm_provider.Complete.prepare_request
+      ~config:request.Llm_provider.Llm_transport.config
+      ~messages:request.messages
+      ~tools:request.tools
+      ?capture_id:request.capture_id
+      ?stream_idle_timeout_s:request.stream_idle_timeout_s
+      ?first_event_timeout_s:request.first_event_timeout_s
+      ?body_timeout_s:request.body_timeout_s
+      ()
+  in
+  let ( let* ) = Result.bind in
+  let* _serialized =
+    Llm_provider.Complete.admit_request_body ~stream prepared
+  in
+  let* wire =
+    Llm_provider.Complete.inspect_serialized_request
+      ~stream
+      ~config:request.config
+      ~messages:request.messages
+      ~tools:request.tools
+      ()
+  in
+  let serving_constraint_admitted =
+    Option.is_some (Llm_provider.Complete.serving_constraint prepared)
+  in
+  let token_fit_enforced =
+    serving_constraint_admitted
+    || Llm_provider.Count_tokens_sync.supports_completion_request_measurement
+         request.config
+  in
+  let token_fit_limit_tokens =
+    if token_fit_enforced
+    then
+      (match Llm_provider.Complete.resolve_context_limit prepared with
+       | Ok limit -> Some limit
+       | Error _ -> None)
+    else None
+  in
+  Ok
+    { serialized_body_bytes = wire.body_bytes
+    ; serialized_body_limit_bytes = request.config.max_request_body_bytes
+    ; token_fit_limit_tokens
+    ; serving_constraint_admitted
+    }
+;;
+
 let probe_transport observed : Llm_provider.Llm_transport.t =
-  let reject () =
-    Atomic.set observed true;
-    Error
-      (Llm_provider.Http_client.AcceptRejected
-         { reason =
-             "provider transport is disabled for capacity re-admission"
-         })
+  let reject ~stream request =
+    match probe_request_admission ~stream request with
+    | Error _ as error -> error
+    | Ok evidence ->
+      Atomic.set observed (Some evidence);
+      Error
+        (Llm_provider.Http_client.AcceptRejected
+           { reason =
+               "provider transport is disabled for capacity re-admission"
+           })
   in
   { complete_sync =
-      (fun _ ->
-         { Llm_provider.Llm_transport.response = reject ()
+      (fun request ->
+         { Llm_provider.Llm_transport.response =
+             reject ~stream:false request
          ; latency_ms = None
          })
-  ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> reject ())
+  ; complete_stream =
+      (fun ?on_telemetry:_ ~on_event:_ request ->
+         reject ~stream:true request)
   }
 ;;
 
@@ -1134,7 +1196,7 @@ let probe_blocks_admission
       ~(stream : bool)
       ~(continuation : bool)
       (goal_blocks : Agent_sdk.Types.content_block list)
-  : (unit, capacity_readmission_failure) result
+  : (capacity_readmission_evidence, capacity_readmission_failure) result
   =
   let admitted_goal_blocks = if continuation then [] else goal_blocks in
   match
@@ -1155,7 +1217,7 @@ let probe_blocks_admission
                     continuation entry point"
                })))
   | Ok () ->
-    let observed = Atomic.make false in
+    let observed = Atomic.make None in
     let transport = probe_transport observed in
     let probe_config =
       { config with
@@ -1172,7 +1234,7 @@ let probe_blocks_admission
          ~net
          ~config:probe_config
          ~checkpoint
-         ~transport
+         ~transport:(Some transport)
      with
      | Error error -> Error (capacity_readmission_failure_of_error error)
      | Ok agent ->
@@ -1209,17 +1271,15 @@ let probe_blocks_admission
            raise exn
        in
        close_agent_for_cleanup ~propagate_cancel:false ~config:probe_config agent;
-       if Atomic.get observed
-       then Ok ()
-       else
-         (match run_result with
-          | Error error ->
-            Error (capacity_readmission_failure_of_error error)
-          | Ok _ ->
-            Error
-              (Readmission_failed
-                 (Agent_sdk.Error.Internal
-                    "capacity re-admission completed without reaching the provider admission boundary"))))
+       (match Atomic.get observed, run_result with
+        | Some evidence, _ -> Ok evidence
+        | None, Error error ->
+          Error (capacity_readmission_failure_of_error error)
+        | None, Ok _ ->
+          Error
+            (Readmission_failed
+               (Agent_sdk.Error.Internal
+                  "capacity re-admission completed without reaching the provider admission boundary"))))
 ;;
 
 (* ================================================================ *)

@@ -308,7 +308,9 @@ let run_try_provider
     in
     let request_config = request_config_for_keeper_projection base_config in
     let base_projection =
-      Option.value ~default:Fun.id ctx.model_input_projection
+      match ctx.model_input_projection with
+      | None -> fun messages -> messages
+      | Some projection -> projection
     in
     let model_input_projection =
       Keeper_provider_input_projection.create

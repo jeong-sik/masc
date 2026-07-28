@@ -185,8 +185,7 @@ let test_requests_json_shape () =
     let r = List.hd reqs in
     (* Required per-request fields *)
     let required_string_fields = [
-      "request_id"; "task_id"; "task_title"; "status"; "created_at";
-      "submitted_by"; "verdict_reason";
+      "request_id"; "task_id"; "task_title"; "created_at"; "submitted_by";
     ] in
     List.iter (fun key ->
       match member key r with
@@ -196,15 +195,6 @@ let test_requests_json_shape () =
             (Printf.sprintf "%s should be string, got %s"
                key (Yojson.Safe.to_string (member key r)))
     ) required_string_fields;
-    (* Nullable fields *)
-    let nullable_string_fields = ["keeper"; "approved_by"; "verdict"] in
-    List.iter (fun key ->
-      match member key r with
-      | `String _ | `Null -> ()
-      | _ ->
-          Alcotest.fail
-            (Printf.sprintf "%s should be string or null" key)
-    ) nullable_string_fields;
     (* List fields *)
     (match member "completion_contract" r with
      | `List items ->
@@ -237,16 +227,11 @@ let test_requests_json_shape () =
       true (member "required_evidence" r = `Null);
     Alcotest.(check bool) "valid empty/non-empty evidence has no projection error"
       true (member "evidence_projection_error" r = `Null);
-    (* Pending status (no verifier yet) *)
-    (match member "status" r with
-     | `String "pending" -> ()
-     | `String s -> Alcotest.fail (Printf.sprintf "expected pending, got %s" s)
-     | _ -> Alcotest.fail "status should be string");
     (match member "submitted_by" r with
      | `String "keeper-alpha" -> ()
      | _ -> Alcotest.fail "submitted_by mismatch");
     (* task_title is pulled from the submit envelope so the UI detail cell
-       has a fallback when contract/evidence/verdict_reason are all empty. *)
+       has a fallback when contract and evidence are empty. *)
     (match member "task_title" r with
      | `String "title for task-shape" -> ()
      | `String s ->
@@ -505,74 +490,6 @@ let test_requests_and_summary_remain_available_after_fd_observation () =
           true
           (member "degraded" summary = `Null)))
 
-let test_summary_empty () =
-  with_temp_base_path (fun base_path ->
-    let j = D.summary_json ~base_path () in
-    Alcotest.(check int) "total" 0 (int_field "total" j);
-    let by = member "by_status" j in
-    Alcotest.(check int) "pending" 0 (int_field "pending" by);
-    Alcotest.(check int) "approved" 0 (int_field "approved" by);
-    Alcotest.(check int) "rejected" 0 (int_field "rejected" by);
-    Alcotest.(check int) "timed_out" 0 (int_field "timed_out" by);
-    match member "recent_rejections" j with
-    | `List [] -> ()
-    | _ -> Alcotest.fail "recent_rejections not empty list")
-
-let test_summary_bucket_counts () =
-  with_temp_base_path (fun base_path ->
-    (* 2 pending + 1 approved + 2 rejected *)
-    let _p1 = create_pending_request ~base_path ~task_id:"t-p1"
-        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
-    let _p2 = create_pending_request ~base_path ~task_id:"t-p2"
-        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
-    let a1 = create_pending_request ~base_path ~task_id:"t-a1"
-        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
-    let r1 = create_pending_request ~base_path ~task_id:"t-r1"
-        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
-    let r2 = create_pending_request ~base_path ~task_id:"t-r2"
-        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
-    let verdict_of req ~verdict =
-      match V.Internal.submit_verdict ~base_path ~req_id:req.V.id
-              ~verifier:"v" ~verdict with
-      | Ok _ -> ()
-      | Error e -> Alcotest.fail e
-    in
-    verdict_of a1 ~verdict:V.Pass;
-    verdict_of r1 ~verdict:(V.Fail "r1 reason");
-    verdict_of r2 ~verdict:(V.Fail "r2 reason");
-
-    let j = D.summary_json ~base_path () in
-    Alcotest.(check int) "total" 5 (int_field "total" j);
-    let by = member "by_status" j in
-    Alcotest.(check int) "pending" 2 (int_field "pending" by);
-    Alcotest.(check int) "approved" 1 (int_field "approved" by);
-    Alcotest.(check int) "rejected" 2 (int_field "rejected" by);
-
-    match member "recent_rejections" j with
-    | `List rows ->
-        Alcotest.(check int) "rejection rows" 2 (List.length rows);
-        List.iter (fun row ->
-          match member "verdict_reason" row with
-          | `String s when s <> "" -> ()
-          | _ -> Alcotest.fail "verdict_reason missing/empty"
-        ) rows
-    | _ -> Alcotest.fail "recent_rejections not list")
-
-let test_summary_recent_clamp () =
-  with_temp_base_path (fun base_path ->
-    (* recent=0 returns empty list even when rejections exist *)
-    let r = create_pending_request ~base_path ~task_id:"t"
-        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
-    (match V.Internal.submit_verdict ~base_path ~req_id:r.V.id
-             ~verifier:"v" ~verdict:(V.Fail "x") with
-     | Ok _ -> () | Error e -> Alcotest.fail e);
-    let j = D.summary_json ~base_path ~recent:0 () in
-    (match member "recent_rejections" j with
-     | `List [] -> ()
-     | _ -> Alcotest.fail "expected empty list at recent=0");
-    (* recent > 20 clamps to 20 (smoke: ensures no crash) *)
-    let _ = D.summary_json ~base_path ~recent:999 () in ())
-
 (* ── Registration ───────────────────────────────────── *)
 
 let () =
@@ -596,9 +513,9 @@ let () =
         test_requests_and_summary_remain_available_after_fd_observation;
     ];
     "summary_json", [
-      Alcotest.test_case "empty base_path" `Quick test_summary_empty;
-      Alcotest.test_case "bucket counts + recent rejections"
-        `Quick test_summary_bucket_counts;
-      Alcotest.test_case "recent clamp" `Quick test_summary_recent_clamp;
+      Alcotest.test_case "immutable submission count" `Quick
+        (fun () -> with_temp_base_path (fun base_path ->
+          let j = D.summary_json ~base_path () in
+          Alcotest.(check int) "total" 0 (int_field "total" j)));
     ];
   ]

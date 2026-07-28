@@ -529,6 +529,9 @@ let effective_meta_of_profile_defaults
              | targets -> targets);
           active_goal_ids =
             apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
+          max_context_override =
+            apply_profile_default_opt defaults.max_context_override
+              meta.max_context_override;
           sandbox_profile;
           sandbox_image =
             apply_profile_default_opt defaults.sandbox_image meta.sandbox_image;

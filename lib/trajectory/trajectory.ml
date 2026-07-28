@@ -610,6 +610,9 @@ let clear_task_id (acc : accumulator) : unit =
 let increment_turn (acc : accumulator) : unit =
   acc.turn <- acc.turn + 1
 
+let set_turn (acc : accumulator) (turn : int) : unit =
+  if turn > acc.turn then acc.turn <- turn
+
 let record_entry ?runtime_contract ?action_radius ?on_persist_error
     (acc : accumulator) (entry : tool_call_entry) : unit =
   acc.entries <- entry :: acc.entries;

@@ -190,7 +190,6 @@ type settlement = Keeper_event_queue_state.settlement =
       ; successor : Keeper_event_queue.stimulus option
       }
 
-type lease = Keeper_event_queue_state.lease
 type transition_receipt = Keeper_event_queue_state.transition_receipt
 type outbox_entry = Keeper_event_queue_state.outbox_entry
 
@@ -206,12 +205,6 @@ type settle_result =
 type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
-
-val lease_stimuli : lease -> Keeper_event_queue.stimulus list
-val lease_kind : lease -> lease_kind
-
-val active_lease_result :
-  base_path:string -> keeper_name:string -> (lease option, string) result
 
 val exact_execution_binding_result :
   base_path:string -> keeper_name:string -> (exact_execution_binding option, string) result
@@ -280,164 +273,14 @@ val load_state_result :
     checkpointed, and then compacted to the exact empty suffix before the state
     is returned. *)
 
-val claim_when_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  claimed_at:float ->
-  ready:(Keeper_event_queue.stimulus -> bool) ->
-  unit ->
-  (lease option, string) result
-
-val claim_board_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  claimed_at:float ->
-  unit ->
-  (lease option, string) result
-
-val settle_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  settled_at:float ->
-  lease:lease ->
-  settlement:settlement ->
-  unit ->
-  (settle_result, string) result
-(** Append and fsync the owner-bound canonical receipt before checkpointing the
-    state snapshot. Once checkpointed, the exact WAL prefix is durably compacted
-    rather than retained by an arbitrary size policy. A post-commit checkpoint,
-    WAL-compaction or pending-projection failure is returned as a committed
-    outcome, never relabelled as an uncommitted error. *)
-
-val bind_exact_execution_result :
-  base_path:string ->
-  keeper_name:string ->
-  lease:lease ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  unit ->
-  (exact_write_outcome, string) result
-(** Bind the affine call identity before dispatch. Only [Ok Fsync_completed]
-    permits the provider call to start. [Ok (Visible_sync_unconfirmed _)]
-    means the replacement is visible but its parent-directory sync is
-    unconfirmed; the
-    exact identity must be settled terminally without POST or failover. An
-    [Error] means the replacement was not visible. *)
-
-val release_exact_execution_before_dispatch_result :
-  base_path:string ->
-  keeper_name:string ->
-  lease:lease ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  unit ->
-  (exact_write_outcome, string) result
-(** Remove a bound identity only while it is still pre-dispatch.
-    [Fsync_completed] permits fallback to another slot.
-    [Visible_sync_unconfirmed _] means the removal is visible but its
-    directory sync is unconfirmed; the caller
-    must return a source-bound terminal for the original identity and must not
-    fail over. [Error] means the removal was not visible. *)
-
-val quarantine_exact_execution_result :
-  base_path:string ->
-  keeper_name:string ->
-  lease:lease ->
-  terminal:exact_execution_terminal ->
-  unit ->
-  (exact_write_outcome, string) result
-(** Persist the canonical post-dispatch terminal cause. A visible replacement
-    with unconfirmed directory sync keeps that original cause and remains
-    eligible for matching source-bound settlement. *)
-
-val prepare_exact_source_disposition_result :
-  base_path:string ->
-  keeper_name:string ->
-  lease:lease ->
-  source:Keeper_checkpoint_ref.t ->
-  terminal:exact_execution_terminal ->
-  semantic:exact_settlement_semantic ->
-  prepared_at:float ->
-  unit ->
-  (exact_source_disposition * exact_write_outcome, string) result
-
-val finalize_exact_source_disposition_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  settled_at:float ->
-  lease:lease ->
-  disposition_id:string ->
-  unit ->
-  (settle_result, string) result
-
-module For_testing : sig
-  type settlement_followup_failure =
-    | Fail_checkpoint of string
-    | Fail_wal_compaction of string
-
-  val finalize_exact_source_disposition_with_followup_failure_result :
-    failure:settlement_followup_failure ->
-    base_path:string ->
-    keeper_name:string ->
-    settled_at:float ->
-    lease:lease ->
-    disposition_id:string ->
-    unit ->
-    (settle_result, string) result
-
-  val prepare_exact_source_disposition_with_sync_parent_result :
-    sync_parent:(string -> unit) ->
-    base_path:string ->
-    keeper_name:string ->
-    lease:lease ->
-    source:Keeper_checkpoint_ref.t ->
-    terminal:exact_execution_terminal ->
-    semantic:exact_settlement_semantic ->
-    prepared_at:float ->
-    unit ->
-    (exact_source_disposition * exact_write_outcome, string) result
-end
-
-val settle_bound_exact_nonterminal_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  settled_at:float ->
-  lease:lease ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  settlement:settlement ->
-  unit ->
-  (settle_result, string) result
-(** Commit only the identity-bound nonterminal Ack/retry/floor
-    cases. Exact terminal outcomes require durable source preparation and
-    [finalize_exact_source_disposition_result]. *)
-
-val cancel_accepted_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  current_owner_nonce:int ->
-  settled_at:float ->
-  lease:lease ->
-  cancellation:accepted_cancellation ->
-  unit ->
-  (settle_result, string) result
-(** Commit one terminal accepted cancellation under the same durable owner lock
-    that reads the current queue revision. The pure state boundary checks the
-    supplied owner generation and observed source revision before the receipt
-    WAL is appended, so callers cannot split fence validation from commit. *)
-
+(* The claim/settle lease surface lived here: claim_when_result,
+   claim_board_result, settle_result, the lease-taking exact-execution
+   fence (bind / release_before_dispatch / quarantine / prepare / finalize /
+   settle_bound_exact_nonterminal), and cancel_accepted_result. #25969 moved
+   production to peek/ack; nothing outside tests obtained a lease afterwards,
+   and Keeper_event_queue_state.of_yojson never restored one, so no live lane
+   could reach any of them. The pending-side operations below carry no lease
+   and stay. *)
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

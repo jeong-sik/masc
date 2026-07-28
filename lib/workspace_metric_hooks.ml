@@ -179,29 +179,6 @@ let observe_task_transition_event
     warn_telemetry_drop ~event:(Accountability transition) exn
 ;;
 
-(* #10449: Task completion path + contract-presence observability. *)
-let task_completion_path_metric = "masc_task_completion_path_total"
-
-let () =
-  Otel_metric_store.register_counter
-    ~name:task_completion_path_metric
-    ~help:
-      "Total task Done emits classified by completion path and contract presence. Lets \
-       operators attribute bypass-rate to creation-side (missing contracts) vs. \
-       gate-side (review adapter not firing). Labels: path (direct_llm_verdict | \
-       via_verification), contract_state \
-       (no_contract | empty_contract | with_contract), agent_name. Cardinality bounded \
-       at ~4 x 3 x fleet_size (#10449)."
-    ()
-;;
-
-let record_task_completion_path ~path ~contract_state ~agent_name =
-  Otel_metric_store.inc_counter
-    task_completion_path_metric
-    ~labels:[ "path", path; "contract_state", contract_state; "agent_name", agent_name ]
-    ()
-;;
-
 let record_workspace_broadcast ~msg_type ~elapsed_s =
   Otel_metric_store.observe_histogram
     Otel_metric_store.metric_workspace_broadcast_duration
@@ -349,7 +326,6 @@ let install () =
 
   Atomic.set Workspace_hooks.tool_assigned_fn Tool_assignment_telemetry.emit_assigned;
 
-  Atomic.set Workspace_hooks.task_completion_path_observed_fn record_task_completion_path;
   Atomic.set Workspace_hooks.workspace_broadcast_observed_fn record_workspace_broadcast;
   Atomic.set File_lock_eio.on_lock_attempt_fn record_file_lock_attempt;
   Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry;
@@ -474,24 +450,6 @@ let install () =
   Atomic.set Workspace_hooks.verification_delete_request_fn
     (fun config ~verification_id ->
        Verification_protocol.delete_verification_request ~config ~verification_id);
-
-  Atomic.set Workspace_hooks.verification_record_verdict_fn
-    (fun config ~task_id ~verifier ~verification_id ~decision ->
-       match decision with
-       | `Approve notes ->
-         Verification_protocol.record_approve_verification
-           ~config
-           ~task_id
-           ~verifier
-           ~verification_id
-           ~notes
-       | `Reject reason ->
-         Verification_protocol.record_reject_verification
-           ~config
-           ~task_id
-           ~verifier
-           ~verification_id
-           ~reason);
 
   Atomic.set Workspace_hooks.verification_notify_submit_fn
     (fun config ~task ~assignee ~verification_id ~evidence_refs ->

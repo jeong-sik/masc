@@ -259,6 +259,11 @@ export type KeeperCompactionReinjectionObservation = {
   readonly context_injected_receipts: number
 }
 
+export type KeeperCompactionOutcome =
+  | 'checkpoint_committed'
+  | 'retry_without_checkpoint'
+  | 'lifecycle_cleanup_failed_without_checkpoint'
+
 export type KeeperCompactionSnapshot = {
   readonly id: string
   readonly keeper: string
@@ -275,6 +280,8 @@ export type KeeperCompactionSnapshot = {
   readonly saved_tokens: number | null
   readonly compaction_id: string | null
   readonly compaction_source: string | null
+  readonly compaction_outcome: KeeperCompactionOutcome | null
+  readonly cause: string | null
   readonly status: string
   readonly links: KeeperCompactionSnapshotLinks
   readonly exact_evidence: KeeperCompactionExactEvidence | null
@@ -630,6 +637,36 @@ function decodeCompactionReinjectionObservation(
   }
 }
 
+function decodeCompactionOutcome(raw: unknown): KeeperCompactionOutcome | null | undefined {
+  if (raw === null) return null
+  const value = asString(raw)
+  switch (value) {
+    case 'checkpoint_committed':
+    case 'retry_without_checkpoint':
+    case 'lifecycle_cleanup_failed_without_checkpoint':
+      return value
+    case undefined:
+    default:
+      return undefined
+  }
+}
+
+function compactionOutcomeContractIsValid(
+  outcome: KeeperCompactionOutcome | null,
+  evidence: KeeperCompactionExactEvidence | null,
+  cause: string | null,
+): boolean {
+  switch (outcome) {
+    case null:
+      return evidence === null && cause === null
+    case 'checkpoint_committed':
+      return evidence !== null && (cause === null || Boolean(cause.trim()))
+    case 'retry_without_checkpoint':
+    case 'lifecycle_cleanup_failed_without_checkpoint':
+      return evidence === null && Boolean(cause?.trim())
+  }
+}
+
 function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
@@ -642,9 +679,18 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
   const runtimeId = asNullableString(raw.runtime_id)
   const compactionSource = asNullableString(raw.compaction_source)
   const exactEvidence = decodeCompactionExactEvidence(raw.exact_evidence)
+  const compactionOutcome = decodeCompactionOutcome(raw.compaction_outcome)
+  const cause =
+    raw.cause === null ? null : asString(raw.cause)
   const reinjectionObservation =
     decodeCompactionReinjectionObservation(raw.reinjection_observation)
-  if (exactEvidence === undefined || reinjectionObservation === undefined) return null
+  if (
+    exactEvidence === undefined
+    || compactionOutcome === undefined
+    || cause === undefined
+    || reinjectionObservation === undefined
+  ) return null
+  if (!compactionOutcomeContractIsValid(compactionOutcome, exactEvidence, cause)) return null
   return {
     id,
     keeper,
@@ -661,6 +707,8 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
     saved_tokens: nullableNumber(raw.saved_tokens),
     compaction_id: asNullableString(raw.compaction_id),
     compaction_source: compactionSource,
+    compaction_outcome: compactionOutcome,
+    cause: cause,
     status,
     links: decodeKeeperCompactionSnapshotLinks(raw.links),
     exact_evidence: exactEvidence,

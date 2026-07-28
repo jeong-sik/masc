@@ -199,36 +199,6 @@ let tool_assigned_fn
      string) Atomic.t
   = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?config_hash:_ ?reason:_ () -> "")
 
-(** #10449: Task completion path observability.
-
-    Issue #10449 documented that 16 task done transitions over 3
-    days saw only 1 (6.25%) traverse the [awaiting_verification]
-    gate. The [verifier-gate redirect] in [Task.Tool] only fires
-    when [task.contract] has a non-empty [completion_contract] or
-    [required_evidence] list, so tasks created without contracts
-    bypass verification entirely.
-
-    The pre-existing [fsm_drift_observer_fn] only counts the
-    [Claimed → Done] skip pattern (skipping [in_progress]); it
-    does not split by contract presence, so operators cannot tell
-    whether the bypass rate comes from missing contracts
-    (creation-side problem) or from the redirect mis-firing
-    (gate-side problem).
-
-    This hook fires once per successful transition into [Done] and
-    classifies the path along two axes:
-
-    - [path]: ["direct_llm_verdict"] / ["via_verification"]
-    - [contract_state]: ["no_contract"] / ["empty_contract"] /
-      ["with_contract"]
-
-    Cardinality is bounded at ~4 × 3 × fleet_size series, safe
-    for Otel_metric_store.  Emit lives in [lib/workspace.ml] to avoid a
-    [masc_workspace → Otel_metric_store] dep cycle. *)
-let task_completion_path_observed_fn
-  : (path:string -> contract_state:string -> agent_name:string -> unit) Atomic.t
-  = Atomic.make (fun ~path:_ ~contract_state:_ ~agent_name:_ -> ())
-
 (** Wall-clock latency of [Workspace_broadcast.broadcast] including
     [next_seq] (state.json file lock + read + write), agent.json read
     for the cache-invariant check, msg.json write, [backend_publish],
@@ -306,17 +276,6 @@ let verification_submit_request_fn
      (unit, string) result) Atomic.t
   = Atomic.make
       (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
-         Ok ())
-
-let verification_record_verdict_fn
-  : (Workspace_utils_backend_setup.config ->
-     task_id:string ->
-     verifier:string ->
-     verification_id:string ->
-     decision:[ `Approve of string | `Reject of string ] ->
-     (unit, string) result) Atomic.t
-  = Atomic.make
-      (fun _config ~task_id:_ ~verifier:_ ~verification_id:_ ~decision:_ ->
          Ok ())
 
 (* RFC-0221 §3.1: compensation hook for atomic submit. Filled at boot to delete

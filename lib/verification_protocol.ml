@@ -29,9 +29,10 @@ type submit_request_spec =
   ; board_title : string
   ; board_content : string
   ; evidence_fields : (string * Yojson.Safe.t) list
-      (* task-1664: [required_artifacts] / [submitted_evidence] JSON fields
-         spliced next to the flat [evidence_refs] so verifiers can tell the
-         contract's demanded artifacts apart from what the agent submitted. *)
+      (* task-1664: transient required/submitted role split for Board/SSE.
+         Request persistence replaces the raw [submitted_evidence] list with
+         its one typed submit-time snapshot SSOT. *)
+  ; submitted_evidence : string list
   }
 
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
@@ -62,13 +63,17 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     (match task.contract with
      | Some c -> c.completion_contract
      | None -> []) in
-  (* task-1664: derive the typed required/submitted split from the task (the
-     SSOT), and splice it next to the unchanged flat [evidence_refs] field. *)
+  (* task-1664: derive the required/submitted role split from the task SSOT.
+     The submitted strings remain transient here; [create_submit_request]
+     replaces them with the typed persisted snapshot. *)
+  let verification_evidence =
+    Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
+      ~submitted_evidence_refs:evidence_refs
+      task
+  in
   let evidence_fields =
     Masc_task_handlers.Tool_task_completion_review.verification_evidence_fields
-      (Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
-         ~submitted_evidence_refs:evidence_refs
-         task)
+      verification_evidence
   in
   let output =
     `Assoc
@@ -89,6 +94,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   ; board_title
   ; board_content
   ; evidence_fields
+  ; submitted_evidence = verification_evidence.submitted_evidence
   }
 
 let warn_contract_gap (task : Masc_domain.task) =
@@ -120,9 +126,29 @@ let create_submit_request ~(config : Workspace.config)
   let base_path = config.Workspace.base_path in
   warn_contract_gap task;
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
+  let evidence_snapshot =
+    Workspace_verification_store.snapshot_submitted_evidence_json
+      ~base_path
+      ~worker:assignee
+      spec.submitted_evidence
+  in
+  let output =
+    match spec.output with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if String.equal key "submitted_evidence"
+             then key, evidence_snapshot
+             else key, value)
+           fields)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      as impossible ->
+      impossible
+  in
   match
     Verification.create_request ~base_path ~task_id:task.id ~request_id:verification_id
-      ~output:spec.output ~criteria:spec.criteria ~worker:assignee ()
+      ~output ~criteria:spec.criteria ~worker:assignee ()
   with
   | Ok _ -> Ok ()
   | Error e ->
@@ -197,35 +223,6 @@ let on_submit_for_verification ~(config : Workspace.config)
     notify_submit_for_verification ~config ~task ~assignee ~verification_id ~evidence_refs;
     Ok ()
 
-let record_approve_verification ~(config : Workspace.config)
-    ~task_id ~verifier ~verification_id ~notes =
-  let base_path = config.Workspace.base_path in
-  (* This low-level receipt write is intentionally not an authorization
-     boundary. The production caller is the post-commit callback installed by
-     [Tool_task]: [Workspace_task_lifecycle] has already admitted [verifier] as
-     the Task phase winner before committing the task transition. The request
-     file lock makes the terminal receipt first-writer-wins. *)
-  if verification_id = "" then
-    Error "verification_id is required for approval verdict persistence"
-  else
-    match
-      Verification.Internal.submit_verdict
-        ~base_path
-        ~req_id:verification_id
-        ~verifier
-        ~verdict:Verification.Pass
-    with
-    | Ok updated ->
-      Verification.attribution_of_request updated
-      |> Option.iter Dashboard_attribution.record;
-      Ok ()
-    | Error e ->
-      Log.Task.error
-        ~keeper_name:task_id
-        "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
-        task_id verification_id verifier e;
-      Error e
-
 let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
   let meta_json = `Assoc [
     ("type", `String "verification_verdict");
@@ -262,41 +259,6 @@ let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
     ("timestamp", `Float (Time_compat.now ()));
   ])
 
-let on_approve_verification ~(config : Workspace.config)
-    ~task_id ~verifier ~verification_id ~notes =
-  match
-    record_approve_verification ~config ~task_id ~verifier ~verification_id ~notes
-  with
-  | Error e -> Error e
-  | Ok () ->
-    notify_approve_verification ~task_id ~verifier ~verification_id ~notes;
-    Ok ()
-
-let record_reject_verification ~(config : Workspace.config)
-    ~task_id ~verifier ~verification_id ~reason =
-  let base_path = config.Workspace.base_path in
-  (* Same Task-winner and post-commit boundary as approval above. *)
-  if verification_id = "" then
-    Error "verification_id is required for rejection verdict persistence"
-  else
-    match
-      Verification.Internal.submit_verdict
-        ~base_path
-        ~req_id:verification_id
-        ~verifier
-        ~verdict:(Verification.Fail reason)
-    with
-    | Ok updated ->
-      Verification.attribution_of_request updated
-      |> Option.iter Dashboard_attribution.record;
-      Ok ()
-    | Error e ->
-      Log.Task.error
-        ~keeper_name:task_id
-        "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
-        task_id verification_id verifier e;
-      Error e
-
 let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
   let meta_json = `Assoc [
     ("type", `String "verification_verdict");
@@ -330,16 +292,6 @@ let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
     ("reason", `String reason);
     ("timestamp", `Float (Time_compat.now ()));
   ])
-
-let on_reject_verification ~(config : Workspace.config)
-    ~task_id ~verifier ~verification_id ~reason =
-  match
-    record_reject_verification ~config ~task_id ~verifier ~verification_id ~reason
-  with
-  | Error e -> Error e
-  | Ok () ->
-    notify_reject_verification ~task_id ~verifier ~verification_id ~reason;
-    Ok ()
 
 let awaiting_verification_deadline
       ~(submitted_at : string)

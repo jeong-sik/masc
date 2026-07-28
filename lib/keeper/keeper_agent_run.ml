@@ -162,6 +162,8 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
 
 let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
+  | Keeper_tools_oas.External_effect_deferred ->
+    Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting)
   | Keeper_tools_oas.Terminal_effect_completed ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
   | Keeper_tools_oas.Terminal_effect_failed

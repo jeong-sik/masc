@@ -223,8 +223,8 @@ let test_masc_transition_schema () =
       Alcotest.(check bool) "description omits requires tools routing"
         false
         (contains_substring ~needle:"requires tools" schema.description);
-      Alcotest.(check bool) "description pins the verification completion path"
-        true
+      Alcotest.(check bool) "description omits configured completion reviewer"
+        false
         (contains_substring
            ~needle:"configured LLM completion reviewer"
            schema.description);
@@ -236,10 +236,12 @@ let test_masc_transition_schema () =
            schema.description);
       (match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "has completion_contract" true
+          Alcotest.(check bool) "no transition completion_contract input" false
             (List.mem_assoc "completion_contract" props);
-          Alcotest.(check bool) "has evaluator_runtime" true
+          Alcotest.(check bool) "no transition evaluator_runtime input" false
             (List.mem_assoc "evaluator_runtime" props);
+          Alcotest.(check bool) "no configured_llm_verdict input" false
+            (List.mem_assoc "configured_llm_verdict" props);
           Alcotest.(check bool) "has handoff_context" true
             (List.mem_assoc "handoff_context" props)
       | None -> Alcotest.fail "masc_transition missing properties");

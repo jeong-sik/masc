@@ -80,19 +80,30 @@ let expect_invalid_transition label = function
 ;;
 
 let transition config ~agent_name ~task_id ~action ?(notes = "") ?(reason = "") () =
-  let configured_llm_verdict =
-    match action with
-    | Masc_domain.Done_action ->
-      Some
-        { Masc_domain.decision = Masc_domain.Completion_pass
-        ; runtime_id = "test-completion-reviewer"
-        ; rationale = Some "lifecycle fixture approval"
-        ; evaluated_at = Masc_domain.now_iso ()
-        }
-    | _ -> None
-  in
-  Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason
-    ?configured_llm_verdict ()
+  match action with
+  | Masc_domain.Done_action ->
+    (match (task config task_id).task_status with
+     | Masc_domain.Claimed _ | Masc_domain.InProgress _ ->
+       (match
+          Workspace.transition_task_r config ~agent_name ~task_id
+            ~action:Masc_domain.Submit_for_verification ~notes ()
+        with
+        | Error _ as error -> error
+        | Ok _ ->
+          let verifier = "admin-board-keeper" in
+          (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
+           | Error _ as error -> error
+           | Ok _ ->
+             Workspace.transition_task_r config ~agent_name:verifier ~task_id
+               ~action:Masc_domain.Approve_verification
+               ~notes:("verified: " ^ notes)
+               ()))
+     | Masc_domain.Todo
+     | Masc_domain.AwaitingVerification _
+     | Masc_domain.Done _
+     | Masc_domain.Cancelled _ ->
+       Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ())
+  | _ -> Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ()
 ;;
 
 let test_claim_start_done_path () =
@@ -120,7 +131,10 @@ let test_claim_start_done_path () =
     match (task config task_id).task_status with
     | Masc_domain.Done { assignee; notes; _ } ->
       check string "assignee" "worker" assignee;
-      check (option string) "notes" (Some "tests pass") notes
+      check bool "notes preserve evidence" true
+        (Option.fold ~none:false
+           ~some:(Astring.String.is_infix ~affix:"verified: tests pass")
+           notes)
     | other -> fail ("expected done, got " ^ Masc_domain.task_status_to_string other))
 ;;
 
@@ -209,7 +223,10 @@ let test_done_is_idempotent_terminal () =
       after_backlog.version;
     match (task config task_id).task_status with
     | Masc_domain.Done { notes; _ } ->
-      check (option string) "original notes" (Some "first") notes
+      check bool "original notes" true
+        (Option.fold ~none:false
+           ~some:(Astring.String.is_infix ~affix:"verified: first")
+           notes)
     | other -> fail ("expected done, got " ^ Masc_domain.task_status_to_string other))
 ;;
 

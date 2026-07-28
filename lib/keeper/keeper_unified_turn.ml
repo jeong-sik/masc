@@ -497,16 +497,18 @@ let append_provider_overflow_manifest
         ~compaction_source:"provider_overflow"
         ~checkpoint_path
         ~decision:
-          (Keeper_runtime_manifest.with_payload_role
-             ~payload_role:Checkpoint
-             (`Assoc
-               [ "trigger", `String (Compaction_trigger.to_label trigger)
-               ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "requeue_disposition_requested", `Bool true
-               ; "error", error
-               ; ( Keeper_compaction_evidence.exact_evidence_key
-                 , Keeper_compaction_evidence.to_json evidence )
-               ]))
+          (Keeper_runtime_manifest.with_compaction_outcome
+             ~compaction_outcome:Checkpoint_committed
+             (Keeper_runtime_manifest.with_payload_role
+                ~payload_role:Checkpoint
+                (`Assoc
+                  [ "trigger", `String (Compaction_trigger.to_label trigger)
+                  ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+                  ; "requeue_disposition_requested", `Bool true
+                  ; "error", error
+                  ; ( Keeper_compaction_evidence.exact_evidence_key
+                    , Keeper_compaction_evidence.to_json evidence )
+                  ])))
         Keeper_runtime_manifest.Context_compacted
     in
     turn_state
@@ -560,14 +562,16 @@ let append_provider_overflow_manifest
         ~status:"retryable_failure"
         ~compaction_source:"provider_overflow"
         ~decision:
-          (Keeper_runtime_manifest.with_payload_role
-             ~payload_role:Checkpoint
-             (`Assoc
-               [ "trigger", `String (Compaction_trigger.to_label trigger)
-               ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-               ; "requeue_disposition_requested", `Bool true
-               ; "error", `String reason
-               ]))
+          (Keeper_runtime_manifest.with_compaction_outcome
+             ~compaction_outcome:Retry_without_checkpoint
+             (Keeper_runtime_manifest.with_payload_role
+                ~payload_role:Checkpoint
+                (`Assoc
+                  [ "trigger", `String (Compaction_trigger.to_label trigger)
+                  ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+                  ; "requeue_disposition_requested", `Bool true
+                  ; "error", `String reason
+                  ])))
         Keeper_runtime_manifest.Context_compacted
     in
     Requeue_after_context_compaction (Compaction_attempt_failed { reason }),
@@ -592,13 +596,15 @@ let append_provider_overflow_manifest
           ~status:"lifecycle_cleanup_failed"
           ~compaction_source:"provider_overflow"
           ~decision:
-            (Keeper_runtime_manifest.with_payload_role
-               ~payload_role:Checkpoint
-               (`Assoc
-                 [ "trigger", `String (Compaction_trigger.to_label trigger)
-                 ; "trigger_detail", Compaction_trigger.to_detail_json trigger
-                 ; "reason", `String reason
-                 ]))
+            (Keeper_runtime_manifest.with_compaction_outcome
+               ~compaction_outcome:Lifecycle_cleanup_failed_without_checkpoint
+               (Keeper_runtime_manifest.with_payload_role
+                  ~payload_role:Checkpoint
+                  (`Assoc
+                    [ "trigger", `String (Compaction_trigger.to_label trigger)
+                    ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+                    ; "error", `String reason
+                    ])))
           Keeper_runtime_manifest.Context_compacted
     in
     source_lease_disposition, turn_state

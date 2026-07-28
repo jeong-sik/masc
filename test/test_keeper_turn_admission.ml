@@ -643,7 +643,9 @@ let test_autonomous_yields_to_queued_connector_message () =
    | `Ran () ->
      check "run_if_free must not admit while a connector message is queued" false);
   (* Leasing changes the receipt to Inflight but does not make it disappear.
-     The autonomous lane keeps yielding until the terminal decision commits. *)
+     The actual turn mutex, not that durable receipt, is the execution fence.
+     A free mutex plus an inflight receipt must stay progress-capable even when
+     a second message is pending — this is the live timeout/orphan shape. *)
   let lease =
     match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> Some lease
@@ -651,11 +653,21 @@ let test_autonomous_yields_to_queued_connector_message () =
       check "lease_next leases the queued connector message" false;
       None
   in
+  (match Keeper_chat_queue.enqueue ~keeper_name { queued_message with content = "next" } with
+   | Ok _ -> ()
+   | Error error ->
+     check
+       ("second enqueue succeeds: "
+        ^ Keeper_chat_queue.mutation_error_to_string error)
+       false);
   let inflight = Keeper_chat_queue.snapshot ~keeper_name in
   check "leased receipt remains visible" (List.length inflight.inflight = 1);
+  check "second receipt remains pending" (List.length inflight.pending = 1);
   (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Busy _ -> check "run_if_free yields while the receipt is inflight" true
-   | `Ran () -> check "run_if_free must not overtake an inflight receipt" false);
+   | `Ran () ->
+     check "stranded/finalizing inflight receipt does not become a second lock" true
+   | `Busy _ ->
+     check "inflight receipt with a free turn mutex must not halt progress" false);
   (match lease with
    | None -> ()
    | Some lease ->
@@ -668,6 +680,29 @@ let test_autonomous_yields_to_queued_connector_message () =
       | `Finalized _ -> ()
       | `Unknown_lease | `Error _ ->
         check "finalize commits the terminal receipt" false));
+  (* With the inflight receipt gone, the still-pending chat is again the
+     authoritative backlog and the autonomous lane yields to its consumer. *)
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy (Keeper_turn_admission.Chat_backlog
+       { pending_count = 1; inflight_count = 0 }) ->
+     check "pending-only backlog still has chat priority" true
+   | `Busy _ | `Ran () ->
+     check "pending-only backlog must retain chat priority" false);
+  (match Keeper_chat_queue.lease_next ~keeper_name with
+   | `Leased lease ->
+     (match
+        Keeper_chat_queue.finalize
+          ~keeper_name
+          ~lease_id:lease.lease_id
+          ~outcome:
+            (Keeper_chat_queue.Mark_delivered
+               { completed_at = 3.0; outcome_ref = None })
+      with
+      | `Finalized _ -> ()
+      | `Unknown_lease | `Error _ ->
+        check "second finalize commits the terminal receipt" false)
+   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+     check "second receipt leases for cleanup" false);
   let settled = Keeper_chat_queue.snapshot ~keeper_name in
   check
     "queue has no active receipts after finalization"
@@ -810,9 +845,9 @@ let test_compaction_lane_bypasses_chat_backlog () =
    with
    | `Ran 7 -> check "compaction lane admits despite a pending receipt" true
    | `Ran _ | `Busy _ -> check "compaction lane admits despite a pending receipt" false);
-  (* Leasing moves the receipt to inflight; the compaction lane still admits
-     (an inflight receipt whose delivery cannot progress is exactly the
-     #24865 wedge), while the standard lane keeps yielding. *)
+  (* Leasing moves the receipt to inflight. Both autonomous entry points use
+     the actual turn mutex as the execution fence; the durable receipt is not
+     a second global lock. *)
   (match Keeper_chat_queue.lease_next ~keeper_name with
    | `Leased _ -> ()
    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
@@ -822,15 +857,13 @@ let test_compaction_lane_bypasses_chat_backlog () =
    with
    | `Ran 8 -> check "compaction lane admits despite an inflight receipt" true
    | `Ran _ | `Busy _ -> check "compaction lane admits despite an inflight receipt" false);
-  (* Production order (#24865 review): the compaction admission released the
-     slot on return, and a follow-up turn re-entering the standard lane still
-     yields to the remaining backlog — the bypass covers the compaction
-     commit only, never the turn that follows it. *)
+  (* Once the compaction admission releases the slot, a follow-up standard
+     turn also remains live despite a stranded/finalizing inflight receipt. *)
   (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Busy (Keeper_turn_admission.Chat_backlog _) ->
-     check "standard lane still yields to the backlog after compaction admission" true
-   | `Busy _ | `Ran () ->
-     check "standard lane still yields to the backlog after compaction admission" false);
+   | `Ran () ->
+     check "standard lane admits past an inflight receipt after compaction" true
+   | `Busy _ ->
+     check "inflight receipt must not refence standard lane after compaction" false);
   (* A genuinely held slot still refuses the compaction lane: it must never
      interleave with an in-flight turn. *)
   Keeper_turn_admission.For_testing.with_unpublished_turn_lock

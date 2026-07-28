@@ -10,34 +10,6 @@ module CU = Workspace_utils
 module W = Workspace_core
 module VP = Masc.Verification_protocol
 
-let submit_verdict_via_protocol ~base_path ~req_id ~verifier ~verdict =
-  match V.load_request base_path req_id with
-  | Error _ as error -> error
-  | Ok request ->
-    let config = W.default_config base_path in
-    let recorded =
-      match verdict with
-      | V.Pass ->
-        VP.record_approve_verification
-          ~config
-          ~task_id:request.task_id
-          ~verifier
-          ~verification_id:req_id
-          ~notes:"verified"
-      | V.Fail reason ->
-        VP.record_reject_verification
-          ~config
-          ~task_id:request.task_id
-          ~verifier
-          ~verification_id:req_id
-          ~reason
-      | V.Partial _ ->
-        Error "Partial verdict is not a Task verification protocol outcome"
-    in
-    (match recorded with
-     | Error _ as error -> error
-     | Ok () -> V.load_request base_path req_id)
-
 let persistence_surface = "verification"
 
 let persistence_counter reason =
@@ -113,90 +85,6 @@ let test_criterion_of_yojson_errors () =
     | Error _ -> ()
     | Ok _ -> Alcotest.fail (Printf.sprintf "%s should fail" label)
   ) bad_cases
-
-(* --- Verdict tests --- *)
-
-let test_verdict_roundtrip () =
-  let verdicts = [V.Pass; V.Fail "bad output"; V.Partial (0.75, "mostly ok")] in
-  List.iter (fun v ->
-    let json = V.verdict_to_yojson v in
-    match V.verdict_of_yojson json with
-    | Ok result ->
-        Alcotest.(check bool) "verdict roundtrip" true
-          (V.equal_verdict v result)
-    | Error e -> Alcotest.fail e
-  ) verdicts
-
-(* --- Evaluation tests --- *)
-
-let test_evaluate_contains () =
-  let output = `String "hello world" in
-  Alcotest.(check bool) "contains match" true
-    (V.evaluate_criterion output (V.Contains "hello") = V.Pass);
-  Alcotest.(check bool) "contains no match" true
-    (match V.evaluate_criterion output (V.Contains "xyz") with
-     | V.Fail _ -> true | _ -> false)
-
-let test_evaluate_not_contains () =
-  let output = `String "hello world" in
-  Alcotest.(check bool) "not_contains pass" true
-    (V.evaluate_criterion output (V.Not_contains "xyz") = V.Pass);
-  Alcotest.(check bool) "not_contains fail" true
-    (match V.evaluate_criterion output (V.Not_contains "hello") with
-     | V.Fail _ -> true | _ -> false)
-
-let test_evaluate_literal_and_empty_needles () =
-  let output = `String "literal .* needle" in
-  Alcotest.(check bool) "contains treats regex metacharacters literally" true
-    (V.evaluate_criterion output (V.Contains ".*") = V.Pass);
-  Alcotest.(check bool) "contains empty needle stays fail" true
-    (match V.evaluate_criterion output (V.Contains "") with
-     | V.Fail _ -> true | _ -> false);
-  Alcotest.(check bool) "not_contains empty needle stays pass" true
-    (V.evaluate_criterion output (V.Not_contains "") = V.Pass)
-
-let test_evaluate_schema_match () =
-  let output = `Assoc [("key", `String "value")] in
-  Alcotest.(check bool) "schema non-null pass" true
-    (V.evaluate_criterion output (V.Schema_match (`Assoc [])) = V.Pass);
-  Alcotest.(check bool) "schema null fail" true
-    (match V.evaluate_criterion `Null (V.Schema_match (`Assoc [])) with
-     | V.Fail _ -> true | _ -> false)
-
-let test_evaluate_custom () =
-  let output = `String "test" in
-  Alcotest.(check bool) "custom returns partial" true
-    (match V.evaluate_criterion output (V.Custom "check quality") with
-     | V.Partial _ -> true | _ -> false)
-
-let test_evaluate_all_pass () =
-  let output = `String "hello world foo" in
-  let criteria = [V.Contains "hello"; V.Not_contains "error"] in
-  Alcotest.(check bool) "all pass" true
-    (V.evaluate_all output criteria = V.Pass)
-
-let test_evaluate_all_fail () =
-  let output = `String "hello world" in
-  let criteria = [V.Contains "hello"; V.Contains "missing"] in
-  Alcotest.(check bool) "one fail = overall fail" true
-    (match V.evaluate_all output criteria with
-     | V.Fail _ -> true | _ -> false)
-
-let test_evaluate_empty_criteria () =
-  Alcotest.(check bool) "empty criteria = pass" true
-    (V.evaluate_all `Null [] = V.Pass)
-
-(* --- Cross-agent enforcement --- *)
-
-let test_cross_agent_same () =
-  match V.validate_cross_agent ~worker:"claude" ~verifier:"claude" with
-  | Error _ -> ()
-  | Ok () -> Alcotest.fail "same agent should be rejected"
-
-let test_cross_agent_different () =
-  match V.validate_cross_agent ~worker:"claude" ~verifier:"codex" with
-  | Ok () -> ()
-  | Error e -> Alcotest.fail e
 
 (* --- Storage tests --- *)
 
@@ -336,6 +224,30 @@ let test_list_requests_ignores_legacy_root_entries () =
       (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error))
 
 let create_evidence_request ~base_path ~request_id ~artifact_path =
+  let profile_path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path
+      ~agent_name:"keeper-executor-agent"
+  in
+  Fs_compat.mkdir_p (Filename.dirname profile_path);
+  Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
+  let submitted_evidence =
+    match
+      Playground_paths.parse_playground_file_path
+        ~base_path
+        ~abs_path:artifact_path
+    with
+    | Some { keeper_name = "executor"; relative_path } ->
+      [ "artifact:" ^ relative_path; "note:executor summary" ]
+    | Some _ | None ->
+      [ "artifact:../outside-worker-playground"; "note:executor summary" ]
+  in
+  let evidence_snapshot =
+    VS.snapshot_submitted_evidence_json
+      ~base_path
+      ~worker:"keeper-executor-agent"
+      submitted_evidence
+  in
   match
     V.create_request
       ~base_path
@@ -343,18 +255,51 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
       ~task_id:"task-001"
       ~output:
         (`Assoc
-            [ ( "submitted_evidence"
-              , `List
-                  [ `String artifact_path
-                  ; `String "executor summary"
-                  ] )
-            ])
+            [ "submitted_evidence", evidence_snapshot ])
       ~criteria:[ V.Custom "inspect artifact" ]
       ~worker:"keeper-executor-agent"
       ()
   with
   | Ok request -> request
   | Error detail -> Alcotest.fail detail
+
+let write_keeper_profile ~base_path ~keeper_name ~sandbox_profile =
+  let path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path
+      ~agent_name:keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file
+    path
+    (Printf.sprintf "[keeper]\nsandbox_profile = %S\n" sandbox_profile)
+
+let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
+  let config = W.default_config base_path in
+  ignore (W.init config ~agent_name:None);
+  ignore
+    (W.add_task
+       config
+       ~title:"Produce typed verification evidence"
+       ~priority:1
+       ~description:"");
+  let task =
+    match (W.read_backlog config).tasks with
+    | [ task ] -> task
+    | tasks ->
+      Alcotest.failf "expected one task, got %d" (List.length tasks)
+  in
+  (match
+     VP.create_submit_request
+       ~config
+       ~task
+       ~assignee:"keeper-executor-agent"
+       ~verification_id:request_id
+       ~evidence_refs
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  task
 
 let inspect_evidence ?(task_id = "task-001")
     ?(task_worker = "keeper-executor-agent") ~base_path ~request_id
@@ -410,6 +355,270 @@ let test_submitted_evidence_inspection_is_assigned_and_contained () =
     | VS.Evidence_metadata_only _ -> ()
     | _ -> Alcotest.fail "non-assigned keeper must receive metadata only")
 
+let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () =
+  with_eio_temp_dir (fun base_path ->
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-executor-agent"
+      ~sandbox_profile:"docker";
+    let artifact_dir =
+      Filename.concat
+        (Keeper_sandbox_config.host_root_abs_of_agent
+           ~base_path
+           ~agent_name:"keeper-executor-agent")
+        "artifacts"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    Fs_compat.save_file
+      (Filename.concat artifact_dir "proof.txt")
+      "docker-relative-proof";
+    let request_id = "vrf-docker-relative-snapshot" in
+    let task =
+      create_protocol_evidence_request
+        ~base_path
+        ~request_id
+        ~evidence_refs:
+          [ "artifact:artifacts/proof.txt"; "note:executor summary" ]
+    in
+    match
+      inspect_evidence
+        ~task_id:task.id
+        ~base_path
+        ~request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
+        ~viewer:"keeper-verifier-agent"
+        ()
+    with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact
+              { reference = "artifact:artifacts/proof.txt"
+              ; content = "docker-relative-proof"
+              ; content_sha256
+              ; _
+              }
+            :: VS.Evidence_note "executor summary"
+            :: []
+        ; _
+        } ->
+      Alcotest.(check string)
+        "snapshot hash covers persisted bounded content"
+        Digestif.SHA256.(digest_string "docker-relative-proof" |> to_hex)
+        content_sha256
+    | _ ->
+      (match
+         inspect_evidence
+           ~task_id:task.id
+           ~base_path
+           ~request_id
+           ~task_verifier:(Some "keeper-verifier-agent")
+           ~viewer:"keeper-verifier-agent"
+           ()
+       with
+       | VS.Evidence_available
+           { items =
+               VS.Evidence_artifact_unreadable { reason; _ } :: _
+           ; _
+           } ->
+         Alcotest.failf
+           "Docker-relative artifact snapshot unreadable: %s"
+           (VS.evidence_read_failure_to_string reason)
+       | VS.Evidence_available { items; _ } ->
+         Alcotest.failf
+           "expected explicit artifact and note snapshot, got %d items"
+           (List.length items)
+       | VS.Evidence_metadata_only _ ->
+         Alcotest.fail "assigned verifier unexpectedly received metadata only"
+       | VS.Evidence_unavailable { reason; _ } ->
+         Alcotest.failf "persisted evidence snapshot unavailable: %s" reason))
+
+let test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd () =
+  with_eio_temp_dir (fun base_path ->
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-executor-agent"
+      ~sandbox_profile:"docker";
+    let artifact_dir =
+      Filename.concat
+        (Keeper_sandbox_config.host_root_abs_of_agent
+           ~base_path
+           ~agent_name:"keeper-executor-agent")
+        "artifacts"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "immutable.txt" in
+    Fs_compat.save_file artifact_path "submit-time-content";
+    let request_id = "vrf-immutable-snapshot" in
+    let task =
+      create_protocol_evidence_request
+        ~base_path
+        ~request_id
+        ~evidence_refs:[ "artifact:artifacts/immutable.txt" ]
+    in
+    Fs_compat.save_file artifact_path "mutated-after-submit";
+    Sys.remove artifact_path;
+    let verifier_cwd = Filename.concat base_path "verifier-cwd" in
+    Fs_compat.mkdir_p verifier_cwd;
+    let original_cwd = Sys.getcwd () in
+    Fun.protect
+      ~finally:(fun () -> Sys.chdir original_cwd)
+      (fun () ->
+        Sys.chdir verifier_cwd;
+        match
+          inspect_evidence
+            ~task_id:task.id
+            ~base_path
+            ~request_id
+            ~task_verifier:(Some "keeper-verifier-agent")
+            ~viewer:"keeper-verifier-agent"
+            ()
+        with
+        | VS.Evidence_available
+            { items =
+                VS.Evidence_artifact
+                  { content = "submit-time-content"; _ }
+                :: []
+            ; _
+            } ->
+          ()
+        | _ ->
+          (match
+             inspect_evidence
+               ~task_id:task.id
+               ~base_path
+               ~request_id
+               ~task_verifier:(Some "keeper-verifier-agent")
+               ~viewer:"keeper-verifier-agent"
+               ()
+           with
+           | VS.Evidence_available
+               { items =
+                   VS.Evidence_artifact_unreadable { reason; _ } :: _
+               ; _
+               } ->
+             Alcotest.failf
+               "immutable artifact snapshot unreadable: %s"
+               (VS.evidence_read_failure_to_string reason)
+           | VS.Evidence_available { items; _ } ->
+             Alcotest.failf
+               "expected one immutable artifact snapshot, got %d items"
+               (List.length items)
+           | VS.Evidence_metadata_only _ ->
+             Alcotest.fail "assigned verifier unexpectedly received metadata only"
+           | VS.Evidence_unavailable { reason; _ } ->
+             Alcotest.failf "persisted evidence snapshot unavailable: %s" reason)))
+
+let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
+  with_eio_temp_dir (fun base_path ->
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-executor-agent"
+      ~sandbox_profile:"docker";
+    let producer_root =
+      Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path
+        ~agent_name:"keeper-executor-agent"
+    in
+    let artifact_dir = Filename.concat producer_root "artifacts" in
+    Fs_compat.mkdir_p artifact_dir;
+    let outside_path = Filename.concat base_path "outside-relative-secret.txt" in
+    Fs_compat.save_file outside_path "outside";
+    let symlink_path = Filename.concat artifact_dir "escape.txt" in
+    Unix.symlink outside_path symlink_path;
+    let request_id = "vrf-relative-boundary-snapshot" in
+    let task =
+      create_protocol_evidence_request
+        ~base_path
+        ~request_id
+        ~evidence_refs:
+          [ "artifact:../outside-relative-secret.txt"
+          ; "artifact:artifacts/escape.txt"
+          ]
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.unlink symlink_path with
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+      (fun () ->
+        match
+          inspect_evidence
+            ~task_id:task.id
+            ~base_path
+            ~request_id
+            ~task_verifier:(Some "keeper-verifier-agent")
+            ~viewer:"keeper-verifier-agent"
+            ()
+        with
+        | VS.Evidence_available
+            { items =
+                VS.Evidence_artifact_unreadable
+                  { reason = VS.Evidence_invalid_reference; _ }
+                :: VS.Evidence_artifact_unreadable
+                     { reason = VS.Evidence_symbolic_link; _ }
+                :: []
+            ; _
+            } ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "relative traversal and symlink escape must persist typed unreadable snapshots"))
+
+let test_submit_snapshot_rejects_bare_and_absolute_references () =
+  with_eio_temp_dir (fun base_path ->
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-executor-agent"
+      ~sandbox_profile:"docker";
+    let producer_root =
+      Keeper_sandbox_config.host_root_abs_of_agent
+        ~base_path
+        ~agent_name:"keeper-executor-agent"
+    in
+    Fs_compat.mkdir_p producer_root;
+    let absolute_path = Filename.concat producer_root "absolute.txt" in
+    Fs_compat.save_file absolute_path "must-not-be-read";
+    let request_id = "vrf-explicit-reference-hard-cut" in
+    let snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-executor-agent"
+        [ "artifacts/bare.txt"; absolute_path ]
+    in
+    ignore
+      (match
+         V.create_request
+           ~base_path
+           ~request_id
+           ~task_id:"task-001"
+           ~output:(`Assoc [ "submitted_evidence", snapshot ])
+           ~criteria:[ V.Custom "inspect explicit refs" ]
+           ~worker:"keeper-executor-agent"
+           ()
+       with
+       | Ok request -> request
+       | Error detail -> Alcotest.fail detail);
+    match
+      inspect_evidence
+        ~base_path
+        ~request_id
+        ~task_verifier:(Some "keeper-verifier-agent")
+        ~viewer:"keeper-verifier-agent"
+        ()
+    with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact_unreadable
+              { reason = VS.Evidence_invalid_reference; _ }
+            :: VS.Evidence_artifact_unreadable
+                 { reason = VS.Evidence_invalid_reference; _ }
+            :: []
+        ; _
+        } ->
+      ()
+    | _ ->
+      Alcotest.fail
+        "bare and absolute references must remain typed invalid without file reads")
+
 let test_submitted_evidence_inspection_rejects_cross_playground_path () =
   with_eio_temp_dir (fun base_path ->
     let other_dir =
@@ -433,7 +642,7 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
     | VS.Evidence_available
         { items =
             VS.Evidence_artifact_unreadable
-              { reason = VS.Evidence_outside_worker_playground; _ }
+              { reason = VS.Evidence_invalid_reference; _ }
             :: _
         ; _
         } ->
@@ -536,7 +745,7 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
      | VS.Evidence_available
          { items =
              VS.Evidence_artifact_unreadable
-               { reason = VS.Evidence_outside_worker_playground; _ }
+               { reason = VS.Evidence_symbolic_link; _ }
              :: _
          ; _
          } ->
@@ -596,7 +805,10 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
           ~output:
             (`Assoc
                 [ ( "submitted_evidence"
-                  , `List [ `String artifact_path ] )
+                  , VS.snapshot_submitted_evidence_json
+                      ~base_path
+                      ~worker:"keeper-executor-agent"
+                      [ "artifact:assignment.txt" ] )
                 ])
           ~criteria:[ V.Custom "inspect artifact" ]
           ~worker:"keeper-executor-agent"
@@ -712,7 +924,11 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
     (match
        W.claim_task_r config ~agent_name:"keeper-verifier-agent" ~task_id:"task-001" ()
      with
-     | Ok _ -> ()
+     | Ok message ->
+       Alcotest.(check bool)
+         "claim response carries persisted snapshot"
+         true
+         (contains_substring message "full-cycle-evidence")
      | Error err ->
        Alcotest.fail
          ("verifier claim failed: " ^ Masc_domain.masc_error_to_string err));
@@ -721,15 +937,6 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "second verifier stole the assignment");
-    let request =
-      match V.load_request base_path request_id with
-      | Ok request -> request
-      | Error detail -> Alcotest.fail detail
-    in
-    Alcotest.(check bool)
-      "request remains pending after Task-phase claim"
-      true
-      (match request.status with V.Pending -> true | V.Completed _ -> false);
     let assigned =
       W.list_tasks
         config
@@ -762,107 +969,6 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
       false
       (contains_substring external_projection "full-cycle-evidence"))
 
-let test_submit_verdict () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-        match submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"codex"
-            ~verdict:V.Pass with
-        | Error e -> Alcotest.fail e
-        | Ok updated ->
-            Alcotest.(check bool) "completed" true
-              (match updated.status with V.Completed V.Pass -> true | _ -> false);
-            (* verifier must be persisted so the dashboard projection never
-               emits "approved with null approved_by" for completed rows. *)
-            Alcotest.(check (option string)) "verifier recorded"
-              (Some "codex") updated.verifier)
-
-let test_submit_verdict_persists_verifier () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-        Alcotest.(check (option string)) "starts unassigned" None req.verifier;
-        match submit_verdict_via_protocol ~base_path ~req_id:req.id
-            ~verifier:"operator:dashboard" ~verdict:V.Pass with
-        | Error e -> Alcotest.fail e
-        | Ok updated ->
-            Alcotest.(check (option string)) "verifier persisted"
-              (Some "operator:dashboard") updated.verifier)
-
-let test_submit_verdict_cannot_overwrite_terminal_receipt () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-      (match
-         submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"codex"
-           ~verdict:V.Pass
-       with
-       | Error e -> Alcotest.fail e
-       | Ok _ -> ());
-      (match
-         submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"gemini"
-           ~verdict:(V.Fail "overwrite")
-       with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail "terminal verification receipt was overwritten");
-      match V.load_request base_path req.id with
-      | Error e -> Alcotest.fail e
-      | Ok final ->
-        Alcotest.(check bool)
-          "first terminal verdict survives"
-          true
-          (match final.status, final.verifier with
-           | V.Completed V.Pass, Some "codex" -> true
-           | _ -> false))
-
-let test_concurrent_verdict_is_first_writer_wins () =
-  with_eio_temp_dir (fun base_path ->
-    let req =
-      match
-        V.create_request
-          ~base_path
-          ~task_id:"task-concurrent-verdict"
-          ~output:`Null
-          ~criteria:[]
-          ~worker:"worker"
-          ()
-      with
-      | Ok req -> req
-      | Error detail -> Alcotest.fail detail
-    in
-    let left = ref None in
-    let right = ref None in
-    Eio.Fiber.both
-      (fun () ->
-         left :=
-           Some
-             (V.Internal.submit_verdict
-                ~base_path
-                ~req_id:req.id
-                ~verifier:"verifier-a"
-                ~verdict:V.Pass))
-      (fun () ->
-         right :=
-           Some
-             (V.Internal.submit_verdict
-                ~base_path
-                ~req_id:req.id
-                ~verifier:"verifier-b"
-                ~verdict:(V.Fail "rejected")));
-    match !left, !right with
-    | Some (Ok _), Some (Error _) | Some (Error _), Some (Ok _) -> ()
-    | Some (Ok _), Some (Ok _) ->
-      Alcotest.fail "concurrent verdicts both overwrote the receipt"
-    | Some (Error left), Some (Error right) ->
-      Alcotest.failf "both concurrent verdicts failed: %s / %s" left right
-    | None, _ | _, None -> Alcotest.fail "concurrent verdict fiber did not return")
-
 (* --- ID generation property test (#7544) --- *)
 
 module StringSet = Set.Make (String)
@@ -883,92 +989,11 @@ let test_generate_id_no_collisions () =
   done;
   Alcotest.(check int) "all 10k ids unique" n (StringSet.cardinal !seen)
 
-(* --- Attribution conversion tests --- *)
-
-module A = Attribution
-
-let test_origin_det_for_rule_based () =
-  let cs = [ V.Contains "x"; V.Not_contains "y"; V.Schema_match (`Assoc []) ] in
-  Alcotest.(check bool) "Det" true (V.origin_of_criteria cs = A.Det)
-
-let test_origin_nondet_for_custom () =
-  let cs = [ V.Contains "x"; V.Custom "is it good?" ] in
-  Alcotest.(check bool) "NonDet" true (V.origin_of_criteria cs = A.NonDet)
-
-let test_verdict_pass_to_attribution () =
-  let attr = V.to_attribution ~origin:Det ~evidence:`Null V.Pass in
-  Alcotest.(check string) "gate" "verification" attr.gate;
-  Alcotest.(check bool) "outcome=Passed" true
-    (match attr.outcome with A.Passed -> true | _ -> false)
-
-let test_verdict_fail_to_attribution () =
-  let attr =
-    V.to_attribution ~origin:Det ~evidence:`Null
-      (V.Fail "output does not match schema")
-  in
-  match attr.outcome with
-  | A.Policy_failed { reason } ->
-    Alcotest.(check string) "reason" "output does not match schema" reason
-  | _ -> Alcotest.fail "expected Policy_failed"
-
-let test_verdict_partial_to_attribution () =
-  let attr =
-    V.to_attribution ~origin:NonDet ~evidence:`Null
-      (V.Partial (0.75, "partial match"))
-  in
-  match attr.outcome with
-  | A.Partial_pass { score; rationale } ->
-    Alcotest.(check (float 0.0001)) "score" 0.75 score;
-    Alcotest.(check string) "rationale" "partial match" rationale
-  | _ -> Alcotest.fail "expected Partial_pass"
-
-let test_attribution_of_request_none_for_pending () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1" ~output:`Null
-            ~criteria:[ V.Contains "x" ] ~worker:"w" () with
-    | Error e -> Alcotest.fail ("create failed: " ^ e)
-    | Ok req ->
-      Alcotest.(check bool) "None for Pending" true
-        (V.attribution_of_request req = None))
-
-let test_attribution_of_request_derives_origin () =
-  with_temp_dir (fun base_path ->
-    (* Build a request with a Custom criterion and a Completed Pass verdict. *)
-    match V.create_request ~base_path ~task_id:"t2" ~output:`Null
-            ~criteria:[ V.Contains "hello"; V.Custom "must be kind" ]
-            ~worker:"claude" () with
-    | Error e -> Alcotest.fail ("create failed: " ^ e)
-    | Ok req ->
-      let completed = { req with status = V.Completed V.Pass } in
-      match V.attribution_of_request completed with
-      | Some attr ->
-        Alcotest.(check bool) "origin=NonDet (Custom present)" true
-          (attr.A.origin = A.NonDet)
-      | None -> Alcotest.fail "expected Some attribution")
-
 let () =
   Alcotest.run "Verification" [
     "criterion", [
       Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;
       Alcotest.test_case "of_yojson errors" `Quick test_criterion_of_yojson_errors;
-    ];
-    "verdict", [
-      Alcotest.test_case "roundtrip" `Quick test_verdict_roundtrip;
-    ];
-    "evaluation", [
-      Alcotest.test_case "contains" `Quick test_evaluate_contains;
-      Alcotest.test_case "not_contains" `Quick test_evaluate_not_contains;
-      Alcotest.test_case "literal and empty needles" `Quick
-        test_evaluate_literal_and_empty_needles;
-      Alcotest.test_case "schema_match" `Quick test_evaluate_schema_match;
-      Alcotest.test_case "custom" `Quick test_evaluate_custom;
-      Alcotest.test_case "all pass" `Quick test_evaluate_all_pass;
-      Alcotest.test_case "all fail" `Quick test_evaluate_all_fail;
-      Alcotest.test_case "empty criteria" `Quick test_evaluate_empty_criteria;
-    ];
-    "cross_agent", [
-      Alcotest.test_case "same agent rejected" `Quick test_cross_agent_same;
-      Alcotest.test_case "different agents ok" `Quick test_cross_agent_different;
     ];
     "id_generation", [
       Alcotest.test_case "vrf- prefix" `Quick test_generate_id_prefix;
@@ -992,6 +1017,14 @@ let () =
         test_list_requests_ignores_legacy_root_entries;
       Alcotest.test_case "submitted evidence assigned and contained" `Quick
         test_submitted_evidence_inspection_is_assigned_and_contained;
+      Alcotest.test_case "submit snapshot resolves Docker relative refs" `Quick
+        test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note;
+      Alcotest.test_case "submit snapshot is immutable and cwd-independent" `Quick
+        test_submit_snapshot_survives_mutation_deletion_and_verifier_cwd;
+      Alcotest.test_case "submit snapshot rejects traversal and symlink escape" `Quick
+        test_submit_snapshot_rejects_relative_traversal_and_symlink_escape;
+      Alcotest.test_case "submit snapshot rejects bare and absolute refs" `Quick
+        test_submit_snapshot_rejects_bare_and_absolute_references;
       Alcotest.test_case "submitted evidence rejects cross playground" `Quick
         test_submitted_evidence_inspection_rejects_cross_playground_path;
       Alcotest.test_case "submitted evidence bounded UTF-8" `Quick
@@ -1006,28 +1039,5 @@ let () =
         test_submitted_evidence_requires_exact_task_assignment_identity;
       Alcotest.test_case "keeper task projection assigned verifier only" `Quick
         test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier;
-      Alcotest.test_case "submit verdict" `Quick test_submit_verdict;
-      Alcotest.test_case "submit verdict persists verifier" `Quick
-        test_submit_verdict_persists_verifier;
-      Alcotest.test_case "submit verdict terminal non-overwrite" `Quick
-        test_submit_verdict_cannot_overwrite_terminal_receipt;
-      Alcotest.test_case "concurrent verdict is first-writer-wins" `Quick
-        test_concurrent_verdict_is_first_writer_wins;
-    ];
-    "attribution", [
-      Alcotest.test_case "origin=Det for rule-based criteria" `Quick
-        test_origin_det_for_rule_based;
-      Alcotest.test_case "origin=NonDet when Custom present" `Quick
-        test_origin_nondet_for_custom;
-      Alcotest.test_case "Pass → Attribution.Passed" `Quick
-        test_verdict_pass_to_attribution;
-      Alcotest.test_case "Fail → Attribution.Policy_failed" `Quick
-        test_verdict_fail_to_attribution;
-      Alcotest.test_case "Partial → Attribution.Partial_pass" `Quick
-        test_verdict_partial_to_attribution;
-      Alcotest.test_case "attribution_of_request None for Pending" `Quick
-        test_attribution_of_request_none_for_pending;
-      Alcotest.test_case "attribution_of_request derives origin" `Quick
-        test_attribution_of_request_derives_origin;
     ];
   ]

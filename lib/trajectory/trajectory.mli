@@ -195,6 +195,12 @@ val create_accumulator :
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit
 val increment_turn : accumulator -> unit
+
+val set_turn : accumulator -> int -> unit
+(** Adopt the turn number the runtime already assigns, so tool-call entries
+    carry the same turn as the reasoning entries they belong to. Monotonic:
+    a lower value is ignored, which keeps [calls_in_current_turn] from
+    re-counting an earlier turn's rounds. *)
 val record_entry :
   ?runtime_contract:Yojson.Safe.t ->
   ?action_radius:Yojson.Safe.t ->

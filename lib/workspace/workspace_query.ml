@@ -394,12 +394,8 @@ let add_verification_evidence_projection
       ~task_verifier
       ~viewer
   with
-  | Workspace_verification_store.Evidence_metadata_only { request; viewer = _ } ->
-    let assigned =
-      match request.verifier with
-      | Some verifier -> verifier
-      | None -> "unassigned"
-    in
+  | Workspace_verification_store.Evidence_metadata_only { request = _; viewer = _ } ->
+    let assigned = Option.value task_verifier ~default:"unassigned" in
     Printf.bprintf buf
       "   └─ verification_request=%s assigned_verifier=%s evidence=metadata_only\n"
       verification_id assigned
@@ -416,10 +412,10 @@ let add_verification_evidence_projection
         | Workspace_verification_store.Evidence_note note ->
           Printf.bprintf buf "      - note: %s\n" note
         | Workspace_verification_store.Evidence_artifact
-            { reference; content; bytes; truncated } ->
+            { reference; content; bytes; truncated; content_sha256 } ->
           Printf.bprintf buf
-            "      - artifact: %s bytes=%d truncated=%b content=untrusted_evidence\n"
-            reference bytes truncated;
+            "      - artifact: %s bytes=%d truncated=%b content_sha256=%s content=untrusted_evidence\n"
+            reference bytes truncated content_sha256;
           add_indented_evidence_content buf content
         | Workspace_verification_store.Evidence_artifact_unreadable
             { reference; reason } ->
@@ -428,6 +424,44 @@ let add_verification_evidence_projection
             reference
             (Workspace_verification_store.evidence_read_failure_to_string reason))
       items
+
+let verification_evidence_projection config ~viewer ~(task : task) =
+  match task.task_status with
+  | Masc_domain.AwaitingVerification
+      { assignee = task_worker; verification_id; phase; _ } ->
+    let buf = Buffer.create 256 in
+    let task_verifier =
+      match phase with
+      | Masc_domain.Awaiting_verifier -> None
+      | Masc_domain.Verifier_assigned { verifier } -> Some verifier
+    in
+    add_verification_evidence_projection
+      buf
+      config
+      ~viewer
+      ~task_id:task.id
+      ~task_worker
+      ~task_verifier
+      verification_id;
+    (match phase with
+     | Masc_domain.Awaiting_verifier ->
+       Printf.bprintf buf
+         "   └─ ACTION: keeper_task_claim task_id=%s; do not Read producer \
+          paths; claim first to receive the typed submitted_evidence snapshot\n"
+         task.id
+     | Masc_domain.Verifier_assigned { verifier }
+       when not (Workspace_task_classify.same_task_actor config verifier viewer) ->
+       Printf.bprintf buf
+         "   └─ assigned_verifier=%s ACTION: skip; do not Read producer paths\n"
+         verifier
+     | Masc_domain.Verifier_assigned _ -> ());
+    Some (Buffer.contents buf)
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ ->
+    None
 
 (** List tasks *)
 let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status
@@ -480,26 +514,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status
              "   └─ verification_request=%s evidence=metadata_only\n"
              verification_id
          | Some viewer ->
-           let task_verifier =
-             match phase with
-             | Masc_domain.Awaiting_verifier -> None
-             | Masc_domain.Verifier_assigned { verifier } -> Some verifier
-           in
-           add_verification_evidence_projection
-             buf config ~viewer ~task_id:task.id ~task_worker ~task_verifier verification_id;
-           (match phase with
-            | Masc_domain.Awaiting_verifier ->
-              Printf.bprintf buf
-                "   └─ ACTION: keeper_task_claim task_id=%s; do not Read producer \
-                 paths; claim first to receive the typed submitted_evidence snapshot\n"
-                task.id
-            | Masc_domain.Verifier_assigned { verifier }
-              when not
-                     (Workspace_task_classify.same_task_actor config verifier viewer) ->
-              Printf.bprintf buf
-                "   └─ assigned_verifier=%s ACTION: skip; do not Read producer paths\n"
-                verifier
-            | Masc_domain.Verifier_assigned _ -> ()))
+           Option.iter
+             (Buffer.add_string buf)
+             (verification_evidence_projection config ~viewer ~task))
       | Masc_domain.Todo
       | Masc_domain.Claimed _
       | Masc_domain.InProgress _

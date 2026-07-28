@@ -117,7 +117,7 @@ let publication_recovery_registry env sw config =
 let make_meta name =
   let json = `Assoc [
     ("name", `String name);
-    ("agent_name", `String ("agent-" ^ name));
+    ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name));
     ("trace_id", `String ("trace-integ-" ^ name));
   ] in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -1643,6 +1643,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
+        ; persona_name_opt = None
         ; instructions_arg = Some "new operator intent"
         ; profile_defaults
         ; instructions_opt = profile_defaults.instructions
@@ -1689,6 +1690,48 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         (Masc.Keeper_keepalive.stop_keepalive_and_await
            ~base_path:config.base_path
            live_name
+          : Masc.Keeper_keepalive.joined_stop_result);
+
+      let stopped_name = "explicit-up-resumes-operator-stop" in
+      let stopped_meta =
+        Shutdown_finalize.For_testing.paused_meta (make_meta stopped_name)
+      in
+      (match Keeper_meta_store.write_meta config stopped_meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let stopped_parsed =
+        { parsed with
+          name = stopped_name
+        ; instructions_arg = Some "resume this stopped keeper"
+        }
+      in
+      let stopped_result =
+        Turn_up_update.update_keeper ctx stopped_parsed stopped_meta
+      in
+      check bool
+        "explicit keeper_up resumes an operator-stopped keeper"
+        true
+        (Keeper_types_profile.tool_result_success stopped_result);
+      let stopped_after =
+        match Keeper_meta_store.read_meta config stopped_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "explicit keeper_up removed stopped metadata"
+        | Error detail -> fail detail
+      in
+      check bool
+        "explicit keeper_up clears the operator pause"
+        false
+        stopped_after.paused;
+      check (option string)
+        "explicit keeper_up clears the operator pause latch"
+        None
+        (Option.map
+           Keeper_latched_reason.to_wire
+           stopped_after.latched_reason);
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           stopped_name
           : Masc.Keeper_keepalive.joined_stop_result))
 
 let test_keeper_shutdown_store_isolates_corrupt_owner () =
@@ -2462,7 +2505,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
         ~slot_id:"shutdown-slot"
         ~call_id:"shutdown-call"
         ~plan_fingerprint:(String.make 64 'p')
-        ~request_body_sha256:(String.make 64 'r')
+        ~request_body_sha256:(String.make 64 'a')
     with
     | Ok _ -> ()
     | Error error -> fail (Approval_queue.exact_attempt_error_to_string error));
@@ -2613,6 +2656,12 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
             (match Keeper_meta_store.write_meta config meta with
              | Ok () -> ()
              | Error detail -> fail detail);
+            let meta =
+              match Keeper_meta_store.read_meta config meta.name with
+              | Ok (Some persisted) -> persisted
+              | Ok None -> fail "retirement fixture metadata disappeared"
+              | Error detail -> fail detail
+            in
             let entry =
               R.For_testing.register
                 ~base_path:config.base_path
@@ -2704,7 +2753,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
                  ~slot_id:"shutdown-slot"
                  ~call_id:"shutdown-call"
                  ~plan_fingerprint:(String.make 64 'p')
-                 ~request_body_sha256:(String.make 64 'r')
+                 ~request_body_sha256:(String.make 64 'a')
                  ~cause:Approval_queue.Exact_flow_execution_failed
              with
              | Ok _ -> ()

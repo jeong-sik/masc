@@ -98,17 +98,12 @@ function makeRequest(overrides: Partial<VerificationRequest> = {}): Verification
     request_kind: 'normal',
     request_summary: '',
     next_action: null,
-    keeper: null,
-    status: 'pending',
     created_at: new Date().toISOString(),
     submitted_by: 'agent-a',
-    approved_by: null,
     completion_contract: [],
     required_artifacts: [],
     submitted_evidence: [],
     evidence_projection_error: null,
-    verdict: null,
-    verdict_reason: '',
     ...overrides,
   }
 }
@@ -144,15 +139,6 @@ describe('VerificationRequestsPanel', () => {
     expect(screen.getByTestId('empty-state')).toBeTruthy()
   })
 
-  it('renders FilterChips for all statuses with counts', () => {
-    setData([makeRequest()])
-    render(html`<${VerificationRequestsPanel} />`)
-    expect(screen.getByTestId('filter-chip-all')).toBeTruthy()
-    expect(screen.getByTestId('filter-chip-pending')).toBeTruthy()
-    expect(screen.getByTestId('filter-chip-approved')).toBeTruthy()
-    expect(screen.getByTestId('filter-chip-rejected')).toBeTruthy()
-    expect(screen.getByTestId('filter-chip-timed_out')).toBeTruthy()
-  })
 
   it('marks the table and rows with v2 workspace classes', () => {
     setData([makeRequest()])
@@ -163,43 +149,13 @@ describe('VerificationRequestsPanel', () => {
   })
 
   it('shows total count in all filter mode', () => {
-    setData([makeRequest(), makeRequest({ request_id: 'req-002', status: 'approved' })])
+    setData([makeRequest(), makeRequest({ request_id: 'req-002' })])
     render(html`<${VerificationRequestsPanel} />`)
     expect(screen.getByText('총 2건')).toBeTruthy()
   })
 
-  it('filters by pending status', () => {
-    const pending = makeRequest({ request_id: 'req-p', status: 'pending' })
-    const approved = makeRequest({ request_id: 'req-a', status: 'approved' })
-    setData([pending, approved])
-    render(html`<${VerificationRequestsPanel} />`)
 
-    fireEvent.click(screen.getByTestId('filter-chip-pending'))
-    const card = screen.getByTestId('card')
-    expect(card.innerHTML).toContain('req-p')
-    expect(card.innerHTML).not.toContain('req-a')
-    expect(screen.getByText('1 / 2건')).toBeTruthy()
-  })
 
-  it('filters by approved status', () => {
-    const pending = makeRequest({ request_id: 'req-p', status: 'pending' })
-    const approved = makeRequest({ request_id: 'req-a', status: 'approved' })
-    setData([pending, approved])
-    render(html`<${VerificationRequestsPanel} />`)
-
-    fireEvent.click(screen.getByTestId('filter-chip-approved'))
-    const card = screen.getByTestId('card')
-    expect(card.innerHTML).toContain('req-a')
-    expect(card.innerHTML).not.toContain('req-p')
-  })
-
-  it('shows filter-specific empty state when no matches', () => {
-    setData([makeRequest({ status: 'approved' })])
-    render(html`<${VerificationRequestsPanel} />`)
-
-    fireEvent.click(screen.getByTestId('filter-chip-rejected'))
-    expect(screen.getByTestId('empty-state')).toBeTruthy()
-  })
 
   it('shows error state', () => {
     mockState.value = { loading: false, error: 'Network error', data: null }
@@ -207,27 +163,12 @@ describe('VerificationRequestsPanel', () => {
     expect(screen.getByTestId('error-state')).toBeTruthy()
   })
 
-  it('shows per-status counts in FilterChips', () => {
-    const pending = makeRequest({ request_id: 'req-p', status: 'pending' })
-    const approved = makeRequest({ request_id: 'req-a', status: 'approved' })
-    const rejected = makeRequest({ request_id: 'req-r', status: 'rejected' })
-    setData([pending, approved, rejected])
-    render(html`<${VerificationRequestsPanel} />`)
-
-    const allChip = screen.getByTestId('filter-chip-all')
-    const pendingChip = screen.getByTestId('filter-chip-pending')
-    expect(allChip.textContent).toContain('3')
-    expect(pendingChip.textContent).toContain('1')
-  })
 
   it('filters by search query', async () => {
     const req1 = makeRequest({ request_id: 'req-alpha', task_id: 'task-001', submitted_by: 'keeper-x' })
     const req2 = makeRequest({ request_id: 'req-beta', task_id: 'task-002', submitted_by: 'keeper-y' })
     setData([req1, req2])
     render(html`<${VerificationRequestsPanel} />`)
-
-    // Reset status filter from previous test (module-scope signal)
-    fireEvent.click(screen.getByTestId('filter-chip-all'))
 
     const searchInput = screen.getByTestId('search-input')
     fireEvent.input(searchInput, { target: { value: 'alpha' } })
@@ -241,8 +182,6 @@ describe('VerificationRequestsPanel', () => {
   it('shows filter-specific empty state with search', async () => {
     setData([makeRequest({ request_id: 'req-001' })])
     render(html`<${VerificationRequestsPanel} />`)
-
-    fireEvent.click(screen.getByTestId('filter-chip-all'))
 
     const searchInput = screen.getByTestId('search-input')
     fireEvent.input(searchInput, { target: { value: 'nonexistent' } })
@@ -258,8 +197,7 @@ describe('VerificationRequestsPanel', () => {
     setData([
       makeRequest({
         request_id: 'req-conflict',
-        status: 'pending',
-        request_kind: 'conflict_triage',
+            request_kind: 'conflict_triage',
         request_summary: 'Conflict verification required: board / planning / mutation path disagree.',
         next_action: 'Reconcile board / planning / mutation surfaces before ordinary approval.',
       }),

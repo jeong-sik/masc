@@ -1,17 +1,38 @@
 ---
 rfc: "0110"
 title: "Tool-pair atomicity at write boundary — sunset compaction repair fabrication"
-status: Implemented
+status: Superseded
 created: 2026-05-17
-updated: 2026-06-12
+updated: 2026-07-28
 author: vincent
 supersedes: []
-superseded_by: null
-related: ["0042", "0077", "0088"]
+superseded_by: "0240"
+related: ["0042", "0077", "0088", "0240"]
 implementation_prs: [15924]
 ---
 
 # RFC-0110: Tool-pair atomicity at write boundary — sunset compaction repair fabrication
+
+> **Status correction 2026-07-28.** This RFC was marked `Implemented` on
+> 2026-06-12. PR #15924 shipped the *read-side* change its own §1
+> describes — dropping broken structural blocks from visible content and
+> emitting `masc.tool_pair_repair` metadata plus telemetry stats. The
+> write-boundary atomicity in the title was never implemented: no
+> boundary rejects a `ToolUse` that is committed without its
+> `ToolResult`. Drop-plus-counters is the telemetry-as-fix signature
+> `software-development.md` rejects, so `Implemented` overstates it.
+>
+> Consequences observed since: `f5f45f97c3` (#25046, 2026-07-18) removed
+> the repair symbols, `4a1880624b` (#25335, 2026-07-23) replaced them
+> with a hard reject at provider admission, and on 2026-07-27 four
+> keepers latched `transcript_corruption_reset_required` after ordinary
+> server restarts, with no path back short of operator reset. The write
+> boundary was never closed, so removing the read-side compensation left
+> neither.
+>
+> Superseded by RFC-0240, which carries the write-time enforcement plus
+> the crash-consistency case this RFC did not consider (RFC-0240 §1.5,
+> §1.6, §2.4).
 
 ## §1 Problem (caller-context)
 

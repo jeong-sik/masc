@@ -66,27 +66,3 @@ val build_claim_observation_payload :
   task_id:string ->
   scope_widened:bool ->
   Yojson.Safe.t
-
-(** [is_cross_runtime_verdict result] is [true] iff [result] has both
-    [generator_runtime = Some g] and [evaluator_runtime] non-empty,
-    and [g <> evaluator_runtime].
-
-    Inclusion criteria align exactly with
-    {!Eval_calibration.calibration_stats} so the live SSE event and
-    the aggregated [cross_runtime_rate] never disagree on whether a
-    given verdict counts. *)
-val is_cross_runtime_verdict : Anti_rationalization.review_result -> bool
-
-(** [build_verdict_sse_payload ~now ~task_id ~req ~result] builds the
-    [verdict_recorded] SSE envelope for a finished review.
-
-    Pure function — no IO, no broadcast, no logging. Exposed so that
-    the payload contract (field names, nullability, [cross_runtime]
-    semantics) can be exercised by unit tests without touching
-    Sse.broadcast or the review pipeline. *)
-val build_verdict_sse_payload :
-  now:float ->
-  task_id:string ->
-  req:Anti_rationalization.review_request ->
-  result:Anti_rationalization.review_result ->
-  Yojson.Safe.t

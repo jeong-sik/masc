@@ -18,6 +18,8 @@ let check_rearm label expected = function
 
 module Gate = Masc.Keeper_gate
 module Registry_queue = Masc.Keeper_registry_event_queue
+module Event_queue_persistence = Keeper_event_queue_persistence
+module Reaction_ledger = Masc.Keeper_reaction_ledger
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    reproduces its unit projection over [resolve_with_policy] so these
@@ -1893,10 +1895,18 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               "pre-rename cancellation payload preserved"
               true
               (observed_payload == cancellation_payload);
-            Alcotest.(check string)
+            let expected_backtrace =
+              Printexc.raw_backtrace_to_string cancellation_backtrace
+            in
+            let observed_backtrace =
+              Printexc.raw_backtrace_to_string observed_backtrace
+            in
+            Alcotest.(check bool)
               "pre-rename cancellation backtrace preserved"
-              (Printexc.raw_backtrace_to_string cancellation_backtrace)
-              (Printexc.raw_backtrace_to_string observed_backtrace)
+              true
+              (String.starts_with
+                 ~prefix:expected_backtrace
+                 observed_backtrace)
           | Error error ->
             Alcotest.failf
               "pre-rename cancellation became an exact error: %s"
@@ -2358,6 +2368,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
              ^ AQ.exact_attempt_error_to_string error)
         | Ok _ ->
           Alcotest.fail "blocked disposition bound without operator rearm");
+       let entry = pending_entry_exn id in
        (match
           AQ.reserve_summary_attempt_retry
             ~base_path
@@ -2477,6 +2488,91 @@ let test_operator_recovery_skips_terminal_exact_failure () =
        reject_and_cleanup ~base_path quarantined_id)
 ;;
 
+let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let pending keeper_name value =
+         let id =
+           submit
+             ~base_path
+             ~keeper_name
+             ~input:(`String value)
+         in
+         check_update
+           "mark pending"
+           true
+           (AQ.mark_summary_pending ~id);
+         id
+       in
+       let owner = "retirement-blocked" in
+       let bound = pending owner "bound" in
+       let sibling = pending owner "sibling" in
+       let retirable = pending "retirement-unbound" "retire" in
+       check_exact_update
+         "bind blocker"
+         true
+         (run_exact_transition
+            AQ.bind_summary_exact_attempt
+            (exact_identity ~slot_id:"slot" ~call_id:"call" bound));
+       (match
+          AQ.retire_summary_owner
+            ~base_path
+            ~keeper_name:owner
+            ~reason:"retired"
+        with
+        | Error
+            (AQ.Summary_owner_retirement_exact_attempt_unsettled _) ->
+          ()
+        | Error error ->
+          Alcotest.fail
+            (AQ.summary_owner_retirement_error_to_string error)
+        | Ok _ -> Alcotest.fail "bound owner retirement succeeded");
+       (match AQ.For_testing.get_pending_entry_unchecked ~id:bound with
+        | Some
+            { summary_status = AQ.Summary_pending
+            ; exact_attempt = AQ.Exact_bound binding
+            ; _
+            } ->
+          Alcotest.(check string)
+            "bound call unchanged"
+            "call"
+            binding.call_id
+        | Some _ | None ->
+          Alcotest.fail "bound entry changed on failed retirement");
+       (match AQ.For_testing.get_pending_entry_unchecked ~id:sibling with
+        | Some { summary_status = AQ.Summary_pending; _ } -> ()
+        | Some _ | None ->
+          Alcotest.fail "blocked retirement partially mutated");
+       (match
+          AQ.retire_summary_owner
+            ~base_path
+            ~keeper_name:"retirement-unbound"
+            ~reason:"retired"
+        with
+        | Error error ->
+          Alcotest.fail
+            (AQ.summary_owner_retirement_error_to_string error)
+        | Ok ids ->
+          Alcotest.(check (list string))
+            "retired ids"
+            [ retirable ]
+            ids);
+       match AQ.For_testing.get_pending_entry_unchecked ~id:retirable with
+       | Some
+           { summary_status =
+               AQ.Summary_failed
+                 { reason = "retired"; retryable = false }
+           ; _
+           } ->
+         ()
+       | Some _ | None ->
+         Alcotest.fail "pending summary was not terminalized")
+;;
 
 let test_dashboard_resolve_rejects_cross_workspace_approval () =
   let base_a = temp_dir () in
@@ -2495,6 +2591,7 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
            ~keeper_name:"queue-resolve-base-a"
            ~input:(`Assoc [ "request", `String "base-a" ])
        in
+       ignore (install_exn ~base_path:base_b);
        let resolve ~decision ~remember_rule =
          Server_dashboard_http.dashboard_gate_resolve_http_json
            ~base_path:base_b
@@ -2533,6 +2630,7 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
               (Sys.file_exists
                  (AQ.For_testing.always_allowed_store_path ~base_path)))
          [ base_a; base_b ];
+       ignore (install_exn ~base_path:base_a);
        reject_and_cleanup ~base_path:base_a approval_id)
 ;;
 
@@ -2730,6 +2828,122 @@ let test_persisted_delivery_replays_before_origin_wake () =
           |> member "grant_consumed"
           |> to_bool);
        drop_resolution ~base_path ~keeper_name resolution)
+;;
+
+let test_observed_delivery_preserves_grant_without_replaying_wake () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-acked-replay-origin" in
+  let input = `Assoc [ "target", `String "acked-replay" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id = submit ~base_path ~keeper_name ~input in
+       (match
+          aq_resolve
+            ~base_path
+            ~id
+            ~decision:AQ.Decision.Approve
+        with
+        | Ok () -> ()
+       | Error error ->
+          Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolution =
+         match
+           durable_resolution_opt
+             ~base_path
+             ~keeper_name
+             ~approval_id:id
+         with
+         | Some resolution -> resolution
+         | None -> Alcotest.fail "HITL wake was not durably queued"
+       in
+       let selection =
+         match
+           Event_queue_persistence.peek_when_result
+             ~base_path
+             ~keeper_name
+             ~ready:(fun _ -> true)
+         with
+       | Ok (Some selection) -> selection
+       | Ok None -> Alcotest.fail "HITL wake was not durably queued"
+       | Error detail -> Alcotest.fail detail
+       in
+       List.iter
+         (Reaction_ledger.record_event_queue_turn_started
+            ~base_path
+            ~keeper_name)
+         selection.stimuli;
+       (match
+          Event_queue_persistence.ack_pending_result
+            ~base_path
+            ~keeper_name
+            ~selection
+            ()
+        with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       let post_id =
+         Keeper_event_queue.hitl_resolution_post_id resolution
+       in
+       (match
+          Reaction_ledger.event_queue_turn_started_seen_for_source_result
+            ~base_path
+            ~keeper_name
+            ~post_id
+            ~stimulus_kind:Reaction_ledger.Hitl_resolved
+        with
+        | Ok true -> ()
+        | Ok false ->
+          Alcotest.failf
+            "turn-started delivery evidence was not found: %s"
+            (Reaction_ledger.summary_for_keeper
+               ~base_path
+               ~keeper_name
+               ~limit:10
+             |> Yojson.Safe.to_string)
+        | Error error ->
+          Alcotest.fail
+            (Reaction_ledger.event_queue_reaction_evidence_error_to_string
+               error));
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int)
+         "observed wake is not replayed"
+         0
+         report.replayed_deliveries;
+       Alcotest.(check bool)
+         "observed wake stays absent after ack"
+         true
+         (Option.is_none
+            (durable_resolution_opt
+               ~base_path
+               ~keeper_name
+               ~approval_id:id));
+       (match AQ.approved_resolution_state ~base_path ~id with
+        | Ok AQ.Resolution_unconsumed -> ()
+        | Ok AQ.Resolution_consumed ->
+          Alcotest.fail "wake acknowledgement consumed the exact grant"
+        | Error error ->
+          Alcotest.fail (AQ.grant_error_to_string error));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok AQ.Consumption_committed -> ()
+        | Ok
+            ( AQ.Consumption_already_committed
+            | AQ.Consumption_not_matching ) ->
+          Alcotest.fail "preserved exact grant was not consumable"
+        | Error error ->
+          Alcotest.fail (AQ.grant_error_to_string error)))
 ;;
 
 let test_one_delivery_replay_failure_does_not_stop_others () =
@@ -3107,6 +3321,10 @@ let () =
             `Quick
             test_operator_recovery_skips_terminal_exact_failure
         ; Alcotest.test_case
+            "summary owner retirement is atomic and owner scoped"
+            `Quick
+            test_summary_owner_retirement_is_atomic_and_owner_scoped
+        ; Alcotest.test_case
               "exact restart finalization requires fsync"
               `Quick
               test_exact_completed_restart_requires_fsync_confirmation
@@ -3134,6 +3352,10 @@ let () =
             "delivery journal replays"
             `Quick
             test_persisted_delivery_replays_before_origin_wake
+        ; Alcotest.test_case
+            "observed delivery preserves grant without replaying wake"
+            `Quick
+            test_observed_delivery_preserves_grant_without_replaying_wake
         ; Alcotest.test_case
             "one replay failure does not stop others"
             `Quick

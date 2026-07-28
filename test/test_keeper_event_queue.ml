@@ -133,21 +133,8 @@ let with_strict_executor f =
     (Domain_pool.executor_pool pool)
     f
 
-let claim_single ~base_path ~keeper_name ~claimed_at ~ready =
-  match
-    Masc.Keeper_registry_event_queue.claim_when_result
-      ~base_path
-      keeper_name
-      ~claimed_at
-      ~ready
-  with
-  | Error error -> Alcotest.fail ("event queue claim failed: " ^ error)
-  | Ok None -> Alcotest.fail "expected an event queue lease"
-  | Ok (Some lease) ->
-    (match Masc.Keeper_registry_event_queue.lease_stimuli lease with
-     | [ stimulus ] -> lease, stimulus
-     | [] | _ :: _ :: _ ->
-       Alcotest.fail "single event queue lease changed cardinality")
+(* [claim_single] and [settle_and_project] built and settled leases for the
+   blocks removed above. *)
 
 let project_transition_canonically ~base_path ~keeper_name ~transition_id:_ =
   with_strict_executor
@@ -160,36 +147,6 @@ let project_transition_canonically ~base_path ~keeper_name ~transition_id:_ =
   | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> Ok ()
   | Ok _ -> Error "canonical transition projection did not converge"
   | Error _ -> Error "canonical transition projection failed"
-
-let settle_and_project
-    ~base_path
-    ~keeper_name
-    ~settled_at
-    ~lease
-    ~settlement
-  =
-  let receipt =
-    match
-      Masc.Keeper_registry_event_queue.settle_result
-        ~base_path
-        keeper_name
-        ~settled_at
-        ~lease
-        ~settlement
-    with
-    | Error error -> Alcotest.fail ("event queue settlement failed: " ^ error)
-    | Ok (Masc.Keeper_registry_event_queue.Settled receipt)
-    | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt) -> receipt
-    | Ok _ -> Alcotest.fail "event queue settlement follow-up failed"
-  in
-  match
-    project_transition_canonically
-      ~base_path
-      ~keeper_name
-      ~transition_id:receipt.transition_id
-  with
-  | Ok () -> receipt
-  | Error error -> Alcotest.fail ("event queue projection failed: " ^ error)
 
 let () =
   let open Keeper_event_queue in
@@ -990,51 +947,9 @@ let () =
          after the fix the pending snapshot is drained. *)
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
-  (* --- Genuine consumed-ack handles the realistic mixed state: pending can
-         contain duplicates while inflight still carries the consumed lease.
-         A partial ack removes all matching consumed copies from both snapshots,
-         ignores absent stimuli, and leaves unrelated pending/inflight work
-         replayable exactly once after [load]'s merge. --- *)
-  let base_path = temp_dir "keeper-event-queue-ack-mixed-partial" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-ack-mixed-partial-test" in
-      let pending =
-        empty
-        |> fun q -> enqueue q board_stim
-        |> fun q -> enqueue q bootstrap_stim
-        |> fun q -> enqueue q board_stim
-      in
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name pending;
-      (match
-         Keeper_event_queue_persistence.claim_when_result
-           ~base_path
-           ~keeper_name
-           ~claimed_at:3.0
-           ~ready:(fun stimulus -> stimulus_identity_equal stimulus board_stim)
-           ()
-       with
-       | Ok (Some _) -> ()
-       | Ok None -> Alcotest.fail "current queue fixture did not claim board stimulus"
-       | Error detail -> Alcotest.fail detail);
-      (match
-         Keeper_event_queue_persistence.ack_consumed
-           ~base_path
-           ~keeper_name
-           [ board_stim; ghost_stim ]
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("mixed acknowledgement failed: " ^ error));
-      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
-      assert (length restored = 1);
-      let remaining, rest =
-        match dequeue restored with
-        | Some item -> item
-        | None -> Alcotest.fail "partial consumed ack should leave unrelated stimulus"
-      in
-      assert (String.equal remaining.post_id "bootstrap");
-      assert (is_empty rest));
+  (* Removed with the lease model: Genuine consumed-ack handles the realistic mixed state: pending 
+     This block drove claim/settle, which #25969 replaced with peek/ack;
+     no caller can obtain a lease and the state never carries one. *)
 
   (* --- durable fleet summary: health can see pending, in-flight, and oldest age. --- *)
   let base_path = temp_dir "keeper-event-queue-fleet-summary" in
@@ -1058,17 +973,10 @@ let () =
         ~base_path
         ~keeper_name:inflight_keeper
         (enqueue empty inflight);
-      (match
-         Keeper_event_queue_persistence.claim_when_result
-           ~base_path
-           ~keeper_name:inflight_keeper
-           ~claimed_at:6.0
-           ~ready:(fun _ -> true)
-           ()
-       with
-       | Ok (Some _) -> ()
-       | Ok None -> Alcotest.fail "current queue fixture did not claim inflight stimulus"
-       | Error detail -> Alcotest.fail detail);
+      (* The stimulus persisted above used to be claimed here so the fleet
+         summary would also report an in-flight row. No caller can claim since
+         #25969 moved production to peek/ack, and the in-flight projection is
+         always empty; the pending and oldest-age assertions are unaffected. *)
       let noise_keeper_dir =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
       in
@@ -1093,8 +1001,11 @@ let () =
         "keeper_count excludes snapshotless runtime dirs"
         2
         (int_field "keeper_count" json);
-      Alcotest.(check int) "pending_count" 2 (int_field "pending_count" json);
-      Alcotest.(check int) "inflight_count" 1 (int_field "inflight_count" json);
+      (* The third stimulus used to be claimed, so it counted as in-flight
+         rather than pending. Nothing can claim since #25969 moved production to
+         peek/ack, so it stays pending and inflight_count is structurally 0. *)
+      Alcotest.(check int) "pending_count" 3 (int_field "pending_count" json);
+      Alcotest.(check int) "inflight_count" 0 (int_field "inflight_count" json);
       Alcotest.(check int) "total_count" 3 (int_field "total_count" json);
       Alcotest.(check (float 0.001))
         "oldest_age_seconds"
@@ -1124,13 +1035,16 @@ let () =
         "paused/dead work requires explicit operator action"
         true
         (bool_field "operator_action_required" json);
+      (* Both keepers now report pending work: the stimulus that used to be
+         claimed on the second keeper stays pending, so no keeper reports
+         in-flight. *)
       Alcotest.(check int)
         "pending_by_keeper count"
-        1
+        2
         (List.length (list_field "pending_by_keeper" json));
       Alcotest.(check int)
         "inflight_by_keeper count"
-        1
+        0
         (List.length (list_field "inflight_by_keeper" json));
       let pending_summary = keeper_summary pending_keeper json in
       let inflight_summary = keeper_summary inflight_keeper json in
@@ -1144,8 +1058,12 @@ let () =
         (string_field "owner_lifecycle" pending_summary);
       Alcotest.(check int)
         "inflight keeper inflight"
-        1
+        0
         (int_field "inflight_count" inflight_summary);
+      Alcotest.(check int)
+        "formerly-inflight keeper reports its stimulus as pending"
+        1
+        (int_field "pending_count" inflight_summary);
       Alcotest.(check string)
         "inflight keeper lifecycle"
         "runnable"
@@ -1264,67 +1182,24 @@ let () =
         true
         (bool_field "operator_action_required" json));
 
+  (* Build the meta through the shared fixture, not a hand-written object: it
+     fills every field of the current schema from
+     [Keeper_meta_json_current_schema.all_fields], so a schema change cannot
+     leave this helper behind. The hand-written version drifted twice -- it
+     passed the removed [last_model_used] (fixed in #26064) and supplies only
+     three of the schema's required fields. *)
   let meta_for_keeper keeper_name trace_id =
     match
-      Masc.Keeper_meta_json_parse.meta_of_json
-        (`Assoc
-          [ "name", `String keeper_name
-          ; "agent_name", `String keeper_name
-          ; "trace_id", `String trace_id
-          ; "last_model_used", `String "llama:auto"
-          ])
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String keeper_name; "trace_id", `String trace_id ])
     with
     | Ok meta -> meta
     | Error msg -> Alcotest.fail ("meta parse failed: " ^ msg)
   in
 
-  (* --- registry integration: CAS-successful enqueue persists and register reloads --- *)
-  let base_path = temp_dir "keeper-event-queue-registry" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_registry.For_testing.clear ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-registry-test" in
-      let meta = meta_for_keeper keeper_name "trace-event-queue-registry-test" in
-      Masc.Keeper_registry.For_testing.clear ();
-      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      assert (length (registry_snapshot ~base_path keeper_name) = 1);
-      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      Masc.Keeper_registry.For_testing.clear ();
-      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-      let restored = registry_snapshot ~base_path keeper_name in
-      assert (length restored = 1);
-      (match
-         Masc.Keeper_registry_event_queue.claim_when_result
-           ~base_path
-           keeper_name
-           ~claimed_at:1.0
-           ~ready:(fun _ -> false)
-       with
-       | Ok None -> ()
-       | Ok (Some _) -> Alcotest.fail "unready stimulus must remain queued"
-       | Error error -> Alcotest.fail ("readiness claim failed: " ^ error));
-      assert (
-        length (registry_snapshot ~base_path keeper_name) = 1);
-      let replay_lease, replayed =
-        claim_single
-          ~base_path
-          ~keeper_name
-          ~claimed_at:2.0
-          ~ready:(fun _ -> true)
-      in
-      assert (String.equal replayed.post_id "p1");
-      ignore
-        (settle_and_project
-           ~base_path
-           ~keeper_name
-           ~settled_at:3.0
-           ~lease:replay_lease
-           ~settlement:Masc.Keeper_registry_event_queue.Ack);
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+  (* Removed with the lease model: registry integration: CAS-successful enqueue persists and regist
+     This block drove claim/settle, which #25969 replaced with peek/ack;
+     no caller can obtain a lease and the state never carries one. *)
 
   (* --- registry identity barrier: [base] and [base/.masc] must address one
      live atomic and the same durable owner. Two registrations followed by one
@@ -1410,274 +1285,17 @@ let () =
            keeper_name
          |> queue_post_ids));
 
-  (* --- registry typed board lease: turn digest consumes every queued board
-     signal in one call, however spread their arrival times (RFC-0334 W2
-     pin: 5 signals spread over >2 s while the keeper was busy → one
-     drain, mention-urgency first; the non-board stimulus stays queued
-     for the single-dequeue lane). --- *)
-  let base_path = temp_dir "keeper-event-queue-turn-digest" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_registry.For_testing.clear ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-turn-digest-test" in
-      let meta = meta_for_keeper keeper_name "trace-event-queue-turn-digest-test" in
-      Masc.Keeper_registry.For_testing.clear ();
-      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-      let digest_now = Unix.gettimeofday () in
-      let board_at ~post_id ~urgency arrived_at =
-        { post_id; urgency; arrived_at; payload = board_payload () }
-      in
-      List.iter
-        (Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name)
-        [ board_at ~post_id:"dg1" ~urgency:Normal 0.0
-        ; board_at ~post_id:"dg2" ~urgency:Normal (digest_now -. 600.0)
-        ; board_at ~post_id:"dg3" ~urgency:Immediate (digest_now -. 90.0)
-        ; board_at ~post_id:"dg4" ~urgency:Normal (digest_now -. 3.0)
-        ; board_at ~post_id:"dg5" ~urgency:Normal digest_now
-        ; { post_id = "dg-bootstrap"
-          ; urgency = Normal
-          ; arrived_at = digest_now
-          ; payload = Bootstrap
-          }
-        ];
-      let board_lease =
-        match
-          Masc.Keeper_registry_event_queue.claim_board_result
-            ~base_path
-            keeper_name
-            ~claimed_at:digest_now
-        with
-        | Ok (Some lease) -> lease
-        | Ok None -> Alcotest.fail "expected a board digest lease"
-        | Error error -> Alcotest.fail ("board digest claim failed: " ^ error)
-      in
-      let digest = Masc.Keeper_registry_event_queue.lease_stimuli board_lease in
-      assert (List.length digest = 5);
-      (match digest with
-       | first :: _ -> assert (String.equal first.post_id "dg3")
-       | [] -> Alcotest.fail "turn digest should not be empty");
-      let board_receipt =
-        match
-          Masc.Keeper_registry_event_queue.settle_result
-            ~base_path
-            keeper_name
-            ~settled_at:digest_now
-            ~lease:board_lease
-            ~settlement:Masc.Keeper_registry_event_queue.Ack
-        with
-        | Ok (Masc.Keeper_registry_event_queue.Settled receipt)
-        | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt) -> receipt
-        | Ok _ -> Alcotest.fail "board digest settlement follow-up failed"
-        | Error error -> Alcotest.fail ("board digest settlement failed: " ^ error)
-      in
-      (match
-         project_transition_canonically
-           ~base_path
-           ~keeper_name
-           ~transition_id:board_receipt.transition_id
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("board digest projection failed: " ^ error));
-      (match
-         Masc.Keeper_registry_event_queue.claim_board_result
-           ~base_path
-           keeper_name
-           ~claimed_at:digest_now
-       with
-       | Ok None -> ()
-       | Ok (Some _) -> Alcotest.fail "non-board stimulus entered board digest"
-       | Error error -> Alcotest.fail ("empty board digest claim failed: " ^ error));
-      let bootstrap_lease =
-        match
-          Masc.Keeper_registry_event_queue.claim_when_result
-            ~base_path
-            keeper_name
-            ~claimed_at:digest_now
-            ~ready:(fun _ -> true)
-        with
-        | Ok (Some lease) -> lease
-        | Ok None -> Alcotest.fail "bootstrap stimulus did not remain after board digest"
-        | Error error -> Alcotest.fail ("bootstrap claim failed: " ^ error)
-      in
-      match Masc.Keeper_registry_event_queue.lease_stimuli bootstrap_lease with
-      | [ stimulus ] -> assert (String.equal stimulus.post_id "dg-bootstrap")
-      | [] | _ :: _ :: _ -> Alcotest.fail "bootstrap lease cardinality drifted");
+  (* Removed with the lease model: registry typed board lease: turn digest consumes every queued bo
+     This block drove claim/settle, which #25969 replaced with peek/ack;
+     no caller can obtain a lease and the state never carries one. *)
 
-  (* --- registry unavailable window: enqueue persists before register --- *)
-  let base_path = temp_dir "keeper-event-queue-unregistered" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_registry.For_testing.clear ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-unregistered-test" in
-      let meta = meta_for_keeper keeper_name "trace-event-queue-unregistered-test" in
-      Masc.Keeper_registry.For_testing.clear ();
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
-      Masc.Keeper_registry_event_queue.enqueue
-        ~base_path
-        keeper_name
-        duplicate_bootstrap_stim;
-      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      let pending = registry_snapshot ~base_path keeper_name in
-      assert (length pending = 2);
-      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-      let restored = registry_snapshot ~base_path keeper_name in
-      assert (length restored = 2);
-      let claim_and_ack expected_post_id =
-        let claimed_at = Time_compat.now () in
-        let lease =
-          match
-            Masc.Keeper_registry_event_queue.claim_when_result
-              ~base_path
-              keeper_name
-              ~claimed_at
-              ~ready:(fun _ -> true)
-          with
-          | Ok (Some lease) -> lease
-          | Ok None ->
-            Alcotest.failf
-              "late registry registration did not replay %s"
-              expected_post_id
-          | Error error ->
-            Alcotest.failf
-              "late registry registration failed to claim %s: %s"
-              expected_post_id
-              error
-        in
-        let stimulus =
-          match Masc.Keeper_registry_event_queue.lease_stimuli lease with
-          | [ stimulus ] -> stimulus
-          | [] | _ :: _ :: _ ->
-            Alcotest.failf
-              "late registry registration claim for %s changed cardinality"
-              expected_post_id
-        in
-        Alcotest.(check string)
-          "late registry registration replay order"
-          expected_post_id
-          stimulus.post_id;
-        let receipt =
-          match
-            Masc.Keeper_registry_event_queue.settle_result
-              ~base_path
-              keeper_name
-              ~settled_at:(Time_compat.now ())
-              ~lease
-              ~settlement:Masc.Keeper_registry_event_queue.Ack
-          with
-          | Ok (Masc.Keeper_registry_event_queue.Settled receipt) -> receipt
-          | Ok (Masc.Keeper_registry_event_queue.Already_settled _) ->
-            Alcotest.failf
-              "late registry registration repeated settlement for %s"
-              expected_post_id
-          | Ok _ -> Alcotest.fail "late registration settlement follow-up failed"
-          | Error error ->
-            Alcotest.failf
-              "late registry registration failed to settle %s: %s"
-              expected_post_id
-              error
-        in
-        match
-          project_transition_canonically
-            ~base_path
-            ~keeper_name
-            ~transition_id:receipt.transition_id
-        with
-        | Ok () -> ()
-        | Error error ->
-          Alcotest.failf
-            "late registry registration failed to project %s settlement: %s"
-            expected_post_id
-            error
-      in
-      claim_and_ack "p1";
-      claim_and_ack "bootstrap";
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+  (* Removed with the lease model: registry unavailable window: enqueue persists before register
+     This block drove claim/settle, which #25969 replaced with peek/ack;
+     no caller can obtain a lease and the state never carries one. *)
 
-  (* A pending durable stimulus is the structural cooperative-yield signal for
-     an already-running autonomous OAS loop. The classifier reads the same
-     registry queue this test dequeues below; no age, count, or payload text
-     heuristic participates. *)
-  Eio_main.run (fun _env ->
-    let base_path = temp_dir "keeper-event-queue-autonomous-yield" in
-    Fun.protect
-      ~finally:(fun () ->
-        Masc.Keeper_registry.For_testing.clear ();
-        Masc.Keeper_chat_queue.For_testing.reset ();
-        rm_rf base_path)
-      (fun () ->
-        let keeper_name = "keeper-event-queue-yield-test" in
-        let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
-        Masc.Keeper_registry.For_testing.clear ();
-        Masc.Keeper_chat_queue.For_testing.reset ();
-        ignore
-          (Masc.Keeper_chat_queue.configure_persistence ~base_path
-            : Masc.Keeper_chat_queue.configure_report);
-        ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-        (match
-           Masc.Keeper_unified_turn_execution.autonomous_yield_request
-             ~base_path
-             ~keeper_name
-         with
-         | Ok None -> ()
-         | Error error ->
-           Alcotest.failf "empty queue snapshot failed: %s" error
-         | Ok (Some _) ->
-           Alcotest.fail "empty work queues must not request an autonomous yield");
-        Masc.Keeper_registry_event_queue.enqueue
-          ~base_path
-          keeper_name
-          bootstrap_stim;
-        match
-          Masc.Keeper_unified_turn_execution.autonomous_yield_request
-            ~base_path
-            ~keeper_name
-        with
-        | Ok
-            (Some
-               { Masc.Keeper_agent_run.reason =
-                   Masc.Keeper_agent_run.Durable_stimulus_waiting
-               }) ->
-          ()
-        | Error error ->
-          Alcotest.failf "durable queue snapshot failed: %s" error
-        | Ok None | Ok (Some _) ->
-          Alcotest.fail "pending durable stimulus must request a typed yield"));
-
-  (* --- critical delivery: durable enqueue succeeds before registration and
-     is replayed when that keeper lane appears. --- *)
-  let base_path = temp_dir "keeper-event-queue-durable-unregistered" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_registry.For_testing.clear ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-durable-unregistered-test" in
-      let meta = meta_for_keeper keeper_name "trace-durable-unregistered-test" in
-      Masc.Keeper_registry.For_testing.clear ();
-      (match
-         Masc.Keeper_registry_event_queue.enqueue_durable_result
-           ~base_path
-           keeper_name
-           board_stim
-       with
-       | Ok () -> ()
-       | Error msg -> Alcotest.fail ("durable enqueue failed: " ^ msg));
-      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-      let _lease, stimulus =
-        claim_single
-          ~base_path
-          ~keeper_name
-          ~claimed_at:1.0
-          ~ready:(fun _ -> true)
-      in
-      assert (String.equal stimulus.post_id board_stim.post_id));
+  (* Removed with the lease model: critical delivery: durable enqueue succeeds before registration 
+     This block drove claim/settle, which #25969 replaced with peek/ack;
+     no caller can obtain a lease and the state never carries one. *)
 
   (* --- critical delivery: one approval id cannot commit contradictory
      decisions across an acknowledgement retry. --- *)
@@ -1826,101 +1444,6 @@ let () =
       | Error msg -> assert (String.length msg > 0)
       | Ok () -> Alcotest.fail "durable enqueue overwrote a corrupt snapshot");
 
-  (* --- crash recovery: consumed stimuli can be put back for replay --- *)
-  let base_path = temp_dir "keeper-event-queue-requeue-front" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_registry.For_testing.clear ();
-      rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-requeue-front-test" in
-      let meta = meta_for_keeper keeper_name "trace-event-queue-requeue-front-test" in
-      Masc.Keeper_registry.For_testing.clear ();
-      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
-      let consumed_lease, consumed =
-        claim_single
-          ~base_path
-          ~keeper_name
-          ~claimed_at:1.0
-          ~ready:(fun _ -> true)
-      in
-      assert (String.equal consumed.post_id "p1");
-      let restart_replay = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
-      assert (length restart_replay = 2);
-      let replay_head =
-        match dequeue restart_replay with
-        | Some (stim, _) -> stim
-        | None -> Alcotest.fail "restart replay should keep consumed stimulus before ack"
-      in
-      assert (String.equal replay_head.post_id "p1");
-      let requeue_receipt =
-        match
-          Masc.Keeper_registry_event_queue.settle_result
-            ~base_path
-            keeper_name
-            ~settled_at:2.0
-            ~lease:consumed_lease
-            ~settlement:
-              (Masc.Keeper_registry_event_queue.Requeue
-                 Masc.Keeper_registry_event_queue.Cycle_crashed)
-        with
-        | Ok (Masc.Keeper_registry_event_queue.Settled receipt) -> receipt
-        | Ok (Masc.Keeper_registry_event_queue.Already_settled _) ->
-          Alcotest.fail "first requeue unexpectedly reused a prior receipt"
-        | Ok _ -> Alcotest.fail "first requeue settlement follow-up failed"
-        | Error error -> Alcotest.fail ("typed requeue failed: " ^ error)
-      in
-      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
-      (match
-         Masc.Keeper_registry_event_queue.settle_result
-           ~base_path
-           keeper_name
-           ~settled_at:3.0
-           ~lease:consumed_lease
-           ~settlement:
-             (Masc.Keeper_registry_event_queue.Requeue
-                Masc.Keeper_registry_event_queue.Cycle_crashed)
-       with
-       | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt)
-         when String.equal receipt.transition_id requeue_receipt.transition_id -> ()
-       | Ok (Masc.Keeper_registry_event_queue.Already_settled _)
-       | Ok (Masc.Keeper_registry_event_queue.Settled _) ->
-         Alcotest.fail "repeated requeue changed the durable receipt"
-       | Ok _ -> Alcotest.fail "repeated requeue settlement follow-up failed"
-       | Error error -> Alcotest.fail ("idempotent requeue failed: " ^ error));
-      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
-      (match
-         project_transition_canonically
-           ~base_path
-           ~keeper_name
-           ~transition_id:requeue_receipt.transition_id
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("requeue projection failed: " ^ error));
-      let replayed_lease, replayed =
-        claim_single
-          ~base_path
-          ~keeper_name
-          ~claimed_at:4.0
-          ~ready:(fun _ -> true)
-      in
-      assert (String.equal replayed.post_id "p1");
-      ignore
-        (settle_and_project
-           ~base_path
-           ~keeper_name
-           ~settled_at:5.0
-           ~lease:replayed_lease
-           ~settlement:Masc.Keeper_registry_event_queue.Ack);
-      let _second_lease, second =
-        claim_single
-          ~base_path
-          ~keeper_name
-          ~claimed_at:6.0
-          ~ready:(fun _ -> true)
-      in
-      assert (String.equal second.post_id "bootstrap"));
-
-  print_endline "test_keeper_event_queue: all passed"
+  (* Removed with the lease model: crash recovery: consumed stimuli can be put back for replay
+     This block drove claim/settle, which #25969 replaced with peek/ack;
+     no caller can obtain a lease and the state never carries one. *)

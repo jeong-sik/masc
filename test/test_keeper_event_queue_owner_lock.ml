@@ -323,15 +323,9 @@ let test_fleet_summary_serializes_with_owner_commit () =
       ~base_path
       ~keeper_name
       (Queue.empty |> fun queue -> Queue.enqueue queue inflight |> fun queue -> Queue.enqueue queue pending);
-    ignore
-      (Persistence.claim_when_result
-         ~base_path
-         ~keeper_name
-         ~claimed_at:11.0
-         ~ready:(fun stimulus -> String.equal stimulus.Queue.post_id inflight.post_id)
-         ()
-       |> require_ok "claim current inflight summary fixture"
-       |> require_some "current inflight summary lease");
+    (* A claim over [inflight] used to stage an in-flight row here. No caller
+       can claim since #25969; the owner-lock serialization under test is
+       unaffected. *)
     let transform_entered = Atomic.make false in
     let release = Atomic.make false in
     let writer_result = ref None in
@@ -379,80 +373,29 @@ let test_fleet_summary_serializes_with_owner_commit () =
              "summary pending count comes from completed pair"
              0
              (int_field "pending_count" keeper);
+           (* This asserted 1, proving the summary preserved independently
+              leased work across the concurrent write. Leases cannot exist since
+              #25969 moved production to peek/ack, so the count is structurally
+              0; the pending assertion above still carries the serialization
+              property this case exists for. *)
            Alcotest.(check int)
-             "summary preserves independently leased work"
-             1
+             "summary reports no leased work"
+             0
              (int_field "inflight_count" keeper)));
     require_some "split writer join" !writer_result
     |> require_ok "split writer update")
 ;;
 
-let test_cancel_after_claim_commit_resumes_stable_lease () =
-  with_temp_dir "event-queue-owner-cancel-after-commit" (fun base_path ->
-    let keeper_name = "cancel_after_commit" in
-    let pending = stimulus ~post_id:"durable-claim" ~arrived_at:11.0 in
-    Persistence.persist
-      ~base_path
-      ~keeper_name
-      (Queue.enqueue Queue.empty pending);
-    let after_commit_entered = Atomic.make false in
-    let release_after_commit = Atomic.make false in
-    let winner =
-      Eio.Fiber.first
-        (fun () ->
-           let result =
-             Persistence.claim_when_result
-               ~base_path
-               ~keeper_name
-               ~claimed_at:12.0
-               ~ready:(fun _ -> true)
-               ~after_commit:(fun _pending ->
-                 Atomic.set after_commit_entered true;
-                 await_atomic release_after_commit)
-               ()
-           in
-           `Claim_returned result)
-        (fun () ->
-           await_atomic after_commit_entered;
-           Atomic.set release_after_commit true;
-           `Cancellation_won)
-    in
-    (match winner with
-     | `Cancellation_won -> ()
-     | `Claim_returned _ ->
-       Alcotest.fail "claim returned before deterministic cancellation won");
-    let lease =
-      Persistence.active_lease_result ~base_path ~keeper_name
-      |> require_ok "resume committed lease"
-      |> require_some "committed lease remains discoverable"
-    in
-    Alcotest.(check (list string))
-      "committed claim is absent from pending"
-      []
-      (Persistence.load_pending ~base_path ~keeper_name |> post_ids);
-    Persistence.settle_result
-      ~base_path
-      ~keeper_name
-      ~settled_at:13.0
-      ~lease
-      ~settlement:Persistence.Ack
-      ()
-    |> require_ok "settle resumed lease"
-    |> ignore;
-    Alcotest.(check bool)
-      "resumed lease settled exactly once"
-      true
-      (Persistence.active_lease_result ~base_path ~keeper_name
-       |> require_ok "read settled state"
-       |> Option.is_none))
-;;
+(* [test_cancel_after_claim_commit_resumes_stable_lease] proved a cancelled
+   claim commit still resumed a stable lease and settled exactly once. It drove
+   claim_when_result / settle_result / active_lease_result, none of which
+   survive the peek/ack migration in #25969. *)
 
 let () =
   Eio_main.run (fun _env ->
     test_canonical_owner_and_cross_context_isolation ();
     test_cancelled_waiter_does_not_leak_owner_lock ();
     test_exception_does_not_poison_owner_or_other_lane ();
-    test_fleet_summary_serializes_with_owner_commit ();
-    test_cancel_after_claim_commit_resumes_stable_lease ());
+    test_fleet_summary_serializes_with_owner_commit ());
   print_endline "test_keeper_event_queue_owner_lock: OK"
 ;;

@@ -24,23 +24,15 @@ module Float = Stdlib.Float
 let masc_add_task_name =
   Tool_name.Task_name.to_string Tool_name.Task_name.Add_task
 
-let handoff_example_evidence_ref =
-  Filename.concat Common.masc_dirname "harness-evidence/proof.json"
-
 let handoff_context_description =
-  Printf.sprintf
-    "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
+  "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
      actions (submit_for_verification / done / release / cancel). On \
-     action='submit_for_verification' or 'done', 'evidence_refs' entries \
-     strengthen the completion review: an existing base-path artifact \
-     file/file:// URI, a commit hash present in the local git repo, or a %s \
-     trace/turn/receipt ref that resolves on disk. Entries must be non-empty \
-     strings, but the list itself is optional — the configured LLM completion \
-     verdict decides the outcome (RFC-0337 withdrew the mandatory evidence \
-     floor). Example: {\"summary\": \"tests green, local proof saved\", \
-     \"evidence_refs\": [\"%s\"]}."
-    Common.masc_dirname
-    handoff_example_evidence_ref
+     action='submit_for_verification', every 'evidence_refs' entry must use \
+     'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
+     'note:<text>' for narrative/commit/trace/URL evidence. Bare relative paths \
+     and absolute host paths are persisted as typed invalid references. The \
+     list itself is optional. Example: {\"summary\": \"tests green, local proof saved\", \
+     \"evidence_refs\": [\"artifact:artifacts/proof.json\"]}."
 
 let schemas : Masc_domain.tool_schema list = [
   {
@@ -48,8 +40,8 @@ let schemas : Masc_domain.tool_schema list = [
     description = Printf.sprintf
       "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
-Every Done transition requires the configured LLM completion verdict. \
-submit_for_verification creates an asynchronous review state; any worker may bind it for scheduling, but actor identity never authorizes approve/reject. \
+Completion must be submitted for an assigned verifier's approve/reject verdict. \
+submit_for_verification creates an asynchronous review state; any non-producer may race to claim it, but only the committed phase-assigned distinct verifier may approve/reject. \
 To re-run completed work, create a new task with predecessor_task_id instead of touching the done one. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
@@ -227,7 +219,7 @@ Tip: Look for status='todo' tasks to claim.";
   {
     name = "masc_transition";
     description =
-      "Move a Task through claim, start, submit_for_verification, approve, reject, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. done/approve/reject invoke the same configured LLM completion reviewer: structured pass reaches done, structured reject leaves or returns work to in_progress, and unavailable evaluation leaves the Task nonterminal with an explicit error. submit_for_verification is an asynchronous scheduling state, not actor approval. Supports expected_version CAS.";
+      "Move a Task through claim, start, submit_for_verification, approve, reject, done, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Direct done is rejected for active tasks: the assignee submits completion evidence, a distinct verifier claims it, and only that assigned verifier may approve or reject. Supports expected_version CAS.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -249,16 +241,7 @@ Tip: Look for status='todo' tasks to claim.";
         ]);
         ("notes", `Assoc [
           ("type", `String "string");
-          ("description", `String "Completion claim supplied to the configured LLM reviewer for done/approve/reject requests");
-        ]);
-        ("completion_contract", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [ ("type", `String "string") ]);
-          ("description", `String "Optional acceptance checklist that completion notes must satisfy before action='done' is accepted");
-        ]);
-        ("evaluator_runtime", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional evaluator runtime override for anti-rationalization review. Default comes from routes.cross_verifier");
+          ("description", `String "Evidence summary for submit_for_verification, or verifier rationale for approve/reject");
         ]);
         ("reason", `Assoc [
           ("type", `String "string");
@@ -293,7 +276,7 @@ Tip: Look for status='todo' tasks to claim.";
             ("evidence_refs", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string"); ("minLength", `Int 1) ]);
-              ("description", `String "References supplied as evidence for the task-completion evaluator or verifier. Entries must be non-empty strings at the transport boundary; their meaning and sufficiency are judged from task context, not by local reference-shape rules.");
+              ("description", `String "Typed verifier evidence. Use artifact:<producer-root-relative-path> for files or note:<text> for narrative, commit, trace, receipt, or URL evidence. Bare and absolute paths are invalid.");
             ]);
           ]);
           ("required", `List [`String "summary"]);

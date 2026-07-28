@@ -56,66 +56,13 @@ module Make (Publish : sig
   type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
     | Fsync_completed
     | Visible_sync_unconfirmed of string
+  (* The lease-taking exact-execution fence (bind / release_before_dispatch /
+     quarantine / prepare / finalize / settle_bound_exact_nonterminal) and
+     active_lease_result lived here. #25969 moved production to peek/ack, after
+     which no caller could obtain a lease and none of these was reachable. *)
 
-  val bind_exact_execution_result :
-    base_path:string ->
-    string ->
-    lease:Keeper_event_queue_persistence.lease ->
-    slot_id:string ->
-    call_id:string ->
-    plan_fingerprint:string ->
-    request_body_sha256:string ->
-    (exact_write_outcome, string) result
-
-  val release_exact_execution_before_dispatch_result :
-    base_path:string ->
-    string ->
-    lease:Keeper_event_queue_persistence.lease ->
-    slot_id:string ->
-    call_id:string ->
-    plan_fingerprint:string ->
-    request_body_sha256:string ->
-    (exact_write_outcome, string) result
-
-  val quarantine_exact_execution_result :
-    base_path:string ->
-    string ->
-    lease:Keeper_event_queue_persistence.lease ->
-    terminal:exact_execution_terminal ->
-    (exact_write_outcome, string) result
-
-  val prepare_exact_source_disposition_result :
-    base_path:string ->
-    string ->
-    lease:Keeper_event_queue_persistence.lease ->
-    source:Keeper_checkpoint_ref.t ->
-    terminal:exact_execution_terminal ->
-    semantic:exact_settlement_semantic ->
-    prepared_at:float ->
-    (exact_source_disposition * exact_write_outcome, string) result
-
-  val finalize_exact_source_disposition_result :
-    base_path:string ->
-    string ->
-    settled_at:float ->
-    lease:Keeper_event_queue_persistence.lease ->
-    disposition_id:string ->
-    (Keeper_event_queue_persistence.settle_result, string) result
-
-  val active_lease_result :
-    base_path:string ->
-    string ->
-    (Keeper_event_queue_persistence.lease option, string) result
 
   val exact_execution_binding_result :
     base_path:string -> string -> (exact_execution_binding option, string) result
 
-  val settle_bound_exact_nonterminal_result :
-    base_path:string ->
-    string ->
-    settled_at:float ->
-    lease:Keeper_event_queue_persistence.lease ->
-    binding:exact_execution_binding ->
-    settlement:Keeper_event_queue_persistence.settlement ->
-    (Keeper_event_queue_persistence.settle_result, string) result
 end

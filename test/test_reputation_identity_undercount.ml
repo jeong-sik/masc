@@ -38,24 +38,27 @@ let with_workspace ?(agent_name = "keeper-repkeeper-agent") f =
       ignore (Workspace.init config ~agent_name:(Some agent_name));
       f config)
 
-let configured_llm_completion_pass : Masc_domain.configured_llm_completion_verdict =
-  { decision = Masc_domain.Completion_pass
-  ; runtime_id = "reputation-identity-test-reviewer"
-  ; rationale = None
-  ; evaluated_at = "2026-07-13T00:00:00Z"
-  }
-
 let claim_and_complete config ~agent_name ~task_id =
   ignore (Workspace.claim_task config ~agent_name ~task_id);
   match
     Workspace.transition_task_r config ~agent_name ~task_id
-      ~action:Masc_domain.Done_action
-      ~configured_llm_verdict:configured_llm_completion_pass
+      ~action:Masc_domain.Submit_for_verification
+      ~notes:"reputation task completion evidence"
       ()
   with
-  | Ok _ -> ()
+  | Ok _ ->
+      let verifier = "admin-board-keeper" in
+      ignore (Workspace.claim_task_r config ~agent_name:verifier ~task_id ());
+      (match
+         Workspace.transition_task_r config ~agent_name:verifier ~task_id
+           ~action:Masc_domain.Approve_verification ()
+       with
+       | Ok _ -> ()
+       | Error err ->
+           Alcotest.failf "approve transition failed: %s"
+             (Masc_domain.masc_error_to_string err))
   | Error err ->
-      Alcotest.failf "done transition failed: %s"
+      Alcotest.failf "verification submission failed: %s"
         (Masc_domain.masc_error_to_string err)
 
 (* The keeper claims under the full actor id; reputation queried by the short

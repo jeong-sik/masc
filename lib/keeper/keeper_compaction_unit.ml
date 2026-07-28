@@ -297,3 +297,68 @@ let validate_provider_transcript messages =
       (Unresolved_tool_results
          { tool_use_ids = unresolved_tool_use_ids protected_suffix })
 ;;
+
+(* The content of a synthesized closer.  It states what is known (the call was
+   issued, no result was recorded) and what is not (whether the call took
+   effect), because masc has no per-tool-call settlement authority: the
+   decision log's [tool_exec] record is written after execution and is lost
+   with the unflushed buffer at exactly the crash this recovers from.  Claiming
+   the tool failed would be a fabrication; claiming it succeeded would be
+   worse. *)
+let interrupted_tool_result_content =
+  "interrupted: the server restarted before this tool result was recorded. The \
+   call may or may not have taken effect. Verify current state before retrying."
+;;
+
+type tail_closure =
+  { messages : T.message list
+  ; closed_tool_use_ids : string list
+  }
+
+(* A tool cycle left open by process death is not corruption.  Checkpoint
+   persistence stores it on purpose so recovery knows which calls were in
+   flight — that is what [partition] returns as [protected_suffix], and why
+   [validate] accepts it while [validate_provider_transcript] does not.  What
+   was missing is the move that closes it: nothing appended the results, so the
+   next dispatch rejected the transcript and the lane latched permanently.
+
+   [close_open_tail] appends one [ToolResult] per unresolved [ToolUse] id, in
+   the on-disk shape the rest of the history uses (role [Tool], one result per
+   message, no message-level [tool_call_id]).  [Unattributed_tool_error] is the
+   constructor for precisely this case — its own definition reads "a persisted
+   failure whose original execution boundary did not record provenance" — and
+   [Unknown] is the honest error class.
+
+   A [structural_error] is passed through unchanged: a history that does not
+   parse is genuine corruption and must keep latching. *)
+let close_open_tail messages =
+  match partition messages with
+  | Error _ as error -> error
+  | Ok { protected_suffix = []; _ } -> Ok { messages; closed_tool_use_ids = [] }
+  | Ok { protected_suffix; _ } ->
+    let closed_tool_use_ids = unresolved_tool_use_ids protected_suffix in
+    let closer tool_use_id : T.message =
+      { role = T.Tool
+      ; content =
+          [ T.ToolResult
+              { tool_use_id
+              ; content = interrupted_tool_result_content
+              ; outcome =
+                  T.Tool_failed
+                    { failure_kind = T.Unattributed_tool_error
+                    ; error_class = Some T.Unknown
+                    }
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    in
+    Ok
+      { messages = messages @ List.map closer closed_tool_use_ids
+      ; closed_tool_use_ids
+      }
+;;

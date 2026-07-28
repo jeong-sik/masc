@@ -72,6 +72,7 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               network_mode = None;
               multimodal_policy = None;
               active_goal_ids = None;
+              max_context_override = None;
               telemetry_feedback_enabled =
                 Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
               telemetry_feedback_window_hours =

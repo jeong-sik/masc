@@ -3,10 +3,6 @@ type source =
       { revision : int64
       ; stimulus : Keeper_event_queue.stimulus
       }
-  | Event_queue_lease of
-      { revision : int64
-      ; lease : Keeper_event_queue_state.lease
-      }
   | Event_queue_outbox of
       { revision : int64
       ; entry : Keeper_event_queue_state.outbox_entry
@@ -65,13 +61,6 @@ let project_event_queue_state ~keeper_name state =
       ; source = Event_queue_pending { revision; stimulus }
       })
   in
-  let leases =
-    Keeper_event_queue_state.leases state
-    |> List.map (fun (lease : Keeper_event_queue_state.lease) ->
-      { keeper_name
-      ; source = Event_queue_lease { revision; lease }
-      })
-  in
   let outbox =
     Keeper_event_queue_state.transition_outbox state
     |> List.map (fun (entry : Keeper_event_queue_state.outbox_entry) ->
@@ -79,7 +68,7 @@ let project_event_queue_state ~keeper_name state =
       ; source = Event_queue_outbox { revision; entry }
       })
   in
-  leases @ pending @ outbox
+  pending @ outbox
 ;;
 
 let project_async_entries ~keeper_name entries =
@@ -174,10 +163,6 @@ let source_to_yojson = function
     `Assoc [ "kind", `String "event_queue_pending"
            ; "revision", `String (Int64.to_string revision)
            ; "value", Keeper_event_queue.stimulus_to_yojson stimulus ]
-  | Event_queue_lease { revision; lease } ->
-    `Assoc [ "kind", `String "event_queue_lease"
-           ; "revision", `String (Int64.to_string revision)
-           ; "value", Keeper_event_queue_state.lease_to_yojson lease ]
   | Event_queue_outbox { revision; entry } ->
     `Assoc [ "kind", `String "event_queue_outbox"
            ; "revision", `String (Int64.to_string revision)

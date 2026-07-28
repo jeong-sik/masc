@@ -91,7 +91,7 @@ let test_malformed_lines_skipped () =
     Fs_compat.mkdir_p month_dir;
     let day_file = Filename.concat month_dir
       (Printf.sprintf "%02d.jsonl" tm.Unix.tm_mday) in
-    (* One valid row, one malformed row, and one pre-disposition legacy row. *)
+    (* One valid row, one malformed row, and two pre-disposition legacy rows. *)
     let valid_line = Yojson.Safe.to_string
       (`Assoc [
         ("tool_name", `String "good");
@@ -100,28 +100,43 @@ let test_malformed_lines_skipped () =
         ("ts", `Float 1000.0);
     ]) in
     let malformed_line = "{\"garbage\": true}" in
-    let legacy_line =
+    let legacy_success_line =
       Yojson.Safe.to_string
         (`Assoc
-          [ "tool_name", `String "legacy"
+          [ "tool_name", `String "legacy-success"
           ; "success", `Bool true
           ; "duration_ms", `Float 2.0
           ; "ts", `Float 1000.0
           ])
     in
+    let legacy_failure_line =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "tool_name", `String "legacy-failure"
+          ; "success", `Bool false
+          ; "duration_ms", `Float 3.0
+          ; "ts", `Float 1000.0
+          ])
+    in
     let content =
-      String.concat "\n" [ valid_line; malformed_line; legacy_line; "" ]
+      String.concat
+        "\n"
+        [ valid_line; malformed_line; legacy_success_line; legacy_failure_line; "" ]
     in
     Fs_compat.append_file day_file content;
     let n = P.restore ~base_path in
-    Alcotest.(check int) "only valid record" 1 n;
+    Alcotest.(check int) "only current record restored" 1 n;
     (match M.stats_for "good" with
      | Some s -> Alcotest.(check int) "good count" 1 s.call_count
      | None -> Alcotest.fail "expected good stats");
     Alcotest.(check bool)
-      "legacy success bool is not migrated"
+      "legacy success is intentionally not reconstructed"
       true
-      (Option.is_none (M.stats_for "legacy")))
+      (Option.is_none (M.stats_for "legacy-success"));
+    Alcotest.(check bool)
+      "legacy failure is intentionally not reconstructed"
+      true
+      (Option.is_none (M.stats_for "legacy-failure")))
 
 let test_reset_clears_cached_store () =
   with_tmp_dir (fun base_path ->

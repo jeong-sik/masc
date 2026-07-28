@@ -235,20 +235,6 @@ type task_action =
   | Reject_verification
 [@@deriving show]
 
-type configured_llm_completion_decision =
-  | Completion_pass
-  | Completion_reject of string
-  | Completion_verdict_unavailable of string
-[@@deriving show, yojson]
-
-type configured_llm_completion_verdict =
-  { decision : configured_llm_completion_decision
-  ; runtime_id : string
-  ; rationale : string option
-  ; evaluated_at : string
-  }
-[@@deriving show, yojson]
-
 let task_action_of_string s =
   match String.lowercase_ascii s with
   | "claim" -> Ok Claim
@@ -502,10 +488,10 @@ type task_execution_links = {
   session_id : string option; [@default None]
 } [@@deriving show, yojson { strict = false }]
 
-(** Task contract - persisted facts for the LLM completion reviewer.
+(** Task contract - persisted verifier criteria and evidence facts.
 
     [completion_contract], [required_evidence], and [verify_gate_evidence] are
-    supplied to the configured reviewer as task facts. The workspace FSM never
+    supplied to the assigned verifier as task facts. The workspace FSM never
     interprets their prose, counts entries, or derives a completion verdict.
 
     A [required_tools : string list] field was also removed (2026-06-03,

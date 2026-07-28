@@ -316,10 +316,11 @@ let admit_autonomous_with_token ~yield_to_chat_backlog ~base_path ~keeper_name f
      lock-only, non-suspending peek and is the SSOT signal that closes the
      gap: the autonomous lane cooperates on the same backlog the consumer
      drains, so the consumer's [in_flight = None] window opens
-     deterministically instead of racing the next autonomous cycle. A leased
-     receipt remains active until its terminal decision commits, so the
-     autonomous lane must also yield during the short lease-to-admission and
-     admission-to-finalization windows.
+     deterministically instead of racing the next autonomous cycle. Once a
+     receipt is leased, the actual per-Keeper turn mutex is the authority for
+     whether its chat turn is still executing. An inflight receipt with a free
+     mutex may be between delivery and finalization or stranded after failure;
+     it must not become a second, durable global turn lock.
 
      [yield_to_chat_backlog:false] (the manual-compaction lane) skips only
      that queue peek: the backlog yield presumes the chat consumer can make
@@ -339,9 +340,10 @@ let admit_autonomous_with_token ~yield_to_chat_backlog ~base_path ~keeper_name f
            failures. They are not evidence of queued work and therefore
            cannot close an otherwise independent autonomous lane. *)
         match List.length snapshot.pending, List.length snapshot.inflight with
-        | 0, 0 -> None
-        | pending_count, inflight_count ->
-          Some (Chat_backlog { pending_count; inflight_count }))
+        | 0, _ -> None
+        | pending_count, 0 ->
+          Some (Chat_backlog { pending_count; inflight_count = 0 })
+        | _, _ -> None)
       else None
     in
     (match chat_backlog with

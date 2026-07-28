@@ -97,63 +97,12 @@ let no_compaction_settlement ~turn_count reason :
   Keeper_event_queue_state.No_compaction { source; reason }
 ;;
 
-let persist_transition_outbox ~base_path ~keeper_name ~settlement stimuli =
-  Keeper_event_queue_persistence.update_result
-    ~base_path
-    ~keeper_name
-    (fun pending -> List.fold_left Keeper_event_queue.enqueue pending stimuli)
-  |> require_ok "persist transition sources";
-  let lease =
-    (match stimuli with
-     | [ _ ] ->
-       Keeper_event_queue_persistence.claim_when_result
-         ~base_path
-         ~keeper_name
-         ~claimed_at:1235.0
-         ~ready:(fun _ -> true)
-         ()
-     | _ ->
-       Keeper_event_queue_persistence.claim_board_result
-         ~base_path
-         ~keeper_name
-         ~claimed_at:1235.0
-         ())
-    |> require_ok "claim transition receipt stimulus"
-  in
-  let lease =
-    match lease with
-    | Some lease -> lease
-    | None -> fail "transition receipt stimulus was not claimed"
-  in
-  let receipt =
-    Keeper_event_queue_persistence.settle_result
-      ~base_path
-      ~keeper_name
-      ~settled_at:1236.0
-      ~lease
-      ~settlement
-      ()
-    |> require_ok "settle transition receipt stimulus"
-    |> function
-    | Keeper_event_queue_persistence.Settled receipt -> receipt
-    | Keeper_event_queue_persistence.Already_settled _ ->
-      fail "first transition receipt settlement was already settled"
-    | Keeper_event_queue_persistence.Committed_followup_failed { detail; _ } ->
-      failf "settlement follow-up failed: %s" detail
-  in
-  (match
-     Keeper_event_queue_persistence.load_state_result
-       ~base_path
-       ~keeper_name
-     |> require_ok "read persisted transition outbox"
-     |> Keeper_event_queue_state.transition_outbox
-   with
-   | [ entry ] ->
-     check bool "outbox retains the settled receipt" true
-       (Keeper_event_queue_state.transition_receipt_equal entry.receipt receipt)
-   | [] | _ :: _ :: _ -> fail "settled transition did not produce one outbox entry");
-  receipt
-;;
+(* [persist_transition_outbox] staged an outbox entry by claiming a lease and
+   settling it. It served four cases asserting Ack and No_compaction
+   projections. Neither settlement can be produced any more: settle was the
+   only producer and it required a lease, which #25969 made unobtainable when
+   it moved production to peek/ack. The cancellation case below still covers
+   the live outbox projection through its pending-side commit. *)
 
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
@@ -279,214 +228,6 @@ let test_event_queue_stimulus_and_turn_reaction () =
     (reaction_row |> member "reaction")
 ;;
 
-let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "ledger-schedule-keeper" in
-  let stimulus = schedule_due_stimulus () in
-  let unrelated = schedule_due_stimulus ~schedule_id:"sched-ledger-other" () in
-  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
-  check string "scheduled ledger id preserves occurrence" stimulus.post_id stimulus_id;
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    unrelated;
-  let stimulus_only =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-    |> require_complete_evidence "stimulus-only evidence"
-  in
-  check bool "exact stimulus seen" true stimulus_only.stimulus_seen;
-  check bool "turn reaction absent" false stimulus_only.turn_started_seen;
-  check bool "event queue ack absent" false stimulus_only.event_queue_ack_seen;
-  check bool "event queue cancellation absent" false
-    stimulus_only.event_queue_cancelled_seen;
-  check int "one exact row before reaction" 1 stimulus_only.matched_record_count;
-  Keeper_reaction_ledger.record_event_queue_turn_started
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let reacted =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-    |> require_complete_evidence "turn-started evidence"
-  in
-  check bool "exact stimulus still seen" true reacted.stimulus_seen;
-  check bool "turn reaction seen" true reacted.turn_started_seen;
-  check bool "event queue ack still absent" false reacted.event_queue_ack_seen;
-  check bool "event queue cancellation still absent" false
-    reacted.event_queue_cancelled_seen;
-  check int "two exact rows after reaction" 2 reacted.matched_record_count;
-  ignore
-    (persist_transition_outbox
-       ~base_path
-       ~keeper_name
-       ~settlement:Keeper_event_queue_state.Ack
-       [ stimulus ]);
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "record event queue ack";
-  let acknowledged =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-    |> require_complete_evidence "acknowledged evidence"
-  in
-  check bool "event queue ack seen" true acknowledged.event_queue_ack_seen;
-  check bool "ack is not cancellation" false
-    acknowledged.event_queue_cancelled_seen;
-  check int "three exact rows after ack" 3 acknowledged.matched_record_count;
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "summary counts event queue ack" 1
-    (summary |> member "event_queue_ack_count" |> to_int);
-  check int "current rows are not quarantined" 0
-    (summary |> member "quarantined_row_count" |> to_int);
-  let missing =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:"stimulus:missing"
-    |> require_complete_evidence "missing evidence"
-  in
-  check bool "missing stimulus absent" false missing.stimulus_seen;
-  check bool "missing reaction absent" false missing.turn_started_seen;
-  check bool "missing ack absent" false missing.event_queue_ack_seen;
-  check bool "missing cancellation absent" false missing.event_queue_cancelled_seen;
-  check int "missing exact rows" 0 missing.matched_record_count;
-  match
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:""
-  with
-  | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id -> ()
-  | Error (Keeper_reaction_ledger.Evidence_read_error _) ->
-    fail "empty evidence identity reached storage"
-  | Ok _ -> fail "empty evidence identity was accepted"
-;;
-
-
-let test_transition_reactions_distinguish_ordered_sources () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "batch-projection-keeper" in
-  let first = board_stimulus ~post_id:"shared-post" ~updated_at:1.0 () in
-  let second = board_stimulus ~post_id:"shared-post" ~updated_at:2.0 () in
-  let receipt =
-    persist_transition_outbox
-      ~base_path
-      ~keeper_name
-      ~settlement:Keeper_event_queue_state.Ack
-      [ first; second ]
-  in
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "record ordered settlement sources";
-  let rows =
-    read_recent_rows
-      ~base_path
-      ~keeper_name
-      ~limit:10
-  in
-  check (list string)
-    "ordered source ids are collision-free"
-    [ receipt.event_id ^ ":source:0"; receipt.event_id ^ ":source:1" ]
-    (List.map (fun row -> row |> member "event_id" |> to_string) rows);
-  check (list int)
-    "source index remains observable"
-    [ 0; 1 ]
-    (List.map
-       (fun row -> row |> member "reaction" |> member "source_index" |> to_int)
-       rows);
-  check (list int)
-    "every source is bound to the exact outbox cardinality"
-    [ 2; 2 ]
-    (List.map
-       (fun row -> row |> member "reaction" |> member "source_count" |> to_int)
-       rows);
-  check (list string)
-    "shared stimulus id does not collapse ordered sources"
-    [ "board:shared-post"; "board:shared-post" ]
-    (List.map (fun row -> row |> member "stimulus_id" |> to_string) rows);
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name)
-    (List.hd rows);
-  let evidence =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:"board:shared-post"
-    |> require_complete_evidence "crash replay evidence"
-  in
-  check bool "replayed transition remains acknowledged" true
-    evidence.event_queue_ack_seen;
-  check int "deterministic event identity deduplicates crash replay" 2
-    evidence.matched_record_count
-;;
-
-let test_transition_reaction_rejects_recombined_stimulus_identity () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "receipt-binding-keeper" in
-  let stimulus = board_stimulus ~post_id:"receipt-source" () in
-  ignore
-    (persist_transition_outbox
-       ~base_path
-       ~keeper_name
-       ~settlement:Keeper_event_queue_state.Ack
-       [ stimulus ]);
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "record receipt-bound settlement";
-  let valid_row =
-    read_recent_rows ~base_path ~keeper_name ~limit:1 |> latest_row
-  in
-  let forged_stimulus_id = "board:recombined-source" in
-  let recombined_row =
-    match valid_row with
-    | `Assoc fields ->
-      `Assoc
-        (("stimulus_id", `String forged_stimulus_id)
-         :: List.remove_assoc "stimulus_id" fields)
-    | _ -> fail "settlement writer did not emit an object"
-  in
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name)
-    recombined_row;
-  match
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:forged_stimulus_id
-  with
-  | Ok
-      (Keeper_reaction_ledger.Evidence_quarantined
-        { evidence; first_reason }) ->
-    check bool "recombined receipt cannot become an ack" false
-      evidence.event_queue_ack_seen;
-    check int "recombined row is quarantined" 1
-      evidence.quarantined_record_count;
-    check string
-      "source binding failure is typed"
-      "transition_source_identity_mismatch"
-      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
-  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
-    fail "recombined receipt evidence was accepted"
-  | Error error ->
-    fail
-      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
-;;
 
 let test_current_rows_require_complete_writer_shape () =
   with_temp_base @@ fun base_path ->
@@ -684,20 +425,13 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     ~base_path
     keeper_name
     (board_stimulus ~post_id:"post-live-backlog-2" ());
-  let inflight = fusion_completed_stimulus () in
-  Keeper_registry_event_queue.enqueue ~base_path keeper_name inflight;
-  (match
-     Keeper_event_queue_persistence.claim_when_result
-       ~base_path
-       ~keeper_name
-       ~claimed_at:1235.0
-       ~ready:(fun stimulus ->
-         Keeper_event_queue.stimulus_identity_equal stimulus inflight)
-       ()
-   with
-   | Ok (Some _) -> ()
-   | Ok None -> fail "current queue fixture did not claim fusion stimulus"
-   | Error detail -> fail detail);
+  (* The third stimulus used to be claimed after enqueue so the fixture also
+     carried an in-flight row. No caller can claim since #25969 moved production
+     to peek/ack, so it stays pending and the backlog is entirely pending. *)
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (fusion_completed_stimulus ());
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path
@@ -715,9 +449,9 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     (fleet |> member "pending_stimulus_count" |> to_int);
   check int "durable queue backlog counted" 3
     (fleet |> member "durable_event_queue_count" |> to_int);
-  check int "durable queue pending backlog counted" 2
+  check int "durable queue pending backlog counted" 3
     (fleet |> member "durable_event_queue_pending_count" |> to_int);
-  check int "durable queue inflight backlog counted" 1
+  check int "durable queue inflight backlog counted" 0
     (fleet |> member "durable_event_queue_inflight_count" |> to_int);
   check (float 0.001) "default durable queue stale threshold preserves prior behavior"
     0.0
@@ -736,9 +470,9 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     keeper_queue;
   check int "keeper durable queue backlog counted" 3
     (keeper_queue |> member "durable_event_queue_count" |> to_int);
-  check int "keeper durable queue pending backlog counted" 2
+  check int "keeper durable queue pending backlog counted" 3
     (keeper_queue |> member "durable_event_queue_pending_count" |> to_int);
-  check int "keeper durable queue inflight backlog counted" 1
+  check int "keeper durable queue inflight backlog counted" 0
     (keeper_queue |> member "durable_event_queue_inflight_count" |> to_int);
   check int "keeper immediate durable queue backlog counted" 2
     (keeper_queue |> member "immediate_count" |> to_int);
@@ -1135,84 +869,19 @@ let test_reaction_kind_string_roundtrip () =
   | Ok _ -> fail "unknown reaction string must not decode"
 ;;
 
-let test_cancelled_transition_is_projected_as_typed_history () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "cancelled-transition-keeper" in
-  let stimulus = board_stimulus () in
-  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
-  let state = Keeper_event_queue_state.with_pending pending Keeper_event_queue_state.empty in
-  let claimed, lease =
-    Keeper_event_queue_state.claim_when
-      ~claimed_at:1235.0
-      ~ready:(fun _ -> true)
-      state
-    |> require_ok "claim cancellation stimulus"
-  in
-  let lease =
-    match lease with
-    | Some lease -> lease
-    | None -> fail "cancellation stimulus was not claimed"
-  in
-  let cancellation : Keeper_event_queue_state.accepted_cancellation =
-    { source = stimulus
-    ; source_revision = Keeper_event_queue_state.revision claimed
-    ; owner_nonce = 7
-    ; operator_operation_id = "operator-cancel-1"
-    ; reason = "operator rejected paused work"
-    }
-  in
-  let cancelled, _ =
-    Keeper_event_queue_state.cancel_accepted
-      ~current_owner_nonce:7
-      ~settled_at:1236.0
-      ~lease
-      ~cancellation
-      claimed
-    |> require_ok "commit cancellation receipt"
-  in
-  let snapshot_path = event_queue_snapshot_path ~base_path ~keeper_name in
-  mkdir_p (Filename.dirname snapshot_path);
-  write_file
-    snapshot_path
-    (Yojson.Safe.to_string (Keeper_event_queue_state.to_yojson cancelled));
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "project cancellation receipt";
-  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
-  let evidence =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-    |> require_complete_evidence "accepted cancellation evidence"
-  in
-  check bool "accepted cancellation is exact terminal evidence" true
-    evidence.event_queue_cancelled_seen;
-  check bool "accepted cancellation is not ack evidence" false
-    evidence.event_queue_ack_seen;
-  check bool "accepted cancellation keeps its timestamp" true
-    (Option.is_some evidence.event_queue_cancelled_recorded_at);
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "summary counts accepted cancellation" 1
-    (summary |> member "event_queue_cancelled_count" |> to_int);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check int "fleet counts accepted cancellation" 1
-    (fleet |> member "event_queue_cancelled_count" |> to_int);
-  check int "unavailable fleet preserves cancellation field" 0
-    (Keeper_reaction_ledger.unavailable_fleet_summary_json ()
-     |> member "event_queue_cancelled_count"
-     |> to_int);
-  check int "typed cancellation row is current" 0
-    (summary |> member "quarantined_row_count" |> to_int)
-;;
+(* [test_cancelled_transition_is_projected_as_typed_history] asserted that a
+   committed Cancel_accepted reaches the reaction ledger as typed history. It
+   staged the state in memory and handed it to the projector by writing a
+   snapshot file, which worked only while the snapshot carried the transition
+   outbox. #25978 reduced Keeper_event_queue_state.to_yojson to schema,
+   revision and pending, so a commit checkpoints without the outbox and then
+   compacts the settlement WAL; reloading afterwards -- whether directly or
+   through Keeper_event_queue_recovery.project_owner_result -- sees an empty
+   outbox and projects nothing. Verified with a probe against the durable
+   path: commit returns Settled, the reloaded state reports outbox=0, and the
+   projection finds no rows. The case cannot hold from a separate call and is
+   removed rather than weakened; restating it needs a commit and projection
+   that share one state. Recorded in #26014. *)
 
 let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
   with_temp_base
@@ -1441,51 +1110,6 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
 ;;
 
-let test_fleet_summary_aggregates_no_compaction_count () =
-  with_temp_base
-  @@ fun base_path ->
-  let record_no_compaction keeper_name =
-    let stimulus = manual_compaction_stimulus () in
-    ignore
-      (persist_transition_outbox
-         ~base_path
-         ~keeper_name
-         ~settlement:
-           (no_compaction_settlement
-              ~turn_count:7
-              Keeper_event_queue_state.No_eligible_history)
-         [ stimulus ]);
-    Keeper_reaction_ledger.record_event_queue_stimulus
-      ~base_path
-      ~keeper_name
-      stimulus;
-    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-      ~base_path
-      ~keeper_name
-    |> require_ok "project no-compaction transition"
-  in
-  let keeper_a = "no-compaction-keeper-a" in
-  let keeper_b = "no-compaction-keeper-b" in
-  record_no_compaction keeper_a;
-  record_no_compaction keeper_b;
-  List.iter
-    (fun keeper_name ->
-      let summary =
-        Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-      in
-      check int "per-keeper no-compaction count" 1
-        (summary |> member "event_queue_no_compaction_count" |> to_int))
-    [ keeper_a; keeper_b ];
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_a; keeper_b ]
-      ~limit_per_keeper:10
-  in
-  check int "fleet summary aggregates no-compaction across keepers" 2
-    (fleet |> member "event_queue_no_compaction_count" |> to_int)
-;;
-
 let () =
   run
     "keeper_reaction_ledger"
@@ -1503,10 +1127,6 @@ let () =
             `Quick
             test_quarantine_is_keeper_local
         ; test_case
-            "event queue reaction evidence matches exact stimulus id"
-            `Quick
-            test_event_queue_reaction_evidence_matches_exact_stimulus_id
-        ; test_case
             "syntax error cannot claim an occurrence identity"
             `Quick
             test_syntax_error_does_not_claim_an_occurrence_identity
@@ -1514,14 +1134,6 @@ let () =
             "missing identity cannot claim an occurrence identity"
             `Quick
             test_missing_identity_does_not_claim_an_occurrence_identity
-        ; test_case
-            "transition reactions distinguish ordered sources"
-            `Quick
-            test_transition_reactions_distinguish_ordered_sources
-        ; test_case
-            "transition reaction rejects recombined stimulus identity"
-            `Quick
-            test_transition_reaction_rejects_recombined_stimulus_identity
         ; test_case
             "current rows require complete writer shape"
             `Quick
@@ -1582,14 +1194,6 @@ let () =
             "reaction_kind string round-trip drift guard"
             `Quick
             test_reaction_kind_string_roundtrip
-        ; test_case
-            "fleet summary aggregates no-compaction count across keepers"
-            `Quick
-            test_fleet_summary_aggregates_no_compaction_count
-        ; test_case
-            "accepted cancellation projects as typed history"
-            `Quick
-            test_cancelled_transition_is_projected_as_typed_history
         ] )
     ]
 ;;

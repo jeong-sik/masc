@@ -104,8 +104,16 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     | false, false -> Ok ()
   in
   let result = Result.bind result (fun () -> runtime_assignment_result) in
-  Result.map
-    (fun () ->
+  let max_context_override_result =
+    match int_ "max_context_override" with
+    | None -> Ok None
+    | Some value ->
+      Keeper_config.validate_max_context_override_value value
+      |> Result.map Option.some
+  in
+  Result.bind result (fun () ->
+    Result.map
+      (fun max_context_override ->
       {
         id = None;
         manifest_path = None;
@@ -128,13 +136,14 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           if has "active_goal_ids" then
             Some (normalize_name_list (strs "active_goal_ids"))
           else None;
+        max_context_override;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         always_allow = bool_ "always_allow";
         oas_env;
         unknown_toml_keys = [];
       })
-    result
+      max_context_override_result)
 
 (** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
     TOML table.  Keep this in sync with the record construction above — the
@@ -152,6 +161,7 @@ let parsed_field_key_names =
   ; "network_mode"
   ; "multimodal_policy"
   ; "active_goal_ids"
+  ; "max_context_override"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "always_allow"
@@ -181,6 +191,7 @@ let canonical_keeper_toml_key_names =
   ; "network_mode"
   ; "multimodal_policy"
   ; "active_goal_ids"
+  ; "max_context_override"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "always_allow"
@@ -293,6 +304,8 @@ let merge_keeper_profile_defaults
     network_mode = prefer overlay.network_mode base.network_mode;
     multimodal_policy = prefer overlay.multimodal_policy base.multimodal_policy;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
+    max_context_override =
+      prefer overlay.max_context_override base.max_context_override;
     telemetry_feedback_enabled =
       prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
     telemetry_feedback_window_hours =

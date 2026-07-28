@@ -263,14 +263,6 @@ let resources : mcp_resource list = [
     ~title:"Event Log (JSON)"
     ~description:"Recent event log snapshot as JSON"
     ~mime_type:"application/json" ();
-  make_resource ~uri:"masc://schema" ~name:"Task FSM Schema"
-    ~title:"Task State Machine"
-    ~description:"Task state machine rules (markdown)"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://schema.json" ~name:"Task FSM Schema (JSON)"
-    ~title:"Task State Machine (JSON)"
-    ~description:"Task state machine rules as JSON"
-    ~mime_type:"application/json" ();
   (* Agent Being Protocol - Institution Memory *)
   make_resource ~uri:"masc://institution" ~name:"Institution Memory"
     ~title:"Institution Memory"
@@ -404,74 +396,6 @@ let read_event_lines config ~limit =
           ) files
     ) month_dirs;
     List.rev !collected
-
-(** Issue #8474: FSM transition matrix. Each entry mirrors a match-arm
-    in the task transition lifecycle. Verification actions are always
-    available when their objective source-state preconditions hold, so
-    the published schema matches the action enum
-    ([Masc_domain.valid_task_action_strings] via #8354).  The regression test
-    [test_types.ml :: fsm_transition_matrix] asserts every action
-    listed by [Workspace_task.valid_next_actions_for_status] for any
-    reachable status appears here, so adding a 4th verifier action
-    fails the test before it ships with a stale schema. *)
-let task_fsm_transitions : (string * string list * string * string option) list =
-  [
-    ("claim",                   ["todo"],                                  "claimed",                None);
-    ("start",                   ["claimed"],                               "in_progress",            None);
-    ("done",                    ["in_progress"],                           "done",                   Some "configured LLM completion verdict must pass");
-    ("cancel",                  ["todo"; "claimed"; "in_progress"],        "cancelled",              None);
-    ("release",                 ["claimed"; "in_progress"],                "todo",                   None);
-    (* Action names match [Masc_domain.task_action_to_string] (SSOT):
-       Approve_verification -> "approve", Reject_verification -> "reject". *)
-    ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "asynchronous configured LLM review state");
-    ("approve",                 ["awaiting_verification"],                 "done",                   Some "configured LLM completion verdict must pass");
-    ("reject",                  ["awaiting_verification"],                 "in_progress",            Some "configured LLM completion verdict must reject");
-  ]
-
-let task_fsm_transition_to_json (action, froms, to_, gate) =
-  let base =
-    [ ("action", `String action)
-    ; ("from", `List (List.map (fun s -> `String s) froms))
-    ; ("to", `String to_)
-    ]
-  in
-  let fields = match gate with
-    | None -> base
-    | Some g -> base @ [("gated_by", `String g)]
-  in
-  `Assoc fields
-
-let schema_json =
-  (* Issue #8354: enums derived from Variant SSOT in [Types]. Hand-rolled
-     lists used to drop [awaiting_verification] and the verification
-     actions ([submit_for_verification] / [approve] / [reject]).
-     Issue #8474: transitions matrix derived from [task_fsm_transitions]
-     (single source of truth) — used to drop the 3 verifier-FSM rows. *)
-  `Assoc [
-    ("task_statuses", `List (List.map (fun s -> `String s) Masc_domain.valid_task_status_strings));
-    ("actions", `List (List.map (fun s -> `String s) Masc_domain.valid_task_action_strings));
-    ("transitions", `List (List.map task_fsm_transition_to_json task_fsm_transitions));
-    ("cas", `Assoc [
-      ("field", `String "backlog.version");
-      ("parameter", `String "expected_version");
-    ]);
-  ]
-
-let schema_markdown =
-  String.concat "\n" [
-    "# Task FSM";
-    "";
-    "- claim: todo -> claimed";
-    "- start: claimed(by you) -> in_progress";
-    "- done: in_progress(by you) -> done (configured LLM verdict=pass)";
-    "- cancel: todo/claimed/in_progress(by you) -> cancelled";
-    "- release: claimed/in_progress(by you) -> todo";
-    "- submit_for_verification: claimed/in_progress(by you) -> awaiting_verification";
-    "- approve: awaiting_verification -> done (configured LLM verdict=pass)";
-    "- reject: awaiting_verification -> in_progress (configured LLM verdict=reject)";
-    "";
-    "CAS guard: expected_version == backlog.version";
-  ]
 
 type owner_identity_projection =
   | Owner_identity_projection_pending
@@ -1185,32 +1109,13 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
         Atomic.set
           Workspace_hooks.get_cross_verifier_runtime_id_fn
           Runtime.cross_verifier_runtime_id;
-        Atomic.set Task.Handlers.record_verdict_fn (fun ~task_id ~req ~result () ->
-          Eval_calibration.record_verdict ~task_id ~req ~result ());
-        Atomic.set Task.Handlers.sse_broadcast_fn Sse.broadcast;
         Atomic.set Task.Handlers.push_event_to_sessions_fn Subscriptions.push_event_to_sessions;
-        Atomic.set Task.Handlers.get_few_shot_block_fn (fun () ->
-          Eval_calibration.format_few_shot_block
-            (Eval_calibration.select_examples ~max_examples:3));
         Board_dispatch.init_jsonl ())
       base_path
   in
   let registry = Session.create () in
-  (* Start the registry's actor consumer fiber. Without this, every
-     [Session.*] helper that awaits a reply (register, restore_from_disk,
-     check_rate_limit, push_message, push_notification, get_session,
-     get_sessions) hangs forever — the mailbox has no consumer.
-     Missed when #10664 introduced the actor model. *)
   Session.start_loop registry ~sw;
-  (* Same sweep miss as Session.start_loop above: PR #10730 introduced
-     [Runtime_observation] as an Eio actor (mailbox + Promise.await) but
-     never wired its [start_actor_if_needed] into a bootstrap path.
-     [runtime_metrics_json ()] (called from [tool_unified.ml:summary_report],
-     which the dashboard tool inspector hits) does
-     [Stream.add Get_metrics_json u; Promise.await p]. Without an actor
-     fiber draining [stream], the await blocks forever. *)
   Runtime_observation.start_actor_if_needed ~sw;
-  (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event
   );
@@ -1241,10 +1146,6 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     net = Some net;
   } in
-  (* [Fiber.fork] starts its child immediately. Yield before opening the
-     registry so callers receive the typed [Initializing] state before any
-     publication-recovery filesystem work. The child performs one registry
-     open and one name discovery; exact owner work remains lane-demanded. *)
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Fiber.yield ();
     let registry_root = Eio.Path.(fs / process_masc_root) in

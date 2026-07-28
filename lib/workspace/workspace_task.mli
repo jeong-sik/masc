@@ -41,15 +41,8 @@ val transition_task_outcome_r :
      evidence_refs:string list ->
      (unit, string) result) ->
   ?compensate_verification_request:(verification_id:string -> unit) ->
-  ?prepare_verification_verdict:
-    (task:Masc_domain.task ->
-     verifier:string ->
-     verification_id:string ->
-     decision:[ `Approve of string | `Reject of string ] ->
-     (unit, string) result) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
-  ?configured_llm_verdict:Masc_domain.configured_llm_completion_verdict ->
   unit -> transition_outcome Masc_domain.masc_result
 
 val transition_task_r :
@@ -61,15 +54,8 @@ val transition_task_r :
      evidence_refs:string list ->
      (unit, string) result) ->
   ?compensate_verification_request:(verification_id:string -> unit) ->
-  ?prepare_verification_verdict:
-    (task:Masc_domain.task ->
-     verifier:string ->
-     verification_id:string ->
-     decision:[ `Approve of string | `Reject of string ] ->
-     (unit, string) result) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
-  ?configured_llm_verdict:Masc_domain.configured_llm_completion_verdict ->
   unit -> string Masc_domain.masc_result
 
 val release_task_r :

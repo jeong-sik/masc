@@ -15,7 +15,8 @@ BASE_URL="${MCP_URL%/mcp}"
 SCHEDULE_ID="contract-live-supported-$$"
 KEEPER_NAME="contract-scheduler-keeper"
 NOW_UNIX="$(date +%s)"
-DUE_AT_UNIX="$((NOW_UNIX + 3600))"
+INTERVAL_SEC="${SCHEDULER_LIVE_INTERVAL_SEC:-3600}"
+DUE_AT_UNIX="$((NOW_UNIX + INTERVAL_SEC))"
 DASHBOARD_JSON="$(mcp_mktemp_file "masc-scheduler-live-supported-dashboard" ".json")"
 AUTH_HEADER_FILE=""
 CREATED_SCHEDULE_ID=""
@@ -108,6 +109,8 @@ assert_dashboard_matched_supported_non_terminal() {
       and (($evidence.matched_schedule_ids // []) | index($schedule_id) != null)
       and $row.payload_kind == "masc.keeper_wake"
       and $row.payload_support == "supported"
+      and $row.recurrence_kind == "interval"
+      and $row.next_due_at == $row.due_at
       and (($row.status | IN("succeeded", "failed", "cancelled", "expired")) | not)
   ' "$DASHBOARD_JSON" >/dev/null
 }
@@ -131,10 +134,13 @@ create_payload="$(
     --arg message "Contract harness live supported scheduler evidence." \
     --argjson requested_at "$NOW_UNIX" \
     --argjson due_at "$DUE_AT_UNIX" \
+    --argjson interval_sec "$INTERVAL_SEC" \
     '{
       schedule_id: $schedule_id,
       requested_at_unix: $requested_at,
       due_at_unix: $due_at,
+      recurrence_kind: "interval",
+      recurrence_interval_sec: $interval_sec,
       requested_by_id: "contract-operator",
       scheduled_by_id: "contract-scheduler",
       payload_kind: "masc.keeper_wake",

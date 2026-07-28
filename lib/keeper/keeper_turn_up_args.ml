@@ -21,6 +21,7 @@ type parsed_args = {
   proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
+  persona_name_opt : string option;
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
   instructions_opt : string option;
@@ -138,7 +139,14 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
+    let persona_name_opt = Safe_ops.json_string_opt "persona_name" args in
     let instructions_arg = get_string_opt args "instructions" in
+    let persona_name_error =
+      match persona_name_opt with
+      | Some persona_name when not (validate_name persona_name) ->
+        Some (Printf.sprintf "invalid persona_name: %S" persona_name)
+      | Some _ | None -> None
+    in
     match
       load_keeper_profile_defaults_result_for_base_path
         ~base_path:ctx.config.base_path
@@ -181,10 +189,10 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
-    match sandbox_profile_error, max_context_override_res with
-    | Some msg, _ -> Error (tool_result_error msg)
-    | None, Error msg -> Error (tool_result_error msg)
-    | None, Ok (max_context_override_present, max_context_override_opt) ->
+    match persona_name_error, sandbox_profile_error, max_context_override_res with
+    | Some msg, _, _ | None, Some msg, _ -> Error (tool_result_error msg)
+    | None, None, Error msg -> Error (tool_result_error msg)
+    | None, None, Ok (max_context_override_present, max_context_override_opt) ->
     Ok {
       name;
       runtime_id_opt;
@@ -197,6 +205,7 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       proactive_enabled_opt;
       sandbox_profile_opt;
       network_mode_opt;
+      persona_name_opt;
       instructions_arg;
       profile_defaults;
       instructions_opt;

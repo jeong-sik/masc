@@ -769,7 +769,10 @@ let public_descriptors =
       ~id:"agent.write_file"
       ~public_name:"Write"
       ~internal_name:"tool_write_file"
-      ~description:"Write full file content into the keeper sandbox or an allowed path."
+      ~description:
+        "Write full file content into the keeper sandbox or an allowed path. Missing \
+         parent directories are created safely; call Write directly instead of using \
+         Execute mkdir."
       ~input_schema:write_file_schema
       ~policy:
         (policy

@@ -14,6 +14,10 @@ type summary_transition_error =
   | Summary_transition_storage_error of storage_error
   | Summary_transition_rejected of summary_transition_rejection
 
+type summary_owner_retirement_error =
+  | Summary_owner_retirement_storage_error of storage_error
+  | Summary_owner_retirement_exact_attempt_unsettled of exact_attempt_binding
+
 type exact_attempt_rejection =
   | Exact_attempt_not_found of string
   | Exact_attempt_key_mismatch of
@@ -158,6 +162,17 @@ let summary_transition_error_to_string = function
   | Summary_transition_rejected (Summary_exact_attempt_bound binding) ->
     "unbound summary transition rejected for exact attempt: "
     ^ exact_attempt_binding_to_string binding
+;;
+
+let summary_owner_retirement_error_to_string = function
+  | Summary_owner_retirement_storage_error error ->
+    storage_error_to_string error
+  | Summary_owner_retirement_exact_attempt_unsettled binding ->
+    Printf.sprintf
+      "approval summary owner retirement blocked by unsettled exact attempt: approval=%s slot=%s call=%s"
+      binding.approval_id
+      binding.slot_id
+      binding.call_id
 ;;
 
 let exact_attempt_error_to_string = function
@@ -3202,7 +3217,34 @@ let complete_delivery delivery =
                (match remove_delivery_from_store delivery with
                 | Error storage_error ->
                   Error (Persistence_failed { approval_id = id; storage_error })
-                | Ok () -> finish ()))))
+               | Ok () -> finish ()))))
+;;
+
+let delivery_wake_was_observed delivery =
+  let resolution : Keeper_event_queue.hitl_resolution =
+    { approval_id = delivery.entry.id
+    ; decision =
+        hitl_resolution_decision_of_approval_decision delivery.decision
+    ; channel = delivery.entry.continuation_channel
+    }
+  in
+  let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
+  match
+    Keeper_reaction_ledger.event_queue_turn_started_seen_for_source_result
+      ~base_path:delivery.entry.audit_base_path
+      ~keeper_name:delivery.entry.keeper_name
+      ~post_id
+      ~stimulus_kind:Keeper_reaction_ledger.Hitl_resolved
+  with
+  | Ok observed -> observed
+  | Error error ->
+    Log.Keeper.warn
+      ~keeper_name:delivery.entry.keeper_name
+      "approval_queue: could not verify prior HITL wake delivery approval=%s; replaying safely: %s"
+      delivery.entry.id
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+         error);
+    false
 ;;
 
 let compare_pending_order left right =
@@ -3301,6 +3343,8 @@ let install_persistence_internal ~after_load ~base_path =
           }
       | delivery :: rest ->
         if delivery.grant_consumed
+        then replay count failures rest
+        else if delivery_wake_was_observed delivery
         then replay count failures rest
         else
           (match complete_delivery delivery with
@@ -3436,6 +3480,63 @@ let resolve_with_policy
 ;;
 
 (* ── Query ────────────────────────────────────────────────── *)
+
+let retire_summary_owner ~base_path ~keeper_name ~reason =
+  let result =
+    with_pending_store_lock (fun () ->
+      let current = Atomic.get pending in
+      let ids, next, bound =
+        SMap.fold
+          (fun id (entry : pending_approval) (ids, map, bound) ->
+             if
+               String.equal entry.audit_base_path base_path
+               && String.equal entry.keeper_name keeper_name
+             then
+               match entry.summary_status, entry.exact_attempt with
+               | Summary_pending, Exact_bound attempt ->
+                 ids, map, Some attempt
+               | Summary_pending, Exact_unbound ->
+                 ( id :: ids
+                 , SMap.add
+                     id
+                     { entry with
+                       summary_status =
+                         Summary_failed { reason; retryable = false }
+                     }
+                     map
+                 , bound )
+               | ( Summary_not_requested
+                 | Summary_available _
+                 | Summary_failed _ ),
+                 _ ->
+                 ids, map, bound
+             else ids, map, bound)
+          current
+          ([], current, None)
+      in
+      match bound, ids with
+      | Some attempt, _ ->
+        Error (Summary_owner_retirement_exact_attempt_unsettled attempt)
+      | None, [] -> Ok []
+      | None, _ ->
+        (match
+           persist_snapshot_unlocked
+             ~base_path
+             ~pending_map:next
+             ~delivery_map:(Atomic.get deliveries)
+         with
+         | Error error ->
+           Error (Summary_owner_retirement_storage_error error)
+         | Ok () ->
+           Atomic.set pending next;
+           Ok (List.rev ids)))
+  in
+  match result with
+  | Error _ as error -> error
+  | Ok ids ->
+    List.iter (fun id -> publish_summary_update ~id) ids;
+    Ok ids
+;;
 
 let pending_entries_in_sequence_order () =
   SMap.fold (fun _id entry acc -> entry :: acc) (Atomic.get pending) []

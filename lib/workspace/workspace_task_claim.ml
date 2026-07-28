@@ -174,8 +174,8 @@ let claim_task_r config ~agent_name ~task_id ()
               The task stays [AwaitingVerification]; [resolve_claim] has bound
               this agent as the verifier in [phase] (Verifier_assigned). Persist
               that status and point the agent at the task. The verifier binding
-              lives only in the task FSM; the verification request remains
-              Pending until the winner records its terminal verdict. *)
+              and outcome live only in the Task FSM; the verification request
+              remains an immutable submit-time evidence envelope. *)
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
            in
@@ -220,9 +220,30 @@ let claim_task_r config ~agent_name ~task_id ()
                ; "task", `String task_id
                ; "ts", `String (now_iso ())
                ]);
+           let evidence_projection =
+             match
+               Workspace_query.verification_evidence_projection
+                 config
+                 ~viewer:agent_name
+                 ~task:claimed_task
+             with
+             | Some projection -> projection
+             | None ->
+               Log.Task.error
+                 ~keeper_name:agent_name
+                 "verification claim committed without an evidence projection (task=%s)"
+                 task_id;
+               Printf.sprintf
+                 "verification_request projection unavailable after assignment for %s; ACTION: stop and report this invariant failure"
+                 task_id
+           in
            Ok
              (`New_claim
-               (Printf.sprintf "%s assigned as verifier for %s" agent_name task_id))
+               (Printf.sprintf
+                  "%s assigned as verifier for %s\n%s"
+                  agent_name
+                  task_id
+                  evidence_projection))
          | `Claimed_ok ->
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks

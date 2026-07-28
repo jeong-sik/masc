@@ -982,9 +982,7 @@
   test_local_runtime_pool
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
-  test_task_status_label_10421
-  test_task_completion_path_10449
-  test_task_cache_invariant_13397
+  test_task_status_label_10421  test_task_cache_invariant_13397
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
   test_dashboard_k2_feeds
@@ -1147,9 +1145,7 @@
   test_local_runtime_pool
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
-  test_task_status_label_10421
-  test_task_completion_path_10449
-  test_task_cache_invariant_13397
+  test_task_status_label_10421  test_task_cache_invariant_13397
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
   test_dashboard_k2_feeds
@@ -1310,19 +1306,10 @@
  (modules test_keeper_board_attention_exact_flow)
  (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
 
-; Durable pre-dispatch fence and restart/cancellation fail-closed proof.
-(test
- (name test_keeper_exact_execution_lease_guard)
- (modules
-  test_keeper_exact_execution_lease_guard
-  test_keeper_exact_execution_lease_guard_fixture)
- (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref eio_main unix))
-
-; Source-bound exact disposition schema, WAL replay, and restart reconciliation.
-(test
- (name test_keeper_exact_disposition_recovery)
- (modules test_keeper_exact_disposition_recovery)
- (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref unix))
+; The exact-execution lease guard and exact-disposition recovery suites lived
+; here. Both drove the lease-taking fence (bind / release / quarantine /
+; prepare / finalize) that #25969 left unreachable when it moved production to
+; peek/ack, and that is now removed.
 
 ; Process-isolated proof that exact-output bootstrap honors full catalog
 ; replacement precedence over deployment overlays and OAS embedded targets.

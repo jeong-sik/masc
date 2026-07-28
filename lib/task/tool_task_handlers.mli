@@ -14,16 +14,6 @@ type task_owner_hooks =
       Workspace_core.config -> agent_name:string -> string list
   }
 
-val record_verdict_fn :
-  (task_id:string ->
-   req:Anti_rationalization.review_request ->
-   result:Anti_rationalization.review_result ->
-   unit ->
-   unit)
-    Atomic.t
-
-val sse_broadcast_fn : (Yojson.Safe.t -> unit) Atomic.t
-val get_few_shot_block_fn : (unit -> string) Atomic.t
 val push_event_to_sessions_fn : (Yojson.Safe.t -> unit) Atomic.t
 
 val set_task_owner_hooks : task_owner_hooks -> unit
@@ -58,16 +48,6 @@ val client_side_transition_gate_error :
 
 val sync_planning_current_task_with_owned_task : context -> unit
 val sync_owner_current_task_binding : context -> unit
-val review_completion_notes :
-  completion_contract:string list option ->
-  evaluator_runtime:string option ->
-  ctx:context ->
-  task_opt:Masc_domain.task option ->
-  task_id:string ->
-  notes:string ->
-  evidence_refs:string list ->
-  Masc_domain.configured_llm_completion_verdict option
-
 val handle_add_task :
   ?created_by:string ->
   tool_name:string ->

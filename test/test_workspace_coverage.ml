@@ -192,23 +192,34 @@ let find_agent_name_by_prefix config prefix =
   | None -> Alcotest.failf "agent with prefix %s not found" prefix
 ;;
 
-let configured_llm_completion_pass : Masc_domain.configured_llm_completion_verdict =
-  { decision = Masc_domain.Completion_pass
-  ; runtime_id = "workspace-coverage-test-reviewer"
-  ; rationale = None
-  ; evaluated_at = "2026-07-13T00:00:00Z"
-  }
-;;
-
 let transition_done_r config ~agent_name ~task_id ~notes =
-  Workspace.transition_task_r
-    config
-    ~agent_name
-    ~task_id
-    ~action:Masc_domain.Done_action
-    ~configured_llm_verdict:configured_llm_completion_pass
-    ~notes
-    ()
+  let evidence_notes =
+    if String.equal (String.trim notes) ""
+    then "test completion evidence"
+    else notes
+  in
+  match
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  with
+  | Some { task_status = Masc_domain.Done _; _ } ->
+    Workspace.transition_task_r config ~agent_name ~task_id
+      ~action:Masc_domain.Done_action ~notes:evidence_notes ()
+  | Some _ | None ->
+    (match
+       Workspace.transition_task_r config ~agent_name ~task_id
+         ~action:Masc_domain.Submit_for_verification ~notes:evidence_notes ()
+     with
+     | Error _ as error -> error
+     | Ok _ ->
+       let verifier = "admin-board-keeper" in
+       (match Workspace.claim_task_r config ~agent_name:verifier ~task_id () with
+        | Error _ as error -> error
+        | Ok _ ->
+          Workspace.transition_task_r config ~agent_name:verifier ~task_id
+            ~action:Masc_domain.Approve_verification
+            ~notes:("verified: " ^ evidence_notes)
+            ()))
 ;;
 
 let transition_done config ~agent_name ~task_id ~notes =
@@ -966,45 +977,6 @@ let test_release_cycle_15_does_not_create_auto_hard_stop () =
         ("cycle count alone should not block reclaim: " ^ Masc_domain.masc_error_to_string e))
 ;;
 
-let test_claim_next_allows_failed_verification_repair () =
-  with_test_env (fun config ->
-    let claude = find_agent_name_by_prefix config "claude" in
-    let _ =
-      Workspace.add_task config ~title:"Repair rejected task" ~priority:1 ~description:""
-    in
-    let req =
-      match
-        Verification.create_request
-          ~base_path:config.Workspace.base_path
-          ~task_id:"task-001"
-          ~output:(`Assoc [])
-          ~criteria:[ Verification.Custom "tests pass" ]
-          ~worker:"worker"
-          ()
-      with
-      | Ok req -> req
-      | Error msg -> Alcotest.fail ("create verification failed: " ^ msg)
-    in
-    (match
-       Verification_protocol.record_reject_verification
-         ~config
-         ~task_id:req.task_id
-         ~verifier:"verifier-agent"
-         ~verification_id:req.id
-         ~reason:"missing evidence"
-     with
-     | Ok () -> ()
-     | Error msg -> Alcotest.fail ("submit verdict failed: " ^ msg));
-    match Workspace.claim_next_r config ~agent_name:claude () with
-    | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "rejected task is repair-claimable" "task-001" task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "failed verification should not permanently block repair"
-    | Workspace.Claim_next_no_unclaimed ->
-      Alcotest.fail "expected failed verification task to remain in backlog"
-    | Workspace.Claim_next_error msg -> Alcotest.fail msg)
-;;
-
 (* ============================================================ *)
 (* Update Priority Tests                                         *)
 (* ============================================================ *)
@@ -1604,17 +1576,17 @@ let test_task_transitions_emit_observability () =
            ; "task_id", "task-001"
            ]);
     Alcotest.(check bool)
-      "audit done recorded"
+      "audit verifier approval recorded"
       true
       (audit_has_entry
          audit_entries
-         ~agent_id:claude
+         ~agent_id:"admin-board-keeper"
          ~action_pred:(function
-           | Audit_log.DoneTask -> true
+           | Audit_log.Custom "task_approve" -> true
            | _ -> false)
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "done"
+           ; "transition", "approve"
            ; "task_id", "task-001"
            ]);
     let telemetry_events = Telemetry_eio.read_all_events config in
@@ -1662,13 +1634,13 @@ let test_task_transitions_emit_observability () =
            ; "task_id", "task-001"
            ]);
     Alcotest.(check bool)
-      "ring done recorded"
+      "ring verifier approval recorded"
       true
       (ring_has_entry
          ring_entries
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "done"
+           ; "transition", "approve"
            ; "task_id", "task-001"
            ]))
 ;;
@@ -1755,17 +1727,17 @@ let test_transition_done_from_claimed_emits_observability () =
     Alcotest.(check bool) "claimed done succeeds" true (contains_check done_result);
     let audit_entries = Audit_log.read_entries ~n:50 config in
     Alcotest.(check bool)
-      "claimed done audit recorded"
+      "claimed task approval audit recorded"
       true
       (audit_has_entry
          audit_entries
-         ~agent_id:claude
+         ~agent_id:"admin-board-keeper"
          ~action_pred:(function
-           | Audit_log.DoneTask -> true
+           | Audit_log.Custom "task_approve" -> true
            | _ -> false)
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "done"
+           ; "transition", "approve"
            ; "task_id", "task-001"
            ]);
     let telemetry_events = Telemetry_eio.read_all_events config in
@@ -1783,13 +1755,13 @@ let test_transition_done_from_claimed_emits_observability () =
       Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
     in
     Alcotest.(check bool)
-      "claimed done ring done recorded"
+      "claimed task ring approval recorded"
       true
       (ring_has_entry
          ring_entries
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "done"
+           ; "transition", "approve"
            ; "task_id", "task-001"
            ]))
 ;;
@@ -2560,14 +2532,7 @@ let test_predecessor_terminal_accepted_and_persisted () =
      | Error e ->
        Alcotest.fail ("start failed: " ^ Masc_domain.masc_error_to_string e));
     let completed =
-      Workspace.transition_task_r
-        config
-        ~agent_name:claude
-        ~task_id:"task-001"
-        ~action:Masc_domain.Done_action
-        ~configured_llm_verdict:configured_llm_completion_pass
-        ~notes:"done"
-        ()
+      transition_done_r config ~agent_name:claude ~task_id:"task-001" ~notes:"done"
     in
     Alcotest.(check bool)
       "predecessor completed"
@@ -2742,10 +2707,6 @@ let () =
             "cycle 15 release does not create auto hard stop"
             `Quick
             test_release_cycle_15_does_not_create_auto_hard_stop
-        ; Alcotest.test_case
-            "failed verification stays repair-claimable"
-            `Quick
-            test_claim_next_allows_failed_verification_repair
         ] )
     ; (* === Update Priority === *)
       ( "update_priority"

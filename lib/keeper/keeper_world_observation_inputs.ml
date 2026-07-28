@@ -62,7 +62,6 @@ let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
 
 let actionable_verification_request_ids ~(config : Workspace.config) : string list =
   Verification.list_requests config.Workspace.base_path
-  |> List.filter Verification.request_is_actionable
   |> List.map (fun (req : Verification.verification_request) -> req.id)
 ;;
 

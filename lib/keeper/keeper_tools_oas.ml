@@ -17,6 +17,7 @@ type terminal_effect_failure =
 
 type terminal_effect_state =
   | Terminal_effect_open
+  | External_effect_deferred
   | Terminal_effect_completed
   | Terminal_effect_failed of terminal_effect_failure
 

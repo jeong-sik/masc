@@ -25,18 +25,6 @@ module Workspace = Workspace_core
 
 (* Yojson.Safe.Util removed — use Json_util SSOT helpers instead *)
 
-let record_verdict_fn
-  : (task_id:string -> req:Anti_rationalization.review_request -> result:Anti_rationalization.review_result -> unit -> unit) Atomic.t
-  = Atomic.make (fun ~task_id:_ ~req:_ ~result:_ () -> ())
-
-let sse_broadcast_fn
-  : (Yojson.Safe.t -> unit) Atomic.t
-  = Atomic.make (fun _ -> ())
-
-let get_few_shot_block_fn
-  : (unit -> string) Atomic.t
-  = Atomic.make (fun () -> "")
-
 let push_event_to_sessions_fn
   : (Yojson.Safe.t -> unit) Atomic.t
   = Atomic.make (fun _ -> ())
@@ -165,97 +153,6 @@ let sync_owner_current_task_binding (ctx : context) =
   (current_task_owner_hooks ()).sync_current_task_binding
     ctx.config
     ~agent_name:ctx.agent_name
-
-let review_completion_notes
-    ~(completion_contract : string list option)
-    ~(evaluator_runtime : string option)
-    ~(ctx : context)
-    ~(task_opt : Masc_domain.task option)
-    ~(task_id : string)
-    ~(notes : string)
-    ~(evidence_refs : string list)
-  : Masc_domain.configured_llm_completion_verdict option
-  =
-  match task_opt with
-  | None -> None
-  | Some task ->
-      let ar_req : Anti_rationalization.review_request = {
-        task_title = task.title;
-        task_description = task.description;
-        completion_notes = notes;
-        agent_name = ctx.agent_name;
-        task_id = task.id;
-        evidence_refs = evidence_refs;
-      } in
-      (* task-1664: the persisted contract's evidence obligations must reach
-         the LLM prompt too, not only [completion_contract]. Read them from
-         the task's own contract so a task requiring e.g. a PR link is judged
-         against that requirement rather than approved on narrative notes. *)
-      let required_evidence, verify_gate_evidence =
-        match task.contract with
-        | Some (c : Masc_domain.task_contract) ->
-            c.required_evidence, c.verify_gate_evidence
-        | None -> [], []
-      in
-      let on_verdict result =
-        (Atomic.get record_verdict_fn)
-          ~task_id ~req:ar_req ~result ();
-        (try
-           (Atomic.get sse_broadcast_fn)
-             (build_verdict_sse_payload
-                ~now:(Time_compat.now ())
-                ~task_id ~req:ar_req ~result)
-         with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            Log.Harness.warn
-              "[anti-rationalization] verdict sse broadcast failed: %s"
-              (Stdlib.Printexc.to_string exn))
-      in
-      let few_shot_block = (Atomic.get get_few_shot_block_fn) () in
-      let ar_result =
-        Anti_rationalization.review
-          ?evaluator_runtime
-          ?completion_contract
-          ~required_evidence
-          ~verify_gate_evidence
-          ~on_verdict
-          ~few_shot_block
-          ~sw:ctx.sw
-          ar_req
-      in
-      let decision, rationale =
-        match ar_result.verdict, ar_result.gate with
-        | Some Anti_rationalization.Approve, Anti_rationalization.Structured_tool ->
-          Masc_domain.Completion_pass, None
-        | Some (Anti_rationalization.Reject reason), Anti_rationalization.Structured_tool ->
-          Masc_domain.Completion_reject reason, Some reason
-        | None, Anti_rationalization.Invalid_verdict ->
-          let reason =
-            Option.value
-              ~default:"configured LLM returned no valid structured completion verdict"
-              ar_result.fallback_reason
-          in
-          Masc_domain.Completion_verdict_unavailable reason, Some reason
-        | None, Anti_rationalization.Evaluator_unavailable ->
-          let reason =
-            Option.value
-              ~default:"configured LLM completion evaluator unavailable"
-              ar_result.fallback_reason
-          in
-          Masc_domain.Completion_verdict_unavailable reason, Some reason
-        | Some _,
-          (Anti_rationalization.Invalid_verdict | Anti_rationalization.Evaluator_unavailable)
-        | None, Anti_rationalization.Structured_tool ->
-          let reason = "inconsistent configured LLM completion result" in
-          Masc_domain.Completion_verdict_unavailable reason, Some reason
-      in
-      Some
-        { Masc_domain.decision
-        ; runtime_id = ar_result.evaluator_runtime
-        ; rationale
-        ; evaluated_at = Masc_domain.now_iso ()
-        }
 
 include Tool_task_completion_review
 
@@ -688,7 +585,5 @@ let transition_known_args =
     "reason";
     "expected_version";
     "agent_name";
-    "completion_contract";
-    "evaluator_runtime";
     "handoff_context";
   ]

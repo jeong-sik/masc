@@ -125,8 +125,17 @@ let keeper_meta_for_name keeper_name =
   | Error msg -> fail ("keeper meta parse failed: " ^ msg)
 ;;
 
-let register_keeper config keeper_name =
-  let meta = keeper_meta_for_name keeper_name in
+let register_keeper ?proactive_enabled config keeper_name =
+  let meta =
+    let meta = keeper_meta_for_name keeper_name in
+    match proactive_enabled with
+    | None -> meta
+    | Some enabled ->
+      { meta with
+        autoboot_enabled = true
+      ; proactive = { enabled }
+      }
+  in
   (match Keeper_meta_store.write_meta config meta with
    | Ok () -> ()
    | Error detail -> fail ("keeper meta write failed: " ^ detail));
@@ -711,6 +720,43 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
         Yojson.Safe.Util.(evidence |> member "event_queue_cancelled_seen" |> to_bool))
 ;;
 
+let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let entry =
+    register_keeper ~proactive_enabled:false config keeper_name
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+       let request = create_keeper_wake_schedule config in
+       Atomic.set entry.fiber_wakeup false;
+       let result = tick_ok config ~now:201.0 in
+       check bool "due schedule signals the live owner" true
+         (Atomic.get entry.fiber_wakeup);
+       match
+         Schedule_store.last_execution_for_schedule
+           (Schedule_store.read_state config)
+           ~schedule_id:request.schedule_id
+       with
+       | Some { detail = Some detail; _ } ->
+         check string "activation is signaled" "signaled"
+           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string);
+         check string "proactive policy is not an activation blocker" ""
+           (match
+              Yojson.Safe.Util.(detail |> member "activation_reason")
+            with
+            | `Null -> ""
+            | json -> Yojson.Safe.to_string json);
+         check int "one schedule dispatch completed" 1
+           (List.length result.dispatches)
+       | Some _ -> fail "schedule execution detail missing"
+       | None -> fail "schedule execution missing")
+;;
+
 let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   with_workspace
   @@ fun config ->
@@ -1054,6 +1100,8 @@ let () =
         ; test_case "cancelled occurrence recovery does not enqueue again"
             `Quick
             test_cancelled_occurrence_recovery_does_not_enqueue_again
+        ; test_case "due wake bypasses proactive policy" `Quick
+            test_due_schedule_wakes_live_keeper_with_proactive_disabled
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "dashboard live supported non-terminal evidence matches supported request"

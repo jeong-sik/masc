@@ -264,8 +264,7 @@ jobs:
           # per the root dune (dirs ...) stanza) is harmless: the Build job
           # runs but dune build skips those dirs.
           # scripts/harness/ stays a prefix match (not suffix): the Build and
-          # Test job executes scripts/harness/contract/run_all.sh, which boots
-          # the python contract verifier (openai_verifier_provider.py), so any
+          # Test job executes scripts/harness/contract/run_all.sh, so any
           # harness file — including non-.sh/.json ones and future extensions —
           # must force build=true. ci_core is intentionally NOT OR-ed here:
           # the ci_core block below already forces build=true.

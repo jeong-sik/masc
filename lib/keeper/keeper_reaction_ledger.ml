@@ -1166,6 +1166,49 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
   end
 ;;
 
+let event_queue_turn_started_seen_for_source_result
+    ~base_path
+    ~keeper_name
+    ~post_id
+    ~stimulus_kind
+  =
+  if String.equal post_id ""
+  then Error Evidence_invalid_stimulus_id
+  else
+    let turn_started_seen = ref false in
+    let expected_stimulus_kind = stimulus_kind_to_string stimulus_kind in
+    let note_parsed_row row =
+      match decode_current_row ~keeper_name row with
+      | Ok
+          (Current_reaction
+             { metadata
+             ; reaction_kind = Turn_started
+             ; transition_receipt = None
+             }) ->
+        (match assoc_field "reaction" metadata.raw with
+         | Some reaction
+           when string_field "post_id" reaction = Some post_id
+                && string_field "stimulus_kind" reaction
+                   = Some expected_stimulus_kind ->
+           turn_started_seen := true
+         | Some _ | None -> ())
+      | Ok
+          ( Current_stimulus _
+          | Current_reaction _
+          | Current_cursor_ack _ )
+      | Error _ ->
+        ()
+    in
+    let store = store_for_base_path ~base_path ~keeper_name in
+    match
+      Dated_jsonl.iter_all_entries_result store (function
+        | Dated_jsonl.Parsed row -> note_parsed_row row
+        | Dated_jsonl.Malformed_json _ -> ())
+    with
+    | Error error -> Error (Evidence_read_error error)
+    | Ok () -> Ok !turn_started_seen
+;;
+
 let nested_string_field outer inner json =
   match assoc_field outer json with
   | Some nested -> string_field inner nested

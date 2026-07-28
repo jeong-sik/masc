@@ -180,7 +180,6 @@ type settlement = State.settlement =
       ; successor : Keeper_event_queue.stimulus option
       }
 
-type lease = State.lease
 type transition_receipt = State.transition_receipt
 type outbox_entry = State.outbox_entry
 
@@ -197,8 +196,6 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let lease_stimuli (lease : lease) = lease.stimuli
-let lease_kind = State.lease_kind
 
 let snapshot_filename = "event-queue.json"
 let settlement_wal_filename = "event-queue-settlements.jsonl"
@@ -566,9 +563,6 @@ let load_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
-let active_lease_result ~base_path ~keeper_name =
-  load_state_result ~base_path ~keeper_name |> Result.map State.active_lease
-;;
 
 let exact_execution_binding_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.exact_execution_binding
@@ -578,12 +572,12 @@ let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
 ;;
 
-let inflight_queue state =
-  State.leases state
-  |> List.concat_map (fun (lease : lease) -> lease.stimuli)
-  |> Keeper_event_queue.uniq_stimuli
-  |> queue_of_stimuli
-;;
+(* In-flight work was the stimuli held by an active lease. Nothing outside
+   [Keeper_event_queue_state] can claim a lease any more and [State.of_yojson]
+   restores none, so a loaded state never carries in-flight stimuli. The
+   projection stays so replay, snapshot, and outbox reporting keep their
+   shape. *)
+let inflight_queue (_ : State.t) = Keeper_event_queue.empty
 
 let replay_queue state =
   Keeper_event_queue.prepend_list
@@ -838,10 +832,11 @@ let state_accounts_for_stimulus state stimulus =
   let same candidate =
     Keeper_event_queue.stimulus_identity_equal candidate stimulus
   in
+  (* A lease term sat between these two: a stimulus held by an active lease also
+     counted as accounted for. No caller can claim a lease since #25969 moved
+     production to peek/ack, and [State.of_yojson] restores none, so that term
+     was always false. *)
   List.exists same (Keeper_event_queue.to_list (State.pending state))
-  || List.exists
-       (fun (lease : lease) -> List.exists same lease.stimuli)
-       (State.leases state)
   || List.exists
        (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
        (State.transition_outbox state)
@@ -922,152 +917,11 @@ let ack_pending_result
     | Ok state -> Ok (state, ()))
 ;;
 
-let claim_when_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~claimed_at
-      ~ready
-      ()
-  =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.claim_when ~claimed_at ~ready state with
-    | Error _ as error -> error
-    | Ok (state, lease) -> Ok (state, lease))
-;;
-
-let claim_board_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~claimed_at
-      ()
-  =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.claim_board ~claimed_at state with
-    | Error _ as error -> error
-    | Ok (state, lease) -> Ok (state, lease))
-;;
-
-let bind_exact_execution_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-      ()
-  =
-  commit_exact_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       State.bind_exact_execution
-         ~lease
-         ~slot_id
-         ~call_id
-         ~plan_fingerprint
-         ~request_body_sha256
-         state
-       |> Result.map (fun next -> next, ()))
-  |> Result.map snd
-;;
-
-let release_exact_execution_before_dispatch_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-      ()
-  =
-  commit_exact_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       State.release_exact_execution_before_dispatch
-         ~lease
-         ~slot_id
-         ~call_id
-         ~plan_fingerprint
-         ~request_body_sha256
-         state
-       |> Result.map (fun next -> next, ()))
-  |> Result.map snd
-;;
-
-let quarantine_exact_execution_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~terminal
-      ()
-  =
-  commit_exact_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       State.quarantine_exact_execution
-         ~lease
-         ~terminal
-         state
-       |> Result.map (fun next -> next, ()))
-  |> Result.map snd
-;;
-
-let prepare_exact_source_disposition_result_with
-      ?save_state
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~source
-      ~terminal
-      ~semantic
-      ~prepared_at
-      ()
-  =
-  commit_exact_transform
-    ?save_state
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       State.prepare_exact_source_disposition
-         ~lease
-         ~source
-         ~terminal
-         ~semantic
-         ~prepared_at
-         state
-       |> Result.map (fun (next, disposition) -> next, disposition))
-;;
-
-let prepare_exact_source_disposition_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~source
-      ~terminal
-      ~semantic
-      ~prepared_at
-      ()
-  =
-  prepare_exact_source_disposition_result_with
-    ~base_path
-    ~keeper_name
-    ~lease
-    ~source
-    ~terminal
-    ~semantic
-    ~prepared_at
-    ()
-;;
+(* The lease-taking exact-execution fence lived here: bind, release before
+   dispatch, quarantine, prepare/finalize source disposition, and
+   settle_bound_exact_nonterminal, plus a For_testing pair that drove the same
+   calls. All of them required a lease, which no caller can obtain since #25969
+   moved production to peek/ack. *)
 
 let commit_settlement_transition_unlocked_with
       ~save_checkpoint
@@ -1171,242 +1025,10 @@ let commit_settlement_transition_unlocked =
     ~compact_wal:(fun _owner -> Ok ())
 ;;
 
-let settle_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ~lease
-      ~settlement
-      ()
-  =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state ->
-           commit_settlement_transition_unlocked
-             owner
-             ~after_commit
-             (State.settle ~settled_at ~lease ~settlement)
-             state
-           |> Result.map fst)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue settlement raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
-;;
-
-let settle_bound_exact_nonterminal_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-      ~settlement
-      ()
-  =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state ->
-           commit_settlement_transition_unlocked
-             owner
-             ~after_commit
-             (State.settle_bound_exact_nonterminal
-                ~settled_at
-                ~lease
-                ~slot_id
-                ~call_id
-                ~plan_fingerprint
-                ~request_body_sha256
-                ~settlement)
-             state
-           |> Result.map fst)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "bound exact nonterminal settlement raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
-;;
-
-let finalize_exact_source_disposition_result_with
-      ~save_checkpoint
-      ~compact_wal
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ~lease
-      ~disposition_id
-      ()
-  =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state ->
-           commit_settlement_transition_unlocked_with
-             ~save_checkpoint
-             ~compact_wal
-             owner
-             ~after_commit
-             (State.finalize_exact_source_disposition
-                ~settled_at
-                ~lease
-                ~disposition_id)
-             state
-           |> Result.map fst)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "exact source disposition settlement raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
-;;
-
-let finalize_exact_source_disposition_result
-      ?after_commit
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ~lease
-      ~disposition_id
-      ()
-  =
-  finalize_exact_source_disposition_result_with
-    ~save_checkpoint:save_state_unlocked
-    ~compact_wal:compact_settlement_wal_unlocked
-    ?after_commit
-    ~base_path
-    ~keeper_name
-    ~settled_at
-    ~lease
-    ~disposition_id
-    ()
-;;
-
-module For_testing = struct
-  type settlement_followup_failure =
-    | Fail_checkpoint of string
-    | Fail_wal_compaction of string
-
-  let finalize_exact_source_disposition_with_followup_failure_result
-        ~failure
-        ~base_path
-        ~keeper_name
-        ~settled_at
-        ~lease
-        ~disposition_id
-        ()
-    =
-    let save_checkpoint, compact_wal =
-      match failure with
-      | Fail_checkpoint detail ->
-        ( (fun _owner _state -> Error detail)
-        , compact_settlement_wal_unlocked )
-      | Fail_wal_compaction detail ->
-        save_state_unlocked, (fun _owner -> Error detail)
-    in
-    finalize_exact_source_disposition_result_with
-      ~save_checkpoint
-      ~compact_wal
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ~lease
-      ~disposition_id
-      ()
-  ;;
-
-  let prepare_exact_source_disposition_with_sync_parent_result
-        ~sync_parent
-        ~base_path
-        ~keeper_name
-        ~lease
-        ~source
-        ~terminal
-        ~semantic
-        ~prepared_at
-        ()
-    =
-    let save =
-      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
-        ~sync_parent
-    in
-    prepare_exact_source_disposition_result_with
-      ~save_state:(save_state_unlocked_strict_staged_with ~save)
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~source
-      ~terminal
-      ~semantic
-      ~prepared_at
-      ()
-  ;;
-end
-
-let cancel_accepted_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~current_owner_nonce
-      ~settled_at
-      ~lease
-      ~cancellation
-      ()
-  =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         match load_state_unlocked owner with
-         | Error _ as error -> error
-         | Ok state ->
-           commit_settlement_transition_unlocked
-             owner
-             ~after_commit
-             (State.cancel_accepted
-                ~current_owner_nonce
-                ~settled_at
-                ~lease
-                ~cancellation)
-             state
-           |> Result.map fst)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue accepted cancellation raised keeper=%s: %s"
-            (keeper_name_of_owner owner)
-            (Printexc.to_string exn)))
-;;
+(* cancel_accepted_result took an operator-supplied lease and handed it to
+   State.cancel_accepted, which reached settle_committed and looked the lease up
+   in durable state. No lease has been there since #25969, so the call could
+   only answer "event queue lease not found". *)
 
 let cancel_pending_accepted_result
       ?(after_commit = fun _ -> ())
@@ -1531,58 +1153,17 @@ let prepare_registration_after_exact_recovery_result
          match load_state_unlocked owner with
          | Error _ as error -> error
          | Ok state ->
-           let finish_exact lease disposition state =
-             match
-               commit_settlement_transition_unlocked
-                 owner
-                 ~after_commit
-                 (State.finalize_exact_source_disposition
-                    ~settled_at
-                    ~lease
-                    ~disposition_id:disposition.disposition_id)
-                 state
-             with
-             | Error _ as error -> error
-             | Ok ((Settled _ | Already_settled _), pending) -> Ok pending
-             | Ok (Committed_followup_failed { detail; _ }, _) ->
-               Error
-                 ("exact registration settlement committed with follow-up failure: "
-                  ^ detail)
-           in
-           let recover_generic lease =
-              (match
-                 commit_settlement_transition_unlocked
-                   owner
-                   ~after_commit
-                   (State.settle
-                      ~settled_at
-                      ~lease
-                      ~settlement:(Requeue Registration_recovery))
-                   state
-               with
-               | Error _ as error -> error
-               | Ok ((Settled _ | Already_settled _), pending) -> Ok pending
-               | Ok (Committed_followup_failed { detail; _ }, _) ->
-                 Error ("registration settlement committed with follow-up failure: " ^ detail))
-           in
-           (match State.active_lease state, State.exact_execution_binding state with
-            | None, None -> Ok (State.pending state)
-            | Some lease, None -> recover_generic lease
-            | None, Some _ ->
-              Error "exact execution binding has no matching active lease"
-            | Some lease, Some { status = Dispatch_uncertain; _ } ->
-              Error
-                (Printf.sprintf
-                   "dispatch-uncertain exact execution remains fail-closed at registration: %s"
-                   lease.lease_id)
-            | Some lease, Some { status = Terminal_quarantined _; _ } ->
-              Error
-                (Printf.sprintf
-                   "source-less terminal quarantine has no source disposition: %s"
-                   lease.lease_id)
-            | Some lease, Some { status = Disposition_prepared disposition; _ } ->
-              (match disposition.outcome with
-               | Terminal _ -> finish_exact lease disposition state)))
+           (* Registration recovery used to resume an active lease here:
+              generic leases were requeued as [Registration_recovery] and a
+              prepared exact disposition was finalized. Both needed
+              [State.active_lease], which cannot return anything now that no
+              caller can claim a lease and [State.of_yojson] restores none.
+              An exact-execution binding without a lease was already an error
+              on this path, so it stays one. *)
+           (match State.exact_execution_binding state with
+            | None -> Ok (State.pending state)
+            | Some _ ->
+              Error "exact execution binding has no matching active lease"))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

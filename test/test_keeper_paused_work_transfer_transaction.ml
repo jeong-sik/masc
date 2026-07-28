@@ -213,27 +213,26 @@ let test_replay_after_target_consumption_has_no_second_effect () =
       |> require_ok "commit Transfer_owner before target consumption"
     in
     check_applied ~expected_target:Transaction.Enqueued first.projection;
-    let lease =
-      Persistence.claim_when_result
+    (* Consume the transferred source the way production does. This used to
+       claim a lease and settle it with Ack; #25969 replaced that with
+       peek/ack. The property under test is unchanged: once the target has
+       consumed the source, replaying the transfer must not enqueue it again. *)
+    let selection =
+      Persistence.peek_when_result
         ~base_path
         ~keeper_name:to_keeper
-        ~claimed_at:4.0
         ~ready:(fun _ -> true)
-        ()
-      |> require_ok "claim transferred target source"
-      |> require_some "transferred target lease"
+      |> require_ok "peek transferred target source"
+      |> require_some "transferred target selection"
     in
     (match
-       Persistence.settle_result
+       Persistence.ack_pending_result
          ~base_path
          ~keeper_name:to_keeper
-         ~settled_at:5.0
-         ~lease
-         ~settlement:State.Ack
+         ~selection
          ()
      with
-     | Ok (Persistence.Settled _ | Persistence.Already_settled _) -> ()
-     | Ok (Persistence.Committed_followup_failed { detail; _ })
+     | Ok () -> ()
      | Error detail -> Alcotest.fail detail);
     let replay =
       Transaction.transfer_pending config ~from_keeper ~to_keeper request

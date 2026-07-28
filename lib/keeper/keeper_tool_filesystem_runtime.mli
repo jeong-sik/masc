@@ -73,7 +73,11 @@ val handle_file_write_with_outcome :
     The project root's parent is the operator-owned capability-acquisition
     boundary. An explicit allowed root outside the project likewise requires
     an operator-owned parent; Keeper-writable components must begin below the
-    opened root capability. *)
+    opened root capability.
+
+    Writes whose selected confined root is exactly this Keeper's playground
+    root proceed after the capability and root-identity checks without an
+    approval Gate. Writes through every other allowed root retain the Gate. *)
 
 module For_testing : sig
   type created_directory_fault_stage =

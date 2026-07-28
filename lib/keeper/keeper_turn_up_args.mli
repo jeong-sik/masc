@@ -25,6 +25,7 @@ type parsed_args =
   ; proactive_enabled_opt : bool option
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
+  ; persona_name_opt : string option
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
   ; instructions_opt : string option

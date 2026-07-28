@@ -9,6 +9,8 @@ module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 module Heartbeat_presence = Masc.Keeper_heartbeat_loop_presence
+module Turn_up_args = Masc.Keeper_turn_up_args
+module Turn_up_config = Masc.Keeper_turn_up_config_persistence
 (* [Runtime] (init_default) lives in the unwrapped [masc_runtime] library, so it
    is referenced directly (not via [Masc.]); [Keeper_runtime] (ensure_keeper_meta)
    lives in the main [masc] library. Same pattern as test_keeper_lifecycle_registry_dispatch. *)
@@ -549,11 +551,11 @@ instructions = "missing sandbox profile"
        ~needle:"sandbox_profile is required"
        (Profile.tool_result_body result))
 
-let test_keeper_up_rejects_missing_profile_source () =
-  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+let test_keeper_up_materializes_missing_profile_source () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "nosourceup" in
   let config = Workspace.default_config base in
-  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let runtime_meta = seed_runtime_meta config name in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let ctx : _ Profile.context =
@@ -568,28 +570,75 @@ let test_keeper_up_rejects_missing_profile_source () =
         Masc_test_deps.non_runtime_publication_recovery_provider;
     }
   in
-  let result = Turn.handle_keeper_up ctx (`Assoc [ ("name", `String name) ]) in
-  if Profile.tool_result_success result then
-    Alcotest.fail "keeper_up should reject missing TOML/persona source";
-  Alcotest.(check bool)
-    "keeper_up missing source error names sandbox_profile"
-    true
-    (contains_substring
-       ~needle:"sandbox_profile is required"
-       (Profile.tool_result_body result))
+  let args =
+    `Assoc
+      [ "name", `String name
+      ; "instructions", `String "durable direct instructions"
+      ; "sandbox_profile", `String "local"
+      ; "allowed_paths", `List [ `String "/tmp/nosourceup" ]
+      ; "mention_targets", `List [ `String "operator" ]
+      ; "proactive_enabled", `Bool false
+      ; "autoboot_enabled", `Bool false
+      ; "max_context_override", `Int 128_001
+      ]
+  in
+  let parsed =
+    match Turn_up_args.parse ctx args with
+    | Ok parsed -> parsed
+    | Error result ->
+      Alcotest.failf "keeper_up args failed: %s" (Profile.tool_result_body result)
+  in
+  let meta =
+    { runtime_meta with
+      instructions = "durable direct instructions"
+    ; sandbox_profile = Profile.Local
+    ; allowed_paths = [ "/tmp/nosourceup" ]
+    ; mention_targets = [ "operator" ]
+    ; proactive = { enabled = false }
+    ; autoboot_enabled = false
+    ; max_context_override = Some 128_001
+    }
+  in
+  (match Turn_up_config.persist ~config ~parsed ~meta with
+   | Ok _ -> ()
+   | Error error -> Alcotest.failf "keeper config persistence failed: %s" error);
+  let toml_path = Filename.concat keepers_dir (name ^ ".toml") in
+  Alcotest.(check bool) "keeper TOML created" true (Sys.file_exists toml_path);
+  match Profile.load_keeper_toml toml_path with
+  | Error error ->
+    Alcotest.failf "created TOML failed to load: %s"
+      (Profile.keeper_toml_load_error_to_string error)
+  | Ok (_, defaults) ->
+    Alcotest.(check (option bool))
+      "proactive persisted"
+      (Some false)
+      defaults.proactive_enabled;
+    Alcotest.(check (option bool))
+      "autoboot persisted"
+      (Some false)
+      defaults.autoboot_enabled;
+    Alcotest.(check (option int))
+      "context override persisted"
+      (Some 128_001)
+      defaults.max_context_override;
+    Alcotest.(check (option (list string)))
+      "allowed paths persisted"
+      (Some [ "/tmp/nosourceup" ])
+      defaults.allowed_paths
 
-let test_missing_profile_source_fails_loud () =
+let test_missing_profile_source_uses_runtime_defaults () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
   let name = "nosource" in
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   match Store.read_effective_meta config name with
-  | Ok _ -> Alcotest.fail "expected absent TOML/persona source to fail loudly"
-  | Error err ->
-      Alcotest.(check bool)
-        "error names missing sandbox_profile"
-        true
-        (contains_substring ~needle:"sandbox_profile is required" err)
+  | Error err -> Alcotest.failf "runtime defaults should remain readable: %s" err
+  | Ok None -> Alcotest.fail "seeded keeper meta disappeared"
+  | Ok (Some meta) ->
+    Alcotest.(check string)
+      "runtime sandbox default"
+      "local"
+      (Profile.sandbox_profile_to_string meta.sandbox_profile)
 
 let test_status_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -1217,11 +1266,11 @@ let () =
           Alcotest.test_case
             "keeper_up rejects profile source without sandbox_profile"
             `Quick test_keeper_up_rejects_profile_source_without_sandbox_profile;
-          Alcotest.test_case "keeper_up rejects missing profile source" `Quick
-            test_keeper_up_rejects_missing_profile_source;
+          Alcotest.test_case "keeper_up materializes missing profile source" `Quick
+            test_keeper_up_materializes_missing_profile_source;
           Alcotest.test_case
-            "missing profile source fails loudly"
-            `Quick test_missing_profile_source_fails_loud;
+            "missing profile source uses runtime defaults"
+            `Quick test_missing_profile_source_uses_runtime_defaults;
           Alcotest.test_case "status tracks TOML overlay edits" `Quick
             test_status_tracks_toml_overlay_changes;
           Alcotest.test_case "status reports normalized options"

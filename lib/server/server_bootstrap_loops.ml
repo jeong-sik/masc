@@ -556,6 +556,31 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
      boundary before publishing [server_state], so no poll/cancel route can
      race a disk-only transition. *)
   set_phase Recovering_requests;
+  (* RFC-0240 §2.4. Close tool cycles left open by process death before
+     anything reads a checkpoint. Persistence stores the open cycle on purpose
+     so recovery knows which calls were dispatched, but nothing closed it, so
+     provider admission rejected the history on every reload and the lane
+     latched Transcript_corruption_reset_required permanently. This must run
+     here rather than in a shutdown hook: an ungraceful kill runs no hook, and
+     keeper loops have not started yet, so no writer races the CAS. *)
+  let transcript_tail_started = preparation_stage_started () in
+  let transcript_tail = Keeper_transcript_tail_recovery.recover_open_tails config in
+  observe_preparation_stage
+    ~stage:"transcript_tail"
+    ~started:transcript_tail_started
+    ~examined:transcript_tail.examined
+    ~failures:transcript_tail.failed;
+  if transcript_tail.closed > 0
+     || transcript_tail.unparseable > 0
+     || transcript_tail.failed > 0
+  then
+    Log.Keeper.warn
+      "transcript_tail_recovery: examined=%d closed=%d tool_results_appended=%d unparseable=%d failed=%d"
+      transcript_tail.examined
+      transcript_tail.closed
+      transcript_tail.tool_results_appended
+      transcript_tail.unparseable
+      transcript_tail.failed;
   let request_started = preparation_stage_started () in
   let keeper_msg_recovery =
     Keeper_msg_async.recover_lost_disk_records ~base_path ()

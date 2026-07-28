@@ -173,6 +173,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_visibility_projection.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_oas_bundle.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_bundle.mli` - oas-tool-bridge
+- `lib/keeper/keeper_tool_call_identity.ml` - oas-tool-bridge
+- `lib/keeper/keeper_tool_call_identity.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_telemetry.ml` - oas-tool-bridge

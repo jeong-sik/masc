@@ -829,7 +829,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          approval_targets="@test/runtest-test_keeper_approval_queue @test/runtest-test_keeper_gate_replay @test/runtest-test_keeper_approval_resolved_history"
+          approval_targets="@test/runtest-test_keeper_approval_queue @test/runtest-test_keeper_gate_replay @test/runtest-test_keeper_approval_resolved_history @test/runtest-test_keeper_tool_dispatch_runtime"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${approval_targets}"
 
       - name: Run SSE reconnect e2e

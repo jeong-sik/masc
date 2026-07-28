@@ -215,19 +215,33 @@ let test_is_agent () =
     Alcotest.(check bool) "empty = not agent" false
       (Board_tool.is_agent ""))
 
-let test_format_timestamp_relative () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let now = Time_compat.now () in
-  let s = Board_tool.format_timestamp_relative now in
-  Alcotest.(check string) "recent timestamp" "just now" s;
-  let old = now -. 86400.0 in
-  let s2 = Board_tool.format_timestamp_relative old in
-  Alcotest.(check bool) "1-day old has 'd'" true (String.contains s2 'd');
-  let minutes_ago = now -. 120.0 in
-  let s3 = Board_tool.format_timestamp_relative minutes_ago in
-  Alcotest.(check bool) "2min ago has 'm'" true (String.contains s3 'm')
+(* Pins the input -> output mapping exactly, in both renderers. The predecessors
+   ([format_timestamp_relative] / [format_ttl_remaining]) read
+   [Time_compat.now ()] inside a [float -> string] signature, so the same post
+   rendered differently from one minute to the next: every board payload was
+   byte-new, [Board_tool_cache] could never hit, and a keeper read the drifting
+   minute counter as a board change. The exact expectations below fail if a
+   clock read is reintroduced; the predecessor assertions could not catch it
+   because they only checked that the output contained the letters 'd' / 'm'. *)
+let test_format_timestamp_absolute () =
+  Alcotest.(check string)
+    "epoch renders as ISO8601 UTC"
+    "1970-01-01T00:00:00Z"
+    (Board_tool.format_timestamp_absolute 0.0);
+  Alcotest.(check string)
+    "fixed instant renders as ISO8601 UTC"
+    "2023-11-14T22:13:20Z"
+    (Board_tool.format_timestamp_absolute 1_700_000_000.0);
+  (* [0.0] is the stored no-expiry sentinel, so "permanent" is derived from the
+     data rather than from a clock comparison. *)
+  Alcotest.(check string)
+    "no-expiry sentinel"
+    "permanent"
+    (Board_tool_format.format_expiry 0.0);
+  Alcotest.(check string)
+    "expiry instant renders as ISO8601 UTC"
+    "2023-11-14T22:13:20Z"
+    (Board_tool_format.format_expiry 1_700_000_000.0)
 
 let json_member_string json key =
   match Yojson.Safe.Util.member key json with
@@ -1923,7 +1937,7 @@ let () =
           Alcotest.test_case "sort_order_of_string" `Quick test_sort_order_of_string;
           Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
           Alcotest.test_case "is_agent" `Quick test_is_agent;
-          Alcotest.test_case "format_timestamp_relative" `Quick test_format_timestamp_relative;
+          Alcotest.test_case "format_timestamp_absolute" `Quick test_format_timestamp_absolute;
           Alcotest.test_case "board actor identity canonicalizes keeper alias"
             `Quick test_board_actor_identity_canonicalizes_keeper_alias;
           Alcotest.test_case "board actor identity keeps non-keeper agent"

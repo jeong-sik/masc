@@ -18,7 +18,7 @@
     Internal helpers stay private at this boundary
     ([board_list_cache] type + the cache cell, the
     [cached_board_list] adapter,
-    [format_ttl_remaining],
+    [format_expiry],
     [agent_lookup_hook] atomic ref,
     [resolve_board_post_kind], [format_post] /
     [format_post_compact] / [format_comment] /
@@ -70,10 +70,14 @@ val author_raw_agent_name_meta_key : string
 
 (** {1 Display formatting} *)
 
-val format_timestamp_relative : float -> string
-(** Renders a Unix timestamp as a human-readable relative
-    duration (["5s ago"] / ["3h ago"] / ["2d ago"]).
-    Used in board listing prompt blocks. *)
+val format_timestamp_absolute : float -> string
+(** Renders a Unix timestamp as an ISO8601 UTC instant
+    (["2026-07-28T02:15:30Z"]). Used in board listing prompt
+    blocks, which an LLM turn consumes: output must be a
+    function of the argument alone so the payload is
+    byte-stable across calls. Relative rendering is a
+    human-dashboard concern and lives in
+    [Dashboard_labels] / [Tempo]. *)
 
 (** {1 Board error rendering} *)
 

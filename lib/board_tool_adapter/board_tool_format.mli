@@ -11,7 +11,17 @@ type sort_order = Board_dispatch.sort_order =
 
 val raw_agent_name_meta_key : field:string -> string
 val author_raw_agent_name_meta_key : string
-val format_timestamp_relative : float -> string
+val format_timestamp_absolute : float -> string
+(** ISO8601 UTC rendering of the given instant. A function of its argument
+    alone — board tool payloads must be byte-stable across calls so
+    [Board_tool_cache] can hit and so a keeper does not read a drifting
+    minute counter as a board change. Relative ("Nm ago") rendering belongs
+    to the human-facing [Dashboard_labels] / [Tempo] renderers. *)
+
+val format_expiry : float -> string
+(** ["permanent"] for the [0.0] no-expiry sentinel, otherwise the ISO8601 UTC
+    expiry instant. Reports the instant, not the remaining duration, so the
+    clock is not a hidden input. *)
 val board_error_to_string : Board.board_error -> string
 val board_error_failure_class : Board.board_error -> Tool_result.tool_failure_class
 val error_of_board_error : tool_name:string -> start_time:float -> Board.board_error -> Tool_result.result

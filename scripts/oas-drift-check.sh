@@ -100,7 +100,21 @@ resolve_source_dir() {
   fi
   if ! GIT_DIR="${scratch}/bare" git cat-file -e "${OAS_AGENT_SDK_SHA}^{commit}" \
         2>/dev/null; then
-    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not present in fetched ${OAS_AGENT_SDK_TRACK_REF}" >&2
+    # A valid release pin can be older than the shallow tracking-ref window.
+    # Fetch the pinned immutable object directly instead of treating age as
+    # pin invalidity; check-oas-pin.sh separately proves it is reachable from
+    # the tracking ref.
+    if ! GIT_DIR="${scratch}/bare" git fetch -q --no-tags --depth=1 \
+           "${OAS_AGENT_SDK_URL}" \
+           "+${OAS_AGENT_SDK_SHA}:refs/masc/pinned-oas" \
+           2>/dev/null; then
+      echo "git fetch of pinned OAS SHA ${OAS_AGENT_SDK_SHA} from ${OAS_AGENT_SDK_URL} failed" >&2
+      return 1
+    fi
+  fi
+  if ! GIT_DIR="${scratch}/bare" git cat-file -e "${OAS_AGENT_SDK_SHA}^{commit}" \
+        2>/dev/null; then
+    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is unavailable after direct fetch" >&2
     return 1
   fi
   mkdir -p "${scratch}/tree"

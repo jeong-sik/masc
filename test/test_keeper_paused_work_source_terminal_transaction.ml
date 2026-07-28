@@ -154,7 +154,7 @@ let source_ack_wire_fields json =
           (match List.assoc_opt "settlement" receipt_fields with
            | Some (`Assoc settlement_fields) ->
              state_fields, outbox_fields, receipt_fields, settlement_fields
-           | Some _ | None -> Alcotest.fail "source ACK settlement must be an object")
+           | Some _ | None -> Alcotest.fail "source ACK receipt must be an object")
         | Some _ | None -> Alcotest.fail "source ACK outbox receipt must be an object")
      | Some _ | None -> Alcotest.fail "source ACK must retain exactly one durable outbox entry")
   | _ -> Alcotest.fail "source ACK state must be a JSON object"
@@ -257,7 +257,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
        | Some (`String schema) -> Some schema
        | Some _ | None -> None);
     Alcotest.(check (option string))
-      "recovery removes legacy source settlement kind"
+      "recovery removes legacy source-terminal label"
       (Some "ack_source_terminal")
       (match List.assoc_opt "kind" recovered_settlement with
        | Some (`String kind) -> Some kind

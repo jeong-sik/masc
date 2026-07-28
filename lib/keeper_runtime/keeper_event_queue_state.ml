@@ -824,7 +824,7 @@ let escalation_reason_of_wire ~label ~detail_json =
     Error (Printf.sprintf "unknown event queue escalation reason: %s" unknown)
 ;;
 
-let legacy_source_terminal_settlement_kind = "settle_from_source_terminal"
+let legacy_source_terminal_kind = "settle_from_source_terminal"
 
 let settlement_kind_label = function
   | Ack -> "ack"
@@ -869,7 +869,7 @@ let legacy_source_terminal_ack_outbox_entry_json json =
         | Some (`Assoc settlement_fields) ->
           (match List.assoc_opt "kind" settlement_fields with
            | Some (`String kind)
-             when String.equal kind legacy_source_terminal_settlement_kind ->
+             when String.equal kind legacy_source_terminal_kind ->
              let settlement_fields =
                replace "kind" (`String "ack_source_terminal") settlement_fields
              in
@@ -3321,7 +3321,7 @@ let transition_receipt_of_yojson json =
       ; Printf.sprintf
           "%s:%s"
           expected_lease_id
-          legacy_source_terminal_settlement_kind
+          legacy_source_terminal_kind
       ]
   in
   if Int64.compare lease_sequence 1L < 0

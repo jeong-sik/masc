@@ -140,7 +140,7 @@ let test_gate_allows_only_the_exact_persisted_rule () =
        let rule, _ = upsert_exn ~base_path ~input in
        let request : Gate.request =
          { keeper_name = "keeper"
-         ; operation = "external-effect"
+         ; operation = Gate.Opaque_operation "external-effect"
          ; input
          ; base_path
          ; causal_context = None
@@ -154,6 +154,8 @@ let test_gate_allows_only_the_exact_persisted_rule () =
          check string "exact rule id" rule.id rule_id
        | Gate.Allow _ -> fail "Gate used a broader Always Allowed source"
        | Gate.Deferred _ -> fail "exact Always Allowed rule unexpectedly deferred"
+       | Gate.Resolved_delivery _ ->
+         fail "exact Always Allowed rule reused a resolved delivery"
        | Gate.Unavailable reason ->
          fail (Gate.unavailable_reason_to_string reason))
 ;;
@@ -329,7 +331,7 @@ let test_duplicate_persisted_rules_reject_whole_store () =
 
 let gate_request ~base_path : Gate.request =
   { keeper_name = "keeper"
-  ; operation = "external-effect"
+  ; operation = Gate.Opaque_operation "external-effect"
   ; input = `Assoc [ "target", `String "exact" ]
   ; base_path
   ; causal_context = None
@@ -395,9 +397,9 @@ let submit_eligibility_entry ~base_path ~keeper_name label =
       ~base_path
       ()
   with
-  | Ok (AQ.Submission_pending id) -> approval_entry_exn id
-  | Ok (AQ.Submission_resolved id) ->
-    fail ("eligibility fixture reused terminal approval: " ^ id)
+  | Ok (AQ.Pending id) -> approval_entry_exn id
+  | Ok (AQ.Resolved_delivery { approval_id; _ }) ->
+    fail ("unexpected resolved delivery " ^ approval_id)
   | Error error -> fail (AQ.storage_error_to_string error)
 ;;
 
@@ -640,6 +642,8 @@ let test_manual_mode_continues_when_rule_store_is_unavailable () =
    | Gate.Deferred { reason = Gate.Human_requested; _ } -> ()
    | Gate.Deferred _ -> fail "Manual mode used the wrong deferred reason"
    | Gate.Allow _ -> fail "Manual mode allowed after exact-rule storage failure"
+   | Gate.Resolved_delivery _ ->
+     fail "Manual mode reused a resolved delivery"
    | Gate.Unavailable reason ->
      fail
        ("exact-rule storage failure blocked Manual HITL: "
@@ -665,6 +669,8 @@ let test_auto_judge_continues_when_rule_store_is_unavailable () =
     ()
   | Gate.Deferred _ -> fail "default Auto Judge used a non-judge deferred reason"
   | Gate.Allow _ -> fail "Auto Judge allowed without a judgment"
+  | Gate.Resolved_delivery _ ->
+    fail "Auto Judge reused a resolved delivery"
   | Gate.Unavailable reason ->
     fail
       ("exact-rule storage failure blocked Auto Judge: "
@@ -683,6 +689,8 @@ let test_invalid_mode_continues_to_explicit_defer_when_rule_store_is_unavailable
     check bool "invalid mode detail is explicit" true (String.trim detail <> "")
   | Gate.Deferred _ -> fail "invalid mode used the wrong deferred reason"
   | Gate.Allow _ -> fail "invalid mode allowed after rule storage failure"
+  | Gate.Resolved_delivery _ ->
+    fail "invalid mode reused a resolved delivery"
   | Gate.Unavailable reason ->
     fail
       ("exact-rule storage failure hid the invalid mode: "
@@ -707,6 +715,8 @@ let test_gate_allows_unexpired_exact_rule () =
     check string "unexpired exact rule id" rule.id rule_id
   | Gate.Allow _ -> fail "Gate used a broader Always Allowed source"
   | Gate.Deferred _ -> fail "unexpired exact rule unexpectedly deferred"
+  | Gate.Resolved_delivery _ ->
+    fail "unexpired exact rule reused a resolved delivery"
   | Gate.Unavailable reason -> fail (Gate.unavailable_reason_to_string reason)
 ;;
 
@@ -729,6 +739,8 @@ let test_gate_defers_and_observes_expired_exact_rule () =
    | Gate.Deferred { reason = Gate.Human_requested; _ } -> ()
    | Gate.Deferred _ -> fail "expired exact rule used the wrong deferred reason"
    | Gate.Allow _ -> fail "expired exact rule still authorized the request"
+   | Gate.Resolved_delivery _ ->
+     fail "expired exact rule reused a resolved delivery"
    | Gate.Unavailable reason ->
      fail
        ("expired exact rule blocked Manual HITL: "
@@ -757,6 +769,8 @@ let test_keeper_always_allow_does_not_depend_on_rule_store () =
        | Gate.Allow { source = Gate.Keeper_always_allow } -> ()
        | Gate.Allow _ -> fail "unexpected Always Allowed source"
        | Gate.Deferred _ -> fail "Keeper Always Allowed unexpectedly deferred"
+       | Gate.Resolved_delivery _ ->
+         fail "Keeper Always Allowed reused a resolved delivery"
        | Gate.Unavailable reason -> fail (Gate.unavailable_reason_to_string reason))
 ;;
 
@@ -774,6 +788,8 @@ let test_workspace_always_allow_does_not_depend_on_rule_store () =
        | Gate.Allow { source = Gate.Workspace_always_allow } -> ()
        | Gate.Allow _ -> fail "unexpected Always Allowed source"
        | Gate.Deferred _ -> fail "workspace Always Allowed unexpectedly deferred"
+       | Gate.Resolved_delivery _ ->
+         fail "workspace Always Allowed reused a resolved delivery"
        | Gate.Unavailable reason -> fail (Gate.unavailable_reason_to_string reason))
 ;;
 

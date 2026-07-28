@@ -137,6 +137,10 @@ type blocker_class =
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_input_required
+  | Gate_replay_repair_required of
+      { approval_id : string
+      ; stage : Keeper_internal_error.gate_replay_repair_stage
+      }
 
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
@@ -148,6 +152,7 @@ let blocker_class_to_string = function
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_input_required -> "sdk_input_required"
+  | Gate_replay_repair_required _ -> "gate_replay_repair_required"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -160,6 +165,7 @@ let blocker_class_of_serialized_string = function
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_input_required" -> Some Sdk_input_required
+  | "gate_replay_repair_required" -> None
   | _ -> None
 ;;
 
@@ -208,6 +214,12 @@ let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
       `Assoc [ "name", `String "runtime_exhausted"
              ; "reason", runtime_exhaustion_reason_to_json reason
              ]
+    | Gate_replay_repair_required { approval_id; stage } ->
+      `Assoc
+        [ "name", `String "gate_replay_repair_required"
+        ; "approval_id", `String approval_id
+        ; "stage", `String (Keeper_internal_error.gate_replay_repair_stage_to_string stage)
+        ]
     | _ -> `String (blocker_class_to_string info.klass)
   in
   let fields =

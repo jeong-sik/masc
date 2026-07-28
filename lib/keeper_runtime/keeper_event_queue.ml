@@ -171,7 +171,13 @@ let bg_job_completion_post_id (c : bg_job_completion) =
   if String.equal c.bg_board_post_id "" then "bg-run:" ^ c.bg_run_id
   else c.bg_board_post_id
 
-let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
+let hitl_resolution_post_id_of_approval_id approval_id =
+  "hitl-approval:" ^ approval_id
+;;
+
+let hitl_resolution_post_id (r : hitl_resolution) =
+  hitl_resolution_post_id_of_approval_id r.approval_id
+;;
 
 let manual_compaction_post_id = "manual-compaction-request"
 

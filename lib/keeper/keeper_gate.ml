@@ -44,6 +44,10 @@ type request =
   ; continuation_channel : Keeper_continuation_channel.t option
   }
 
+let request_operation_name request =
+  operation_to_string request.operation
+;;
+
 type authorization_source =
   | One_shot_resolution of string
   | Exact_always_rule of string
@@ -62,6 +66,8 @@ type unavailable_reason =
   | Queue_storage_unavailable of Keeper_approval_queue.storage_error
   | Approval_grant_unavailable of Keeper_approval_queue.grant_error
   | Approval_grant_consumption_in_progress of string
+  | Approval_replay_repair_required of string
+  | Approval_resolved_delivery_mismatch of string
 
 type decision =
   | Allow of authorization
@@ -69,7 +75,10 @@ type decision =
       { approval_id : string
       ; reason : deferred_reason
       }
-  | Resolved of { approval_id : string }
+  | Resolved_delivery of
+      { approval_id : string
+      ; outcome : Keeper_approval_queue.resolution_replay_outcome
+      }
   | Unavailable of unavailable_reason
 
 type auto_judge_completion_rejection =
@@ -217,7 +226,7 @@ let rec take_matching_cycle_grant grant request =
         ~base_path:request.base_path
         ~id:entry.approval_id
         ~keeper_name:request.keeper_name
-        ~tool_name:(operation_to_string request.operation)
+        ~tool_name:(request_operation_name request)
         ~input:request.input
       with
       | Error error ->
@@ -261,6 +270,14 @@ let unavailable_reason_to_string = function
     Keeper_approval_queue.grant_error_to_string error
   | Approval_grant_consumption_in_progress approval_id ->
     Printf.sprintf "approval %s is being consumed" approval_id
+  | Approval_replay_repair_required approval_id ->
+    Printf.sprintf
+      "approval %s was consumed without a durable replay outcome; operator repair is required"
+      approval_id
+  | Approval_resolved_delivery_mismatch approval_id ->
+    Printf.sprintf
+      "resolved approval %s no longer matches the exact submitted operation and input"
+      approval_id
 ;;
 
 let source_fields = function
@@ -299,26 +316,21 @@ let decision_to_yojson = function
        ; "reason", `String (deferred_reason_to_string reason)
        ]
        @ detail)
-  | Resolved { approval_id } ->
+  | Resolved_delivery { approval_id; outcome } ->
     `Assoc
-      [ "decision", `String "resolved"
+      [ "decision", `String "resolved_delivery"
       ; "approval_id", `String approval_id
+      ; ( "outcome"
+        , `String
+            (match outcome with
+             | Keeper_approval_queue.Replay_applied _ -> "applied"
+             | Keeper_approval_queue.Replay_failed _ -> "failed") )
       ]
   | Unavailable reason ->
     `Assoc
       [ "decision", `String "unavailable"
       ; "reason", `String (unavailable_reason_to_string reason)
       ]
-;;
-
-let resolved_retry_payload approval_id =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "message"
-       , `String
-           "This exact external-effect invocation already has a durable Gate resolution. It was not executed and no new approval was queued."
-       ; "gate", decision_to_yojson (Resolved { approval_id })
-       ])
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
@@ -332,7 +344,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
        | Keeper_always_allow | Workspace_always_allow ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
-    ~tool_name:(operation_to_string request.operation)
+    ~tool_name:(request_operation_name request)
     ?tool_call_id:(Option.bind request.causal_context (fun context -> context.tool_call_id))
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
@@ -346,7 +358,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
 let submit request =
   Keeper_approval_queue.submit_pending
     ~keeper_name:request.keeper_name
-    ~tool_name:(operation_to_string request.operation)
+    ~tool_name:(request_operation_name request)
     ~input:request.input
     ~base_path:request.base_path
     ?turn_id:(request_turn_id request)
@@ -1389,9 +1401,59 @@ let request_operator_auto_judge_recovery ~base_path =
 let defer request reason =
   match submit request with
   | Error error -> Unavailable (Queue_storage_unavailable error)
-  | Ok (Keeper_approval_queue.Submission_resolved approval_id) ->
-    Resolved { approval_id }
-  | Ok (Keeper_approval_queue.Submission_pending approval_id) ->
+  | Ok
+      (Keeper_approval_queue.Resolved_delivery
+         { approval_id
+         ; delivery =
+             { state = Keeper_approval_queue.Resolution_consumed
+             ; replay_outcome = Some outcome
+             ; _
+             }
+         }) ->
+    Resolved_delivery { approval_id; outcome }
+  | Ok
+      (Keeper_approval_queue.Resolved_delivery
+         { approval_id
+         ; delivery =
+             { state = Keeper_approval_queue.Resolution_consumed
+             ; replay_outcome = None
+             ; _
+             }
+         }) ->
+    Unavailable (Approval_replay_repair_required approval_id)
+  | Ok
+      (Keeper_approval_queue.Resolved_delivery
+         { approval_id
+         ; delivery =
+             { state = Keeper_approval_queue.Resolution_unconsumed; _ }
+         }) ->
+    (match
+       Keeper_approval_queue.consume_approved_resolution
+         ~base_path:request.base_path
+         ~id:approval_id
+         ~keeper_name:request.keeper_name
+         ~tool_name:(request_operation_name request)
+         ~input:request.input
+     with
+     | Error error -> Unavailable (Approval_grant_unavailable error)
+     | Ok Keeper_approval_queue.Consumption_not_matching ->
+       Unavailable (Approval_resolved_delivery_mismatch approval_id)
+     | Ok Keeper_approval_queue.Consumption_committed ->
+       let source = One_shot_resolution approval_id in
+       audit_allow request ~source_approval_id:approval_id source;
+       Allow { source }
+     | Ok Keeper_approval_queue.Consumption_already_committed ->
+       (match
+          Keeper_approval_queue.approved_resolution_delivery
+            ~base_path:request.base_path
+            ~id:approval_id
+        with
+        | Ok { replay_outcome = Some outcome; _ } ->
+          Resolved_delivery { approval_id; outcome }
+        | Ok { replay_outcome = None; _ } ->
+          Unavailable (Approval_replay_repair_required approval_id)
+        | Error error -> Unavailable (Approval_grant_unavailable error)))
+  | Ok (Keeper_approval_queue.Pending approval_id) ->
     let reason =
       match reason with
       | Judge_requested ->
@@ -1437,7 +1499,7 @@ let defer request reason =
              ~event_type:"auto_judge_block_observation_superseded"
              ~id:approval_id
              ~keeper_name:request.keeper_name
-             ~tool_name:(operation_to_string request.operation)
+             ~tool_name:(request_operation_name request)
              ();
            Log.Keeper.warn
              ~keeper_name:request.keeper_name
@@ -1478,7 +1540,7 @@ let observe_exact_rule_store_degraded request error =
   Log.Keeper.error
     ~keeper_name:request.keeper_name
     "exact Always Allowed rule lookup unavailable operation=%s: %s; continuing configured Gate mode"
-    (operation_to_string request.operation)
+    (request_operation_name request)
     detail;
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
@@ -1489,7 +1551,7 @@ let observe_exact_rule_store_degraded request error =
     ~event_type:"gate_exact_rule_store_degraded"
     ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
-    ~tool_name:(operation_to_string request.operation)
+    ~tool_name:(request_operation_name request)
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids
@@ -1501,13 +1563,13 @@ let observe_exact_rule_expired request (rule_match : Keeper_approval_queue.rule_
     ~keeper_name:request.keeper_name
     "exact Always Allowed rule %s expired operation=%s; continuing configured Gate mode"
     rule_match.rule_id
-    (operation_to_string request.operation);
+    (request_operation_name request);
   Keeper_approval_queue.audit_approval_event
     ~base_path:request.base_path
     ~event_type:"gate_exact_rule_expired"
     ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
-    ~tool_name:(operation_to_string request.operation)
+    ~tool_name:(request_operation_name request)
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids
@@ -1552,7 +1614,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
           Keeper_approval_queue.find_matching_rule
             ~base_path:request.base_path
             ~keeper_name:request.keeper_name
-            ~tool_name:(operation_to_string request.operation)
+            ~tool_name:(request_operation_name request)
             ~input:request.input
             ()
         with
@@ -1591,14 +1653,14 @@ let decide ?cycle_grant ~keeper_always_allow request =
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
       "one-shot Gate grant unavailable; preserving the unconsumed grant operation=%s reason=%s"
-      (operation_to_string request.operation)
+      (request_operation_name request)
       (unavailable_reason_to_string reason);
     Keeper_approval_queue.audit_approval_event
       ~base_path:request.base_path
       ~event_type:"gate_grant_unavailable"
       ~id:approval_id
       ~keeper_name:request.keeper_name
-      ~tool_name:(operation_to_string request.operation)
+      ~tool_name:(request_operation_name request)
       ?turn_id:(request_turn_id request)
       ?task_id:request.task_id
       ~goal_ids:request.goal_ids

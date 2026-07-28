@@ -56,9 +56,27 @@ val fetch : t -> sha256:string -> (string option, fetch_error) result
 
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.
-    Mainly used by [gc] and tests. *)
+    Mainly used by tests. Production retention is owned exclusively by
+    {!Tool_blob_maintenance}. *)
 
-val gc : t -> keep_set:string list -> int
-(** Delete every artifact whose sha256 is NOT in [keep_set].
-    Returns the number of artifacts deleted. Best-effort: unlink failures
-    are silently skipped. *)
+type list_error =
+  { path : string
+  ; reason : string
+  }
+
+val list_all_result : t -> (string list, list_error) result
+(** Typed production listing. Directory read/stat failures never collapse to
+    an empty store. *)
+
+type delete_error =
+  { sha256 : string
+  ; path : string
+  ; reason : string
+  }
+
+val delete_error_to_string : delete_error -> string
+val delete : t -> sha256:string -> (bool, delete_error) result
+(** Delete one exact blob. [Ok false] means it is already absent; filesystem
+    failures remain typed and visible. Bulk retention/deletion is owned
+    exclusively by {!Tool_blob_maintenance}; callers must not synthesize a
+    partial consumer keep-set. *)

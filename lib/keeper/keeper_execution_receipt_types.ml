@@ -220,9 +220,11 @@ let receipt_terminal_reason_code_of_stop_reason = function
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
   | Runtime_agent.Completed ->
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
+  | Runtime_agent.Awaiting_external_effect _ ->
+    Keeper_turn_disposition.to_wire
+      Keeper_turn_disposition.External_effect_deferred
   | ( Runtime_agent.Yielded_to_chat_waiting _
     | Runtime_agent.Yielded_to_durable_stimulus _
-    | Runtime_agent.Awaiting_external_effect _
     | Runtime_agent.Yielded_after_repeated_tool_call _ ) as stop_reason ->
     stop_reason_to_string stop_reason
 ;;

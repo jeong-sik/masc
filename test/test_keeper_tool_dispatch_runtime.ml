@@ -2512,97 +2512,6 @@ let test_approved_web_search_grant_executes_exact_request () =
       | Error error ->
         fail (Masc.Keeper_approval_queue.grant_error_to_string error))
 
-let test_resolved_web_search_retry_is_terminal_without_effect () =
-  with_exec_fixture "keeper_tool_dispatch_resolved_web_search_retry"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
-      (match
-         Masc.Keeper_gate_mode.set
-           config
-           ~actor:"test"
-           Masc.Keeper_gate_mode.Manual
-       with
-       | Ok _ -> ()
-       | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
-      let input = `Assoc [ "query", `String "resolved retry must not search" ] in
-      let gate_context () =
-        { Masc.Keeper_gate.turn_id = Some 19
-        ; tool_call_id = Some "web-search-resolved-retry"
-        ; snapshot = None
-        }
-      in
-      let deferred =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config
-          ~meta
-          ~publication_recovery
-          ~ctx_work
-          ~gate_context
-          ~name:"WebSearch"
-          ~input
-          ()
-      in
-      (match deferred.disposition with
-       | Tool_result.Deferred () -> ()
-       | Tool_result.Completed () | Tool_result.Failed _ ->
-         fail "resolved retry fixture did not create its first pending approval");
-      let approval_id =
-        match
-          Masc.Keeper_approval_queue.list_pending_entries_for_workspace
-            ~base_path:config.base_path
-        with
-        | Ok [ entry ] -> entry.id
-        | Ok entries ->
-          failf "expected one pending resolved-retry approval, got %d" (List.length entries)
-        | Error error ->
-          fail (Masc.Keeper_approval_queue.storage_error_to_string error)
-      in
-      (match
-         Masc.Keeper_approval_queue.resolve_with_policy
-           ~base_path:config.base_path
-           ~id:approval_id
-           ~decision:Masc.Keeper_approval_queue.Decision.Approve
-           ~source:Masc.Keeper_approval_queue.Auto_judge
-           ()
-       with
-       | Ok _ -> ()
-       | Error error ->
-         fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
-      Masc.Tool_misc.with_web_search_simulation_for_test
-        ~outcomes:[ "duckduckgo", `Error "resolved retry must not execute search" ]
-      @@ fun () ->
-      let retry =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config
-          ~meta
-          ~publication_recovery
-          ~ctx_work
-          ~gate_context
-          ~name:"WebSearch"
-          ~input
-          ()
-      in
-      check string "resolved retry is terminal" "success" (outcome_label retry.disposition);
-      let payload = parse_json retry.raw_output in
-      check string
-        "resolved retry exposes terminal Gate decision"
-        "resolved"
-        Yojson.Safe.Util.(payload |> member "gate" |> member "decision" |> to_string);
-      check string
-        "resolved retry keeps approval identity"
-        approval_id
-        Yojson.Safe.Util.(payload |> member "gate" |> member "approval_id" |> to_string);
-      match
-        Masc.Keeper_approval_queue.list_pending_entries_for_workspace
-          ~base_path:config.base_path
-      with
-      | Ok [] -> ()
-      | Ok entries ->
-        failf
-          "resolved retry created %d pending approvals"
-          (List.length entries)
-      | Error error ->
-        fail (Masc.Keeper_approval_queue.storage_error_to_string error))
-
 let test_approved_web_search_replays_without_model_resubmission () =
   with_exec_fixture "keeper_tool_dispatch_replayed_web_search"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -2811,6 +2720,31 @@ let test_approved_web_search_replays_without_model_resubmission () =
        | Ok _ -> fail "durable WebSearch replay result was missing"
        | Error error ->
          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+      let resolved_retry =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~gate_context:(fun () ->
+            { Masc.Keeper_gate.turn_id = Some 17
+            ; tool_call_id = Some tool_call_id
+            ; snapshot = None
+            })
+          ~name:"WebSearch"
+          ~input
+          ()
+      in
+      (match resolved_retry.disposition with
+       | Tool_result.Completed () ->
+         check bool
+           "same tool-call retry terminalizes from durable replay"
+           true
+           (contains_substring resolved_retry.raw_output "Replayed result")
+       | Tool_result.Deferred () ->
+         fail "same resolved tool-call retry deferred forever"
+       | Tool_result.Failed _ ->
+         fail "same resolved tool-call retry lost its durable success");
       match
         Masc.Keeper_gate_replay.replay_approved_effect
           ~config
@@ -3178,15 +3112,104 @@ let test_consumed_without_outcome_requires_operator_repair () =
            request
        with
        | Masc.Keeper_gate.Allow _ -> ()
-       | ( Masc.Keeper_gate.Deferred _
-         | Masc.Keeper_gate.Resolved _
-         | Masc.Keeper_gate.Unavailable _ ) ->
+       | Masc.Keeper_gate.Deferred _
+       | Masc.Keeper_gate.Resolved_delivery _
+       | Masc.Keeper_gate.Unavailable _ ->
          fail "crash-gap fixture did not consume its approval");
       let restarted_grant =
         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
         | Some grant -> grant
         | None -> fail "approved restart resolution did not create a grant"
       in
+      let missing_after_restart =
+        Masc.Keeper_gate_replay.replay_approved_effect
+          ~config
+          ~meta
+          ~publication_recovery
+          ~turn_sandbox_factory:None
+          ~grant:restarted_grant
+          ~approval_id
+          ()
+      in
+      (match missing_after_restart with
+       | Masc.Keeper_gate_replay.Repair_required
+          {
+            stage =
+              Masc.Keeper_gate_replay.Replay_effect_indeterminate_after_restart
+          ; _
+          } ->
+        ()
+       | outcome ->
+        failf
+          "consumed unknown outcome entered replay: %s"
+          (Masc.Keeper_gate_replay.outcome_to_string outcome));
+      let source_post_id =
+        Keeper_event_queue.hitl_resolution_post_id_of_approval_id approval_id
+      in
+      (match
+         Masc.Keeper_registry_event_queue.snapshot_result
+           ~base_path:config.base_path
+           meta.name
+       with
+       | Ok queue ->
+         check bool "repair source exists before settlement" true
+           (Keeper_event_queue.to_list queue
+            |> List.exists (fun stimulus ->
+              String.equal stimulus.post_id source_post_id))
+       | Error detail -> fail detail);
+      let settle_args =
+        `Assoc
+          [ "approval_id", `String approval_id
+          ; ( "stage"
+            , `String "effect_indeterminate_after_restart" )
+          ; ( "decision"
+            , `String "effect_outcome_reconciled_externally" )
+          ]
+      in
+      (match
+         Server_dashboard_http
+         .dashboard_gate_replay_repair_settle_http_json
+           ~base_path:config.base_path
+           ~actor:"authenticated-operator"
+           ~args:settle_args
+       with
+       | Ok json ->
+         check bool "settlement retires exact source" true
+           Yojson.Safe.Util.(json |> member "source_retired" |> to_bool)
+       | Error detail -> fail detail);
+      (match
+         Masc.Keeper_registry_event_queue.snapshot_result
+           ~base_path:config.base_path
+           meta.name
+       with
+       | Ok queue ->
+         check bool "settlement removed exact repair source" false
+           (Keeper_event_queue.to_list queue
+            |> List.exists (fun stimulus ->
+              String.equal stimulus.post_id source_post_id))
+       | Error detail -> fail detail);
+      let audit_path =
+        Masc.Keeper_gate_path.replay_repair_settlements
+          ~base_path:config.base_path
+      in
+      let audit = Fs_compat.load_file audit_path in
+      check bool "restart settlement has typed unknown outcome" true
+        (contains_substring audit "\"effect_kind\":\"unknown_after_restart\"");
+      check bool "restart settlement fabricates no effect hash" true
+        (contains_substring audit "\"effect_sha256\":null");
+      check bool "settlement audit contains no raw repair detail" false
+        (contains_substring
+           audit
+           "authorization is consumed but no durable replay outcome");
+      (match
+         Server_dashboard_http
+         .dashboard_gate_replay_repair_settle_http_json
+           ~base_path:config.base_path
+           ~actor:"authenticated-operator"
+           ~args:settle_args
+       with
+       | Error _ -> ()
+       | Ok _ -> fail "same repair settlement succeeded twice");
       match
         Masc.Keeper_gate_replay.replay_approved_effect
           ~config
@@ -3198,11 +3221,14 @@ let test_consumed_without_outcome_requires_operator_repair () =
           ()
       with
       | Masc.Keeper_gate_replay.Repair_required
-          { stage = Masc.Keeper_gate_replay.Replay_effect_indeterminate_after_restart; _ } ->
+          { stage =
+              Masc.Keeper_gate_replay.Replay_effect_indeterminate_after_restart
+          ; _
+          } ->
         ()
       | outcome ->
         failf
-          "consumed unknown outcome entered replay: %s"
+          "operator settlement caused unknown effect to rerun: %s"
           (Masc.Keeper_gate_replay.outcome_to_string outcome))
 
 let workflow_rejection_message =
@@ -4270,8 +4296,6 @@ let () =
         test_manual_gate_defers_web_tools_before_network;
       test_case "approved WebSearch grant executes exact request" `Quick
         test_approved_web_search_grant_executes_exact_request;
-      test_case "resolved WebSearch retry is terminal without effect" `Quick
-        test_resolved_web_search_retry_is_terminal_without_effect;
       test_case "approved WebSearch replays without model resubmission" `Quick
         test_approved_web_search_replays_without_model_resubmission;
       test_case "blob failure repairs journal without second effect" `Quick

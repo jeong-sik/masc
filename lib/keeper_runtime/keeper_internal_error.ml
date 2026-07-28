@@ -240,7 +240,8 @@ let gate_replay_repair_stage_to_string = function
   | Replay_grant_consumption -> "grant_consumption"
   | Replay_evidence_storage -> "evidence_storage"
   | Replay_journal -> "replay_journal"
-  | Replay_effect_indeterminate_after_restart -> "effect_indeterminate_after_restart"
+  | Replay_effect_indeterminate_after_restart ->
+    "effect_indeterminate_after_restart"
   | Replay_invalid_resolution_state -> "invalid_resolution_state"
 ;;
 

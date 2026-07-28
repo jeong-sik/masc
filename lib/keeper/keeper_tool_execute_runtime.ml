@@ -354,9 +354,6 @@ let handle_tool_execute_typed
              ~context:(`Assoc typed_context_fields)
              ()
            |> Keeper_gate_deferred_payload.to_execution
-         | Keeper_gate.Resolved { approval_id } ->
-           Keeper_tool_execution.success
-             (Keeper_gate.resolved_retry_payload approval_id)
          | Keeper_gate.Unavailable reason ->
            typed_error_json
              ~extra_fields:
@@ -365,6 +362,14 @@ let handle_tool_execute_typed
                , `String (Keeper_gate.unavailable_reason_to_string reason)
                ]
              "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
+         | Keeper_gate.Resolved_delivery
+             { outcome = Keeper_approval_queue.Replay_applied output; _ } ->
+           Keeper_tool_execution.success output
+         | Keeper_gate.Resolved_delivery
+             { outcome = Keeper_approval_queue.Replay_failed detail; _ } ->
+           Keeper_tool_execution.failure
+             ~class_:Tool_result.Runtime_failure
+             detail
          | Keeper_gate.Allow authorization ->
           Log.Keeper.info
             ~keeper_name:meta.name

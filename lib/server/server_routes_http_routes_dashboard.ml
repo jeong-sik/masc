@@ -540,6 +540,38 @@ let handle_gate_resolve_body state operator_name request reqd body_str =
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
 ;;
 
+let handle_gate_replay_repair_settle_body
+      state
+      operator_name
+      request
+      reqd
+      body_str
+  =
+  try
+    let args = Yojson.Safe.from_string body_str in
+    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    match
+      dashboard_gate_replay_repair_settle_http_json
+        ~base_path
+        ~actor:operator_name
+        ~args
+    with
+    | Ok json -> respond_json_value_with_cors request reqd json
+    | Error message ->
+      respond_json_value_with_cors
+        ~status:`Bad_request
+        request
+        reqd
+        (operator_error_json message)
+  with
+  | Yojson.Json_error message ->
+    respond_json_value_with_cors
+      ~status:`Bad_request
+      request
+      reqd
+      (operator_error_json (Printf.sprintf "invalid json: %s" message))
+;;
+
 let handle_gate_retry_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
@@ -1175,6 +1207,16 @@ let add_routes ~sw ~clock router =
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
              (handle_gate_resolve_body state operator_name request reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/replay-repair/settle" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_replay_repair_settle_body
+                state
+                operator_name
+                request
+                reqd))
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/retry" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

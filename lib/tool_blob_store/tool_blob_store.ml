@@ -1,5 +1,3 @@
-module SS = Set_util.StringSet
-
 type t =
   { root : string
   ; ownership_root : string
@@ -135,16 +133,92 @@ let list_all t =
     ) shards;
     !acc
 
-let gc t ~keep_set =
-  let keep = List.fold_left (fun acc s -> SS.add s acc) SS.empty keep_set in
-  let deleted = ref 0 in
-  List.iter (fun sha256 ->
-    if not (SS.mem sha256 keep) then begin
-      let path = shard_path t sha256 in
-      try
-        Unix.unlink path;
-        incr deleted
-      with Unix.Unix_error _ -> ()
-    end
-  ) (list_all t);
-  !deleted
+type list_error =
+  { path : string
+  ; reason : string
+  }
+
+let list_all_result t =
+  let read_dir path =
+    try Ok (Sys.readdir path) with
+    | Sys_error reason -> Error { path; reason }
+    | Unix.Unix_error (code, fn, arg) ->
+      Error
+        { path
+        ; reason =
+            Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+        }
+  in
+  if not (Sys.file_exists t.root)
+  then Ok []
+  else
+    match read_dir t.root with
+    | Error _ as error -> error
+    | Ok shards ->
+      let rec scan_shards acc index =
+        if index = Array.length shards
+        then Ok acc
+        else
+          let shard_dir = Filename.concat t.root shards.(index) in
+          try
+            if not (Sys.is_directory shard_dir)
+            then scan_shards acc (index + 1)
+            else
+              (match read_dir shard_dir with
+               | Error _ as error -> error
+               | Ok files ->
+                 let acc =
+                   Array.fold_left
+                     (fun current filename ->
+                        match validate_sha256 filename with
+                        | Ok () -> filename :: current
+                        | Error _ -> current)
+                     acc
+                     files
+                 in
+                 scan_shards acc (index + 1))
+          with
+          | Sys_error reason ->
+            Error { path = shard_dir; reason }
+      in
+      scan_shards [] 0
+
+type delete_error =
+  { sha256 : string
+  ; path : string
+  ; reason : string
+  }
+
+let delete_error_to_string { sha256; path; reason } =
+  Printf.sprintf "blob delete failed sha256=%s path=%s: %s" sha256 path reason
+;;
+
+let delete t ~sha256 =
+  match validate_sha256 sha256 with
+  | Error invalid ->
+    Error
+      { sha256
+      ; path = t.root
+      ; reason = invalid_sha256_to_string invalid
+      }
+  | Ok () ->
+    let path = shard_path t sha256 in
+    if not (Sys.file_exists path)
+    then Ok false
+    else
+      (try
+         Unix.unlink path;
+         Ok true
+       with
+       | Unix.Unix_error (code, fn, arg) ->
+         Error
+           { sha256
+           ; path
+           ; reason =
+               Printf.sprintf
+                 "%s(%s): %s"
+                 fn
+                 arg
+                 (Unix.error_message code)
+           }
+       | Sys_error reason -> Error { sha256; path; reason })

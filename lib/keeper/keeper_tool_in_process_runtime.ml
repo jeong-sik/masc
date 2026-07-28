@@ -25,8 +25,8 @@ type external_gate_block =
 
 type external_gate_non_allow =
   | Gate_deferred of Keeper_gate_deferred_payload.t
-  | Gate_resolved of string
   | Gate_unavailable of external_gate_block
+  | Gate_resolved of Keeper_approval_queue.resolution_replay_outcome
 
 let external_gate_decision
       ~config
@@ -61,7 +61,6 @@ let external_gate_decision
             ~approval_id
             ~reason
             ()))
-  | Keeper_gate.Resolved { approval_id } -> Error (Gate_resolved approval_id)
   | Keeper_gate.Unavailable reason ->
     Error
       (Gate_unavailable
@@ -77,6 +76,7 @@ let external_gate_decision
                   ])
          ; failure_class = Tool_result.Runtime_failure
          })
+  | Keeper_gate.Resolved_delivery { outcome; _ } -> Error (Gate_resolved outcome)
   | Keeper_gate.Allow authorization ->
     Log.Keeper.info
       ~keeper_name:meta.name
@@ -113,16 +113,21 @@ let with_external_gate_tool_result
       ~tool_name:(Keeper_gate.operation_to_string operation)
       ~start_time:(Time_compat.now ())
       deferred
-  | Error (Gate_resolved approval_id) ->
-    Tool_result.ok
-      ~tool_name:(Keeper_gate.operation_to_string operation)
-      ~start_time:(Time_compat.now ())
-      (Keeper_gate.resolved_retry_payload approval_id)
   | Error (Gate_unavailable blocked) ->
     tool_result_error
       ~tool_name:(Keeper_gate.operation_to_string operation)
       ~class_:blocked.failure_class
       blocked.payload
+  | Error (Gate_resolved (Keeper_approval_queue.Replay_applied output)) ->
+    Tool_result.ok
+      ~tool_name:(Keeper_gate.operation_to_string operation)
+      ~start_time:(Time_compat.now ())
+      output
+  | Error (Gate_resolved (Keeper_approval_queue.Replay_failed detail)) ->
+    tool_result_error
+      ~tool_name:(Keeper_gate.operation_to_string operation)
+      ~class_:Tool_result.Runtime_failure
+      detail
 ;;
 
 let with_external_gate_tool_result_option
@@ -153,18 +158,24 @@ let with_external_gate_tool_result_option
          ~tool_name:(Keeper_gate.operation_to_string operation)
          ~start_time:(Time_compat.now ())
          deferred)
-  | Error (Gate_resolved approval_id) ->
-    Some
-      (Tool_result.ok
-         ~tool_name:(Keeper_gate.operation_to_string operation)
-         ~start_time:(Time_compat.now ())
-         (Keeper_gate.resolved_retry_payload approval_id))
   | Error (Gate_unavailable blocked) ->
     Some
       (tool_result_error
          ~tool_name:(Keeper_gate.operation_to_string operation)
          ~class_:blocked.failure_class
          blocked.payload)
+  | Error (Gate_resolved (Keeper_approval_queue.Replay_applied output)) ->
+    Some
+      (Tool_result.ok
+         ~tool_name:(Keeper_gate.operation_to_string operation)
+         ~start_time:(Time_compat.now ())
+         output)
+  | Error (Gate_resolved (Keeper_approval_queue.Replay_failed detail)) ->
+    Some
+      (tool_result_error
+         ~tool_name:(Keeper_gate.operation_to_string operation)
+         ~class_:Tool_result.Runtime_failure
+         detail)
 ;;
 
 let with_external_gate_execution
@@ -191,13 +202,18 @@ let with_external_gate_execution
   | Ok () -> continue ()
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_execution deferred
-  | Error (Gate_resolved approval_id) ->
-    Keeper_tool_execution.success (Keeper_gate.resolved_retry_payload approval_id)
   | Error (Gate_unavailable blocked) ->
     Keeper_tool_execution.failure
       ~class_:blocked.failure_class
       ~effect_disposition:Tool_result.Proven_pre_effect
       blocked.payload
+  | Error (Gate_resolved (Keeper_approval_queue.Replay_applied output)) ->
+    Keeper_tool_execution.success output
+  | Error (Gate_resolved (Keeper_approval_queue.Replay_failed detail)) ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_post_effect
+      detail
 ;;
 
 let network_read_gate_operation = Keeper_gate.Network_read

@@ -159,16 +159,15 @@ let parse_last_blocker fields =
          | Some klass -> Ok klass
          | None -> invalidf "last_blocker.klass has unknown value %S" label)
       | `Assoc klass_fields ->
-        let* () =
-          require_exact_fields
-            ~context:"last_blocker.klass"
-            [ "name"; "reason" ]
-            klass_fields
-        in
         let* name = string_field klass_fields "name" in
-        if not (String.equal name "runtime_exhausted")
-        then invalidf "last_blocker.klass has unknown object name %S" name
-        else
+        if String.equal name "runtime_exhausted"
+        then
+          let* () =
+            require_exact_fields
+              ~context:"last_blocker.klass"
+              [ "name"; "reason" ]
+              klass_fields
+          in
           let* reason_json = required_field klass_fields "reason" in
           (match runtime_exhaustion_reason_of_json reason_json with
            | Some reason
@@ -178,6 +177,31 @@ let parse_last_blocker fields =
              Ok (Runtime_exhausted reason)
            | Some _ | None ->
              invalidf "last_blocker.klass.reason is not the current exact shape")
+        else if String.equal name "gate_replay_repair_required"
+        then
+          let* () =
+            require_exact_fields
+              ~context:"last_blocker.klass"
+              [ "name"; "approval_id"; "stage" ]
+              klass_fields
+          in
+          let* approval_id = string_field klass_fields "approval_id" in
+          let* stage_raw = string_field klass_fields "stage" in
+          (match
+             Keeper_internal_error.gate_replay_repair_stage_of_string
+               stage_raw
+           with
+           | Some stage
+             when String.equal
+                    stage_raw
+                    (Keeper_internal_error.gate_replay_repair_stage_to_string
+                       stage) ->
+             Ok (Gate_replay_repair_required { approval_id; stage })
+           | Some _ | None ->
+             invalidf
+               "last_blocker.klass.stage has unknown value %S"
+               stage_raw)
+        else invalidf "last_blocker.klass has unknown object name %S" name
       | other ->
         invalidf
           "last_blocker.klass must be a string or object, got %s"

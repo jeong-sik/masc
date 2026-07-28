@@ -48,7 +48,10 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Terminal_effect_failed _) -> None
   | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> None
   | Some (Keeper_turn_driver.History_persistence_failed _) -> None
-  | Some (Keeper_turn_driver.Gate_replay_repair_required _) -> None
+  | Some
+      (Keeper_turn_driver.Gate_replay_repair_required
+         { approval_id; stage; _ }) ->
+    Some (Gate_replay_repair_required { approval_id; stage })
   | None ->
     (match err with
      | Agent_sdk.Error.Internal _ -> None
@@ -104,6 +107,26 @@ let is_fiber_unresolved_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
 ;;
 
+let is_gate_replay_repair_blocker_class blocker_class =
+  String.equal
+    blocker_class
+    (blocker_class_to_string
+       (Gate_replay_repair_required
+          { approval_id = ""; stage = Keeper_internal_error.Replay_resolution_lookup }))
+;;
+
+let gate_replay_repair_detail_sha256 detail =
+  Digestif.SHA256.(digest_string detail |> to_hex)
+;;
+
+let gate_replay_repair_summary ~approval_id ~stage ~detail =
+  Printf.sprintf
+    "Gate replay repair requires operator settlement for approval %s at stage %s (detail_sha256=%s); the exact wake remains unacknowledged and the effect must not be re-run."
+    approval_id
+    (Keeper_internal_error.gate_replay_repair_stage_to_string stage)
+    (gate_replay_repair_detail_sha256 detail)
+;;
+
 let runtime_blocker_surface_of_masc_internal_error = function
   | Keeper_turn_driver.Accept_rejected _
   | Keeper_turn_driver.Runtime_exhausted _
@@ -115,9 +138,16 @@ let runtime_blocker_surface_of_masc_internal_error = function
   | Keeper_turn_driver.Incomplete_tool_transcript _
   | Keeper_turn_driver.Terminal_effect_failed _
   | Keeper_turn_driver.Receipt_persistence_failed _
-  | Keeper_turn_driver.History_persistence_failed _
-  | Keeper_turn_driver.Gate_replay_repair_required _ ->
+  | Keeper_turn_driver.History_persistence_failed _ ->
     None
+  | Keeper_turn_driver.Gate_replay_repair_required
+      { approval_id; stage; detail; _ } ->
+    Some
+      { blocker_class =
+          blocker_class_to_string
+            (Gate_replay_repair_required { approval_id; stage })
+      ; summary = gate_replay_repair_summary ~approval_id ~stage ~detail
+      }
 
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
@@ -148,6 +178,14 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Sdk_guardrail_violation
     | Sdk_tripwire_violation
     | Sdk_input_required -> if summary = "" then str else summary
+    | Gate_replay_repair_required { approval_id; stage } ->
+      if summary = ""
+      then
+        gate_replay_repair_summary
+          ~approval_id
+          ~stage
+          ~detail:"detail unavailable"
+      else summary
   in
   { blocker_class = str; summary }
 ;;

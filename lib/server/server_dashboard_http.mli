@@ -94,6 +94,12 @@ val dashboard_gate_resolve_http_json :
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, approval_resolve_http_error) result
 
+val dashboard_gate_replay_repair_settle_http_json :
+  base_path:string ->
+  actor:string ->
+  args:Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result
+
 val dashboard_gate_retry_http_json :
   base_path:string ->
   requested_by:string ->

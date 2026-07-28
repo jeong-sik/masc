@@ -206,6 +206,7 @@ val bg_job_completion_post_id : bg_job_completion -> post_id
     when the producer set it, otherwise falls back to ["bg-run:<run_id>"]. *)
 
 val hitl_resolution_post_id : hitl_resolution -> post_id
+val hitl_resolution_post_id_of_approval_id : string -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
     window. *)

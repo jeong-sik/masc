@@ -221,7 +221,8 @@ let prepare_agent_setup
                    | Keeper_gate_replay.Replay_journal ->
                      Keeper_internal_error.Replay_journal
                    | Keeper_gate_replay.Replay_effect_indeterminate_after_restart ->
-                     Keeper_internal_error.Replay_effect_indeterminate_after_restart
+                     Keeper_internal_error
+                     .Replay_effect_indeterminate_after_restart
                    | Keeper_gate_replay.Invalid_resolution_state ->
                      Keeper_internal_error.Replay_invalid_resolution_state)
               ; detail

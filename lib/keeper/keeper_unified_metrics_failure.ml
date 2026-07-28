@@ -119,7 +119,18 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
              (match Keeper_status_bridge.blocker_class_of_sdk_error err with
               | Some klass ->
                   let detail =
-                    Keeper_internal_error.cap_blocker_detail public_reason
+                    match
+                      Keeper_turn_driver.classify_masc_internal_error err
+                    with
+                    | Some
+                        (Keeper_turn_driver.Gate_replay_repair_required
+                           { approval_id; stage; detail; _ }) ->
+                      Keeper_status_bridge.gate_replay_repair_summary
+                        ~approval_id
+                        ~stage
+                        ~detail
+                    | Some _ | None ->
+                      Keeper_internal_error.cap_blocker_detail public_reason
                   in
                   Some (Keeper_meta_contract.blocker_info_of_class
                           ~detail klass)

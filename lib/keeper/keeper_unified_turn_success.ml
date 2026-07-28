@@ -412,7 +412,7 @@ let terminal_reason_of_outcome result = function
   | Terminal_external_effect_deferred ->
     Keeper_turn_terminal.of_disposition
       ~source:"external_effect_gate_resolution"
-      Keeper_turn_disposition.Input_required
+      Keeper_turn_disposition.External_effect_deferred
   | Terminal_checkpoint ->
     (match result.Keeper_agent_run.stop_reason with
      | Runtime_agent.Yielded_to_chat_waiting _

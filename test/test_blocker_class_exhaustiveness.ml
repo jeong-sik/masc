@@ -33,6 +33,10 @@ let all_variants : blocker_class list =
   ; Sdk_guardrail_violation
   ; Sdk_tripwire_violation
   ; Sdk_input_required
+  ; Gate_replay_repair_required
+      { approval_id = "approval-test"
+      ; stage = Masc.Keeper_internal_error.Replay_evidence_storage
+      }
   ]
 ;;
 
@@ -43,12 +47,18 @@ let test_roundtrip () =
     (fun variant ->
        let s = blocker_class_to_string variant in
        let deserialized = blocker_class_of_serialized_string s in
-       (match deserialized with
-        | None ->
+       (match variant, deserialized with
+        | Gate_replay_repair_required _, None ->
+          (* This class carries mandatory structured fields and therefore
+             refuses promotion from its bare display label. *)
+          ()
+        | Gate_replay_repair_required _, Some _ ->
+          fail "structured Gate repair blocker decoded from a bare label"
+        | _, None ->
           failf
             "blocker_class_of_serialized_string returned None for %S (from variant)"
             s
-        | Some result ->
+        | _, Some result ->
           (* Runtime_exhausted payloads collapse to [Other_detail] on
              deserialization — that is the expected lossy round-trip. *)
           let s' = blocker_class_to_string result in

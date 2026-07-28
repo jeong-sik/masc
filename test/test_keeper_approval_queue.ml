@@ -96,9 +96,6 @@ let drop_resolution ~base_path ~keeper_name resolution =
   | Error reason -> Alcotest.fail reason
 ;;
 
-let submission_id = function
-  | AQ.Submission_pending id | AQ.Submission_resolved id -> id
-;;
 
 let submit_with_context
       ?tool_call_id
@@ -128,7 +125,10 @@ let submit_with_context
       ?continuation_channel
       ()
   with
-  | Ok submission -> submission_id submission
+  | Ok (AQ.Pending id) -> id
+  | Ok (AQ.Resolved_delivery { approval_id; _ }) ->
+    Alcotest.fail
+      ("expected pending submission, found resolved delivery " ^ approval_id)
   | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
 ;;
 
@@ -206,10 +206,8 @@ let test_tool_call_identity_controls_pending_deduplication () =
             "blank tool call identity is rejected at ingress"
             "tool_call_id must be non-blank when supplied"
             error.reason
-        | Ok submission ->
-          Alcotest.failf
-            "blank tool call identity created approval %s"
-            (submission_id submission));
+        | Ok _ ->
+          Alcotest.fail "blank tool call identity created an approval");
        let first =
          submit_with_context
            ~tool_call_id:"tool-call-1"
@@ -265,10 +263,8 @@ let test_tool_call_identity_controls_pending_deduplication () =
             "tool call identity collision fails closed"
             true
             (String.starts_with ~prefix:"tool_call_id" error.reason)
-        | Ok submission ->
-          Alcotest.failf
-            "tool call identity collision created approval %s"
-            (submission_id submission));
+        | Ok _ ->
+          Alcotest.fail "tool call identity collision created an approval");
        let another_turn =
          submit_with_context
            ~tool_call_id:"tool-call-2"
@@ -359,30 +355,34 @@ let test_tool_call_identity_controls_pending_deduplication () =
         | Ok _ -> ()
         | Error error ->
           Alcotest.fail (AQ.resolve_error_to_string error));
-       let resolved_retry =
-         match
-           AQ.submit_pending
-             ~keeper_name
-             ~tool_name:"external-effect"
-           ~tool_call_id:"tool-call-1"
-           ~turn_id:42
-           ~goal_ids:[ "goal-after-resolution" ]
-           ~continuation_channel:dashboard_b
-           ~base_path
-           ~input
-           ()
-         with
-         | Ok (AQ.Submission_resolved id) -> id
-         | Ok (AQ.Submission_pending id) ->
-           Alcotest.failf
-             "resolved execution identity remained pending as approval %s"
-             id
-         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
-       in
-       Alcotest.(check string)
-         "resolved execution identity cannot create another approval"
-         first
-         resolved_retry;
+       (match
+          AQ.submit_pending
+            ~tool_call_id:"tool-call-1"
+            ~turn_id:42
+            ~goal_ids:[ "goal-after-resolution" ]
+            ~continuation_channel:dashboard_b
+            ~base_path
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+            ()
+        with
+        | Ok
+            (AQ.Resolved_delivery
+               { approval_id
+               ; delivery = { state = AQ.Resolution_unconsumed; _ }
+               }) ->
+          Alcotest.(check string)
+            "resolved execution identity is typed"
+            first
+            approval_id
+        | Ok (AQ.Pending id) ->
+          Alcotest.failf
+            "resolved execution identity flattened to pending %s"
+            id
+        | Ok (AQ.Resolved_delivery _) ->
+          Alcotest.fail "resolved delivery unexpectedly consumed"
+        | Error error -> Alcotest.fail (AQ.storage_error_to_string error));
        (match
           AQ.submit_pending
             ~keeper_name
@@ -397,10 +397,8 @@ let test_tool_call_identity_controls_pending_deduplication () =
             "resolved identity collision still fails closed"
             true
             (String.starts_with ~prefix:"tool_call_id" error.reason)
-        | Ok submission ->
-          Alcotest.failf
-            "resolved identity collision created approval %s"
-            (submission_id submission));
+        | Ok _ ->
+          Alcotest.fail "resolved identity collision created an approval");
        List.iter (reject_and_cleanup ~base_path)
          [ another_turn
          ; another_channel
@@ -1484,7 +1482,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
           the peek/ack intake path rather than to this file; see #25980. *)
        let request ~input ~task_id ~goal_ids : Gate.request =
          { keeper_name
-         ; operation = "external-effect"
+         ; operation = Gate.Opaque_operation "external-effect"
          ; input
          ; base_path
          ; causal_context =
@@ -1501,6 +1499,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        let source_of = function
          | Gate.Allow { source } -> source
          | Gate.Deferred _ -> Alcotest.fail "keeper Always Allow unexpectedly deferred"
+         | Gate.Resolved_delivery _ ->
+           Alcotest.fail "keeper Always Allow reused a resolved delivery"
          | Gate.Unavailable reason ->
            Alcotest.fail (Gate.unavailable_reason_to_string reason)
        in
@@ -3522,7 +3522,7 @@ let test_default_auto_judge_defers_without_blocking () =
        ignore (install_exn ~base_path);
        let request : Gate.request =
          { keeper_name
-         ; operation = "external-effect"
+         ; operation = Gate.Opaque_operation "external-effect"
          ; input = `Assoc [ "target", `String "auto-judge" ]
          ; base_path
          ; causal_context =
@@ -3570,6 +3570,8 @@ let test_default_auto_judge_defers_without_blocking () =
        | Gate.Deferred { reason = (Gate.Human_requested | Gate.Mode_state_invalid _); _ } ->
          Alcotest.fail "default Gate mode did not select Auto Judge"
        | Gate.Allow _ -> Alcotest.fail "default Auto Judge allowed without a verdict"
+       | Gate.Resolved_delivery _ ->
+         Alcotest.fail "default Auto Judge reused a resolved delivery"
        | Gate.Unavailable reason ->
          Alcotest.fail (Gate.unavailable_reason_to_string reason))
 ;;
@@ -3598,7 +3600,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
        in
        let request : Gate.request =
          { keeper_name
-         ; operation = "external-effect"
+         ; operation = Gate.Opaque_operation "external-effect"
          ; input
          ; base_path
          ; causal_context = None
@@ -3614,6 +3616,8 @@ let test_unavailable_cycle_grant_never_falls_through () =
           Alcotest.fail "unconsumed grant failure fell through to Always Allow"
         | Gate.Deferred _ ->
           Alcotest.fail "unconsumed grant failure created a second approval"
+        | Gate.Resolved_delivery _ ->
+          Alcotest.fail "unreadable grant produced a resolved delivery"
         | Gate.Unavailable _ ->
           Alcotest.fail "unexpected unavailable reason for unreadable grant");
        ignore (install_exn ~base_path);
@@ -3622,6 +3626,8 @@ let test_unavailable_cycle_grant_never_falls_through () =
           Alcotest.(check string) "grant remains unconsumed" approval_id actual
         | Gate.Allow _ -> Alcotest.fail "restored exact grant used the wrong source"
         | Gate.Deferred _ -> Alcotest.fail "restored exact grant did not authorize"
+        | Gate.Resolved_delivery _ ->
+          Alcotest.fail "restored unconsumed grant was already resolved"
         | Gate.Unavailable reason ->
           Alcotest.fail (Gate.unavailable_reason_to_string reason));
        drop_resolution ~base_path ~keeper_name resolution)

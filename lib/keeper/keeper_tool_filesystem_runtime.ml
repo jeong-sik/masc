@@ -1189,7 +1189,6 @@ let confined_write_is_keeper_playground
 type file_write_attempt =
   | Write_succeeded of string
   | Write_deferred of Keeper_gate_deferred_payload.t
-  | Write_resolved of string
   | Write_failed of
       { payload : string
       ; class_ : Tool_result.tool_failure_class
@@ -1697,8 +1696,6 @@ let file_write_attempt_to_execution = function
   | Write_succeeded payload -> Keeper_tool_execution.success payload
   | Write_deferred deferred ->
     Keeper_gate_deferred_payload.to_execution deferred
-  | Write_resolved approval_id ->
-    Keeper_tool_execution.success (Keeper_gate.resolved_retry_payload approval_id)
   | Write_failed { payload; class_ } -> Keeper_tool_execution.failure ~class_ payload
   | Write_failed_data { message; data; class_ } ->
     Keeper_tool_execution.failure_data ~class_ ~message data
@@ -1983,7 +1980,6 @@ let handle_file_write_with_outcome
                 ~reason
                 ~context:(`Assoc [ "path", `String target ])
                 ()))
-      | Keeper_gate.Resolved { approval_id } -> Ok (Write_resolved approval_id)
       | Keeper_gate.Unavailable reason ->
         Ok
           (Write_failed
@@ -1996,6 +1992,16 @@ let handle_file_write_with_outcome
                      , `String (Keeper_gate.unavailable_reason_to_string reason)
                      ]
                    "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
+             ; class_ = Tool_result.Runtime_failure
+             })
+      | Keeper_gate.Resolved_delivery
+          { outcome = Keeper_approval_queue.Replay_applied output; _ } ->
+        Ok (Write_succeeded output)
+      | Keeper_gate.Resolved_delivery
+          { outcome = Keeper_approval_queue.Replay_failed detail; _ } ->
+        Ok
+          (Write_failed
+             { payload = detail
              ; class_ = Tool_result.Runtime_failure
              })
       | Keeper_gate.Allow authorization ->

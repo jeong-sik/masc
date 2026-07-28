@@ -150,12 +150,28 @@ let last_runtime_attempt_json (meta : keeper_meta) =
   | Some attempt -> runtime_attempt_record_json attempt
 ;;
 
+let gate_replay_repair_facts (meta : keeper_meta) =
+  match meta.runtime.last_blocker with
+  | Some
+      { klass = Gate_replay_repair_required { approval_id; stage }
+      ; detail = _
+      } ->
+    [ "approval_id", `String approval_id
+    ; ( "stage"
+      , `String (Keeper_internal_error.gate_replay_repair_stage_to_string stage) )
+    ; "operator_action_required", `Bool true
+    ; "operator_action", `String "settle_gate_replay_repair"
+    ]
+  | Some _ | None -> []
+;;
+
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
-    [ "source", `String "keeper_runtime.last_runtime_attempt"
-    ; "runtime_id", `String (runtime_id_of_meta meta)
-    ; "last_runtime_attempt", last_runtime_attempt_json meta
-    ]
+    ([ "source", `String "keeper_runtime.last_runtime_attempt"
+     ; "runtime_id", `String (runtime_id_of_meta meta)
+     ; "last_runtime_attempt", last_runtime_attempt_json meta
+     ]
+     @ gate_replay_repair_facts meta)
 ;;
 
 let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
@@ -211,6 +227,9 @@ let attention_fields_json_with_approval_queue
         true, Some "stale_turn_timeout", Some "inspect_stale_turn_root_cause"
       | Some blocker when is_fiber_unresolved_blocker_class blocker.blocker_class ->
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
+      | Some blocker
+        when is_gate_replay_repair_blocker_class blocker.blocker_class ->
+        true, Some "gate_replay_repair_required", Some "settle_gate_replay_repair"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
       | None -> false, None, None

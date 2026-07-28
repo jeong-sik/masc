@@ -8,5 +8,9 @@ let replay_results ~base_path =
   Filename.concat (dir ~base_path) "replay-results.json"
 ;;
 
+let replay_repair_settlements ~base_path =
+  Filename.concat (dir ~base_path) "replay-repair-settlements.jsonl"
+;;
+
 let always_allowed ~base_path = Filename.concat (dir ~base_path) "always-allowed.json"
 ;;

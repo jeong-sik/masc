@@ -122,6 +122,13 @@ type replay_recording =
   | Replay_recorded
   | Replay_already_recorded
 
+type pending_submission =
+  | Pending of string
+  | Resolved_delivery of
+      { approval_id : string
+      ; delivery : approved_resolution_delivery
+      }
+
 type delivery_replay_failure =
   { approval_id : string
   ; reason : string
@@ -402,18 +409,12 @@ end
 
 (** {1 Nonblocking submission and explicit resolution} *)
 
-type submission =
-  | Submission_pending of string
-  | Submission_resolved of string
-(** A request is pending only while its exact invocation still requires an
-    operator resolution.  A matching resolved delivery is terminal for that
-    invocation: callers must not publish another deferred wait. *)
-
 (** Durably enqueue an exact request without suspending the caller. When
-    supplied, [tool_call_id] must be non-blank. An existing id is reused for
-    the same durable [tool_call_id], Keeper, operation identity, and canonical
-    input, including when that execution occurrence is already in the resolved
-    delivery journal. When it is absent, legacy callers retain their complete
+    supplied, [tool_call_id] must be non-blank. [Pending id] identifies a
+    newly-created or existing pending request. [Resolved_delivery] preserves
+    the closed durable state of a matching resolved execution occurrence, so
+    callers cannot flatten it back into a pending wait. When [tool_call_id] is
+    absent, legacy callers retain their complete
     turn/task/goal/channel request identity only while pending, so a retry does
     not create another pending approval without suppressing a later
     indistinguishable legacy occurrence. A deduplicated request does not
@@ -431,7 +432,7 @@ val submit_pending :
   ?goal_ids:string list ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
-  (submission, storage_error) result
+  (pending_submission, storage_error) result
 
 type resolve_error =
   | Not_found of string

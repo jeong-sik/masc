@@ -103,6 +103,13 @@ type replay_recording =
   | Replay_recorded
   | Replay_already_recorded
 
+type pending_submission =
+  | Pending of string
+  | Resolved_delivery of
+      { approval_id : string
+      ; delivery : approved_resolution_delivery
+      }
+
 type delivery_replay_failure =
   { approval_id : string
   ; reason : string
@@ -3511,10 +3518,6 @@ let find_request_id_in_map
 
 (* ── Nonblocking submission ───────────────────────────────── *)
 
-type submission =
-  | Submission_pending of string
-  | Submission_resolved of string
-
 let valid_tool_call_id = function
   | None -> true
   | Some value -> String.trim value <> ""
@@ -3533,7 +3536,7 @@ let submit_pending
       ?(goal_ids = [])
       ?continuation_channel
       ()
-  : (submission, storage_error) result
+  : (pending_submission, storage_error) result
   =
   let input_hash = normalized_input_hash input in
   let continuation_channel =
@@ -3604,10 +3607,37 @@ let submit_pending
                    pending_id
                    delivery_id
              }
-         | Ok (Some id), Ok None ->
-           Ok (`Existing (Submission_pending id))
+         | Ok (Some id), Ok None -> Ok (Pending id, None)
          | Ok None, Ok (Some id) ->
-           Ok (`Existing (Submission_resolved id))
+           (match SMap.find_opt id (Atomic.get deliveries) with
+            | None ->
+              Error
+                { path = pending_store_path ~base_path
+                ; reason =
+                    Printf.sprintf
+                      "resolved approval %s disappeared during submission"
+                      id
+                }
+            | Some delivery ->
+              Ok
+                ( Resolved_delivery
+                    { approval_id = id
+                    ; delivery =
+                        { request =
+                            { keeper_name = delivery.entry.keeper_name
+                            ; tool_name = delivery.entry.tool_name
+                            ; tool_call_id = delivery.entry.tool_call_id
+                            ; input = delivery.entry.input
+                            }
+                        ; state =
+                            if delivery.grant_consumed
+                            then Resolution_consumed
+                            else Resolution_unconsumed
+                        ; replay_outcome = delivery.replay_outcome
+                        }
+                    }
+                , None )
+              )
          | Ok None, Ok None ->
            let id = generate_id () in
            if sequence = max_int
@@ -3649,14 +3679,16 @@ let submit_pending
              Atomic.set
                next_sequences
                (SMap.add base_path following_sequence (Atomic.get next_sequences));
-             Ok (`Fresh entry))))
+             Ok (Pending id, Some entry))))
   in
   match stored with
   | Error _ as error -> error
-  | Ok (`Existing submission) -> Ok submission
-  | Ok (`Fresh entry) ->
+  | Ok (submission, None) -> Ok submission
+  | Ok (Pending id as submission, Some entry) ->
     record_pending entry;
-    Ok (Submission_pending entry.id)
+    Ok submission
+  | Ok (Resolved_delivery _, Some _) ->
+    invalid_arg "resolved delivery submission cannot create a pending entry"
 ;;
 
 (* ── Resolve (operator action) ────────────────────────────── *)

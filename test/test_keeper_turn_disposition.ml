@@ -137,8 +137,12 @@ let test_runtime_wire_severity_byte_compat () =
      RFC-0042 explicitly defers (§3.1 "intentionally flat"). *)
 let round_trippable : (string * D.t) list =
   [ "Success", D.Success
+  ; "Input_required", D.Input_required
+  ; "External_effect_deferred", D.External_effect_deferred
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
+  ; "Runtime_attempts_exhausted", D.Runtime_attempts_exhausted
+  ; "Gate_replay_operator_attention", D.Gate_replay_operator_attention
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
   ; (* Runtime wires that Code.of_wire_exact recognises losslessly (no payload

@@ -52,6 +52,7 @@ type outcome =
           never invokes the effect again. *)
 
 val repair_stage_to_string : repair_stage -> string
+val repair_stage_of_string : string -> repair_stage option
 
 val outcome_to_string : outcome -> string
 (** Render operation, journal state, bounded evidence byte count, and SHA-256
@@ -109,16 +110,52 @@ val connector_post_of_gate_input :
   (Keeper_tool_in_process_runtime.connector_post_replay, string) result
 (** Decode the producer-owned exact connector request. *)
 
-type replayable =
+type replay_operation =
   | Replay_write
   | Replay_execute
   | Replay_network_read
   | Replay_connector_post
 
-val replayable_of_operation : Keeper_gate.operation -> replayable option
+val replay_operation_to_string : replay_operation -> string
+val replay_operation_of_string : string -> replay_operation option
 (** Which approved operations can be spent without the Keeper re-emitting the
     call. Exposed because a decode function that exists but is never dispatched
     to is indistinguishable from a working replay at the boundary. *)
+
+type operator_settlement_decision =
+  | Effect_outcome_reconciled_externally
+  | Approval_authority_removed
+
+type operator_settlement_error =
+  | No_pending_repair of string
+  | Settlement_resolution_lookup_failed of string
+  | Settlement_stage_mismatch of
+      { expected : repair_stage
+      ; actual : repair_stage
+      }
+  | Settlement_actor_missing
+  | Settlement_audit_failed of string
+  | Settlement_source_retirement_failed of string
+
+val operator_settlement_decision_to_string :
+  operator_settlement_decision -> string
+
+val operator_settlement_error_to_string : operator_settlement_error -> string
+
+val settle_pending_repair :
+  base_path:string ->
+  approval_id:string ->
+  expected_stage:repair_stage ->
+  actor:string ->
+  decision:operator_settlement_decision ->
+  (unit, operator_settlement_error) result
+(** Durably audit an explicit operator decision before retiring the exact
+    source wake and clearing any process-local raw effect outcome. The caller
+    must name the observed stage, so a stale dashboard action cannot settle a
+    different repair state. Consumed-without-outcome approvals remain
+    settleable after restart with a typed unknown outcome and no fabricated
+    hash. No effect content is persisted. An audit or source-retirement failure
+    leaves any process-local raw outcome in memory. *)
 (** Recover the execute tool arguments from the approved Gate input. Nothing is
     reconstructed: the Gate request wraps the arguments with execution context
     rather than re-encoding them. *)

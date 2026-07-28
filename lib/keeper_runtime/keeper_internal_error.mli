@@ -160,6 +160,8 @@ type masc_internal_error =
     }
 
 val gate_replay_repair_stage_to_string : gate_replay_repair_stage -> string
+val gate_replay_repair_stage_of_string :
+  string -> gate_replay_repair_stage option
 
 val masc_internal_error_prefix : string
 

@@ -146,6 +146,10 @@ type blocker_class =
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_input_required
+  | Gate_replay_repair_required of
+      { approval_id : string
+      ; stage : Keeper_internal_error.gate_replay_repair_stage
+      }
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator

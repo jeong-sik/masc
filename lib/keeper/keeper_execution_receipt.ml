@@ -133,8 +133,10 @@ let operator_disposition (receipt : t)
     | Input_required -> true
     | Success
     | External_cancel
+    | External_effect_deferred
     | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
+    | Gate_replay_operator_attention
     | Provider_error _
     | Unknown _ -> false
   in

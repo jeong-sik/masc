@@ -83,12 +83,15 @@ let of_failure ?(tool_call_count = 0) ~raw_error err =
         | Keeper_turn_driver.Incomplete_tool_transcript _
         | Keeper_turn_driver.Terminal_effect_failed _
         | Keeper_turn_driver.Receipt_persistence_failed _
-        | Keeper_turn_driver.History_persistence_failed _
-        | Keeper_turn_driver.Gate_replay_repair_required _ ) ->
+        | Keeper_turn_driver.History_persistence_failed _ ) ->
       of_disposition
         ~source:"typed_error"
         (Keeper_turn_disposition.Provider_error
            (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))
+    | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
+      of_disposition
+        ~source:"typed_error"
+        Keeper_turn_disposition.Gate_replay_operator_attention
     | None ->
       (* The driver classifier returned None, meaning err is a generic
          [Agent_sdk.Error.t] not in the masc_internal_error family.

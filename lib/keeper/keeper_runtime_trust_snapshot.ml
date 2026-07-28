@@ -103,6 +103,8 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Fiber_unresolved ->
       Keeper_turn_disposition.Provider_error
         Keeper_turn_terminal_code.Fiber_unresolved
+  | Keeper_meta_contract.Gate_replay_repair_required _ ->
+      Keeper_turn_disposition.Gate_replay_operator_attention
   | Keeper_meta_contract.Sdk_context_window_exceeded
   | Keeper_meta_contract.Sdk_unrecognized_stop_reason
   | Keeper_meta_contract.Sdk_guardrail_violation
@@ -115,11 +117,19 @@ let disposition_of_runtime_blocker_class raw_blocker_class =
   | Some blocker_class -> disposition_of_typed_runtime_blocker_class blocker_class
   | None -> Keeper_turn_disposition.Unknown { raw_error = "unknown_error" }
 
-let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
+let terminal_reason_from_runtime_blocker_fields
+      ?typed_blocker_class
+      runtime_blocker_fields
+  =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
   | None -> None
   | Some blocker_class ->
-      let disposition = disposition_of_runtime_blocker_class blocker_class in
+      let disposition =
+        match typed_blocker_class with
+        | Some typed ->
+          disposition_of_typed_runtime_blocker_class typed
+        | None -> disposition_of_runtime_blocker_class blocker_class
+      in
       let summary = assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields in
       Some
         (Keeper_turn_terminal.of_disposition
@@ -176,7 +186,13 @@ let latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
   | None ->
       if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
            latest_receipt
-      then terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
+      then
+        terminal_reason_from_runtime_blocker_fields
+          ?typed_blocker_class:
+            (Option.map
+               (fun blocker -> blocker.Keeper_meta_contract.klass)
+               meta.runtime.last_blocker)
+          runtime_blocker_fields
       else Option.bind latest_receipt terminal_reason_from_receipt
 
 let terminal_reason_timeline_event ~latest_decision ~latest_receipt =

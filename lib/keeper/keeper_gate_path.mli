@@ -9,4 +9,8 @@ val replay_results : base_path:string -> string
     [pending.json]. A rollback binary can therefore keep decoding the v8
     pending snapshot while safely ignoring this additive sidecar. *)
 
+val replay_repair_settlements : base_path:string -> string
+(** Append-only durable audit of explicit operator settlements for
+    process-local replay repair payloads. *)
+
 val always_allowed : base_path:string -> string

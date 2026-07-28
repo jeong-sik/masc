@@ -157,7 +157,98 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
   in
   check bool "Gate replay repair retains exact wake without ACK" false
     (Heartbeat.cycle_outcome_acks_source
-       (Cycle.Failed { meta; failure = replay_failure }))
+       (Cycle.Failed { meta; failure = replay_failure }));
+  check bool "Gate repair is not runtime exhaustion" false
+    (Keeper_error_classify.is_runtime_exhausted_error replay_error);
+  (match
+     Masc.Keeper_status_bridge_blocker.blocker_class_of_sdk_error replay_error
+   with
+   | Some
+       (Masc.Keeper_meta_contract.Gate_replay_repair_required
+          { approval_id; stage }) ->
+     check string "typed approval id" "approval-retain" approval_id;
+     check bool
+       "typed repair stage"
+       true
+       (stage = Keeper_internal_error.Replay_journal)
+   | Some blocker ->
+     failf
+       "unexpected Gate blocker class %s"
+       (Masc.Keeper_meta_contract.blocker_class_to_string blocker)
+   | None -> fail "Gate repair lost typed blocker class");
+  check bool "Gate repair is not provider runtime" false
+    (Masc.Keeper_status_bridge_blocker.is_provider_runtime_blocker_class
+       (Masc.Keeper_meta_contract.blocker_class_to_string
+          (Masc.Keeper_meta_contract.Gate_replay_repair_required
+             { approval_id = "approval-retain"
+             ; stage = Keeper_internal_error.Replay_journal
+             })));
+  let terminal =
+    Masc.Keeper_turn_terminal.of_failure
+      ~raw_error:"must not classify as provider"
+      replay_error
+  in
+  check bool "Gate repair has operator-attention disposition" true
+    (Masc.Keeper_turn_disposition.equal
+       Masc.Keeper_turn_disposition.Gate_replay_operator_attention
+       terminal.disposition);
+  let internal =
+    Keeper_turn_driver.Gate_replay_repair_required
+      { approval_id = "approval-retain"
+      ; operation = "connector_post"
+      ; stage = Keeper_internal_error.Replay_journal
+      ; detail = "raw-sensitive-fsync-detail"
+      }
+  in
+  (match
+     Masc.Keeper_status_bridge_blocker
+     .runtime_blocker_surface_of_masc_internal_error
+       internal
+   with
+   | Some surface ->
+     check bool "safe summary contains approval id" true
+       (String_util.contains_substring surface.summary "approval-retain");
+     check bool "safe summary omits raw detail" false
+       (String_util.contains_substring
+          surface.summary
+          "raw-sensitive-fsync-detail");
+     check bool "safe summary carries detail hash" true
+       (String_util.contains_substring surface.summary "detail_sha256=")
+   | None -> fail "Gate repair did not produce runtime blocker surface")
+  ;
+  let dashboard_meta =
+    { meta with
+      runtime =
+        { meta.runtime with
+          last_blocker =
+            Some
+              (Masc.Keeper_meta_contract.blocker_info_of_class
+                 ~detail:
+                   (Masc.Keeper_status_bridge_blocker.gate_replay_repair_summary
+                      ~approval_id:"approval-retain"
+                      ~stage:Keeper_internal_error.Replay_journal
+                      ~detail:"raw-sensitive-fsync-detail")
+                 (Masc.Keeper_meta_contract.Gate_replay_repair_required
+                    { approval_id = "approval-retain"
+                    ; stage = Keeper_internal_error.Replay_journal
+                    }))
+        }
+    }
+  in
+  let dashboard_fields =
+    Masc.Keeper_status_bridge.attention_fields_json_with_approval_queue
+      (Workspace.default_config (Filename.get_temp_dir_name ()))
+      dashboard_meta
+      (Masc.Keeper_status_bridge.Approval_queue_ready 0)
+  in
+  check (option string) "dashboard reason is typed repair"
+    (Some "gate_replay_repair_required")
+    (List.assoc_opt "attention_reason" dashboard_fields
+     |> Option.bind Yojson.Safe.Util.to_string_option);
+  check (option string) "dashboard action settles repair"
+    (Some "settle_gate_replay_repair")
+    (List.assoc_opt "next_human_action" dashboard_fields
+     |> Option.bind Yojson.Safe.Util.to_string_option)
 
 let test_cooperative_yield_ignores_only_active_source_identity () =
   let stimulus post_id : Keeper_event_queue.stimulus =
@@ -258,7 +349,19 @@ let test_external_effect_wait_acknowledgement_is_visible () =
      | Success.Terminal_done
      | Success.Terminal_checkpoint
      | Success.Terminal_input_required ->
-       false)
+       false);
+  check string "turn disposition is not input_required"
+    "external_effect_deferred"
+    (Masc.Keeper_turn_disposition.to_wire
+       Masc.Keeper_turn_disposition.External_effect_deferred);
+  check (option string) "operator action resolves exact approval"
+    (Some "resolve_external_effect_approval")
+    (Masc.Keeper_turn_disposition.next_action
+       Masc.Keeper_turn_disposition.External_effect_deferred);
+  check string "receipt keeps external-effect identity"
+    "external_effect_deferred"
+    (Masc.Keeper_execution_receipt.receipt_terminal_reason_code_of_stop_reason
+       stop_reason)
 
 let test_external_effect_acknowledgement_survives_server_projection () =
   let acknowledgement = Response_text.external_effect_deferred_acknowledgement in

@@ -393,30 +393,36 @@ let test_dispatch_covers_both_replayable_operations () =
     Alcotest.bool
     "an approved filesystem_write is replayed"
     true
-    (replayable_of_operation
-       (Masc.Keeper_gate.operation_of_storage_string "filesystem_write")
-     = Some Replay_write);
+    (replay_operation_of_string "filesystem_write" = Some Replay_write);
   Alcotest.check
     Alcotest.bool
     "an approved tool_execute is replayed"
     true
-    (replayable_of_operation
-       (Masc.Keeper_gate.operation_of_storage_string "tool_execute")
-     = Some Replay_execute);
+    (replay_operation_of_string "tool_execute" = Some Replay_execute);
   Alcotest.check
     Alcotest.bool
     "an approved WebSearch/WebFetch network_read is replayed"
     true
-    (replayable_of_operation
-       (Masc.Keeper_gate.operation_of_storage_string "network_read")
-     = Some Replay_network_read);
+    (replay_operation_of_string "network_read" = Some Replay_network_read);
   Alcotest.check
     Alcotest.bool
     "an approved connector_post is host-replayed"
     true
-    (replayable_of_operation
-       (Masc.Keeper_gate.operation_of_storage_string "connector_post")
-     = Some Replay_connector_post)
+    (replay_operation_of_string "connector_post" = Some Replay_connector_post);
+  List.iter
+    (fun operation ->
+       Alcotest.(check (option string))
+         "typed replay operation round-trips"
+         (Some (replay_operation_to_string operation))
+         (Option.map
+            replay_operation_to_string
+            (replay_operation_of_string
+               (replay_operation_to_string operation))))
+    [ Replay_write
+    ; Replay_execute
+    ; Replay_network_read
+    ; Replay_connector_post
+    ]
 ;;
 
 let test_dispatch_refuses_unknown_operations () =
@@ -427,9 +433,7 @@ let test_dispatch_refuses_unknown_operations () =
          Alcotest.bool
          (operation ^ " still requires resubmission")
          true
-         (replayable_of_operation
-            (Masc.Keeper_gate.operation_of_storage_string operation)
-          = None))
+         (replay_operation_of_string operation = None))
     [ "keeper_board_post"; "" ]
 ;;
 

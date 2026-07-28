@@ -445,6 +445,59 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
           Error (Gone err)))
 ;;
 
+let dashboard_gate_replay_repair_settle_http_json
+      ~base_path
+      ~actor
+      ~(args : Yojson.Safe.t)
+  =
+  let open Result.Syntax in
+  let required_string field =
+    match Safe_ops.json_string_opt field args with
+    | Some value when String.trim value <> "" -> Ok (String.trim value)
+    | Some _ | None -> Error (field ^ " is required")
+  in
+  let* approval_id = required_string "approval_id" in
+  let* stage_raw = required_string "stage" in
+  let* stage =
+    match Keeper_gate_replay.repair_stage_of_string stage_raw with
+    | Some stage
+      when String.equal stage_raw (Keeper_gate_replay.repair_stage_to_string stage) ->
+      Ok stage
+    | Some _ | None -> Error "stage is not a canonical Gate replay repair stage"
+  in
+  let* decision_raw = required_string "decision" in
+  let* decision =
+    match decision_raw with
+    | "effect_outcome_reconciled_externally" ->
+      Ok Keeper_gate_replay.Effect_outcome_reconciled_externally
+    | "approval_authority_removed" ->
+      Ok Keeper_gate_replay.Approval_authority_removed
+    | _ -> Error "decision is not a supported Gate replay repair settlement"
+  in
+  match
+    Keeper_gate_replay.settle_pending_repair
+      ~base_path
+      ~approval_id
+      ~expected_stage:stage
+      ~actor
+      ~decision
+  with
+  | Error error ->
+    Error (Keeper_gate_replay.operator_settlement_error_to_string error)
+  | Ok () ->
+    Ok
+      (`Assoc
+         [ "ok", `Bool true
+         ; "approval_id", `String approval_id
+         ; "stage", `String stage_raw
+         ; ( "decision"
+           , `String
+               (Keeper_gate_replay.operator_settlement_decision_to_string
+                  decision) )
+         ; "source_retired", `Bool true
+         ])
+;;
+
 let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields =

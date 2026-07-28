@@ -231,7 +231,7 @@ let cleanup_reason_label = function
 
 let meta_disposition_of_cleanup_reason = function
   | Operator_stop_retain_meta -> Retain_operator_pause
-  | Dead_tombstone_cleanup
+  | Dead_tombstone_cleanup -> Retain_dead_tombstone
   | Operator_stop_remove_meta
   | Dashboard_keeper_purge _ -> Remove_meta
 ;;

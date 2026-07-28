@@ -18,6 +18,10 @@ type summary_transition_error =
   | Summary_transition_storage_error of storage_error
   | Summary_transition_rejected of summary_transition_rejection
 
+type summary_owner_retirement_error =
+  | Summary_owner_retirement_storage_error of storage_error
+  | Summary_owner_retirement_exact_attempt_unsettled of exact_attempt_binding
+
 type exact_attempt_rejection =
   | Exact_attempt_not_found of string
   | Exact_attempt_key_mismatch of
@@ -110,6 +114,8 @@ val approval_queue_unavailable_icon : string
 val approval_queue_ready_state_json : Yojson.Safe.t
 val approval_queue_unavailable_state_json : storage_error -> Yojson.Safe.t
 val summary_transition_error_to_string : summary_transition_error -> string
+val summary_owner_retirement_error_to_string :
+  summary_owner_retirement_error -> string
 val exact_attempt_error_to_string : exact_attempt_error -> string
 val grant_error_to_string : grant_error -> string
 val install_error_to_string : install_error -> string
@@ -341,6 +347,15 @@ val list_pending_dashboard_json_for_workspace :
   base_path:string -> (Yojson.Safe.t list, storage_error) result
 val list_pending_entries_for_workspace :
   base_path:string -> (pending_approval list, storage_error) result
+
+val retire_summary_owner :
+  base_path:string ->
+  keeper_name:string ->
+  reason:string ->
+  (string list, summary_owner_retirement_error) result
+(** Fail closed only while an exact summary attempt remains unsettled.
+    Otherwise terminalize unbound pending summaries in one durable snapshot and
+    leave already terminal summaries unchanged. *)
 
 val store_revision_for_workspace : base_path:string -> int
 (** Monotonic process-local revision of the workspace queue authority.

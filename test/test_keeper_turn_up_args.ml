@@ -51,20 +51,23 @@ let test_parse_max_context_override () =
   check_error "fraction" (`Float 3.9);
   check_error "overflow" (`Intlit "999999999999999999999999")
 
-let test_persisted_max_context_override () =
+let test_runtime_json_rejects_toml_owned_max_context_override () =
   let parse value =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc [ "name", `String "override-fixture"; "max_context_override", value ])
   in
-  (match parse (`Int 128_001) with
-   | Ok meta -> check (option int) "positive exact" (Some 128_001) meta.max_context_override
-   | Error error -> fail error);
-  (match parse `Null with
-   | Ok meta -> check (option int) "null absent" None meta.max_context_override
-   | Error error -> fail error);
   List.iter
-    (fun value -> match parse value with Error _ -> () | Ok _ -> fail "invalid persisted override")
-    [ `Int 0; `Int (-1); `Float 3.9; `Intlit "999999999999999999999999" ]
+    (fun value ->
+      match parse value with
+      | Error _ -> ()
+      | Ok _ -> fail "TOML-owned max_context_override leaked into runtime JSON")
+    [ `Int 128_001
+    ; `Null
+    ; `Int 0
+    ; `Int (-1)
+    ; `Float 3.9
+    ; `Intlit "999999999999999999999999"
+    ]
 
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
    while creation required a sandbox_profile readable only from a keeper TOML the tool
@@ -142,7 +145,8 @@ let () =
         ] )
     ; ( "max_context_override"
       , [ test_case "request values are exact or rejected" `Quick test_parse_max_context_override
-        ; test_case "persisted values are exact or rejected" `Quick test_persisted_max_context_override
+        ; test_case "runtime JSON rejects TOML-owned field" `Quick
+            test_runtime_json_rejects_toml_owned_max_context_override
         ] )
     ]
 ;;

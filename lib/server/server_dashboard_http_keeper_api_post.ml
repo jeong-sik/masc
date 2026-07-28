@@ -707,10 +707,9 @@ let persist_activation_fields ~(config : Workspace.config) ~name fields =
          name
      with
      | None ->
-       Error
-         { code = "keeper_toml_missing"
-         ; detail = Printf.sprintf "keeper %S has no declarative TOML" name
-         }
+       (* [update_keeper] now materializes the complete declarative TOML from
+          effective metadata before applying the runtime update. *)
+       Ok ()
      | Some path ->
        (match Keeper_toml_loader.update_keeper_toml_bool_fields ~path bool_fields with
         | Ok () -> Ok ()

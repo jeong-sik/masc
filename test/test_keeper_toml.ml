@@ -507,6 +507,7 @@ mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 autoboot_enabled = false
 active_goal_ids = ["goal-runtime", "goal-masc"]
+max_context_override = 128001
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -522,7 +523,25 @@ active_goal_ids = ["goal-runtime", "goal-masc"]
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
       check (option (list string)) "active_goal_ids"
         (Some [ "goal-runtime"; "goal-masc" ])
-        d.active_goal_ids
+        d.active_goal_ids;
+      check (option int) "max_context_override" (Some 128_001)
+        d.max_context_override
+
+let test_profile_rejects_invalid_max_context_override () =
+  let input =
+    {|
+[keeper]
+max_context_override = 0
+|}
+  in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected invalid max_context_override error"
+     | Error message ->
+       check bool "names max_context_override" true
+         (contains_substring message "max_context_override"))
 
 let test_profile_parses_multimodal_policy () =
   let input = {|
@@ -873,6 +892,53 @@ let write_file path content =
   let oc = open_out path in
   output_string oc content;
   close_out oc
+
+let test_typed_keeper_toml_edits_preserve_unrelated_fields () =
+  with_temp_dir "keeper-toml-edits" @@ fun dir ->
+  let path = Filename.concat dir "probe.toml" in
+  write_file path
+    {|
+# operator comment
+[keeper]
+instructions = "keep me"
+proactive_enabled	= true
+max_context_override	= 200000
+
+[keeper.oas_env]
+OAS_OPENAI_BASE_URL = "http://127.0.0.1:1"
+|};
+  (match
+     TL.edit_keeper_toml_fields
+       ~path
+       [ "proactive_enabled", TL.Set (TL.Toml_bool false)
+       ; "persona_name", TL.Set (TL.Toml_string "researcher")
+       ; "allowed_paths", TL.Set (TL.Toml_string_array [ "/tmp/a"; "/tmp/b" ])
+       ; "max_context_override", TL.Remove
+       ]
+   with
+   | Error error -> fail error
+   | Ok () -> ());
+  let content =
+    match Safe_ops.read_file_safe path with
+    | Error error -> fail error
+    | Ok content -> content
+  in
+  check bool "comment survives" true
+    (contains_substring content "# operator comment");
+  match TL.parse_toml content with
+  | Error error -> fail error
+  | Ok doc ->
+    check (option bool) "bool updated" (Some false)
+      (TL.toml_bool_opt doc "keeper.proactive_enabled");
+    check (option string) "persona inserted" (Some "researcher")
+      (TL.toml_string_opt doc "keeper.persona_name");
+    check (list string) "list inserted" [ "/tmp/a"; "/tmp/b" ]
+      (TL.toml_string_list doc "keeper.allowed_paths");
+    check (option int) "context override removed" None
+      (TL.toml_int_opt doc "keeper.max_context_override");
+    check (option string) "unrelated table survives"
+      (Some "http://127.0.0.1:1")
+      (TL.toml_string_opt doc "keeper.oas_env.OAS_OPENAI_BASE_URL")
 
 let with_profile_base f =
   with_env_restore [ "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ] @@ fun () ->
@@ -1822,6 +1888,8 @@ let () =
           test_case "rejects legacy keeper.goal" `Quick
             test_profile_rejects_legacy_goal;
           test_case "full" `Quick test_profile_full;
+          test_case "rejects invalid max_context_override" `Quick
+            test_profile_rejects_invalid_max_context_override;
           test_case "parses multimodal_policy" `Quick
             test_profile_parses_multimodal_policy;
           test_case "rejects invalid multimodal_policy" `Quick
@@ -1842,6 +1910,11 @@ let () =
             test_profile_rejects_runtime_id_key;
           test_case "rejects keeper.model key" `Quick
             test_profile_rejects_model_key;
+        ] );
+      ( "writer",
+        [
+          test_case "typed edits preserve unrelated fields" `Quick
+            test_typed_keeper_toml_edits_preserve_unrelated_fields;
         ] );
       ( "unknown_keys",
         [

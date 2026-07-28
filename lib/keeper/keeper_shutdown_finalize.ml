@@ -689,31 +689,29 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
     | Dead_tombstone_cleanup
     | Dashboard_keeper_purge _ ->
       (match
-         Keeper_approval_queue.list_pending_entries_for_workspace
+         Keeper_approval_queue.retire_summary_owner
            ~base_path:config.base_path
+           ~keeper_name:operation.keeper_name
+           ~reason:
+             (Printf.sprintf
+                "Keeper permanently retired before HITL context summary completed (%s)"
+                (cleanup_reason_label operation.cleanup_intent.reason))
        with
+       | Ok _ -> Ok ()
+       | Error
+           (Keeper_approval_queue.Summary_owner_retirement_exact_attempt_unsettled
+              _ as error) ->
+         Error
+           (`Draining
+              (Keeper_approval_queue.summary_owner_retirement_error_to_string
+                 error))
        | Error error ->
          Error
            (`Failed
               (Printf.sprintf
                  "Keeper cleanup cannot prove approval-summary release: %s"
-                 (Keeper_approval_queue.storage_error_to_string error)))
-       | Ok pending_entries ->
-         (match
-            List.find_opt
-              (fun (pending : Keeper_approval_queue.pending_approval) ->
-                 String.equal
-                   pending.keeper_name
-                   operation.keeper_name)
-              pending_entries
-          with
-          | None -> Ok ()
-          | Some pending ->
-            Error
-              (`Draining
-                 (Printf.sprintf
-                    "Keeper cleanup is blocked by pending approval %s; resolve the approval before permanent retirement"
-                    pending.id))))
+                 (Keeper_approval_queue.summary_owner_retirement_error_to_string
+                    error))))
   in
   let finish registry_unregistered =
     match remove_meta_file ~config operation with

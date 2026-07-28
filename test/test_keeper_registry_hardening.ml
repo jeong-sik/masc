@@ -666,6 +666,172 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
        | None -> fail "Goal disappeared")
 ;;
 
+let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
+  let dir = temp_dir "registry_goal_reconciliation_restart" in
+  let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.task_terminal_committed_fn previous_hook;
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let config = Masc.Workspace.default_config dir in
+       let meta = make_goal_reconciler_meta () in
+       ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
+       Atomic.set Workspace_hooks.task_terminal_committed_fn
+         (fun _config ~agent_name:_ ~task_id:_ ->
+            Workspace_hooks.Task_terminal_delivered);
+       let goal, _ =
+         match
+           Goal_store.upsert_goal
+             config
+             ~id:"goal-reconciliation-restart"
+             ~title:"Recover a missed terminal hook"
+             ()
+         with
+         | Ok result -> result
+         | Error detail -> fail detail
+       in
+       ignore
+         (Workspace_task.add_task
+            ~goal_id:goal.id
+            config
+            ~title:"terminal before restart"
+            ~priority:2
+            ~description:"missed hook");
+       let transition action =
+         match
+           Masc.Workspace.transition_task_r
+             config
+             ~agent_name:meta.agent_name
+             ~task_id:"task-001"
+             ~action
+             ()
+         with
+         | Ok _ -> ()
+         | Error error -> fail (Masc_domain.masc_error_to_string error)
+       in
+       transition Masc_domain.Claim;
+       transition Masc_domain.Start;
+       transition Masc_domain.Cancel;
+       check int "missed hook left no queue item" 0
+         (registry_snapshot ~base_path:config.base_path meta.name
+          |> Keeper_event_queue.length);
+       let queue_path =
+         Filename.concat
+           (Filename.concat
+              (Common.keepers_runtime_dir_of_base ~base_path:config.base_path)
+              meta.name)
+           "event-queue.json"
+       in
+       Fs_compat.mkdir_p queue_path;
+       let failed =
+         Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
+       in
+       check int "storage failure remains visible" 1 failed.failed_count;
+       Unix.rmdir queue_path;
+       let first = ref None in
+       let second = ref None in
+       Eio.Fiber.both
+         (fun () ->
+            first :=
+              Some
+                (Masc.Keeper_goal_reconciliation_wake.reconcile_startup
+                   ~config))
+         (fun () ->
+            second :=
+              Some
+                (Masc.Keeper_goal_reconciliation_wake.reconcile_startup
+                   ~config));
+       let require_summary = function
+         | Some summary -> summary
+         | None -> fail "concurrent reconciliation fiber returned no summary"
+       in
+       let first = require_summary !first in
+       let second = require_summary !second in
+       check int "one concurrent scan enqueued"
+         1 (first.enqueued_count + second.enqueued_count);
+       check int "the other concurrent scan observed durable identity"
+         1 (first.already_present_count + second.already_present_count);
+       check int "restart recovery persisted exactly once" 1
+         (registry_snapshot ~base_path:config.base_path meta.name
+          |> Keeper_event_queue.length))
+;;
+
+let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
+  let dir = temp_dir "registry_goal_reconciliation_hook_degradation" in
+  let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.task_terminal_committed_fn previous_hook;
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Masc.Workspace.default_config dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "external"));
+       let terminal_with hook title =
+         Atomic.set Workspace_hooks.task_terminal_committed_fn hook;
+         ignore
+           (Workspace_task.add_task
+              config
+              ~title
+              ~priority:2
+              ~description:"");
+         let task_id =
+           match
+             Masc.Workspace.get_tasks_raw config
+             |> List.find_opt (fun (task : Masc_domain.task) ->
+                  String.equal task.title title)
+           with
+           | Some task -> task.id
+           | None -> fail "newly added hook-degradation Task was not persisted"
+         in
+         let transition action =
+           Masc.Workspace.transition_task_r
+             config
+             ~agent_name:"external"
+             ~task_id
+             ~action
+             ()
+         in
+         (match transition Masc_domain.Claim with
+          | Ok _ -> ()
+          | Error error -> fail (Masc_domain.masc_error_to_string error));
+         (match transition Masc_domain.Start with
+          | Ok _ -> ()
+          | Error error -> fail (Masc_domain.masc_error_to_string error));
+         (match transition Masc_domain.Cancel with
+          | Ok _ ->
+            (match
+               Masc.Workspace.get_tasks_raw config
+               |> List.find_opt (fun (task : Masc_domain.task) ->
+                    String.equal task.id task_id)
+             with
+             | Some task
+               when Masc_domain.task_status_is_terminal task.task_status ->
+               ()
+             | Some _ | None ->
+               fail "terminal hook degradation lost terminal state")
+          | Error error ->
+            fail
+              ("committed terminal transition was reported as failure: "
+               ^ Masc_domain.masc_error_to_string error))
+       in
+       terminal_with
+         (fun _config ~agent_name:_ ~task_id:_ ->
+            Workspace_hooks.Task_terminal_delivery_degraded
+              { kind = "injected"; detail = "delivery unavailable" })
+         "typed delivery degradation";
+       terminal_with
+         (fun _config ~agent_name:_ ~task_id:_ ->
+            failwith "injected hook exception")
+         "hook exception")
+;;
+
 let contains_substring text needle =
   let text_len = String.length text in
   let needle_len = String.length needle in
@@ -853,6 +1019,14 @@ let () =
             "goal reconciliation persists once after last terminal task"
             `Quick
             test_goal_reconciliation_enqueues_once_after_last_terminal_task
+        ; test_case
+            "restart scan retries missed reconciliation exactly once"
+            `Quick
+            test_goal_reconciliation_restart_scan_retries_missed_delivery
+        ; test_case
+            "terminal hook degradation preserves committed Task outcome"
+            `Quick
+            test_terminal_hook_degradation_does_not_invalidate_task_commit
         ] )
     ; ( "tool_dispatch_exact_resources"
       , [ test_case "preserves exact meta after healthy entry replacement" `Quick

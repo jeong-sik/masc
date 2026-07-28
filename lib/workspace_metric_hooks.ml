@@ -440,11 +440,30 @@ let install () =
 
   Atomic.set Workspace_hooks.task_terminal_committed_fn
     (fun config ~agent_name ~task_id ->
-       ignore
-         (Keeper_goal_reconciliation_wake.enqueue_if_ready
-            ~config
-            ~completing_agent_name:agent_name
-            ~task_id));
+       match
+         Keeper_goal_reconciliation_wake.enqueue_if_ready
+           ~config
+           ~completing_agent_name:agent_name
+           ~task_id
+       with
+       | Keeper_goal_reconciliation_wake.Not_ready
+       | Keeper_goal_reconciliation_wake.Enqueued _
+       | Keeper_goal_reconciliation_wake.Already_present _ ->
+         Workspace_hooks.Task_terminal_delivered
+       | Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
+         Workspace_hooks.Task_terminal_delivery_degraded
+           { kind = "no_keeper_target"; detail = "goal_id=" ^ goal_id }
+       | Keeper_goal_reconciliation_wake.Enqueue_failed
+           { goal_id; keeper_name; detail } ->
+         Workspace_hooks.Task_terminal_delivery_degraded
+           { kind = "storage_error"
+           ; detail =
+               Printf.sprintf
+                 "keeper=%s goal_id=%s: %s"
+                 keeper_name
+                 goal_id
+                 detail
+           });
 
   Atomic.set Workspace_hooks.verification_submit_request_fn
     (fun config ~task ~assignee ~verification_id ~evidence_refs ->

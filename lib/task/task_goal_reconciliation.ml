@@ -3,7 +3,43 @@ type ready = {
   triggering_task_id : string;
 }
 
+type startup_ready = {
+  ready : ready;
+  completing_agent_name : string;
+}
+
 module Workspace = Workspace_core
+
+let terminal_fact (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.Done { assignee; completed_at; _ } ->
+    Some (completed_at, assignee)
+  | Masc_domain.Cancelled { cancelled_by; cancelled_at; _ } ->
+    Some (cancelled_at, cancelled_by)
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.AwaitingVerification _ -> None
+;;
+
+let latest_terminal_task tasks =
+  match
+    tasks
+    |> List.filter_map (fun task ->
+         Option.map
+           (fun (terminal_at, completing_agent_name) ->
+              task, terminal_at, completing_agent_name)
+           (terminal_fact task))
+    |> List.sort (fun
+         ((left : Masc_domain.task), left_at, _)
+         ((right : Masc_domain.task), right_at, _) ->
+         match String.compare right_at left_at with
+         | 0 -> String.compare right.id left.id
+         | ordering -> ordering)
+  with
+  | [] -> None
+  | latest :: _ -> Some latest
+;;
 
 let ready_after_terminal_task ~config ~task_id =
   let tasks = Workspace.get_tasks_raw config in
@@ -35,3 +71,34 @@ let ready_after_terminal_task ~config ~task_id =
         | Some _ | None -> None)
      | Some (_ :: _ :: _) | Some [] | None -> None)
   | Some _ | None -> None
+
+let ready_executing_goals ~config =
+  let tasks = Workspace.get_tasks_raw config in
+  let goal_task_links = Workspace_goal_index.read_goal_task_links config in
+  let goal_task_index =
+    Workspace_goal_index.build_goal_task_index ~goal_task_links tasks
+  in
+  Goal_store.list_goals config ~phase:Goal_phase.Executing ()
+  |> List.sort (fun left right -> String.compare left.Goal_store.id right.Goal_store.id)
+  |> List.filter_map (fun (goal : Goal_store.goal) ->
+       let linked_tasks =
+         Workspace_goal_index.tasks_for_goal goal_task_index ~goal_id:goal.id
+       in
+       if
+         linked_tasks = []
+         || not
+              (List.for_all
+                 (fun (task : Masc_domain.task) ->
+                    Masc_domain.task_status_is_terminal task.task_status)
+                 linked_tasks)
+       then None
+       else
+         match latest_terminal_task linked_tasks with
+         | None -> None
+         | Some (task, _, completing_agent_name) ->
+           Some
+             { ready =
+                 { goal_id = goal.id; triggering_task_id = task.Masc_domain.id }
+             ; completing_agent_name
+             })
+;;

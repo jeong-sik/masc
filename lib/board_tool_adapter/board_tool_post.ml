@@ -194,7 +194,7 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
        | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
-let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
+let handle_post_list ~tool_name ~start_time args : Tool_result.result =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
   let visibility_str = get_string_opt args "visibility" in
@@ -317,17 +317,6 @@ let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         ~data:(`String (header ^ "\n" ^ String.concat separator formatted))
         ())
-;;
-
-let handle_post_list ~tool_name ~start_time args =
-  (* Skip cache for random=true — non-deterministic by definition. *)
-  let random = get_bool args "random" false in
-  if random
-  then handle_post_list_uncached ~tool_name ~start_time args
-  else (
-    let key = Board_tool_cache.board_list_cache_key args in
-    Board_tool_cache.cached_board_list ~key ~tool_name ~start_time (fun () ->
-      handle_post_list_uncached ~tool_name ~start_time args))
 ;;
 
 let handle_post_get ~tool_name ~start_time args : Tool_result.result =

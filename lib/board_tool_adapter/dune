@@ -13,14 +13,12 @@
  (public_name masc.board_tool_adapter)
  (wrapped false)
  (private_modules
-  board_tool_cache
   board_tool_curation
   board_tool_handlers
   board_tool_post
   board_tool_sub_board)
  (modules
   board_tool
-  board_tool_cache
   board_tool_curation
   board_tool_dispatch
   board_tool_format

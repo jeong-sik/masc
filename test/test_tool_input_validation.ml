@@ -592,7 +592,7 @@ let test_registered_hook_keeper_board_post_accepts_sources_array () =
   check_keeper_board_post_sources_preserved forwarded
 
 (* Regression: the board_list/search backends already read [compact]
-   (board_tool_post.ml handle_post_list_uncached, board_tool_handlers.ml
+   (board_tool_post.ml handle_post_list, board_tool_handlers.ml
    handle_search), but the keeper_board_* schemas omitted it, so
    qa-king's keeper_board_list compact=true was rejected as an
    unsupported field. Assert the keeper surface now accepts compact while

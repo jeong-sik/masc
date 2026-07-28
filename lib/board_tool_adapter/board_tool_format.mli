@@ -13,10 +13,10 @@ val raw_agent_name_meta_key : field:string -> string
 val author_raw_agent_name_meta_key : string
 val format_timestamp_absolute : float -> string
 (** ISO8601 UTC rendering of the given instant. A function of its argument
-    alone — board tool payloads must be byte-stable across calls so
-    [Board_tool_cache] can hit and so a keeper does not read a drifting
-    minute counter as a board change. Relative ("Nm ago") rendering belongs
-    to the human-facing [Dashboard_labels] / [Tempo] renderers. *)
+    alone, so an unchanged board renders to unchanged bytes and a keeper does
+    not read a drifting minute counter as a board change. Relative ("Nm ago")
+    rendering belongs to the human-facing [Dashboard_labels] / [Tempo]
+    renderers, which have a human reader and no such contract. *)
 
 val format_expiry : float -> string
 (** ["permanent"] for the [0.0] no-expiry sentinel, otherwise the ISO8601 UTC

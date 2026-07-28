@@ -470,7 +470,8 @@ let heartbeat_event_intake
             | Keeper_world_observation.Fusion_completed
             | Keeper_world_observation.Bg_completed
             | Keeper_world_observation.External_attention
-            | Keeper_world_observation.Goal_assigned ->
+            | Keeper_world_observation.Goal_assigned
+            | Keeper_world_observation.Goal_reconciliation_ready ->
               Log.Keeper.info
                 "turn entry: promoted queued observation post_id=%s keeper=%s"
                 event.Keeper_world_observation.post_id

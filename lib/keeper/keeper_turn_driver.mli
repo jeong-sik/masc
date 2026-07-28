@@ -94,6 +94,7 @@ val run_named :
   ?temperature:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?hooks:Agent_sdk.Hooks.hooks ->
+  ?request_shaping_hooks:Agent_sdk.Hooks.hooks ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -112,6 +113,8 @@ val run_named :
   ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
+  ?on_capacity_readmission_probe:
+    (Runtime_agent.capacity_readmission_probe -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->

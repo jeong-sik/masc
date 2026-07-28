@@ -18,6 +18,7 @@ type try_provider_ctx =
   ; temperature : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; hooks : Agent_sdk.Hooks.hooks option
+  ; request_shaping_hooks : Agent_sdk.Hooks.hooks option
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; transport_resolved : Masc_grpc_transport.t
@@ -40,6 +41,8 @@ type try_provider_ctx =
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; on_runtime_observation :
       (Runtime_observation.runtime_observation -> unit) option
+  ; on_capacity_readmission_probe :
+      (Runtime_agent.capacity_readmission_probe -> unit) option
   ; event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

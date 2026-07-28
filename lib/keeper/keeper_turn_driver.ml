@@ -331,6 +331,7 @@ let run_named
     ?temperature
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?hooks
+    ?request_shaping_hooks
     ?raw_trace
     ?on_event
     ?on_yield
@@ -349,6 +350,7 @@ let run_named
     ?trace_link
     ?event_bus
     ?on_runtime_observation
+    ?on_capacity_readmission_probe
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?deferred_runtime_lane
@@ -666,6 +668,7 @@ let run_named
             ; temperature
             ; accept
             ; hooks
+            ; request_shaping_hooks
             ; raw_trace
             ; transport_resolved
             ; checkpoint_sidecar
@@ -687,6 +690,7 @@ let run_named
             ; on_resume
             ; agent_ref
             ; on_runtime_observation
+            ; on_capacity_readmission_probe
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append

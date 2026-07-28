@@ -545,6 +545,50 @@ let test_prior_checkpoint_appends_current_goal_once () =
       1
       current_goal_count)
 
+let test_selected_runtime_publishes_offline_readmission_probe () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let published_probe = ref None in
+    let result =
+      Driver.run_named
+        ~runtime_id:"primary.test_model"
+        ~keeper_name:"selected-runtime-readmission-probe"
+        ~base_path:(Filename.get_temp_dir_name ())
+        ~goal:"probe the selected runtime request"
+        ~body_timeout_s:0.5
+        ~on_capacity_readmission_probe:(fun probe ->
+          published_probe := Some probe)
+        ~sw
+        ~net:env#net
+        ()
+    in
+    (match result with
+     | Error _ -> ()
+     | Ok _ ->
+       Alcotest.fail
+         "invalid provider endpoint unexpectedly completed the selected runtime");
+    let probe =
+      match !published_probe with
+      | Some probe -> probe
+      | None ->
+        Alcotest.fail
+          "selected runtime did not publish its capacity re-admission probe"
+    in
+    match probe (checkpoint_with_session_id "readmission-probe-session") with
+    | Error Runtime_agent.Still_over_capacity error
+    | Error Runtime_agent.Readmission_failed error ->
+      Alcotest.failf
+        "offline re-admission probe failed: %s"
+        (Agent_sdk.Error.to_string error)
+    | Ok evidence ->
+      Alcotest.(check (option int))
+        "selected runtime body cap"
+        (Some 65536)
+        evidence.serialized_body_limit_bytes)
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "resilient" with
@@ -1285,6 +1329,10 @@ let () =
             "prior checkpoint appends current goal once"
             `Quick
             test_prior_checkpoint_appends_current_goal_once;
+          Alcotest.test_case
+            "selected runtime publishes offline readmission probe"
+            `Quick
+            test_selected_runtime_publishes_offline_readmission_probe;
           Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick

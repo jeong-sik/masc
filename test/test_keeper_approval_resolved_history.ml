@@ -226,6 +226,54 @@ let test_empty_store_is_an_empty_page base_path =
   check bool "scan not exhausted" false history.resolved_scan_exhausted
 ;;
 
+(* #26126: judge evidence recorded on the resolved audit event at resolution
+   time must survive projection verbatim; events written before the enrichment
+   project the members as [`Null] rather than being dropped or invented. *)
+let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
+
+let test_judge_evidence_passes_through base_path =
+  let summary_status : Yojson.Safe.t =
+    `Assoc [ "status", `String "failed"; "reason", `String "quarantined" ]
+  in
+  let exact_attempt : Yojson.Safe.t = `Assoc [ "state", `String "unbound" ] in
+  append_row
+    ~base_path
+    ~ts:(now -. minutes 5)
+    (`Assoc
+        [ "event", `String "resolved"
+        ; "id", `String "with-judge"
+        ; "ts", `Float (now -. minutes 5)
+        ; "keeper", `String "rondo"
+        ; "tool", `String "tool_execute"
+        ; "decision", `String "approve"
+        ; "decision_source", `String "auto_judge"
+        ; "summary_status", summary_status
+        ; "exact_attempt", exact_attempt
+        ]);
+  seed_resolved ~base_path ~ts:(now -. minutes 10) ~id:"legacy" ();
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:60 () in
+  let member name row =
+    match row with
+    | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt name fields)
+    | _ -> `Null
+  in
+  let find id =
+    List.find (fun row -> member "id" row = `String id) history.resolved_rows
+  in
+  check
+    yojson
+    "summary_status passes through"
+    summary_status
+    (member "summary_status" (find "with-judge"));
+  check
+    yojson
+    "exact_attempt passes through"
+    exact_attempt
+    (member "exact_attempt" (find "with-judge"));
+  check yojson "legacy summary_status is null" `Null (member "summary_status" (find "legacy"));
+  check yojson "legacy exact_attempt is null" `Null (member "exact_attempt" (find "legacy"))
+;;
+
 let test_bounds_are_clamped base_path =
   let over = AQ.list_recent_resolved ~base_path ~now_ts:now ~limit:100_000 ~window_minutes:999_999 () in
   check int "limit clamped to the max" AQ.recent_resolved_max_limit over.resolved_limit;
@@ -263,6 +311,10 @@ let () =
             (with_store test_undated_decision_is_excluded)
         ; test_case "empty store is an empty page" `Quick
             (with_store test_empty_store_is_an_empty_page)
+        ] )
+    ; ( "judge evidence"
+      , [ test_case "judge evidence passes through, legacy rows project null" `Quick
+            (with_store test_judge_evidence_passes_through)
         ] )
     ]
 ;;

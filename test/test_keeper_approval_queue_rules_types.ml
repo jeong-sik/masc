@@ -148,12 +148,60 @@ let test_rule_parser_rejects_duplicate_fields () =
       reason
 ;;
 
+(* #26094: [retryable] was a write-only bool — OCaml only ever wrote [false],
+   no reader consumed it, and the dashboard blanked the whole approval queue on
+   any other value. The field left the wire contract; stores written before the
+   removal still parse, and the serializer never emits it again. *)
+let test_summary_failed_has_no_retryable () =
+  let failed = Q.Summary_failed { reason = "provider down" } in
+  (match Q.summary_status_to_yojson failed with
+   | `Assoc fields ->
+     check
+       (list string)
+       "serialized fields"
+       [ "status"; "reason" ]
+       (List.map fst fields)
+   | _ -> fail "Summary_failed must serialize as an object");
+  let decode json = Q.summary_status_of_yojson_with_error json in
+  (match
+     decode (`Assoc [ "status", `String "failed"; "reason", `String "provider down" ])
+   with
+   | Ok status -> check bool "modern decode" true (status = failed)
+   | Error e -> fail e);
+  (match
+     decode
+       (`Assoc
+           [ "status", `String "failed"
+           ; "reason", `String "provider down"
+           ; "retryable", `Bool true
+           ])
+   with
+   | Ok status -> check bool "legacy retryable discarded" true (status = failed)
+   | Error e -> fail e);
+  match
+    decode
+      (`Assoc
+          [ "status", `String "failed"
+          ; "reason", `String "provider down"
+          ; "retryable", `String "yes"
+          ])
+  with
+  | Ok _ -> fail "non-boolean legacy retryable must reject"
+  | Error _ -> ()
+;;
+
 let () =
   run
     "Keeper_approval_queue_rules_types"
     [ ( "judgment"
       , [ test_case "typed judgment round trip" `Quick test_advisory_judgment_round_trip
         ; test_case "summary has no hierarchy" `Quick test_summary_json_is_nonhierarchical
+        ] )
+    ; ( "summary status"
+      , [ test_case
+            "retryable is out of the contract, legacy stores still parse"
+            `Quick
+            test_summary_failed_has_no_retryable
         ] )
     ; ( "exact rule"
       , [ test_case "JSON round trip" `Quick test_approval_rule_json_round_trip

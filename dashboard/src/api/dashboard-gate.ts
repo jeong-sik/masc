@@ -3,17 +3,24 @@
 
 import { ApiRequestError, get, post, withRetries } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asString } from '../components/common/normalize'
-import { asNullableIsoTimestamp, normalizeKeeperApprovalQueueItem } from './board'
+import {
+  asNullableIsoTimestamp,
+  normalizeKeeperApprovalQueueItem,
+  normalizeHitlSummaryStatus,
+  normalizeKeeperExactAttempt,
+} from './board'
 import { normalizeKeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
 import type {
   KeeperApprovalRule,
   DashboardGateResponse,
   KeeperApprovalQueueItem,
+  KeeperApprovalQueueRowViolation,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
   KeeperApprovalQueueState,
   KeeperAutoJudgeRearmExpectation,
   GateDecisionSource,
+  GateJudgeLane,
   GateMode,
   GateModeStatus,
 } from '../types'
@@ -107,10 +114,32 @@ function normalizeGateMode(raw: unknown): GateModeStatus | undefined {
   }
 }
 
+/** Parse the closed `judge_lane` variant emitted by `dashboard_gate.ml`.
+ *  Returns undefined for an absent field (older server) or a shape outside
+ *  the contract — the header then simply omits the judge model. */
+function normalizeGateJudgeLane(raw: unknown): GateJudgeLane | undefined {
+  if (!isRecord(raw)) return undefined
+  const laneId = asString(raw.lane_id, '').trim()
+  if (!laneId) return undefined
+  if (raw.status === 'available' && Array.isArray(raw.slots)) {
+    const slots = raw.slots.filter(
+      (slot): slot is string => typeof slot === 'string' && slot.trim() !== '',
+    )
+    if (slots.length === 0 || slots.length !== raw.slots.length) return undefined
+    return { status: 'available', lane_id: laneId, slots }
+  }
+  if (raw.status === 'unavailable') {
+    const reason = asString(raw.reason, '').trim()
+    return reason ? { status: 'unavailable', lane_id: laneId, reason } : undefined
+  }
+  return undefined
+}
+
 function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] | undefined {
   if (!isRecord(raw)) return undefined
   return {
     gate_mode: normalizeGateMode(raw.gate_mode),
+    judge_lane: normalizeGateJudgeLane(raw.judge_lane),
   }
 }
 
@@ -134,6 +163,20 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
   const decisionRaw = asNullableString(raw.decision)
   const decisionKind = asNullableString(raw.decision_kind)
   const decisionReason = asNullableString(raw.decision_reason)
+  // Judge evidence rides on resolved audit events written since #26126;
+  // older events project the members as null. Absent stays null (nothing was
+  // recorded); a present-but-malformed blob rejects the row like any other
+  // contract violation instead of silently degrading to "not recorded".
+  let summaryStatus: KeeperResolvedApprovalItem['summary_status'] = null
+  if (raw.summary_status !== undefined && raw.summary_status !== null) {
+    summaryStatus = normalizeHitlSummaryStatus(raw.summary_status)
+    if (summaryStatus === null) return null
+  }
+  let exactAttempt: KeeperResolvedApprovalItem['exact_attempt'] = null
+  if (raw.exact_attempt !== undefined && raw.exact_attempt !== null) {
+    exactAttempt = normalizeKeeperExactAttempt(raw.exact_attempt)
+    if (exactAttempt === null) return null
+  }
   return {
     id,
     keeper_name: keeperName,
@@ -150,6 +193,8 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
       : [],
     decision_source: normalizeGateDecisionSource(raw.decision_source),
     rule_match: ruleMatch,
+    summary_status: summaryStatus,
+    exact_attempt: exactAttempt,
   }
 }
 
@@ -202,6 +247,7 @@ export function fetchDashboardGate(
     })
     const approvalQueueState = normalizeApprovalQueueState(raw.approval_queue_state)
     let approvalQueue: KeeperApprovalQueueItem[] | null
+    const approvalQueueViolations: KeeperApprovalQueueRowViolation[] = []
     if (approvalQueueState.state === 'unavailable') {
       if (raw.approval_queue !== null) {
         return gateSnapshotProtocolDrift('unavailable approval_queue must be null')
@@ -211,11 +257,27 @@ export function fetchDashboardGate(
       if (!Array.isArray(raw.approval_queue)) {
         return gateSnapshotProtocolDrift('ready approval_queue must be an array')
       }
-      const normalized = raw.approval_queue.map(item => normalizeKeeperApprovalQueueItem(item))
-      if (normalized.some(item => item === null)) {
-        return gateSnapshotProtocolDrift('approval_queue contains a contract-violating row')
-      }
-      approvalQueue = normalized as KeeperApprovalQueueItem[]
+      // A contract-violating row is quarantined as a visible placeholder
+      // instead of failing the whole snapshot (#26094): one drifted row used
+      // to blank the entire queue — the surface an operator needs precisely
+      // when rows are drifting. Identity fields are best-effort salvage so
+      // the placeholder still names the pending request.
+      const accepted: KeeperApprovalQueueItem[] = []
+      raw.approval_queue.forEach((item, index) => {
+        const normalized = normalizeKeeperApprovalQueueItem(item)
+        if (normalized !== null) {
+          accepted.push(normalized)
+          return
+        }
+        const record = isRecord(item) ? item : undefined
+        approvalQueueViolations.push({
+          index,
+          id: record ? asNullableString(record.id) : null,
+          keeper_name: record ? asNullableString(record.keeper_name) : null,
+          tool_name: record ? asNullableString(record.tool_name) : null,
+        })
+      })
+      approvalQueue = accepted
     }
     const recentResolved = Array.isArray(raw.recent_resolved)
       ? raw.recent_resolved
@@ -233,6 +295,7 @@ export function fetchDashboardGate(
       note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
       approval_queue: approvalQueue,
       approval_queue_state: approvalQueueState,
+      approval_queue_violations: approvalQueueViolations,
       recent_resolved: recentResolved,
       recent_resolved_page: recentResolvedPage,
       approval_rules: approvalRules,

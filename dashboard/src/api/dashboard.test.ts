@@ -1738,6 +1738,170 @@ describe('fetchDashboardGate', () => {
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it('quarantines a contract-violating queue row instead of blanking the queue (#26094)', async () => {
+    const validItem = {
+      id: 'appr-valid',
+      keeper_name: 'keeper-a',
+      tool_name: 'shell_exec',
+      input_hash: 'a'.repeat(64),
+      sequence: 3,
+      requested_at: 1_782_522_100,
+      waiting_s: 30,
+      turn_id: null,
+      task_id: null,
+      goal_id: null,
+      goal_ids: [],
+      summary_status: 'not_requested',
+      exact_attempt: { state: 'unbound' },
+      summary_attempt_disposition: { code: 'ready' },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [
+          validItem,
+          {
+            id: 'appr-drifted',
+            keeper_name: 'keeper-b',
+            tool_name: 'fs_write',
+            input_hash: 'b'.repeat(64),
+            sequence: 4,
+            summary_status: { status: 'failed', reason: 'x', retryable: true },
+            exact_attempt: { state: 'unbound' },
+            summary_attempt_disposition: { code: 'ready' },
+          },
+        ],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const result = await fetchDashboardGate()
+
+    expect(result.approval_queue).toHaveLength(1)
+    expect(result.approval_queue?.[0]?.id).toBe('appr-valid')
+    expect(result.approval_queue_violations).toEqual([
+      { index: 1, id: 'appr-drifted', keeper_name: 'keeper-b', tool_name: 'fs_write' },
+    ])
+  })
+
+  it('carries judge evidence on resolved rows and null for pre-enrichment events', async () => {
+    const judgeSummary = {
+      summary_version: 2,
+      generated_at: 1_782_522_120,
+      model_run_id: 'run-1',
+      context_summary: 'Keeper requested a read-only listing.',
+      key_questions: ['Is the path inside the sandbox?'],
+      judgment: 'approve',
+      rationale: 'Read-only and scoped.',
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: [
+          {
+            id: 'appr-judged',
+            keeper_name: 'keeper-a',
+            tool_name: 'shell_exec',
+            decision: 'approve',
+            decision_kind: 'approve',
+            decision_source: 'auto_judge',
+            resolved_at: 1_782_522_183,
+            summary_status: { status: 'available', summary: judgeSummary },
+            exact_attempt: {
+              state: 'bound',
+              approval_id: 'appr-judged',
+              input_hash: 'a'.repeat(64),
+              sequence: 7,
+              slot_id: 'glm-coding.glm-5-turbo',
+              call_id: 'call-1',
+              plan_fingerprint: 'plan-1',
+              request_body_sha256: 'c'.repeat(64),
+              status: 'completed',
+              quarantine_cause: null,
+            },
+          },
+          {
+            id: 'appr-legacy',
+            keeper_name: 'keeper-a',
+            tool_name: 'fs_write',
+            decision: 'approve',
+            decision_kind: 'approve',
+            resolved_at: 1_782_522_100,
+            summary_status: null,
+            exact_attempt: null,
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const result = await fetchDashboardGate()
+
+    const judged = result.recent_resolved?.find(item => item.id === 'appr-judged')
+    expect(judged?.summary_status?.status).toBe('available')
+    expect(
+      judged?.summary_status?.status === 'available'
+        ? judged.summary_status.summary.context_summary
+        : null,
+    ).toBe('Keeper requested a read-only listing.')
+    expect(
+      judged?.exact_attempt?.state === 'bound' ? judged.exact_attempt.slot_id : null,
+    ).toBe('glm-coding.glm-5-turbo')
+    const legacy = result.recent_resolved?.find(item => item.id === 'appr-legacy')
+    expect(legacy?.summary_status).toBeNull()
+    expect(legacy?.exact_attempt).toBeNull()
+  })
+
+  it('parses the closed judge_lane variant and drops shapes outside it', async () => {
+    const snapshot = (judgeLane: unknown) => new Response(JSON.stringify({
+      approval_queue: [],
+      approval_queue_state: { state: 'ready' },
+      recent_resolved: [],
+      hitl: {
+        gate_mode: { mode: 'auto_judge', configured: false, state: 'ready' },
+        judge_lane: judgeLane,
+      },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(snapshot({
+      status: 'available',
+      lane_id: 'hitl_auto_judge',
+      slots: ['glm-coding.glm-5-turbo', 'ollama_cloud.deepseek-v4-flash'],
+    })))
+    expect((await fetchDashboardGate()).hitl?.judge_lane).toEqual({
+      status: 'available',
+      lane_id: 'hitl_auto_judge',
+      slots: ['glm-coding.glm-5-turbo', 'ollama_cloud.deepseek-v4-flash'],
+    })
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(snapshot({
+      status: 'unavailable',
+      lane_id: 'hitl_auto_judge',
+      reason: 'registry_not_published',
+    })))
+    expect((await fetchDashboardGate()).hitl?.judge_lane).toEqual({
+      status: 'unavailable',
+      lane_id: 'hitl_auto_judge',
+      reason: 'registry_not_published',
+    })
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(snapshot({
+      status: 'available',
+      lane_id: 'hitl_auto_judge',
+      slots: [],
+    })))
+    expect((await fetchDashboardGate()).hitl?.judge_lane).toBeUndefined()
+  })
 })
 
 describe('setGateMode', () => {

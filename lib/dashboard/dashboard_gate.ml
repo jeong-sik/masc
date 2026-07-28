@@ -4,8 +4,44 @@
     queue, exact Always Allowed rules, and recent decisions. It derives no
     product policy or execution authority. *)
 
+(* Which exact-output lane serves Gate Auto Judge, read from the published
+   runtime registry. The first slot is the model that judges; later slots are
+   OAS failover order. An unpublished or busy registry reports itself as a
+   closed unavailable variant instead of guessing (#26126). *)
+let judge_lane_json () =
+  let lane_id = Hitl_summary_worker.lane_id in
+  let unavailable reason =
+    `Assoc
+      [ "status", `String "unavailable"
+      ; "lane_id", `String lane_id
+      ; "reason", `String reason
+      ]
+  in
+  match Runtime_exact_output_registry.current () with
+  | Error error ->
+    unavailable (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+     | Error error ->
+       unavailable (Runtime_exact_output_registry.lane_resolution_error_to_string error)
+     | Ok { selected_slots } ->
+       `Assoc
+         [ "status", `String "available"
+         ; "lane_id", `String lane_id
+         ; ( "slots"
+           , `List
+               (List.map
+                  (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+                    `String slot.slot_id)
+                  selected_slots) )
+         ])
+;;
+
 let hitl_status_json ~base_path =
-  `Assoc [ "gate_mode", Keeper_gate_mode.status_json ~base_path ]
+  `Assoc
+    [ "gate_mode", Keeper_gate_mode.status_json ~base_path
+    ; "judge_lane", judge_lane_json ()
+    ]
 ;;
 
 (* The page bounds travel with the rows. Without them a client cannot tell an

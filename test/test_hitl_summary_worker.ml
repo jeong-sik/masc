@@ -1010,8 +1010,7 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
         | Some
             { input_hash
             ; sequence
-            ; summary_status =
-                Q.Summary_failed { reason; retryable = false }
+            ; summary_status = Q.Summary_failed { reason }
             ; exact_attempt =
                 Q.Exact_bound
                   { slot_id

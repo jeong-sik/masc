@@ -118,6 +118,13 @@ function decisionSourceLabel(source: GateDecisionSource | null | undefined): str
 
 function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
   const decision = keeperResolvedApprovalDecisionLabel(item.decision)
+  // Judge evidence recorded at resolution time (#26126). Older audit events
+  // carry none, so the row renders without the fold rather than implying a
+  // judgment that was never recorded.
+  const judgeSummary =
+    item.summary_status?.status === 'available' ? item.summary_status.summary : null
+  const judgeSlot =
+    item.exact_attempt?.state === 'bound' ? item.exact_attempt.slot_id : null
   return html`
     <li
       class="ap-history-item"
@@ -129,11 +136,30 @@ function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
       <span class="ap-history-keeper">${item.keeper_name}</span>
       <span class="ap-history-source">${decisionSourceLabel(item.decision_source)}</span>
       <span class="ap-history-id mono">${item.id}</span>
+      ${judgeSlot
+        ? html`<span class="ap-history-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`
+        : null}
       ${item.rule_match?.rule_id
         ? html`<span class="ap-history-rule mono">rule ${item.rule_match.rule_id}</span>`
         : null}
       ${item.resolved_at
         ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
+        : null}
+      ${judgeSummary
+        ? html`
+            <details class="ap-history-judge" data-testid="approval-history-judge">
+              <summary>판정 근거</summary>
+              <p class="ap-summary-text">${judgeSummary.context_summary}</p>
+              ${judgeSummary.key_questions.length
+                ? html`<ul class="ap-summary-questions">
+                    ${judgeSummary.key_questions.map(q => html`<li>${q}</li>`)}
+                  </ul>`
+                : null}
+              ${judgeSummary.rationale.trim()
+                ? html`<p class="ap-summary-rationale">${judgeSummary.rationale.trim()}</p>`
+                : null}
+            </details>
+          `
         : null}
     </li>
   `
@@ -593,6 +619,7 @@ function ApAside({
     .sort((a, b) => resolvedAtMs(b) - resolvedAtMs(a))
     .slice(0, ASIDE_RECENT_LIMIT)
   const gateMode = hitl?.gate_mode
+  const judgeLane = hitl?.judge_lane
   const acting = gateApprovalActing.value
   const modeDisabled = acting !== null
   const hiddenRules = Math.max(0, rules.length - ASIDE_RULES_LIMIT)
@@ -626,6 +653,21 @@ function ApAside({
           <div class="wka-auto-note">
             Human은 사람이 판단하고, Auto Judge는 LLM이 판단하며, Always Allow는 workspace의 명시적 선택입니다.
           </div>
+          ${judgeLane
+            ? judgeLane.status === 'available'
+              ? html`
+                  <div class="wka-auto-stat mono" data-testid="gate-judge-lane">
+                    판정 모델 ${judgeLane.slots[0]}${judgeLane.slots.length > 1
+                      ? ` (+${judgeLane.slots.length - 1} failover)`
+                      : ''}
+                  </div>
+                `
+              : html`
+                  <div class="ap-env-warn mono" data-testid="gate-judge-lane">
+                    판정 lane ${judgeLane.lane_id} 확인 불가: ${judgeLane.reason}
+                  </div>
+                `
+            : null}
           ${gateMode?.state === 'invalid' || gateMode?.state === 'unavailable' || gateMode?.read_error
             ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state ?? 'invalid'}: ${gateMode.read_error ?? '상태 확인 실패'}</div>`
             : null}
@@ -695,6 +737,7 @@ export function ApprovalsSurface() {
   const resolvedItems = gateData.value?.recent_resolved ?? []
   const resolvedPage = gateData.value?.recent_resolved_page ?? null
   const rules = gateData.value?.approval_rules ?? []
+  const queueViolations = gateData.value?.approval_queue_violations ?? []
   const error = gateError.value
   // First load only: gateResource is stale-while-revalidate, so a refetch
   // keeps the previous data — gateData is null ONLY before the first load
@@ -752,6 +795,23 @@ export function ApprovalsSurface() {
         </header>
 
         ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
+        ${queueViolations.length > 0
+          ? html`
+              <div class="ap-error sev-warn" role="alert" data-testid="approvals-queue-violations">
+                <strong><span aria-hidden="true">!</span> 표시 불가 대기 요청 ${queueViolations.length}건</strong>
+                <span>
+                  아래 행은 디코딩 계약을 위반해 카드로 표시할 수 없지만, 대기 중인
+                  승인 요청은 실재합니다. 서버 원장(audit-approvals)에서 확인하세요.
+                </span>
+                ${queueViolations.map(violation => html`
+                  <span class="mono" key=${violation.index}>
+                    #${violation.index} · ${violation.keeper_name ?? 'keeper?'} ·
+                    ${violation.tool_name ?? 'tool?'} · ${violation.id ?? 'id?'}
+                  </span>
+                `)}
+              </div>
+            `
+          : null}
         ${queueUnavailable
           ? html`
               <div
@@ -813,7 +873,7 @@ export function ApprovalsSurface() {
               </div>
             `
           : null}
-        ${items.length === 0 && !error && !queueUnavailable
+        ${items.length === 0 && !error && !queueUnavailable && queueViolations.length === 0
           ? html`
               <div class="ap-clear" data-testid="approvals-empty">
                 <div class="ico">${'✓'}</div>

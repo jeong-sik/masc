@@ -335,7 +335,6 @@ describe('normalizeKeeperApprovalQueueItem', () => {
         summary_status: {
           status: 'failed',
           reason: 'Auto Judge exact attempt quarantined: flow_execution_failed',
-          retryable: false,
         },
       })!.summary_status,
     ).toEqual({
@@ -361,8 +360,16 @@ describe('normalizeKeeperApprovalQueueItem', () => {
         summary_status: {
           status: 'failed',
           reason: 'Auto Judge exact attempt quarantined: cancellation',
-          retryable: false,
         },
+      }),
+    ).toBeNull()
+    // `retryable` left the wire contract with #26094: the OCaml producer no
+    // longer writes it, so any occurrence — either value — is a stale or
+    // hand-edited payload and rejects the row.
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: { status: 'failed', reason: 'provider down', retryable: false },
       }),
     ).toBeNull()
     expect(

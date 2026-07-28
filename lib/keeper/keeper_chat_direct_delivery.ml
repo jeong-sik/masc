@@ -28,7 +28,10 @@ type transcript_effect =
       { content : string
       ; tool_calls : Keeper_chat_store.tool_call list
       }
-  | Tool_calls_only of { tool_calls : Keeper_chat_store.tool_call list }
+  | Tool_calls_only of
+      { tool_calls : Keeper_chat_store.tool_call list
+      ; turn_ref : Ids.Turn_ref.t option
+      }
   | No_assistant_reply
 
 type staged_effect =
@@ -276,6 +279,13 @@ let validate_nonblank field value =
   else Ok ()
 ;;
 
+let validate_nonempty_after_trim field value =
+  let* () = validate_utf8 field value in
+  if String.equal (String.trim value) ""
+  then Error (Invalid_payload (field ^ " must not be blank"))
+  else Ok ()
+;;
+
 let rec validate_json_text field = function
   | `Null | `Bool _ | `Int _ | `Intlit _ -> Ok ()
   | `String text -> validate_utf8 field text
@@ -346,8 +356,8 @@ let validate_row_id field row_id = validate_nonblank field row_id
 
 let validate_tool_call index (tool_call : Keeper_chat_store.tool_call) =
   let prefix = Printf.sprintf "tool_calls[%d]." index in
-  let* () = validate_nonblank (prefix ^ "call_id") tool_call.call_id in
-  let* () = validate_nonblank (prefix ^ "call_name") tool_call.call_name in
+  let* () = validate_nonempty_after_trim (prefix ^ "call_id") tool_call.call_id in
+  let* () = validate_nonempty_after_trim (prefix ^ "call_name") tool_call.call_name in
   validate_utf8 (prefix ^ "args") tool_call.args
 ;;
 
@@ -380,9 +390,9 @@ let validate_effect (staged : staged_effect) =
   | false, Transport_failure { content; tool_calls } ->
     let* () = validate_utf8 "transport_failure.content" content in
     validate_tool_calls tool_calls
-  | true, Tool_calls_only { tool_calls = _ :: _ as tool_calls } ->
+  | true, Tool_calls_only { tool_calls = _ :: _ as tool_calls; _ } ->
     validate_tool_calls tool_calls
-  | true, Tool_calls_only { tool_calls = [] } ->
+  | true, Tool_calls_only { tool_calls = []; _ } ->
     Error (Invalid_effect "a tool-only reply requires at least one tool call")
   | true, No_assistant_reply -> Ok ()
   | true, Transport_failure _ ->
@@ -558,9 +568,11 @@ let transcript_effect_to_yojson = function
       ; "content", `String content
       ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
       ]
-  | Tool_calls_only { tool_calls } ->
+  | Tool_calls_only { tool_calls; turn_ref } ->
     `Assoc
       [ "kind", `String "tool_calls_only"
+      ; ( "turn_ref"
+        , string_option_to_yojson (Option.map Ids.Turn_ref.to_string turn_ref) )
       ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
       ]
   | No_assistant_reply -> `Assoc [ "kind", `String "no_assistant_reply" ]
@@ -901,14 +913,30 @@ let transcript_effect_of_yojson = function
        in
        Ok (Transport_failure { content; tool_calls })
      | "tool_calls_only" ->
+       let turn_ref_json = List.assoc_opt "turn_ref" fields in
        let* () =
          validate_fields
            ~context:"tool-only effect"
-           ~expected:[ "kind"; "tool_calls" ]
+           ~expected:
+             (match turn_ref_json with
+              | None -> [ "kind"; "tool_calls" ]
+              | Some _ -> [ "kind"; "turn_ref"; "tool_calls" ])
            fields
        in
        let* tool_calls = tool_calls_of_yojson (List.assoc "tool_calls" fields) in
-       Ok (Tool_calls_only { tool_calls })
+       let* turn_ref =
+         match turn_ref_json with
+         | None -> Ok None
+         | Some _ ->
+           let* wire = json_string_option "turn_ref" fields in
+           (match wire with
+            | None -> Ok None
+            | Some wire ->
+              (match Ids.Turn_ref.of_string wire with
+               | Some turn_ref -> Ok (Some turn_ref)
+               | None -> Error (Decode_failed "tool-only turn_ref is invalid")))
+       in
+       Ok (Tool_calls_only { tool_calls; turn_ref })
      | "no_assistant_reply" ->
        let* () =
          validate_fields
@@ -1362,10 +1390,11 @@ let redact_effect redaction (staged : staged_effect) =
                     })
                  tool_calls
            })
-    | Tool_calls_only { tool_calls } ->
+    | Tool_calls_only { tool_calls; turn_ref } ->
       Ok
         (Tool_calls_only
-           { tool_calls =
+           { turn_ref
+           ; tool_calls =
                List.map
                  (fun tool_call ->
                     { tool_call with
@@ -1632,7 +1661,7 @@ let append_staged_transcript ~base_path existing ~user_row_id staged =
     |> Result.map row_id_of_append_once
     |> Result.map_error (fun detail ->
       Transcript_failed { slot = Assistant_transcript; detail })
-  | Tool_calls_only { tool_calls } ->
+  | Tool_calls_only { tool_calls; turn_ref } ->
     Keeper_chat_store.append_tool_calls_once
       ~base_dir:base_path
       ~keeper_name:existing.payload.keeper_name
@@ -1640,6 +1669,7 @@ let append_staged_transcript ~base_path existing ~user_row_id staged =
       ~tool_calls
       ~surface:existing.payload.surface
       ?conversation_id:existing.payload.conversation_id
+      ?turn_ref
       ()
     |> Result.map row_id_of_append_once
     |> Result.map_error (fun detail ->

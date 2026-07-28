@@ -76,6 +76,26 @@ let test_replayed_start_keeps_received_fragments () =
     [ { call_id = "call-replayed"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
     (A.to_tool_calls t)
 
+let test_conflicting_start_cannot_reopen_until_stop () =
+  let t = A.create () in
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-a") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}" );
+  (* A conflicting identity invalidates this provider block. A later start at
+     the same index must not turn the original fragments into a new call. *)
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-b") ~tool_name:(Some "Write"));
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-c") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"c.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "conflicted block is dropped" [] (A.to_tool_calls t);
+  (* The terminator closes the bad bridge; a genuinely later block may reuse
+     the index without inheriting any old fragments. *)
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-d") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"d.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "later block after stop is accepted"
+    [ { call_id = "call-d"; call_name = "Read"; args = "{\"path\":\"d.ml\"}" } ]
+    (A.to_tool_calls t)
+
 (* A block with no call id cannot be joined to its output row, so persisting it
    would render an anonymous step. *)
 let test_block_without_call_id_is_dropped () =
@@ -123,6 +143,7 @@ let () =
         ; test_case "snapshot replaces fragments" `Quick test_snapshot_replaces_fragments
         ; test_case "parallel blocks keep provider order" `Quick test_parallel_blocks_keep_provider_order
         ; test_case "replayed start keeps fragments" `Quick test_replayed_start_keeps_received_fragments
+        ; test_case "conflicting start stays closed until stop" `Quick test_conflicting_start_cannot_reopen_until_stop
         ; test_case "block without call id is dropped" `Quick test_block_without_call_id_is_dropped
         ; test_case "message stop finalizes open blocks" `Quick test_message_stop_finalizes_open_blocks
         ; test_case "non-tool events are ignored" `Quick test_non_tool_events_are_ignored

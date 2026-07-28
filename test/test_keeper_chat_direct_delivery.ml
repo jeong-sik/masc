@@ -210,6 +210,7 @@ let test_direct_tool_only_transcript_has_no_empty_assistant _env =
                       ; call_name = "Read"
                       ; args = "{\"path\":\"lib/b.ml\"}"
                       } ]
+                ; turn_ref = Some (Ids.Turn_ref.make ~trace_id:"direct-tool-only" ~absolute_turn:1)
                 }
           }
         ~now:4.0
@@ -223,7 +224,10 @@ let test_direct_tool_only_transcript_has_no_empty_assistant _env =
     match history with
     | [ _user; tool ] ->
       check string "tool call id" "call-2"
-        (Option.value ~default:"" tool.tool_call_id)
+        (Option.value ~default:"" tool.tool_call_id);
+      check (option string) "tool-only row keeps turn provenance"
+        (Some "direct-tool-only#1")
+        (Option.map Ids.Turn_ref.to_string tool.turn_ref)
     | _ -> fail "expected user and tool rows")
 ;;
 

@@ -44,7 +44,10 @@ type transcript_effect =
       { content : string
       ; tool_calls : Keeper_chat_store.tool_call list
       }
-  | Tool_calls_only of { tool_calls : Keeper_chat_store.tool_call list }
+  | Tool_calls_only of
+      { tool_calls : Keeper_chat_store.tool_call list
+      ; turn_ref : Ids.Turn_ref.t option
+      }
   | No_assistant_reply
 
 type staged_effect =

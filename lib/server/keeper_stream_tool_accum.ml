@@ -16,11 +16,15 @@ type open_block = {
 
 type t = {
   mutable blocks : (int * open_block) list;
+  (* A conflicting start makes the whole provider block untrustworthy.  Keep
+     its index closed until the matching terminator arrives; otherwise a third
+     start could resurrect the first call's fragments under a new identity. *)
+  mutable invalid_indices : int list;
   mutable finalized : (int * Keeper_chat_store.tool_call) list;
   mutable next_opened_at : int;
 }
 
-let create () = { blocks = []; finalized = []; next_opened_at = 0 }
+let create () = { blocks = []; invalid_indices = []; finalized = []; next_opened_at = 0 }
 
 let block_for_index t index = List.assoc_opt index t.blocks
 
@@ -28,6 +32,14 @@ let replace_block t index block =
   t.blocks <- (index, block) :: List.remove_assoc index t.blocks
 
 let drop_block t index = t.blocks <- List.remove_assoc index t.blocks
+
+let invalidate_index t index =
+  drop_block t index;
+  if not (List.mem index t.invalid_indices)
+  then t.invalid_indices <- index :: t.invalid_indices
+
+let clear_invalid_index t index =
+  t.invalid_indices <- List.filter (fun invalid -> invalid <> index) t.invalid_indices
 
 (* A block with no call id cannot be joined to its output row, so it is dropped
    rather than persisted as an anonymous step. The name alone does not identify
@@ -75,7 +87,9 @@ let stream_start_is_tool (evt : Agent_sdk.Types.sse_event) =
 let on_event t (evt : Agent_sdk.Types.sse_event) =
   match evt with
   | Agent_sdk.Types.ContentBlockStart { index; tool_id; tool_name; _ } ->
-    if stream_start_is_tool evt then (
+    if List.mem index t.invalid_indices
+    then ()
+    else if stream_start_is_tool evt then (
       match block_for_index t index, tool_id, tool_name with
       (* Providers may replay a start event after its JSON deltas. It is the
          same open block, not a replacement, so retaining it preserves the
@@ -85,22 +99,26 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
         when String.equal (Option.value ~default:"" block.call_id) call_id
              && String.equal (Option.value ~default:"" block.call_name) call_name ->
         ()
-      | Some _, _, _ -> drop_block t index
+      | Some _, _, _ -> invalidate_index t index
       | None, _, _ ->
         let opened_at = t.next_opened_at in
         t.next_opened_at <- opened_at + 1;
         replace_block t index
           { opened_at; call_id = tool_id; call_name = tool_name; args_fragments = [] })
-    else drop_block t index
+    else invalidate_index t index
   | Agent_sdk.Types.ContentBlockDelta
       { index; delta = Agent_sdk.Types.InputJsonDelta fragment } ->
     append_fragment t index fragment
   | Agent_sdk.Types.ContentBlockDelta
       { index; delta = Agent_sdk.Types.InputJsonSnapshot snapshot } ->
     replace_fragments t index snapshot
-  | Agent_sdk.Types.ContentBlockStop { index } -> finalize_block t index
+  | Agent_sdk.Types.ContentBlockStop { index } ->
+    if List.mem index t.invalid_indices
+    then clear_invalid_index t index
+    else finalize_block t index
   | Agent_sdk.Types.MessageStop ->
-    List.iter (fun (index, _) -> finalize_block t index) t.blocks
+    List.iter (fun (index, _) -> finalize_block t index) t.blocks;
+    t.invalid_indices <- []
   | _ -> ()
 ;;
 

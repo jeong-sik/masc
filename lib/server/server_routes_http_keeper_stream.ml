@@ -1740,7 +1740,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ()
     |> Result.map (fun _ -> ())
   in
-  let append_queued_tool_calls_once tool_calls =
+  let append_queued_tool_calls_once ?turn_ref tool_calls =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
     Keeper_chat_store.append_tool_calls_once
@@ -1749,6 +1749,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~delivery_key
       ~tool_calls
       ~surface:chat_surface
+      ?turn_ref
       ()
     |> Result.map (fun _ -> ())
   in
@@ -2244,9 +2245,9 @@ let process_single_turn ~user_row_origin ~queued_turn
                        ~ok:true
                        ~body
                        ~data:payload_json_opt
-                       (Keeper_chat_direct_delivery.Tool_calls_only { tool_calls })
+                       (Keeper_chat_direct_delivery.Tool_calls_only { tool_calls; turn_ref })
                    else if queued_turn
-                   then append_queued_tool_calls_once tool_calls
+                   then append_queued_tool_calls_once ?turn_ref tool_calls
                    else
                      match user_row_origin with
                      | Keeper_chat_store.Needs_append ->
@@ -2258,6 +2259,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ~tool_calls
                          ~surface:chat_surface
                          ~speaker:chat_speaker
+                         ?turn_ref
                          ()
                      | Keeper_chat_store.Already_persisted _
                      | Keeper_chat_store.Already_persisted_upstream ->
@@ -2266,6 +2268,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ~keeper_name:payload.name
                          ~tool_calls
                          ~surface:chat_surface
+                         ?turn_ref
                          ()
                  in
                  let delivered_after_persist ?content persisted =
@@ -2277,6 +2280,11 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ~keeper_name:payload.name ~source:chat_source ?content ();
                        Ok queued_outcome
                    | Error _ as error -> error
+                 in
+                 let broadcast_after_tool_only_persist () =
+                   Keeper_chat_broadcast.chat_appended
+                     ~keeper_name:payload.name ~source:chat_source ();
+                   Ok None
                  in
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
@@ -2305,11 +2313,15 @@ let process_single_turn ~user_row_origin ~queued_turn
                               ~data:payload_json_opt
                               Keeper_chat_direct_delivery.No_assistant_reply
                             |> Result.map (fun () -> None)
-                          else persist_tool_calls_only () |> Result.map (fun () -> None)
+                          else
+                            persist_tool_calls_only ()
+                            |> Result.bind (fun () -> broadcast_after_tool_only_persist ())
                         | None ->
                           if has_visible_blocks || tool_calls <> []
                           then if tool_calls <> [] && not has_visible_blocks
-                          then persist_tool_calls_only () |> Result.map (fun () -> None)
+                          then
+                            persist_tool_calls_only ()
+                            |> Result.bind (fun () -> broadcast_after_tool_only_persist ())
                           else
                             persist_assistant_reply ~assistant_content:""
                             |> Result.map (fun () -> None)
@@ -2318,21 +2330,34 @@ let process_single_turn ~user_row_origin ~queued_turn
                             Ok None))
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
-                       if has_visible_blocks || tool_calls <> []
+                       let detail =
+                         "no visible reply was produced for this queued message"
+                       in
+                       if queued_turn
+                       then
+                         let persist =
+                           if has_visible_blocks || tool_calls <> []
+                           then if tool_calls <> [] && not has_visible_blocks
+                           then persist_tool_calls_only ()
+                           else persist_assistant_reply ~assistant_content:""
+                           else persist_failure_reply detail
+                         in
+                         (match persist with
+                          | Ok () ->
+                            if has_visible_blocks || tool_calls <> []
+                            then
+                              Keeper_chat_broadcast.chat_appended
+                                ~keeper_name:payload.name ~source:chat_source ();
+                            Ok (Some (Failed { kind = No_visible_reply; detail }))
+                          | Error persist_error -> Error persist_error)
+                       else if has_visible_blocks || tool_calls <> []
                        then if tool_calls <> [] && not has_visible_blocks
-                       then persist_tool_calls_only () |> delivered_after_persist
+                       then
+                         persist_tool_calls_only ()
+                         |> Result.bind (fun () -> broadcast_after_tool_only_persist ())
                        else
                          persist_assistant_reply ~assistant_content:""
                          |> delivered_after_persist
-                       else if queued_turn
-                       then
-                         let detail =
-                           "no visible reply was produced for this queued message"
-                         in
-                         (match persist_failure_reply detail with
-                          | Ok () ->
-                            Ok (Some (Failed { kind = No_visible_reply; detail }))
-                          | Error persist_error -> Error persist_error)
                        else (
                          persist_user_message_only ();
                          Ok None)

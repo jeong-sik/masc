@@ -1,21 +1,6 @@
 (* Keeper_registry_types_failure — failure reason types and helpers.
    Extracted from keeper_registry_types.ml during godfile decomposition.
-   Contains kill-class type re-exports, failure_reason ADT, cohort key,
-   and stale watchdog failure classification. *)
-
-type stale_kill_class = Keeper_registry_types_kill_class.stale_kill_class =
-  | Idle_turn of { stall_seconds : float }
-  | Mid_turn_no_progress of
-      { active_seconds : float
-      ; since_progress_seconds : float
-      ; progress_timeout_threshold : float
-      ; last_progress_kind : string option
-      }
-  | Noop_failure_loop of { noop_count : int }
-
-let progress_kind_label = Keeper_registry_types_kill_class.progress_kind_label
-let stale_kill_class_to_string =
-  Keeper_registry_types_kill_class.stale_kill_class_to_string
+   Contains the failure_reason ADT and its cohort key. *)
 
 (** Issue #18901: Cause carried inside [Fiber_unresolved].
     Forces emit sites to distinguish graceful shutdown (SIGTERM/SIGINT
@@ -44,7 +29,6 @@ type fiber_drop_cause =
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_turn_timeout of stale_kill_class
   | Stale_termination_storm of { count : int }
   (** #10765 Phase 2: latched when [record_stale_termination] returns a
           window count >= [escalation_threshold]. This remains a typed
@@ -81,8 +65,6 @@ let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
     Printf.sprintf "heartbeat_consecutive_failures(%d)" n
   | Turn_consecutive_failures n -> Printf.sprintf "turn_consecutive_failures(%d)" n
-  | Stale_turn_timeout cls ->
-    Printf.sprintf "stale_turn_timeout(%s)" (stale_kill_class_to_string cls)
   | Stale_termination_storm { count } ->
     Printf.sprintf "stale_termination_storm(count=%d)" count
   | Provider_runtime_error { code; detail; provider_id; http_status; runtime_id = _ } ->
@@ -122,7 +104,6 @@ let failure_reason_to_string = function
 let failure_reason_cohort_key = function
   | Some (Heartbeat_consecutive_failures _) -> "heartbeat_failures"
   | Some (Turn_consecutive_failures _) -> "turn_failures"
-  | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
   | Some (Provider_runtime_error _) -> "provider_runtime_error"
   | Some (Fiber_unresolved Graceful_shutdown) -> "fiber_unresolved_graceful"
@@ -134,20 +115,4 @@ let failure_reason_cohort_key = function
   | Some Turn_overflow_failure -> "turn_overflow_failure"
   | Some Operator_interrupt -> "operator_interrupt"
   | None -> "unknown"
-;;
-
-let stale_kill_failure_reason ~prior ~kill_class =
-  match prior with
-  | Some
-      ( Provider_runtime_error _
-      | Turn_consecutive_failures _
-      | Turn_overflow_failure
-      | Heartbeat_consecutive_failures _
-      | Exception _
-      | Operator_interrupt ) -> prior
-  | Some
-      ( Stale_termination_storm _
-      | Stale_turn_timeout _
-      | Fiber_unresolved _ )
-  | None -> Some (Stale_turn_timeout kill_class)
 ;;

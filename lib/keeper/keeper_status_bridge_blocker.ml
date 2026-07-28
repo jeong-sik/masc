@@ -148,33 +148,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   { blocker_class = str; summary }
 ;;
 
-let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =
-  match kill_class with
-  | Keeper_registry.Idle_turn { stall_seconds } ->
-    Printf.sprintf
-      "idle_turn: no completed turn for %.0fs; stale watchdog stopped the keeper before \
-       restart."
-      stall_seconds
-  | Keeper_registry.Mid_turn_no_progress
-      { active_seconds
-      ; since_progress_seconds
-      ; progress_timeout_threshold
-      ; last_progress_kind
-      } ->
-    Printf.sprintf
-      "mid_turn_no_progress: active turn ran for %.0fs but produced no progress for %.0fs \
-       past the %.0fs progress timeout (last=%s); stale watchdog stopped the keeper."
-      active_seconds
-      since_progress_seconds
-      progress_timeout_threshold
-      (Keeper_registry.progress_kind_label last_progress_kind)
-  | Keeper_registry.Noop_failure_loop { noop_count } ->
-    Printf.sprintf
-      "noop_failure_loop: %d consecutive turn(s) produced no tool calls; stale watchdog \
-       stopped the keeper."
-      noop_count
-;;
-
 let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_reason) =
   match reason with
   | Keeper_registry.Heartbeat_consecutive_failures count ->
@@ -194,11 +167,6 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
              before retry."
             count
       }
-  | Keeper_registry.Stale_turn_timeout kill_class ->
-    Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:(stale_kill_class_summary kill_class)
-         Stale_turn_timeout)
   | Keeper_registry.Stale_termination_storm { count } ->
     Some
       { blocker_class = "stale_termination_storm"

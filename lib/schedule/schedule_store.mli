@@ -216,9 +216,11 @@ val recover_running_on_startup :
   now:float ->
   (state * int, store_error) result
 (** Atomically returns every persisted [Running] schedule to [Due] and finishes
-    each matching execution attempt as [Failed]. Intended for a one-time runner
-    startup recovery before any new dispatch can be active. The recovery reason
-    is fixed to [Interrupted_by_process_restart]. *)
+    each exact current occurrence's execution attempt as [Failed]. Exact
+    occurrence identity, rather than wall-clock ordering, distinguishes a newly
+    interrupted retry from an older dispatched recurrence. Intended for a
+    one-time runner startup recovery before any new dispatch can be active. The
+    recovery reason is fixed to [Interrupted_by_process_restart]. *)
 
 val fail_due_candidate :
   Workspace_utils.config ->

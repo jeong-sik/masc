@@ -43,6 +43,10 @@ type consumer_dispatch_error =
 type consumer_dispatch_result =
   | Work_completed of Yojson.Safe.t
   | Work_accepted of Yojson.Safe.t
+  | Work_failed of
+      { error : string
+      ; detail : Yojson.Safe.t
+      }
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
@@ -341,7 +345,27 @@ let dispatch_candidate
            | Error err ->
              dispatch_result ~detail
                ~error:(Schedule_store.store_error_to_string err)
-               occurrence_id schedule_id Dispatch_failed)))
+               occurrence_id schedule_id Dispatch_failed)
+        | Ok (Work_failed { error; detail }) ->
+          (match
+             Schedule_store.fail_dispatched_occurrence
+               config
+               ~now
+               ~schedule_id
+               ~due_at:signal.due_at
+               ~payload_digest:signal.payload_digest
+               ~error
+           with
+           | Ok _ ->
+             dispatch_result ~detail ~error occurrence_id schedule_id Dispatch_failed
+           | Error err ->
+             let error =
+               Printf.sprintf
+                 "%s; failed to mark schedule occurrence failed: %s"
+                 error
+                 (Schedule_store.store_error_to_string err)
+             in
+             dispatch_result ~detail ~error occurrence_id schedule_id Dispatch_failed)))
 ;;
 
 let dispatch_candidates config ~now consumer candidates =

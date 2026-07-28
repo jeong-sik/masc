@@ -826,9 +826,11 @@ let recover_running_on_startup config ~now =
         (match request.status with
          | Running ->
            (match
-              last_execution_for_schedule
+              execution_for_occurrence
                 { state with executions }
                 ~schedule_id:request.schedule_id
+                ~due_at:request.due_at
+                ~payload_digest:(Schedule_domain.payload_digest request.payload)
             with
             | Some { status = Execution_dispatched; _ } ->
               recover (request :: schedules_rev) executions recovered rest

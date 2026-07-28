@@ -46,6 +46,10 @@ type consumer_dispatch_error =
 type consumer_dispatch_result =
   | Work_completed of Yojson.Safe.t
   | Work_accepted of Yojson.Safe.t
+  | Work_failed of
+      { error : string
+      ; detail : Yojson.Safe.t
+      }
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
@@ -89,5 +93,7 @@ val tick :
     consumer dispatch can complete, durably accept, or fail the request.
     [Work_accepted] advances recurring intent but leaves the execution
     unfinished; a one-shot request remains [Running]. Consumer payload rejection
-    is terminal. A typed retryable dispatch failure finishes only its current
-    execution attempt and leaves the schedule [Due] for the next tick. *)
+    is terminal. [Work_failed] finishes the exact occurrence; recurring intent
+    advances while a one-shot request becomes [Failed]. A typed retryable
+    dispatch failure finishes only its current execution attempt and leaves the
+    schedule [Due] for the next tick. *)

@@ -402,6 +402,64 @@ let test_startup_recovery_returns_only_running_schedule_to_due () =
     (read_state config).version
 ;;
 
+let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"clock-rollback"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  ignore (start_due_candidate config ~now:300.0 ~schedule_id:request.schedule_id);
+  let advanced =
+    match accept_running config ~now:301.0 ~schedule_id:request.schedule_id () with
+    | Ok stored -> stored
+    | Error err -> fail (store_error_to_string err)
+  in
+  check_status "older occurrence was dispatched" Scheduled advanced.status;
+  ignore (refresh_due config ~now:advanced.due_at);
+  let current =
+    match start_due_candidate config ~now:100.0 ~schedule_id:request.schedule_id with
+    | Ok stored -> stored
+    | Error err -> fail (store_error_to_string err)
+  in
+  check_status "clock-rollback occurrence is running" Running current.status;
+  (match recover_running_on_startup config ~now:101.0 with
+   | Ok (_, recovered) ->
+     check int "exact current occurrence recovered" 1 recovered
+   | Error err -> fail (store_error_to_string err));
+  let state = read_state config in
+  (match get_schedule config ~schedule_id:request.schedule_id with
+   | Some stored -> check_status "current occurrence returned to due" Due stored.status
+   | None -> fail "clock-rollback schedule missing");
+  let digest = payload_digest request.payload in
+  (match
+     execution_for_occurrence
+       state
+       ~schedule_id:request.schedule_id
+       ~due_at:advanced.due_at
+       ~payload_digest:digest
+   with
+   | Some execution ->
+     check string "newer prepended occurrence failed" "failed"
+       (execution_status_to_string execution.status)
+   | None -> fail "current clock-rollback execution missing");
+  match
+    execution_for_occurrence
+      state
+      ~schedule_id:request.schedule_id
+      ~due_at:request.due_at
+      ~payload_digest:digest
+  with
+  | Some execution ->
+    check string "older dispatched occurrence remains dispatched" "dispatched"
+      (execution_status_to_string execution.status)
+  | None -> fail "older dispatched execution missing"
+;;
+
 let test_startup_recovery_refuses_corrupt_ledger () =
   with_workspace
   @@ fun config ->
@@ -912,6 +970,8 @@ let () =
             test_dispatched_one_shot_failure_is_terminal;
           test_case "startup recovery returns only running schedule to due" `Quick
             test_startup_recovery_returns_only_running_schedule_to_due;
+          test_case "startup recovery ignores wall-clock rollback" `Quick
+            test_startup_recovery_uses_exact_occurrence_across_clock_rollback;
           test_case "fail due candidate records failed execution" `Quick
             test_fail_due_candidate_records_failed_execution;
           test_case "recurring occurrences remain dispatchable" `Quick

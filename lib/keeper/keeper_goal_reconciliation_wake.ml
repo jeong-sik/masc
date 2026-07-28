@@ -69,7 +69,7 @@ let wake_keeper ~base_path keeper_name goal_id =
       (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
       goal_id
 
-let enqueue_ready ~config ~completing_agent_name
+let enqueue_ready ?(wake_if_present = false) ~config ~completing_agent_name
       ({ Masc_task_handlers.Task_goal_reconciliation.goal_id; triggering_task_id } as ready_fact)
   =
   match target_keeper_name ~config ~completing_agent_name ~goal_id with
@@ -104,6 +104,8 @@ let enqueue_ready ~config ~completing_agent_name
          wake_keeper ~base_path:config.base_path keeper_name goal_id;
          Enqueued { goal_id; keeper_name }
        | Keeper_registry_event_queue.Stimulus_already_present ->
+         if wake_if_present
+         then wake_keeper ~base_path:config.base_path keeper_name goal_id;
          Already_present { goal_id; keeper_name }
        | Keeper_registry_event_queue.Stimulus_storage_error detail ->
          Log.Keeper.error
@@ -137,6 +139,7 @@ let reconcile_startup ~config =
          Masc_task_handlers.Task_goal_reconciliation.startup_ready) ->
        let outcome =
          enqueue_ready
+           ~wake_if_present:true
            ~config
            ~completing_agent_name:candidate.completing_agent_name
            candidate.ready

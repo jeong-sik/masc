@@ -494,6 +494,7 @@ let transition_task_outcome_r
                   ~agent_name
                   ~task_id
               with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn ->
                 Workspace_hooks.Task_terminal_delivery_degraded
                   { kind = "hook_exception"; detail = Printexc.to_string exn }

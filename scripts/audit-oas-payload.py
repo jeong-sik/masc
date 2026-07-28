@@ -17,8 +17,13 @@ the questions the files already contain:
 Exit status is 0 for a report and 1 when a threshold is exceeded, so this can
 become a gate without changing the output format.
 
+Traces live under ``<base-path>/.masc/traces``. RFC-0121 makes MASC_BASE_PATH
+the sole canonical source for that base path; there is no home-directory or cwd
+fallback. Pass --traces-dir to point at an exported copy instead.
+
 Usage:
-    scripts/audit-oas-payload.py [TRACES_DIR] [--json] [--limit N]
+    MASC_BASE_PATH=<base> scripts/audit-oas-payload.py [--json] [--limit N]
+                                 [--traces-dir DIR]
                                  [--max-top-tool-share PCT]
                                  [--max-repeat-run N]
                                  [--min-tool-usage PCT]
@@ -28,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -42,6 +48,21 @@ DEFAULT_MAX_REPEAT_RUN: Final[int] = 10
 DEFAULT_MIN_TOOL_USAGE: Final[float] = 25.0
 
 SNAPSHOT_GLOB: Final[str] = "oas-snapshot-*.json"
+MASC_DIRNAME: Final[str] = ".masc"
+TRACES_DIRNAME: Final[str] = "traces"
+
+
+def default_traces_dir() -> Path | None:
+    """Resolve <base-path>/.masc/traces from MASC_BASE_PATH.
+
+    RFC-0121: MASC_BASE_PATH is the sole canonical source. No home-directory or
+    cwd fallback — a wrong base path would silently audit someone else's
+    workspace and report confident numbers about it.
+    """
+    value = os.environ.get("MASC_BASE_PATH", "").strip()
+    if not value:
+        return None
+    return Path(value) / MASC_DIRNAME / TRACES_DIRNAME
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,10 +304,12 @@ def snapshot_to_json(snap: Snapshot) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "traces_dir",
-        nargs="?",
-        default=str(Path.home() / "me" / ".masc" / "traces"),
-        help="directory holding <trace>/oas-snapshot-*.json (default: ~/me/.masc/traces)",
+        "--traces-dir",
+        default=None,
+        help=(
+            "directory holding <trace>/oas-snapshot-*.json "
+            "(default: $MASC_BASE_PATH/.masc/traces)"
+        ),
     )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument(
@@ -299,7 +322,14 @@ def main() -> int:
     parser.add_argument("--min-tool-usage", type=float, default=DEFAULT_MIN_TOOL_USAGE)
     args = parser.parse_args()
 
-    root = Path(args.traces_dir)
+    root = Path(args.traces_dir) if args.traces_dir else default_traces_dir()
+    if root is None:
+        print(
+            "MASC_BASE_PATH is required (RFC-0121: sole canonical source, no "
+            "home/cwd fallback). Export it, or pass --traces-dir explicitly.",
+            file=sys.stderr,
+        )
+        return 2
     if not root.is_dir():
         print(f"no traces directory: {root}", file=sys.stderr)
         return 2

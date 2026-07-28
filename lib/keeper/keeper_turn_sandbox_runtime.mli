@@ -41,9 +41,6 @@ val container_path_of_host :
 val container_cwd_of_host :
   t -> host_cwd:string -> string
 
-val host_cwd_of_container :
-  t -> container_cwd:string -> (string, string) result
-
 val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?on_stdout_chunk:(string -> unit) ->

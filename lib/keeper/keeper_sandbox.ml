@@ -71,9 +71,6 @@ let host_root_abs_of_config_agent ~config ~agent_name =
 let host_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   host_root_rel_of_profile meta.sandbox_profile meta.name
 
-let host_root_abs_of_backend ~(config : Workspace.config) ~(backend : backend) name =
-  Filename.concat config.base_path (host_root_rel_of_backend ~backend name)
-
 let host_root_abs_of_meta ~(config : Workspace.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   Filename.concat config.base_path (host_root_rel_of_meta ~meta)

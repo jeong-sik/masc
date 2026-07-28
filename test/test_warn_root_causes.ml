@@ -385,13 +385,12 @@ let test_keeper_mainline_failures_log_at_error () =
   check bool "missing checkpoint after run logs at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_finalize_response.ml"
        {|"runtime=%s missing OAS checkpoint after run"|});
-  check bool "memory write failures log at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
-       {|"memory_write failed: %s"|});
-  check bool "memory write failures are no longer WARN" true
+  (* The deterministic memory-bank write (and its "memory_write failed" log
+     site) was removed with the bank — RFC keeper-memory-consolidation
+     Stage 4. *)
+  check bool "memory-bank write log site is gone" true
     (file_not_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
-       {|Log.Keeper.warn
-               "memory_write failed: %s"|});
+       {|"memory_write failed: %s"|});
   check bool "stale episode creation failure string is absent" true
     (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
        {|episode_create failed|})

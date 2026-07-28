@@ -18,63 +18,19 @@ let run
   ?deliberation_execution
   ()
   =
-  (* RFC-0257: snapshot the per-keeper tool-emission accumulator synchronously
-     at turn end, before the memory series detaches onto the memory lane.
-     Reading the live accumulator from a detached fiber could fold a later
-     turn's emissions into this turn's notes. *)
-  let tool_results_snapshot =
-    Keeper_tool_emission_hook.snapshot
-      (Keeper_tool_emission_hook.accumulator_for_keeper
-         meta.Keeper_meta_contract.name)
-  in
   (* (1) deterministic write and (2) LLM librarian extraction run on this
      keeper's memory lane (RFC-0257), detached from the turn lane, as TWO
-     separate submissions rather than one bundled unit (masc#25052 P3).
-     Before this split, both lived in one closure sharing one
-     Keeper_memory_lane reservation: a librarian call stuck on provider
-     queue wait held that reservation (and the lane's per-keeper mutex) for
-     the whole wait, so a subsequent turn's deterministic write -- bundled
-     in the SAME unit -- could be dropped alongside a saturated librarian
-     attempt, even though the write itself never touches a provider. Split,
-     the deterministic write's own reservation is held only for its (fast,
-     file-only) duration, so provider latency on the librarian side can no
-     longer cause it to be dropped for saturation. Both units still share
-     the keeper's per-keeper mutex (RFC-0257's fairness boundary is
-     unchanged); meta/config are immutable snapshots, so using them after
-     the turn returns does not race a later turn. See RFC #3646 Section 3:
-     Det/NonDet boundary. *)
+     separate submissions rather than one bundled unit (masc#25052 P3):
+     a librarian call stuck on provider queue wait must not hold the
+     deterministic unit's reservation. Both units still share the keeper's
+     per-keeper mutex (RFC-0257's fairness boundary is unchanged); meta/config
+     are immutable snapshots, so using them after the turn returns does not
+     race a later turn. *)
   let det_write_series () =
-    (try
-       let notes_written =
-         Memory.append_from_tool_results
-           config
-           meta
-           ~turn
-           ~results:tool_results_snapshot
-       in
-       let kinds_written =
-         if notes_written > 0 then [ "long_term" ] else []
-       in
-       if notes_written > 0
-       then
-         Keeper_turn_telemetry.log_keeper_memory_write
-           ~keeper_name:meta.name
-           ~notes_written
-           ~kinds_written
-     with
-     | exn ->
-       Log.Keeper.error ~keeper_name:meta.name
-         "memory_write failed: %s"
-         (Printexc.to_string exn);
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string MemoryWriteFailures)
-         ~labels:[ "keeper", meta.name ]
-         ());
-
     (* Advisory delegation request drafts: keep review artifact persistence on
-       the same bounded post-turn memory lane as draft-skill projection, not
-       on the decision-record append path. Deterministic (no provider call),
-       so it stays in this unit rather than the librarian one. *)
+       the bounded post-turn memory lane, not on the decision-record append
+       path. Deterministic (no provider call), so it stays in this unit rather
+       than the librarian one. *)
     (try
        match deliberation_execution with
        | None -> ()

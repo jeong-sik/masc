@@ -246,7 +246,7 @@ Institution에서 추출된 행동 패턴. 트리거, 단계, 성공률, 사용 
 Keeper 세션의 저장점. `working_context`, `generation`, messages, structured working_context를 포함한다. handoff rollover는 새 session에 `next_generation` checkpoint를 저장한 뒤에만 commit된다. `-> lib/keeper/keeper_context_core.ml`, `-> lib/keeper/keeper_rollover.ml`
 
 **MASC Memory Facade**
-Keeper memory bank, continuity snapshot, and compaction status를 묶는 MASC-owned public type. `-> lib/memory.mli`
+(제거됨) legacy memory bank facade. Memory OS fact store로 대체 — RFC keeper-memory-consolidation Stage 4.
 
 ---
 

@@ -40,7 +40,7 @@ import {
   KeeperRuntimeActions,
 } from './keeper-shared'
 import { KeeperStateDiagramPanel } from './keeper-state-diagram'
-import { KeeperMemoryTierPanel } from './keeper-memory-tier-panel'
+import { KeeperCompactionPanel } from './keeper-compaction-panel'
 import { AgentJournalStream } from './agent-detail-journal'
 import { SessionTraceView } from './session-trace/session-trace-view'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
@@ -152,8 +152,8 @@ export function KeeperDetailBody({
         <${KeeperStateDiagramPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
       <//>
 
-      <${CollapsibleSection} title="Memory Tier & Compaction">
-        <${KeeperMemoryTierPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
+      <${CollapsibleSection} title="Compaction">
+        <${KeeperCompactionPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
       <//>
 
       ${'' /* ── Divergent conditions (amber banner; renders only when phase lags observed signals) ── */}

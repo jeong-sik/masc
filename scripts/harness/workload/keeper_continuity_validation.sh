@@ -302,7 +302,6 @@ keeper_status_json() {
     fast: false,
     include_context: true,
     include_metrics_overview: true,
-    include_memory_bank: true,
     include_history_tail: true,
     include_compaction_history: true,
     tail_messages: 5,

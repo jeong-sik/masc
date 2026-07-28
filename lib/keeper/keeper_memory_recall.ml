@@ -4,8 +4,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-include Keeper_memory_bank
-
 module Log_memory = Log.Memory
 
 (* Static string-match patterns hoisted from evaluate_memory_recall.
@@ -133,108 +131,6 @@ let recent_lines_or_record
      | _ -> [])
 ;;
 
-(* RFC-0149 §3.1 — typed Result entry point.  Distinguishes "empty
-   memory bank" ([Ok summary] where [summary] holds zero recent rows)
-   from "memory bank read failed" ([Error class]).  Callers that want
-   to render a [Memory_unavailable] signal up the chain should consume
-   this variant instead of the legacy
-   [read_keeper_memory_summary]/[empty-summary] silent fallback. *)
-let read_keeper_memory_summary_result
-    (config : Workspace.config)
-    ~(name : string)
-    ~(max_bytes : int)
-    ~(max_lines : int)
-    ~(recent_limit : int) :
-    (keeper_memory_summary, Keeper_memory_recall_exn_class.t) result =
-  match
-    read_file_tail_lines_result
-      (Keeper_types_support.keeper_memory_bank_path config name)
-      ~max_bytes
-      ~max_lines
-  with
-  | Ok lines -> Ok (summarize_memory_bank_lines lines ~recent_limit)
-  | Error exn_class -> Error exn_class
-
-(* RFC-0149 §3.1: pure list -> list reducer.  Now the sole consumer is
-   [read_memory_horizon_counts_result]; the legacy facade was deleted
-   in the §3.1 closeout once all caller sites consumed the typed
-   variant. *)
-let memory_horizon_counts_from_lines (lines : string list) :
-    (string * int) list =
-  let counts : (string, int) Hashtbl.t = Hashtbl.create 8 in
-  List.iter
-    (fun line ->
-      match parse_memory_bank_row line with
-      | None -> ()
-      | Some row ->
-          let cur =
-            Option.value ~default:0
-              (Hashtbl.find_opt counts row.horizon)
-          in
-          Hashtbl.replace counts row.horizon (cur + 1))
-    lines;
-  counts
-  |> Hashtbl.to_seq
-  |> List.of_seq
-  |> List.sort (fun (ka, va) (kb, vb) ->
-         let c = compare vb va in
-         if c <> 0 then c else String.compare ka kb)
-
-(* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
-   horizon rows recorded") from [Error class] ("bank read failed"). *)
-let read_memory_horizon_counts_result
-    (config : Workspace.config)
-    ~(name : string)
-    ~(max_bytes : int)
-    ~(max_lines : int) :
-    ((string * int) list, Keeper_memory_recall_exn_class.t) result =
-  match
-    read_file_tail_lines_result
-      (Keeper_types_support.keeper_memory_bank_path config name)
-      ~max_bytes
-      ~max_lines
-  with
-  | Ok lines -> Ok (memory_horizon_counts_from_lines lines)
-  | Error exn_class -> Error exn_class
-
-(* RFC-0149 §3.1: pure list -> list filter (horizon-aware memory text
-   projector).  Now the sole consumer is
-   [read_recent_memory_texts_result]; the legacy facade was deleted
-   in the §3.1 closeout. *)
-let recent_memory_texts_from_lines
-    ~(horizon : string)
-    ~(limit : int)
-    (lines : string list) : string list =
-  lines
-  |> List.filter_map parse_memory_bank_row
-  |> List.filter (fun row -> String.equal row.horizon horizon)
-  |> List.sort (fun a b ->
-         let c = compare b.priority a.priority in
-         if c <> 0 then c else compare b.ts_unix a.ts_unix)
-  |> dedup_by_key (fun row -> normalize_memory_text_key row.text)
-  |> take (max 0 limit)
-  |> List.map (fun row -> row.text)
-
-(* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
-   recent texts for this horizon") from [Error class] ("bank read
-   failed"). *)
-let read_recent_memory_texts_result
-    (config : Workspace.config)
-    ~(name : string)
-    ~(horizon : string)
-    ~(max_bytes : int)
-    ~(max_lines : int)
-    ~(limit : int) :
-    (string list, Keeper_memory_recall_exn_class.t) result =
-  match
-    read_file_tail_lines_result
-      (Keeper_types_support.keeper_memory_bank_path config name)
-      ~max_bytes
-      ~max_lines
-  with
-  | Ok lines -> Ok (recent_memory_texts_from_lines ~horizon ~limit lines)
-  | Error exn_class -> Error exn_class
-
 (** Detect whether a query is asking about past conversation memory.
 
     Keywords are split by language for maintainability.
@@ -348,7 +244,7 @@ let history_user_messages_from_lines
              "load_history_user_messages: skipping line in %s: %s"
              path exn_detail;
            Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string MemoryBankLoadHistorySwallowedExceptions)
+             Keeper_metrics.(to_string MemoryRecallHistorySwallowedExceptions)
              ~labels:[ ("exception_class", exn_label) ]
              ();
            None)

@@ -89,7 +89,7 @@ let get_float ~default name =
         default)
 
 (** Variants that floor at zero.  An operator who sets a negative
-    value (e.g. [MASC_KEEPER_MEMORY_MAX_NOTES=-5]) gets the default
+    value (e.g. [MASC_KEEPER_METRICS_MAX_BYTES=-5]) gets the default
     rather than the literal — negative budgets/counts are
     nonsensical for the call sites these feed
     ({!Env_config_keeper}, size budgets, retry caps).

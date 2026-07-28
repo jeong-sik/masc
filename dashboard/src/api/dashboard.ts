@@ -330,8 +330,6 @@ export {
 export type {
   MemorySubsystemsSynapse,
   MemorySubsystemsEpisode,
-  MemorySubsystemsMemoryEntry,
-  MemorySubsystemsMemoryEntryError,
   MemorySubsystemsDelegationRequest,
   MemorySubsystemsResponse,
   KeeperMemoryHealthAlert,

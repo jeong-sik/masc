@@ -37,7 +37,6 @@ type status_options =
   ; fast : bool
   ; include_context : bool
   ; include_metrics_overview : bool
-  ; include_memory_bank : bool
   ; include_history_tail : bool
   ; include_compaction_history : bool
   }
@@ -229,12 +228,6 @@ let status_options_of_fields fields =
       Keeper_status_options_defaults.Argument.include_metrics_overview
       ~default:(not fast)
   in
-  let* include_memory_bank =
-    optional_bool_argument
-      fields
-      Keeper_status_options_defaults.Argument.include_memory_bank
-      ~default:(not fast)
-  in
   let* include_history_tail =
     optional_bool_argument
       fields
@@ -256,7 +249,6 @@ let status_options_of_fields fields =
     ; fast
     ; include_context
     ; include_metrics_overview
-    ; include_memory_bank
     ; include_history_tail
     ; include_compaction_history
     }
@@ -360,7 +352,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
         ; fast
         ; include_context
         ; include_metrics_overview
-        ; include_memory_bank
         ; include_history_tail
         ; include_compaction_history
         }
@@ -433,9 +424,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          in
 
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
-         let memory_bank_path =
-           Keeper_types_support.keeper_memory_bank_path config m.name
-         in
          let generation_index_path =
            Keeper_types_support.keeper_generation_index_path config m.name
          in
@@ -485,51 +473,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            else
              empty_metrics_summary
          in
-         (* RFC-0149 §3.1 — typed Result resolver.  The companion
-            [memory_bank_error_class] travels alongside the summary so
-            the dashboard detail surface can distinguish an empty
-            memory bank ([Ok summary], no recent rows) from an IO
-            fault ([Error class]) instead of collapsing both into the
-            same empty-shape record via the legacy silent fallback. *)
-         let empty_memory_bank_summary
-           : Keeper_memory_policy.keeper_memory_summary
-           =
-           { total_notes = 0
-           ; last_ts_unix = 0.0
-           ; top_kind = None
-           ; kind_counts = []
-           ; recent_notes = []
-           }
-         in
-         let memory_bank_summary, memory_bank_error_class =
-           if include_memory_bank then
-             match
-               read_keeper_memory_summary_result
-                 config
-                 ~name:m.name
-                 ~max_bytes:tail_bytes
-                 ~max_lines:
-                   (max
-                      (tail_turns
-                       * Keeper_status_options_defaults.metrics_lines_per_turn)
-                      Keeper_status_options_defaults.min_metrics_scan_lines)
-                 ~recent_limit:8
-             with
-             | Ok summary ->
-               let summary =
-                 { summary with
-                   recent_notes =
-                     apply_tail_order tail_order summary.recent_notes
-                 }
-               in
-               summary, None
-             | Error exn_class ->
-               ( empty_memory_bank_summary
-               , Some (Keeper_memory_recall_exn_class.to_label exn_class) )
-           else
-             empty_memory_bank_summary, None
-         in
-
          let history_filter_fragments =
            bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
          in
@@ -905,7 +848,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("fast", `Bool fast);
              ("include_context", `Bool include_context);
              ("include_metrics_overview", `Bool include_metrics_overview);
-             ("include_memory_bank", `Bool include_memory_bank);
              ("include_history_tail", `Bool include_history_tail);
              ("include_compaction_history", `Bool include_compaction_history);
              ("tail_order", `String (tail_order_to_string tail_order));
@@ -919,9 +861,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("sources", source_provenance_json config m);
            ("context", ctx_stats);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
-           ("memory_bank", memory_summary_to_json memory_bank_summary);
-           ("memory_bank_error_class",
-             Json_util.string_opt_to_json memory_bank_error_class);
            ("generation_lineage", generation_lineage);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);
@@ -938,7 +877,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-           ("memory_bank", `String memory_bank_path);
            ("generation_index", `String generation_index_path);
            ( "decisions"
            , `String (Keeper_types_support.keeper_decision_log_path config m.name) );

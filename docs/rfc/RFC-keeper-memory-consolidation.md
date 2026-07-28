@@ -1,9 +1,9 @@
 ---
 rfc: "keeper-memory-consolidation"
 title: "Keeper durable memory consolidation — deprecate memory_bank into Memory OS"
-status: Draft
+status: Implemented
 created: 2026-06-24
-updated: 2026-06-24
+updated: 2026-07-28
 author: vincent (drafted by Claude Opus 4.8)
 supersedes: []
 superseded_by: null
@@ -66,6 +66,11 @@ keeper durable 기억을 **Memory OS 단일 경로로 통합**하고 memory_bank
 
 비목표: Memory OS 스코어 모델 재설계(RFC-0243/0259/0285 소관)는 본 RFC 범위 밖. 본 RFC는 *두 시스템
 공존 제거*와 *retention 실작동*에 한정한다.
+
+> **2026-07-28 집행**: Stage 2~4를 단일 PR로 집행 완료 (branch
+> `refactor/remove-memory-bank`). bank 모듈·kind/horizon 어휘·read/write
+> 표면 전체 제거, durable 기억은 Memory OS fact store 단일 경로.
+> 잔존: legacy `.memory.jsonl` purge 경로 3사이트 (파일 정리 전용).
 
 ## §3 Plan — 4-stage deprecate (각 독립 PR + 롤백)
 

@@ -1,7 +1,7 @@
 (** Tool_shard_types_enum_mirrors — hand-mirrored enum string lists
     consumed by tool schema JSON producers in Tool_shard_types.
 
-    These six lists each mirror a [valid_*_strings] SSOT owned by a
+    These lists each mirror a [valid_*_strings] SSOT owned by a
     downstream keeper/board module. A direct dependency would form a
     cycle (Tool_shard -> Keeper_alerting -> Tool_shard via
     [keeper_model_tools]), so each value is hand-kept in lock-step
@@ -12,8 +12,6 @@
           mirrors [Board_dispatch.valid_sort_order_strings] (#8513)
       - [memory_search_source_enum_strings]
           mirrors [Keeper_tool_memory_runtime.valid_memory_search_source_strings] (#8484)
-      - [memory_kind_enum_strings]
-          mirrors [Keeper_memory_policy.valid_memory_kind_strings] (#8527)
       - [fs_write_mode_enum_strings]
           mirrors [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings] (#8490)
       - [vote_direction_enum_strings]
@@ -28,15 +26,6 @@
     generated SSOT via dune rule or lazy late-binding registration). *)
 
 let memory_search_source_enum_strings = [ "memory"; "history"; "all" ]
-
-let memory_kind_enum_strings =
-  [ "decision"
-  ; "goal"
-  ; "progress"
-  ; "open_question"
-  ; "long_term"
-  ]
-;;
 
 let fs_write_mode_enum_strings = [ "overwrite"; "append"; "patch" ]
 let sort_order_enum_strings = [ "hot"; "trending"; "recent"; "updated"; "discussed" ]

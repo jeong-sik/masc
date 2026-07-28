@@ -754,7 +754,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         interests: asStringArray(row.interests),
         primaryValue: asString(row.primaryValue) ?? asString(row.primary_value),
         activityLevel: asNumber(row.activityLevel) ?? asNumber(row.activity_level),
-        memory_recent_note: asString(row.memory_recent_note) ?? null,
         recent_input_preview: asString(row.recent_input_preview) ?? null,
         recent_output_preview: asString(row.recent_output_preview) ?? null,
         recent_tool_names: asStringArray(row.recent_tool_names) ?? [],

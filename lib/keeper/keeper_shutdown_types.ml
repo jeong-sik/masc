@@ -51,6 +51,8 @@ type completion_action =
 
 type dashboard_purge_artifact =
   | Keeper_metrics_store_artifact
+  (* Legacy: the memory bank was removed (RFC keeper-memory-consolidation
+     Stage 4); purge still deletes a pre-removal [.memory.jsonl]. *)
   | Keeper_memory_bank_artifact
   | Keeper_generation_index_artifact
   | Keeper_decision_log_artifact

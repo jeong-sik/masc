@@ -69,45 +69,6 @@ let handle_keeper_list ctx args : tool_result =
           let metrics_overview =
             summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.nonce
           in
-          (* RFC-0149 §3.1 — single typed read drives both the structured
-             [memory_bank_summary] (consumed by [memory_bank] / counts
-             elsewhere in this object) and the operator-visible
-             [memory_recent_note] string field.  An IO fault surfaces a
-             typed unavailable marker on the note, and the empty-shaped
-             summary preserves the legacy aggregate semantics (zero notes,
-             no kinds) so downstream JSON keys stay populated. *)
-          let memory_bank_summary, memory_recent_note =
-            match
-              read_keeper_memory_summary_result
-                ctx.config
-                ~name:m.name
-                ~max_bytes:120000
-                ~max_lines:180
-                ~recent_limit:3
-            with
-            | Ok summary ->
-              let note =
-                match summary.recent_notes with
-                | row :: _ -> Some row.text
-                | [] -> None
-              in
-              summary, note
-            | Error exn_class ->
-              let empty : Keeper_memory_policy.keeper_memory_summary =
-                { total_notes = 0
-                ; last_ts_unix = 0.0
-                ; top_kind = None
-                ; kind_counts = []
-                ; recent_notes = []
-                }
-              in
-              let note =
-                Some
-                  (Printf.sprintf "[memory unavailable: %s]"
-                     (Keeper_memory_recall_exn_class.to_label exn_class))
-              in
-              empty, note
-          in
           let context_json =
             match last_metrics with
             | None -> `Assoc [("source", `String "none")]
@@ -199,19 +160,11 @@ let handle_keeper_list ctx args : tool_result =
               ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
               ("noop_turn_count", `Int m.runtime.noop_turn_count);
               ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
-              ("memory_note_count", `Int memory_bank_summary.total_notes);
-              ("memory_top_kind",
-                Json_util.string_opt_to_json memory_bank_summary.top_kind);
-              ("memory_recent_note",
-                Json_util.string_opt_to_json memory_recent_note);
               ("context", context_json);
               ("metrics_overview", metrics_summary_to_json metrics_overview);
-              ("memory_bank", memory_summary_to_json memory_bank_summary);
               ("storage_paths", `Assoc [
                 ("meta", `String (keeper_meta_path ctx.config m.name));
                 ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-                ( "memory_bank"
-                , `String (Keeper_types_support.keeper_memory_bank_path ctx.config m.name) );
                 ( "feedback"
                 , `String (Keeper_types_support.keeper_feedback_log_path ctx.config m.name) );
                 ( "session_dir"

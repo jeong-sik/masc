@@ -30,7 +30,7 @@ code_refs:
 |-----------|------|------|------|------|------|------|---------|
 | Workspace State | 03 | 24 | 0 | 0 | 0 | 100% | 전 기능 운용 |
 | Chain Engine | 04 | - | - | - | - | **REMOVED** | 소스 삭제됨, OAS superseded |
-| Keeper Agent | 05 | 25 | 0 | 0 | 0 | 100% | MASC-owned memory facade + JSONL memory bank |
+| Keeper Agent | 05 | 25 | 0 | 0 | 0 | 100% | Memory OS fact store (legacy JSONL memory bank 제거) |
 | Command Plane | 06 | 40 | 0 | 0 | 0 | 100% | Intent 도구 4종 MCP 등록 완료 |
 | Team Session | 07 | 31 | 2 | 0 | 0 | 94% | Auto 모드는 OAS 위임, projection 해소 |
 | Gate | 08 | 28 | 0 | 0 | 0 | 100% | 비계층 effect Gate + dashboard surface |
@@ -193,7 +193,7 @@ Auto Judge, durable nonblocking HITL, one-shot provenance와 독립 Keeper wake�
 | 우선순위 | 항목 | 근거 |
 |---------|------|------|
 | ~~1~~ | ~~Server: SSE rate limit 활성화~~ | **완료** (기본값 1s/60s-10 활성화) |
-| ~~2~~ | ~~Keeper: external memory projection 완성~~ | **제거** (`Masc.Memory.t` + keeper memory bank로 경계 정리) |
+| ~~2~~ | ~~Keeper: external memory projection 완성~~ | **제거** (Memory OS fact store로 경계 정리) |
 | 2 | Team Session: bridge fidelity 재설계 여부 결정 | `collaboration_context` 제거 상태에서 `worker_specs` / prompt context만으로 충분한지 판단 필요 |
 | ~~1~~ | ~~Board Listener: filesystem-first 재설계~~ | **완료** (제거됨 — Board_dispatch가 SSE 직접 발사, PG relay 불필요) |
 | 1 | Transport: HTTP/2 h2c 벤치마크 | opt-in→canonical 전환 판단 근거 |

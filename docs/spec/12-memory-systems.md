@@ -1,11 +1,10 @@
 ---
 status: reference
-last_verified: 2026-07-10
+last_verified: 2026-07-28
 code_refs:
-  - lib/memory.ml
-  - lib/keeper/keeper_memory_bank.ml
   - lib/keeper/keeper_memory_recall.ml
   - lib/keeper/keeper_librarian.ml
+  - lib/keeper/keeper_memory_os_store.ml
   - lib/institution_eio.ml
 ---
 
@@ -20,13 +19,18 @@ side derives memory from a model-authored state envelope.
 | Store | Owner | Purpose |
 |---|---|---|
 | OAS checkpoint/context | OAS | active transcript and restartable agent context |
-| Keeper memory bank | MASC | explicitly selected durable notes with provenance |
+| Memory OS fact store | MASC | durable claims with provenance (librarian + explicit writes) |
 | Institution memory | MASC | shared organizational knowledge and episodes |
 | Procedural memory | MASC | verified reusable procedures |
 | Tool/history logs | MASC | observable evidence and recall source |
 
-Keeper memory bank path:
-`.masc/keepers/<keeper_name>.memory.jsonl`.
+Memory OS fact store path:
+`.masc/config/keepers/<keeper_name>.facts.jsonl`.
+
+The legacy per-keeper memory bank (`.masc/keepers/<keeper_name>.memory.jsonl`
+and its kind/horizon vocabulary) was removed
+(RFC keeper-memory-consolidation Stage 4); keeper purge still deletes a
+pre-removal file left on disk.
 
 ## Write Contract
 
@@ -58,7 +62,7 @@ OAS reduces active context through its checkpoint/context APIs. MASC may
 request a configured strategy and observe the outcome, but must not rewrite
 the transcript through domain-specific text parsing.
 
-Keeper memory-bank rewriting is an explicit typed Memory operation. An LLM
+Memory OS fact rewriting is an explicit typed Memory operation. An LLM
 librarian returns the keep, rewrite, or forget decisions; deterministic code
 only validates their schema and provenance and atomically applies that exact
 plan. Storage pressure is observable and may request the operation, but a

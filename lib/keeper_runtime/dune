@@ -10,7 +10,6 @@
  (modules
   keeper_sandbox_error
   keeper_terminal_reason
-  keeper_synthetic_marker
   keeper_runtime_config
   keeper_disk_pressure
   keeper_fd_pressure

@@ -103,13 +103,6 @@ val keeper_decisions_log_json :
   unit ->
   Yojson.Safe.t
 (** Renders the K2 cross-keeper decision log feed. *)
-
-val keeper_memory_log_json :
-  config:Workspace.config ->
-  keepers:Keeper_meta_contract.keeper_meta list ->
-  ?limit:int ->
-  unit ->
-  Yojson.Safe.t
 (** Renders the K2 cross-keeper memory-bank feed. *)
 
 (** {1 Per-keeper runtime snapshots} *)

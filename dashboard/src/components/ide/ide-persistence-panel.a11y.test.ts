@@ -30,7 +30,7 @@ afterEach(() => {
 })
 
 describe('IdePersistencePanel a11y', () => {
-  it('has no axe violations for lifecycle and memory graph content', async () => {
+  it('has no axe violations for lifecycle content', async () => {
     activeKeeperName.value = 'sangsu'
     keepers.value = [{
       name: 'sangsu',
@@ -42,14 +42,10 @@ describe('IdePersistencePanel a11y', () => {
       keeper: 'sangsu',
       current_phase: 'Running',
       mermaid: 'graph TD',
-      memory_kind_usage: [
-        { kind: 'tool_result', used: 8, cap: 10, priority: 1 },
-        { kind: 'semantic_note', used: 3, cap: 12, priority: 2 },
-      ],
     } satisfies KeeperStateDiagramResponse)
 
     const { container, findByTestId } = render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
-    await findByTestId('ide-memory-graph')
+    await findByTestId('ide-persistence-lifecycle')
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
 
     expect(await axe(container)).toHaveNoViolations()

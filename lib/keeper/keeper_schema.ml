@@ -316,10 +316,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "boolean");
           ("description", `String "Include metrics overview + skill route scan (default: !fast).");
         ]);
-        (Keeper_status_options_defaults.Argument.include_memory_bank, `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include memory bank summary (default: !fast).");
-        ]);
         (Keeper_status_options_defaults.Argument.include_history_tail, `Assoc [
           ("type", `String "boolean");
           ("description", `String "Include recent history tail + fragment counters (default: !fast).");

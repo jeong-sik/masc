@@ -558,43 +558,10 @@ let run_keeper_invocation_turn_admitted
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
-              (* RFC-0149 §3.1 — route through typed Result resolver so a
-                 memory-bank IO fault stays explicit instead of collapsing
-                 into the same empty block as "no durable notes". *)
-              let durable_memory_text =
-                  (* RFC keeper-memory-consolidation Stage 1: memory_bank long-term
-                     inject를 kill-switch 뒤로 둔다. off 시 Memory OS facts
-                     (keeper_run_tools_hooks.render_if_enabled, default-ON) 단독
-                     주입이 되어 durable 기억의 double-coverage를 제거한다. *)
-                  if not (Keeper_memory_bank_env.bank_longterm_inject_enabled ())
-                  then ""
-                  else
-                  match
-                    read_recent_memory_texts_result ctx.config
-                      ~name:meta.name
-                      ~horizon:Keeper_memory_policy.long_term_horizon
-                      ~max_bytes:(128 * 1024)
-                      ~max_lines:200
-                      ~limit:3
-                  with
-                  | Ok [] -> ""
-                  | Ok items ->
-                      let safe_items =
-                        List.map
-                          (fun s ->
-                             Keeper_run_prompt.normalize_memory_fragment
-                               (String.trim s))
-                          items
-                      in
-                      if safe_items = []
-                      then ""
-                      else
-                        "Long-term memory:\n- " ^ String.concat "\n- " safe_items
-                  | Error exn_class ->
-                      Printf.sprintf
-                        "Long-term memory: [unavailable: %s]"
-                        (Keeper_memory_recall_exn_class.to_label exn_class)
-              in
+              (* Durable memory arrives from Memory OS facts recall
+                 (keeper_run_tools_hooks.render_if_enabled, default-ON); the
+                 legacy memory-bank "Long-term memory:" block is gone
+                 (RFC keeper-memory-consolidation Stage 4). *)
               let recent_direct_conversation_text =
                 direct_owner_conversation_context
                   ~config:ctx.config ~meta ~direct_reply ~channel_session_key
@@ -643,8 +610,7 @@ let run_keeper_invocation_turn_admitted
               in
               let soft_parts = List.filter
                 (fun s -> String.trim s <> "")
-                [ durable_memory_text;
-                  recent_direct_conversation_text;
+                [ recent_direct_conversation_text;
                   worktree_text;
                   telemetry_feedback_text;
                   turn_instructions_text ]

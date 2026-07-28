@@ -118,7 +118,6 @@ const dashboardFetchHandlers: ReadonlyArray<[
   [/\/state-diagram/, () => jsonResponse({
     keeper: 'sangsu',
     current_phase: 'observe',
-    memory_kind_usage: [],
   })],
 ]
 

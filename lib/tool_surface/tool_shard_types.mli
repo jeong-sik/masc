@@ -7,10 +7,6 @@ val memory_search_source_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_memory_runtime.valid_memory_search_source_strings]
     (#8484). *)
 
-val memory_kind_enum_strings : string list
-(** Hand-mirrored from [Keeper_memory_policy.valid_memory_kind_strings]
-    (#8527). *)
-
 val fs_write_mode_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings]
     (#8490). *)

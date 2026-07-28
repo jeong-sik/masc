@@ -28,12 +28,10 @@ let base_tools : Masc_domain.tool_schema list =
   ; (* Memory *)
     { name = "keeper_memory_search"
     ; description =
-        "Search this run's working notes or conversation history. \
-         Returns results with provenance metadata. Default searches the structured memory \
-         bank. Use 'kind' to filter the typed note categories exposed by the runtime. \
-         Use source='history' for raw user messages, \
-         source='all' for both. Durable long_term claims are not searched here; they \
-         are rendered into your context automatically."
+        "Search your durable Memory OS facts or conversation history. \
+         Returns results with claim_kind/category metadata. Default searches the \
+         durable fact store. Use source='history' for raw user messages, \
+         source='all' for both."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -43,16 +41,6 @@ let base_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; "description", `String "keyword to search for"
-                      ] )
-                ; ( "kind"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "enum"
-                        , `List
-                            (List.map
-                               (fun s -> `String s)
-                               memory_kind_enum_strings) )
-                      ; "description", `String "Filter by memory kind"
                       ] )
                 ; ( "limit"
                   , `Assoc
@@ -82,23 +70,19 @@ let base_tools : Masc_domain.tool_schema list =
                                memory_search_source_enum_strings) )
                       ; ( "description"
                         , `String
-                            "Search scope: memory (default, structured notes), history \
+                            "Search scope: memory (default, durable facts), history \
                              (raw messages), or all" )
                       ] )
                 ] )
           ; "required", `List [ `String "query" ]
           ]
     }
-  ; (* RFC-0035 P4: explicit memory write surface.
-     Symmetric to the memory search tool; takes a structured note
-     (kind/title/content). RFC-0351 L1: the kind picks the store —
-     long_term writes the durable claim recall reads back on later
-     turns, the rest write turn-scoped working notes. *)
+  ; (* RFC-0035 P4: explicit memory write surface. Writes a durable claim
+     into the Memory OS fact store (RFC keeper-memory-consolidation
+     Stage 4: the turn-scoped bank is gone). *)
     { name = "keeper_memory_write"
     ; description =
-        "Record something you want to keep. 'long_term' writes a durable claim that \
-         later turns read back; the other kinds write a working note for the run in \
-         progress, searchable but not carried forward on its own. Your context resets \
+        "Record a durable claim that later turns read back. Your context resets \
          between turns, so a conclusion you leave only in this turn's reasoning is \
          gone. Task sequencing and operating constraints belong to their typed domain \
          stores, not memory prose. The runtime records explicit typed provenance and \
@@ -108,21 +92,7 @@ let base_tools : Masc_domain.tool_schema list =
           [ "type", `String "object"
           ; ( "properties"
             , `Assoc
-                [ ( "kind"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "enum"
-                        , `List
-                            (List.map
-                               (fun s -> `String s)
-                               memory_kind_enum_strings) )
-                      ; ( "description"
-                        , `String
-                            "Memory kind. 'long_term' is the durable store later \
-                             turns read back; goal/progress/decision/open_question \
-                             are working notes for the run in progress." )
-                      ] )
-                ; ( "title"
+                [ ( "title"
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
@@ -141,13 +111,13 @@ let base_tools : Masc_domain.tool_schema list =
                       [ "type", `String "integer"
                       ; ( "description"
                         , `String
-                            "Optional, long_term only: how many days this claim stays \
+                            "Optional: how many days this claim stays \
                              true (1-365). Recall stops injecting it after that. Omit \
                              when the claim has no expiry; do not omit it merely \
                              because you are unsure how long it holds." )
                       ] )
                 ] )
-          ; "required", `List [ `String "kind"; `String "content" ]
+          ; "required", `List [ `String "content" ]
           ]
     }
   ; (* Tool self-introspection — lets the keeper enumerate its own capabilities *)

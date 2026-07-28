@@ -166,11 +166,6 @@ let keeper_cost_metric_row_is_event (json : Yojson.Safe.t) : bool =
      || field_equals "work_kind" "status_tick"
      || field_equals "snapshot_source" "keeper_context_status")
 
-let memory_kind_for_log = function
-  | Keeper_memory_policy.Progress -> "episode"
-  | Keeper_memory_policy.Goal | Keeper_memory_policy.Decision -> "plan"
-  | Keeper_memory_policy.Open_question | Keeper_memory_policy.Long_term -> "fact"
-
 let keeper_decisions_dashboard_surface = "/api/v1/dashboard/keeper-decisions"
 
 let k2_feed_limit limit = max 1 (min 200 limit)

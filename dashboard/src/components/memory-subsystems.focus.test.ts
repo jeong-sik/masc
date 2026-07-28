@@ -29,21 +29,6 @@ const baseResponse: MemorySubsystemsResponse = {
       },
     ],
   },
-  memory_entries: {
-    total: 1,
-    filtered: 1,
-    shown: 1,
-    limit: 100,
-    items: [
-      {
-        keeper: 'keeper-alpha',
-        kind: 'verified',
-        text: 'PR review addressed',
-        priority: 90,
-        ts_unix: 1,
-      },
-    ],
-  },
   delegation_requests: {
     total: 1,
     shown: 1,
@@ -66,7 +51,6 @@ const baseResponse: MemorySubsystemsResponse = {
   filters: {
     keepers: ['keeper-alpha'],
     outcomes: ['success'],
-    memory_kinds: ['verified'],
   },
 }
 
@@ -124,31 +108,6 @@ describe('MemorySubsystems focus targets', () => {
     vi.restoreAllMocks()
   })
 
-  it('requests sensitive memory entries and focuses that section for entries focus', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse))
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(html`<${MemorySubsystems} focus=${'entries'} />`, container)
-
-    await vi.waitFor(() => {
-      const requestUrls = fetchMock.mock.calls.map(call =>
-        new URL(call[0] as string, 'http://dashboard.local'),
-      )
-      expect(requestUrls.some(url => url.searchParams.get('include_memory_entries') === 'true')).toBe(true)
-    })
-    await vi.waitFor(() => {
-      expect(container.textContent).toContain('PR review addressed')
-    })
-
-    const target = container.querySelector('[data-memory-focus-target="entries"]')
-    expect(target).not.toBeNull()
-    expect(container.querySelector('[data-testid="memory-entries"]')).not.toBeNull()
-    await vi.waitFor(() => {
-      expect(focusMock.mock.contexts).toContain(target)
-      expect(scrollIntoViewMock.mock.contexts).toContain(target)
-    })
-  })
-
   it('renders delegation requests from the memory subsystem payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse))
     vi.stubGlobal('fetch', fetchMock)
@@ -191,26 +150,14 @@ describe('MemorySubsystems focus targets', () => {
     })
   })
 
-  it('focuses the episodes section without requesting memory entries for episodes focus', async () => {
-    const responseWithoutEntries: MemorySubsystemsResponse = {
-      ...baseResponse,
-      memory_entries: undefined,
-      filters: {
-        keepers: ['keeper-alpha'],
-        outcomes: ['success'],
-      },
-    }
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(responseWithoutEntries))
+  it('focuses the episodes section for episodes focus', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse))
     vi.stubGlobal('fetch', fetchMock)
 
     render(html`<${MemorySubsystems} focus=${'episodes'} />`, container)
 
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalled()
-      const requestUrls = fetchMock.mock.calls.map(call =>
-        new URL(call[0] as string, 'http://dashboard.local'),
-      )
-      expect(requestUrls.some(url => url.searchParams.has('include_memory_entries'))).toBe(false)
     })
     await vi.waitFor(() => {
       expect(container.textContent).toContain('Finished a task')
@@ -218,40 +165,23 @@ describe('MemorySubsystems focus targets', () => {
 
     const target = container.querySelector('[data-memory-focus-target="episodes"]')
     expect(target).not.toBeNull()
-    expect(container.querySelector('[data-memory-focus-target="entries"]')).toBeNull()
     await vi.waitFor(() => {
       expect(focusMock.mock.contexts).toContain(target)
       expect(scrollIntoViewMock.mock.contexts).toContain(target)
     })
   })
 
-  it('does not show the entries panel from an unrequested empty memory_entries payload', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
-      ...baseResponse,
-      memory_entries: {
-        total: 0,
-        filtered: 0,
-        shown: 0,
-        limit: 100,
-        items: [],
-      },
-    }))
+  it('does not scroll or focus the episodes section without a focus target', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse))
     vi.stubGlobal('fetch', fetchMock)
 
     render(html`<${MemorySubsystems} />`, container)
 
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled()
-      const requestUrls = fetchMock.mock.calls.map(call =>
-        new URL(call[0] as string, 'http://dashboard.local'),
-      )
-      expect(requestUrls.some(url => url.searchParams.has('include_memory_entries'))).toBe(false)
-    })
-    await vi.waitFor(() => {
       expect(container.textContent).toContain('Finished a task')
     })
 
-    expect(container.querySelector('[data-memory-focus-target="entries"]')).toBeNull()
-    expect(container.querySelector('[data-testid="memory-entries"]')).toBeNull()
+    expect(scrollIntoViewMock).not.toHaveBeenCalled()
+    expect(focusMock).not.toHaveBeenCalled()
   })
 })

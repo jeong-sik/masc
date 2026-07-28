@@ -1,15 +1,8 @@
-(** Keeper_memory_recall — memory recall and memory evaluation.
-
-    Pure memory bank operations are provided by [Keeper_memory_bank]
-    (included below). This module adds recall-specific logic on top. *)
+(** Keeper_memory_recall — memory recall and memory evaluation. *)
 
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-
-(** {1 Re-exported from Keeper_memory_bank} *)
-
-include module type of Keeper_memory_bank
 
 (** {1 File Reading} *)
 
@@ -54,49 +47,6 @@ val recent_lines_or_record :
     matching the prior tail read's graceful degradation;
     {!Eio.Cancel.Cancelled} is re-raised verbatim (RFC-0106).  Shared by the
     operator tool-audit and keeper status-metrics snapshot paths. *)
-
-val read_keeper_memory_summary_result :
-  Workspace.config ->
-  name:string ->
-  max_bytes:int ->
-  max_lines:int ->
-  recent_limit:int ->
-  (keeper_memory_summary, Keeper_memory_recall_exn_class.t) result
-(** Result-returning variant of {!read_keeper_memory_summary}.  On
-    [Error class] the caller can render a typed [Memory_unavailable]
-    signal up the chain (boot-time alert, operator-visible degraded
-    status) instead of emitting an empty summary that is
-    indistinguishable from a fresh keeper with no recorded memory.
-
-    @since RFC-0149 Phase 1 *)
-
-val read_memory_horizon_counts_result :
-  Workspace.config ->
-  name:string ->
-  max_bytes:int ->
-  max_lines:int ->
-  ((string * int) list, Keeper_memory_recall_exn_class.t) result
-(** Result-returning variant of {!read_memory_horizon_counts}.  On
-    [Error class] the caller can distinguish "no horizon counts because
-    the bank is empty" ([Ok []]) from "the bank read failed"
-    ([Error class]).
-
-    @since RFC-0149 §3.1 *)
-
-val read_recent_memory_texts_result :
-  Workspace.config ->
-  name:string ->
-  horizon:string ->
-  max_bytes:int ->
-  max_lines:int ->
-  limit:int ->
-  (string list, Keeper_memory_recall_exn_class.t) result
-(** Result-returning variant of {!read_recent_memory_texts}.  On
-    [Error class] the caller can distinguish "no recent texts in this
-    horizon" ([Ok []]) from "the bank read failed" ([Error class]).
-
-    @since RFC-0149 §3.1 *)
-
 
 (** {1 Query Detection} *)
 

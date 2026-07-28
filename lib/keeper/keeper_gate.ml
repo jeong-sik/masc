@@ -1,5 +1,6 @@
 type causal_context =
   { turn_id : int option
+  ; tool_call_id : string option
   ; snapshot : Yojson.Safe.t
   }
 
@@ -187,6 +188,7 @@ let rec take_matching_cycle_grant grant request =
         ~id:entry.approval_id
         ~keeper_name:request.keeper_name
         ~tool_name:request.operation
+        ~tool_call_id:(Option.bind request.causal_context (fun context -> context.tool_call_id))
         ~input:request.input
       with
       | Error error ->
@@ -303,6 +305,7 @@ let submit request =
     ~input:request.input
     ~base_path:request.base_path
     ?turn_id:(request_turn_id request)
+    ?tool_call_id:(Option.bind request.causal_context (fun context -> context.tool_call_id))
     ?request_context:(Option.map (fun context -> context.snapshot) request.causal_context)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids

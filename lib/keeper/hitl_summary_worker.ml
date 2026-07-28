@@ -43,6 +43,7 @@ let build_context_bundle ~(entry : pending_approval) =
   let request_identity =
     [ "keeper_name", `String entry.keeper_name
     ; "tool_name", `String entry.tool_name
+    ; "tool_call_id", Json_util.string_opt_to_json entry.tool_call_id
     ; "turn_id", Json_util.int_opt_to_json entry.turn_id
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id

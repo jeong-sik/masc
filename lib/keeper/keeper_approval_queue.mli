@@ -71,6 +71,7 @@ type exact_attempt_transition =
 type approved_resolution_request =
   { keeper_name : string
   ; tool_name : string
+  ; tool_call_id : string option
   ; input : Yojson.Safe.t
   }
 
@@ -152,6 +153,7 @@ val consume_approved_resolution :
   id:string ->
   keeper_name:string ->
   tool_name:string ->
+  tool_call_id:string option ->
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
 
@@ -342,13 +344,16 @@ end
 
 (** {1 Nonblocking submission and explicit resolution} *)
 
-(** Durably enqueue an exact request without suspending the caller. Returns an
-    existing id only when the same Keeper, operation identity, canonical input,
-    turn/task/goal identity, and continuation channel are already pending. A
-    deduplicated request does not consume a durable queue sequence. *)
+(** Durably enqueue an exact request without suspending the caller. An existing
+    id is reused only when the caller supplies the same durable [tool_call_id],
+    Keeper, operation identity, and canonical input. Turn/task/goal/channel
+    fields are provenance and never deduplication keys. Requests without a
+    [tool_call_id] are never deduplicated. A deduplicated request does not
+    consume a durable queue sequence. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
+  ?tool_call_id:string ->
   input:Yojson.Safe.t ->
   base_path:string ->
   ?turn_id:int ->

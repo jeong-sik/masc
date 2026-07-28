@@ -8,8 +8,6 @@
     - {!Board_tool_format}    — formatters, arg coercion helpers,
                                 sort-order parser,
                                 Board_error renderer, Yojson boundary.
-    - {!Board_tool_cache}     — TTL cache for [masc_board_list]
-                                payloads and its invalidator.
     - {!Board_tool_handlers}  — agent-lookup callback, SOUL-evolution
                                 hook, vote / comment_vote / reaction /
                                 stats / search / profile / hearths /
@@ -30,7 +28,6 @@
     [sort_order]. *)
 
 include Board_tool_format
-include Board_tool_cache
 include Board_tool_handlers
 include Board_tool_post
 include Board_tool_sub_board

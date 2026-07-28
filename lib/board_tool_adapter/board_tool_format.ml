@@ -32,13 +32,14 @@ let author_raw_agent_name_meta_key = raw_agent_name_meta_key ~field:"author"
    The previous [format_timestamp_relative] / [format_ttl_remaining] pair read
    [Time_compat.now ()] inside functions whose signatures promised a pure
    [float -> string]: the clock was a hidden second input. A re-listed post
-   therefore drifted "7m ago" -> "8m ago" while nothing about the post changed,
-   which (a) made every payload byte-new, so [Board_tool_cache] could never hit
-   and no downstream dedup was possible, and (b) read to the keeper as "the
-   board moved", re-arming its poll cycle. Measured on rondo turn
-   1785189305806: 44 [masc_board_search] calls, one real change, 44 distinct
-   payloads whose only diff was the minute counter; the turn's tool_result
-   accumulation was 81.3% byte-exact duplication.
+   therefore drifted "7m ago" -> "8m ago" while nothing about the post changed.
+   Measured on one rondo turn: 42 [masc_board_list] calls returning the same
+   878B of board state split across three distinct byte sequences, purely
+   because the minute counter advanced.
+
+   The cost is that "the board did not change" becomes unrepresentable:
+   nothing downstream can collapse those calls, and the drift is a candidate
+   false "state moved" signal to the reading model.
 
    Both now render the instant they were given, so output is a function of the
    argument alone. The keeper resolves recency against [session:wall_time],

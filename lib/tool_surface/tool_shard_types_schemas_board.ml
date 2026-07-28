@@ -159,7 +159,7 @@ let board_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Sort order (default: recent)"
                       ] )
                 ; (* Mirror masc_board_list: the board_list backend
-                     (board_tool_post.ml handle_post_list_uncached) already
+                     (board_tool_post.ml handle_post_list) already
                      reads [compact] (default true), but the keeper surface
                      omitted it, so a keeper could never request full output
                      and qa-king's [compact] arg was rejected as an

@@ -16,19 +16,17 @@
       shared with the dashboard board route.
 
     Internal helpers stay private at this boundary
-    ([board_list_cache] type + the cache cell, the
-    [cached_board_list] adapter,
-    [format_expiry],
+    ([format_expiry],
     [agent_lookup_hook] atomic ref,
     [resolve_board_post_kind], [format_post] /
     [format_post_compact] / [format_comment] /
     [format_comment_tree], [assoc_replace],
     [judgment_arg], [normalize_board_post_meta],
-    [handle_post_create] / [_list_uncached] / [_list] /
+    [handle_post_create] / [_list] /
     [_get] / [_comment_add] / [_vote] / [_stats] /
     [_search] / [_comment_vote] / [_profile] /
     [_hearth_list] / [_delete] / [_board_cleanup],
-    [board_list_cache_key], [evolution_callback] type,
+    [evolution_callback] type,
     [evolution_hook] atomic ref,
     [register_evolution_callback], [tool_post_list],
     [tool_post_get], [tool_comment_add], [tool_vote],
@@ -108,14 +106,6 @@ val is_agent : string -> bool
 (** Returns the result of the registered hook, [false]
     when no hook is installed. *)
 
-(** {1 Cache invalidation} *)
-
-val invalidate_board_list_cache : unit -> unit
-(** Drops the cached [masc_board_list] result so the next
-    read sees fresh state.  Called automatically by
-    {!handle_tool} after every mutation
-    (post / comment / vote / delete / cleanup). *)
-
 (** {1 Tools advertised to MCP} *)
 
 val tool_post_create : Masc_domain.tool_schema
@@ -137,12 +127,11 @@ val handle_tool : string -> Yojson.Safe.t -> Tool_result.result
     {!Tool_dispatch.handler} registration boundary inside {!register},
     so external callers (MCP transport) see no behavior change. *)
 (** Routes [name] to the matching internal handler.
-    Mutation tools (post / comment / vote / delete /
-    cleanup) automatically invoke
-    {!invalidate_board_list_cache} on completion so the
-    next [masc_board_list] reads fresh data.  Returns a
-    {!Tool_result.result} carrying success flag, structured
-    payload, tool name, and elapsed duration. *)
+    [masc_board_list] reads the store on every call, so a
+    mutation is visible to the next read with no
+    invalidation step.  Returns a {!Tool_result.result}
+    carrying success flag, structured payload, tool name,
+    and elapsed duration. *)
 
 (** {1 Registry installation} *)
 

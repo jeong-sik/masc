@@ -28,7 +28,6 @@ val dispatch :
     [submitted_by] is trusted boundary context, never model input. *)
 val dispatch_keeper_msg
   :  submitted_by:string
-  -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> _ context
   -> args:Yojson.Safe.t

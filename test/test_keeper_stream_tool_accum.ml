@@ -100,6 +100,8 @@ let test_replayed_completed_block_is_not_persisted_twice () =
      already durable, so it must not open a second transcript tool row. *)
   A.on_event t (start ~index:0 ~tool_id:(Some "call-complete") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-conflict") ~tool_name:(Some "Write"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"wrong.ml\"}");
   A.on_event t (stop ~index:0);
   check (list tool_call) "completed replay remains one call"
     [ { call_id = "call-complete"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]

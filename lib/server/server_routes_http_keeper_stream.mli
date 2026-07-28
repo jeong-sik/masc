@@ -213,8 +213,10 @@ val process_single_turn :
 
     [queued_turn] (default [false], set [true] only by
     [Server_bootstrap_loops]'s queue-consumer [handle_turn] wiring) changes
-    ONLY the [No_visible_reply]/empty-[Visible_reply] outcome. A persisted
-    media block is a delivered reply even when its text is empty. With no
+    terminal handling for [No_visible_reply], an empty [Visible_reply], and
+    [Continuation_checkpoint]. A media-only ordinary reply is delivered even
+    when its text is empty. A queued continuation remains a typed failure but
+    retains any streamed media blocks on that durable failure row. With no
     visible blocks, the interactive HTTP stream keeps recording the user line
     only ([persist_user_message_only]), matching its existing "the keeper will
     answer on the next turn" semantics; a queued turn instead persists a typed

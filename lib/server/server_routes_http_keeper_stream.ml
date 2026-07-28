@@ -548,107 +548,6 @@ let keeper_stream_success = function
   | Tool_result.Completed () | Tool_result.Deferred () -> true
   | Tool_result.Failed _ -> false
 
-let execute_keeper_stream_tool
-      ~sw
-      ~clock
-      ?auth_token:_
-      ?on_event
-      state
-      ~agent_name
-      ~arguments
-      ~continuation_channel
-  =
-  let workspace_scope = Mcp_server.workspace_scope state in
-  let config = workspace_scope.config in
-  let start_time = Eio.Time.now clock in
-  let body, disposition =
-    try
-      let keeper_ctx : _ Keeper_tool_surface.context =
-        {
-          config;
-          agent_name;
-          sw;
-          clock;
-          proc_mgr = state.Mcp_server.proc_mgr;
-          net = state.Mcp_server.net;
-          publication_recovery_provider =
-            Mcp_server.publication_recovery_availability_provider state;
-        }
-      in
-      match
-        Keeper_tool_surface.dispatch_keeper_msg
-          ~submitted_by:agent_name
-          ?on_event
-          ~continuation_channel
-          keeper_ctx
-          ~args:arguments
-      with
-      | result ->
-          let body = Tool_result.message result in
-          body, keeper_stream_disposition_of_result result
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Workspace.Not_initialized ->
-        ( Masc_domain.masc_error_to_string
-            (Masc_domain.System Masc_domain.System_error.NotInitialized)
-        , Tool_result.Failed Tool_result.Runtime_failure )
-    | exn ->
-        let err = Printexc.to_string exn in
-        Log.Mcp.error "tools/call crashed: %s" err;
-        ( Printf.sprintf "Internal error: %s" err
-        , Tool_result.Failed Tool_result.Runtime_failure )
-  in
-  let success = keeper_stream_success disposition in
-  let end_time = Eio.Time.now clock in
-  let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
-  let error_detail =
-    if success then None
-    else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
-  in
-  Audit_log.log_tool_call config
-    ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg:error_detail ();
-  (match disposition with
-   | Tool_result.Failed failure_class ->
-     Log.Keeper.emit Log.Error
-       ~details:
-         (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
-            ~agent_name ~duration_ms ~streaming:false ~error_body:body
-            ~failure_class)
-       "keeper tool call failed: masc_keeper_msg"
-   | Tool_result.Completed () | Tool_result.Deferred () -> ());
-  let telemetry_enabled = Env_config_core.telemetry_enabled () in
-  if telemetry_enabled then (
-    match state.Mcp_server.fs with
-    | Some fs ->
-        (try
-           let telemetry_error_kind =
-             if success then None
-             else Some (Telemetry_eio.error_kind_of_string "tool_failure")
-           in
-           let telemetry_failure_class =
-             match disposition with
-             | Tool_result.Failed failure_class -> Some failure_class
-             | Tool_result.Completed () | Tool_result.Deferred () -> None
-           in
-           Telemetry_eio.track_tool_called ~fs config
-             ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
-             ~source:(Tool_registry.string_of_source Agent_internal)
-             ?failure_class:telemetry_failure_class
-             ?error_kind:telemetry_error_kind ?error_message:error_detail ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Misc.error "telemetry tracking failed: %s"
-             (Printexc.to_string exn))
-    | None -> ()
-  );
-  Tool_registry.record_call_if_known ~source:Agent_internal
-    ~tool_name:"masc_keeper_msg"
-    ~disposition
-    ~duration_ms
-    ();
-  (success, body)
-
 let parse_keeper_chat_stream_request body_str =
   try
     let json = Yojson.Safe.from_string body_str in
@@ -1872,15 +1771,15 @@ let process_single_turn ~user_row_origin ~queued_turn
      turn can persist it as reload-visible chat blocks. The bridge surfaces this
      media live over SSE; the persist site records it durably (see the persist arm
      below). Content-addressed, so the two persists reuse one file. *)
-  let worker_media_accum = ref (Keeper_stream_media_accum.create ()) in
+  let worker_media_accum = Keeper_stream_media_accum.create () in
   (* The same stream carries this turn's tool calls. Without collecting them the
      persist site below has nothing to pass as [?tool_calls], so history rows
      hold no tool rows and a reload loses the tool timeline the live stream
      showed. *)
-  let worker_tool_accum = ref (Keeper_stream_tool_accum.create ()) in
+  let worker_tool_accum = Keeper_stream_tool_accum.create () in
   let on_event evt =
-    Keeper_stream_media_accum.on_event !worker_media_accum evt;
-    Keeper_stream_tool_accum.on_event !worker_tool_accum evt;
+    Keeper_stream_media_accum.on_event worker_media_accum evt;
+    Keeper_stream_tool_accum.on_event worker_tool_accum evt;
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
@@ -1911,7 +1810,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
       ();
     let content = persisted_error_reply err in
-    let tool_calls = Keeper_stream_tool_accum.to_tool_calls !worker_tool_accum in
+    let tool_calls = Keeper_stream_tool_accum.to_tool_calls worker_tool_accum in
     let persisted =
       if Option.is_some !direct_delivery_checkpoint
       then
@@ -2093,24 +1992,14 @@ let process_single_turn ~user_row_origin ~queued_turn
               Log.Keeper.warn
                 "keeper_stream: streaming dispatch raised: %s"
                 (Printexc.to_string exn);
-              if dashboard_direct_stream || queued_turn
-              then Error (Printexc.to_string exn)
-              else
-                (try
-                   (* The failed streaming attempt may have emitted a partial
-                      tool/media sequence. The fallback is a new turn, so its
-                      transcript must be collected from a fresh accumulator. *)
-                   worker_media_accum := Keeper_stream_media_accum.create ();
-                   worker_tool_accum := Keeper_stream_tool_accum.create ();
-                   Ok
-                     (`Ran
-	                        (execute_keeper_stream_tool ~sw:request_sw ~clock
-	                           ?auth_token
-	                           state ~agent_name ~arguments:args
-	                            ~on_event ~continuation_channel))
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn2 -> Error (Printexc.to_string exn2))
+              (* A second non-streaming dispatch is a distinct asynchronous
+                 turn whose submission acknowledgement returns before its
+                 events. Retrying here can duplicate provider/tool effects,
+                 while the outer transcript has already consumed its
+                 accumulator. Terminalize the original streaming attempt;
+                 [persist_failure_reply] retains the calls and media it
+                 actually emitted. *)
+              Error (Printexc.to_string exn)
         in
         match dispatch_result with
         | Ok (`Deferred rejection) ->
@@ -2184,7 +2073,7 @@ let process_single_turn ~user_row_origin ~queued_turn
             let blocks =
               match
                 Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
-                  !worker_media_accum
+                  worker_media_accum
               with
               | [] -> None
               | media_blocks -> Some media_blocks
@@ -2225,7 +2114,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
                  let tool_calls =
-                   Keeper_stream_tool_accum.to_tool_calls !worker_tool_accum
+                   Keeper_stream_tool_accum.to_tool_calls worker_tool_accum
                  in
                  let persist_assistant_reply ~assistant_content =
                    if Option.is_some !direct_delivery_checkpoint

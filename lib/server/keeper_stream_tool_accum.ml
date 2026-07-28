@@ -122,8 +122,10 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
       | None when has_finalized_call_id t call_id ->
         (* A provider can replay an entire block after its stop. The live
            dashboard keys completed tool cards by call id, so reopening it
-           here would make durable reload diverge with a duplicate row. *)
-        ()
+           here would make durable reload diverge with a duplicate row. Keep
+           the replay index closed until its own terminator too, so a
+           conflicting start cannot resurrect it under a second identity. *)
+        invalidate_index t index
       | None ->
         let opened_at = t.next_opened_at in
         t.next_opened_at <- opened_at + 1;

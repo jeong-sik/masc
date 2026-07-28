@@ -936,6 +936,7 @@ let apply_and_persist
     (* A schema-valid zero-op result still carries episode metadata authored
        for this conversation slice. Persist it without touching facts or the
        O(store) recognition ledger. *)
+    (* NDT-OK: episode timestamps are provenance/retention metadata only. *)
     let now = Unix.gettimeofday () in
     let episode =
       Keeper_librarian.episode_of_recognition

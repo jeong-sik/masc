@@ -276,6 +276,10 @@ and handle_transition
     log_task_transition_failed ~agent_name:ctx.agent_name err;
     let message = Masc_domain.masc_error_to_string err in
     let rule_id =
+      (* Exhaustive, no catch-all: [completion_state_error] returns only
+         [Task] errors and only four of the five constructors, but a [_] arm
+         here would silently absorb a newly added variant into the generic
+         rule id instead of failing to compile. *)
       match err with
       | Masc_domain.Task (Masc_domain.Task_error.NotClaimed _) ->
         Some "task_done_requires_claimed_or_started"
@@ -283,7 +287,14 @@ and handle_transition
         Some "task_done_requires_current_owner"
       | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
         Some "task_done_invalid_lifecycle_state"
-      | _ -> Some "task_done_lifecycle_rejected"
+      | Masc_domain.Task (Masc_domain.Task_error.NotFound _) ->
+        Some "task_done_task_not_found"
+      | Masc_domain.Task (Masc_domain.Task_error.InvalidId _)
+      | Masc_domain.Agent _
+      | Masc_domain.Auth _
+      | Masc_domain.System _
+      | Masc_domain.RateLimitExceeded _
+      | Masc_domain.CacheError _ -> Some "task_done_lifecycle_rejected"
     in
     workflow_rejection_result
       ~tool_name

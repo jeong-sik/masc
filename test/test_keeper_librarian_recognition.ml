@@ -119,7 +119,7 @@ let test_revise_rewrites_in_place () =
 ;;
 
 let test_revise_null_semantics_clear_expiry () =
-  let store = [ fact ~valid_until:(Some 9_000_000.0) () ] in
+  let store = [ fact ~valid_until:9_000_000.0 () ] in
   let result =
     apply
       [ Recognition.Revise

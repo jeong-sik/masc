@@ -156,6 +156,8 @@ let board_event_kind_label = function
   | Keeper_world_observation.Schedule_due -> "schedule_due"
   | Keeper_world_observation.External_attention -> "external_attention"
   | Keeper_world_observation.Goal_assigned -> "goal_assigned"
+  | Keeper_world_observation.Goal_reconciliation_ready ->
+    "goal_reconciliation_ready"
 ;;
 
 let quote_prompt_field value =
@@ -200,7 +202,8 @@ let board_event_note = function
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Bg_completed
   | Keeper_world_observation.Schedule_due
-  | Keeper_world_observation.Goal_assigned -> ""
+  | Keeper_world_observation.Goal_assigned
+  | Keeper_world_observation.Goal_reconciliation_ready -> ""
 ;;
 
 let format_board_event_text

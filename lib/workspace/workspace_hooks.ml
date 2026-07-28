@@ -85,6 +85,10 @@ type agent_lifecycle_event =
   | Session_rebound
   | Session_ended
 
+type task_terminal_delivery =
+  | Task_terminal_delivered
+  | Task_terminal_delivery_degraded of { kind : string; detail : string }
+
 let agent_lifecycle_event_to_string = function
   | Session_bound -> "session_bound"
   | Session_rebound -> "session_rebound"
@@ -266,6 +270,15 @@ let record_thompson_result_fn
 let push_task_event_fn
   : (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
   = Atomic.make (fun ~event_type:_ ~details:_ -> ())
+
+let task_terminal_committed_fn
+  : (Workspace_utils_backend_setup.config ->
+     agent_name:string ->
+     task_id:string ->
+     task_terminal_delivery) Atomic.t
+  =
+  Atomic.make
+    (fun _config ~agent_name:_ ~task_id:_ -> Task_terminal_delivered)
 
 let verification_submit_request_fn
   : (Workspace_utils_backend_setup.config ->

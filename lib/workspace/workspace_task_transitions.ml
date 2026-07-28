@@ -481,6 +481,34 @@ let transition_task_outcome_r
             Masc_domain.task_status_is_done new_status
             && not (Masc_domain.task_status_is_done task.task_status)
           in
+          let became_terminal =
+            Masc_domain.task_status_is_terminal new_status
+            && not (Masc_domain.task_status_is_terminal task.task_status)
+          in
+          if became_terminal
+          then (
+            let delivery =
+              try
+                (Atomic.get Workspace_hooks.task_terminal_committed_fn)
+                  config
+                  ~agent_name
+                  ~task_id
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn ->
+                Workspace_hooks.Task_terminal_delivery_degraded
+                  { kind = "hook_exception"; detail = Printexc.to_string exn }
+            in
+            match delivery with
+            | Workspace_hooks.Task_terminal_delivered -> ()
+            | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
+              Log.TaskState.error
+                "task terminal commit succeeded but reconciliation delivery degraded \
+                 task_id=%s agent=%s kind=%s detail=%s"
+                task_id
+                agent_name
+                kind
+                detail);
           let phase_duration_ms () =
             Some
               (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))

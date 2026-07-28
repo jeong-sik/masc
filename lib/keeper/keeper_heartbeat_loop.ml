@@ -168,7 +168,8 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Manual_compaction_requested
-      | Keeper_event_queue.Goal_assigned _ ->
+      | Keeper_event_queue.Goal_assigned _
+      | Keeper_event_queue.Goal_reconciliation_ready _ ->
         None)
     stimuli
 ;;
@@ -187,7 +188,8 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Bootstrap
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Manual_compaction_requested
-       | Keeper_event_queue.Goal_assigned _ -> ())
+       | Keeper_event_queue.Goal_assigned _
+       | Keeper_event_queue.Goal_reconciliation_ready _ -> ())
     stimuli
 ;;
 

@@ -127,7 +127,11 @@ let apply ~now ~operations facts =
         let revised =
           { row with
             claim
-          ; category = Option.value category ~default:row.category
+          ; (* DET-OK: typed optional op payload (not parsed input) — the wire
+               contract states null category/claim_id/valid_for_days mean
+               "keep the row's value"; the parser already rejected malformed
+               fields, so None here is the librarian's explicit keep. *)
+            category = Option.value category ~default:row.category
           ; claim_id =
               (match claim_id with
                | Some id -> Some id

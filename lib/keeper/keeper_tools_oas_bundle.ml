@@ -91,6 +91,11 @@ let make_tool_bundle
          Log.Keeper.error
            "gate replay approval=%s %s"
            approval_id
+           (Keeper_gate_replay.outcome_to_string outcome)
+       | Keeper_gate_replay.Repair_required _ as outcome ->
+         Log.Keeper.error
+           "gate replay approval=%s %s"
+           approval_id
            (Keeper_gate_replay.outcome_to_string outcome));
       Some Keeper_tools_oas.{ approval_id; outcome }
     | _ -> None

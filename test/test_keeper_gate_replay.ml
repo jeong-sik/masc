@@ -315,9 +315,13 @@ let test_large_replay_result_is_recoverable_but_request_bounded () =
          ^ "\nLARGE-REPLAY-END"
        in
        let evidence =
-         Masc.Keeper_gate_replay.For_testing.persist_bounded_replay_evidence
-           ~base_path
-           raw_output
+         match
+           Masc.Keeper_gate_replay.For_testing.persist_bounded_replay_evidence
+             ~base_path
+             raw_output
+         with
+         | Ok evidence -> evidence
+         | Error detail -> Alcotest.fail detail
        in
        Alcotest.check
          Alcotest.bool
@@ -399,7 +403,12 @@ let test_dispatch_covers_both_replayable_operations () =
     Alcotest.bool
     "an approved WebSearch/WebFetch network_read is replayed"
     true
-    (replayable_of_operation "network_read" = Some Replay_network_read)
+    (replayable_of_operation "network_read" = Some Replay_network_read);
+  Alcotest.check
+    Alcotest.bool
+    "an approved connector_post is host-replayed"
+    true
+    (replayable_of_operation "connector_post" = Some Replay_connector_post)
 ;;
 
 let test_dispatch_refuses_unknown_operations () =
@@ -411,7 +420,72 @@ let test_dispatch_refuses_unknown_operations () =
          (operation ^ " still requires resubmission")
          true
          (replayable_of_operation operation = None))
-    [ "connector_post"; "keeper_board_post"; "" ]
+    [ "keeper_board_post"; "" ]
+;;
+
+let test_large_connector_post_preserves_exact_durable_request () =
+  let open Masc.Keeper_tool_in_process_runtime in
+  let content =
+    "CONNECTOR-BEGIN\n"
+    ^ String.make (512 * 1024) 'x'
+    ^ "\nCONNECTOR-END"
+  in
+  let blocks =
+    [ `Assoc
+        [ "type", `String "section"
+        ; "text", `Assoc [ "type", `String "mrkdwn"; "text", `String content ]
+        ]
+    ]
+  in
+  let input =
+    `Assoc
+      [ "connector", `String "slack"
+      ; "channel_id", `String "C-exact"
+      ; "content", `String content
+      ; "blocks", `List blocks
+      ]
+  in
+  match Masc.Keeper_gate_replay.connector_post_of_gate_input input with
+  | Ok
+      (Replay_slack_post
+         { input = decoded_input
+         ; channel_id
+         ; content = decoded_content
+         ; blocks = decoded_blocks
+         }) ->
+    Alcotest.check json "exact durable request retained" input decoded_input;
+    Alcotest.check Alcotest.string "channel retained" "C-exact" channel_id;
+    Alcotest.check Alcotest.string "large content retained" content decoded_content;
+    Alcotest.check
+      (Alcotest.list json)
+      "large blocks retained"
+      blocks
+      decoded_blocks
+  | Ok (Replay_discord_post _) ->
+    Alcotest.fail "Slack request decoded as Discord"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_connector_post_rejects_heuristic_or_truncated_input () =
+  List.iter
+    (fun input ->
+       match Masc.Keeper_gate_replay.connector_post_of_gate_input input with
+       | Error _ -> ()
+       | Ok _ ->
+         Alcotest.fail
+           "incomplete or widened connector request became replayable")
+    [ `Assoc
+        [ "connector", `String "slack"
+        ; "channel_id", `String "C-exact"
+        ; "content", `String "missing exact blocks"
+        ]
+    ; `Assoc
+        [ "connector", `String "discord"
+        ; "channel_id", `String "D-exact"
+        ; "content", `String "exact"
+        ; "truncated", `Bool true
+        ]
+    ]
 ;;
 
 let () =
@@ -483,6 +557,14 @@ let () =
             "refuses operations it cannot replay"
             `Quick
             test_dispatch_refuses_unknown_operations
+        ; Alcotest.test_case
+            "large connector request stays exact"
+            `Quick
+            test_large_connector_post_preserves_exact_durable_request
+        ; Alcotest.test_case
+            "connector decoder rejects heuristic input"
+            `Quick
+            test_connector_post_rejects_heuristic_or_truncated_input
         ] )
     ]
 ;;

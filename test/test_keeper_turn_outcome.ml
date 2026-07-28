@@ -134,7 +134,30 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
   check bool "input required retains durable source" false
     (Heartbeat.cycle_outcome_acks_source
        (cycle_of_stop_reason
-          (Runtime_agent.InputRequired { turns_used = 2; request })))
+          (Runtime_agent.InputRequired { turns_used = 2; request })));
+  let replay_error =
+    Keeper_internal_error.sdk_error_of_masc_internal_error
+      (Keeper_internal_error.Gate_replay_repair_required
+         { approval_id = "approval-retain"
+         ; operation = "connector_post"
+         ; stage = Keeper_internal_error.Replay_journal
+         ; detail = "fsync failed"
+         })
+  in
+  let replay_failure : UT.turn_failure =
+    { error = replay_error
+    ; runtime_id = "runtime-retain"
+    ; route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Masc_execution
+          replay_error
+    ; source_lease_disposition = UT.Retain_unacked
+    ; deferred_runtime_lane = None
+    }
+  in
+  check bool "Gate replay repair retains exact wake without ACK" false
+    (Heartbeat.cycle_outcome_acks_source
+       (Cycle.Failed { meta; failure = replay_failure }))
 
 let test_cooperative_yield_ignores_only_active_source_identity () =
   let stimulus post_id : Keeper_event_queue.stimulus =

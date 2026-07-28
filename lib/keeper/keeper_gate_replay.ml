@@ -4,6 +4,15 @@ type replay_journal =
   | Replay_grant_not_consumed
   | Replay_journal_failed of string
 
+type repair_stage =
+  | Resolution_lookup
+  | Request_decode
+  | Grant_consumption
+  | Evidence_storage
+  | Replay_journal
+  | Outcome_unknown_after_restart
+  | Invalid_resolution_state
+
 type outcome =
   | Not_applicable
   | Applied of
@@ -16,6 +25,21 @@ type outcome =
       ; detail : string
       ; journal : replay_journal
       }
+  | Repair_required of
+      { operation : string
+      ; stage : repair_stage
+      ; detail : string
+      }
+
+let repair_stage_to_string = function
+  | Resolution_lookup -> "resolution_lookup"
+  | Request_decode -> "request_decode"
+  | Grant_consumption -> "grant_consumption"
+  | Evidence_storage -> "evidence_storage"
+  | Replay_journal -> "replay_journal"
+  | Outcome_unknown_after_restart -> "outcome_unknown_after_restart"
+  | Invalid_resolution_state -> "invalid_resolution_state"
+;;
 
 let replay_journal_to_string = function
   | Replay_journal_recorded -> "recorded"
@@ -44,35 +68,35 @@ let bounded_preview payload =
   Buffer.contents buffer
 ;;
 
-let replay_storage_failure_evidence ~payload ~detail =
-  `Assoc
-    [ "artifact_status", `String "storage_failed"
-    ; "sha256", `String (payload_fingerprint payload)
-    ; "bytes", `Int (String.length payload)
-    ; "preview", `String (bounded_preview payload)
-    ; "storage_error_sha256", `String (payload_fingerprint detail)
-    ]
-  |> Yojson.Safe.to_string
-;;
-
 let persist_bounded_replay_evidence ~base_path payload =
   try
     let store = Tool_blob_store.create ~base_path in
     match Tool_blob_store.put store ~bytes:payload ~mime:"text/plain" with
-    | Tool_output.Stored _ as stored -> Tool_output.encode_for_oas stored
+    | Tool_output.Stored _ as stored -> Ok (Tool_output.encode_for_oas stored)
     | Tool_output.Inline _ ->
       invalid_arg "tool_blob_store.put returned an inline replay payload"
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     let detail = Printexc.to_string exn in
-    let evidence = replay_storage_failure_evidence ~payload ~detail in
     Log.Keeper.error
       "Gate replay result artifact persistence failed bytes=%d sha256=%s error_sha256=%s"
       (String.length payload)
       (payload_fingerprint payload)
       (payload_fingerprint detail);
-    evidence
+    Error detail
+;;
+
+let replay_evidence_persister_override
+  : (base_path:string -> string -> (string, string) result) option Atomic.t
+  =
+  Atomic.make None
+;;
+
+let persist_replay_evidence ~base_path payload =
+  match Atomic.get replay_evidence_persister_override with
+  | None -> persist_bounded_replay_evidence ~base_path payload
+  | Some persist -> persist ~base_path payload
 ;;
 
 let outcome_to_string = function
@@ -91,6 +115,12 @@ let outcome_to_string = function
       (replay_journal_to_string journal)
       (String.length detail)
       (payload_fingerprint detail)
+  | Repair_required { operation; stage; detail } ->
+    Printf.sprintf
+      "repair_required operation=%s stage=%s detail_sha256=%s"
+      operation
+      (repair_stage_to_string stage)
+      (payload_fingerprint detail)
 ;;
 
 (* Replay recognizes exactly the identity its producer submits; every other
@@ -99,6 +129,9 @@ let outcome_to_string = function
 let write_operation = Keeper_tool_filesystem_runtime.gate_operation
 let execute_operation = Keeper_tool_execute_runtime.gate_operation
 let network_read_operation = Keeper_tool_in_process_runtime.network_read_gate_operation
+let connector_post_operation =
+  Keeper_tool_in_process_runtime.connector_post_gate_operation
+;;
 
 (* The producer owns both the argument schema and the effect encoding, so it
    owns the inversion; replay only decides whether to spend the grant. *)
@@ -114,6 +147,10 @@ let network_read_of_gate_input =
   Keeper_tool_in_process_runtime.network_read_replay_of_gate_input
 ;;
 
+let connector_post_of_gate_input =
+  Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
+;;
+
 (* Which approved operations this module can spend without the Keeper
    re-emitting the call. Separated from the replay body so the set is
    assertable: a decode function that exists but is never dispatched to looks
@@ -122,6 +159,7 @@ type replayable =
   | Replay_write
   | Replay_execute
   | Replay_network_read
+  | Replay_connector_post
 
 let replayable_of_operation operation =
   if String.equal operation write_operation
@@ -130,6 +168,8 @@ let replayable_of_operation operation =
   then Some Replay_execute
   else if String.equal operation network_read_operation
   then Some Replay_network_read
+  else if String.equal operation connector_post_operation
+  then Some Replay_connector_post
   else None
 ;;
 
@@ -139,9 +179,55 @@ type effect_outcome =
 
 let bound_replay_effect ~base_path = function
   | Effect_applied output ->
-    Effect_applied (persist_bounded_replay_evidence ~base_path output)
+    Result.map
+      (fun output -> Effect_applied output)
+      (persist_replay_evidence ~base_path output)
   | Effect_failed detail ->
-    Effect_failed (persist_bounded_replay_evidence ~base_path detail)
+    Result.map
+      (fun detail -> Effect_failed detail)
+      (persist_replay_evidence ~base_path detail)
+;;
+
+module Repair_map = Map.Make (String)
+
+type pending_repair =
+  { operation : string
+  ; replay_effect : effect_outcome
+  }
+
+(* The effect has already crossed its one-shot Gate before it reaches this
+   map. Keep the exact raw outcome until its blob reference and replay journal
+   commit together. Each retained wake makes exactly one persistence-repair
+   attempt and never re-runs the effect. This is deliberately process-local:
+   after a restart, consumed-without-outcome is unknown and requires operator
+   repair rather than guessing that the effect may be repeated. *)
+let pending_repairs = Atomic.make Repair_map.empty
+
+let repair_key ~base_path ~approval_id =
+  base_path ^ "\000" ^ approval_id
+;;
+
+let rec update_pending_repairs update =
+  let current = Atomic.get pending_repairs in
+  let next = update current in
+  if not (Atomic.compare_and_set pending_repairs current next)
+  then update_pending_repairs update
+;;
+
+let remember_pending_repair ~base_path ~approval_id repair =
+  let key = repair_key ~base_path ~approval_id in
+  update_pending_repairs (Repair_map.add key repair)
+;;
+
+let forget_pending_repair ~base_path ~approval_id =
+  let key = repair_key ~base_path ~approval_id in
+  update_pending_repairs (Repair_map.remove key)
+;;
+
+let find_pending_repair ~base_path ~approval_id =
+  Repair_map.find_opt
+    (repair_key ~base_path ~approval_id)
+    (Atomic.get pending_repairs)
 ;;
 
 let summarize_execution ~operation (execution : Keeper_tool_execution.t) =
@@ -171,26 +257,44 @@ let replay_journal ~base_path ~approval_id = function
       ~outcome:(Keeper_approval_queue.Replay_failed detail)
 ;;
 
+type replay_journal_failure =
+  | Replay_grant_not_consumed_failure of string
+  | Replay_journal_write_failure of string
+
 let replay_journal_status ~base_path ~approval_id replay_effect =
   match replay_journal ~base_path ~approval_id replay_effect with
-  | Ok Keeper_approval_queue.Replay_recorded -> Replay_journal_recorded
+  | Ok Keeper_approval_queue.Replay_recorded -> Ok Replay_journal_recorded
   | Ok Keeper_approval_queue.Replay_already_recorded ->
-    Replay_journal_already_recorded
+    Ok Replay_journal_already_recorded
   | Error (Keeper_approval_queue.Grant_replay_not_consumed _) ->
-    Replay_grant_not_consumed
+    Error
+      (Replay_grant_not_consumed_failure
+         "approved grant was not consumed before replay journal repair")
   | Error error ->
-    Replay_journal_failed
-      (Keeper_approval_queue.grant_error_to_string error)
+    let detail = Keeper_approval_queue.grant_error_to_string error in
+    Error (Replay_journal_write_failure detail)
 ;;
 
 let replayed_outcome ~base_path ~approval_id ~operation replay_effect =
-  let replay_effect = bound_replay_effect ~base_path replay_effect in
-  let journal =
-    replay_journal_status ~base_path ~approval_id replay_effect
-  in
-  match replay_effect with
-  | Effect_applied output -> Applied { operation; output; journal }
-  | Effect_failed detail -> Failed { operation; detail; journal }
+  remember_pending_repair
+    ~base_path
+    ~approval_id
+    { operation; replay_effect };
+  match bound_replay_effect ~base_path replay_effect with
+  | Error detail ->
+    Repair_required { operation; stage = Evidence_storage; detail }
+  | Ok bounded_effect ->
+    (match replay_journal_status ~base_path ~approval_id bounded_effect with
+     | Error (Replay_grant_not_consumed_failure detail) ->
+       forget_pending_repair ~base_path ~approval_id;
+       Repair_required { operation; stage = Grant_consumption; detail }
+     | Error (Replay_journal_write_failure detail) ->
+       Repair_required { operation; stage = Replay_journal; detail }
+     | Ok journal ->
+       forget_pending_repair ~base_path ~approval_id;
+       (match bounded_effect with
+        | Effect_applied output -> Applied { operation; output; journal }
+        | Effect_failed detail -> Failed { operation; detail; journal }))
 ;;
 
 let model_safe_replay_evidence evidence =
@@ -248,6 +352,18 @@ let append_model_evidence ~approval_id ~user_message = function
       ; "Host Gate replay did not apply the approved operation."
       ; "Do not assume success or blindly request the same operation again."
       ; evidence
+      ]
+  | Repair_required { operation; stage; detail } ->
+    String.concat
+      "\n"
+      [ user_message
+      ; ""
+      ; "Host Gate replay requires operator repair before provider dispatch."
+      ; Printf.sprintf "- approval_id: %s" approval_id
+      ; Printf.sprintf "- operation: %s" operation
+      ; Printf.sprintf "- stage: %s" (repair_stage_to_string stage)
+      ; Printf.sprintf "- detail_sha256: %s" (payload_fingerprint detail)
+      ; "The exact wake remains pending; do not execute or request this effect again."
       ]
 ;;
 
@@ -410,6 +526,8 @@ let compose_model_message
        prompt, not the pre-replay authorization rendering: retaining that
        rendering would tell the model a consumed one-shot grant is still live. *)
     append_model_evidence ~approval_id ~user_message outcome
+  | Some (approval_id, (Repair_required _ as outcome)) ->
+    append_model_evidence ~approval_id ~user_message outcome
   | None
   | Some (_, Not_applicable) ->
     user_message_with_hitl_resolution
@@ -431,18 +549,73 @@ let replay_approved_effect
       ()
   =
   match
-    Keeper_approval_queue.approved_resolution_request
+    Keeper_approval_queue.approved_resolution_delivery
       ~base_path:config.base_path
       ~id:approval_id
   with
   | Error error ->
-    Failed
+    Repair_required
       { operation = "unknown"
       ; detail = Keeper_approval_queue.grant_error_to_string error
-      ; journal = Replay_journal_failed "resolution lookup failed"
+      ; stage = Resolution_lookup
       }
-  | Ok None -> Not_applicable
-  | Ok (Some request) ->
+  | Ok
+      { request
+      ; state = Keeper_approval_queue.Resolution_consumed
+      ; replay_outcome = Some replay_outcome
+      } ->
+    forget_pending_repair ~base_path:config.base_path ~approval_id;
+    (match replay_outcome with
+     | Keeper_approval_queue.Replay_applied output ->
+       Applied
+         { operation = request.tool_name
+         ; output
+         ; journal = Replay_journal_already_recorded
+         }
+     | Keeper_approval_queue.Replay_failed detail ->
+       Failed
+         { operation = request.tool_name
+         ; detail
+         ; journal = Replay_journal_already_recorded
+         })
+  | Ok
+      { request
+      ; state = Keeper_approval_queue.Resolution_consumed
+      ; replay_outcome = None
+      } ->
+    (match
+     find_pending_repair
+         ~base_path:config.base_path
+         ~approval_id
+     with
+     | Some { operation; replay_effect } ->
+       replayed_outcome
+         ~base_path:config.base_path
+         ~approval_id
+         ~operation
+         replay_effect
+     | None ->
+       Repair_required
+         { operation = request.tool_name
+         ; stage = Outcome_unknown_after_restart
+         ; detail =
+             "authorization is consumed but no durable replay outcome or in-memory repair payload exists"
+         })
+  | Ok
+      { request
+      ; state = Keeper_approval_queue.Resolution_unconsumed
+      ; replay_outcome = Some _
+      } ->
+    Repair_required
+      { operation = request.tool_name
+      ; stage = Invalid_resolution_state
+      ; detail = "replay outcome exists before grant consumption"
+      }
+  | Ok
+      { request
+      ; state = Keeper_approval_queue.Resolution_unconsumed
+      ; replay_outcome = None
+      } ->
     let replay_gate_context =
       match request.tool_call_id with
       | None -> gate_context
@@ -463,11 +636,7 @@ let replay_approved_effect
     let replay operation decode run =
       match decode request.input with
       | Error detail ->
-        replayed_outcome
-          ~base_path:config.base_path
-          ~approval_id
-          ~operation
-          (Effect_failed detail)
+        Repair_required { operation; stage = Request_decode; detail }
       | Ok args ->
         summarize_execution ~operation (run args)
         |> replayed_outcome
@@ -503,11 +672,11 @@ let replay_approved_effect
      | Some Replay_network_read ->
        (match network_read_of_gate_input request.input with
         | Error detail ->
-          replayed_outcome
-            ~base_path:config.base_path
-            ~approval_id
-            ~operation:network_read_operation
-            (Effect_failed detail)
+          Repair_required
+            { operation = network_read_operation
+            ; stage = Request_decode
+            ; detail
+            }
         | Ok (Keeper_tool_in_process_runtime.Replay_web_search args) ->
           Keeper_tool_in_process_runtime.handle_web_search_with_outcome
             ~config
@@ -535,9 +704,29 @@ let replay_approved_effect
           |> replayed_outcome
                ~base_path:config.base_path
                ~approval_id
-               ~operation:network_read_operation))
+               ~operation:network_read_operation)
+     | Some Replay_connector_post ->
+       replay
+         connector_post_operation
+         connector_post_of_gate_input
+         (fun connector_post ->
+            Keeper_tool_in_process_runtime.replay_connector_post_with_outcome
+              ~config
+              ~meta
+              ?continuation_channel
+              ?gate_context:replay_gate_context
+              ~gate_grant:grant
+              connector_post))
 ;;
 
 module For_testing = struct
   let persist_bounded_replay_evidence = persist_bounded_replay_evidence
+
+  let with_replay_evidence_persister persist f =
+    let previous = Atomic.exchange replay_evidence_persister_override (Some persist) in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set replay_evidence_persister_override previous)
+      f
+  ;;
 end

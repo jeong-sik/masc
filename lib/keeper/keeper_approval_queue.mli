@@ -204,7 +204,9 @@ val consume_approved_resolution :
 (** Durably attach bounded, recoverable host replay evidence to a consumed
     approval. Outcomes live in an additive sidecar instead of inflating the
     strict queue snapshot. Identical writes are idempotent; conflicting or
-    oversized evidence fails closed. *)
+    oversized evidence fails closed. A sidecar write failure is returned
+    without poisoning the readable strict queue, so the retained exact wake
+    can retry only this journal commit. *)
 val record_consumed_resolution_replay :
   base_path:string ->
   id:string ->

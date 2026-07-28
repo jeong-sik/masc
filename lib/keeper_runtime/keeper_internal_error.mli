@@ -87,6 +87,15 @@ type transcript_quarantine_reason =
   | Structurally_invalid
   | Unresolved_tool_results
 
+type gate_replay_repair_stage =
+  | Replay_resolution_lookup
+  | Replay_request_decode
+  | Replay_grant_consumption
+  | Replay_evidence_storage
+  | Replay_journal
+  | Replay_outcome_unknown_after_restart
+  | Replay_invalid_resolution_state
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -143,6 +152,14 @@ type masc_internal_error =
       approval_id : string;
       detail : string;
     }
+  | Gate_replay_repair_required of {
+      approval_id : string;
+      operation : string;
+      stage : gate_replay_repair_stage;
+      detail : string;
+    }
+
+val gate_replay_repair_stage_to_string : gate_replay_repair_stage -> string
 
 val masc_internal_error_prefix : string
 

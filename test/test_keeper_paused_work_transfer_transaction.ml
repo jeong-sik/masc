@@ -364,6 +364,10 @@ let () =
             `Quick
             test_stale_source_revision_has_no_receipt_or_target_effect
         ; Alcotest.test_case
+            "replay after target consumption has no second effect"
+            `Quick
+            test_replay_after_target_consumption_has_no_second_effect
+        ; Alcotest.test_case
             "replay after source ACK projects target"
             `Quick
             test_replay_after_source_ack_projects_target

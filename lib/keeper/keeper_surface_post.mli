@@ -19,6 +19,10 @@ type post_target =
       (** Post to a bound Slack channel. [blocks] may carry Slack Block Kit
           rich blocks to render alongside the plain-text fallback. *)
 
+val dashboard_label : string
+val discord_label : string
+val slack_label : string
+
 val resolve_target :
   surface:string ->
   channel_id:string option ->

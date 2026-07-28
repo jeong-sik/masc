@@ -191,6 +191,46 @@ let prepare_agent_setup
          approval_id, outcome)
       gate_replay_delivery
   in
+  let* () =
+    match replay_delivery with
+    | Some
+        ( approval_id
+        , Keeper_gate_replay.Repair_required
+            { operation; stage; detail } ) ->
+      (try keeper_tools_cleanup () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.error
+           "keeper tool cleanup after Gate replay repair failure raised: %s"
+           (Printexc.to_string exn));
+      Error
+        (Keeper_internal_error.sdk_error_of_masc_internal_error
+           (Keeper_internal_error.Gate_replay_repair_required
+              { approval_id
+              ; operation
+              ; stage =
+                  (match stage with
+                   | Keeper_gate_replay.Resolution_lookup ->
+                     Keeper_internal_error.Replay_resolution_lookup
+                   | Keeper_gate_replay.Request_decode ->
+                     Keeper_internal_error.Replay_request_decode
+                   | Keeper_gate_replay.Grant_consumption ->
+                     Keeper_internal_error.Replay_grant_consumption
+                   | Keeper_gate_replay.Evidence_storage ->
+                     Keeper_internal_error.Replay_evidence_storage
+                   | Keeper_gate_replay.Replay_journal ->
+                     Keeper_internal_error.Replay_journal
+                   | Keeper_gate_replay.Outcome_unknown_after_restart ->
+                     Keeper_internal_error.Replay_outcome_unknown_after_restart
+                   | Keeper_gate_replay.Invalid_resolution_state ->
+                     Keeper_internal_error.Replay_invalid_resolution_state)
+              ; detail
+              }))
+    | Some (_, (Keeper_gate_replay.Applied _ | Keeper_gate_replay.Failed _))
+    | Some (_, Keeper_gate_replay.Not_applicable)
+    | None ->
+      Ok ()
+  in
   let user_message =
     Keeper_gate_replay.compose_model_message
       ~base_path:config.base_path

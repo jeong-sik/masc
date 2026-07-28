@@ -2167,7 +2167,11 @@ let record_consumed_resolution_replay ~base_path ~id ~outcome =
                 ~delivery_map:updated_deliveries
             with
             | Error error ->
-              mark_store_unavailable_unlocked ~base_path error;
+              (* The strict queue snapshot and consumed grant remain readable.
+                 Poisoning the whole workspace here made the retained HITL
+                 wake unable to perform its journal-only retry. The caller
+                 keeps the exact in-memory effect outcome and retries this
+                 sidecar write without re-entering the effect. *)
               Error (Grant_store_unavailable error)
             | Ok () ->
               Atomic.set deliveries updated_deliveries;

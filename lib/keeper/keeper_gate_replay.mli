@@ -18,6 +18,15 @@ type replay_journal =
   | Replay_grant_not_consumed
   | Replay_journal_failed of string
 
+type repair_stage =
+  | Resolution_lookup
+  | Request_decode
+  | Grant_consumption
+  | Evidence_storage
+  | Replay_journal
+  | Outcome_unknown_after_restart
+  | Invalid_resolution_state
+
 type outcome =
   | Not_applicable
       (** No unconsumed approval, or the approved operation is not one this
@@ -32,6 +41,17 @@ type outcome =
       ; detail : string
       ; journal : replay_journal
       }
+  | Repair_required of
+      { operation : string
+      ; stage : repair_stage
+      ; detail : string
+      }
+      (** Host replay cannot safely enter the provider turn. The exact wake
+          must remain unacknowledged. When an effect outcome is still held in
+          process, a later attempt repairs only blob/journal persistence and
+          never invokes the effect again. *)
+
+val repair_stage_to_string : repair_stage -> string
 
 val outcome_to_string : outcome -> string
 (** Render operation, journal state, bounded evidence byte count, and SHA-256
@@ -84,10 +104,16 @@ val network_read_of_gate_input :
 (** Decode the producer-owned [network_read] envelope without reconstructing
     WebSearch or WebFetch arguments. *)
 
+val connector_post_of_gate_input :
+  Yojson.Safe.t ->
+  (Keeper_tool_in_process_runtime.connector_post_replay, string) result
+(** Decode the producer-owned exact connector request. *)
+
 type replayable =
   | Replay_write
   | Replay_execute
   | Replay_network_read
+  | Replay_connector_post
 
 val replayable_of_operation : string -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the
@@ -101,8 +127,9 @@ val replayable_of_operation : string -> replayable option
 
     Covers operations whose approvals a Keeper must otherwise re-earn by
     re-emitting a byte-identical call: [filesystem_write], [tool_execute], and
-    producer-typed [network_read] (WebSearch/WebFetch). Any other operation is
-    {!Not_applicable} and still requires resubmission.
+    producer-typed [network_read] (WebSearch/WebFetch), and the exact durable
+    [connector_post] continuation. Any other operation is {!Not_applicable}
+    and still requires resubmission.
 
     [gate_context] is the same causal-context provider the model-issued write
     path supplies. A replay whose re-derived input no longer matches its
@@ -110,8 +137,10 @@ val replayable_of_operation : string -> replayable option
     causal context cannot be summarized for Auto Judge, which stalls the FIFO
     drain for every later approval.
 
-    Consumption is the durable one-shot grant, so a repeated call after a
-    successful replay reports {!Not_applicable} rather than writing twice. *)
+    Consumption is the durable one-shot grant. A repeated call after a
+    successful replay returns the already-recorded durable outcome without
+    invoking the effect again. A consumed grant with no durable or in-memory
+    outcome returns {!Repair_required}. *)
 val replay_approved_effect :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -126,5 +155,10 @@ val replay_approved_effect :
 
 module For_testing : sig
   val persist_bounded_replay_evidence :
-    base_path:string -> string -> string
+    base_path:string -> string -> (string, string) result
+
+  val with_replay_evidence_persister :
+    (base_path:string -> string -> (string, string) result) ->
+    (unit -> 'a) ->
+    'a
 end

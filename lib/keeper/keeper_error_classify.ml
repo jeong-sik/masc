@@ -56,7 +56,8 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Incomplete_tool_transcript _
       | Keeper_turn_driver.Terminal_effect_failed _
       | Keeper_turn_driver.Receipt_persistence_failed _
-      | Keeper_turn_driver.History_persistence_failed _ )
+      | Keeper_turn_driver.History_persistence_failed _
+      | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None -> false
 
 (** Classify an [sdk_error] into a static [error_classification] variant.
@@ -299,6 +300,7 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.History_persistence_failed _)
+  | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
       false
 
@@ -316,6 +318,7 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.History_persistence_failed _)
+  | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
       false
 
@@ -343,7 +346,8 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Incomplete_tool_transcript _
       | Keeper_turn_driver.Terminal_effect_failed _
       | Keeper_turn_driver.Receipt_persistence_failed _
-      | Keeper_turn_driver.History_persistence_failed _ )
+      | Keeper_turn_driver.History_persistence_failed _
+      | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None ->
     false
 
@@ -476,6 +480,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Terminal_effect_failed _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _)
     | Some (Keeper_turn_driver.History_persistence_failed _)
+    | Some (Keeper_turn_driver.Gate_replay_repair_required _)
     | None ->
         None
 
@@ -516,7 +521,8 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
     | Some (Keeper_turn_driver.Terminal_effect_failed _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _)
-    | Some (Keeper_turn_driver.History_persistence_failed _) ->
+    | Some (Keeper_turn_driver.History_persistence_failed _)
+    | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
         None
     | None ->
         (* Typed runtime rotation: raw provider API errors that are
@@ -832,6 +838,7 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.History_persistence_failed _)
+  | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
     false
 
@@ -886,5 +893,6 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
-  | Some (Keeper_turn_driver.History_persistence_failed _) -> false
+  | Some (Keeper_turn_driver.History_persistence_failed _)
+  | Some (Keeper_turn_driver.Gate_replay_repair_required _) -> false
   | None -> false

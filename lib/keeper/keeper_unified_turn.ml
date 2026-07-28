@@ -37,6 +37,7 @@ type source_lease_disposition =
   | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
   | Pause_after_transcript_corruption of { detail : string }
+  | Retain_unacked
   | Acknowledge_after_in_turn_handling
 
 let source_lease_disposition_after_no_compaction
@@ -99,7 +100,8 @@ let transcript_corruption error =
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Receipt_persistence_failed _
-      | Keeper_internal_error.History_persistence_failed _ )
+      | Keeper_internal_error.History_persistence_failed _
+      | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->
     None
 ;;
@@ -115,6 +117,8 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
     (* This error is produced by MASC after host replay and before provider
        dispatch. The shared [Agent_sdk.Error.Internal] carrier must not
        misattribute that local persistence boundary to OAS. *)
+    Keeper_runtime_failure_route.Masc_execution
+  | None, Some (Keeper_internal_error.Gate_replay_repair_required _) ->
     Keeper_runtime_failure_route.Masc_execution
   | None,
     Some
@@ -1348,6 +1352,26 @@ dominant source of the observed CAS race exhaustion after
                      telemetry here. Exhausted failures remain visible without
                      dispatching a second LLM call. *)
                   let transcript_corruption = transcript_corruption err in
+                  let gate_replay_repair_required =
+                    match Keeper_internal_error.classify_masc_internal_error err with
+                    | Some
+                        (Keeper_internal_error.Gate_replay_repair_required _) ->
+                      true
+                    | Some
+                        ( Keeper_internal_error.Runtime_exhausted _
+                        | Keeper_internal_error.Capacity_backpressure _
+                        | Keeper_internal_error.Resumable_cli_session _
+                        | Keeper_internal_error.Accept_rejected _
+                        | Keeper_internal_error.Internal_unhandled_exception _
+                        | Keeper_internal_error.Internal_bridge_exception _
+                        | Keeper_internal_error.Internal_contract_rejected _
+                        | Keeper_internal_error.Incomplete_tool_transcript _
+                        | Keeper_internal_error.Terminal_effect_failed _
+                        | Keeper_internal_error.Receipt_persistence_failed _
+                        | Keeper_internal_error.History_persistence_failed _ )
+                    | None ->
+                      false
+                  in
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
                       ~boundary:
@@ -1357,10 +1381,11 @@ dominant source of the observed CAS race exhaustion after
                       err
                   in
                   let source_lease_disposition, turn_state =
-                    match transcript_corruption with
-                    | Some detail ->
+                    match gate_replay_repair_required, transcript_corruption with
+                    | true, _ -> Retain_unacked, turn_state
+                    | false, Some detail ->
                       Pause_after_transcript_corruption { detail }, turn_state
-                    | None ->
+                    | false, None ->
                       (* The checkpoint helper reports [Ok] only after the
                          compacted checkpoint is durably saved. The heartbeat
                          settles the owning lease after this cycle returns, so

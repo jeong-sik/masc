@@ -3426,11 +3426,14 @@ let find_pending_id_in_map
                 ~tool_call_id ~input_hash
            then Ok (Some id)
            else
-             Error
-               (Printf.sprintf
-                  "tool_call_id %s is already pending for a different canonical request (approval %s)"
-                  (Option.get tool_call_id)
-                  id)
+             (match tool_call_id with
+              | Some tool_call_id ->
+                Error
+                  (Printf.sprintf
+                     "tool_call_id %s is already pending for a different canonical request (approval %s)"
+                     tool_call_id
+                     id)
+              | None -> Ok None)
          else Ok None)
     map
     (Ok None)

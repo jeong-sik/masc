@@ -24,13 +24,34 @@ type raw_trace_sink_outcome =
 
 (** Typed reason for an autonomous Keeper run to release its lane after OAS
     completes a tool boundary. *)
+type durable_stimulus_summary = {
+  pending_count : int;
+  head : Keeper_event_queue.stimulus option;
+  head_age_sec : float;
+  kinds : Keeper_event_queue.stimulus_payload list;
+}
+(** What the durable queue held at the instant the turn yielded. The yield
+    condition is [pending <> empty], so a yield record without this says only
+    that a yield happened, not what it yielded to — which cannot distinguish
+    healthy cooperation from a keeper that never finishes a turn. *)
+
 type autonomous_yield_reason =
   | Chat_waiting
-  | Durable_stimulus_waiting
+  | Durable_stimulus_waiting of durable_stimulus_summary
 
 type autonomous_yield_request = {
   reason : autonomous_yield_reason;
 }
+
+val durable_stimulus_summary
+  :  now:float
+  -> Keeper_event_queue.t
+  -> durable_stimulus_summary
+(** Project the queue snapshot the yield decision already read. [now] is
+    supplied by the caller so the age is measured against the same clock the
+    decision used. *)
+
+val durable_stimulus_summary_to_string : durable_stimulus_summary -> string
 
 val terminal_effect_boundary_decision
   :  Keeper_tools_oas.terminal_effect_state

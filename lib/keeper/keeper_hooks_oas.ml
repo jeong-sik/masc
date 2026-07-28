@@ -323,9 +323,16 @@ let make_hooks
         let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
         let decode_tok_s = fmt_tok_s decode_tok_s_opt in
         let thinking = summarize_thinking_blocks response.content in
+        (* [tokens] alone is a numerator. Runtimes in one fleet declare
+           windows from 200K to 1M, so the same absolute count means a
+           different amount of pressure per keeper and the log cannot be
+           compared across them. The window is already on the turn record;
+           carrying it here makes the log self-sufficient. [0] means the
+           provider reported no window rather than a window of zero. *)
+        let context_window = context_max_of_telemetry response.telemetry in
         Log.Keeper.info ~keeper_name:meta.name
-          "turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
-          turn meta.runtime.usage.total_turns model total_tok
+          "turn=%d total_turns=%d runtime_lane=%s tokens=%d context_window=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
+          turn meta.runtime.usage.total_turns model total_tok context_window
           wall_tok_s prompt_tok_s decode_tok_s latency_ms
           thinking.thinking_present
           thinking.thinking_blocks
@@ -433,7 +440,8 @@ let make_hooks
          | Tool_result.Error -> Log.Keeper.error
          | Tool_result.Ok | Tool_result.Unknown -> Log.Keeper.info)
           "keeper:%s tool_call tool=%s params=[%s] input_shape=[%s] outcome=%s out_len=%d error_preview=%s"
-          (!meta_ref).name tool_name input_keys input_shape outcome_s out_len error_preview;
+          (!meta_ref).name tool_name input_keys input_shape outcome_s out_len
+          error_preview;
         (* Persistent tool call I/O log for dashboard inspector.
            tool_start_time is keeper-local (one ref per make_hooks call).
            Tool calls within Agent.run are sequential, so no race. *)

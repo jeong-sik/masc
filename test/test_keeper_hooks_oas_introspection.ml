@@ -145,6 +145,8 @@ let test_pre_tool_use_is_observation_only () =
   | Agent_sdk.Hooks.Continue -> ()
   | AdjustParams _ -> fail "pre_tool_use timing hook adjusted parameters"
   | ElicitInput _ -> fail "pre_tool_use timing hook elicited input"
+  | ElicitToolApproval _ ->
+    fail "pre_tool_use timing hook elicited tool approval"
   | Nudge _ -> fail "pre_tool_use timing hook returned Nudge"
   | HookFailed _ -> fail "pre_tool_use timing hook failed"
   | Block _ -> fail "pre_tool_use timing hook returned Block"

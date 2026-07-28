@@ -70,6 +70,26 @@ let drop_leading_wake_marker ~user_turn_record current_suffix =
     -> current_suffix
 ;;
 
+let is_trailing_blank_assistant (message : Agent_sdk.Types.message) =
+  match message.role, message.content with
+  | Agent_sdk.Types.Assistant, [] -> true
+  | Agent_sdk.Types.Assistant, blocks ->
+    List.for_all
+      (function
+        | Agent_sdk.Types.Text text -> String.trim text = ""
+        | _ -> false)
+      blocks
+  | _, _ -> false
+;;
+
+let drop_trailing_blank_assistants messages =
+  let rec drop = function
+    | message :: rest when is_trailing_blank_assistant message -> drop rest
+    | reversed -> List.rev reversed
+  in
+  drop (List.rev messages)
+;;
+
 let canonical_success_replay_checkpoint
       ~(history_messages : Agent_sdk.Types.message list)
       ~(session_id : string)
@@ -82,17 +102,31 @@ let canonical_success_replay_checkpoint
       ~prefix:history_messages
       checkpoint.Agent_sdk.Checkpoint.messages
   with
-  | Ok current_suffix ->
-    let dropped_current_turn_replay = current_suffix <> [] in
+  | Ok original_current_suffix ->
     let current_suffix =
-      drop_leading_wake_marker ~user_turn_record current_suffix
+      drop_leading_wake_marker ~user_turn_record original_current_suffix
+    in
+    (* A blank visible response is not authority to erase typed replay. The
+       suffix may contain an actual user input, ToolUse/ToolResult pair,
+       thinking, or media whose effect has already happened. Remove only an
+       inert trailing Assistant shell; the typed skipped-wake rule above owns
+       the autonomous marker independently. *)
+    let current_suffix =
+      if String.trim response_text = ""
+      then drop_trailing_blank_assistants current_suffix
+      else current_suffix
+    in
+    let replay_suffix_pruned =
+      if current_suffix <> original_current_suffix
+      then Some Canonical_success_replay
+      else None
     in
     let checkpoint =
       if String.trim response_text = ""
       then
         { checkpoint with
           Agent_sdk.Checkpoint.session_id
-        ; messages = history_messages
+        ; messages = history_messages @ current_suffix
         ; working_context = None
         }
       else
@@ -119,9 +153,7 @@ let canonical_success_replay_checkpoint
     in
     Ok
       ( checkpoint
-      , if dropped_current_turn_replay
-        then Some Canonical_success_replay
-        else None )
+      , replay_suffix_pruned )
   | Error _ ->
     Error
       "refusing to save checkpoint: canonical replay persistence requires \

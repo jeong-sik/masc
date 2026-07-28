@@ -655,7 +655,6 @@ let exact_attempt_quarantine_summary_status cause =
         Printf.sprintf
           "Auto Judge exact attempt quarantined: %s"
           (exact_attempt_quarantine_cause_to_string cause)
-    ; retryable = false
     }
 ;;
 
@@ -1408,6 +1407,8 @@ let audit_approval_event
       ?actor
       ?decision_source
       ?decision
+      ?summary_status
+      ?exact_attempt
       ()
   =
   let decision, decision_kind, decision_reason =
@@ -1449,6 +1450,13 @@ let audit_approval_event
             | None -> [])
          @ (match decision_reason with
             | Some reason -> [ "decision_reason", `String reason ]
+            | None -> [])
+         @ (match summary_status with
+            | Some status -> [ "summary_status", summary_status_to_yojson status ]
+            | None -> [])
+         @ (match exact_attempt with
+            | Some attempt ->
+              [ "exact_attempt", exact_attempt_state_to_yojson attempt ]
             | None -> [])
          )
     in
@@ -1565,6 +1573,10 @@ let resolved_approval_json_of_audit_event json =
     ; "actor", json_member_or_null "actor" json
     ; "decision_source", json_member_or_null "decision_source" json
     ; "rule_match", json_member_or_null "rule_match" json
+      (* Judge evidence recorded at resolution time (#26126). Events written
+         before that enrichment have no such members and project as [`Null]. *)
+    ; "summary_status", json_member_or_null "summary_status" json
+    ; "exact_attempt", json_member_or_null "exact_attempt" json
     ]
 ;;
 
@@ -1945,7 +1957,7 @@ let record_pending (entry : pending_approval) =
 let summary_audit_extras (entry : pending_approval) : (string * Yojson.Safe.t) list =
   match entry.summary_status with
   | Summary_available summary -> [ "model_run_id", `String summary.model_run_id ]
-  | Summary_failed { reason; _ } -> [ "failure_reason", `String reason ]
+  | Summary_failed { reason } -> [ "failure_reason", `String reason ]
   | Summary_not_requested | Summary_pending -> []
 ;;
 
@@ -2941,6 +2953,8 @@ let resolve_entry
     ~goal_ids:entry.goal_ids
     ~decision_source:source
     ~decision
+    ~summary_status:entry.summary_status
+    ~exact_attempt:entry.exact_attempt
     ();
   before_terminal_publish ();
   try
@@ -3627,8 +3641,7 @@ let retire_summary_owner ~base_path ~keeper_name ~reason =
                  , SMap.add
                      id
                      { entry with
-                       summary_status =
-                         Summary_failed { reason; retryable = false }
+                       summary_status = Summary_failed { reason }
                      }
                      map
                  , bound )

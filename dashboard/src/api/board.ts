@@ -130,7 +130,7 @@ function normalizeHitlContextSummary(raw: unknown): HitlContextSummary | null {
 /** Parse the backend `summary_status` wire value into the typed union. Returns
  *  `null` for an absent or contract-violating shape — a malformed status must
  *  not silently read as `not_requested`, which would hide a wiring fault. */
-function normalizeHitlSummaryStatus(raw: unknown): HitlSummaryStatus | null {
+export function normalizeHitlSummaryStatus(raw: unknown): HitlSummaryStatus | null {
   if (raw === 'not_requested') return { status: 'not_requested' }
   if (raw === 'pending') return { status: 'pending' }
   if (!isRecord(raw)) return null
@@ -141,11 +141,13 @@ function normalizeHitlSummaryStatus(raw: unknown): HitlSummaryStatus | null {
       return summary ? { status: 'available', summary } : null
     }
     case 'failed': {
-      if (!hasOnlyKeys(raw, ['status', 'reason', 'retryable'])) return null
+      // `retryable` was removed producer-side (#26094): it was write-only
+      // `false` in OCaml, and requiring that exact value here turned one
+      // drifted row into a blank approval queue. The server no longer sends
+      // the field, so its presence is a contract violation for this row.
+      if (!hasOnlyKeys(raw, ['status', 'reason'])) return null
       const reason = asString(raw.reason, '').trim()
-      return reason && raw.retryable === false
-        ? { status: 'failed', reason }
-        : null
+      return reason ? { status: 'failed', reason } : null
     }
     default:
       return null
@@ -178,7 +180,7 @@ function hasOnlyKeys(raw: Record<string, unknown>, allowed: readonly string[]): 
   return keys.length === allowed.length && keys.every(key => allowed.includes(key))
 }
 
-function normalizeKeeperExactAttempt(raw: unknown): KeeperExactAttemptState | null {
+export function normalizeKeeperExactAttempt(raw: unknown): KeeperExactAttemptState | null {
   if (!isRecord(raw)) return null
   if (raw.state === 'unbound') {
     return hasOnlyKeys(raw, ['state']) ? { state: 'unbound' } : null

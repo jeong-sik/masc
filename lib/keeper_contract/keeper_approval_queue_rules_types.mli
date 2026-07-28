@@ -24,7 +24,7 @@ type summary_status =
   | Summary_not_requested
   | Summary_pending
   | Summary_available of hitl_context_summary
-  | Summary_failed of { reason : string; retryable : bool }
+  | Summary_failed of { reason : string }
 
 type exact_attempt_quarantine_cause =
   | Exact_flow_execution_failed

@@ -169,7 +169,28 @@ export interface KeeperResolvedApprovalItem {
   rule_match?: {
     rule_id?: string | null
   } | null
+  /** Judge evidence recorded on the resolved audit event at resolution time
+   *  (#26126). `null` on events written before that enrichment existed. */
+  summary_status?: HitlSummaryStatus | null
+  exact_attempt?: KeeperExactAttemptState | null
 }
+
+/** An approval_queue row the server sent but the client contract rejected.
+ *  Rendered as an explicit placeholder instead of blanking the whole queue
+ *  (#26094): the operator must know a pending request exists even when its
+ *  row cannot be decoded. Identity fields are best-effort salvage. */
+export interface KeeperApprovalQueueRowViolation {
+  index: number
+  id?: string | null
+  keeper_name?: string | null
+  tool_name?: string | null
+}
+
+/** Which exact-output lane serves Gate Auto Judge. Slot order is OAS failover
+ *  order: the first slot is the model that actually judges. */
+export type GateJudgeLane =
+  | { status: 'available'; lane_id: string; slots: string[] }
+  | { status: 'unavailable'; lane_id: string; reason: string }
 
 export interface KeeperApprovalRule {
   id: string
@@ -211,11 +232,13 @@ export interface DashboardGateResponse {
   note?: string
   approval_queue: KeeperApprovalQueueItem[] | null
   approval_queue_state: KeeperApprovalQueueState
+  approval_queue_violations?: KeeperApprovalQueueRowViolation[]
   recent_resolved?: KeeperResolvedApprovalItem[]
   recent_resolved_page?: KeeperResolvedApprovalPage | null
   approval_rules?: KeeperApprovalRule[]
   hitl?: {
     gate_mode?: GateModeStatus
+    judge_lane?: GateJudgeLane
   }
 }
 

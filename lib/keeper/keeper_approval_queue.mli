@@ -211,6 +211,8 @@ val audit_approval_event :
   ?actor:string ->
   ?decision_source:decision_source ->
   ?decision:decision ->
+  ?summary_status:summary_status ->
+  ?exact_attempt:exact_attempt_state ->
   unit ->
   unit
 

@@ -1448,8 +1448,7 @@ let test_exact_attempt_binding_release_and_conflicts () =
          true
          (quarantine_exact replacement quarantine_cause);
        (match pending_entry_exn id with
-        | { summary_status =
-              AQ.Summary_failed { reason; retryable = false }
+        | { summary_status = AQ.Summary_failed { reason }
           ; exact_attempt =
               AQ.Exact_bound
                 { status =
@@ -2473,7 +2472,7 @@ let test_operator_recovery_skips_terminal_exact_failure () =
          (reserve_retry_exact ~base_path (pending_entry_exn quarantined_id));
        (match AQ.For_testing.get_pending_entry_unchecked ~id:quarantined_id with
         | Some
-            { summary_status = AQ.Summary_failed { retryable = false; _ }
+            { summary_status = AQ.Summary_failed _
             ; exact_attempt =
                 AQ.Exact_bound
                   { status =
@@ -2564,9 +2563,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
             ids);
        match AQ.For_testing.get_pending_entry_unchecked ~id:retirable with
        | Some
-           { summary_status =
-               AQ.Summary_failed
-                 { reason = "retired"; retryable = false }
+           { summary_status = AQ.Summary_failed { reason = "retired" }
            ; _
            } ->
          ()
@@ -3240,6 +3237,50 @@ let test_nonapproved_resolution_payload_is_delivered () =
        drop_resolution ~base_path ~keeper_name edited)
 ;;
 
+(* #26126: resolution writes the judge evidence the entry carried onto the
+   resolved audit event, so the decision remains explainable after the entry
+   leaves the pending queue. *)
+let test_resolved_audit_event_carries_judge_evidence () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-judge-evidence" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let id =
+         submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "doc" ])
+       in
+       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let history =
+         AQ.list_recent_resolved
+           ~base_path
+           ~now_ts:(Unix.gettimeofday ())
+           ~window_minutes:60
+           ()
+       in
+       let open Yojson.Safe.Util in
+       let row =
+         List.find_opt
+           (fun row -> String.equal (row |> member "id" |> to_string) id)
+           history.resolved_rows
+       in
+       match row with
+       | None -> Alcotest.fail "resolved decision missing from history"
+       | Some row ->
+         Alcotest.check yojson
+           "summary_status recorded at resolution"
+           (`String "not_requested")
+           (row |> member "summary_status");
+         Alcotest.check yojson
+           "exact_attempt recorded at resolution"
+           (AQ.exact_attempt_state_to_yojson AQ.Exact_unbound)
+           (row |> member "exact_attempt"))
+;;
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
@@ -3280,6 +3321,10 @@ let () =
             "resolution wakes only origin"
             `Quick
             test_resolution_is_durable_and_origin_scoped
+        ; Alcotest.test_case
+            "resolved audit event carries judge evidence"
+            `Quick
+            test_resolved_audit_event_carries_judge_evidence
         ; Alcotest.test_case
             "remembered rule carries requested expiry"
             `Quick

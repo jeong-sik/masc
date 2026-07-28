@@ -63,11 +63,13 @@ function responseWithQueue(
     state: 'ready',
   },
   recent_resolved_page: DashboardGateResponse['recent_resolved_page'] = null,
+  approval_queue_violations: DashboardGateResponse['approval_queue_violations'] = [],
 ): DashboardGateResponse {
   return {
     generated_at: '2026-06-19T00:00:00Z',
     approval_queue,
     approval_queue_state,
+    approval_queue_violations,
     recent_resolved,
     recent_resolved_page,
     approval_rules,
@@ -86,6 +88,7 @@ async function loadSurface(
     state: 'ready',
   },
   recent_resolved_page: DashboardGateResponse['recent_resolved_page'] = null,
+  approval_queue_violations: DashboardGateResponse['approval_queue_violations'] = [],
 ) {
   vi.resetModules()
   const resolveGateApproval = vi
@@ -115,6 +118,7 @@ async function loadSurface(
         hitl,
         approval_queue_state,
         recent_resolved_page,
+        approval_queue_violations,
       )
     : responseWithQueue(
         approval_queue,
@@ -123,6 +127,7 @@ async function loadSurface(
         undefined,
         approval_queue_state,
         recent_resolved_page,
+        approval_queue_violations,
       )
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),
@@ -688,6 +693,129 @@ describe('ApprovalsSurface', () => {
     expect(history?.querySelector('.ap-history-decision')?.className).toContain('decision-reject')
     expect(history?.querySelector('.ap-history-decision')?.className).not.toContain('operator denied')
     expect(history?.querySelector('.ap-history-at')?.textContent).toContain('2026')
+  }, 20000)
+
+  it('unfolds judge evidence and slot on resolved rows that carry it, none on legacy rows', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [
+        {
+          id: 'appr-judged',
+          keeper_name: 'keeper-a',
+          tool_name: 'shell_exec',
+          decision: 'approve',
+          decision_source: 'auto_judge',
+          resolved_at: '2026-07-28T09:39:00Z',
+          summary_status: {
+            status: 'available',
+            summary: {
+              summary_version: 2,
+              generated_at: '2026-07-28T09:38:40Z',
+              model_run_id: 'run-1',
+              context_summary: 'Keeper requested a read-only listing.',
+              key_questions: ['Is the path inside the sandbox?'],
+              judgment: 'approve',
+              rationale: 'Read-only and scoped.',
+            },
+          },
+          exact_attempt: {
+            state: 'bound',
+            approval_id: 'appr-judged',
+            input_hash: 'a'.repeat(64),
+            sequence: 7,
+            slot_id: 'glm-coding.glm-5-turbo',
+            call_id: 'call-1',
+            plan_fingerprint: 'plan-1',
+            request_body_sha256: 'c'.repeat(64),
+            status: 'completed',
+            quarantine_cause: null,
+          },
+        },
+        {
+          id: 'appr-legacy',
+          keeper_name: 'keeper-a',
+          tool_name: 'fs_write',
+          decision: 'approve',
+          resolved_at: '2026-07-28T09:10:00Z',
+          summary_status: null,
+          exact_attempt: null,
+        },
+      ],
+    )
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
+    await flushUi()
+
+    const rows = container.querySelectorAll('[data-testid="approval-history-item"]')
+    expect(rows).toHaveLength(2)
+    const judged = container.querySelector('[data-approval-id="appr-judged"]')
+    expect(judged?.querySelector('[data-testid="approval-history-slot"]')?.textContent)
+      .toBe('glm-coding.glm-5-turbo')
+    const fold = judged?.querySelector('[data-testid="approval-history-judge"]')
+    expect(fold?.textContent).toContain('Keeper requested a read-only listing.')
+    expect(fold?.textContent).toContain('Is the path inside the sandbox?')
+    expect(fold?.textContent).toContain('Read-only and scoped.')
+    const legacy = container.querySelector('[data-approval-id="appr-legacy"]')
+    expect(legacy?.querySelector('[data-testid="approval-history-slot"]')).toBeNull()
+    expect(legacy?.querySelector('[data-testid="approval-history-judge"]')).toBeNull()
+  }, 20000)
+
+  it('shows contract-violating queue rows as a visible banner instead of a clean empty queue', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [],
+      [],
+      undefined,
+      { state: 'ready' },
+      null,
+      [{ index: 0, id: 'appr-drifted', keeper_name: 'keeper-b', tool_name: 'fs_write' }],
+    )
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const banner = container.querySelector('[data-testid="approvals-queue-violations"]')
+    expect(banner).not.toBeNull()
+    expect(banner?.textContent).toContain('표시 불가 대기 요청 1건')
+    expect(banner?.textContent).toContain('appr-drifted')
+    expect(container.querySelector('[data-testid="approvals-empty"]')).toBeNull()
+  }, 20000)
+
+  it('names the judge lane model in the Gate mode card, and its unavailability', async () => {
+    const { ApprovalsSurface } = await loadSurface([], [], [], {
+      gate_mode: { mode: 'auto_judge', configured: true, state: 'ready' },
+      judge_lane: {
+        status: 'available',
+        lane_id: 'hitl_auto_judge',
+        slots: ['glm-coding.glm-5-turbo', 'ollama_cloud.deepseek-v4-flash'],
+      },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const lane = container.querySelector('[data-testid="gate-judge-lane"]')
+    expect(lane?.textContent).toContain('판정 모델 glm-coding.glm-5-turbo')
+    expect(lane?.textContent).toContain('+1 failover')
+
+    const { ApprovalsSurface: UnavailableSurface } = await loadSurface([], [], [], {
+      gate_mode: { mode: 'auto_judge', configured: true, state: 'ready' },
+      judge_lane: {
+        status: 'unavailable',
+        lane_id: 'hitl_auto_judge',
+        reason: 'registry_not_published',
+      },
+    })
+
+    render(html`<${UnavailableSurface} />`, container)
+    await flushUi()
+
+    const unavailable = container.querySelector('[data-testid="gate-judge-lane"]')
+    expect(unavailable?.textContent).toContain('hitl_auto_judge')
+    expect(unavailable?.textContent).toContain('registry_not_published')
   }, 20000)
 
   it('filters resolved approval history and surfaces Always-rule evidence', async () => {

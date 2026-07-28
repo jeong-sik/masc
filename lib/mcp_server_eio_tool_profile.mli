@@ -45,17 +45,15 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
     strings changes how clients describe / discover the server. *)
 
 val default_instructions : unit -> string
-(** [default_instructions ()] returns [Full] profile instructions. Describes MASC project /
-    cluster / read / write conventions and points clients at
-    [masc_tool_help]. Tool lifecycle prose is loaded from
-    [config/prompts/tool_contract.task_lifecycle_workflow.md]. *)
+(** [default_instructions ()] returns [Full] profile instructions. Describes
+    where MASC state lives (project / cluster / read / write conventions). It
+    names no tool as a thing to call: the typed schema is the callable
+    catalog. *)
 
 val managed_agent_instructions : string
-(** [Managed_agent] profile instructions.  Names the canonical
-    task-control tools ([masc_status], [masc_tasks],
-    [keeper_task_claim], [masc_transition], [masc_plan_set_task])
-    and warns that the public /mcp surface and managed-agent
-    surface diverge in inventory. *)
+(** [Managed_agent] profile instructions.  States that the profile exposes
+    the internal agent control surface, and warns that the public /mcp
+    surface and the managed-agent surface diverge in inventory. *)
 
 val operator_remote_instructions : string
 (** [Operator_remote] profile instructions.  Names the 7 operator

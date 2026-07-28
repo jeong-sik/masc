@@ -135,14 +135,15 @@ let manual_help_entry name =
       Some
         {
           name;
-          short_description = "Search for additional tools by natural language query.";
-          when_to_use = "Use when your core tools are insufficient for the current task and you need help identifying relevant tools by describing the capability you need.";
+          short_description = "Search active Keeper tools by natural language query.";
+          when_to_use = "Use when you need to identify a relevant tool from the active Keeper schema by describing the capability you need.";
           key_constraints =
             [
+              "A non-empty query is required.";
               "Returns up to 10 matching results per query.";
             ];
           details_markdown =
-            "BM25 search over the full tool universe. Returns matching tool names, descriptions, and usage guidance for discovery and selection.";
+            "Ranked multilingual text search over the tool schemas visible in the current Keeper turn. Returns matching names, descriptions, and input schemas without dumping the full catalog.";
           doc_refs = [];
           prompt_hints = [];
           examples = [ "query='find a tool that edits files in place'" ];

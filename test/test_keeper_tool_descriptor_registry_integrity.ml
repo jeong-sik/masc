@@ -1109,6 +1109,25 @@ let test_library_search_descriptor_has_recoverable_query_schema () =
     (List.mem "query" (schema_required_fields descriptor.input_schema))
 ;;
 
+let test_tool_search_descriptor_uses_registry_schema () =
+  let descriptor = required_internal_descriptor "keeper_tool_search" in
+  let canonical =
+    Masc.Keeper_tool_registry.keeper_tool_search_schema
+  in
+  Alcotest.(check bool)
+    "descriptor and registry share one exact input schema"
+    true
+    (descriptor.Descriptor.input_schema = canonical.input_schema);
+  Alcotest.(check bool)
+    "query remains required"
+    true
+    (List.mem "query" (schema_required_fields canonical.input_schema));
+  Alcotest.(check bool)
+    "search schema rejects unowned fields"
+    true
+    (schema_forbids_additional_properties canonical.input_schema)
+;;
+
 let test_readonly_policy_projection_is_descriptor_owned () =
   let projected = Descriptor.readonly_internal_names () in
   List.iter
@@ -1521,6 +1540,10 @@ let () =
             "Library search query is runtime-recoverable"
             `Quick
             test_library_search_descriptor_has_recoverable_query_schema
+        ; test_case
+            "Tool search descriptor uses registry SSOT"
+            `Quick
+            test_tool_search_descriptor_uses_registry_schema
         ] )
     ; ( "masc-board"
       , [ test_case

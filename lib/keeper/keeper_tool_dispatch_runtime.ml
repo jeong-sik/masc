@@ -13,7 +13,7 @@ open Keeper_tool_shared_runtime
 include Keeper_tool_registry
 include Keeper_tool_policy
 
-let unavailable_tool_search () =
+let unavailable_tool_search ~query:_ ~max_results:_ =
   let data =
     `Assoc
       [ "ok", `Bool false

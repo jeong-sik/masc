@@ -17,7 +17,8 @@ type context =
       Keeper_publication_recovery_availability.turn_context
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
-  ; search_fn : unit -> Keeper_tool_execution.t
+  ; search_fn :
+      query:string -> max_results:int -> Keeper_tool_execution.t
   ; sw : Eio.Switch.t option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t option
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
@@ -40,6 +41,20 @@ let descriptor_for_internal internal_name =
   match Keeper_tool_descriptor.descriptors_for_internal internal_name with
   | descriptor :: _ -> Some descriptor
   | [] -> None
+;;
+
+let invalid_tool_search_query () =
+  let data =
+    `Assoc
+      [ "ok", `Bool false
+      ; "error", `String "invalid_tool_search_query"
+      ; "reason", `String "query_required"
+      ]
+  in
+  Keeper_tool_execution.failure_data
+    ~class_:Tool_result.Policy_rejection
+    ~message:(Yojson.Safe.to_string data)
+    data
 ;;
 
 let handle_filesystem ctx descriptor args =
@@ -172,7 +187,19 @@ let handle_in_process ctx descriptor args =
     Some
       (Keeper_tool_execution.success
          (Keeper_tool_in_process_runtime.handle_tools_list ~meta:ctx.meta ~args))
-  | Tool_tool_search -> Some (ctx.search_fn ())
+  | Tool_tool_search ->
+    let query =
+      Safe_ops.json_string ~default:"" "query" args |> String.trim
+    in
+    if String.equal query ""
+    then Some (invalid_tool_search_query ())
+    else
+      let max_results =
+        Safe_ops.json_int ~default:5 "max_results" args
+        |> Int.max 1
+        |> Int.min 10
+      in
+      Some (ctx.search_fn ~query ~max_results)
   | Tool_context_status ->
     Some
       (Keeper_tool_execution.success

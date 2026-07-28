@@ -32,7 +32,9 @@ val write_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 val execute_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** Recover the execute tool arguments from the approved Gate input. Nothing is
     reconstructed: the Gate request wraps the arguments with execution context
-    rather than re-encoding them. *)
+    rather than re-encoding them, and the approved [cwd] the submitting handler
+    upserted into those arguments rides along. The envelope's own sandbox
+    fields stay behind for the handler to re-derive. *)
 
 type replayable =
   | Replay_write
@@ -42,9 +44,6 @@ val replayable_of_operation : string -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the
     call. Exposed because a decode function that exists but is never dispatched
     to is indistinguishable from a working replay at the boundary. *)
-(** Recover the execute tool arguments from the approved Gate input. Nothing is
-    reconstructed: the Gate request wraps the arguments with execution context
-    rather than re-encoding them. *)
 
 (** Replay the approved effect behind [approval_id] exactly once.
 

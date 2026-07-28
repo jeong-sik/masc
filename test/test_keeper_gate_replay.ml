@@ -139,10 +139,17 @@ let test_non_object_input_is_rejected () =
 ;;
 
 
-(* [tool_execute] is 66% of live approvals and was Not_applicable until now,
+(* [tool_execute] dominates live approvals and was Not_applicable until now,
    so a Keeper had to re-emit a byte-identical command to spend its own
    approval. Unlike the write path nothing is reconstructed: the Gate request
-   wraps the arguments with execution context instead of re-encoding them. *)
+   wraps the arguments with execution context instead of re-encoding them.
+
+   The submitting handler upserts the resolved [cwd] into the arguments before
+   wrapping them (keeper_tool_execute_runtime.ml), so every approved execute
+   carries it twice: once inside [input] and once in the envelope. This fixture
+   reproduces that shape — 130 of 130 pending [tool_execute] entries in the
+   2026-07-28 store had [input.cwd], with no exceptions. A fixture without it
+   passes assertions the producer can never satisfy. *)
 let approved_execute_input =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
@@ -150,6 +157,7 @@ let approved_execute_input =
       , `Assoc
           [ "argv", `List [ `String "git"; `String "status" ]
           ; "timeout_sec", `Int 30
+          ; "cwd", `String "/repo"
           ] )
     ; "cwd", `String "/repo"
     ; "sandbox_profile", `String "docker"
@@ -165,14 +173,33 @@ let test_execute_args_are_the_approved_arguments () =
        (`Assoc
           [ "argv", `List [ `String "git"; `String "status" ]
           ; "timeout_sec", `Int 30
+          ; "cwd", `String "/repo"
           ]))
     (Masc.Keeper_gate_replay.execute_args_of_gate_input approved_execute_input)
 ;;
 
-let test_execute_context_is_not_replayed () =
-  (* cwd and the sandbox fields describe where the approval was granted. The
-     handler re-derives them from the current turn; carrying the stored ones
-     would execute somewhere the approval never described. *)
+(* The approved [cwd] is part of the effect the operator authorized, so it
+   rides along inside the arguments. Dropping it would run the command in the
+   current turn's default directory — an effect nobody approved. *)
+let test_approved_cwd_is_replayed () =
+  match
+    Masc.Keeper_gate_replay.execute_args_of_gate_input approved_execute_input
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok (`Assoc fields) ->
+    Alcotest.check
+      (Alcotest.option json)
+      "the approved working directory reaches the replayed call"
+      (Some (`String "/repo"))
+      (List.assoc_opt "cwd" fields)
+  | Ok _ -> Alcotest.fail "replayed execute arguments are not an object"
+;;
+
+(* The envelope siblings describe the sandbox the approval was granted under.
+   The handler re-derives those and rebuilds the envelope, so a sandbox that
+   moved since approval fails the canonical-input match instead of executing
+   under a profile the approval never described. *)
+let test_execute_envelope_is_not_replayed () =
   match
     Masc.Keeper_gate_replay.execute_args_of_gate_input approved_execute_input
   with
@@ -185,7 +212,7 @@ let test_execute_context_is_not_replayed () =
            (key ^ " is not carried into the replayed arguments")
            false
            (List.mem_assoc key fields))
-      [ "cwd"; "sandbox_profile"; "sandbox_target"; "schema" ]
+      [ "sandbox_profile"; "sandbox_target"; "schema" ]
   | Ok _ -> Alcotest.fail "replayed execute arguments are not an object"
 ;;
 
@@ -259,9 +286,13 @@ let () =
             `Quick
             test_execute_args_are_the_approved_arguments
         ; Alcotest.test_case
-            "approval-time context is not replayed"
+            "approved cwd is replayed"
             `Quick
-            test_execute_context_is_not_replayed
+            test_approved_cwd_is_replayed
+        ; Alcotest.test_case
+            "approval-time envelope is not replayed"
+            `Quick
+            test_execute_envelope_is_not_replayed
         ; Alcotest.test_case
             "input without arguments rejected"
             `Quick

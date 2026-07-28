@@ -22,10 +22,17 @@ val replay_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** Recover the approved tool arguments from the stored Gate input.
 
     The Gate request wraps the arguments with execution context rather than
-    re-encoding them, so the approved arguments are returned verbatim. The
-    stored [cwd]/[sandbox_*] fields are not replayed: the handler re-derives
-    them from the current turn, and a divergence fails the canonical-input
-    match instead of executing somewhere the approval did not describe. *)
+    re-encoding them, so the approved arguments are returned verbatim —
+    including the [cwd] the submitting turn resolved and upserted into them.
+    Replaying that [cwd] is the point: the approval describes one working
+    directory, and re-deriving the current turn's default would execute
+    somewhere the operator never saw.
+
+    The envelope's sibling [cwd]/[sandbox_profile]/[sandbox_target] fields
+    stay behind. The handler re-derives the sandbox from the current turn and
+    rebuilds the envelope, so a sandbox that moved between approval and replay
+    produces a different canonical input and fails the match rather than
+    executing under a profile the approval did not describe. *)
 
 val handle_tool_execute_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

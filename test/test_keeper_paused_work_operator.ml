@@ -69,6 +69,59 @@ let common operation fields =
      @ fields)
 ;;
 
+let with_source_terminal_lane f =
+  let base_path = Filename.temp_dir "keeper-paused-work-operator-terminal" "" in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "paused-work-operator-terminal" in
+       let meta =
+         Masc_test_deps.meta_of_json_fixture
+           (`Assoc
+             [ "name", `String keeper_name
+             ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
+             ; "trace_id", `String "trace-paused-work-operator-terminal"
+             ; "autoboot_enabled", `Bool false
+             ])
+         |> require_ok "parse source-terminal metadata"
+       in
+       let meta =
+         { meta with
+           paused = true
+         ; latched_reason =
+             Some
+               (Keeper_latched_reason.Operator_paused
+                  { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
+         ; runtime = { meta.runtime with nonce = 19 }
+         }
+       in
+       Keeper_meta_store.write_meta config meta |> require_ok "persist source-terminal metadata";
+       let source, _channel = terminal_source () in
+       Persistence.update_result ~base_path ~keeper_name (fun pending ->
+         Queue.enqueue pending source)
+       |> require_ok "seed source-terminal event";
+       let source_revision =
+         Persistence.load_state_result ~base_path ~keeper_name
+         |> require_ok "load source-terminal state"
+         |> State.revision
+       in
+       let source_receipt =
+         State.source_terminal_receipt_of_stimulus source
+         |> require_ok "derive source-terminal receipt"
+       in
+       let request =
+         { source
+         ; source_revision
+         ; owner_nonce = meta.runtime.nonce
+         ; source_receipt
+         ; operator_operation_id = "operator-source-terminal-response"
+         }
+       in
+       f config keeper_name request)
+;;
+
 let test_strict_request_codec () =
   let resume =
     common
@@ -195,6 +248,35 @@ let test_strict_request_codec () =
   (match Operator.request_of_yojson mismatched_source_terminal with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "source-terminal request accepted a mismatched receipt")
+;;
+
+let test_source_terminal_outcome_is_ack_boundary () =
+  with_source_terminal_lane (fun config keeper_name request ->
+    let outcome =
+      match Operator.execute config ~keeper_name (Operator.Ack_source_terminal request) with
+      | Ok outcome -> outcome
+      | Error error -> Alcotest.fail (Operator.error_to_string error)
+    in
+    let json = Operator.outcome_to_yojson outcome in
+    let open Yojson.Safe.Util in
+    Alcotest.(check bool)
+      "source-terminal outcome projection is complete"
+      true
+      (Operator.outcome_projection_complete outcome);
+    Alcotest.(check string)
+      "operator response names source ACK"
+      "ack_source_terminal"
+      (json |> member "operation" |> to_string);
+    Alcotest.(check string)
+      "durable receipt names source ACK"
+      "ack_source_terminal"
+      (json |> member "receipt" |> member "operation" |> to_string);
+    Alcotest.(check bool)
+      "durable source-terminal receipt has no settled_at"
+      true
+      (match json |> member "receipt" |> member "source_terminal" |> member "settled_at" with
+       | `Null -> true
+       | _ -> false))
 ;;
 
 let test_inventory_exposes_exact_durable_fences () =
@@ -324,6 +406,12 @@ let () =
     "keeper paused-work operator"
     [ ( "codec"
       , [ Alcotest.test_case "strict four-way request codec" `Quick test_strict_request_codec ] )
+    ; ( "source terminal"
+      , [ Alcotest.test_case
+            "outcome is ACK boundary"
+            `Quick
+            test_source_terminal_outcome_is_ack_boundary
+        ] )
     ; ( "inventory"
       , [ Alcotest.test_case
             "durable exact identity and revision"

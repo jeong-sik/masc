@@ -997,8 +997,39 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
             entry.tool_call_id
             Yojson.Safe.Util.
               (context_bundle |> member "tool_call_id" |> to_string_option)
-        | Ok entries ->
+       | Ok entries ->
           failf "expected one pending approval, got %d" (List.length entries)
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.storage_error_to_string error));
+       let blank_id_invocation =
+         Agent_sdk.Tool_contract.Invocation.create
+           ~tool_use_id:""
+           ~turn:17
+           ~completion:Agent_sdk.Tool_contract.Continue_after_success
+           ~schedule:
+             { planned_index = 1
+             ; batch_index = 1
+             ; batch_size = 2
+             ; execution_mode = Agent_sdk.Tool_contract.Serial
+             }
+       in
+       (match handler ~oas_invocation:blank_id_invocation input with
+        | Tool_result.Deferred _ -> ()
+        | Tool_result.Completed _ | Tool_result.Failed _ ->
+          fail "blank-id OAS occurrence did not remain Gate-deferred");
+       (match handler ~oas_invocation:blank_id_invocation input with
+        | Tool_result.Deferred _ -> ()
+        | Tool_result.Completed _ | Tool_result.Failed _ ->
+          fail "replayed blank-id OAS occurrence did not remain Gate-deferred");
+       (match
+          Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+            ~base_path:config.base_path
+        with
+        | Ok entries ->
+          check int
+            "the repeated blank-id OAS occurrence has one durable approval"
+            2
+            (List.length entries)
         | Error error ->
           fail (Masc.Keeper_approval_queue.storage_error_to_string error));
        let later_invocation =
@@ -1031,7 +1062,7 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
           in
           check int
             "a reused raw provider ID in a later OAS turn creates a new approval"
-            2
+            3
             (List.length identities)
         | Error error ->
           fail (Masc.Keeper_approval_queue.storage_error_to_string error));

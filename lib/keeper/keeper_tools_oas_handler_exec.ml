@@ -25,9 +25,6 @@ let gate_context_for_invocation
   match oas_invocation with
   | None -> gate_context
   | Some invocation ->
-    let raw_tool_call_id =
-      Agent_sdk.Tool_contract.Invocation.tool_use_id invocation
-    in
     Some
       (fun () ->
          let base_context =
@@ -40,15 +37,12 @@ let gate_context_for_invocation
              }
          in
          let tool_call_id =
-           if String.trim raw_tool_call_id = ""
-           then None
-           else
-             Some
-               (Keeper_tool_call_identity.create
-                  ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                  ?keeper_turn_id:base_context.turn_id
-                  invocation
-                |> Keeper_tool_call_identity.to_string)
+           Some
+             (Keeper_tool_call_identity.create
+                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                ?keeper_turn_id:base_context.turn_id
+                invocation
+              |> Keeper_tool_call_identity.to_string)
          in
          { base_context with tool_call_id })
 ;;

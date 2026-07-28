@@ -275,10 +275,16 @@ let test_public_read_rejects_unsupported_range_fields () =
          | `Assoc _ -> true
          | _ -> false))
 
-let test_public_read_rejects_offset_without_enrichment () =
+let test_public_read_supports_offset_line_window () =
   with_exec_fixture
-    "keeper_tool_dispatch_runtime_read_rejects_offset"
+    "keeper_tool_dispatch_runtime_read_offset"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let playground = KES.keeper_default_write_root ~config ~meta in
+      mkdir_p playground;
+      let file_name = "offset-window.txt" in
+      write_file
+        (Filename.concat playground file_name)
+        "line-001\nline-002\nline-003\n";
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
@@ -288,21 +294,19 @@ let test_public_read_rejects_offset_without_enrichment () =
           ~name:"Read"
           ~input:
             (`Assoc
-               [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
-               ; "offset", `Int 100
+               [ "file_path", `String file_name
+               ; "offset", `Int 2
+               ; "limit", `Int 1
                ])
           ()
       in
-      check string "runtime outcome" "failure" (outcome_label result.disposition);
-      let json =
-        match result.data with
-        | Some data -> data
-        | None -> fail "validation rejection omitted typed data"
-      in
-      check bool "dispatch does not add a tutor" true
-        Yojson.Safe.Util.(member "tool_tutor" json = `Null);
-      check bool "validation names exact field" true
-        (contains_substring result.raw_output "offset"))
+      let json = check_success_result "Read offset window" result in
+      check int "offset passes through as a line coordinate" 2
+        Yojson.Safe.Util.(member "offset" json |> to_int);
+      check int "limit caps returned lines" 1
+        Yojson.Safe.Util.(member "returned_lines" json |> to_int);
+      check string "Read starts at the requested line" "line-002\n"
+        (json_string_field ~default:"" "content" json))
 
 let test_raw_board_runtime_respects_projection () =
   let meta = make_meta ~name:"keeper-board-runtime-guard" () in
@@ -2134,8 +2138,10 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
       let execute_json = check_success_result "Execute" execute_result in
       check bool "Execute used typed Shell IR" true
         (json_bool_field ~default:false "typed" execute_json);
-      check bool "Execute ran in requested cwd" true
-        (contains_substring execute_result.raw_output playground))
+      check string
+        "Execute ran in requested cwd"
+        (Unix.realpath playground)
+        (json_string_field ~default:"" "output" execute_json |> String.trim))
 
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
@@ -3566,6 +3572,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                fail "later success changed failure into an external defer"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                fail "later success overwrote the failed terminal effect");
+            let broadcast_count_before_runtime_failure = !chat_broadcast_count in
             Unix.unlink chat_path;
             Unix.mkdir chat_path 0o755;
             let runtime_bundle =
@@ -3661,8 +3668,8 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                fail "runtime terminal failure became completion");
             check int
-              "runtime failure emits no keeper chat broadcast"
-              0
+              "runtime failure emits no additional keeper chat broadcast"
+              broadcast_count_before_runtime_failure
               !chat_broadcast_count;
             check bool
               "runtime terminal delivery failure is not auto-recoverable"
@@ -3721,8 +3728,8 @@ let () =
     ("execute_keeper_tool_call_with_outcome", [
       test_case "public Read rejects unsupported range fields" `Quick
         test_public_read_rejects_unsupported_range_fields;
-      test_case "public Read rejects offset without dispatch enrichment" `Quick
-        test_public_read_rejects_offset_without_enrichment;
+      test_case "public Read supports offset line windows" `Quick
+        test_public_read_supports_offset_line_window;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "initializing recovery isolates only publication writes" `Quick

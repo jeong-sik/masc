@@ -312,6 +312,56 @@ let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
         (Some "live gate replay output")
         (fetch_ok store ~sha256:replay_live.sha256))
 
+let test_maintenance_keeps_wire_capture_reference_within_retention () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let captured =
+        B.put store ~bytes:"captured provider response" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let dead =
+        B.put store ~bytes:"unreferenced provider response" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let wire_capture =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "wire-capture/2026-07/28.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname wire_capture);
+      Fs_compat.save_file
+        wire_capture
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "kind", `String "response"
+             ; ( "response_text"
+               , `String (O.encode_for_oas (O.Stored captured)) )
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "wire capture reference is live"
+        1
+        observed.live_references;
+      Alcotest.(check int)
+        "only the unreferenced blob is a candidate"
+        1
+        observed.candidates_recorded;
+      let swept =
+        maintenance_ok
+          ~base_path
+          ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "stable unreferenced blob is deleted" 1 swept.deleted;
+      Alcotest.(check (option string))
+        "wire capture blob remains readable"
+        (Some "captured provider response")
+        (fetch_ok store ~sha256:captured.sha256);
+      Alcotest.(check (option string))
+        "unreferenced blob no longer exists"
+        None
+        (fetch_ok store ~sha256:dead.sha256))
+
 let test_maintenance_malformed_reference_fails_closed () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -828,6 +878,10 @@ let () =
             "maintenance malformed reference fails closed"
             `Quick
             test_maintenance_malformed_reference_fails_closed;
+          Alcotest.test_case
+            "maintenance keeps wire-capture reference within retention"
+            `Quick
+            test_maintenance_keeps_wire_capture_reference_within_retention;
           Alcotest.test_case
             "maintenance ignores repository mirrors"
             `Quick

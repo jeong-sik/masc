@@ -224,6 +224,9 @@ let durable_consumer_basenames =
   ; "tool_calls"
   ; "traces"
   ; Common.keeper_runtime_store_dirname Common.Keeper_trajectories
+  (* The bounded diagnostic store owns every blob reference for as long as
+     its dated JSONL row remains inside wire-capture retention. *)
+  ; "wire-capture"
   ]
 ;;
 
@@ -422,22 +425,21 @@ let save_candidate_snapshot ~base_path candidates =
     | Error detail ->
       Error (Candidate_snapshot_write_failed { path; detail })
     | Ok Fs_compat.Owned_directory_missing ->
-      (try
-         Fs_compat.mkdir_p parent;
-         match inspect_parent () with
-         | Ok (Fs_compat.Owned_directory stats) -> Ok stats
-         | Ok Fs_compat.Owned_directory_missing ->
+      Safe_ops.handle
+        (fun () ->
+           Fs_compat.mkdir_p parent;
+           match inspect_parent () with
+           | Ok (Fs_compat.Owned_directory stats) -> Ok stats
+           | Ok Fs_compat.Owned_directory_missing ->
+             Error
+               (Candidate_snapshot_write_failed
+                  { path; detail = "candidate snapshot parent was not created" })
+           | Error detail ->
+             Error (Candidate_snapshot_write_failed { path; detail }))
+        (fun exn ->
            Error
              (Candidate_snapshot_write_failed
-                { path; detail = "candidate snapshot parent was not created" })
-         | Error detail ->
-           Error (Candidate_snapshot_write_failed { path; detail })
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Error
-           (Candidate_snapshot_write_failed
-              { path; detail = Printexc.to_string exn }))
+                { path; detail = Printexc.to_string exn }))
     | Ok (Fs_compat.Owned_directory stats) -> Ok stats
   in
   let* () =

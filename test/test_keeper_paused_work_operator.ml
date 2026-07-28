@@ -190,7 +190,6 @@ let test_inventory_exposes_exact_durable_fences () =
             [ "name", `String keeper_name
             ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
             ; "trace_id", `String "trace-paused-work-inventory"
-            ; "runtime_id", `String "runtime.primary"
             ; "autoboot_enabled", `Bool false
             ])
         |> require_ok "parse inventory metadata"

@@ -256,6 +256,11 @@ let record_anti_rationalization_outcome ~outcome ~runtime =
 ;;
 
 let install () =
+  Atomic.set Workspace_hooks.schedule_wake_target_registered_fn (fun config keeper_name ->
+    match Keeper_meta_store.read_effective_meta config keeper_name with
+    | Ok (Some _) -> Ok true
+    | Ok None -> Ok false
+    | Error detail -> Error detail);
   Atomic.set Workspace_hooks.observe_agent_lifecycle_fn (fun config ~agent_id ~event ~details ->
     observe_agent_lifecycle config ~agent_id ~event ~details);
   Atomic.set Workspace_hooks.observe_task_transition_fn (fun config ~agent_name ~task_id ~transition ~details ->

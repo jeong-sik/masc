@@ -40,6 +40,14 @@ val activity_emit_fn : (Workspace_utils_backend_setup.config ->
            Atomic.t
 val runtime_agents_fn :
   (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t
+
+(** Whether a schedule keeper_wake target has durable keeper metadata.
+    [Ok true] = registered, [Ok false] = absent, [Error] = read failure.
+    Default allows every target; the runtime installs the
+    durable-metadata reader at boot so the tool layer keeps no static
+    keeper dependency (RFC-0194). *)
+val schedule_wake_target_registered_fn :
+  (Workspace_utils_backend_setup.config -> string -> (bool, string) result) Atomic.t
 val relation_on_leave_fn : (leaving_agent:string -> active_agents:string list -> unit)
            Atomic.t
 val relation_on_task_done_fn : (assignee:string -> active_agents:string list -> unit) Atomic.t

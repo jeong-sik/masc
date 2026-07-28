@@ -25,6 +25,53 @@ type t =
 
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
+(* One type, one projection. Every filesystem path a keeper LLM is shown has
+   to pass through [Path], so that the compiler rejects a host path at an
+   LLM-facing sink instead of a doc comment asking callers not to write one.
+
+   The convention alone was already tried: keeper_sandbox.mli has said "use
+   this in LLM-facing surfaces" since #10650, and the same host->container
+   mapping was still reimplemented five times with three different fallback
+   behaviours. Two of those fallbacks emit a string the keeper acts on as if
+   it were real — the host path itself, or a silent collapse to the sandbox
+   root that drops the repo segment. *)
+module Path = struct
+  type host
+  type container
+  type visible
+
+  (* [+] is required, not stylistic: the parameter is phantom, so without a
+     variance annotation OCaml cannot deduce it from the representation. The
+     tags are distinct abstract types in the .mli, so covariance creates no
+     subtyping between them — [host t] still fails to unify with
+     [visible t]. *)
+  type +'space t = string
+
+  type conversion_error =
+    | Outside_sandbox_root of
+        { path : string
+        ; host_root : string
+        }
+    | Container_root_missing of { path : string }
+
+  let of_host_abs raw : host t = Env_config_core.normalize_path_lexically raw
+  let unsafe_to_string (p : _ t) = p
+  let visible_to_string (p : visible t) = p
+
+  let conversion_error_to_string = function
+    | Outside_sandbox_root { path; host_root } ->
+      Printf.sprintf
+        "path_outside_sandbox_root: %s is not under %s"
+        path
+        host_root
+    | Container_root_missing { path } ->
+      Printf.sprintf
+        "container_root_missing: no container root is configured, cannot \
+         project %s"
+        path
+  ;;
+end
+
 let backend_of_profile = function
   | Keeper_types_profile_sandbox.Local -> Local
   | Keeper_types_profile_sandbox.Docker -> Docker
@@ -137,6 +184,71 @@ let keeper_visible_root_abs (t : t) : string =
   match t.container_root with
   | Some container -> container
   | None -> t.host_root_abs
+
+(* The host -> keeper-visible projection. Fail-closed: a path that cannot be
+   projected yields [Error], never the host path and never a collapse to the
+   sandbox root. Both of those were live fallbacks in the implementations
+   this replaces, and both hand the keeper a plausible string it then acts on
+   as if the directory existed.
+
+   Projection is not containment. For a Local backend the keeper runs on the
+   host filesystem, so every host path is already visible and the answer is
+   the input — that this returns an out-of-sandbox path unchanged is correct
+   here and is decided elsewhere, by Keeper_alerting_path. For Docker the two
+   coordinate systems are disjoint, so an out-of-root path has no visible
+   spelling at all and must be an error. *)
+let visible_path_of_host (t : t) (p : Path.host Path.t)
+  : (Path.visible Path.t, Path.conversion_error) result
+  =
+  let path = Path.unsafe_to_string p in
+  match t.backend with
+  | Local -> Ok path
+  | Docker ->
+    (match t.container_root with
+     | None -> Error (Path.Container_root_missing { path })
+     | Some container_root ->
+       let host_root =
+         Env_config_core.normalize_path_lexically t.host_root_abs
+         |> strip_trailing_slashes
+       in
+       let container_root =
+         Env_config_core.normalize_path_lexically container_root
+         |> strip_trailing_slashes
+       in
+       if String.equal path host_root
+       then Ok container_root
+       else if String.starts_with ~prefix:(host_root ^ "/") path
+       then (
+         let suffix =
+           String.sub
+             path
+             (String.length host_root + 1)
+             (String.length path - String.length host_root - 1)
+         in
+         Ok (Filename.concat container_root suffix))
+       else Error (Path.Outside_sandbox_root { path; host_root }))
+;;
+
+(* Boundary parse for a path that arrived as an untyped string, typically a
+   [cwd] argument decoded from a keeper's tool call. A keeper may legitimately
+   send either coordinate system, because the echoes it has been shown carry
+   both, so decide once here rather than letting each tool guess. A string
+   already rooted at the visible root is accepted as-is; anything else is read
+   as a host path and projected. *)
+let visible_path_of_raw (t : t) (raw : string)
+  : (Path.visible Path.t, Path.conversion_error) result
+  =
+  let normalized = Env_config_core.normalize_path_lexically raw in
+  let visible_root =
+    keeper_visible_root_abs t
+    |> Env_config_core.normalize_path_lexically
+    |> strip_trailing_slashes
+  in
+  if String.equal normalized visible_root
+     || String.starts_with ~prefix:(visible_root ^ "/") normalized
+  then Ok normalized
+  else visible_path_of_host t (Path.of_host_abs raw)
+;;
 
 let storage_lifetime = "persistent_backend_task_overlay"
 

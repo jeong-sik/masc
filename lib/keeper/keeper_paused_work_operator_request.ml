@@ -16,7 +16,7 @@ type t =
   | Settle_from_source_terminal of Source_terminal.request
 
 let ( let* ) = Result.bind
-let schema = "masc.keeper.paused-work.operator-request.v1"
+let schema = "masc.keeper.paused-work.operator-request.v2"
 
 let sorted fields =
   List.sort (fun (left, _) (right, _) -> String.compare left right) fields
@@ -112,7 +112,6 @@ let parse_transfer = function
     ; ("operator_operation_id", `String operator_operation_id)
     ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
-    ; ("settled_at", settled_at_json)
     ; ("source", source_json)
     ; ("source_revision", source_revision_json)
     ; ("target_generation", `Int target_generation)
@@ -122,7 +121,6 @@ let parse_transfer = function
     let* source = Queue.stimulus_of_yojson source_json in
     let* source_revision = int64_of_yojson "source_revision" source_revision_json in
     let* source_revision = nonnegative_int64 "source_revision" source_revision in
-    let* settled_at = finite_float_of_yojson "settled_at" settled_at_json in
     let* continuation_binding =
       Disposition.continuation_binding_of_yojson continuation_binding_json
     in
@@ -143,7 +141,6 @@ let parse_transfer = function
                ; target_generation
                ; continuation_binding
                ; operator_operation_id
-               ; settled_at
                }
          })
   | _ -> Error "transfer_owner request fields are not exact"

@@ -63,7 +63,7 @@ let terminal_source () =
 
 let common operation fields =
   `Assoc
-    ([ "schema", `String "masc.keeper.paused-work.operator-request.v1"
+    ([ "schema", `String "masc.keeper.paused-work.operator-request.v2"
      ; "operation", `String operation
      ]
      @ fields)
@@ -122,7 +122,6 @@ let test_strict_request_codec () =
       ; ( "continuation_binding"
         , Disposition.continuation_binding_to_yojson (Disposition.Routed channel) )
       ; "operator_operation_id", `String "operator-transfer"
-      ; "settled_at", `Float 4.0
       ]
   in
   (match Operator.request_of_yojson transfer with
@@ -133,6 +132,14 @@ let test_strict_request_codec () =
        (request.source = terminal_source)
    | Ok _ -> Alcotest.fail "transfer decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
+  let transfer_with_obsolete_settled_at =
+    match transfer with
+    | `Assoc fields -> `Assoc (("settled_at", `Float 4.0) :: fields)
+    | _ -> Alcotest.fail "transfer fixture must be a JSON object"
+  in
+  (match Operator.request_of_yojson transfer_with_obsolete_settled_at with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "transfer request accepted obsolete settled_at field");
   let source_terminal =
     common
       "settle_from_source_terminal"

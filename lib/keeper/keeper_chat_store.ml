@@ -858,21 +858,36 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
    propagate it. The failure is still counted + warn-logged here so callers that
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
 let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () :
-    (unit, string) result =
+    ?(tool_calls = []) ?surface ?conversation_id ?audio ?blocks ?turn_ref
+    ?stream_lifecycle () : (unit, string) result =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let blocks = redact_blocks redaction blocks in
     let audio = Option.map (redact_audio redaction) audio in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
+    let tool_lines =
+      List.mapi
+        (fun position tc ->
+          encode_line ~role:Role.Tool
+            ~content:(normalize_tool_args tc.args)
+            ~ts
+            ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+            ~tool_call_name:tc.call_name
+            ?surface ?conversation_id ?turn_ref ())
+        tool_calls
+    in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
         ?audio ?blocks ?turn_ref ?stream_lifecycle ()
     in
-    append_chat_payload_durable path (line ^ "\n");
+    let payload =
+      String.concat "\n" (tool_lines @ [ line ]) ^ "\n"
+    in
+    append_chat_payload_durable path payload;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -945,10 +960,11 @@ let append_assistant_message_once
    failure is already counted + logged inside the [_result] variant). New callers
    that must surface the failure call [append_assistant_message_result] directly. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle () =
+    ?tool_calls ?surface ?conversation_id ?audio ?blocks ?turn_ref
+    ?stream_lifecycle () =
   ignore
-    (append_assistant_message_result ~base_dir ~keeper_name ~content ?surface
-       ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
+    (append_assistant_message_result ~base_dir ~keeper_name ~content ?tool_calls
+       ?surface ?conversation_id ?audio ?blocks ?turn_ref ?stream_lifecycle ()
       : (unit, string) result)
 
 (* RFC-0226: inbound user line recorded at delivery time, before (and

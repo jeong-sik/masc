@@ -92,6 +92,19 @@ let test_non_tool_events_are_ignored () =
   A.on_event t (stop ~index:0);
   check (list tool_call) "no calls" [] (A.to_tool_calls t)
 
+let test_invalid_tool_starts_are_ignored () =
+  let t = A.create () in
+  (* Blank tool_id or tool_name *)
+  A.on_event t (start ~index:0 ~tool_id:(Some "   ") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
+  A.on_event t (stop ~index:0);
+  (* Non-tool content type carrying identity *)
+  A.on_event t (Agent_sdk.Types.ContentBlockStart
+    { index = 1; content_type = "text"; tool_id = Some "call-x"; tool_name = Some "Read" });
+  A.on_event t (json_delta ~index:1 "{\"path\":\"b.ml\"}");
+  A.on_event t (stop ~index:1);
+  check (list tool_call) "invalid starts ignored" [] (A.to_tool_calls t)
+
 let () =
   run "Keeper_stream_tool_accum"
     [ ( "accumulation"
@@ -101,5 +114,6 @@ let () =
         ; test_case "block without call id is dropped" `Quick test_block_without_call_id_is_dropped
         ; test_case "message stop finalizes open blocks" `Quick test_message_stop_finalizes_open_blocks
         ; test_case "non-tool events are ignored" `Quick test_non_tool_events_are_ignored
+        ; test_case "invalid tool starts are ignored" `Quick test_invalid_tool_starts_are_ignored
         ] )
     ]

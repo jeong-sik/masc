@@ -279,6 +279,7 @@ val append_assistant_message_result :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
+  ?tool_calls:tool_call list ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->
@@ -315,6 +316,7 @@ val append_assistant_message :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
+  ?tool_calls:tool_call list ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->

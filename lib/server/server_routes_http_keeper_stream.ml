@@ -2169,6 +2169,9 @@ let process_single_turn ~user_row_origin ~queued_turn
                       });
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
+                 let tool_calls =
+                   Keeper_stream_tool_accum.to_tool_calls worker_tool_accum
+                 in
                  let persist_assistant_reply ~assistant_content =
                    if Option.is_some !direct_delivery_checkpoint
                    then
@@ -2193,9 +2196,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ~keeper_name:payload.name
                          ~user_content:payload.message
                          ~user_attachments:payload.attachments
-                         ~tool_calls:
-                           (Keeper_stream_tool_accum.to_tool_calls
-                              worker_tool_accum)
+                         ~tool_calls
                          ~surface:chat_surface
                          ~speaker:chat_speaker
                          ~assistant_content
@@ -2209,6 +2210,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ~base_dir:base_path
                          ~keeper_name:payload.name
                          ~content:assistant_content
+                         ~tool_calls
                          ~surface:chat_surface
                          ?blocks
                          ?turn_ref
@@ -2251,11 +2253,16 @@ let process_single_turn ~user_row_origin ~queued_turn
                             Keeper_chat_direct_delivery.No_assistant_reply
                           |> Result.map (fun () -> None)
                         | None ->
-                          persist_user_message_only ();
-                          Ok None)
+                          if has_visible_blocks || tool_calls <> []
+                          then
+                            persist_assistant_reply ~assistant_content:""
+                            |> Result.map (fun () -> None)
+                          else (
+                            persist_user_message_only ();
+                            Ok None))
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
-                       if has_visible_blocks
+                       if has_visible_blocks || tool_calls <> []
                        then
                          persist_assistant_reply ~assistant_content:""
                          |> delivered_after_persist

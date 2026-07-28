@@ -59,14 +59,25 @@ let replace_fragments t index snapshot =
   | None -> ()
   | Some block -> replace_block t index { block with args_fragments = [ snapshot ] }
 
+let stream_start_is_tool (evt : Agent_sdk.Types.sse_event) =
+  match evt with
+  | Agent_sdk.Types.ContentBlockStart { content_type; tool_id; tool_name; _ } ->
+    Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal evt
+    &&
+    (match tool_id, tool_name with
+     | Some tid, Some tname
+       when String.trim tid <> "" && String.trim tname <> "" -> true
+     | _ -> false)
+  | _ -> false
+
 let on_event t (evt : Agent_sdk.Types.sse_event) =
   match evt with
   | Agent_sdk.Types.ContentBlockStart { index; tool_id; tool_name; _ } ->
-    (match tool_id, tool_name with
-     | None, None -> ()
-     | _ ->
-       replace_block t index
-         { call_id = tool_id; call_name = tool_name; args_fragments = [] })
+    if stream_start_is_tool evt then
+      replace_block t index
+        { call_id = tool_id; call_name = tool_name; args_fragments = [] }
+    else
+      drop_block t index
   | Agent_sdk.Types.ContentBlockDelta
       { index; delta = Agent_sdk.Types.InputJsonDelta fragment } ->
     append_fragment t index fragment

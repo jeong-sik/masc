@@ -1096,14 +1096,6 @@ export interface MetricsWindow {
   tool_call_count?: number
 
   // -- Memory --
-  memory_checks?: number
-  memory_passed?: number
-  memory_failed?: number
-  memory_pass_rate?: number
-  memory_avg_score?: number
-  memory_threshold?: number
-  memory_corrections?: number
-  memory_correction_success?: number
   memory_notes_added?: number
 
   // -- Memory compaction --
@@ -1113,11 +1105,6 @@ export interface MetricsWindow {
   memory_compaction_invalid_dropped?: number
   memory_compaction_drop_ratio?: number
   memory_compaction_drop_avg?: number
-
-  // -- Memory weather --
-  memory_weather_checks?: number
-  memory_weather_passed?: number
-  memory_weather_pass_rate?: number
 
   // -- Top-N lists --
   top_work_kinds?: MetricsWindowTopItem[]

@@ -110,8 +110,8 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
 
    [cycle_crashed = true] means either the catch-all in
    [run_keepalive_unified_turn] swallowed an exception to keep the
-   keeper fiber alive, or the durable event-queue commit did
-   not commit. The failure has already been recorded via
+   keeper fiber alive, or event-queue work did not complete. The failure has
+   already been recorded via
    [Keeper_registry.increment_turn_failures] (the same counter the
    unified-turn failure path in [Keeper_unified_turn_failure] uses),
    so the caller reads a non-zero [turn_fail_count] and dispatches
@@ -151,7 +151,7 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
   | None | Some _ -> false
 ;;
 
-exception Event_queue_commit_failed of string
+exception Event_queue_cycle_failed of string
 
 type board_attention_settlement_outcome =
   | Board_attention_settled of
@@ -495,10 +495,10 @@ let run_keepalive_unified_turn
     in
     let cycle_outcome_ref = ref None in
     let selection_acked = ref false in
-    let event_queue_commit_failed = ref false in
+    let event_queue_failed = ref false in
     let transcript_corruption_detected = ref false in
-    let record_event_queue_commit_failure message =
-      event_queue_commit_failed := true;
+    let record_event_queue_failure message =
+      event_queue_failed := true;
       match !cycle_outcome_ref with
       | Some (Cycle.Failed _) ->
         (* The failed turn already recorded its failure counter.  The queue
@@ -518,7 +518,7 @@ let run_keepalive_unified_turn
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name
-          (Event_queue_commit_failed message)
+          (Event_queue_cycle_failed message)
     in
     let retain_unacked_pending _reason = () in
     let settle_exact_terminal_after_cancellation () = false in
@@ -583,7 +583,7 @@ let run_keepalive_unified_turn
          when
            Stimulus_intake.event_queue_intake_error_counts_as_cycle_failure
              error ->
-         record_event_queue_commit_failure
+         record_event_queue_failure
            (Stimulus_intake.event_queue_intake_error_to_string error)
        | Some _ -> ());
       let pending_board_events = event_intake.pending_board_events in
@@ -862,7 +862,7 @@ let run_keepalive_unified_turn
         with
         | Ok () -> true
         | Error message ->
-          record_event_queue_commit_failure message;
+          record_event_queue_failure message;
           false
       in
       (* Pending remains the authority throughout execution. Remove only an
@@ -887,7 +887,7 @@ let run_keepalive_unified_turn
                ~base_path:ctx.config.base_path
                ~keeper_name:meta_after_triage.name
                (connector_attention_event_ids_of_stimuli !consumed_stimuli)
-           | Error message -> record_event_queue_commit_failure message);
+           | Error message -> record_event_queue_failure message);
       (* RFC-0351 S0 / #25461: advance the compaction streak the ceiling reads.
          The ceiling now lives at the trigger, not at lease settlement:
          [Keeper_post_turn] asks [Keeper_meta_contract.compaction_retry_suspended]
@@ -933,7 +933,7 @@ let run_keepalive_unified_turn
               message));
       { meta = meta_after_cycle
       ; cycle_status =
-          if !event_queue_commit_failed then Turn_cycle_crashed else Turn_cycle_completed
+          if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed
       }
     with
     | Eio.Cancel.Cancelled _ as e ->

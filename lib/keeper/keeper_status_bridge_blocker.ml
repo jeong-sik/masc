@@ -121,7 +121,7 @@ let gate_replay_repair_detail_sha256 detail =
 
 let gate_replay_repair_summary ~approval_id ~stage ~detail =
   Printf.sprintf
-    "Gate replay repair requires operator settlement for approval %s at stage %s (detail_sha256=%s); the exact wake remains unacknowledged and the effect must not be re-run."
+    "Gate replay recovery is pending for approval %s at stage %s (detail_sha256=%s); the exact wake remains unacknowledged while recovery retries and the effect must not be re-run."
     approval_id
     (Keeper_internal_error.gate_replay_repair_stage_to_string stage)
     (gate_replay_repair_detail_sha256 detail)

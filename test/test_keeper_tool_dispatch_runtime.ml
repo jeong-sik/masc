@@ -3066,7 +3066,7 @@ let test_failed_effect_is_durable_and_not_replayed () =
           "durable failure was executed again: %s"
           (Masc.Keeper_gate_replay.outcome_to_string outcome))
 
-let test_consumed_without_outcome_requires_operator_repair () =
+let test_consumed_without_outcome_delivers_indeterminate_result () =
   with_exec_fixture "keeper_gate_replay_unknown_restart"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       (match
@@ -3132,104 +3132,25 @@ let test_consumed_without_outcome_requires_operator_repair () =
           ()
       in
       (match missing_after_restart with
-       | Masc.Keeper_gate_replay.Repair_required
-          {
-            stage =
-              Masc.Keeper_gate_replay.Replay_effect_indeterminate_after_restart
-          ; _
-          } ->
-        ()
+       | Masc.Keeper_gate_replay.Not_applicable ->
+         ()
        | outcome ->
         failf
-          "consumed unknown outcome entered replay: %s"
+          "consumed unknown outcome blocked normal HITL delivery: %s"
           (Masc.Keeper_gate_replay.outcome_to_string outcome));
-      let source_post_id =
-        Keeper_event_queue.hitl_resolution_post_id_of_approval_id approval_id
-      in
-      (match
-         Masc.Keeper_registry_event_queue.snapshot_result
-           ~base_path:config.base_path
-           meta.name
-       with
-       | Ok queue ->
-         check bool "repair source exists before settlement" true
-           (Keeper_event_queue.to_list queue
-            |> List.exists (fun stimulus ->
-              String.equal stimulus.post_id source_post_id))
-       | Error detail -> fail detail);
-      let settle_args =
-        `Assoc
-          [ "approval_id", `String approval_id
-          ; ( "stage"
-            , `String "effect_indeterminate_after_restart" )
-          ; ( "decision"
-            , `String "effect_outcome_reconciled_externally" )
-          ]
-      in
-      (match
-         Server_dashboard_http
-         .dashboard_gate_replay_repair_settle_http_json
-           ~base_path:config.base_path
-           ~actor:"authenticated-operator"
-           ~args:settle_args
-       with
-       | Ok json ->
-         check bool "settlement retires exact source" true
-           Yojson.Safe.Util.(json |> member "source_retired" |> to_bool)
-       | Error detail -> fail detail);
-      (match
-         Masc.Keeper_registry_event_queue.snapshot_result
-           ~base_path:config.base_path
-           meta.name
-       with
-       | Ok queue ->
-         check bool "settlement removed exact repair source" false
-           (Keeper_event_queue.to_list queue
-            |> List.exists (fun stimulus ->
-              String.equal stimulus.post_id source_post_id))
-       | Error detail -> fail detail);
-      let audit_path =
-        Masc.Keeper_gate_path.replay_repair_settlements
+      let message =
+        Masc.Keeper_gate_replay.compose_model_message
           ~base_path:config.base_path
+          ~user_message:"continue independent work"
+          ~hitl_resolution:(Some resolution)
+          ~replay_delivery:(Some (approval_id, missing_after_restart))
       in
-      let audit = Fs_compat.load_file audit_path in
-      check bool "restart settlement has typed unknown outcome" true
-        (contains_substring audit "\"effect_kind\":\"unknown_after_restart\"");
-      check bool "restart settlement fabricates no effect hash" true
-        (contains_substring audit "\"effect_sha256\":null");
-      check bool "settlement audit contains no raw repair detail" false
+      check bool "indeterminate result is explicit" true
         (contains_substring
-           audit
-           "authorization is consumed but no durable replay outcome");
-      (match
-         Server_dashboard_http
-         .dashboard_gate_replay_repair_settle_http_json
-           ~base_path:config.base_path
-           ~actor:"authenticated-operator"
-           ~args:settle_args
-       with
-       | Error _ -> ()
-       | Ok _ -> fail "same repair settlement succeeded twice");
-      match
-        Masc.Keeper_gate_replay.replay_approved_effect
-          ~config
-          ~meta
-          ~publication_recovery
-          ~turn_sandbox_factory:None
-          ~grant:restarted_grant
-          ~approval_id
-          ()
-      with
-      | Masc.Keeper_gate_replay.Repair_required
-          { stage =
-              Masc.Keeper_gate_replay.Replay_effect_indeterminate_after_restart
-          ; _
-          } ->
-        ()
-      | outcome ->
-        failf
-          "operator settlement caused unknown effect to rerun: %s"
-          (Masc.Keeper_gate_replay.outcome_to_string outcome))
+           message
+           "authorization consumed, replay outcome unavailable");
+      check bool "indeterminate result forbids effect replay" true
+        (contains_substring message "Do not request the operation again"))
 
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
@@ -4304,8 +4225,8 @@ let () =
         test_journal_failure_retries_only_persistence;
       test_case "failed effect is durable and not replayed" `Quick
         test_failed_effect_is_durable_and_not_replayed;
-      test_case "consumed outcome gap requires operator repair" `Quick
-        test_consumed_without_outcome_requires_operator_repair;
+      test_case "consumed outcome gap delivers indeterminate result" `Quick
+        test_consumed_without_outcome_delivers_indeterminate_result;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "Manual Gate defers tool_execute before process" `Quick

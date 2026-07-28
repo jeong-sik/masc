@@ -91,7 +91,7 @@ let of_failure ?(tool_call_count = 0) ~raw_error err =
     | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
       of_disposition
         ~source:"typed_error"
-        Keeper_turn_disposition.Gate_replay_operator_attention
+        Keeper_turn_disposition.Gate_replay_recovery_pending
     | None ->
       (* The driver classifier returned None, meaning err is a generic
          [Agent_sdk.Error.t] not in the masc_internal_error family.

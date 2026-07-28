@@ -29,9 +29,9 @@ type t =
   (** Runtime aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
           this as the root cause. *)
-  | Gate_replay_operator_attention
-  (** A host replay effect outcome requires explicit operator settlement.
-      This is neither a provider failure nor runtime exhaustion. *)
+  | Gate_replay_recovery_pending
+  (** A host replay effect outcome is being recovered without replaying the
+      effect. This is neither a provider failure nor runtime exhaustion. *)
   | Provider_error of Keeper_turn_terminal_code.t
   (** Runtime-layer termination promoted to operator-facing
           disposition. The inner code preserves the typed runtime cause
@@ -72,7 +72,7 @@ val next_action : t -> string option
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
     - [Runtime_attempts_exhausted] → ["runtime_attempts_exhausted"]
-    - [Gate_replay_operator_attention] → ["gate_replay_repair_required"]
+    - [Gate_replay_recovery_pending] → ["gate_replay_repair_required"]
     - [Provider_error code] → [Keeper_turn_terminal_code.to_wire code]
     - [Unknown { raw_error }] → [raw_error] verbatim *)
 val to_wire : t -> string

@@ -122,40 +122,6 @@ val replay_operation_of_string : string -> replay_operation option
     call. Exposed because a decode function that exists but is never dispatched
     to is indistinguishable from a working replay at the boundary. *)
 
-type operator_settlement_decision =
-  | Effect_outcome_reconciled_externally
-  | Approval_authority_removed
-
-type operator_settlement_error =
-  | No_pending_repair of string
-  | Settlement_resolution_lookup_failed of string
-  | Settlement_stage_mismatch of
-      { expected : repair_stage
-      ; actual : repair_stage
-      }
-  | Settlement_actor_missing
-  | Settlement_audit_failed of string
-  | Settlement_source_retirement_failed of string
-
-val operator_settlement_decision_to_string :
-  operator_settlement_decision -> string
-
-val operator_settlement_error_to_string : operator_settlement_error -> string
-
-val settle_pending_repair :
-  base_path:string ->
-  approval_id:string ->
-  expected_stage:repair_stage ->
-  actor:string ->
-  decision:operator_settlement_decision ->
-  (unit, operator_settlement_error) result
-(** Durably audit an explicit operator decision before retiring the exact
-    source wake and clearing any process-local raw effect outcome. The caller
-    must name the observed stage, so a stale dashboard action cannot settle a
-    different repair state. Consumed-without-outcome approvals remain
-    settleable after restart with a typed unknown outcome and no fabricated
-    hash. No effect content is persisted. An audit or source-retirement failure
-    leaves any process-local raw outcome in memory. *)
 (** Recover the execute tool arguments from the approved Gate input. Nothing is
     reconstructed: the Gate request wraps the arguments with execution context
     rather than re-encoding them. *)
@@ -170,9 +136,9 @@ val settle_pending_repair :
 
     [gate_context] is the same causal-context provider the model-issued write
     path supplies. A replay whose re-derived input no longer matches its
-    approval falls back to an ordinary Gate request, and a request without
-    causal context cannot be summarized for Auto Judge, which stalls the FIFO
-    drain for every later approval.
+    approval falls back to an ordinary Gate request. A request without causal
+    context cannot be summarized for Auto Judge, which stalls the FIFO drain
+    for every later approval.
 
     Consumption is the durable one-shot grant. A repeated call after a
     successful replay returns the already-recorded durable outcome without

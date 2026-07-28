@@ -159,8 +159,6 @@ let gate_replay_repair_facts (meta : keeper_meta) =
     [ "approval_id", `String approval_id
     ; ( "stage"
       , `String (Keeper_internal_error.gate_replay_repair_stage_to_string stage) )
-    ; "operator_action_required", `Bool true
-    ; "operator_action", `String "settle_gate_replay_repair"
     ]
   | Some _ | None -> []
 ;;
@@ -229,7 +227,7 @@ let attention_fields_json_with_approval_queue
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some blocker
         when is_gate_replay_repair_blocker_class blocker.blocker_class ->
-        true, Some "gate_replay_repair_required", Some "settle_gate_replay_repair"
+        true, Some "gate_replay_repair_required", Some "inspect_latest_error"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
       | None -> false, None, None

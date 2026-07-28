@@ -237,8 +237,9 @@ type pending_repair =
    map. Keep the exact raw outcome until its blob reference and replay journal
    commit together. Each retained wake makes exactly one persistence-repair
    attempt and never re-runs the effect. This is deliberately process-local:
-   after a restart, consumed-without-outcome is unknown and requires operator
-   repair rather than guessing that the effect may be repeated. *)
+   after a restart, the missing outcome is delivered as an explicit
+   indeterminate approval result instead of guessing that the effect may be
+   repeated. *)
 let pending_repairs = Atomic.make Repair_map.empty
 
 let repair_key ~base_path ~approval_id =
@@ -266,215 +267,6 @@ let find_pending_repair ~base_path ~approval_id =
   Repair_map.find_opt
     (repair_key ~base_path ~approval_id)
     (Atomic.get pending_repairs)
-;;
-
-type operator_settlement_decision =
-  | Effect_outcome_reconciled_externally
-  | Approval_authority_removed
-
-type operator_settlement_error =
-  | No_pending_repair of string
-  | Settlement_resolution_lookup_failed of string
-  | Settlement_stage_mismatch of
-      { expected : repair_stage
-      ; actual : repair_stage
-      }
-  | Settlement_actor_missing
-  | Settlement_audit_failed of string
-  | Settlement_source_retirement_failed of string
-
-let operator_settlement_decision_to_string = function
-  | Effect_outcome_reconciled_externally ->
-    "effect_outcome_reconciled_externally"
-  | Approval_authority_removed -> "approval_authority_removed"
-;;
-
-let operator_settlement_error_to_string = function
-  | No_pending_repair approval_id ->
-    Printf.sprintf "no replay repair exists for %s" approval_id
-  | Settlement_resolution_lookup_failed detail ->
-    "operator replay repair resolution lookup failed: " ^ detail
-  | Settlement_stage_mismatch { expected; actual } ->
-    Printf.sprintf
-      "replay repair stage changed: expected %s, actual %s"
-      (repair_stage_to_string expected)
-      (repair_stage_to_string actual)
-  | Settlement_actor_missing -> "operator settlement actor must be non-blank"
-  | Settlement_audit_failed detail ->
-    "operator replay repair settlement audit failed: " ^ detail
-  | Settlement_source_retirement_failed detail ->
-    "operator replay repair source retirement failed: " ^ detail
-;;
-
-let effect_outcome_audit_fields = function
-  | Effect_applied output ->
-    "applied", Some Digestif.SHA256.(digest_string output |> to_hex)
-  | Effect_failed detail ->
-    "failed", Some Digestif.SHA256.(digest_string detail |> to_hex)
-;;
-
-type settlement_target =
-  { keeper_name : string
-  ; operation : replay_operation
-  ; stage : repair_stage
-  ; effect_kind : string
-  ; effect_sha256 : string option
-  }
-
-let settlement_target ~base_path ~approval_id =
-  match find_pending_repair ~base_path ~approval_id with
-  | Some { keeper_name; operation; replay_effect; stage } ->
-    let effect_kind, effect_sha256 =
-      effect_outcome_audit_fields replay_effect
-    in
-    Ok { keeper_name; operation; stage; effect_kind; effect_sha256 }
-  | None ->
-    (match
-       Keeper_approval_queue.approved_resolution_delivery
-         ~base_path
-         ~id:approval_id
-     with
-     | Error error ->
-       Error
-         (Settlement_resolution_lookup_failed
-            (Keeper_approval_queue.grant_error_to_string error))
-     | Ok
-         { request
-         ; state = Keeper_approval_queue.Resolution_consumed
-         ; replay_outcome = None
-         } ->
-       (match replay_operation_of_string request.tool_name with
-        | Some operation ->
-          Ok
-            { keeper_name = request.keeper_name
-            ; operation
-            ; stage = Replay_effect_indeterminate_after_restart
-            ; effect_kind = "unknown_after_restart"
-            ; effect_sha256 = None
-            }
-        | None -> Error (No_pending_repair approval_id))
-     | Ok _ -> Error (No_pending_repair approval_id))
-;;
-
-let settle_pending_repair
-      ~base_path
-      ~approval_id
-      ~expected_stage
-      ~actor
-      ~decision
-  =
-  let actor = String.trim actor in
-  if String.equal actor ""
-  then Error Settlement_actor_missing
-  else
-    match settlement_target ~base_path ~approval_id with
-    | Error _ as error -> error
-    | Ok { keeper_name; operation; stage; effect_kind; effect_sha256 } ->
-      if stage <> expected_stage
-      then
-        Error
-          (Settlement_stage_mismatch
-             { expected = expected_stage; actual = stage })
-      else
-        let source_post_id =
-          Keeper_event_queue.hitl_resolution_post_id_of_approval_id
-            approval_id
-        in
-        let source_present =
-          match
-            Keeper_registry_event_queue.snapshot_result
-              ~base_path
-              keeper_name
-          with
-          | Error detail ->
-            Error (Settlement_source_retirement_failed detail)
-          | Ok queue ->
-            if
-              Keeper_event_queue.to_list queue
-              |> List.exists (fun stimulus ->
-                String.equal stimulus.post_id source_post_id)
-            then Ok ()
-            else
-              Error
-                (Settlement_source_retirement_failed
-                   "exact Gate replay repair source is already absent")
-        in
-        Result.bind source_present (fun () ->
-        let audit =
-          `Assoc
-            [ "schema_version", `Int 1
-            ; ( "event"
-              , `String "gate_replay_repair_settlement_decision_committed" )
-            ; "approval_id", `String approval_id
-            ; "operation", `String (replay_operation_to_string operation)
-            ; "stage", `String (repair_stage_to_string stage)
-            ; "decision", `String (operator_settlement_decision_to_string decision)
-            ; "actor", `String actor
-            ; "effect_kind", `String effect_kind
-            ; ( "effect_sha256"
-              , match effect_sha256 with
-                | Some sha256 -> `String sha256
-                | None -> `Null )
-            ; "settled_at", `String (Masc_domain.now_iso ())
-            ]
-        in
-        let path = Keeper_gate_path.replay_repair_settlements ~base_path in
-        let suffix = Yojson.Safe.to_string audit ^ "\n" in
-        (try
-           match
-             Fs_compat.append_private_jsonl_durable_locked_result
-               path
-               suffix
-           with
-           | Fs_compat.Private_file_succeeded () ->
-             (match
-                Keeper_registry_event_queue.drop_by_post_id
-                  ~base_path
-                  keeper_name
-                  ~post_id:source_post_id
-              with
-              | Ok _ ->
-                forget_pending_repair ~base_path ~approval_id;
-                Ok ()
-              | Error detail ->
-                Error (Settlement_source_retirement_failed detail))
-           | Fs_compat.Private_file_succeeded_with_cleanup_failure
-               { value = (); cleanup_failure } ->
-             Log.Keeper.error
-               "Gate replay repair settlement committed with descriptor cleanup failure approval=%s: %s"
-               approval_id
-               (Fs_compat.private_jsonl_operation_failure_to_string
-                  cleanup_failure);
-             (match
-                Keeper_registry_event_queue.drop_by_post_id
-                  ~base_path
-                  keeper_name
-                  ~post_id:source_post_id
-              with
-              | Ok _ ->
-                forget_pending_repair ~base_path ~approval_id;
-                Ok ()
-              | Error detail ->
-                Error (Settlement_source_retirement_failed detail))
-           | Fs_compat.Private_file_failed error ->
-             Error
-               (Settlement_audit_failed
-                  (Fs_compat.private_jsonl_append_error_to_string error))
-           | Fs_compat.Private_file_failed_with_cleanup_failure
-               { error; cleanup_failure } ->
-             Error
-               (Settlement_audit_failed
-                  (Printf.sprintf
-                     "%s; descriptor_cleanup=%s"
-                     (Fs_compat.private_jsonl_append_error_to_string error)
-                     (Fs_compat.private_jsonl_operation_failure_to_string
-                        cleanup_failure)))
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Error
-             (Settlement_audit_failed
-                (Printexc.to_string exn))))
 ;;
 
 let summarize_execution ~operation (execution : Keeper_tool_execution.t) =
@@ -621,7 +413,7 @@ let append_model_evidence ~approval_id ~user_message = function
       "\n"
       [ user_message
       ; ""
-      ; "Host Gate replay requires operator repair before provider dispatch."
+      ; "Host Gate replay is awaiting automatic recovery before provider dispatch."
       ; Printf.sprintf "- approval_id: %s" approval_id
       ; Printf.sprintf "- operation: %s" operation
       ; Printf.sprintf "- stage: %s" (repair_stage_to_string stage)
@@ -865,13 +657,12 @@ let replay_approved_effect
      | None ->
        (match replay_operation_of_string request.tool_name with
         | None -> Not_applicable
-        | Some operation ->
-          Repair_required
-            { operation = replay_operation_to_string operation
-            ; stage = Replay_effect_indeterminate_after_restart
-            ; detail =
-                "authorization is consumed but no durable replay outcome or in-memory repair payload exists"
-            }))
+        | Some _ ->
+          (* The effect may already have happened. Do not invent an outcome,
+             do not retry it, and do not let this consumed approval block the
+             FIFO forever. [compose_model_message] reuses the durable HITL
+             delivery to give the provider the explicit uncertainty warning. *)
+          Not_applicable))
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_unconsumed

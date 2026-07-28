@@ -136,7 +136,7 @@ let operator_disposition (receipt : t)
     | External_effect_deferred
     | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
-    | Gate_replay_operator_attention
+    | Gate_replay_recovery_pending
     | Provider_error _
     | Unknown _ -> false
   in

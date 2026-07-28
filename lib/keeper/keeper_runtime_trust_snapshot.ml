@@ -104,7 +104,7 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
       Keeper_turn_disposition.Provider_error
         Keeper_turn_terminal_code.Fiber_unresolved
   | Keeper_meta_contract.Gate_replay_repair_required _ ->
-      Keeper_turn_disposition.Gate_replay_operator_attention
+      Keeper_turn_disposition.Gate_replay_recovery_pending
   | Keeper_meta_contract.Sdk_context_window_exceeded
   | Keeper_meta_contract.Sdk_unrecognized_stop_reason
   | Keeper_meta_contract.Sdk_guardrail_violation

@@ -142,7 +142,7 @@ let round_trippable : (string * D.t) list =
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
   ; "Runtime_attempts_exhausted", D.Runtime_attempts_exhausted
-  ; "Gate_replay_operator_attention", D.Gate_replay_operator_attention
+  ; "Gate_replay_recovery_pending", D.Gate_replay_recovery_pending
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
   ; (* Runtime wires that Code.of_wire_exact recognises losslessly (no payload

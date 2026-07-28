@@ -15,7 +15,7 @@ type t =
   | External_effect_deferred
   | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted
-  | Gate_replay_operator_attention
+  | Gate_replay_recovery_pending
   | Provider_error of Code.t
   | Unknown of { raw_error : string }
 
@@ -32,7 +32,7 @@ let severity = function
   | External_cancel
   | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted
-  | Gate_replay_operator_attention -> Warn
+  | Gate_replay_recovery_pending -> Warn
   | Provider_error _ -> Bad
   | Unknown _ -> Unknown_bad
 ;;
@@ -47,8 +47,8 @@ let summary = function
     "keeper turn hit a stale/no-progress timeout"
   | Runtime_attempts_exhausted ->
     "runtime attempts exhausted; inspect per-attempt root causes"
-  | Gate_replay_operator_attention ->
-    "Gate replay is awaiting explicit operator settlement"
+  | Gate_replay_recovery_pending ->
+    "Gate replay is awaiting automatic recovery; the effect will not be re-run"
   | Provider_error code -> Printf.sprintf "keeper turn ended with %s" (Code.to_wire code)
   | Unknown { raw_error = "" } ->
     "keeper turn failed without a classified terminal reason"
@@ -62,7 +62,7 @@ let next_action = function
   | External_cancel -> Some "rerun_if_still_relevant"
   | Turn_wall_clock_timeout -> Some "inspect_turn_timeout"
   | Runtime_attempts_exhausted -> Some "inspect_runtime_attempts"
-  | Gate_replay_operator_attention -> Some "settle_gate_replay_repair"
+  | Gate_replay_recovery_pending -> Some "inspect_latest_error"
   | Provider_error _ | Unknown _ -> Some "inspect_latest_error"
 ;;
 
@@ -73,7 +73,7 @@ let to_wire = function
   | External_cancel -> "external_cancel"
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
   | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
-  | Gate_replay_operator_attention -> "gate_replay_repair_required"
+  | Gate_replay_recovery_pending -> "gate_replay_repair_required"
   | Provider_error code -> Code.to_wire code
   | Unknown { raw_error } -> raw_error
 ;;
@@ -106,7 +106,7 @@ let of_wire wire =
   | "external_cancel" -> External_cancel
   | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
   | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
-  | "gate_replay_repair_required" -> Gate_replay_operator_attention
+  | "gate_replay_repair_required" -> Gate_replay_recovery_pending
   | other ->
     (match Code.of_wire_exact other with
      | Some c -> of_termination_code c
@@ -120,7 +120,7 @@ let is_success = function
   | External_effect_deferred
   | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted
-  | Gate_replay_operator_attention
+  | Gate_replay_recovery_pending
   | Provider_error _
   | Unknown _ -> false
 ;;
@@ -133,7 +133,7 @@ let equal a b =
   | External_cancel, External_cancel
   | Turn_wall_clock_timeout, Turn_wall_clock_timeout
   | Runtime_attempts_exhausted, Runtime_attempts_exhausted
-  | Gate_replay_operator_attention, Gate_replay_operator_attention -> true
+  | Gate_replay_recovery_pending, Gate_replay_recovery_pending -> true
   | Provider_error a, Provider_error b -> String.equal (Code.to_wire a) (Code.to_wire b)
   | Unknown a, Unknown b -> String.equal a.raw_error b.raw_error
   | ( Success
@@ -142,7 +142,7 @@ let equal a b =
     | External_cancel
     | Turn_wall_clock_timeout
     | Runtime_attempts_exhausted
-    | Gate_replay_operator_attention
+    | Gate_replay_recovery_pending
     | Provider_error _
     | Unknown _ ), _ -> false
 ;;

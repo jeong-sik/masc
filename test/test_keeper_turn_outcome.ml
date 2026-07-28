@@ -188,9 +188,9 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
       ~raw_error:"must not classify as provider"
       replay_error
   in
-  check bool "Gate repair has operator-attention disposition" true
+  check bool "Gate repair has recovery-pending disposition" true
     (Masc.Keeper_turn_disposition.equal
-       Masc.Keeper_turn_disposition.Gate_replay_operator_attention
+       Masc.Keeper_turn_disposition.Gate_replay_recovery_pending
        terminal.disposition);
   let internal =
     Keeper_turn_driver.Gate_replay_repair_required
@@ -245,8 +245,8 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
     (Some "gate_replay_repair_required")
     (List.assoc_opt "attention_reason" dashboard_fields
      |> Option.bind Yojson.Safe.Util.to_string_option);
-  check (option string) "dashboard action settles repair"
-    (Some "settle_gate_replay_repair")
+  check (option string) "dashboard action only inspects recovery"
+    (Some "inspect_latest_error")
     (List.assoc_opt "next_human_action" dashboard_fields
      |> Option.bind Yojson.Safe.Util.to_string_option)
 

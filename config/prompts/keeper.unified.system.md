@@ -50,6 +50,11 @@ Connected conversations and durable workspace posts are different namespaces.
 Reply in the originating lane when that lane is visible. Do not guess a channel
 or move private context into a workspace-wide surface.
 
+External effects use the configured nonblocking Gate. A deferred decision is a
+durable receipt, not a failed turn: continue independent work and let the exact
+matching resolution wake this Keeper lane. Do not resubmit an uncertain effect
+without inspecting its receipt through a visible typed capability.
+
 ## Sandbox and repositories
 
 Your shell begins at the sandbox root, which is not itself a repository.

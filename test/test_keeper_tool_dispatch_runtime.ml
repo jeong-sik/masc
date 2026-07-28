@@ -2393,6 +2393,183 @@ let test_approved_web_search_grant_executes_exact_request () =
       | Error error ->
         fail (Masc.Keeper_approval_queue.grant_error_to_string error))
 
+let test_approved_web_search_replays_without_model_resubmission () =
+  with_exec_fixture "keeper_tool_dispatch_replayed_web_search"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      (match
+         Masc.Keeper_gate_mode.set
+           config
+           ~actor:"test"
+           Masc.Keeper_gate_mode.Manual
+       with
+       | Ok _ -> ()
+       | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+      let input =
+        `Assoc
+          [ "query", `String "approved replay search"
+          ; "limit", `Int 1
+          ]
+      in
+      let deferred =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~name:"WebSearch"
+          ~input
+          ()
+      in
+      (match deferred.disposition with
+       | Tool_result.Deferred () -> ()
+       | Tool_result.Completed () | Tool_result.Failed _ ->
+         fail "approval-gated WebSearch did not defer before replay");
+      let approval_id =
+        match
+          Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+            ~base_path:config.base_path
+        with
+        | Ok [ entry ] -> entry.id
+        | Ok entries ->
+          failf
+            "expected one pending replay approval, got %d"
+            (List.length entries)
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+      in
+      (match
+         Masc.Keeper_approval_queue.resolve_with_policy
+           ~base_path:config.base_path
+           ~id:approval_id
+           ~decision:Masc.Keeper_approval_queue.Decision.Approve
+           ~source:Masc.Keeper_approval_queue.Auto_judge
+           ()
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+      let resolution : Keeper_event_queue.hitl_resolution =
+        { approval_id
+        ; decision = Keeper_event_queue.Hitl_approved
+        ; channel =
+            Keeper_continuation_channel.unrouted
+              "replayed WebSearch test"
+        }
+      in
+      let grant =
+        match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+        | Some grant -> grant
+        | None -> fail "approved replay resolution did not create a grant"
+      in
+      Masc.Tool_misc.with_web_search_simulation_for_test
+        ~outcomes:
+          [ ( "duckduckgo"
+            , `Hits
+                [ ( "Replayed result"
+                  , "https://example.com/replayed"
+                  , "approved WebSearch replay"
+                  )
+                ] )
+        ]
+        (fun () ->
+          let bundle =
+            Masc.Keeper_tools_oas_bundle.make_tool_bundle
+              ~config
+              ~meta
+              ~publication_recovery
+              ~ctx_snapshot:ctx_work
+              ~hitl_resolution:resolution
+              ()
+          in
+          Fun.protect
+            ~finally:bundle.cleanup
+            (fun () ->
+               match bundle.gate_replay_delivery with
+               | Some
+                   { outcome =
+                       Masc.Keeper_gate_replay.Applied
+                         { operation = "network_read"
+                         ; output
+                         ; journal =
+                             Masc.Keeper_gate_replay.Replay_journal_recorded
+                         }
+                   ; _
+                   } ->
+                 check bool
+                   "stored WebSearch effect executed"
+                   true
+                   (contains_substring output "Replayed result")
+               | Some
+                   { outcome = Masc.Keeper_gate_replay.Applied _; _ } ->
+                 fail
+                   "replayed WebSearch did not durably journal its exact result"
+               | Some { outcome; _ } ->
+                 failf
+                   "stored WebSearch effect was not replayed: %s"
+                   (Masc.Keeper_gate_replay.outcome_to_string outcome)
+               | None ->
+                 fail
+                   "production tool bundle dropped the approved replay outcome"));
+      (match
+         Masc.Keeper_approval_queue.approved_resolution_state
+           ~base_path:config.base_path
+           ~id:approval_id
+       with
+       | Ok Masc.Keeper_approval_queue.Resolution_consumed -> ()
+       | Ok Masc.Keeper_approval_queue.Resolution_unconsumed ->
+         fail "replayed WebSearch did not consume its one-shot grant"
+       | Error error ->
+         fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+      (match
+         Masc.Keeper_approval_queue.approved_resolution_delivery
+           ~base_path:config.base_path
+           ~id:approval_id
+       with
+       | Ok
+           { state = Masc.Keeper_approval_queue.Resolution_consumed
+           ; replay_outcome =
+               Some (Masc.Keeper_approval_queue.Replay_applied output)
+           ; _
+           } ->
+         check bool
+           "replayed WebSearch output survives in the durable approval journal"
+           true
+           (contains_substring output "Replayed result");
+         let model_message =
+           Masc.Keeper_unified_turn.user_message_with_hitl_resolution
+             ~base_path:config.base_path
+             ~user_message:"continue"
+             (Some resolution)
+         in
+         check bool
+           "durable replay output reaches the next model turn"
+           true
+           (contains_substring model_message "Replayed result");
+         check bool
+           "model is forbidden to request the consumed operation again"
+           true
+           (contains_substring
+              model_message
+              "Do not request this approved operation again")
+       | Ok _ -> fail "durable WebSearch replay result was missing"
+       | Error error ->
+         fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+      match
+        Masc.Keeper_gate_replay.replay_approved_effect
+          ~config
+          ~meta
+          ~publication_recovery
+          ~turn_sandbox_factory:None
+          ~grant
+          ~approval_id
+          ()
+      with
+      | Masc.Keeper_gate_replay.Not_applicable -> ()
+      | outcome ->
+        failf
+          "consumed WebSearch replayed twice: %s"
+          (Masc.Keeper_gate_replay.outcome_to_string outcome))
+
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
 
@@ -3457,6 +3634,8 @@ let () =
         test_manual_gate_defers_web_tools_before_network;
       test_case "approved WebSearch grant executes exact request" `Quick
         test_approved_web_search_grant_executes_exact_request;
+      test_case "approved WebSearch replays without model resubmission" `Quick
+        test_approved_web_search_replays_without_model_resubmission;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "Manual Gate defers tool_execute before process" `Quick

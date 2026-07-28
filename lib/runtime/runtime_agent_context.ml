@@ -66,9 +66,13 @@ type config =
   ; description : string option
   ; initial_messages : Agent_sdk.Types.message list
   ; model_input_projection :
-      (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option
+      Agent_sdk.Agent.model_input_projection option
     (** Caller-owned projection applied only to provider-bound messages.
         Agent state and checkpoints retain their canonical persisted form. *)
+  ; request_wire_observer :
+      Llm_provider.Request_wire_observer.try_observe option
+    (** Metadata-only observation of the exact final serialized request at the
+        OAS transport boundary. *)
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; enable_thinking : bool option
@@ -125,6 +129,7 @@ let default_config
   ; description = None
   ; initial_messages = []
   ; model_input_projection = None
+  ; request_wire_observer = None
   ; raw_trace = None
   ; trace_link = None
   ; enable_thinking = None
@@ -148,6 +153,59 @@ let oas_tracer_ref = Atomic.make Agent_sdk.Tracing.null
 let set_oas_tracer tracer = Atomic.set oas_tracer_ref tracer
 
 let context_fit_admission = Agent_sdk.Agent.Enforce_when_supported
+
+let configured_or_inherited configured inherited =
+  match configured with
+  | Some _ as configured -> configured
+  | None -> inherited
+;;
+
+(* Mirror the exact Builder field resolution used by [builder] below so
+   caller-side final-wire inspection uses the same provider configuration that
+   OAS derives at route time. The raw provider configuration is loaded first;
+   explicit Runtime_agent fields then override it. *)
+let agent_config_for_request ?tool_choice (config : config)
+  : Agent_sdk.Types.agent_config
+  =
+  let provider = config.provider_cfg in
+  { (Agent_sdk.Types.default_config ~model:config.model_id) with
+    name = config.name
+  ; model = config.model_id
+  ; system_prompt = Some config.system_prompt
+  ; max_tokens = configured_or_inherited config.max_tokens provider.max_tokens
+  ; temperature =
+      configured_or_inherited config.temperature provider.temperature
+  ; top_p = configured_or_inherited config.top_p provider.top_p
+  ; top_k = configured_or_inherited config.top_k provider.top_k
+  ; min_p = configured_or_inherited config.min_p provider.min_p
+  ; enable_thinking =
+      configured_or_inherited config.enable_thinking provider.enable_thinking
+  ; preserve_thinking =
+      configured_or_inherited
+        config.preserve_thinking
+        provider.preserve_thinking
+  ; response_format = provider.response_format
+  ; thinking_budget =
+      configured_or_inherited config.thinking_budget provider.thinking_budget
+  ; reasoning_effort = provider.reasoning_effort
+  ; tool_choice =
+      (match tool_choice with
+       | Some _ as override -> override
+       | None -> provider.tool_choice)
+  ; disable_parallel_tool_use = provider.disable_parallel_tool_use
+  ; cache_system_prompt =
+      config.cache_system_prompt || provider.cache_system_prompt
+  ; initial_messages = config.initial_messages
+  ; yield_on_tool = config.yield_on_tool
+  }
+;;
+
+let provider_config_for_request ?tool_choice (config : config) =
+  let agent_config = agent_config_for_request ?tool_choice config in
+  Agent_sdk.Provider.provider_config_with_agent_config
+    ~config:agent_config
+    config.provider_cfg
+;;
 
 let builder
       ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -228,6 +286,11 @@ let builder
     else builder
   in
   let builder =
+    match config.model_input_projection with
+    | Some project -> Agent_sdk.Builder.with_model_input_projection project builder
+    | None -> builder
+  in
+  let builder =
     match config.context_injector with
     | Some injector -> Agent_sdk.Builder.with_context_injector injector builder
     | None -> builder
@@ -290,37 +353,23 @@ type prepared_resume =
 let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   : prepared_resume
   =
-
+  let agent_config = agent_config_for_request config in
   let patched_checkpoint =
     { checkpoint with
       Agent_sdk.Checkpoint.model = config.model_id
-    ; system_prompt = Some config.system_prompt
-    ; temperature = config.temperature
-    ; top_p = config.top_p
-    ; top_k = config.top_k
-    ; min_p = config.min_p
-    ; enable_thinking = config.enable_thinking
-    ; preserve_thinking = config.preserve_thinking
-    ; thinking_budget = config.thinking_budget
-    ; cache_system_prompt = config.cache_system_prompt
-    ; response_format = config.provider_cfg.response_format
-    }
-  in
-  let agent_config : Agent_sdk.Types.agent_config =
-    { (Agent_sdk.Types.default_config ~model:config.model_id) with
-      name = config.name
-    ; model = config.model_id
-    ; system_prompt = Some config.system_prompt
-    ; max_tokens = config.max_tokens
-    ; temperature = config.temperature
-    ; top_p = config.top_p
-    ; top_k = config.top_k
-    ; min_p = config.min_p
-    ; enable_thinking = config.enable_thinking
-    ; preserve_thinking = config.preserve_thinking
-    ; thinking_budget = config.thinking_budget
-    ; cache_system_prompt = config.cache_system_prompt
-    ; yield_on_tool = config.yield_on_tool
+    ; system_prompt = agent_config.system_prompt
+    ; tool_choice = agent_config.tool_choice
+    ; disable_parallel_tool_use = agent_config.disable_parallel_tool_use
+    ; temperature = agent_config.temperature
+    ; top_p = agent_config.top_p
+    ; top_k = agent_config.top_k
+    ; min_p = agent_config.min_p
+    ; reasoning_effort = agent_config.reasoning_effort
+    ; enable_thinking = agent_config.enable_thinking
+    ; preserve_thinking = agent_config.preserve_thinking
+    ; thinking_budget = agent_config.thinking_budget
+    ; cache_system_prompt = agent_config.cache_system_prompt
+    ; response_format = agent_config.response_format
     }
   in
   let options : Agent_sdk.Agent.options =

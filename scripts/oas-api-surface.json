@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "6bf1751a56357eecddd088383f0aac65275c6de6",
-  "pinned_version": "v0.229.0",
+  "pinned_sha": "48909eb7ba2a0c05989b92cfd9b796b1eabbdfdd",
+  "pinned_version": "v0.229.1",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -139,6 +139,7 @@
       "type:measurement_start_error:type measurement_start_error = | Measurement_operation_id_generation_failed of string | Measurement_clock_required_for_timeout",
       "type:flow_start_error:type flow_start_error = Flow_id_generation_failed of string",
       "val:start_attempt:val start_attempt : ready_plan -> (attempt, start_attempt_error) result",
+      "val:execute_once:val execute_once : net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> ?clock:_ Eio.Time.clock -> attempt -> (success, execution_error) result",
       "val:start_flow:val start_flow : flow_snapshot -> (flow_attempt, flow_start_error) result",
       "val:call_id_to_string:val call_id_to_string : call_id -> string",
       "val:flow_id_to_string:val flow_id_to_string : flow_id -> string",

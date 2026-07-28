@@ -226,6 +226,34 @@ let acknowledged_turn_refs messages =
     messages
 ;;
 
+let delivery_key_mem key keys =
+  List.exists
+    (Keeper_chat_delivery_identity.delivery_key_equal key)
+    keys
+;;
+
+let acknowledged_delivery_keys messages =
+  List.fold_left
+    (fun keys (message : Keeper_chat_store.chat_message) ->
+      match message.role, message.kind, message.delivery_key with
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Utterance,
+        Some delivery_key ->
+        if delivery_key_mem delivery_key keys
+        then keys
+        else delivery_key :: keys
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Transport_failure,
+        _
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Utterance,
+        None
+      | Keeper_chat_store.Role.User, _, _
+      | Keeper_chat_store.Role.Tool, _, _ -> keys)
+    []
+    messages
+;;
+
 let messages_after_ack ~ack_id messages =
   match ack_id with
   | None -> messages
@@ -239,14 +267,28 @@ let messages_after_ack ~ack_id messages =
 ;;
 
 let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) =
-  let acknowledged = acknowledged_turn_refs messages in
+  let acknowledged_turn_refs = acknowledged_turn_refs messages in
+  let acknowledged_delivery_keys = acknowledged_delivery_keys messages in
   messages_after_ack ~ack_id messages
   |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
-    match message.role, message.turn_ref with
-    | Keeper_chat_store.Role.User, Some turn_ref ->
-      not (StringSet.mem (Ids.Turn_ref.to_string turn_ref) acknowledged)
-    | Keeper_chat_store.Role.User, None -> true
-    | Keeper_chat_store.Role.Assistant, _ | Keeper_chat_store.Role.Tool, _ -> false)
+    match message.role with
+    | Keeper_chat_store.Role.User ->
+      let answered_by_turn_ref =
+        match message.turn_ref with
+        | Some turn_ref ->
+          StringSet.mem
+            (Ids.Turn_ref.to_string turn_ref)
+            acknowledged_turn_refs
+        | None -> false
+      in
+      let answered_by_delivery_key =
+        match message.delivery_key with
+        | Some delivery_key ->
+          delivery_key_mem delivery_key acknowledged_delivery_keys
+        | None -> false
+      in
+      not (answered_by_turn_ref || answered_by_delivery_key)
+    | Keeper_chat_store.Role.Assistant | Keeper_chat_store.Role.Tool -> false)
 ;;
 
 let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
@@ -255,7 +297,7 @@ let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
   | None -> false
 ;;
 
-let pending_messages_of_messages
+let all_pending_messages_of_messages
       ?ack_id
       ~(targets : string list)
       (messages : Keeper_chat_store.chat_message list)
@@ -283,6 +325,22 @@ let pending_messages_of_messages
     else None)
 ;;
 
+let pending_messages_of_messages
+      ?ack_id
+      ~(targets : string list)
+      (messages : Keeper_chat_store.chat_message list)
+  : pending_message list
+  =
+  (* One autonomous turn owns one exact durable input row. The success path
+     advances its watermark through the rendered row, so projecting a batch
+     here would silently acknowledge every later row even when the model only
+     addressed one. Source order plus one-row admission trades throughput for
+     lossless delivery; the next row wakes the next cycle. *)
+  match all_pending_messages_of_messages ?ack_id ~targets messages with
+  | [] -> []
+  | oldest :: _ -> [ oldest ]
+;;
+
 (* RFC-0230 P2 — scope messages: a keeper's lane is, in practice, an operator
    (Owner) conversation. The operator often addresses the keeper without an
    "@name", so an unanswered Owner line that is not already a mention is a scope
@@ -295,7 +353,7 @@ let pending_scope_of_messages
       (messages : Keeper_chat_store.chat_message list)
   : (string * string) list
   =
-  pending_messages_of_messages ?ack_id ~targets messages
+  all_pending_messages_of_messages ?ack_id ~targets messages
   |> pairs_of_kind Scope
 ;;
 
@@ -305,7 +363,7 @@ let pending_mentions_of_messages
       (messages : Keeper_chat_store.chat_message list)
   : (string * string) list
   =
-  pending_messages_of_messages ?ack_id ~targets messages
+  all_pending_messages_of_messages ?ack_id ~targets messages
   |> pairs_of_kind Mention
 ;;
 

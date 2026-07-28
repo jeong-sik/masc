@@ -2,7 +2,7 @@
 
     Takes the run context from [Keeper_run_context], calls the
     [build_turn_prompt] callback to get the final system prompt and
-    dynamic context, then renders memory/temporal context, builds prompt
+    dynamic context, then renders temporal context, builds prompt
     metrics, and appends the user message.
 
     @since 0.120.0 *)
@@ -10,7 +10,6 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_sdk.Types.message list
@@ -31,6 +30,21 @@ type user_turn_record =
   | Skip_uninformative_wake
       (** Autonomous wake marker alone. Neither appended to the working context
           nor persisted to session history. *)
+
+let drop_skipped_wake_marker
+      ~(user_turn_record : user_turn_record)
+      current_suffix
+  =
+  match user_turn_record, current_suffix with
+  | ( Skip_uninformative_wake
+    , ({ Agent_sdk.Types.role = Agent_sdk.Types.User
+       ; content = [ Agent_sdk.Types.Text text ]
+       ; _
+       }
+       :: rest) )
+    when String.equal text Keeper_unified_prompt.autonomous_wake_marker -> rest
+  | (Skip_uninformative_wake | Record_user_turn), _ -> current_suffix
+;;
 
 (* The unified lane's user turn is the wake marker constant unless a HITL
    resolution was appended to it, so the presence of that resolution is the
@@ -68,6 +82,27 @@ let memory_extraction_record_of_turn
   | Skip_uninformative_wake, true -> Extract_turn
   | Record_user_turn, false -> Extract_turn
   | Record_user_turn, true -> Extract_turn
+;;
+
+let is_inert_autonomous_turn
+      ~(user_turn_record : user_turn_record)
+      ~(durable_input_present : bool)
+      ~(tool_calls_made : bool)
+      ~(stop_reason : Runtime_agent.stop_reason)
+  =
+  match user_turn_record, durable_input_present, tool_calls_made, stop_reason with
+  | Skip_uninformative_wake, false, false, Runtime_agent.Completed -> true
+  | ( Skip_uninformative_wake
+    , (false | true)
+    , (false | true)
+    , ( Runtime_agent.InputRequired _
+      | Runtime_agent.Yielded_to_chat_waiting _
+      | Runtime_agent.Yielded_to_durable_stimulus _
+      | Runtime_agent.Awaiting_external_effect _
+      | Runtime_agent.Yielded_after_repeated_tool_call _ ) )
+  | Skip_uninformative_wake, true, (false | true), Runtime_agent.Completed
+  | Skip_uninformative_wake, false, true, Runtime_agent.Completed
+  | Record_user_turn, (false | true), (false | true), _ -> false
 ;;
 
 type extra_system_context_assembly =
@@ -129,7 +164,6 @@ let build_turn_context
       ~base_system_prompt
       ~messages:(Keeper_context_runtime.messages_of_context ctx_work)
   in
-  let memory_context = "" in
   let temporal_context =
     Masc_context_injector.render_temporal_summary shared_context
     |> Option.value ~default:""
@@ -184,7 +218,6 @@ let build_turn_context
    | Record_user_turn, true | Skip_uninformative_wake, _ -> ());
   { turn_system_prompt
   ; dynamic_context
-  ; memory_context
   ; temporal_context
   ; prompt_metrics
   ; history_messages

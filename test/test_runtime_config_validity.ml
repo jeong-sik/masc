@@ -802,6 +802,27 @@ List.iter
       default.provider_config.connect_timeout_s;
     check int "public seed has no keeper assignments" 0
       (List.length assignments);
+    List.iter
+      (fun (runtime_id, expected_bytes) ->
+         match
+           List.find_opt
+             (fun (runtime : Runtime.t) -> String.equal runtime.id runtime_id)
+             runtimes
+         with
+         | None -> failf "expected bounded Keeper runtime in seed: %s" runtime_id
+         | Some runtime ->
+           check
+             (option int)
+             (Printf.sprintf "%s exact request body budget" runtime_id)
+             (Some expected_bytes)
+             runtime.provider_config.max_request_body_bytes)
+      [ "ollama_cloud.deepseek-v4-flash", 524288
+      ; "deepseek.deepseek-v4-pro", 524288
+      ; "deepseek.deepseek-v4-flash", 524288
+      ; "glm-coding.glm-4-7-coding", 262144
+      ; "glm-coding.glm-5-turbo", 262144
+      ; "ollama_cloud.ollama-cloud-deepseek-v4-flash", 524288
+      ];
     check int "Ollama Cloud canonical seed count"
       (List.length ollama_cloud_seed_cases)
       (List.length
@@ -1505,6 +1526,48 @@ let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
        check (option int) "omitted max-request-body-bytes stays None" None
          binding.Runtime_schema.max_request_body_bytes
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_repo_keeper_runtime_bindings_declare_wire_working_sets () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let config =
+    match Runtime_toml.parse_file path with
+    | Ok config -> config
+    | Error errors ->
+      failf
+        "repo runtime.toml should load: %s"
+        (render_runtime_toml_errors errors)
+  in
+  let expected =
+    [ "ollama_cloud.deepseek-v4-flash", 524288
+    ; "deepseek.deepseek-v4-pro", 524288
+    ; "deepseek.deepseek-v4-flash", 524288
+    ; "glm-coding.glm-4-7-coding", 262144
+    ; "glm-coding.glm-5-turbo", 262144
+    ; "ollama_cloud.ollama-cloud-deepseek-v4-flash", 524288
+    ]
+  in
+  List.iter
+    (fun (runtime_id, expected_bytes) ->
+       match String.split_on_char '.' runtime_id with
+       | provider_id :: model_id_parts ->
+         let model_id = String.concat "." model_id_parts in
+         (match
+            List.find_opt
+              (fun (binding : Runtime_schema.binding) ->
+                 String.equal binding.provider_id provider_id
+                 && String.equal binding.model_id model_id)
+              config.Runtime_schema.bindings
+          with
+          | None -> failf "repo runtime binding %s is missing" runtime_id
+          | Some binding ->
+            check
+              (option int)
+              (runtime_id ^ " exact serialized-body working set")
+              (Some expected_bytes)
+              binding.max_request_body_bytes)
+       | [] -> failf "invalid expected runtime id %S" runtime_id)
+    expected
+;;
 
 let test_runtime_toml_rejects_non_positive_max_request_body_bytes () =
   let template n =
@@ -3230,6 +3293,9 @@ let () =
             test_runtime_toml_parses_optional_max_request_body_bytes;
           test_case "omitted max-request-body-bytes stays None" `Quick
             test_runtime_toml_omitted_max_request_body_bytes_is_none;
+          test_case
+            "keeper runtime bindings declare exact wire working sets"
+            `Quick test_repo_keeper_runtime_bindings_declare_wire_working_sets;
           test_case "non-positive max-request-body-bytes is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case

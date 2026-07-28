@@ -53,6 +53,19 @@ let pending_without_active_sources ~active_source_stimuli pending =
   |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
 ;;
 
+let durable_input_present
+      ~has_active_source
+      ~has_hitl_resolution
+      ~has_current_task
+      (observation : Keeper_world_observation.world_observation)
+  =
+  has_active_source
+  || has_hitl_resolution
+  || has_current_task
+  || observation.active_goals <> []
+  || Keeper_world_observation.actionable_signal_present observation
+;;
+
 let autonomous_yield_request ~base_path ~keeper_name ~active_source_stimuli =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
@@ -251,6 +264,12 @@ let run (ctx : ctx)
                  ~user_turn_record:
                    (Keeper_run_prompt.user_turn_record_of_hitl_resolution
                       hitl_resolution)
+                 ~durable_input_present:
+                   (durable_input_present
+                      ~has_active_source:(active_source_stimuli <> [])
+                      ~has_hitl_resolution:(Option.is_some hitl_resolution)
+                      ~has_current_task:(Option.is_some meta.current_task_id)
+                      observation)
                  ~history_assistant_source:"internal_assistant"
                  ~degraded_retry_applied:
                    (Option.is_some turn_state.degraded_retry_info)
@@ -522,4 +541,5 @@ module For_testing = struct
 
   let declared_lane_failure_of_error = declared_lane_failure_of_error
   let pending_without_active_sources = pending_without_active_sources
+  let durable_input_present = durable_input_present
 end

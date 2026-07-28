@@ -2,7 +2,7 @@
 
     Takes the run context from [Keeper_run_context], calls the
     [build_turn_prompt] callback to get the final system prompt and
-    dynamic context, then renders memory/temporal context, builds prompt
+    dynamic context, then renders temporal context, builds prompt
     metrics, and appends the user message.
 
     @since 0.120.0 *)
@@ -10,7 +10,6 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_sdk.Types.message list
@@ -32,6 +31,15 @@ type user_turn_record =
 val user_turn_record_of_hitl_resolution : _ option -> user_turn_record
 (** Map the unified lane's HITL resolution slot to a transcript decision.
     Absent resolution means the user turn is the bare wake marker. *)
+
+val drop_skipped_wake_marker :
+  user_turn_record:user_turn_record ->
+  Agent_sdk.Types.message list ->
+  Agent_sdk.Types.message list
+(** Remove the exact leading autonomous wake message from a current-turn
+    suffix only when the typed record is [Skip_uninformative_wake]. Other user
+    text is preserved even if the caller supplied the skip variant. Shared by
+    OAS stage persistence and final canonical replay. *)
 
 type memory_extraction_record =
   | Extract_turn
@@ -58,6 +66,17 @@ val memory_extraction_record_of_turn
 (** [Skip_inert_turn] only when the wake was bare {b and} no tool ran. A wake
     that called a tool did something worth recording; a turn carrying operator
     or HITL input can hold a durable fact even with no tool call. *)
+
+val is_inert_autonomous_turn :
+  user_turn_record:user_turn_record ->
+  durable_input_present:bool ->
+  tool_calls_made:bool ->
+  stop_reason:Runtime_agent.stop_reason ->
+  bool
+(** [true] only for a completed bare autonomous wake with no durable source or
+    structured actionable observation and no tool call. Such a turn has no
+    durable input or effect; its provider response remains observable but does
+    not belong in canonical replay. *)
 
 type extra_system_context_assembly =
   { extra_system_context : string option

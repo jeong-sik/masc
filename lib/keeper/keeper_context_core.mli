@@ -117,6 +117,20 @@ val checkpoint_write_error_to_string
   -> 'persistence_error checkpoint_write_error
   -> string
 
+val checkpoint_for_persistence :
+  multimodal_policy:Keeper_types_profile.multimodal_policy ->
+  keeper_name:string ->
+  session:session_context ->
+  agent_name:string ->
+  ctx:working_context ->
+  generation:int ->
+  (Agent_sdk.Checkpoint.t, Keeper_compaction_unit.structural_error) result
+(** Build the single canonical checkpoint persistence projection without
+    writing it: stamp Keeper identity/generation, evict inline media required
+    by the effective multimodal policy, and reject malformed tool history.
+    Every checkpoint writer, including OAS mid-stage sinks, must pass this
+    boundary before publication. *)
+
 (** Save the current working context as a generation-tagged OAS checkpoint.
     Message order and typed content are preserved exactly. A structurally open
     ToolUse suffix is valid and remains exact; malformed completed protocol

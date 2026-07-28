@@ -37,6 +37,8 @@ val autonomous_wake_marker : string
 (** Build the three-channel unified prompt from keeper state.
 
     @param meta Keeper metadata (identity, soul, goals, instructions)
+    @param base_path Workspace root used to derive the exact sandbox paths that
+    the selected Keeper runtime exposes.
     @param observation Current world snapshot *)
 val build_prompt :
   meta:Keeper_meta_contract.keeper_meta ->

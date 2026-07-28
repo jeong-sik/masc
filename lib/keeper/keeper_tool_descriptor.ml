@@ -138,8 +138,6 @@ let keeper_model_projection_to_string = function
   | Transport_alias _ -> "transport_alias"
 ;;
 
-;;
-
 let keeper_tool_group_to_string = function
   | Execute_group -> "execute"
   | Search_files_group -> "search_files"

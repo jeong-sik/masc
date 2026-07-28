@@ -215,6 +215,11 @@ type turn_source_settlement =
 let turn_source_settlement_of_cycle_outcome = function
   | None -> Retain_unacked
   | Some Cycle.Completed _
+  (* The Gate request and its typed resolution wake are durably persisted
+     before this outcome is produced. That new continuation owns the exact
+     external effect, so retaining the triggering source would replay it ahead
+     of the resolution and manufacture duplicate approvals. *)
+  | Some Cycle.External_effect_deferred _
   | Some Cycle.Manual_compaction_applied _
   | Some Cycle.Manual_compaction_not_applied _ ->
     Settle_source Scheduled_work_succeeded
@@ -387,6 +392,7 @@ let compaction_outcome_of_cycle_outcome = function
   | Some (Cycle.Completed _) -> Some `Recovered
   | Some
       ( Cycle.Checkpointed _
+      | Cycle.External_effect_deferred _
       | Cycle.Input_required _
       | Cycle.Cancelled _
       | Cycle.Skipped _
@@ -507,6 +513,7 @@ let run_keepalive_unified_turn
       | Some
           ( Cycle.Completed _
           | Cycle.Checkpointed _
+          | Cycle.External_effect_deferred _
           | Cycle.Input_required _
           | Cycle.Cancelled _
           | Cycle.Skipped _
@@ -838,6 +845,7 @@ let run_keepalive_unified_turn
         | Some
             ( Cycle.Completed _
             | Cycle.Checkpointed _
+            | Cycle.External_effect_deferred _
             | Cycle.Input_required _
             | Cycle.Cancelled _
             | Cycle.Skipped _

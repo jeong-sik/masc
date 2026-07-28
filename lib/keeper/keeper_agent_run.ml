@@ -250,6 +250,67 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
+let prepare_pipeline_checkpoint
+      ~(history_messages : Agent_sdk.Types.message list)
+      ~(user_turn_record : Keeper_run_prompt.user_turn_record)
+      ~checkpoint_sidecar
+      ~(session : Keeper_types.session_context)
+      ~(keeper_name : string)
+      ~(agent_name : string)
+      ~(multimodal_policy : Keeper_types_profile.multimodal_policy)
+      ~(generation : int)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  let checkpoint =
+    { checkpoint with
+      session_id = session.session_id
+    ; working_context =
+        (match checkpoint_sidecar with
+         | Some _ as sidecar -> sidecar
+         | None -> checkpoint.working_context)
+    }
+  in
+  match
+    Keeper_replay_prefix.split
+      ~prefix:history_messages
+      checkpoint.messages
+  with
+  | Error error ->
+    let detail =
+      match error with
+      | Keeper_replay_prefix.Prefix_longer_than_messages ->
+        "prefix is longer than checkpoint messages"
+      | Keeper_replay_prefix.Prefix_message_mismatch ->
+        "checkpoint prefix differs from canonical history"
+    in
+    Error
+      ("OAS pipeline checkpoint does not retain the canonical pre-turn \
+        prefix: "
+       ^ detail)
+  | Ok current_suffix ->
+    let current_suffix =
+      Keeper_run_prompt.drop_skipped_wake_marker
+        ~user_turn_record
+        current_suffix
+    in
+    let checkpoint =
+      { checkpoint with messages = history_messages @ current_suffix }
+    in
+    let context =
+      Keeper_context_core.context_of_oas_checkpoint checkpoint
+    in
+    Keeper_context_core.checkpoint_for_persistence
+      ~multimodal_policy
+      ~keeper_name
+      ~session
+      ~agent_name
+      ~ctx:context
+      ~generation
+    |> Result.map_error (fun structural_error ->
+      "OAS pipeline checkpoint structural validation failed: "
+      ^ Keeper_compaction_unit.show_structural_error structural_error)
+;;
+
 let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
   | Keeper_tools_oas.Deferred_tool_result ->
@@ -282,6 +343,7 @@ module For_testing = struct
   let provider_transcript_admission = provider_transcript_admission
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
+  let prepare_pipeline_checkpoint = prepare_pipeline_checkpoint
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -328,6 +390,7 @@ let run_turn
       ~(generation : int)
       ?(history_user_source = "direct_user")
       ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
+      ?(durable_input_present = true)
       ?(history_assistant_source = "direct_assistant")
       ?temperature
       ?on_event
@@ -512,7 +575,7 @@ let run_turn
         (`Assoc
           [ "loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
-  (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
+  (* Steps 5-6: turn prompt, temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
   let prompt_ctx =
     Keeper_run_prompt.build_turn_context
@@ -528,7 +591,6 @@ let run_turn
   in
   let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
-  let memory_context = prompt_ctx.Keeper_run_prompt.memory_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let prompt_metrics = prompt_ctx.Keeper_run_prompt.prompt_metrics in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
@@ -539,32 +601,6 @@ let run_turn
       resume_oas_checkpoint
   in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
-  let history_messages_digest = digest_message_texts_as_joined history_messages in
-  let context_digest =
-    digest_text
-      (base_system_prompt ^ turn_system_prompt ^ dynamic_context ^ memory_context
-       ^ temporal_context ^ user_message ^ history_messages_digest)
-  in
-  append_manifest ~site:"context_injected"
-    ~keeper_turn_id:manifest_keeper_turn_id
-    ?checkpoint_path:
-      (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
-    ~decision:
-      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
-        (`Assoc
-          [
-            ("base_system_prompt_digest", `String (digest_text base_system_prompt));
-            ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
-            ("dynamic_context_digest", `String (digest_text dynamic_context));
-            ("memory_context_digest", `String (digest_text memory_context));
-            ("temporal_context_digest", `String (digest_text temporal_context));
-            ("user_message_digest", `String (digest_text user_message));
-            ("history_message_count", `Int (List.length history_messages));
-            ("history_messages_digest", `String history_messages_digest);
-            ("context_window", `Int max_context);
-            ("context_digest", `String context_digest);
-          ]))
-    Keeper_runtime_manifest.Context_injected;
   (* 7. Set up agent — delegated to Keeper_run_tools *)
   let setup =
     Keeper_run_tools.prepare_agent_setup
@@ -604,6 +640,47 @@ let run_turn
   match setup with
   | Error e -> Error e
   | Ok s ->
+    let user_message = s.Keeper_run_tools.user_message in
+    let prompt_metrics =
+      Keeper_agent_prompt_metrics.build_prompt_metrics
+        ~system_prompt:turn_system_prompt
+        ~dynamic_context
+        ~user_message
+    in
+    let history_messages_digest =
+      digest_message_texts_as_joined history_messages
+    in
+    let context_digest =
+      digest_text
+        (base_system_prompt
+         ^ turn_system_prompt
+         ^ dynamic_context
+         ^ temporal_context
+         ^ user_message
+         ^ history_messages_digest)
+    in
+    append_manifest
+      ~site:"context_injected"
+      ~keeper_turn_id:manifest_keeper_turn_id
+      ?checkpoint_path:
+        (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
+      ~decision:
+        (Keeper_runtime_manifest.with_payload_role
+           ~payload_role:Model_input
+           (`Assoc
+             [ ( "base_system_prompt_digest"
+               , `String (digest_text base_system_prompt) )
+             ; ( "turn_system_prompt_digest"
+               , `String (digest_text turn_system_prompt) )
+             ; "dynamic_context_digest", `String (digest_text dynamic_context)
+             ; "temporal_context_digest", `String (digest_text temporal_context)
+             ; "user_message_digest", `String (digest_text user_message)
+             ; "history_message_count", `Int (List.length history_messages)
+             ; "history_messages_digest", `String history_messages_digest
+             ; "context_window", `Int max_context
+             ; "context_digest", `String context_digest
+             ]))
+      Keeper_runtime_manifest.Context_injected;
     let cleanup_agent_setup () =
       Turn_helpers.cleanup_agent_setup ~keeper_name:meta.name s
     in
@@ -722,29 +799,27 @@ let run_turn
          in
          let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
-                (* OAS's per-turn pipeline builds checkpoints with an empty
-                   session_id (the OAS agent carries no session field), so the
-                   sink must stamp the keeper's own session identity before
-                   persisting. [meta.runtime.trace_id] is a validated,
-                   non-empty [Trace_id.t]; without this restamp the checkpoint
-                   transaction rejects an invalid persistence identity. *)
-                let checkpoint =
-                  { snapshot.checkpoint with
-                    session_id =
-                      Keeper_id.Trace_id.to_string meta.runtime.trace_id
-                  ; working_context =
-                      (match checkpoint_sidecar with
-                       | Some _ as sidecar -> sidecar
-                       | None -> snapshot.checkpoint.working_context)
-                  }
-                in
                 match
-                  Keeper_checkpoint_store.save_oas_classified
-                    ~session_dir:session.session_dir
-                    checkpoint
+                  prepare_pipeline_checkpoint
+                    ~history_messages
+                    ~user_turn_record
+                    ~checkpoint_sidecar
+                    ~session
+                    ~keeper_name:meta.name
+                    ~agent_name:meta.agent_name
+                    ~multimodal_policy:meta.multimodal_policy
+                    ~generation
+                    snapshot.checkpoint
                 with
-                | Ok _ -> Ok ()
                 | Error _ as error -> error
+                | Ok checkpoint ->
+                  (match
+                     Keeper_checkpoint_store.save_oas_classified
+                       ~session_dir:session.session_dir
+                       checkpoint
+                   with
+                   | Ok _ -> Ok ()
+                   | Error _ as error -> error)
          in
          let call_run_named ?raw_trace ~initial_messages () =
                 (* Keeper does not impose a cumulative turn, time, token, or cost
@@ -847,7 +922,6 @@ let run_turn
                    build_ctx_composition_metrics
                      ~system_prompt:turn_system_prompt
                      ~dynamic_context
-                     ~memory_context
                      ~temporal_context
                      ~user_message
                      ~history_messages
@@ -891,6 +965,7 @@ let run_turn
                           ~acc
                           ~actual_keeper_tool_names
                           ~user_turn_record
+                          ~durable_input_present
                           ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ~runtime_id_string
                           ~history_messages

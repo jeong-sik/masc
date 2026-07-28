@@ -59,7 +59,9 @@ type config = {
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   model_input_projection
-      : (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
+      : Agent_sdk.Agent.model_input_projection option;
+  request_wire_observer
+      : Llm_provider.Request_wire_observer.try_observe option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
@@ -106,6 +108,14 @@ val default_config :
     in place via record copy ([{ cfg with ... }]) before passing
     to {!builder} or {!prepare_resume}. *)
 
+val provider_config_for_request :
+  ?tool_choice:Agent_sdk.Types.tool_choice ->
+  config ->
+  Llm_provider.Provider_config.t
+(** Exact provider configuration produced by the builder/route field-resolution
+    contract for [config]. [tool_choice] supplies a turn-hook override when the
+    caller knows it before final-wire inspection. *)
+
 (** {1 Builder} *)
 
 val builder :
@@ -130,8 +140,9 @@ type prepared_resume = {
   options : Agent_sdk.Agent.options;
   context_fit_admission : Agent_sdk.Agent.context_fit_admission;
 }
-(** Output of {!prepare_resume}. [patched_checkpoint] has runtime identity
-    fields adjusted. *)
+(** Output of {!prepare_resume}. [patched_checkpoint] and [agent_config] carry
+    the same current runtime/provider field resolution as a fresh builder;
+    stale checkpoint request policy cannot override the lane assignment. *)
 
 val set_oas_tracer : Agent_sdk.Tracing.t -> unit
 (** Set the OAS tracer used by {!builder}.  Called once

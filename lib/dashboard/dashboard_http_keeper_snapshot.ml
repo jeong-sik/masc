@@ -158,7 +158,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
             ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
         let parts =
-          Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
+          Keeper_unified_prompt.build_prompt
+            ~meta:m
+            ~base_path:config.base_path
             ~profile_defaults:defaults ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the

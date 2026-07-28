@@ -72,7 +72,6 @@ val history_bucket_of_block :
 val build_ctx_composition_metrics :
   system_prompt:string ->
   dynamic_context:string ->
-  memory_context:string ->
   temporal_context:string ->
   user_message:string ->
   history_messages:Agent_sdk.Types.message list ->

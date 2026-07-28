@@ -71,15 +71,31 @@ type grant_error =
   | Grant_still_pending of string
   | Grant_resolution_not_approved of string
   | Grant_resolution_missing of string
+  | Grant_replay_not_consumed of string
+  | Grant_replay_outcome_conflict of string
 
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
 
+type resolution_replay_outcome =
+  | Replay_applied of string
+  | Replay_failed of string
+
+type approved_resolution_delivery =
+  { request : approved_resolution_request
+  ; state : approved_resolution_state
+  ; replay_outcome : resolution_replay_outcome option
+  }
+
 type grant_consumption =
   | Consumption_committed
   | Consumption_already_committed
   | Consumption_not_matching
+
+type replay_recording =
+  | Replay_recorded
+  | Replay_already_recorded
 
 type delivery_replay_failure =
   { approval_id : string
@@ -102,6 +118,7 @@ type persisted_delivery =
   ; rule_expires_at : float option
   ; created_by : string option
   ; grant_consumed : bool
+  ; replay_outcome : resolution_replay_outcome option
   }
 
 let storage_error_to_string error =
@@ -246,6 +263,14 @@ let grant_error_to_string = function
     Printf.sprintf "approval %s was not approved" approval_id
   | Grant_resolution_missing approval_id ->
     Printf.sprintf "approval %s has no durable resolution journal" approval_id
+  | Grant_replay_not_consumed approval_id ->
+    Printf.sprintf
+      "approval %s cannot record a replay outcome before its grant is consumed"
+      approval_id
+  | Grant_replay_outcome_conflict approval_id ->
+    Printf.sprintf
+      "approval %s already has a different durable replay outcome"
+      approval_id
 ;;
 
 let install_error_to_string = function
@@ -368,6 +393,13 @@ let approval_decision_to_yojson = function
     `Assoc [ "kind", `String "edit"; "input", input ]
 ;;
 
+let resolution_replay_outcome_to_yojson = function
+  | Replay_applied output ->
+    `Assoc [ "kind", `String "applied"; "output", `String output ]
+  | Replay_failed detail ->
+    `Assoc [ "kind", `String "failed"; "detail", `String detail ]
+;;
+
 (* [request_context] is the Auto Judge / HITL summary input: request-local
    causal evidence (bounded history lead-up, the triggering user message,
    current dynamic context, and completed tool calls) captured at request time.
@@ -389,6 +421,10 @@ let persisted_delivery_to_yojson delivery =
     ; "rule_expires_at", Json_util.float_opt_to_json delivery.rule_expires_at
     ; "created_by", Json_util.string_opt_to_json delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
+    ; ( "replay_outcome"
+      , match delivery.replay_outcome with
+        | Some outcome -> resolution_replay_outcome_to_yojson outcome
+        | None -> `Null )
     ]
 ;;
 
@@ -888,6 +924,44 @@ let approval_decision_of_yojson json =
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
 
+let resolution_replay_outcome_of_yojson = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "gate_pending.delivery.replay_outcome" in
+    let* kind = required_string ~surface "kind" fields in
+    (match kind with
+     | "applied" ->
+       let* () =
+         reject_unknown_fields
+           ~surface
+           ~allowed:[ "kind"; "output" ]
+           fields
+       in
+       let* output =
+         match List.assoc_opt "output" fields with
+         | Some (`String output) -> Ok output
+         | Some _ -> Error (surface ^ ".output must be a string")
+         | None -> Error (surface ^ ".output is required")
+       in
+       Ok (Replay_applied output)
+     | "failed" ->
+       let* () =
+         reject_unknown_fields
+           ~surface
+           ~allowed:[ "kind"; "detail" ]
+           fields
+       in
+       let* detail = required_string ~surface "detail" fields in
+       Ok (Replay_failed detail)
+     | other ->
+       Error
+         (Printf.sprintf
+            "%s.kind %S is unknown"
+            surface
+            other))
+  | _ -> Error "gate_pending.delivery.replay_outcome must be a JSON object"
+;;
+
 let persisted_delivery_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
@@ -904,6 +978,7 @@ let persisted_delivery_of_yojson ~base_path json =
           ; "rule_expires_at"
           ; "created_by"
           ; "grant_consumed"
+          ; "replay_outcome"
           ]
         fields
     in
@@ -931,11 +1006,23 @@ let persisted_delivery_of_yojson ~base_path json =
       | Some _ -> Error (surface ^ ".grant_consumed must be a boolean")
       | None -> Error (surface ^ ".grant_consumed is required")
     in
+    let* replay_outcome =
+      match List.assoc_opt "replay_outcome" fields with
+      | None | Some `Null -> Ok None
+      | Some json ->
+        Result.map
+          (fun outcome -> Some outcome)
+          (resolution_replay_outcome_of_yojson json)
+    in
     let* () =
-      match decision, grant_consumed with
-      | Decision.Approve, _ -> Ok ()
-      | (Decision.Reject _ | Decision.Edit _), false -> Ok ()
-      | (Decision.Reject _ | Decision.Edit _), true ->
+      match decision, grant_consumed, replay_outcome with
+      | Decision.Approve, true, _ -> Ok ()
+      | Decision.Approve, false, None -> Ok ()
+      | Decision.Approve, false, Some _ ->
+        Error (surface ^ ".replay_outcome requires a consumed approve grant")
+      | (Decision.Reject _ | Decision.Edit _), false, None -> Ok ()
+      | (Decision.Reject _ | Decision.Edit _), true, None
+      | (Decision.Reject _ | Decision.Edit _), (true | false), Some _ ->
         Error (surface ^ ".grant_consumed is valid only for approve")
     in
     Ok
@@ -946,6 +1033,7 @@ let persisted_delivery_of_yojson ~base_path json =
       ; rule_expires_at
       ; created_by
       ; grant_consumed
+      ; replay_outcome
       }
   | _ -> Error "gate_pending.delivery must be a JSON object"
 ;;
@@ -1707,7 +1795,7 @@ let normalized_input_hash = request_fingerprint
 
 type approved_delivery_lookup =
   | Approved_delivery_unconsumed of persisted_delivery
-  | Approved_delivery_consumed
+  | Approved_delivery_consumed of persisted_delivery
 
 type grant_consumption_commit =
   | Consumption_without_audit of grant_consumption
@@ -1734,7 +1822,7 @@ let approved_delivery_unlocked ~base_path ~id =
          (match delivery.decision with
           | Decision.Approve ->
             if delivery.grant_consumed
-            then Ok Approved_delivery_consumed
+            then Ok (Approved_delivery_consumed delivery)
             else Ok (Approved_delivery_unconsumed delivery)
           | Decision.Reject _ | Decision.Edit _ ->
             Error (Grant_resolution_not_approved id))
@@ -1756,7 +1844,7 @@ let approved_resolution_request ~base_path ~id =
   with_pending_store_lock (fun () ->
     match approved_delivery_unlocked ~base_path ~id with
     | Error _ as error -> error
-    | Ok Approved_delivery_consumed -> Ok None
+    | Ok (Approved_delivery_consumed _) -> Ok None
     | Ok (Approved_delivery_unconsumed delivery) ->
       Ok
         (Some
@@ -1770,8 +1858,74 @@ let approved_resolution_state ~base_path ~id =
   with_pending_store_lock (fun () ->
     match approved_delivery_unlocked ~base_path ~id with
     | Error _ as error -> error
-    | Ok Approved_delivery_consumed -> Ok Resolution_consumed
+    | Ok (Approved_delivery_consumed _) -> Ok Resolution_consumed
     | Ok (Approved_delivery_unconsumed _) -> Ok Resolution_unconsumed)
+;;
+
+let approved_resolution_delivery ~base_path ~id =
+  with_pending_store_lock (fun () ->
+    match approved_delivery_unlocked ~base_path ~id with
+    | Error _ as error -> error
+    | Ok (Approved_delivery_unconsumed delivery) ->
+      Ok
+        { request =
+            { keeper_name = delivery.entry.keeper_name
+            ; tool_name = delivery.entry.tool_name
+            ; input = delivery.entry.input
+            }
+        ; state = Resolution_unconsumed
+        ; replay_outcome = delivery.replay_outcome
+        }
+    | Ok (Approved_delivery_consumed delivery) ->
+      Ok
+        { request =
+            { keeper_name = delivery.entry.keeper_name
+            ; tool_name = delivery.entry.tool_name
+            ; input = delivery.entry.input
+            }
+        ; state = Resolution_consumed
+        ; replay_outcome = delivery.replay_outcome
+        })
+;;
+
+let resolution_replay_outcome_equal left right =
+  match left, right with
+  | Replay_applied left, Replay_applied right
+  | Replay_failed left, Replay_failed right ->
+    String.equal left right
+  | Replay_applied _, Replay_failed _
+  | Replay_failed _, Replay_applied _ ->
+    false
+;;
+
+let record_consumed_resolution_replay ~base_path ~id ~outcome =
+  with_pending_store_lock (fun () ->
+    match approved_delivery_unlocked ~base_path ~id with
+    | Error _ as error -> error
+    | Ok (Approved_delivery_unconsumed _) ->
+      Error (Grant_replay_not_consumed id)
+    | Ok (Approved_delivery_consumed delivery) ->
+      (match delivery.replay_outcome with
+       | Some existing when resolution_replay_outcome_equal existing outcome ->
+         Ok Replay_already_recorded
+       | Some _ -> Error (Grant_replay_outcome_conflict id)
+       | None ->
+         let updated_delivery =
+           { delivery with replay_outcome = Some outcome }
+         in
+         let updated_deliveries =
+           SMap.add id updated_delivery (Atomic.get deliveries)
+         in
+         (match
+            persist_snapshot_unlocked
+              ~base_path
+              ~pending_map:(Atomic.get pending)
+              ~delivery_map:updated_deliveries
+          with
+          | Error error -> Error (Grant_store_unavailable error)
+          | Ok () ->
+            Atomic.set deliveries updated_deliveries;
+            Ok Replay_recorded)))
 ;;
 
 let consume_approved_resolution
@@ -1785,7 +1939,7 @@ let consume_approved_resolution
     with_pending_store_lock (fun () ->
       match approved_delivery_unlocked ~base_path ~id with
       | Error error -> Error error
-      | Ok Approved_delivery_consumed ->
+      | Ok (Approved_delivery_consumed _) ->
         Ok (Consumption_without_audit Consumption_already_committed)
       | Ok (Approved_delivery_unconsumed delivery) ->
         let entry = delivery.entry in
@@ -3216,6 +3370,7 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~cr
         ; rule_expires_at
         ; created_by
         ; grant_consumed = false
+        ; replay_outcome = None
         }
       in
       let updated_pending = SMap.remove id pending_map in

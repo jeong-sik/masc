@@ -198,6 +198,90 @@ let test_execute_without_input_is_rejected () =
   | Error _ -> ()
 ;;
 
+let approved_web_search_input =
+  `Assoc
+    [ "capability", `String "web_search"
+    ; ( "input"
+      , `Assoc
+          [ "query", `String "approved exact search"
+          ; "limit", `Int 1
+          ] )
+    ]
+;;
+
+let test_network_read_preserves_exact_web_search_arguments () =
+  match
+    Masc.Keeper_gate_replay.network_read_of_gate_input approved_web_search_input
+  with
+  | Ok
+      (Masc.Keeper_tool_in_process_runtime.Replay_web_search
+         (`Assoc
+           [ "query", `String "approved exact search"
+           ; "limit", `Int 1
+           ])) ->
+    ()
+  | Ok _ -> Alcotest.fail "approved WebSearch arguments changed during decode"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_network_read_rejects_unknown_capability () =
+  match
+    Masc.Keeper_gate_replay.network_read_of_gate_input
+      (`Assoc
+        [ "capability", `String "invented"
+        ; "input", `Assoc [ "query", `String "must not run" ]
+        ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "unknown network_read capability became replayable"
+;;
+
+let test_network_read_rejects_unknown_envelope_fields () =
+  match
+    Masc.Keeper_gate_replay.network_read_of_gate_input
+      (`Assoc
+        [ "capability", `String "web_search"
+        ; "input", `Assoc [ "query", `String "must stay exact" ]
+        ; "fallback", `String "invented"
+        ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "unknown network_read envelope field was ignored"
+;;
+
+let test_applied_replay_result_is_model_visible () =
+  let output = {|{"results":[{"title":"durable"}]}|} in
+  let message =
+    Masc.Keeper_gate_replay.append_model_evidence
+      ~approval_id:"approval-1"
+      ~user_message:"continue"
+      (Masc.Keeper_gate_replay.Applied
+         { operation = "network_read"
+         ; output
+         ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+         })
+  in
+  let evidence =
+    message
+    |> String.split_on_char '\n'
+    |> List.rev
+    |> List.hd
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.check
+    Alcotest.string
+    "exact replay output reaches the current model turn"
+    output
+    Yojson.Safe.Util.(evidence |> member "untrusted_tool_output" |> to_string);
+  Alcotest.check
+    Alcotest.bool
+    "current model turn cannot request the approved effect again"
+    true
+    (String_util.contains_substring
+       message
+       "Do not request the approved operation again")
+;;
+
 
 (* The decode functions above are only reachable if dispatch routes to them.
    An operation that has a decoder but is never dispatched to is
@@ -214,7 +298,12 @@ let test_dispatch_covers_both_replayable_operations () =
     Alcotest.bool
     "an approved tool_execute is replayed"
     true
-    (replayable_of_operation "tool_execute" = Some Replay_execute)
+    (replayable_of_operation "tool_execute" = Some Replay_execute);
+  Alcotest.check
+    Alcotest.bool
+    "an approved WebSearch/WebFetch network_read is replayed"
+    true
+    (replayable_of_operation "network_read" = Some Replay_network_read)
 ;;
 
 let test_dispatch_refuses_unknown_operations () =
@@ -226,7 +315,7 @@ let test_dispatch_refuses_unknown_operations () =
          (operation ^ " still requires resubmission")
          true
          (replayable_of_operation operation = None))
-    [ "network_read"; "keeper_board_post"; "" ]
+    [ "connector_post"; "keeper_board_post"; "" ]
 ;;
 
 let () =
@@ -266,6 +355,24 @@ let () =
             "input without arguments rejected"
             `Quick
             test_execute_without_input_is_rejected
+        ] )
+    ; ( "network read replay"
+      , [ Alcotest.test_case
+            "approved WebSearch arguments stay exact"
+            `Quick
+            test_network_read_preserves_exact_web_search_arguments
+        ; Alcotest.test_case
+            "unknown capability rejected"
+            `Quick
+            test_network_read_rejects_unknown_capability
+        ; Alcotest.test_case
+            "unknown envelope field rejected"
+            `Quick
+            test_network_read_rejects_unknown_envelope_fields
+        ; Alcotest.test_case
+            "applied result reaches current model turn"
+            `Quick
+            test_applied_replay_result_is_model_visible
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case

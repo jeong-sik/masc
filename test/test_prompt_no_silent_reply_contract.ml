@@ -54,6 +54,46 @@ let assert_contains ~prompt text needle =
     (contains text needle)
 ;;
 
+let test_critical_contracts_exist_in_both_keeper_lanes () =
+  let autonomous =
+    read_file (prompt_path "keeper.unified.system.md")
+  in
+  let chat =
+    [ "keeper.core_behavior.md"
+    ; "keeper.capabilities.md"
+    ; "keeper.constitution.md"
+    ]
+    |> List.map (fun name -> read_file (prompt_path name))
+    |> String.concat "\n"
+  in
+  [ ( "typed tool authority"
+    , "The active typed schema is the only callable catalog"
+    , "The active typed tool schema supplied with this turn is the sole \
+       authority" )
+  ; ( "nonblocking Gate"
+    , "External effects use the configured Gate"
+    , "External effects use the configured nonblocking Gate" )
+  ; ( "typed failure handling"
+    , "Every failed call returns a typed error"
+    , "Do not silently ignore a tool error" )
+  ; ( "merge blocker"
+    , "Do not merge with failing required checks"
+    , "Never merge with an unresolved blocker, failing required checks" )
+  ; ( "no-work response"
+    , "short no-work report"
+    , "short no-work report" )
+  ]
+  |> List.iter (fun (contract, chat_needle, autonomous_needle) ->
+    assert_contains
+      ~prompt:("chat lane: " ^ contract)
+      chat
+      chat_needle;
+    assert_contains
+      ~prompt:("autonomous lane: " ^ contract)
+      autonomous
+      autonomous_needle)
+;;
+
 let test_no_work_prompts_do_not_request_silent_finish () =
   List.iter
     (fun prompt ->
@@ -87,6 +127,10 @@ let () =
     "prompt no silent reply contract"
     [ ( "prompt assets"
       , [ test_case
+            "critical contracts exist in both Keeper lanes"
+            `Quick
+            test_critical_contracts_exist_in_both_keeper_lanes
+        ; test_case
             "no-work prompts require visible no-work report"
             `Quick
             test_no_work_prompts_do_not_request_silent_finish

@@ -174,11 +174,15 @@ let test_board_authors_share_one_neutral_observation_boundary () =
   let obs_peer = { base_observation with pending_board_events = [ peer_event ] } in
   let obs_human = { base_observation with pending_board_events = [ human_event ] } in
   let { Masc.Keeper_unified_prompt.world_state = peer_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
       ~observation:obs_peer ()
   in
   let { Masc.Keeper_unified_prompt.world_state = human_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
       ~observation:obs_human ()
   in
   let neutral_boundary = "Rows below are Board context." in
@@ -203,6 +207,25 @@ let test_board_authors_share_one_neutral_observation_boundary () =
     (contains_sub "[mentions test-keeper]" peer_msg)
 ;;
 
+let test_board_activity_renders_absolute_updated_at () =
+  let updated_at = 1_714_989_600.0 in
+  let event = { sample_board_event with updated_at } in
+  let observation =
+    { base_observation with pending_board_events = [ event ] }
+  in
+  let { Masc.Keeper_unified_prompt.world_state = rendered; _ } =
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
+      ~observation
+      ()
+  in
+  check bool "absolute timestamp is carried beside the board row" true
+    (contains_sub
+       ("updated_at=" ^ Masc_domain.iso8601_of_unix_seconds updated_at)
+       rendered)
+;;
+
 let test_board_reaction_event_renders_reaction_context () =
   Masc_test_deps.init_keeper_tool_registry ();
   let reaction_event =
@@ -223,7 +246,9 @@ let test_board_reaction_event_renders_reaction_context () =
   in
   let obs = { base_observation with pending_board_events = [ reaction_event ] } in
   let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
       ~observation:obs ()
   in
   check bool "prompt labels reaction board event" true
@@ -250,7 +275,9 @@ let test_observation_tool_names_are_preserved () =
   in
   let obs = { base_observation with pending_board_events = [ event ] } in
   let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
       ~observation:obs ()
   in
   check bool "keeper diagnostic token remains in observation" true
@@ -329,7 +356,9 @@ let test_scheduled_automation_prompt_section () =
     { base_observation with scheduled_automation = scheduled_automation_observation }
   in
   let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
       ~observation:obs ()
   in
   check bool "prompt includes schedule section" true
@@ -416,7 +445,9 @@ let test_scheduled_wake_preserves_complete_message () =
 let test_world_state_never_in_persisted_user_message () =
   let obs = { base_observation with pending_board_events = [ sample_board_event ] } in
   let { Masc.Keeper_unified_prompt.world_state; user_message; _ } =
-    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
       ~observation:obs ()
   in
   check bool "world_state carries the frame header" true
@@ -494,6 +525,9 @@ let () =
           test_case
             "prompt: all Board authors share one neutral observation boundary"
             `Quick test_board_authors_share_one_neutral_observation_boundary;
+          test_case
+            "prompt: Board activity renders absolute updated_at"
+            `Quick test_board_activity_renders_absolute_updated_at;
           test_case
             "prompt: board reaction event renders reaction context"
             `Quick test_board_reaction_event_renders_reaction_context;

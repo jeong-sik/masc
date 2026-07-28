@@ -6,6 +6,7 @@
 module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Receipt = Masc.Keeper_execution_receipt
 module Replay_prefix = Masc.Keeper_replay_prefix
+module Run = Masc.Keeper_agent_run.For_testing
 
 let message role content =
   Agent_sdk.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
@@ -437,7 +438,13 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
    survive. *)
 let wake_marker_text = Masc.Keeper_unified_prompt.autonomous_wake_marker
 
-let wake_persistence ~user_turn_record ~response_text messages =
+let wake_persistence
+      ?(tool_calls_made = true)
+      ?(durable_input_present = true)
+      ~user_turn_record
+      ~response_text
+      messages
+  =
   Finalize.checkpoint_for_replay_persistence
     ~history_messages:
       Agent_sdk.Types.
@@ -453,6 +460,8 @@ let wake_persistence ~user_turn_record ~response_text messages =
     ~session_id:"new-session"
     ~response_text
     ~user_turn_record
+    ~durable_input_present
+    ~tool_calls_made
     (checkpoint messages)
 ;;
 
@@ -542,6 +551,159 @@ let test_skipped_wake_blank_response_drops_only_inert_suffix () =
     (List.length patched.messages)
 ;;
 
+let test_completed_inert_wake_drops_generated_idle_replay () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text wake_marker_text ]
+    ; message Assistant
+        [ Thinking { signature = None; content = "checked the empty frame" }
+        ; Text "Workspace idle; no actionable work found."
+        ]
+    ]
+  in
+  let patched, reason =
+    wake_persistence
+      ~tool_calls_made:false
+      ~durable_input_present:false
+      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~response_text:"Workspace idle; no actionable work found."
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "no-input no-effect output is absent from next-turn replay"
+    true
+    (patched.messages = history_seed);
+  Alcotest.(check (option string))
+    "idle pruning is separately observable"
+    (Some "inert_autonomous_replay")
+    (prune_reason_to_string reason)
+;;
+
+let test_completed_bare_wake_keeps_durable_input_response () =
+  let open Agent_sdk.Types in
+  let response = "Acknowledged the scheduled source." in
+  let suffix =
+    [ message User [ Text wake_marker_text ]
+    ; message Assistant [ Text response ]
+    ]
+  in
+  let patched, reason =
+    wake_persistence
+      ~tool_calls_made:false
+      ~durable_input_present:true
+      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~response_text:response
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "durable source response remains in replay"
+    true
+    (patched.messages = history_seed @ [ message Assistant [ Text response ] ]);
+  Alcotest.(check (option string))
+    "ordinary wake-marker pruning keeps its canonical reason"
+    (Some "canonical_success_replay")
+    (prune_reason_to_string reason)
+;;
+
+let prepare_pipeline_checkpoint
+      ~base_dir
+      ~history_messages
+      ?(multimodal_policy = Masc.Keeper_types_profile.Mm_inherit)
+      checkpoint
+  =
+  let session =
+    Masc.Keeper_context_core.create_session
+      ~session_id:"pipeline-stage-session"
+      ~base_dir
+  in
+  Run.prepare_pipeline_checkpoint
+    ~history_messages
+    ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+    ~checkpoint_sidecar:(Some (`Assoc [ "sidecar", `Bool true ]))
+    ~session
+    ~keeper_name:"pipeline-stage-keeper"
+    ~agent_name:"keeper-pipeline-stage-keeper-agent"
+    ~multimodal_policy
+    ~generation:7
+    checkpoint
+;;
+
+let test_pipeline_checkpoint_drops_wake_and_uses_shared_projection () =
+  Eio_main.run @@ fun _env ->
+  with_temp_dir @@ fun base_dir ->
+  let open Agent_sdk.Types in
+  let canonical_history =
+    [ message User
+        [ Text "canonical image"
+        ; Image
+            { media_type = "image/png"
+            ; data = Base64.encode_string "inline-image"
+            ; source_type = Base64
+            }
+        ]
+    ]
+  in
+  let current_assistant = message Assistant [ Text "mid-stage response" ] in
+  let prepared =
+    prepare_pipeline_checkpoint
+      ~base_dir
+      ~history_messages:canonical_history
+      ~multimodal_policy:Masc.Keeper_types_profile.Mm_delegate
+      (checkpoint
+         (canonical_history
+          @ [ message User [ Text wake_marker_text ]; current_assistant ]))
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "mid-stage bare wake is absent"
+    false
+    (List.exists
+       (fun (item : message) -> item.content = [ Text wake_marker_text ])
+       prepared.messages);
+  Alcotest.(check bool)
+    "mid-stage assistant remains crash-recoverable"
+    true
+    (List.exists
+       (fun item -> item = current_assistant)
+       prepared.messages);
+  Alcotest.(check bool)
+    "shared persistence projection evicts delegate images"
+    false
+    (has_content (function Image _ -> true | _ -> false) prepared.messages);
+  Alcotest.(check bool)
+    "checkpoint sidecar is retained"
+    true
+    (prepared.working_context = Some (`Assoc [ "sidecar", `Bool true ]))
+;;
+
+let test_pipeline_checkpoint_rejects_overlapping_tool_cycles () =
+  Eio_main.run @@ fun _env ->
+  with_temp_dir @@ fun base_dir ->
+  let open Agent_sdk.Types in
+  let malformed_suffix =
+    [ message User [ Text wake_marker_text ]
+    ; message Assistant
+        [ ToolUse { id = "open-a"; name = "tool"; input = `Assoc [] } ]
+    ; message Assistant
+        [ ToolUse { id = "open-b"; name = "tool"; input = `Assoc [] } ]
+    ]
+  in
+  match
+    prepare_pipeline_checkpoint
+      ~base_dir
+      ~history_messages:history_seed
+      (checkpoint (history_seed @ malformed_suffix))
+  with
+  | Ok _ -> Alcotest.fail "mid-stage sink accepted overlapping tool cycles"
+  | Error detail ->
+    Alcotest.(check bool)
+      "structural rejection is explicit"
+      true
+      (String.length (String.trim detail) > 0)
+;;
+
 let () =
   Alcotest.run
     "keeper replay checkpoint"
@@ -598,6 +760,22 @@ let () =
             "skipped wake blank response drops only inert suffix"
             `Quick
             test_skipped_wake_blank_response_drops_only_inert_suffix
+        ; Alcotest.test_case
+            "completed inert wake drops generated idle replay"
+            `Quick
+            test_completed_inert_wake_drops_generated_idle_replay
+        ; Alcotest.test_case
+            "durable-input bare wake keeps generated response"
+            `Quick
+            test_completed_bare_wake_keeps_durable_input_response
+        ; Alcotest.test_case
+            "pipeline checkpoint drops wake and applies shared projection"
+            `Quick
+            test_pipeline_checkpoint_drops_wake_and_uses_shared_projection
+        ; Alcotest.test_case
+            "pipeline checkpoint rejects overlapping tool cycles"
+            `Quick
+            test_pipeline_checkpoint_rejects_overlapping_tool_cycles
         ] )
     ]
 ;;

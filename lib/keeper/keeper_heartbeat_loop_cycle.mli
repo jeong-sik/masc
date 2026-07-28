@@ -3,6 +3,7 @@
 type cycle_outcome =
   | Completed of Keeper_meta_contract.keeper_meta
   | Checkpointed of Keeper_meta_contract.keeper_meta
+  | External_effect_deferred of Keeper_meta_contract.keeper_meta
   | Input_required of Keeper_meta_contract.keeper_meta
   | Cancelled of Keeper_meta_contract.keeper_meta
   | Skipped of Keeper_meta_contract.keeper_meta

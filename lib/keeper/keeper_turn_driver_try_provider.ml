@@ -185,6 +185,58 @@ let observe_checkpoint_stage observed (_ : Agent_sdk.Agent.checkpoint_stage) =
 
 let same_run_retry_allowed observed = not (Atomic.get observed)
 
+let projection_manifest_decision
+      (observation : Keeper_provider_input_projection.observation)
+  =
+  Keeper_runtime_manifest.with_payload_role
+    ~payload_role:Keeper_runtime_manifest.Model_input
+    (`Assoc
+      [ "projection", `String "lossless_exact_body_preflight"
+      ; "canonical_history_unchanged", `Bool true
+      ; "limit_bytes", `Int observation.limit_bytes
+      ; "stream", `Bool observation.stream
+      ; "canonical_history_messages", `Int observation.canonical_history_messages
+      ; "current_run_messages", `Int observation.current_run_messages
+      ; "body_bytes", `Int observation.body_bytes
+      ; "body_sha256", `String observation.body_sha256
+      ; "fits", `Bool observation.fits
+      ])
+;;
+
+let request_wire_manifest_decision
+      (observation : Llm_provider.Request_wire_observer.observation)
+  =
+  Keeper_runtime_manifest.with_payload_role
+    ~payload_role:Keeper_runtime_manifest.Operator_evidence
+    (`Assoc
+      [ ( "capture_id"
+        , match observation.capture_id with
+          | Some capture_id -> `String capture_id
+          | None -> `Null )
+      ; "provider", `String observation.provider
+      ; "model", `String observation.model
+      ; "http_codec", `String observation.http_codec
+      ; "stream", `Bool observation.stream
+      ; "body_bytes", `Int observation.body_bytes
+      ; "body_sha256", `String observation.body_sha256
+      ])
+;;
+
+let normalize_keeper_tool_choice (config : Runtime_agent.config) =
+  let provider_cfg =
+    { config.provider_cfg with
+      Llm_provider.Provider_config.tool_choice =
+        Keeper_tool_choice_policy.relax_strict_for_keeper
+          config.provider_cfg.tool_choice
+    }
+  in
+  { config with provider_cfg }
+;;
+
+let request_config_for_keeper_projection (config : Runtime_agent.config) =
+  Runtime_agent_context.provider_config_for_request config
+;;
+
 let run_try_provider
       (ctx : try_provider_ctx)
       ?enable_thinking_override
@@ -216,6 +268,7 @@ let run_try_provider
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools
         candidate
+      |> normalize_keeper_tool_choice
     in
     (* Runtime/model configuration is authoritative; the run-level value only
        fills an omitted provider temperature. *)
@@ -224,7 +277,7 @@ let run_try_provider
       | Some _ as configured -> configured
       | None -> ctx.temperature
     in
-    Ok
+    let base_config =
       { base_config with
         stream_idle_timeout_s = ctx.stream_idle_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
@@ -246,11 +299,48 @@ let run_try_provider
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
-          ; model_input_projection = ctx.model_input_projection
+          ; model_input_projection = None
+          ; request_wire_observer = None
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
           }
+    in
+    let request_config = request_config_for_keeper_projection base_config in
+    let base_projection =
+      Option.value ~default:Fun.id ctx.model_input_projection
+    in
+    let model_input_projection =
+      Keeper_provider_input_projection.create
+        ~canonical_prefix:ctx.initial_messages
+        ~provider_config:request_config
+        ~tools:ctx.tools
+        ~stream:(Option.is_some ctx.on_event)
+        ~base_projection
+        ~observe:(fun observation ->
+          emit_runtime_manifest
+            ctx
+            ~status:
+              (if observation.fits
+               then "exact_body_within_limit"
+               else "exact_body_requires_compaction")
+            ~decision:(projection_manifest_decision observation)
+            Keeper_runtime_manifest.Context_injected)
+        ()
+    in
+    let request_wire_observer observation =
+      emit_runtime_manifest
+        ctx
+        ~status:"request_serialized"
+        ~decision:(request_wire_manifest_decision observation)
+        Keeper_runtime_manifest.Provider_attempt_started;
+      Ok ()
+    in
+    Ok
+      { base_config with
+        model_input_projection = Some model_input_projection
+      ; request_wire_observer = Some request_wire_observer
+      }
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
   match config_result with
@@ -334,4 +424,5 @@ let run_try_provider
 
 module For_testing = struct
   let apply_accept = apply_accept
+  let normalize_keeper_tool_choice = normalize_keeper_tool_choice
 end

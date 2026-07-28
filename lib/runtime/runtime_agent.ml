@@ -110,7 +110,9 @@ type config =
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   model_input_projection
-      : (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
+      : Agent_sdk.Agent.model_input_projection option;
+  request_wire_observer
+      : Llm_provider.Request_wire_observer.try_observe option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
@@ -211,7 +213,7 @@ let observed_http_transport
     ~net
     ?clock
     ?body_timeout_s
-    ?model_input_projection
+    ?request_wire_observer
     ()
   : Llm_provider.Llm_transport.t =
   (* RFC-OAS-026: stream_idle_timeout_s moved off transport construction
@@ -229,15 +231,13 @@ let observed_http_transport
       ~net
       ()
   in
-  let project_request
+  let observe_request
       (request : Llm_provider.Llm_transport.completion_request)
     =
-    let messages =
-      match model_input_projection with
-      | None -> request.messages
-      | Some project -> project request.messages
-    in
-    { request with messages }
+    match request_wire_observer with
+    | None -> request
+    | Some request_wire_observer ->
+      { request with request_wire_observer = Some request_wire_observer }
   in
   provider_http_observation_transport
     { complete_sync =
@@ -246,7 +246,7 @@ let observed_http_transport
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
-        http_transport.complete_sync (project_request req));
+        http_transport.complete_sync (observe_request req));
       complete_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
@@ -256,7 +256,7 @@ let observed_http_transport
         http_transport.complete_stream
           ?on_telemetry
           ~on_event
-          (project_request req));
+          (observe_request req));
     }
 
 let transport_for_provider
@@ -264,7 +264,7 @@ let transport_for_provider
     ~net
     ?clock
     ?body_timeout_s
-    ?model_input_projection
+    ?request_wire_observer
     ()
   =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
@@ -279,7 +279,7 @@ let transport_for_provider
           ~net
           ?clock
           ?body_timeout_s
-          ?model_input_projection
+          ?request_wire_observer
           ()))
 
 let runtime_id_of_config (config : config) =
@@ -913,7 +913,7 @@ let build
          ~net
          ?clock
          ?body_timeout_s:config.body_timeout_s
-         ?model_input_projection:config.model_input_projection
+         ?request_wire_observer:config.request_wire_observer
          ()
      with
      | Error _ as e -> e
@@ -1000,7 +1000,7 @@ let resume_from_checkpoint
          ~net
          ?clock
          ?body_timeout_s:config.body_timeout_s
-         ?model_input_projection:config.model_input_projection
+         ?request_wire_observer:config.request_wire_observer
          ()
      with
      | Error _ as e -> e
@@ -1017,6 +1017,7 @@ let resume_from_checkpoint
            ~tools:config.tools ?context:config.context
            ~provider_config:config.provider_cfg
            ~context_fit_admission:prepared_resume.context_fit_admission
+           ?model_input_projection:config.model_input_projection
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
            ()))

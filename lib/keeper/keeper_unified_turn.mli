@@ -207,15 +207,19 @@ type turn_failure =
 type turn_success =
   | Turn_completed of Keeper_meta_contract.keeper_meta
   | Turn_checkpointed of Keeper_meta_contract.keeper_meta
+  | Turn_external_effect_deferred of Keeper_meta_contract.keeper_meta
   | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
   | Turn_skipped of Keeper_meta_contract.keeper_meta
 (** Typed non-error result of the unified turn boundary. Only
     [Turn_completed] proves that the requested action path finished.
     [Turn_checkpointed] and [Turn_input_required] are healthy runtime exits but
-    preserve the durable source for continuation. Supervisor cancellation and a
-    non-executable phase remain distinct so a durable source cannot be
-    acknowledged as completed work. *)
+    preserve the durable source for continuation.
+    [Turn_external_effect_deferred] proves a different durable handoff: the
+    Gate request and its resolution continuation now own the exact effect, so
+    the triggering source must be acknowledged instead of replayed. Supervisor
+    cancellation and a non-executable phase remain distinct so a durable source
+    cannot otherwise be acknowledged as completed work. *)
 
 val turn_success_of_stop_reason
   :  meta:Keeper_meta_contract.keeper_meta

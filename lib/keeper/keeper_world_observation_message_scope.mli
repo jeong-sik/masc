@@ -77,8 +77,12 @@ val render_recent_direct_conversation_context
   -> string
 
 (** Pure source-ordered classification after the optional durable ack row.
-    Paired direct turns are acknowledged only by an assistant utterance with
-    the same typed [turn_ref]; an unrelated assistant row never clears input. *)
+    Returns at most the oldest pending row so one autonomous turn owns one
+    exact durable input and its success watermark cannot consume a batch.
+
+    Paired direct turns are acknowledged by an assistant utterance with the
+    same typed [turn_ref] or typed [delivery_key]. An unrelated assistant row
+    never clears input, and a transport-failure row is not an acknowledgement. *)
 val pending_messages_of_messages
   :  ?ack_id:string
   -> targets:string list
@@ -96,7 +100,9 @@ val pending_mentions_of_messages
     mention — the operator addressing the keeper without an "@name". External
     (connector) lines and lines already counted as mentions are excluded, so
     this signal stays disjoint from mentions and does not flood on busy
-    channels. Same watermark as {!pending_mentions_of_messages}; pure. *)
+    channels. Unlike {!pending_messages_of_messages}, the kind-specific
+    inspection helpers do not apply the one-row runtime admission limit. Same
+    watermark as {!pending_mentions_of_messages}; pure. *)
 val pending_scope_of_messages
   :  ?ack_id:string
   -> targets:string list

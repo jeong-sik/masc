@@ -1304,6 +1304,83 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
   check (option (float 0.0001)) "resume agent min_p" (Some 0.07)
     prepared.agent_config.min_p
 
+let test_runtime_request_config_matches_builder_resolution () =
+  let provider_cfg =
+    { (provider_cfg ()) with
+      Llm_provider.Provider_config.max_tokens = Some 300
+    ; max_request_body_bytes = Some 65_536
+    ; temperature = Some 0.8
+    ; top_p = Some 0.81
+    ; top_k = Some 41
+    ; min_p = Some 0.08
+    ; system_prompt = Some "provider system"
+    ; enable_thinking = Some true
+    ; preserve_thinking = Some false
+    ; thinking_budget = Some 512
+    ; tool_choice = Some Agent_sdk.Types.Any
+    ; disable_parallel_tool_use = true
+    ; cache_system_prompt = true
+    }
+  in
+  let config =
+    Runtime_agent.default_config
+      ~name:"request-config-parity"
+      ~provider_cfg
+      ~system_prompt:"runtime system"
+      ~tools:[]
+  in
+  let config =
+    { config with
+      max_tokens = Some 700
+    ; temperature = Some 0.2
+    ; top_p = Some 0.72
+    ; top_k = Some 17
+    ; min_p = Some 0.03
+    ; enable_thinking = Some false
+    ; preserve_thinking = Some true
+    ; thinking_budget = Some 256
+    }
+  in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_sdk.Builder.build_safe builder with
+      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Ok agent ->
+        Eio.Switch.on_release sw (fun () -> Agent_sdk.Agent.close agent);
+        let expected =
+          Agent_sdk.Provider.provider_config_with_agent_config
+            ~config:(Agent_sdk.Agent.state agent).config
+            provider_cfg
+        in
+        let actual = Runtime_agent_context.provider_config_for_request config in
+        let same =
+          String.equal actual.model_id expected.model_id
+          && actual.max_tokens = expected.max_tokens
+          && actual.max_context = expected.max_context
+          && actual.max_request_body_bytes = expected.max_request_body_bytes
+          && actual.temperature = expected.temperature
+          && actual.top_p = expected.top_p
+          && actual.top_k = expected.top_k
+          && actual.min_p = expected.min_p
+          && actual.system_prompt = expected.system_prompt
+          && actual.enable_thinking = expected.enable_thinking
+          && actual.preserve_thinking = expected.preserve_thinking
+          && actual.thinking_budget = expected.thinking_budget
+          && actual.reasoning_effort = expected.reasoning_effort
+          && actual.tool_choice = expected.tool_choice
+          && actual.disable_parallel_tool_use
+             = expected.disable_parallel_tool_use
+          && actual.response_format = expected.response_format
+          && actual.cache_system_prompt = expected.cache_system_prompt
+        in
+        check bool "request preflight config equals OAS builder resolution" true same))
+
 let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
   let resume_schema : Yojson.Safe.t =
     `Assoc
@@ -1317,6 +1394,9 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     { base with
       Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonSchema resume_schema
     ; output_schema = Some resume_schema
+    ; max_tokens = Some 321
+    ; tool_choice = Some Agent_sdk.Types.Any
+    ; disable_parallel_tool_use = true
     }
   in
   let config =
@@ -1360,7 +1440,13 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
   in
   check bool "resume patches checkpoint response_format to base JsonSchema" true
     (prepared.patched_checkpoint.Agent_sdk.Checkpoint.response_format
-     = expected_response_format)
+     = expected_response_format);
+  check (option int) "resume inherits provider max_tokens" (Some 321)
+    prepared.agent_config.max_tokens;
+  check bool "resume replaces stale checkpoint tool choice" true
+    (prepared.patched_checkpoint.tool_choice = Some Agent_sdk.Types.Any);
+  check bool "resume replaces stale parallel-tool policy" true
+    prepared.patched_checkpoint.disable_parallel_tool_use
 
 let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   let tool =
@@ -1744,6 +1830,10 @@ let () =
             "runtime agent context preserves provider sampling config"
             `Quick
             test_runtime_agent_context_preserves_provider_sampling_config
+        ; test_case
+            "runtime request config matches OAS builder resolution"
+            `Quick
+            test_runtime_request_config_matches_builder_resolution
         ; test_case
             "runtime agent context resume patches stale response_format to base contract"
             `Quick

@@ -174,7 +174,6 @@ let history_bucket_of_block
 let build_ctx_composition_metrics
     ~(system_prompt : string)
     ~(dynamic_context : string)
-    ~(memory_context : string)
     ~(temporal_context : string)
     ~(user_message : string)
     ~(history_messages : Agent_sdk.Types.message list)
@@ -186,7 +185,6 @@ let build_ctx_composition_metrics
   in
   add_text_segment "system_prompt" system_prompt;
   add_text_segment "dynamic_context" dynamic_context;
-  add_text_segment "memory_context" memory_context;
   add_text_segment "temporal_context" temporal_context;
   add_text_segment "user_message" user_message;
   List.iter

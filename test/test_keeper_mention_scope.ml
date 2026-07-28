@@ -45,7 +45,8 @@ let test_empty_targets () =
 
 let msg ~role ?(id = "test-msg") ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
     ?(audio = None)
-    ?(kind = Store.Row_kind.Utterance) ?(turn_ref = None) content
+    ?(kind = Store.Row_kind.Utterance) ?(turn_ref = None)
+    ?(delivery_key = None) content
   : Store.chat_message
   =
   { id
@@ -67,7 +68,7 @@ let msg ~role ?(id = "test-msg") ?(ts = Some 1.0) ?(source = None) ?(speaker = N
   ; kind
   ; turn_ref
   ; stream_lifecycle = None
-  ; delivery_key = None
+  ; delivery_key
   }
 ;;
 
@@ -299,6 +300,58 @@ let test_unrelated_assistant_does_not_clear_pending () =
     (contents (MS.pending_scope_of_messages ~targets lane))
 ;;
 
+let direct_delivery_key request_id =
+  Keeper_chat_delivery_identity.Direct_request
+    (match
+       Keeper_chat_delivery_identity.Request_id.of_string request_id
+     with
+     | Ok request_id -> request_id
+     | Error detail -> Alcotest.fail detail)
+;;
+
+let test_matching_delivery_key_clears_user_without_turn_ref () =
+  let delivery_key = Some (direct_delivery_key "request-scope-1") in
+  let lane =
+    [ msg
+        ~id:"m1"
+        ~role:Store.Role.User
+        ~delivery_key
+        "@alice connector question"
+    ; msg
+        ~id:"a1"
+        ~role:Store.Role.Assistant
+        ~delivery_key
+        "connector answer"
+    ]
+  in
+  check (list string)
+    "append-once assistant closes its exact inbound delivery"
+    []
+    (contents (MS.pending_mentions_of_messages ~targets lane))
+;;
+
+let test_transport_failure_with_delivery_key_does_not_clear () =
+  let delivery_key = Some (direct_delivery_key "request-scope-2") in
+  let lane =
+    [ msg
+        ~id:"m1"
+        ~role:Store.Role.User
+        ~delivery_key
+        "@alice connector question"
+    ; msg
+        ~id:"a1"
+        ~role:Store.Role.Assistant
+        ~delivery_key
+        ~kind:Store.Row_kind.Transport_failure
+        "Keeper request failed"
+    ]
+  in
+  check (list string)
+    "failed delivery remains pending"
+    [ "@alice connector question" ]
+    (contents (MS.pending_mentions_of_messages ~targets lane))
+;;
+
 let test_ack_clears_only_injected_prefix () =
   let lane =
     [ msg ~id:"m1" ~role:Store.Role.User "@alice first"
@@ -312,7 +365,7 @@ let test_ack_clears_only_injected_prefix () =
     (List.map (fun (message : MS.pending_message) -> message.content) pending)
 ;;
 
-let test_all_pending_rows_preserve_source_order_without_cap () =
+let test_oldest_pending_row_is_admitted_alone () =
   let lane =
     List.init 20 (fun index ->
       msg
@@ -321,9 +374,9 @@ let test_all_pending_rows_preserve_source_order_without_cap () =
         (Printf.sprintf "@alice message-%d" index))
   in
   let pending = MS.pending_messages_of_messages ~targets lane in
-  check int "no fixed pending cap" 20 (List.length pending);
-  check (list string) "source order preserved"
-    (List.init 20 (fun index -> Printf.sprintf "message-%d" index))
+  check int "one exact row admitted" 1 (List.length pending);
+  check (list string) "oldest source row wins"
+    [ "message-0" ]
     (List.map
        (fun (message : MS.pending_message) ->
           String.sub message.content 7 (String.length message.content - 7))
@@ -364,10 +417,14 @@ let () =
             test_voice_audio_self_output_is_not_recent_context
         ; test_case "unrelated_assistant_does_not_clear" `Quick
             test_unrelated_assistant_does_not_clear_pending
+        ; test_case "matching_delivery_key_clears" `Quick
+            test_matching_delivery_key_clears_user_without_turn_ref
+        ; test_case "delivery_failure_does_not_clear" `Quick
+            test_transport_failure_with_delivery_key_does_not_clear
         ; test_case "ack_clears_only_injected_prefix" `Quick
             test_ack_clears_only_injected_prefix
-        ; test_case "all_rows_source_order_no_cap" `Quick
-            test_all_pending_rows_preserve_source_order_without_cap
+        ; test_case "oldest_row_only" `Quick
+            test_oldest_pending_row_is_admitted_alone
         ] )
     ]
 ;;

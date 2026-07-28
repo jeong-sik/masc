@@ -3,13 +3,15 @@
 
     Each named block is read from
     [<Config_dir_resolver.prompts_dir ()>/behavior/<name>.md] on first
-    access and cached for the remainder of the process lifetime.  The
-    cache key is the block name. A leading YAML frontmatter block is
-    stripped so callers receive only prompt body text.
+    successful access and cached for the remainder of the process lifetime.
+    Missing or unreadable files are retried on later calls, so restoring a
+    prompt takes effect without a process restart. The cache key is the block
+    name. A leading YAML frontmatter block is stripped so callers receive only
+    prompt body text.
 
     Missing files do not crash.  [get name] returns [None] and logs
-    once per name so callers can render an explicit config-drift marker
-    while operators restore the external file.
+    the first failure per name so callers can render an explicit config-drift
+    marker while operators restore the external file.
 
     This module is a thin sibling of [Prompt_registry]: that registry
     handles versioned, override-able, frontmatter-aware system prompts.
@@ -22,8 +24,8 @@
 val get : string -> string option
 (** [get name] returns the contents of
     [<prompts_dir>/behavior/<name>.md] on success, or [None] if the
-    file is missing/unreadable.  Cached after the first call so the
-    file is read at most once per process per [name]. *)
+    file is missing/unreadable. Successful content is cached after the first
+    call; failures are retried. *)
 
 val reset_cache : unit -> unit
 (** Drop the cache so the next [get] re-reads from disk.  Intended for

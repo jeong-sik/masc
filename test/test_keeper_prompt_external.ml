@@ -182,6 +182,44 @@ let test_cache_is_used () =
       Alcotest.(check (option string))
         "cache returns identical content" first second)
 
+let test_missing_file_is_retried_after_restore () =
+  let root = Filename.temp_dir "keeper-prompt-restore-" "" in
+  let config_dir = Filename.concat root "config" in
+  let prompts_dir = Filename.concat config_dir "prompts" in
+  let behavior_dir = Filename.concat prompts_dir "behavior" in
+  Unix.mkdir config_dir 0o700;
+  Unix.mkdir prompts_dir 0o700;
+  Unix.mkdir behavior_dir 0o700;
+  let prompt_name = "restored_without_keeper_restart" in
+  let prompt_path = Filename.concat behavior_dir (prompt_name ^ ".md") in
+  let previous_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_config_dir with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Config_dir_resolver.reset ();
+      Lib.Keeper_prompt_external.reset_cache ();
+      if Sys.file_exists prompt_path then Sys.remove prompt_path;
+      Unix.rmdir behavior_dir;
+      Unix.rmdir prompts_dir;
+      Unix.rmdir config_dir;
+      Unix.rmdir root)
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      Lib.Keeper_prompt_external.reset_cache ();
+      Alcotest.(check (option string))
+        "first missing lookup"
+        None
+        (Lib.Keeper_prompt_external.get prompt_name);
+      Out_channel.with_open_text prompt_path (fun channel ->
+        output_string channel "restored behavior contract\n");
+      Alcotest.(check (option string))
+        "restored file is visible without cache reset"
+        (Some "restored behavior contract\n")
+        (Lib.Keeper_prompt_external.get prompt_name))
+
 let test_source_has_no_generic_behavior_fallbacks () =
   with_repo_root_cwd (fun () ->
       let src = read_file "lib/keeper/keeper_prompt.ml" in
@@ -226,6 +264,8 @@ let () =
             test_missing_returns_none;
           Alcotest.test_case "second lookup uses cache" `Quick
             test_cache_is_used;
+          Alcotest.test_case "missing prompt is retried after restore" `Quick
+            test_missing_file_is_retried_after_restore;
           Alcotest.test_case "source has no generic behavior fallbacks"
             `Quick test_source_has_no_generic_behavior_fallbacks;
         ] );

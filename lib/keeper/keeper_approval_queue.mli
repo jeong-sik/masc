@@ -84,15 +84,31 @@ type grant_error =
   | Grant_still_pending of string
   | Grant_resolution_not_approved of string
   | Grant_resolution_missing of string
+  | Grant_replay_not_consumed of string
+  | Grant_replay_outcome_conflict of string
 
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
 
+type resolution_replay_outcome =
+  | Replay_applied of string
+  | Replay_failed of string
+
+type approved_resolution_delivery =
+  { request : approved_resolution_request
+  ; state : approved_resolution_state
+  ; replay_outcome : resolution_replay_outcome option
+  }
+
 type grant_consumption =
   | Consumption_committed
   | Consumption_already_committed
   | Consumption_not_matching
+
+type replay_recording =
+  | Replay_recorded
+  | Replay_already_recorded
 
 type delivery_replay_failure =
   { approval_id : string
@@ -143,6 +159,15 @@ val approved_resolution_request :
 val approved_resolution_state :
   base_path:string -> id:string -> (approved_resolution_state, grant_error) result
 
+(** Read the approved request together with its consumption state and any
+    durable host replay result. Unlike [approved_resolution_request], this
+    remains available after one-shot consumption so a retried or restarted
+    Keeper turn cannot forget an already-applied external effect. *)
+val approved_resolution_delivery :
+  base_path:string ->
+  id:string ->
+  (approved_resolution_delivery, grant_error) result
+
 (** Atomically consume an approved resolution only when the Keeper, opaque
     operation identity, and canonical complete input match its durable request.
     Turn, Task, Goal, and channel fields remain provenance and never become
@@ -154,6 +179,14 @@ val consume_approved_resolution :
   tool_name:string ->
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
+
+(** Durably attach the exact host replay result to a consumed approval.
+    Identical writes are idempotent; a conflicting result fails closed. *)
+val record_consumed_resolution_replay :
+  base_path:string ->
+  id:string ->
+  outcome:resolution_replay_outcome ->
+  (replay_recording, grant_error) result
 
 (** {1 Exact Always Allowed rules} *)
 

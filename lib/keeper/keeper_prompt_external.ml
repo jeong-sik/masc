@@ -4,10 +4,11 @@
 
 module Mutex = Stdlib.Mutex
 
-(* Cache stores the *result* of the lookup (Some content or None) so
-   missing-file lookups are not retried on every keeper turn — the
-   warn fires once and subsequent calls return the same [None]. *)
-let cache : (string, string option) Hashtbl.t = Hashtbl.create 16
+(* Successful prompt bodies are process-cached. A miss is observed once but is
+   never cached as a value: operators can restore a missing behavior file and
+   the next Keeper turn sees it without restarting the server. *)
+let cache : (string, string) Hashtbl.t = Hashtbl.create 16
+let observed_failures : (string, unit) Hashtbl.t = Hashtbl.create 16
 let cache_mutex = Mutex.create ()
 
 let behavior_path name =
@@ -45,35 +46,39 @@ let read_file path =
   with
   | Sys_error _ -> None
 
+type load_failure =
+  | Missing of string
+  | Read_failed of string
+
 let load_uncached name =
   let path = behavior_path name in
   if Sys.file_exists path && not (Sys.is_directory path) then (
     match read_file path with
-    | Some content -> Some content
-    | None ->
-        Log.Keeper.warn
-          "keeper_prompt_external: failed to read %s (returning None; \
-           caller will render config-drift marker)"
-          path;
-        None)
-  else (
-    (* P1-4: missing external prompt file is expected during startup when
-       the operator's base-path config does not yet have the file.
-       keeper_prompt.ml renders an explicit config-drift marker, so a WARN
-       here fires on every startup and becomes noise. Downgrade to INFO so
-       the path is visible but not alarming. *)
+    | Some content -> Ok content
+    | None -> Error (Read_failed path))
+  else Error (Missing path)
+
+let observe_failure = function
+  | Read_failed path ->
+    Log.Keeper.warn
+      "keeper_prompt_external: failed to read %s (returning None; caller will \
+       render config-drift marker; future turns will retry)"
+      path
+  | Missing path ->
+    (* P1-4: missing external prompt files are expected during bootstrap.
+       Log the first miss at INFO, then retry silently until the file appears. *)
     Log.Keeper.info
-      "keeper_prompt_external: missing %s (returning None; caller will \
-       render config-drift marker)"
-      path;
-    None)
+      "keeper_prompt_external: missing %s (returning None; caller will render \
+       config-drift marker; future turns will retry)"
+      path
+;;
 
 let get name =
   Mutex.lock cache_mutex;
   match Hashtbl.find_opt cache name with
   | Some cached ->
       Mutex.unlock cache_mutex;
-      cached
+      Some cached
   | None ->
       Mutex.unlock cache_mutex;
       (* Read outside the lock so concurrent first-time lookups for
@@ -82,11 +87,29 @@ let get name =
          caches; the resulting [Hashtbl.replace] is idempotent. *)
       let result = load_uncached name in
       Mutex.lock cache_mutex;
-      Hashtbl.replace cache name result;
-      Mutex.unlock cache_mutex;
-      result
+      (match result with
+       | Ok content ->
+         Hashtbl.replace cache name content;
+         Hashtbl.remove observed_failures name;
+         Mutex.unlock cache_mutex;
+         Some content
+       | Error failure ->
+         (match Hashtbl.find_opt cache name with
+          | Some content ->
+            (* Another first reader restored and cached the same prompt while
+               this read was in flight. Never return a stale miss after a
+               process-local success is already authoritative. *)
+            Mutex.unlock cache_mutex;
+            Some content
+          | None ->
+            let first_failure = not (Hashtbl.mem observed_failures name) in
+            Hashtbl.replace observed_failures name ();
+            Mutex.unlock cache_mutex;
+            if first_failure then observe_failure failure;
+            None))
 
 let reset_cache () =
   Mutex.lock cache_mutex;
   Hashtbl.clear cache;
+  Hashtbl.clear observed_failures;
   Mutex.unlock cache_mutex

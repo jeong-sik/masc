@@ -11,9 +11,11 @@ open Keeper_agent_result
 
 type replay_suffix_prune_reason =
   | Canonical_success_replay
+  | Inert_autonomous_replay
 
 let replay_suffix_prune_reason_to_string = function
   | Canonical_success_replay -> "canonical_success_replay"
+  | Inert_autonomous_replay -> "inert_autonomous_replay"
 ;;
 
 let replay_response_text_for_capture ~suppress_visible_response ~response_text =
@@ -49,27 +51,6 @@ let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
     reasons
 ;;
 
-(* RFC-0351 S1 / #25462: a [Skip_uninformative_wake] turn records nothing in
-   the MASC-side stores (#25515), but the OAS run still receives the wake
-   marker as its goal and appends it to the transcript as a user message —
-   so every completed bare wake persisted one more byte-identical marker
-   into the checkpoint (343 measured in one keeper before the offline
-   purge). The typed turn record gates the drop; the exact sentinel
-   equality is a defence against the record ever being paired with a
-   different user message, not a classifier. *)
-let drop_leading_wake_marker ~user_turn_record current_suffix =
-  match user_turn_record, current_suffix with
-  | ( Keeper_run_prompt.Skip_uninformative_wake
-    , ({ Agent_sdk.Types.role = Agent_sdk.Types.User
-       ; content = [ Agent_sdk.Types.Text text ]
-       ; _
-       }
-       :: rest) )
-    when String.equal text Keeper_unified_prompt.autonomous_wake_marker -> rest
-  | (Keeper_run_prompt.Skip_uninformative_wake | Keeper_run_prompt.Record_user_turn), _
-    -> current_suffix
-;;
-
 let is_trailing_blank_assistant (message : Agent_sdk.Types.message) =
   match message.role, message.content with
   | Agent_sdk.Types.Assistant, [] -> true
@@ -90,6 +71,54 @@ let drop_trailing_blank_assistants messages =
   drop (List.rev messages)
 ;;
 
+let is_inert_assistant_message (message : Agent_sdk.Types.message) =
+  message.role = Agent_sdk.Types.Assistant
+  && List.for_all
+       (function
+         | Agent_sdk.Types.Text _
+         | Agent_sdk.Types.Thinking _
+         | Agent_sdk.Types.ReasoningDetails _
+         | Agent_sdk.Types.RedactedThinking _ -> true
+         | Agent_sdk.Types.ToolUse _
+         | Agent_sdk.Types.ToolResult _
+         | Agent_sdk.Types.Image _
+         | Agent_sdk.Types.Document _
+         | Agent_sdk.Types.Audio _ -> false)
+       message.content
+;;
+
+let inert_autonomous_replay_checkpoint
+      ~(history_messages : Agent_sdk.Types.message list)
+      ~(session_id : string)
+      ~(user_turn_record : Keeper_run_prompt.user_turn_record)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  match
+    Keeper_replay_prefix.split
+      ~prefix:history_messages
+      checkpoint.Agent_sdk.Checkpoint.messages
+  with
+  | Ok original_suffix ->
+    let suffix =
+      Keeper_run_prompt.drop_skipped_wake_marker
+        ~user_turn_record
+        original_suffix
+    in
+    if
+      List.length suffix < List.length original_suffix
+      && List.for_all is_inert_assistant_message suffix
+    then
+      Some
+        ( { checkpoint with
+            Agent_sdk.Checkpoint.session_id
+          ; messages = history_messages
+          ; working_context = None
+          }
+        , Some Inert_autonomous_replay )
+    else None
+  | Error _ -> None
+;;
+
 let canonical_success_replay_checkpoint
       ~(history_messages : Agent_sdk.Types.message list)
       ~(session_id : string)
@@ -104,7 +133,9 @@ let canonical_success_replay_checkpoint
   with
   | Ok original_current_suffix ->
     let current_suffix =
-      drop_leading_wake_marker ~user_turn_record original_current_suffix
+      Keeper_run_prompt.drop_skipped_wake_marker
+        ~user_turn_record
+        original_current_suffix
     in
     (* A blank visible response is not authority to erase typed replay. The
        suffix may contain an actual user input, ToolUse/ToolResult pair,
@@ -189,6 +220,8 @@ let checkpoint_for_replay_persistence
       ~(response_text : string)
       ?(stop_reason = Runtime_agent.Completed)
       ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
+      ?(durable_input_present = true)
+      ?(tool_calls_made = true)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match stop_reason with
@@ -223,12 +256,35 @@ let checkpoint_for_replay_persistence
        resumption cannot repeat an already committed effect. *)
     observation_replay_checkpoint ~history_messages ~session_id checkpoint
   | Runtime_agent.Completed ->
-    canonical_success_replay_checkpoint
-      ~history_messages
-      ~session_id
-      ~response_text
-      ~user_turn_record
-      checkpoint
+    if
+      Keeper_run_prompt.is_inert_autonomous_turn
+        ~user_turn_record
+        ~durable_input_present
+        ~tool_calls_made
+        ~stop_reason
+    then
+      (match
+         inert_autonomous_replay_checkpoint
+           ~history_messages
+           ~session_id
+           ~user_turn_record
+           checkpoint
+       with
+       | Some result -> Ok result
+       | None ->
+         canonical_success_replay_checkpoint
+           ~history_messages
+           ~session_id
+           ~response_text
+           ~user_turn_record
+           checkpoint)
+    else
+      canonical_success_replay_checkpoint
+        ~history_messages
+        ~session_id
+        ~response_text
+        ~user_turn_record
+        checkpoint
 ;;
 
 module For_testing = struct
@@ -260,6 +316,7 @@ let finalize
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~actual_keeper_tool_names
     ~(user_turn_record : Keeper_run_prompt.user_turn_record)
+    ~(durable_input_present : bool)
     ~(result : Runtime_agent.run_result)
     ~checkpoint_persistence_error
     ~post_turn_t0
@@ -276,6 +333,14 @@ let finalize
     ?continuation_delivery_channel:_
     () =
   let completion_contract_result = acc.receipt_completion_contract_result in
+  let tool_calls_made = actual_keeper_tool_names <> [] in
+  let inert_autonomous_turn =
+    Keeper_run_prompt.is_inert_autonomous_turn
+      ~user_turn_record
+      ~durable_input_present
+      ~tool_calls_made
+      ~stop_reason:result.stop_reason
+  in
   let control_checkpoint =
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
       result.stop_reason
@@ -302,15 +367,18 @@ let finalize
   let replay_response_text =
     replay_response_text_for_capture ~suppress_visible_response ~response_text
   in
+  let persisted_replay_response_text =
+    if inert_autonomous_turn then None else replay_response_text
+  in
   let assistant_msg =
     Option.map
       (fun replay_response_text ->
          Agent_sdk.Types.make_message
            ~role:Agent_sdk.Types.Assistant
            [ Agent_sdk.Types.Text replay_response_text ])
-      replay_response_text
+      persisted_replay_response_text
   in
-  (match replay_response_text, assistant_msg with
+  (match persisted_replay_response_text, assistant_msg with
    | Some response_text, Some assistant_msg ->
      Keeper_context_runtime.persist_message
        ~source:history_assistant_source
@@ -331,6 +399,8 @@ let finalize
           ~response_text
           ~stop_reason:result.stop_reason
           ~user_turn_record
+          ~durable_input_present
+          ~tool_calls_made
           checkpoint
       in
       (match checkpoint_for_save_result with
@@ -340,11 +410,33 @@ let finalize
               ~keeper_name:meta.name
               ~detail)
        | Ok (patched, replay_suffix_pruned) ->
-         (match
-            Keeper_checkpoint_store.save_oas_classified
-              ~session_dir:session.session_dir
-              patched
-          with
+         let normalized_context =
+           Keeper_context_core.context_of_oas_checkpoint patched
+         in
+         let normalized_checkpoint =
+           Keeper_context_core.checkpoint_for_persistence
+             ~multimodal_policy:meta.multimodal_policy
+             ~keeper_name:meta.name
+             ~session
+             ~agent_name:meta.agent_name
+             ~ctx:normalized_context
+             ~generation
+         in
+         (match normalized_checkpoint with
+          | Error structural_error ->
+            Error
+              (checkpoint_persistence_error
+                 ~keeper_name:meta.name
+                 ~detail:
+                   ("OAS checkpoint structural validation failed: "
+                    ^ Keeper_compaction_unit.show_structural_error
+                        structural_error))
+          | Ok patched ->
+            (match
+               Keeper_checkpoint_store.save_oas_classified
+                 ~session_dir:session.session_dir
+                 patched
+             with
        | Ok (Keeper_checkpoint_store.Saved _) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
@@ -397,7 +489,7 @@ let finalize
          Error
            (checkpoint_persistence_error
               ~keeper_name:meta.name
-              ~detail:("OAS checkpoint save failed: " ^ e))))
+              ~detail:("OAS checkpoint save failed: " ^ e)))))
     | None ->
       Log.Keeper.error ~keeper_name:meta.name
         "runtime=%s missing OAS checkpoint after run"
@@ -432,7 +524,7 @@ let finalize
       ~memory_extraction_record:
         (Keeper_run_prompt.memory_extraction_record_of_turn
            ~user_turn_record
-           ~tool_calls_made:(actual_keeper_tool_names <> []))
+           ~tool_calls_made)
       ~post_turn_t0
       ~inference_telemetry:result.response.telemetry
       ();

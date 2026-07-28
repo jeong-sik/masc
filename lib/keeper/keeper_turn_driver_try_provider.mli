@@ -67,6 +67,9 @@ val accept_rejected_error :
   Agent_sdk.Error.sdk_error
 
 module For_testing : sig
+  val normalize_keeper_tool_choice :
+    Runtime_agent.config -> Runtime_agent.config
+
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->

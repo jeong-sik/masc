@@ -8,9 +8,8 @@
       wake-reason section (before: build_prompt recomputed with
       reactive_wake=false / event_queue_triggers=[], so stimulus-driven wakes
       rendered no reason).
-   3. [?active_goal_summaries] renders goal titles next to ids, and a keeper
-      WITH goals receives a self-direction directive (parity with the
-      pre-existing no-goal branch). *)
+   3. [?active_goal_summaries] renders goal titles next to ids without adding
+      a runtime-authored next-action directive. *)
 
 open Alcotest
 
@@ -45,7 +44,14 @@ let with_repo_prompt_config f =
     ~finally:(fun () ->
       restore_env "MASC_CONFIG_DIR" original_config;
       Config_dir_resolver.reset ();
-      Prompt_registry.clear ())
+      Prompt_registry.clear ();
+      match original_config with
+      | Some config_dir when String.trim config_dir <> "" ->
+        Prompt_registry.set_markdown_dir
+          (Filename.concat config_dir "prompts");
+        Masc.Prompt_defaults.init ();
+        Masc.Keeper_prompt_external.reset_cache ()
+      | Some _ | None -> ())
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
@@ -146,6 +152,71 @@ let contains ~needle haystack =
   in
   loop 0
 
+let with_malformed_unified_prompt f =
+  let prompts_dir = Filename.temp_dir "keeper-unified-render-failure-" "" in
+  let prompt_path =
+    Filename.concat prompts_dir "keeper.unified.system.md"
+  in
+  Out_channel.with_open_text prompt_path (fun channel ->
+    output_string channel
+      "---\n\
+       description: malformed keeper unified prompt\n\
+       category: keeper\n\
+       template_variables: [identity_header, unknown_variable]\n\
+       ---\n\
+       {{identity_header}}\n\
+       {{unknown_variable}}\n");
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.clear ();
+      Sys.remove prompt_path;
+      Unix.rmdir prompts_dir)
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir prompts_dir;
+      f ())
+
+let test_unified_template_failure_uses_closed_safety_fallback () =
+  with_repo_prompt_config @@ fun () ->
+  with_malformed_unified_prompt @@ fun () ->
+  let sentinel = "SENTINEL_UNIFIED_INSTRUCTIONS_7f4a" in
+  let degraded_meta = { meta with instructions = sentinel } in
+  let { Prompt.system_prompt; _ } =
+    Prompt.build_prompt
+      ~meta:degraded_meta
+      ~base_path:"/tmp/unused"
+      ~observation:base_observation
+      ()
+  in
+  check bool "identity survives render failure" true
+    (contains
+       ~needle:"You are wake-context-keeper, a keeper agent."
+       system_prompt);
+  check bool "instructions survive render failure" true
+    (contains ~needle:sentinel system_prompt);
+  check bool "raw unresolved placeholder is never delivered" false
+    (contains ~needle:"{{unknown_variable}}" system_prompt);
+  check bool "fallback makes configuration degradation explicit" true
+    (contains ~needle:"## Prompt configuration degraded" system_prompt);
+  check bool "fallback keeps typed tool authority" true
+    (contains ~needle:"active typed tool schema" system_prompt)
+
+let test_template_syntax_inside_instructions_is_literal_content () =
+  with_repo_prompt_config @@ fun () ->
+  let literal = "Document the literal {{example_variable}} token." in
+  let literal_meta = { meta with instructions = literal } in
+  let { Prompt.system_prompt; _ } =
+    Prompt.build_prompt
+      ~meta:literal_meta
+      ~base_path:"/tmp/unused"
+      ~observation:base_observation
+      ()
+  in
+  check bool "injected instruction remains exact" true
+    (contains ~needle:literal system_prompt);
+  check bool "literal content does not trigger degraded fallback" false
+    (contains ~needle:"## Prompt configuration degraded" system_prompt)
+
 let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
   {
     id = "task-42";
@@ -204,7 +275,7 @@ let test_current_task_section_renders () =
     (contains ~needle:"- Prior handoff: lexer done, parser half-wired" user);
   check bool "handoff next step" true
     (contains ~needle:"- Suggested next step: wire parser to store" user);
-  check bool "continue-or-release directive" true
+  check bool "runtime adds no continue-or-release directive" false
     (contains ~needle:"release it with a handoff summary" user)
 
 let test_current_task_section_absent_without_task () =
@@ -239,7 +310,7 @@ let test_unthreaded_recompute_renders_no_reason_on_empty_world () =
   check bool "no reactive scheduler line" false
     (contains ~needle:"- Scheduler: reactive turn (external stimulus)." user)
 
-(* --- 3. Goal titles + self-direction parity --- *)
+(* --- 3. Goal titles without runtime-authored next-action policy --- *)
 
 let test_goal_summaries_render_titles () =
   let observation = { base_observation with active_goals = [ "goal-x" ] } in
@@ -271,7 +342,7 @@ let test_partial_goal_summaries_preserve_missing_ids () =
   check bool "missing title falls back to bare id" true
     (contains ~needle:"- goal-b" user)
 
-let test_goal_holder_gets_self_direction_directive () =
+let test_goal_context_does_not_choose_the_next_action () =
   with_repo_prompt_config @@ fun () ->
   let meta_with_goal =
     meta_of_json
@@ -286,17 +357,23 @@ let test_goal_holder_gets_self_direction_directive () =
     Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
       ~observation:base_observation ()
   in
-  check bool "goal-holder directive present" true
+  check bool "primary goal remains observable" true
+    (contains ~needle:"Primary goal: goal-x" system);
+  check bool "goal-holder next-action directive is absent" false
     (contains ~needle:"advance one of your active" system);
-  check bool "defer is stated as valid" true
+  check bool "runtime does not choose deferral policy" false
     (contains ~needle:"Deferring is a valid choice" system);
   let { Prompt.system_prompt = no_goal_system; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
       ~observation:base_observation ()
   in
-  check bool "no-goal branch keeps its own directive" true
+  check bool "missing primary goal remains observable" true
+    (contains
+       ~needle:"Primary goal: (no valid active goal — awaiting assignment)"
+       no_goal_system);
+  check bool "no-goal next-action menu is absent" false
     (contains ~needle:"You have no active goal" no_goal_system);
-  check bool "goal-holder directive absent without goals" false
+  check bool "goal-holder directive is absent without goals" false
     (contains ~needle:"advance one of your active" no_goal_system)
 
 let () =
@@ -304,9 +381,20 @@ let () =
   init_runtime_default_for_tests ();
   run "keeper_wake_turn_context"
     [
+      ( "prompt render failure",
+        [
+          test_case
+            "unified template failure uses closed safety fallback"
+            `Quick
+            test_unified_template_failure_uses_closed_safety_fallback;
+          test_case
+            "template syntax in instructions stays literal"
+            `Quick
+            test_template_syntax_inside_instructions_is_literal_content;
+        ] );
       ( "current task layer",
         [
-          test_case "renders id, status, handoff, directive" `Quick
+          test_case "renders id, status, and handoff facts" `Quick
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick
             test_current_task_section_absent_without_task;
@@ -318,13 +406,13 @@ let () =
           test_case "unthreaded recompute stays blind on empty world" `Quick
             test_unthreaded_recompute_renders_no_reason_on_empty_world;
         ] );
-      ( "goal titles and parity directive",
+      ( "goal titles and neutral goal context",
         [
           test_case "summaries render titles, unresolved ids stay bare" `Quick
             test_goal_summaries_render_titles;
           test_case "partial summaries preserve missing goal ids" `Quick
             test_partial_goal_summaries_preserve_missing_ids;
-          test_case "goal holder gets self-direction directive" `Quick
-            test_goal_holder_gets_self_direction_directive;
+          test_case "runtime does not choose the next action" `Quick
+            test_goal_context_does_not_choose_the_next_action;
         ] );
     ]

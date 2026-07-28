@@ -123,6 +123,21 @@ module For_testing : sig
     -> dispatch:(unit -> ('a, Agent_sdk.Error.sdk_error) result)
     -> ('a, Agent_sdk.Error.sdk_error) result
 
+  val prepare_pipeline_checkpoint :
+    history_messages:Agent_sdk.Types.message list ->
+    user_turn_record:Keeper_run_prompt.user_turn_record ->
+    checkpoint_sidecar:Yojson.Safe.t option ->
+    session:Keeper_types.session_context ->
+    keeper_name:string ->
+    agent_name:string ->
+    multimodal_policy:Keeper_types_profile.multimodal_policy ->
+    generation:int ->
+    Agent_sdk.Checkpoint.t ->
+    (Agent_sdk.Checkpoint.t, string) result
+  (** Exact preparation boundary used by every OAS mid-stage checkpoint sink:
+      validate the canonical prefix, remove only a typed bare wake, then apply
+      the shared checkpoint structure and multimodal persistence projection. *)
+
 end
 
 (** {1 Turn execution} *)
@@ -145,6 +160,10 @@ end
             does not infer world state from prompt text.
     @param generation Current generation counter
     @param history_user_source Source label for user messages in history
+    @param durable_input_present Whether this autonomous turn owns a durable
+           source or structured actionable observation. Defaults true so only
+           the unified lane's explicit evidence can authorize idle replay
+           pruning.
     @param history_assistant_source Source label for assistant messages in history
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence
@@ -171,6 +190,7 @@ val run_turn
   -> generation:int
   -> ?history_user_source:string
   -> ?user_turn_record:Keeper_run_prompt.user_turn_record
+  -> ?durable_input_present:bool
   -> ?history_assistant_source:string
   -> ?temperature:float
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)

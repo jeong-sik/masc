@@ -313,7 +313,9 @@ let attempt_inference_policy
     | Some _ as enabled -> enabled
     | None -> fallback_enable_thinking
   in
-  { attempt_enable_thinking; attempt_preserve_thinking = runtime_seed.preserve_thinking }
+  { attempt_enable_thinking
+  ; attempt_preserve_thinking = runtime_seed.preserve_thinking
+  }
 
 let run_named
     ~runtime_id

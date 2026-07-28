@@ -183,6 +183,29 @@ let test_keeper_hook_relaxes_strict_tool_choice () =
     (relax (Some None_) = Some None_);
   Alcotest.(check bool) "unset unchanged" true (relax None = None)
 
+let test_keeper_provider_attempt_uses_relaxed_tool_choice () =
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"strict-tool-choice"
+      ~base_url:"http://127.0.0.1"
+      ~tool_choice:Agent_sdk.Types.Any
+      ()
+  in
+  let config =
+    Runtime_agent.default_config
+      ~name:"strict-tool-choice"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[]
+    |> Masc.Keeper_turn_driver_try_provider.For_testing.normalize_keeper_tool_choice
+  in
+  let request_config = Runtime_agent_context.provider_config_for_request config in
+  Alcotest.(check bool)
+    "provider attempt and exact-body preflight both use Auto"
+    true
+    (request_config.tool_choice = Some Agent_sdk.Types.Auto)
+
 let test_accept_keeps_result () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -1091,12 +1114,14 @@ let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
 
 let test_manual_direct_turn_uses_effective_context_budget () =
   let source = read_source_file "lib/keeper/keeper_turn.ml" in
-  let start_marker = "let max_runtime_context =" in
+  let start_marker =
+    "Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id"
+  in
   let end_marker = "~initial_max_context:max_runtime_context" in
   let start =
     match index_of ~needle:start_marker source with
     | Some index -> index
-    | None -> Alcotest.fail "manual max_runtime_context block missing"
+    | None -> Alcotest.fail "manual runtime-specific context resolver missing"
   in
   let stop =
     match index_of ~needle:end_marker source with
@@ -1108,11 +1133,13 @@ let test_manual_direct_turn_uses_effective_context_budget () =
     "manual direct turn resolves max context from runtime/meta"
     true
     (contains
-       ~needle:
-         "Keeper_context_runtime.resolve_max_context_resolution\n\
-          \t                  ~requested_override:meta.max_context_override \
-          effective_models"
-       slice);
+       ~needle:"Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id"
+       slice
+     && contains ~needle:"~runtime_id:turn_runtime_id" slice);
+  Alcotest.(check bool)
+    "manual direct turn threads the Keeper override into runtime resolution"
+    true
+    (contains ~needle:"~requested_override:meta.max_context_override" slice);
   Alcotest.(check bool)
     "manual direct first attempt uses provider-effective budget"
     true
@@ -1736,6 +1763,10 @@ let () =
             "strict tool_choice is relaxed to auto"
             `Quick
             test_keeper_hook_relaxes_strict_tool_choice;
+          Alcotest.test_case
+            "provider attempt and preflight share relaxed tool_choice"
+            `Quick
+            test_keeper_provider_attempt_uses_relaxed_tool_choice;
           Alcotest.test_case "rejected response is typed" `Quick
             test_rejects_as_typed_accept_error;
           Alcotest.test_case "thinking-only rejection is diagnosed" `Quick

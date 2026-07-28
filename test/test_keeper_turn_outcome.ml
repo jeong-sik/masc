@@ -19,7 +19,9 @@ module Stream = Server_routes_http_keeper_stream
 module UT = Masc.Keeper_unified_turn
 module Cycle = Masc.Keeper_heartbeat_loop_cycle
 module Heartbeat = Masc.Keeper_heartbeat_loop.For_testing
+module Observation = Masc.Keeper_world_observation
 module Response_text = Masc.Keeper_agent_run_response_text
+module Success = Masc.Keeper_unified_turn_success.For_testing
 
 let outcome : TO.t testable =
   testable
@@ -99,6 +101,8 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
     match UT.turn_success_of_stop_reason ~meta stop_reason with
     | UT.Turn_completed meta -> Cycle.Completed meta
     | UT.Turn_checkpointed meta -> Cycle.Checkpointed meta
+    | UT.Turn_external_effect_deferred meta ->
+      Cycle.External_effect_deferred meta
     | UT.Turn_input_required meta -> Cycle.Input_required meta
     | UT.Turn_cancelled _
     | UT.Turn_skipped _ ->
@@ -115,7 +119,7 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
     (Heartbeat.cycle_outcome_acks_source
        (cycle_of_stop_reason
           (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 })));
-  check bool "external effect wait retains durable source" false
+  check bool "durable Gate handoff settles triggering source" true
     (Heartbeat.cycle_outcome_acks_source
        (cycle_of_stop_reason
           (Runtime_agent.Awaiting_external_effect { turns_used = 2 })));
@@ -168,6 +172,46 @@ let test_cooperative_yield_ignores_only_active_source_identity () =
   | retained ->
     failf "expected one later durable source, got %d" (List.length retained)
 
+let inert_world_observation : Observation.world_observation =
+  { pending_messages = []
+  ; pending_board_events = []
+  ; idle_seconds = 0
+  ; active_goals = []
+  ; unclaimed_task_count = 0
+  ; claimable_task_count = 0
+  ; failed_task_count = 0
+  ; pending_verification_count = 0
+  ; scheduled_automation =
+      Observation.empty_scheduled_automation_observation
+  ; backlog_updated_since_last_scheduled_autonomous = false
+  ; running_keeper_fiber_count = 0
+  ; connected_surfaces = []
+  ; connected_surface_failures = []
+  }
+
+let test_durable_input_retains_goal_and_task_turns () =
+  let durable_input_present =
+    Masc.Keeper_unified_turn_execution.For_testing.durable_input_present
+  in
+  check bool "truly inert turn has no durable input" false
+    (durable_input_present
+       ~has_active_source:false
+       ~has_hitl_resolution:false
+       ~has_current_task:false
+       inert_world_observation);
+  check bool "active goal keeps assistant replay" true
+    (durable_input_present
+       ~has_active_source:false
+       ~has_hitl_resolution:false
+       ~has_current_task:false
+       { inert_world_observation with active_goals = [ "goal-1" ] });
+  check bool "current task keeps assistant replay" true
+    (durable_input_present
+       ~has_active_source:false
+       ~has_hitl_resolution:false
+       ~has_current_task:true
+       inert_world_observation)
+
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply
     (TO.of_result_surface ~response_text:"done" Runtime_agent.Completed);
@@ -184,7 +228,14 @@ let test_external_effect_wait_acknowledgement_is_visible () =
     (String.trim acknowledgement <> "");
   check outcome "external effect acknowledgement reaches chat"
     TO.Visible_reply
-    (TO.of_result_surface ~response_text:acknowledgement stop_reason)
+    (TO.of_result_surface ~response_text:acknowledgement stop_reason);
+  check bool "success path preserves external-effect terminal identity" true
+    (match Success.terminal_outcome_of_stop_reason stop_reason with
+     | Success.Terminal_external_effect_deferred -> true
+     | Success.Terminal_done
+     | Success.Terminal_checkpoint
+     | Success.Terminal_input_required ->
+       false)
 
 let test_external_effect_acknowledgement_survives_server_projection () =
   let acknowledgement = Response_text.external_effect_deferred_acknowledgement in
@@ -546,6 +597,8 @@ let () =
             test_runtime_stop_reason_controls_durable_source_completion;
           test_case "cooperative yield ignores only active source identity" `Quick
             test_cooperative_yield_ignores_only_active_source_identity;
+          test_case "durable input retains goal and task turns" `Quick
+            test_durable_input_retains_goal_and_task_turns;
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "external effect wait acknowledgement is visible" `Quick
             test_external_effect_wait_acknowledgement_is_visible;

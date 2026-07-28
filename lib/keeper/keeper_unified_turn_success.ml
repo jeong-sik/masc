@@ -37,6 +37,7 @@ let apply_lifecycle
 type terminal_outcome =
   | Terminal_done
   | Terminal_checkpoint
+  | Terminal_external_effect_deferred
   | Terminal_input_required
 
 type handle_result =
@@ -55,32 +56,41 @@ let acknowledge_pending_messages
     }
 ;;
 
-let terminal_outcome_of_result result =
-  match result.Keeper_agent_run.stop_reason with
+let terminal_outcome_of_stop_reason = function
   | Runtime_agent.Completed -> Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
+  | Runtime_agent.Awaiting_external_effect _ ->
+    Terminal_external_effect_deferred
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_after_repeated_tool_call _ ->
     Terminal_checkpoint
+;;
+
+let terminal_outcome_of_result result =
+  terminal_outcome_of_stop_reason result.Keeper_agent_run.stop_reason
 ;;
 
 let terminal_outcome_is_completed_turn _ = true
 ;;
 
 let terminal_outcome_to_activity_kind = function
-  | Terminal_done | Terminal_checkpoint -> "keeper.turn_completed"
+  | Terminal_done
+  | Terminal_checkpoint
+  | Terminal_external_effect_deferred ->
+    "keeper.turn_completed"
   | Terminal_input_required -> "keeper.turn_input_required"
 
 let terminal_outcome_to_label = function
   | Terminal_done -> "done"
   | Terminal_checkpoint -> "checkpoint"
+  | Terminal_external_effect_deferred -> "external_effect_deferred"
   | Terminal_input_required -> "input_required"
 
 let terminal_outcome_to_log_label = function
   | Terminal_done -> "OK"
   | Terminal_checkpoint -> "checkpoint"
+  | Terminal_external_effect_deferred -> "external_effect_deferred"
   | Terminal_input_required -> "input_required"
 
 let append_metrics_snapshot
@@ -274,7 +284,9 @@ let emit_usage_metrics_and_log
     match terminal_outcome with
     | Terminal_done -> "success"
     | Terminal_input_required -> "input_required"
-     | Terminal_checkpoint ->
+    | Terminal_external_effect_deferred ->
+      "awaiting_external_effect"
+    | Terminal_checkpoint ->
       (match result.stop_reason with
        | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
@@ -375,16 +387,20 @@ let emit_usage_metrics_and_log
 type decision_outcome =
   | Decision_success
   | Decision_checkpoint
+  | Decision_external_effect_deferred
   | Decision_input_required
 
 let decision_outcome_of_terminal_outcome = function
   | Terminal_done -> Decision_success
   | Terminal_checkpoint -> Decision_checkpoint
+  | Terminal_external_effect_deferred ->
+    Decision_external_effect_deferred
   | Terminal_input_required -> Decision_input_required
 
 let decision_outcome_to_label = function
   | Decision_success -> "success"
   | Decision_checkpoint -> "checkpoint"
+  | Decision_external_effect_deferred -> "external_effect_deferred"
   | Decision_input_required -> "input_required"
 
 let terminal_reason_of_outcome result = function
@@ -392,6 +408,10 @@ let terminal_reason_of_outcome result = function
   | Terminal_input_required ->
     Keeper_turn_terminal.of_disposition
       ~source:"runtime_stop_reason"
+      Keeper_turn_disposition.Input_required
+  | Terminal_external_effect_deferred ->
+    Keeper_turn_terminal.of_disposition
+      ~source:"external_effect_gate_resolution"
       Keeper_turn_disposition.Input_required
   | Terminal_checkpoint ->
     (match result.Keeper_agent_run.stop_reason with
@@ -504,8 +524,10 @@ module For_testing = struct
   type nonrec terminal_outcome = terminal_outcome =
     | Terminal_done
     | Terminal_checkpoint
+    | Terminal_external_effect_deferred
     | Terminal_input_required
 
+  let terminal_outcome_of_stop_reason = terminal_outcome_of_stop_reason
   let terminal_outcome_of_result = terminal_outcome_of_result
   let terminal_outcome_is_completed_turn = terminal_outcome_is_completed_turn
 

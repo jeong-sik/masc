@@ -188,6 +188,22 @@ let test_tool_call_identity_controls_pending_deduplication () =
          Keeper_continuation_channel.dashboard ~thread_id:"thread-b"
          |> Result.get_ok
        in
+       (match
+          AQ.submit_pending
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~tool_call_id:" \t "
+            ~input
+            ~base_path
+            ()
+        with
+        | Error error ->
+          Alcotest.(check string)
+            "blank tool call identity is rejected at ingress"
+            "tool_call_id must be non-blank when supplied"
+            error.reason
+        | Ok id ->
+          Alcotest.failf "blank tool call identity created approval %s" id);
        let first =
          submit_with_context
            ~tool_call_id:"tool-call-1"
@@ -984,7 +1000,15 @@ let test_resolution_is_durable_and_origin_scoped () =
     (fun () ->
        ignore (install_exn ~base_path);
        let input = `Assoc [ "target", `String "document"; "body", `String "hello" ] in
-       let id = submit ~base_path ~keeper_name ~input in
+       let tool_call_id = "tool-call-resolution" in
+       let id =
+         submit_with_context
+           ~tool_call_id
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
        let result =
          AQ.resolve_with_policy
            ~base_path
@@ -1016,6 +1040,10 @@ let test_resolution_is_durable_and_origin_scoped () =
         | Ok (Some request) ->
           Alcotest.(check string) "journal keeper" keeper_name request.keeper_name;
           Alcotest.(check string) "journal operation" "external-effect" request.tool_name;
+          Alcotest.(check (option string))
+            "journal tool call identity"
+            (Some tool_call_id)
+            request.tool_call_id;
           Alcotest.(check bool) "journal complete input" true
             (Yojson.Safe.equal input request.input)
         | Ok None -> Alcotest.fail "approved journal was consumed before Gate use"
@@ -1044,7 +1072,7 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~id
             ~keeper_name
             ~tool_name:"external-effect"
-            ~tool_call_id:None
+            ~tool_call_id:(Some tool_call_id)
             ~input:(`Assoc [ "target", `String "other" ])
         with
         | Ok AQ.Consumption_not_matching -> ()
@@ -1058,6 +1086,19 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~keeper_name
             ~tool_name:"external-effect"
             ~tool_call_id:None
+            ~input
+        with
+        | Ok AQ.Consumption_not_matching -> ()
+        | Ok (AQ.Consumption_committed | AQ.Consumption_already_committed) ->
+          Alcotest.fail "missing tool call identity consumed the exact grant"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~tool_call_id:(Some tool_call_id)
             ~input
         with
         | Ok AQ.Consumption_committed -> ()

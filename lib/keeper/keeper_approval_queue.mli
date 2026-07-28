@@ -145,8 +145,9 @@ val approved_resolution_state :
   base_path:string -> id:string -> (approved_resolution_state, grant_error) result
 
 (** Atomically consume an approved resolution only when the Keeper, opaque
-    operation identity, and canonical complete input match its durable request.
-    Turn, Task, Goal, and channel fields remain provenance and never become
+    operation identity, durable [tool_call_id] (including its presence or
+    absence), and canonical complete input match its durable request. Turn,
+    Task, Goal, and channel fields remain provenance and never become
     authorization constraints. *)
 val consume_approved_resolution :
   base_path:string ->
@@ -344,12 +345,13 @@ end
 
 (** {1 Nonblocking submission and explicit resolution} *)
 
-(** Durably enqueue an exact request without suspending the caller. An existing
-    id is reused only when the caller supplies the same durable [tool_call_id],
-    Keeper, operation identity, and canonical input. Turn/task/goal/channel
-    fields are provenance and never deduplication keys. Requests without a
-    [tool_call_id] are never deduplicated. A deduplicated request does not
-    consume a durable queue sequence. *)
+(** Durably enqueue an exact request without suspending the caller. When
+    supplied, [tool_call_id] must be non-blank. An existing id is reused only
+    when the caller supplies the same durable [tool_call_id], Keeper, operation
+    identity, and canonical input. Turn/task/goal/channel fields are provenance
+    and never deduplication keys. Requests without a [tool_call_id] are never
+    deduplicated. A deduplicated request does not consume a durable queue
+    sequence. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->

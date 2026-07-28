@@ -3062,6 +3062,11 @@ let find_pending_id_in_map
 
 (* ── Nonblocking submission ───────────────────────────────── *)
 
+let valid_tool_call_id = function
+  | None -> true
+  | Some value -> String.trim value <> ""
+;;
+
 let submit_pending
       ~keeper_name
       ~tool_name
@@ -3082,7 +3087,14 @@ let submit_pending
     Option.value continuation_channel ~default:(default_continuation_channel ())
   in
   let stored =
-    with_pending_store_lock (fun () ->
+    if not (valid_tool_call_id tool_call_id)
+    then
+      Error
+        { path = pending_store_path ~base_path
+        ; reason = "tool_call_id must be non-blank when supplied"
+        }
+    else
+      with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
       match next_sequence_lifecycle ~base_path with
       | Uninstalled ->

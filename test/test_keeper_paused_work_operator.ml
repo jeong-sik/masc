@@ -63,7 +63,7 @@ let terminal_source () =
 
 let common operation fields =
   `Assoc
-    ([ "schema", `String "masc.keeper.paused-work.operator-request.v2"
+    ([ "schema", `String "masc.keeper.paused-work.operator-request.v3"
      ; "operation", `String operation
      ]
      @ fields)
@@ -84,6 +84,20 @@ let test_strict_request_codec () =
      ()
    | Ok _ -> Alcotest.fail "resume request decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
+  let obsolete_v2_resume =
+    match resume with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "schema", _ -> "schema", `String "masc.keeper.paused-work.operator-request.v2"
+             | field -> field)
+           fields)
+    | _ -> Alcotest.fail "resume fixture must be a JSON object"
+  in
+  (match Operator.request_of_yojson obsolete_v2_resume with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "request codec accepted obsolete v2 schema");
   let with_extra =
     match resume with
     | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
@@ -142,23 +156,30 @@ let test_strict_request_codec () =
    | Ok _ -> Alcotest.fail "transfer request accepted obsolete settled_at field");
   let source_terminal =
     common
-      "settle_from_source_terminal"
+      "ack_source_terminal"
       [ "source", Queue.stimulus_to_yojson terminal_source
       ; "source_revision", int64_json 13L
       ; "owner_nonce", `Int 7
       ; "source_receipt_kind", `String "hitl_terminal"
       ; "operator_operation_id", `String "operator-source-terminal"
-      ; "settled_at", `Float 5.0
       ]
   in
   (match Operator.request_of_yojson source_terminal with
-   | Ok (Operator.Settle_from_source_terminal request) ->
+   | Ok (Operator.Ack_source_terminal request) ->
      Alcotest.(check bool)
        "source terminal exact"
        true
        (request.source = terminal_source)
    | Ok _ -> Alcotest.fail "source-terminal decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
+  let source_terminal_with_obsolete_settled_at =
+    match source_terminal with
+    | `Assoc fields -> `Assoc (("settled_at", `Float 5.0) :: fields)
+    | _ -> Alcotest.fail "source-terminal fixture must be a JSON object"
+  in
+  (match Operator.request_of_yojson source_terminal_with_obsolete_settled_at with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "source-terminal request accepted obsolete settled_at field");
   let mismatched_source_terminal =
     match source_terminal with
     | `Assoc fields ->

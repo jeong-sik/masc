@@ -15,14 +15,13 @@ type transfer_owner =
 type source_terminal_operation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; settled_at : float
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   }
 
 type operation =
   | Resume_owner
   | Transfer_owner of transfer_owner
-  | Settle_from_source_terminal of source_terminal_operation
+  | Ack_source_terminal of source_terminal_operation
 
 type keeper_lock = { keeper_name : string }
 
@@ -97,11 +96,9 @@ let validate receipt =
         <> continuation_binding_of_source transfer.source
       then Error "paused-work transfer continuation binding does not match source"
       else Ok ()
-    | Settle_from_source_terminal operation ->
+    | Ack_source_terminal operation ->
       if Int64.compare operation.source_revision 0L < 0
       then Error "paused-work source-terminal revision must not be negative"
-      else if not (Float.is_finite operation.settled_at)
-      then Error "paused-work source-terminal settlement time must be finite"
       else
         let* exact =
           Keeper_event_queue_state.source_terminal_receipt_of_stimulus
@@ -159,7 +156,6 @@ let source_terminal_operation_to_yojson operation =
   `Assoc
     [ "source", Keeper_event_queue.stimulus_to_yojson operation.source
     ; "source_revision", `Intlit (Int64.to_string operation.source_revision)
-    ; "settled_at", `Float operation.settled_at
     ; "source_receipt_kind", `String (source_terminal_receipt_kind operation.source_receipt)
     ]
 ;;
@@ -186,10 +182,10 @@ let to_yojson receipt =
       "transfer_owner"
       "masc.keeper.paused-work-disposition.v4"
       [ "transfer", transfer_owner_to_yojson transfer ]
-  | Settle_from_source_terminal operation ->
+  | Ack_source_terminal operation ->
     common
-      "settle_from_source_terminal"
-      "masc.keeper.paused-work-disposition.v3"
+      "ack_source_terminal"
+      "masc.keeper.paused-work-disposition.v4"
       [ "source_terminal", source_terminal_operation_to_yojson operation ]
 ;;
 
@@ -260,14 +256,12 @@ let transfer_owner_of_yojson = function
 let source_terminal_operation_of_yojson = function
   | `Assoc fields ->
     (match sorted fields with
-     | [ ("settled_at", settled_at_json)
-       ; ("source", source_json)
+     | [ ("source", source_json)
        ; ("source_receipt_kind", `String source_receipt_kind)
        ; ("source_revision", source_revision_json)
        ] ->
        let* source = Keeper_event_queue.stimulus_of_yojson source_json in
        let* source_revision = source_revision_of_yojson source_revision_json in
-       let* settled_at = requested_at_of_yojson settled_at_json in
        let* source_receipt =
          Keeper_event_queue_state.source_terminal_receipt_of_stimulus source
        in
@@ -276,7 +270,7 @@ let source_terminal_operation_of_yojson = function
          then Ok ()
          else Error "paused-work source-terminal receipt kind does not match source"
        in
-       Ok { source; source_revision; settled_at; source_receipt }
+       Ok { source; source_revision; source_receipt }
      | _ -> Error "paused-work source-terminal fields are not exact")
   | _ -> Error "paused-work source-terminal operation must be an object"
 ;;
@@ -342,10 +336,10 @@ let of_yojson = function
      | [ ("expected_generation", `Int expected_generation)
        ; ("expected_trace_id", `String expected_trace_id)
        ; ("keeper_name", `String keeper_name)
-       ; ("operation", `String "settle_from_source_terminal")
+       ; ("operation", `String "ack_source_terminal")
        ; ("operator_operation_id", `String operator_operation_id)
        ; ("requested_at", requested_at_json)
-       ; ("schema", `String "masc.keeper.paused-work-disposition.v3")
+       ; ("schema", `String "masc.keeper.paused-work-disposition.v4")
        ; ("source_terminal", source_terminal_json)
        ] ->
        let* operation = source_terminal_operation_of_yojson source_terminal_json in
@@ -355,7 +349,7 @@ let of_yojson = function
          ~expected_generation
          ~operator_operation_id
          ~requested_at_json
-         ~operation:(Settle_from_source_terminal operation)
+         ~operation:(Ack_source_terminal operation)
      | _ -> Error "paused-work disposition receipt fields are not exact")
   | _ -> Error "paused-work disposition receipt must be a JSON object"
 ;;

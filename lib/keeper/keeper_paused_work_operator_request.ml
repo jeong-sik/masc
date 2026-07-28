@@ -13,10 +13,10 @@ type t =
       { to_keeper : string
       ; request : Transfer.request
       }
-  | Settle_from_source_terminal of Source_terminal.request
+  | Ack_source_terminal of Source_terminal.request
 
 let ( let* ) = Result.bind
-let schema = "masc.keeper.paused-work.operator-request.v2"
+let schema = "masc.keeper.paused-work.operator-request.v3"
 
 let sorted fields =
   List.sort (fun (left, _) (right, _) -> String.compare left right) fields
@@ -147,11 +147,10 @@ let parse_transfer = function
 ;;
 
 let parse_source_terminal = function
-  | [ ("operation", `String "settle_from_source_terminal")
+  | [ ("operation", `String "ack_source_terminal")
     ; ("operator_operation_id", `String operator_operation_id)
     ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
-    ; ("settled_at", settled_at_json)
     ; ("source", source_json)
     ; ("source_receipt_kind", `String source_receipt_kind)
     ; ("source_revision", source_revision_json)
@@ -160,7 +159,6 @@ let parse_source_terminal = function
     let* source = Queue.stimulus_of_yojson source_json in
     let* source_revision = int64_of_yojson "source_revision" source_revision_json in
     let* source_revision = nonnegative_int64 "source_revision" source_revision in
-    let* settled_at = finite_float_of_yojson "settled_at" settled_at_json in
     let* source_receipt = Queue_state.source_terminal_receipt_of_stimulus source in
     let* () =
       if
@@ -175,16 +173,15 @@ let parse_source_terminal = function
     in
     let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
-      (Settle_from_source_terminal
+      (Ack_source_terminal
          Source_terminal.
            { source
            ; source_revision
            ; owner_nonce
            ; source_receipt
            ; operator_operation_id
-           ; settled_at
            })
-  | _ -> Error "settle_from_source_terminal request fields are not exact"
+  | _ -> Error "ack_source_terminal request fields are not exact"
 ;;
 
 let of_yojson = function
@@ -200,7 +197,7 @@ let of_yojson = function
           there since #25969 moved production to peek/ack. *)
        Error "active-lease cancel_accepted is no longer supported"
      | Some (`String "transfer_owner"), _ -> parse_transfer fields
-     | Some (`String "settle_from_source_terminal"), _ ->
+     | Some (`String "ack_source_terminal"), _ ->
        parse_source_terminal fields
      | Some (`String operation), _ ->
        Error (Printf.sprintf "unsupported paused-work operation %S" operation)

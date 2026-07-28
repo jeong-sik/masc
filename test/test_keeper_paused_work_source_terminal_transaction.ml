@@ -89,7 +89,6 @@ let with_source_terminal_lane f =
          ; owner_nonce = meta.runtime.nonce
          ; source_receipt = State.Hitl_terminal resolution
          ; operator_operation_id = "operator-source-terminal-1"
-         ; settled_at = 2.0
          }
        in
        f config keeper_name meta request)
@@ -108,22 +107,51 @@ let check_applied = function
          { cause = failure; reservation_release = None })
 ;;
 
-let test_exact_terminal_receipt_settles_pending () =
+let test_exact_terminal_receipt_acks_pending () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
     let first =
-      Transaction.settle_pending config ~keeper_name request
+      Transaction.ack_pending config ~keeper_name request
       |> Result.map_error Transaction.error_to_string
-      |> require_ok "commit Settle_from_source_terminal"
+      |> require_ok "commit Ack_source_terminal"
     in
     (match first.commit_status with
      | Transaction.Committed -> ()
-     | Transaction.Already_committed -> Alcotest.fail "first settlement was replayed");
+     | Transaction.Already_committed -> Alcotest.fail "first ACK was replayed");
     check_applied first.projection;
+    let open Yojson.Safe.Util in
+    Alcotest.(check bool)
+      "source-terminal receipt omits removed settled_at"
+      true
+      (match Receipt.to_yojson first.receipt |> member "source_terminal" |> member "settled_at" with
+       | `Null -> true
+       | _ -> false);
+    let obsolete_v3_receipt =
+      match Receipt.to_yojson first.receipt with
+      | `Assoc fields ->
+        let source_terminal =
+          match List.assoc_opt "source_terminal" fields with
+          | Some (`Assoc source_fields) ->
+            `Assoc (("settled_at", `Float 2.0) :: source_fields)
+          | Some _ | None -> Alcotest.fail "source-terminal receipt must be an object"
+        in
+        `Assoc
+          (List.map
+             (function
+               | "operation", _ -> "operation", `String "settle_from_source_terminal"
+               | "schema", _ -> "schema", `String "masc.keeper.paused-work-disposition.v3"
+               | "source_terminal", _ -> "source_terminal", source_terminal
+               | field -> field)
+             fields)
+      | _ -> Alcotest.fail "source-terminal receipt must be a JSON object"
+    in
+    (match Receipt.of_yojson obsolete_v3_receipt with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "source-terminal receipt accepted obsolete v3 schema");
     let state =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path
         ~keeper_name
-      |> require_ok "load source-terminal settlement"
+      |> require_ok "load source-terminal ACK"
     in
     Alcotest.(check int) "source removed" 0 (Queue.length (State.pending state)))
 ;;
@@ -135,12 +163,12 @@ let test_source_terminal_busy_has_zero_mutation () =
        Keeper_turn_admission.run_admin_if_free
          ~base_path
          ~keeper_name
-         (fun () -> Transaction.settle_pending config ~keeper_name request)
+         (fun () -> Transaction.ack_pending config ~keeper_name request)
      with
      | `Ran (Error { cause = Transaction.Admission_busy _; _ }) -> ()
      | `Ran (Error error) -> Alcotest.fail (Transaction.error_to_string error)
      | `Ran (Ok _) | `Busy _ ->
-       Alcotest.fail "source-terminal settlement was not deferred by turn admission");
+       Alcotest.fail "source-terminal ACK was not deferred by turn admission");
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load admission-busy source-terminal lane"
@@ -164,7 +192,7 @@ let test_mismatched_terminal_receipt_is_rejected_before_commit () =
       }
     in
     let request = { request with source_receipt = State.Hitl_terminal mismatch } in
-    (match Transaction.settle_pending config ~keeper_name request with
+    (match Transaction.ack_pending config ~keeper_name request with
      | Error { cause = Transaction.Invalid_request _; _ } -> ()
      | Error error -> Alcotest.fail (Transaction.error_to_string error)
      | Ok _ -> Alcotest.fail "mismatched terminal receipt was accepted");
@@ -195,7 +223,7 @@ let test_nonterminal_payload_is_rejected () =
       }
     in
     let request = { request with source = bootstrap } in
-    match Transaction.settle_pending config ~keeper_name request with
+    match Transaction.ack_pending config ~keeper_name request with
     | Error { cause = Transaction.Invalid_request _; _ } -> ()
     | Error error -> Alcotest.fail (Transaction.error_to_string error)
     | Ok _ -> Alcotest.fail "nonterminal source payload was accepted")
@@ -204,11 +232,11 @@ let test_nonterminal_payload_is_rejected () =
 let () =
   Alcotest.run
     "keeper paused-work source-terminal transaction"
-    [ ( "Settle_from_source_terminal"
+    [ ( "Ack_source_terminal"
       , [ Alcotest.test_case
-            "exact receipt settles pending"
+            "exact receipt ACKs pending"
             `Quick
-            test_exact_terminal_receipt_settles_pending
+            test_exact_terminal_receipt_acks_pending
         ; Alcotest.test_case
             "admission busy has zero mutation"
             `Quick

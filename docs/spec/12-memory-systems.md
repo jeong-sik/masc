@@ -5,7 +5,6 @@ code_refs:
   - lib/keeper/keeper_memory_recall.ml
   - lib/keeper/keeper_librarian.ml
   - lib/keeper/keeper_memory_os_store.ml
-  - lib/institution_eio.ml
 ---
 
 # Memory Systems
@@ -20,7 +19,6 @@ side derives memory from a model-authored state envelope.
 |---|---|---|
 | OAS checkpoint/context | OAS | active transcript and restartable agent context |
 | Memory OS fact store | MASC | durable claims with provenance (librarian + explicit writes) |
-| Institution memory | MASC | shared organizational knowledge and episodes |
 | Procedural memory | MASC | verified reusable procedures |
 | Tool/history logs | MASC | observable evidence and recall source |
 

@@ -263,16 +263,6 @@ let resources : mcp_resource list = [
     ~title:"Event Log (JSON)"
     ~description:"Recent event log snapshot as JSON"
     ~mime_type:"application/json" ();
-  (* Agent Being Protocol - Institution Memory *)
-  make_resource ~uri:"masc://institution" ~name:"Institution Memory"
-    ~title:"Institution Memory"
-    ~description:"Institutional knowledge: mission, values, procedural memory, succession policy"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://institution.json"
-    ~name:"Institution Memory (JSON)"
-    ~title:"Institution Memory (JSON)"
-    ~description:"Institutional knowledge as JSON for agent onboarding"
-    ~mime_type:"application/json" ();
   (* Library - curated knowledge from direct research *)
   make_resource ~uri:"masc://library" ~name:"Library Index"
     ~title:"Research Library"

@@ -230,7 +230,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 
 | Gap | 현재 상태 | 필요한 spec |
 |-----|----------|-------------|
-| **Memory system** | `12-memory-systems.md` | MASC-owned Memory OS fact store / institution / procedural 계약 |
+| **Memory system** | `12-memory-systems.md` | MASC-owned Memory OS fact store 계약 |
 | **TRPG subsystem** | 7개 docs, 미통합 | 분리 패키지 후 자체 spec |
 | **Transport protocol detail** | TRANSPORT-VERIFICATION-CHECKLIST (401 lines) | 09-server-transport.md에 부분 포함, WebRTC/WS 미상세 |
 | **OAS integration contract** | OAS-MASC-BOUNDARY.md, KEEPER-STATE-OWNERSHIP.md | OAS delegation과 MASC domain-state 소유권 |

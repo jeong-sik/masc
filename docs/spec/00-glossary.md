@@ -227,20 +227,20 @@ operation으로 수행하고 canonical message/tool values와 active anchors를
 보존한다. Current source의 durable operation, source checkpoint CAS,
 reinjection receipt는 아직 completion gate다.
 
-**Institution**
-Level 5 장기 집단 기억 시스템. Episode(사건), Knowledge(지식), Pattern(패턴) 3가지 타입의 기억을 관리한다. Episode는 참여자, 이벤트 유형, 결과, 학습 내용을 기록한다. `-> lib/institution_eio.ml`
+**Institution (제거됨)**
+Level 5 장기 집단 기억 시스템이었으나 프로덕션 생산자 0·라이브 데이터 0으로 확인되어 제거됨 (2026-07-28). durable 기억은 Memory OS fact store가 단일 경로.
 
 **Procedural Memory**
 반복적 에이전트 행동에서 추출된 절차적 기억. "When X, do Y" 형태의 패턴을 증거(evidence)와 신뢰도(confidence)와 함께 저장한다. 적응형 임계값으로 결정화: 표준(3회+, 70%+ 성공), 희소-완벽(2회+, 100% 성공). `-> lib/procedural_memory.ml`
 
 **Episode**
-Institution에 기록되는 개별 사건. 참여자, 이벤트 유형, 요약, 결과(Success/Failure/Partial), 학습 내용을 포함한다. `-> lib/institution_eio.ml`
+(제거됨) Institution의 개별 사건 레코드였음. Memory OS의 episode(librarian 산출)와는 별개 개념.
 
 **Knowledge**
-Institution에 기록되는 검증된 지식. 주제, 내용, 신뢰도, 출처, 참조를 포함한다. `-> lib/institution_eio.ml`
+(제거됨) Institution의 지식 레코드였음.
 
 **Pattern (Institution)**
-Institution에서 추출된 행동 패턴. 트리거, 단계, 성공률, 사용 횟수, 효과성 지표를 포함한다. evolved_from 필드로 패턴의 진화 계보를 추적한다. `-> lib/institution_eio.ml`
+(제거됨) Institution의 행동 패턴 레코드였음.
 
 **Checkpoint**
 Keeper 세션의 저장점. `working_context`, `generation`, messages, structured working_context를 포함한다. handoff rollover는 새 session에 `next_generation` checkpoint를 저장한 뒤에만 commit된다. `-> lib/keeper/keeper_context_core.ml`, `-> lib/keeper/keeper_rollover.ml`

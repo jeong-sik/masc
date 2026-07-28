@@ -319,7 +319,7 @@ Profile별 종류당 보존 상한:
 
 ### 6.5 MASC-Owned Memory
 
-`run_turn`은 더 이상 OAS memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 typed tool-result memory note 경로에서만 수행하며, institution/procedural memory는 MASC 소유 파일/모듈에 머문다.
+`run_turn`은 더 이상 OAS memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 librarian 추출 경로에서만 수행한다 (Institution memory는 제거됨).
 
 ---
 
@@ -553,7 +553,7 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 
 ### 15.6 Memory Boundary
 
-External memory projection은 제거됐다. 남은 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 Memory OS fact store, institution, procedural 모듈이 소유한다.
+External memory projection은 제거됐다. 남은 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 Memory OS fact store가 소유한다.
 
 ---
 

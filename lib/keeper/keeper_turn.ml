@@ -90,6 +90,23 @@ let direct_turn_task_context ~(current_task : Masc_domain.task option) : string 
   | Some task -> Keeper_unified_prompt.format_current_task task
   | None -> ""
 
+let direct_turn_dynamic_context
+      ~(current_task : Masc_domain.task option)
+      ~(recent_direct_conversation_text : string)
+      ~(worktree_text : string)
+      ~(telemetry_feedback_text : string)
+      ~(turn_instructions_text : string)
+  : string
+  =
+  [ direct_turn_task_context ~current_task
+  ; recent_direct_conversation_text
+  ; worktree_text
+  ; telemetry_feedback_text
+  ; turn_instructions_text
+  ]
+  |> List.filter (fun text -> String.trim text <> "")
+  |> String.concat "\n\n"
+
 let direct_owner_conversation_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -197,7 +214,7 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
 
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
-  let direct_turn_task_context = direct_turn_task_context
+  let direct_turn_dynamic_context = direct_turn_dynamic_context
   let surface_context_to_instructions = surface_context_to_instructions
   let direct_no_progress_retry_reason =
     Keeper_turn_runtime_budget.direct_no_progress_retry_reason
@@ -572,7 +589,6 @@ let run_keeper_invocation_turn_admitted
                 ~config:ctx.config
                 ~meta
             in
-            let task_context = direct_turn_task_context ~current_task in
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -626,15 +642,14 @@ let run_keeper_invocation_turn_admitted
                       |> Model_inference_metrics.render_keeper_prompt_feedback)
                 | Some false | None -> ""
               in
-              let soft_parts = List.filter
-                (fun s -> String.trim s <> "")
-                [ task_context;
-                  recent_direct_conversation_text;
-                  worktree_text;
-                  telemetry_feedback_text;
-                  turn_instructions_text ]
+              let dynamic_context =
+                direct_turn_dynamic_context
+                  ~current_task
+                  ~recent_direct_conversation_text
+                  ~worktree_text
+                  ~telemetry_feedback_text
+                  ~turn_instructions_text
               in
-              let dynamic_context = String.concat "\n\n" soft_parts in
               (* === HARD CONSTRAINTS (stay in system_prompt) === *)
               (* 1. Direct reply mode *)
               let prompt =

@@ -42,11 +42,15 @@ module For_testing : sig
     channel:string ->
     string
 
-  val direct_turn_task_context :
+  val direct_turn_dynamic_context :
     current_task:Masc_domain.task option ->
+    recent_direct_conversation_text:string ->
+    worktree_text:string ->
+    telemetry_feedback_text:string ->
+    turn_instructions_text:string ->
     string
-  (** Fresh task context for a direct message. This is prompt-only and must
-      never be appended to the durable conversation history. *)
+  (** Production composition boundary for fresh direct-turn context. The
+      result is prompt-only and must never enter durable conversation history. *)
 
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   (** Format a dashboard co-view context object ({ label, route, scene, fields })

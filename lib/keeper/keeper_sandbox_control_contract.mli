@@ -5,7 +5,6 @@ type stop_scope =
   | Stop_turn
   | Stop_all
 
-val all_stop_scopes : stop_scope list
 (** Exhaustive ordered set exposed by the sandbox-stop schema. *)
 
 val default_stop_scope : stop_scope

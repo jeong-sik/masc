@@ -43,14 +43,12 @@ val set_env :
 
 (** {1 Cache state (test-visible)} *)
 
-val cached_endpoints : endpoint_info list ref
 (** Current cached probe result. Exposed for the
     [test_tool_local_runtime_verify] suite which needs to seed
     a deterministic value and restore the original after the
     test. Production callers should go through
     {!get_cached_or_refresh} instead. *)
 
-val cache_updated_at : float Atomic.t
 (** Unix timestamp of the most recent successful refresh. The
     TTL check in {!get_cached_or_refresh} reads this without
     taking the cache mutex. Exposed for the same testing

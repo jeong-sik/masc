@@ -42,7 +42,6 @@ type jsonrpc_request = Mcp_transport_protocol.jsonrpc_request = {
 
 val jsonrpc_request_of_yojson :
   Yojson.Safe.t -> (jsonrpc_request, string) result
-val jsonrpc_request_to_yojson : jsonrpc_request -> Yojson.Safe.t
 
 val has_field : string -> Yojson.Safe.t -> bool
 val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option

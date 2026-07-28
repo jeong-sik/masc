@@ -4,7 +4,6 @@ module Http = Http_server_eio
 module Provider_logs = Server_routes_http_dashboard_provider_logs
 module Keeper_api = Server_dashboard_http_keeper_api
 
-val dashboard_logs_store_path : masc_root:string -> string
 val dashboard_logs_json :
   config:Workspace.config ->
   limit:int ->

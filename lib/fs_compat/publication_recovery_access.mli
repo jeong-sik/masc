@@ -310,7 +310,6 @@ val with_store
   -> (Capability_recovery_obligation.store -> 'a)
   -> ('a, access_error) result
 
-val access_error_to_string : access_error -> string
 val registry_error_to_string : registry_error -> string
 val lane_open_error_to_string : lane_open_error -> string
 val lane_release_failure_to_string : lane_release_failure -> string
@@ -320,7 +319,6 @@ val owner_discovery_row_to_string : owner_discovery_row -> string
 val discovery_failure_to_string : discovery_failure -> string
 val discovery_error_to_string : discovery_error -> string
 val inspection_error_to_string : inspection_error -> string
-val owner_block_to_string : owner_block -> string
 val reconciliation_error_to_string : reconciliation_error -> string
 
 (** Exact delegations to the recovery-obligation error SSOT. *)

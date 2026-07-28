@@ -130,7 +130,6 @@ val apply_default : 'a option -> 'a -> 'a
 (** [apply_default opt default] returns [v] when [opt = Some v], else
     [default]. *)
 
-val apply_default_opt : 'a option -> 'a option -> 'a option
 (** [apply_default_opt primary fallback] returns [primary] when it is
     [Some], else [fallback]. *)
 
@@ -163,9 +162,6 @@ type keeper_bootstrap_stats = {
 }
 (** Counts emitted by [bootstrap_existing_keepers] for telemetry. *)
 
-val bootstrap_existing_keepers :
-  [> float Eio.Time.clock_ty ] Keeper_types_profile.context ->
-  keeper_bootstrap_stats
 (** Walk every bootable keeper and start/recover its keepalive fiber.
     Returns counts for the boot summary log line. *)
 
@@ -176,7 +172,6 @@ val supervisor_sweep_running : string -> bool
 val stop_supervisor_sweep : string -> unit
 (** Stop and forget the supervisor sweep for [keeper_name]; idempotent. *)
 
-val update_supervisor_sweep_interval : string -> float -> bool
 (** Adjust the sweep interval for an active sweep.  Returns [false] when
     the keeper has no active sweep. *)
 

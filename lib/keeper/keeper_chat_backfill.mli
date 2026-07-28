@@ -30,6 +30,5 @@ val backfill_file : dry_run:bool -> string -> file_report
 (** Backfill one lane file.  With [dry_run] the file is not modified;
     the report counts what would change. *)
 
-val backfill_base_path : dry_run:bool -> string -> file_report list
 (** Backfill every [.jsonl] lane under
     [<base_path>/.masc/keeper_chat/].  Missing directory returns []. *)

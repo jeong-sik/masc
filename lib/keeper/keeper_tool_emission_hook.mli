@@ -73,7 +73,6 @@ val accumulator_size : accumulator -> int
 
     Tests and other call sites that need an isolated accumulator
     should use [create_accumulator] instead. *)
-val global_accumulator : accumulator
 
 (** Tier K4c — per-keeper accumulator registry.
 
@@ -96,7 +95,6 @@ val capture_typed_result_for_keeper :
 
 (** Snapshot of keeper names with a registered accumulator, in
     ascending order. Useful for metrics/diagnostics. *)
-val registered_keeper_names : unit -> string list
 
 (** Remove a keeper's accumulator entry from the registry. Intended
     for keeper teardown paths (process shutdown, keeper down/repair).

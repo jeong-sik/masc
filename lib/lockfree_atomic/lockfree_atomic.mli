@@ -22,4 +22,3 @@ val update_with_commit : 'a Atomic.t -> ('a -> ('a, 'b) commit) -> 'b
 
 (** [update_with_result atomic f] is the tuple variant of [update_with_commit].
     [f] returns [(next_state, result)] which is internally mapped to a [commit]. *)
-val update_with_result : 'a Atomic.t -> ('a -> 'a * 'b) -> 'b

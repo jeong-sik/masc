@@ -79,14 +79,7 @@ val max_messages : unit -> int
     effective prompt window is this value scaled by [cadence_turns] so skipped
     turns are not evicted before the next due extraction. *)
 
-val select_recent_messages
-  :  max_messages:int
-  -> Agent_sdk.Types.message list
-  -> Agent_sdk.Types.message list
 
-val messages_for_librarian
-  :  Keeper_librarian.input
-  -> (Agent_sdk.Types.message list, string) result
 
 val exact_lane_id : string
 (** OAS exact-output lane used by the Librarian. *)
@@ -105,7 +98,6 @@ val extraction_error_kind : extraction_error -> extraction_error_kind
 
 val extraction_error_to_string : extraction_error -> string
 
-val should_record_cadence_backoff_after_error : extraction_error -> bool
 (** Whether an extraction error represents enough completed work to defer the
     next attempt until the next cadence window. Completed provider attempts and
     a durable unsettled prior-attempt guard defer cadence; local deterministic

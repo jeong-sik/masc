@@ -18,7 +18,6 @@ val register_runtime_meta_write_sync :
 (** Pre-compiled regex matching the CAS [meta version conflict]
     error message. Exposed for symmetry — used internally by
     [is_version_conflict_error]. *)
-val version_conflict_re : Re.re
 
 (** Read a keeper meta JSON file at [path]. Returns [Ok None] when
     the file does not exist. Unknown top-level keys are rejected with a
@@ -27,7 +26,6 @@ val read_meta_file_path :
   string -> (Keeper_meta_contract.keeper_meta option, string) result
 
 (** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
-val is_keeper_meta_file : string -> bool
 
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
@@ -92,8 +90,6 @@ val read_meta_if_changed :
 
 (** Atomic write of [persisted] to [path]; runs the
     [runtime_meta_write_sync_hook] on success. *)
-val persist_meta :
-  Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
 (** Persist [m] with a CAS bump on [meta_version]: the write is rejected
     if the on-disk version has moved since [m] was read. There is no force
@@ -108,11 +104,6 @@ val write_meta :
 (** Lifecycle-owner variant of [write_meta]. The opaque reservation token is
     checked against the same BasePath/name key before entering the per-path
     CAS critical section. *)
-val write_meta_for_lifecycle :
-  Keeper_lifecycle_reservation.token ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
 
 type identity_update_error =
   | Identity_missing

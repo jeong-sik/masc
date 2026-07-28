@@ -21,7 +21,6 @@ type threshold_outcome =
   | Repeated_threshold of int
   | Threshold of threshold_payload
 
-val default_normalize_length_cap : int
 
 (** [normalize_signature raw] trims leading/trailing ASCII whitespace,
     collapses whitespace runs to one space, lowercases ASCII letters,

@@ -28,10 +28,6 @@ type model_resolution =
   }
 
 (** Resolve provider:auto expansion for any registered runtime provider. *)
-val auto_models_for_runtime_prefix
-  :  ?getenv:(string -> string option)
-  -> string
-  -> string list option
 
 (** Resolve ["auto"] for any provider. Local providers resolve ["auto"] via
     {!Llm_provider.Discovery.first_discovered_model_id}; non-local providers
@@ -43,7 +39,6 @@ val resolve_auto_model
   -> model_selector
   -> model_resolution
 
-val resolve_auto_model_id : string -> string -> string
 
 (** Parse a "model@url" custom model spec.
     Returns [(model_id, base_url)].

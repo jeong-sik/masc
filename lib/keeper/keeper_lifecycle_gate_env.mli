@@ -13,7 +13,6 @@ val global : unit -> Keeper_lifecycle_gate.flags
     meta field backs each gate: [reactive] has no per-keeper flag (global
     only); [proactive] = [meta.proactive.enabled]; [autonomous] and
     [bootstrap] = [meta.autoboot_enabled]. *)
-val meta_flags : Keeper_meta_contract.keeper_meta -> Keeper_lifecycle_gate.flags
 
 (** [enabled gate m] is [true] iff [gate] is enabled for keeper [m] — the
     global kill-switch AND the per-keeper flag. The single resolver every

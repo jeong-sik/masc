@@ -141,12 +141,9 @@ val recurrence_summary : recurrence -> string
     outputs. This is presentation-only; schedule eligibility still uses the
     typed [recurrence] value. *)
 val execution_status_to_string : execution_status -> string
-val execution_status_of_string : string -> (execution_status, string) result
 
 val actor_to_yojson : actor -> Yojson.Safe.t
-val actor_of_yojson : Yojson.Safe.t -> (actor, string) result
 val recurrence_to_yojson : recurrence -> Yojson.Safe.t
-val recurrence_of_yojson : Yojson.Safe.t -> (recurrence, string) result
 val execution_record_to_yojson : execution_record -> Yojson.Safe.t
 val execution_record_of_yojson :
   Yojson.Safe.t -> (execution_record, string) result

@@ -171,7 +171,6 @@ val advisory_judgment_of_string : string -> advisory_judgment option
 val approval_decision_to_string : decision -> string
 val decision_source_to_string : decision_source -> string
 val decision_source_of_string : string -> decision_source option
-val string_opt_of_json : Yojson.Safe.t -> string option
 val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
 val rule_match_to_yojson : rule_match -> Yojson.Safe.t
 

@@ -18,7 +18,6 @@ type tail_order = Keeper_status_options_defaults.tail_order =
 (** Parse the [tail_order] argument from a tool-call JSON.
     Defaults to [Oldest_first] when missing and rejects values outside the
     public schema enum. *)
-val tail_order_of_args : Yojson.Safe.t -> (tail_order, string) result
 
 val tail_order_to_string : tail_order -> string
 
@@ -31,7 +30,6 @@ val valid_tail_order_strings : string list
 
 (** Apply [tail_order] to a list of items. Identity for
     [Oldest_first], [List.rev] for [Newest_first]. *)
-val apply_tail_order : tail_order -> 'a list -> 'a list
 
 (** [keeper_status] tool handler. Builds a fresh observation so time-derived,
     file-backed, registry, queue, and sandbox fields cannot be frozen behind

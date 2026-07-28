@@ -35,7 +35,6 @@ type parsed_args =
     missing keys. *)
 (** [true] iff [key] exists in the assoc and its value is not
     [`Null]. *)
-val json_non_null_member_present : string -> Yojson.Safe.t -> bool
 
 (** Parse an optional string-list field at [key]; uses
     [normalize_name_list]. *)
@@ -84,7 +83,6 @@ val resolve_network_mode :
 
 (** Reject globs ([*?\[\]]) and traversal segments ([./..]) in
     sandbox allowed-path entries. *)
-val sandbox_allowed_path_has_forbidden_segments : string -> bool
 
 (** Validate allowed_paths without changing behavior by sandbox backend. *)
 val validate_sandbox_settings :

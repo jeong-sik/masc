@@ -11,7 +11,6 @@
 
     @since 2.145.0 *)
 
-val min_edit_interval_s : float
 (** Minimum seconds between PATCH edits (default 1.0). *)
 
 type error = Discord_rest_client.error

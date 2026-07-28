@@ -69,8 +69,6 @@ end
 
 (** {1 JSON object merge} *)
 
-val merge_json_objects :
-  Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Concatenates the field lists of two [`Assoc] objects.
     Returns the right operand untouched when either side
     is not an [`Assoc].  Used by

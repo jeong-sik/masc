@@ -8,14 +8,11 @@ type stage =
   ; args : string list
   }
 
-val normalize_command_name : string -> string
 (** Normalize a command token to the lowercase basename used for shape checks. *)
 
-val parsed_stages : Shell_ir.t -> stage list
 (** Literal command stages from an IR. Returns [[]] when any stage contains
     non-literal argv fragments. *)
 
-val effective_stages : Shell_ir.t -> stage list
 (** Literal stages after simple wrapper unwrapping such as [env git ...] and
     [opam exec -- git ...]. *)
 

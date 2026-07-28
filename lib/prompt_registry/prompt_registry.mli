@@ -68,9 +68,6 @@ type prompt_metrics = Prompt_registry_types.prompt_metrics = {
   last_used : float;
 }
 
-val prompt_metrics_to_yojson : prompt_metrics -> Yojson.Safe.t
-val prompt_metrics_of_yojson :
-  Yojson.Safe.t -> (prompt_metrics, string) result
 
 type prompt_entry = Prompt_registry_types.prompt_entry = {
   id : string;

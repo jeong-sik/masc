@@ -61,7 +61,6 @@ type action_request = {
 }
 (** Parsed operator action — output of {!action_request_of_args}. *)
 
-val canonical_action_type : string -> string
 (** [canonical_action_type t] is the remaining parser seam for
     action-type normalization. Historical aliases are intentionally no
     longer accepted here; callers must use canonical action types. *)

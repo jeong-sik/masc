@@ -41,11 +41,7 @@ type target =
 val register_target_gate :
   (Workspace.config -> target -> (unit, string) result) -> unit
 
-val preview_of_pending_confirm : pending_confirm -> Yojson.Safe.t
 val pending_confirm_to_yojson : pending_confirm -> Yojson.Safe.t
-val pending_confirm_of_yojson : Yojson.Safe.t -> (pending_confirm, string) result
-val raw_pending_confirms_result :
-  Workspace.config -> (pending_confirm list, string) result
 val raw_pending_confirms : Workspace.config -> pending_confirm list
 val write_pending_confirms :
   Workspace.config -> pending_confirm list -> (unit, string) result
@@ -60,13 +56,10 @@ val remove_pending_confirms_by_target :
   Workspace.config -> target_type:string -> target_id:string option -> (int, string) result
 val remove_pending_confirms_by_typed_target :
   Workspace.config -> target -> (int, string) result
-val normalize_pending_confirm_actor_filter : string option -> string option
 val pending_confirm_scope_of_entries : ?actor:string -> pending_confirm list -> pending_confirm_scope
 val pending_confirm_scope : ?actor:string -> Workspace.config -> pending_confirm_scope
 val pending_confirms_json : ?actor:string -> Workspace.config -> Yojson.Safe.t
 val available_actions : available_action list
-val available_action_to_yojson : available_action -> Yojson.Safe.t
 val available_actions_json : Yojson.Safe.t
 val pending_confirm_summary_json_of_scope : pending_confirm_scope -> Yojson.Safe.t
 val pending_confirm_summary_json : ?actor:string -> Workspace.config -> Yojson.Safe.t
-val pending_confirm_envelope_json : ?actor:string -> Workspace.config -> Yojson.Safe.t

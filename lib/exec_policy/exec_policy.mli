@@ -19,23 +19,14 @@ type parse_mode = Strict | Tool_execute
 val parse_string_to_ir :
   mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
 
-val command_context :
-  Masc_exec.Shell_ir.t ->
-  (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
-val validate_command : Masc_exec.Shell_ir.t -> (unit, block_reason) result
 
-val command_context_tool_execute :
-  ?allow_pipes:bool ->
-  Masc_exec.Shell_ir.t ->
-  (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
 val validate_command_tool_execute :
   ?allow_pipes:bool ->
   Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
-val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
 
 (** Filesystem path normalization and allowlist checks. Exposed so callers can
     reach [validate_path] via [Exec_policy.Paths] (e.g. test keepers). *)
@@ -71,7 +62,4 @@ val sanitize_command_for_log_of_ir :
   fallback_cmd:string -> Masc_exec.Shell_ir.t -> string
 val truncate_for_log : ?max_len:int -> string -> string
 
-val block_reason_tag : block_reason -> string
 
-val attribution_of_validation :
-  cmd:string -> (unit, block_reason) result -> Attribution.t

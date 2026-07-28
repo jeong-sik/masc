@@ -43,8 +43,6 @@ val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
 val lower_string_list_opt : string list -> string list option
-val workspace_seq_map_to_json : (string * int) list -> Yojson.Safe.t
-val workspace_seq_map_of_json : Yojson.Safe.t -> (string * int) list
 
 include module type of Keeper_types_profile_defaults
 
@@ -62,7 +60,6 @@ val string_has_operator_todo_placeholder : string -> bool
 val json_has_operator_todo_placeholder : Yojson.Safe.t -> bool
 val json_operator_todo_placeholder_paths : Yojson.Safe.t -> string list
 val reject_placeholder_persona_profile : label:string -> path:string -> Yojson.Safe.t -> bool
-val keeper_profile_defaults_materializable : keeper_profile_defaults -> bool
 val keeper_profile_defaults_materializable_for_name :
   ?base_path:string -> string -> bool
 
@@ -171,9 +168,6 @@ val keeper_config_probe_error_to_json : keeper_config_probe_error -> Yojson.Safe
 val keeper_toml_config_error_of_load_error :
   keeper_name:string -> keeper_toml_load_error -> keeper_toml_config_error
 val keeper_toml_unknown_keys_to_json : keeper_toml_unknown_keys -> Yojson.Safe.t
-val keeper_name_of_toml_path : string -> string
-val keeper_toml_unknown_keys_of_path : string -> keeper_toml_unknown_keys option
-val keeper_toml_config_error_of_path : string -> keeper_toml_config_error option
 val keeper_toml_config_errors_in_dir_result :
   string -> (keeper_toml_config_error list, keeper_config_probe_error) result
 val keeper_toml_unknown_keys_in_dir : string -> keeper_toml_unknown_keys list

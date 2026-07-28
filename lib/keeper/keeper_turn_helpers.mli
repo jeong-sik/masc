@@ -10,7 +10,6 @@ open Keeper_context_runtime
 
 (** Interval (seconds) for the per-turn background fiber that drains the
     [keeper_turn] subscription on the OAS event bus. *)
-val default_turn_event_bus_drain_interval_sec : float
 
 val turn_event_bus_drain_interval_sec : unit -> float
 
@@ -28,11 +27,6 @@ val report_keeper_cycle_side_effect_issue :
   string -> unit
 (** Log and record a side-effect failure for a keeper cycle. *)
 
-val dispatch_keeper_phase_event_checked :
-  config:Workspace.config ->
-  keeper_name:string ->
-  side_effect:string ->
-  Keeper_state_machine.event -> unit
 (** Dispatch a phase event and log on error instead of raising. *)
 
 val finalize_trajectory_acc :
@@ -43,12 +37,6 @@ val finalize_trajectory_acc :
 (** Finalize a trajectory accumulator with the given outcome. Logs errors
     rather than raising (except cancellation). *)
 
-val record_execution_receipt_gap :
-  config:Workspace.config ->
-  meta:keeper_meta ->
-  stale_reason:string ->
-  error:string ->
-  unit -> unit
 (** Record a coverage gap when an execution receipt could not be appended. *)
 
 val post_assign_task : any_pending:bool -> channel:string -> unit

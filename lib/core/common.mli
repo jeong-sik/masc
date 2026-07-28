@@ -6,20 +6,11 @@
 (** Boolean environment variable with permissive truthy parsing:
     ["1"], ["true"], ["yes"], ["on"] (case/whitespace insensitive)
     all return [true]; absent, empty, or anything else returns [false]. *)
-val env_true : string -> bool
 
 (** [true] when [MASC_STRICT_FINALIZERS] env is truthy. Callers can
     opt into raising finally-block exceptions instead of swallowing
     them. *)
-val strict_finalizers : unit -> bool
 
-val handle_finalizer_error :
-  module_name:string ->
-  label:string ->
-  during_exception:bool ->
-  backtrace:Printexc.raw_backtrace ->
-  exn ->
-  unit
 (** Logs a finalizer failure. When [during_exception = false] and
     [strict_finalizers ()] is [true], re-raises [exn] with its backtrace
     so strict runs surface hidden bugs. *)
@@ -66,7 +57,6 @@ type keeper_runtime_store =
 
 val keeper_runtime_store_dirname : keeper_runtime_store -> string
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
-val keeper_runtime_store_dirnames : string list
 
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
@@ -81,11 +71,6 @@ val agents_dir_from_base_path : base_path:string -> string
 val max_tool_output_bytes : int
 (** SSOT 64KB cap for MCP tool response bodies. *)
 
-val truncate_response :
-  ?max_bytes:int ->
-  total_count:int ->
-  string ->
-  string
 (** [truncate_response ?max_bytes ~total_count s] returns [s] unchanged
     when its length is at most [max_bytes] (default
     {!max_tool_output_bytes}). Otherwise returns the first [max_bytes]

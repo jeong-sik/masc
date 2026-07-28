@@ -97,12 +97,6 @@ val read_recent_memory_texts_result :
 
     @since RFC-0149 §3.1 *)
 
-
-(** {1 Query Detection} *)
-
-val is_memory_recall_query : string -> bool
-val expected_topic_hint : string -> string option
-
 (** {1 User Message Extraction} *)
 
 val recent_user_messages :
@@ -119,12 +113,6 @@ val load_history_user_messages_result :
 
     @since RFC-0149 §3.1 *)
 
-val recall_candidates_with_history :
-  checkpoint_messages:Agent_sdk.Types.message list ->
-  history_path:string ->
-  max_checkpoint:int ->
-  max_history:int ->
-  string list
 
 (** {1 Memory Recall Evaluation} *)
 
@@ -145,18 +133,3 @@ val evaluate_memory_recall :
   assistant_reply:string ->
   candidates:string list ->
   memory_recall_eval
-
-val memory_eval_to_json :
-  memory_recall_eval ->
-  correction_applied:bool ->
-  correction_success:bool ->
-  correction_skipped_budget:bool ->
-  prompt_fallback_applied:bool ->
-  prompt_fallback_success:bool ->
-  prompt_fallback_skipped_budget:bool ->
-  postpass_budget_ms:int ->
-  postpass_budget_remaining_ms:int ->
-  recall_fallback_applied:bool ->
-  Yojson.Safe.t
-
-val work_kind_of_eval : memory_recall_eval -> string

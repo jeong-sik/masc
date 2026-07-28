@@ -26,10 +26,8 @@
 val target_prefix : string
 (** ["@"] — the single-at direct-target prefix. *)
 
-val broadcast_selector_prefix : string
 (** ["@@"] — the double-at broadcast selector prefix. *)
 
-val broadcast_all_selector : string
 (** ["all"] — the only universally supported broadcast selector. *)
 
 val trim_token_edges : string -> string

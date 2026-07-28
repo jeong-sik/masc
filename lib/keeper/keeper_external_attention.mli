@@ -89,7 +89,6 @@ type event =
     }
 
 (** Default stale claim timeout used by {!pending_for_keeper}. *)
-val default_claim_stale_after_s : float
 
 val event_id_of_dedupe_key : string -> string
 
@@ -109,8 +108,6 @@ val external_message_ref_to_json : external_message_ref -> Yojson.Safe.t
 val external_message_ref_of_json :
   Yojson.Safe.t -> (external_message_ref, string) result
 
-val actor_to_json : actor -> Yojson.Safe.t
-val actor_of_json : Yojson.Safe.t -> (actor, string) result
 
 val item_to_json : item -> Yojson.Safe.t
 val item_of_json : Yojson.Safe.t -> (item, string) result
@@ -169,8 +166,6 @@ val mark_ignored :
   unit ->
   (unit, string) result
 
-val load_events_result :
-  base_path:string -> keeper_name:string -> (event list, string) result
 
 val load_events : base_path:string -> keeper_name:string -> event list
 

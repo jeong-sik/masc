@@ -19,7 +19,6 @@ type name_map = {
 
 (** {1 Path configuration} *)
 
-val default_names_path : string
 
 (** [configured_write_path env_name ~default] — env override
     resolved against [Env_config_core.base_path ()] when relative. *)
@@ -27,7 +26,6 @@ val configured_write_path : string -> default:string -> string
 
 (** Default write path (env [MASC_DISCORD_NAMES_PATH] →
     {!default_names_path}). *)
-val names_write_path : unit -> string
 
 (** Default read path (env [MASC_DISCORD_NAMES_PATH] →
     {!default_names_path}). *)

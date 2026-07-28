@@ -62,10 +62,8 @@ type dispatch_observer =
     arm; other arms receive [None].  Observer-only ([unit] return) —
     cannot mutate the outcome. *)
 
-val pre_hooks : pre_hook list ref
 (** Mutable list of registered pre-hooks. *)
 
-val dispatch_observers : dispatch_observer list ref
 (** Mutable list of registered dispatch observers. *)
 
 val register_pre_hook : pre_hook -> unit

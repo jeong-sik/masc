@@ -38,10 +38,6 @@ val audit_tasks_without_actionable_verification_ids
     join requires the record — so it is a silent starvation source under the
     default-on flip. Pure so tests can drive it without a verification store. *)
 
-val audit_tasks_without_actionable_verification
-  :  config:Workspace.config
-  -> Masc_domain.task list
-  -> (string * string) list
 (** [audit_tasks_without_actionable_verification_ids] backed by the live
     verification store ([actionable_verification_request_ids]). For runtime
     diagnostics. *)

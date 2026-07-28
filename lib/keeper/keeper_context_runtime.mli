@@ -191,8 +191,6 @@ val commit_prepared_compaction
 (** {1 Trace and Board Utilities} *)
 
 val generate_trace_id : ?now:float -> unit -> string
-val keeper_board_write_tool_names : string list
-val keeper_action_kind_of_tool_names : string list -> string
 
 (** {1 Model and Workspace Utilities} *)
 

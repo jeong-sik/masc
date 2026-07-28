@@ -158,7 +158,6 @@ val plan_of_json
 
 val completed_plan : completed_plan -> compaction_plan
 val completed_exact_execution_evidence : completed_plan -> exact_execution_evidence
-val completed_attempt_observation : completed_plan -> attempt_observation
 val completed_post_success_terminalizer : completed_plan -> post_success_terminalizer
 
 val claim_post_success_commit :

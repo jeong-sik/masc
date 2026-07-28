@@ -119,5 +119,3 @@ val parse_time_of_day_value : string -> (time_of_day, parse_error) result
 (** Parse and validate an RFC 5545 TIME value ([HHMMSS], leap second
     admitted). *)
 
-val freq_to_string : freq -> string
-val weekday_to_string : weekday -> string

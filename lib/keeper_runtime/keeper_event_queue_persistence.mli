@@ -394,8 +394,6 @@ val project_accepted_transfer_result :
     The accounting survives target consumption and makes later receipt replay
     return [Transfer_already_projected] without a second target effect. *)
 
-val persist_snapshot :
-  base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
 
 val ack_consumed :
   base_path:string ->

@@ -8,7 +8,6 @@ val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
 
 (** Render a failed [Tool_result.result] as [error_json], preserving
     [failure_class] for keeper-facing routing and diagnostics. *)
-val tool_result_error_json : Tool_result.result -> string
 
 val file_not_found_prefix : string
 
@@ -28,10 +27,8 @@ val missing_file_error_json
 val assoc_override_string : string -> string -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Re-export of [Keeper_alerting_path.effective_allowed_paths]. *)
-val keeper_effective_allowed_paths : meta:Keeper_meta_contract.keeper_meta -> string list
 
 (** Re-export of [Keeper_alerting_path.effective_write_allowed_paths]. *)
-val keeper_effective_write_allowed_paths : meta:Keeper_meta_contract.keeper_meta -> string list
 
 (** Sandbox playground root for [meta]; ensures the bundle dirs
     exist as a side effect. *)
@@ -88,11 +85,6 @@ val resolve_keeper_confined_write_path
     paths, including a Docker-visible path projected to its host mount, retain
     their explicit identity. The resulting path is checked once against the
     objective allowed-root containment boundary. *)
-val resolve_keeper_path
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> raw_path:string
-  -> (string, string) result
 
 (** Resolve a read target using the same deterministic namespace as
     {!resolve_keeper_path}, without existence inference. *)
@@ -119,11 +111,6 @@ val resolve_keeper_execute_cwd_typed
   -> raw_path:string
   -> (string, Keeper_path_rejection.keeper_path_rejection) result
 
-val resolve_keeper_execute_cwd
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> raw_path:string
-  -> (string, string) result
 
 (** Resolve an already projected host path that came from a
     Keeper-visible [cwd] + relative [file_path] composition. [raw_for_error]
@@ -143,7 +130,6 @@ val shell_readonly_limit : Yojson.Safe.t -> int
 
 (** Clamp [args.max_bytes] to [256..100000] (default 4000) for
     the structured [cat] read operation. *)
-val shell_readonly_cat_max_bytes : Yojson.Safe.t -> int
 
 (** Project [text] to a JSON array of lines, capped by [limit]
     lines and [max_bytes] total payload. The omitted-tail line

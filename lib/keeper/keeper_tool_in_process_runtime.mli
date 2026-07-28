@@ -40,18 +40,7 @@ val handle_context_status
   -> args:Yojson.Safe.t
   -> string
 
-val handle_memory_search
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> ctx_work:working_context
-  -> args:Yojson.Safe.t
-  -> string
 
-val handle_memory_write
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> args:Yojson.Safe.t
-  -> string
 
 val handle_library_search_with_outcome
   : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
@@ -114,21 +103,10 @@ val handle_voice_with_outcome
 
 (** [handle_task] dispatches to [Keeper_tool_task_runtime.handle_keeper_task_tool]
     by [name]. Caller must pass a name in the task / broadcast cluster. *)
-val handle_task
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> string
 
 (** [handle_board] dispatches to
     [Keeper_tool_board_runtime.handle_keeper_board_tool] by [name]. Caller
     must pass a name in the board cluster. *)
-val handle_board
-  :  meta:keeper_meta
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> string
 
 (** [handle_masc_board] admits only Board operations whose typed Keeper
     projection is [Direct_masc], binds runtime-owned identity to [meta.name],
@@ -271,23 +249,6 @@ val handle_analyze_image_with_outcome
     Dispatches via [Keeper_dispatch_ref] registered by [Keeper_tool_surface] at
     module load.  Receives [meta] so callers like [masc_keeper_status]
     can resolve the "self" target when the [name] argument is empty. *)
-val handle_masc_keeper
-  :  publication_recovery_provider:
-       Keeper_publication_recovery_availability.provider
-  -> ?sw:Eio.Switch.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
-  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?mcp_session_id:string
-  -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?gate_context:(unit -> Keeper_gate.causal_context)
-  -> ?gate_grant:Keeper_gate.cycle_grant
-  -> config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> unit
-  -> string
 
 val handle_masc_keeper_with_outcome
   :  publication_recovery_provider:
@@ -311,16 +272,6 @@ val handle_masc_keeper_with_outcome
     Ollama probe crosses the neutral external-effect Gate with the exact
     operation identity and complete input; other registered local-runtime
     operations retain their existing dispatch behavior. *)
-val handle_masc_local_runtime
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?gate_context:(unit -> Keeper_gate.causal_context)
-  -> ?gate_grant:Keeper_gate.cycle_grant
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> unit
-  -> string
 
 val handle_masc_local_runtime_with_outcome
   :  config:Workspace.config

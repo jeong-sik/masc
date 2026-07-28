@@ -35,22 +35,13 @@ val requests_dir : base_path:string -> string
 val index_path : base_path:string -> string
 val request_dir : base_path:string -> Keeper_delegation_request.t -> string
 
-val render_task_seed_md : Keeper_delegation_request.t -> string
 
 val write_request
   :  base_path:string
   -> Keeper_delegation_request.t
   -> (stored_request, string) result
 
-val write_requests
-  :  base_path:string
-  -> Keeper_delegation_request.t list
-  -> (stored_request list, string) result
 
-val write_request_if_changed
-  :  base_path:string
-  -> Keeper_delegation_request.t
-  -> (stored_request option, string) result
 
 val write_execution_result
   :  base_path:string

@@ -30,11 +30,9 @@ val wire_field_valid_for_days : string
     extracting model's own judgment — categories never infer a validity
     horizon (RFC-0351 S2). *)
 
-val wire_episode_fields : string list
 (** Canonical episode-object wire field names accepted by the parser and used by
     retry prompt rendering. *)
 
-val wire_claim_fields : string list
 (** Canonical claim-object wire field names accepted by the parser and used by
     retry prompt rendering. *)
 

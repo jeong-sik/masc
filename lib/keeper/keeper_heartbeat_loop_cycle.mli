@@ -33,9 +33,6 @@ val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
     admitted.  Queue ownership must inspect the full {!cycle_outcome}; this
     projection alone is never completion evidence. *)
 
-val manual_compaction_followup_failure
-  :  cycle_outcome
-  -> Keeper_unified_turn.turn_failure option
 (** The following-turn failure only when manual compaction already committed.
     Queue settlement uses this projection to preserve an LLM judgment
     successor without replaying the completed compaction transaction. *)

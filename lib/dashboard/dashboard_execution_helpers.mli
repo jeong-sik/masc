@@ -147,7 +147,6 @@ val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
 val event_detail_json : Yojson.Safe.t -> Yojson.Safe.t
 val severity_rank : string -> int
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
-val execution_tool_preview_limit : int
 val cap_string_list : ?limit:int -> string list -> string list
 
 (** {1 Health predicates} *)

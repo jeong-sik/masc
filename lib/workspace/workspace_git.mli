@@ -12,7 +12,6 @@
 (** [has_git_marker path] returns [true] if [path] (or any ancestor)
     contains a [.git] entry.  Used as a fast-fail guard before calling
     git subprocesses on non-repo directories. *)
-val has_git_marker : string -> bool
 
 (** [git_root ~base_path] resolves the git toplevel containing
     [base_path] via [git rev-parse --show-toplevel].  Returns [None]
@@ -30,7 +29,6 @@ val remote_branch_exists : string -> string -> bool
 (** [commit_exists ~root ~commit] checks whether [commit] resolves to a local
     commit object in [root]. No fetch is performed; this is a deterministic
     local repository lookup. *)
-val commit_exists : root:string -> commit:string -> bool
 
 (** [origin_head_branch root] returns the branch [origin/HEAD]
     resolves to (typically [main] or [master]).  [None] when

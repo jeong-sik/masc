@@ -19,13 +19,11 @@
     [resilience_meta] (live classification timeline) is reserved
     for a follow-up PR. *)
 
-val levels_response : unit -> Yojson.Safe.t
 (** [{ "count": 4, "levels": [{ "tag": "L1", "symbol": "L1",
        "rank": 1, "description": "..." }, ...] }] listing every
     degradation level with its rank ordering and a short
     operator-facing description. *)
 
-val strategies_response : unit -> Yojson.Safe.t
 (** [{ "count": 4, "strategies": [{ "tag": "Retry",
        "description": "..." }, ...] }] listing every strategy
     class produced by {!Resilience.Recovery.default_strategy}. *)

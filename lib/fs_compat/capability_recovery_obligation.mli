@@ -263,7 +263,6 @@ val locator_parent_components : locator -> string list
 val locator_parent : locator -> identity
 val locator_target_leaf : locator -> string
 
-val prepared_owner : prepared -> owner
 val prepared_operation_id : prepared -> operation_id
 val prepared_locator : prepared -> locator
 

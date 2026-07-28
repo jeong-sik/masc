@@ -58,7 +58,6 @@ exception Episode_store_corrupt of string
 (** [episode_ttl_expired ~now episode] uses only the exact producer-supplied
     [valid_until], with the same boundary as {!ttl_expired}: [ts >= now] is
     current; an absent [valid_until] never expires. *)
-val episode_ttl_expired : now:float -> episode -> bool
 
 (** Run the deterministic explicit-expiry sweep over one keeper's episode
     files. Unless [dry_run], deletes each episode file past its exact

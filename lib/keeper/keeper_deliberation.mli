@@ -18,7 +18,6 @@ type deliberation_trigger =
   | SelfDirectedExplore
 
 val deliberation_trigger_to_string : deliberation_trigger -> string
-val deliberation_trigger_to_json : deliberation_trigger -> Yojson.Safe.t
 
 (** {1 Actions} *)
 
@@ -97,7 +96,6 @@ type execution_result = {
 val baseline_execution_result : world_observation -> execution_result
 val action_source_of_execution_result : execution_result -> action_source
 val execution_result_to_json : execution_result -> Yojson.Safe.t
-val policy_labels_of_action : deliberation_action -> string list
 val legality_verdict : world_observation -> deliberation_action -> legality_verdict
 val execute_structured_result :
   world_observation -> structured_result -> execution_result
@@ -124,7 +122,6 @@ type deliberation_meta = {
   last_triage_triggers: string;
 }
 
-val default_deliberation_meta : deliberation_meta
 val deliberation_meta_to_json : deliberation_meta -> (string * Yojson.Safe.t) list
 val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
 

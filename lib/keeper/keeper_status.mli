@@ -19,10 +19,6 @@ val handle_keeper_list :
 
 (** Read recent trajectory entries (default 20) for the keeper named
     in [args.name], scoped to its current trace_id. *)
-val handle_keeper_trajectory :
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 (** Run the keeper-eval projection (continuity/blocker summary) for
     [args.name]. *)
-val handle_keeper_eval :
-  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

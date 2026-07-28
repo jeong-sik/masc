@@ -74,7 +74,6 @@ type tlc_result_entry = {
   log_path : string option;
 }
 
-val tlc_results_dir : unit -> string
 (** Directory containing TLC logs. Reads [MASC_TLC_RESULTS_DIR], falling back
     to the host temporary directory. This matches [specs/Makefile], which
     writes logs as [tlc-<cfg-stem>.log]. *)

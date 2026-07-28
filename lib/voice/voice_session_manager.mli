@@ -48,7 +48,6 @@ val generate_session_id : unit -> string
 val string_of_status : session_status -> string
 (** Inverse of {!status_of_string_opt}. *)
 
-val status_of_string_opt : string -> session_status option
 (** [Some] only for the three wire-format names; any other input
     returns [None] (#8612 — never silently maps unknowns to [Idle]). *)
 
@@ -74,7 +73,6 @@ val session_to_json : session -> Yojson.Safe.t
     voice-loop contract. Realtime bridge JSON exposes configured metadata only;
     the raw websocket endpoint is intentionally redacted. *)
 
-val turn_based_voice_loop_json : session_active:bool -> Yojson.Safe.t
 (** Structured capability contract for the current voice implementation.
     MASC voice sessions are batch STT/TTS loops: operator audio is first
     transcribed to text, then delivered through the normal keeper turn;
@@ -82,7 +80,6 @@ val turn_based_voice_loop_json : session_active:bool -> Yojson.Safe.t
 
 val voice_loop_json : session_active:bool -> conversation_mode -> Yojson.Safe.t
 
-val session_of_json : Yojson.Safe.t -> session
 (** Decode failures on individual fields raise [Yojson] exceptions.
     A corrupt [status] field defaults to [Suspended] (fail-closed —
     the session stays visible to operators instead of being skipped
@@ -105,14 +102,11 @@ val start_session :
 val end_session : t -> agent_id:string -> bool
 (** [true] if a session was removed, [false] if [agent_id] had none. *)
 
-val suspend_session : t -> agent_id:string -> unit
-val resume_session : t -> agent_id:string -> unit
 
 (** {1 Query} *)
 
 val get_session : t -> agent_id:string -> session option
 val list_sessions : t -> session list
-val has_session : t -> agent_id:string -> bool
 val session_count : t -> int
 
 (** {1 Activity tracking} *)

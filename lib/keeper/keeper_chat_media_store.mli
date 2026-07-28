@@ -44,7 +44,6 @@ val content_type_of_path : string -> string
 val valid_token : string -> bool
 
 (** Raw generated-media byte budget used before durable writes. *)
-val max_raw_bytes : unit -> int
 
 (** Encoded-carrier budget for live stream accumulation. Gives base64 expansion
     headroom over {!max_raw_bytes}. *)

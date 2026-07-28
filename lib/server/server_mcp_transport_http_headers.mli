@@ -33,13 +33,10 @@ val body_jsonrpc_method : string -> (string * bool) option
     non-object body).  [has_id] reports whether the [id] field is
     present (used to distinguish notifications from requests). *)
 
-val request_protocol_version_header : Httpun.Request.t -> string option
 (** Case-insensitive lookup of [MCP-Protocol-Version]. *)
 
-val request_method_header : Httpun.Request.t -> string option
 (** Case-insensitive lookup of [Mcp-Method]. *)
 
-val request_name_header : Httpun.Request.t -> string option
 (** Case-insensitive lookup of [Mcp-Name]. *)
 
 val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
@@ -54,7 +51,6 @@ val validate_2026_request_headers :
     [_meta], [Mcp-Method], and, for [tools/call], [resources/read],
     and [prompts/get], matching [Mcp-Name]. *)
 
-val is_initialize_method : string -> bool
 (** [is_initialize_method m] tests whether [m] equals the literal
     [["initialize"]].  The initialize handshake must always go over
     plain JSON, never SSE. *)

@@ -18,7 +18,6 @@ type msg_type_typed =
   | Broadcast
   | Cache_invalidated of { task_id : string; status : string }
 
-val string_of_msg_type_typed : msg_type_typed -> string
 
 val emit_message_activity : Workspace_utils_backend_setup.config ->
            from_agent:string ->

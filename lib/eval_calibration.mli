@@ -13,15 +13,12 @@ type record_type =
   | Verdict_record
   | Label_record
 
-val record_type_to_string : record_type -> string
-val record_type_of_string : string -> record_type option
 
 type label_verdict =
   | Approve_label
   | Reject_label
 
 val label_verdict_to_string : label_verdict -> string
-val label_verdict_of_string : string -> label_verdict option
 
 val verdict_to_string : Task.Anti_rationalization.verdict -> string
 val verdict_of_string : string -> Task.Anti_rationalization.verdict option
@@ -71,7 +68,6 @@ val get_store : unit -> Dated_jsonl.t
 val reset_store_for_testing : unit -> unit
 (** Reset the store reference.  For testing only. *)
 
-val set_store : base_dir:string -> unit
 (** Set the process-local verdict store to an explicit isolated directory.
     Used by offline eval tooling after verdict-store isolation checks and by
     tests through [set_store_for_testing]. *)

@@ -33,7 +33,6 @@
 
 (** 질문 + 패널 답들로 심판 프롬프트를 구성한다
     ({!Fusion_judge_parse.expected_json_doc} 지시 포함). 순수 — 테스트 가능. *)
-val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list -> string
 
 (** 심판 모델을 실행해 구조화 종합을 받는다.
 
@@ -67,11 +66,6 @@ val run
     더해, 1차 심판 종합 [prior]을 [Fusion_types.render_prior_synthesis]로 lossless 렌더해
     <prior_synthesis> 블록으로 싣고, 2차 심판에게 그것을 패널 증거에 비추어 개선하라 지시한다
     (가짜 panel_answer 날조 없음). 순수 — 테스트 가능. *)
-val compose_refine_prompt
-  :  question:string
-  -> panel:Fusion_types.panel_outcome list
-  -> prior:Fusion_types.judge_synthesis
-  -> string
 
 (** REFINE 위상의 2차 심판을 실행한다. [run]과 동일한 빌드/실행/usage/파싱 경로이며,
     프롬프트만 [compose_refine_prompt ~prior]로 구성하는 점이 다르다([prior]는 1차
@@ -106,11 +100,6 @@ val attach_usage
 (** JOJ(judge-of-judges, RFC-0283) meta 심판 프롬프트를 구성한다. [compose_refine_prompt]와
     동형이되 N개 1차 종합 [priors]((정체성, synthesis) 쌍)를 각각 [<judge id="...">] 블록으로
     lossless 렌더하고, meta 심판에게 패널 증거에 비추어 reconcile하라 지시한다. 순수 — 테스트 가능. *)
-val compose_meta_prompt
-  :  question:string
-  -> panel:Fusion_types.panel_outcome list
-  -> priors:(string * Fusion_types.judge_synthesis) list
-  -> string
 
 (** JOJ meta 심판을 실행한다(RFC-0283). [run]/[run_refine]와 동일한 빌드/실행/usage/파싱
     경로이며, 프롬프트만 [compose_meta_prompt ~priors]로 구성한다([priors]는 N개 1차 심판이

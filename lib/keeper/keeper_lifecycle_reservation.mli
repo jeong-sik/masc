@@ -23,7 +23,6 @@ type release_outcome =
   | Release_missing
   | Release_not_owner of snapshot
 
-val purpose_to_string : purpose -> string
 val snapshot_to_string : snapshot -> string
 
 val acquire :

@@ -53,8 +53,6 @@ type snapshot =
   ; async_requests : t list availability
   }
 
-val project_event_queue_state :
-  keeper_name:string -> Keeper_event_queue_state.t -> t list
 
 val project_async_entries :
   keeper_name:string -> Keeper_msg_async.entry list -> (t list, read_error) result

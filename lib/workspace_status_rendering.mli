@@ -19,7 +19,6 @@
     bool-flag) stay private — the rendered string is the
     operator contract; intermediate atoms are not. *)
 
-val active_task_assignee : Masc_domain.task_status -> string option
 (** [active_task_assignee status] returns the assignee for the
     active states ([Claimed] / [InProgress] /
     [AwaitingVerification]), and [None] for the terminal /

@@ -118,11 +118,6 @@ val invalidate_execution_cache : unit -> unit
     exceptions through
     {!Keeper_metrics.(to_string LifecycleCallbackFailures)}. *)
 
-val invalidate_execution_cache_with_hooks_for_testing :
-  invalidate_execution_surface:(unit -> unit) ->
-  invalidate_light_cache:(unit -> unit) ->
-  unit ->
-  unit
 (** Test seam for the best-effort invalidation failure path. Production
     callers should use {!invalidate_execution_cache}. *)
 
@@ -237,12 +232,4 @@ val paused_of_lifecycle_event : string -> bool option
 
 val seed_execution_cache_for_test : unit -> unit
 
-val patch_surface_json_for_running_keepers :
-  Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
 
-val patch_keeper_row :
-  keeper_name:string ->
-  event:string ->
-  keepalive_running:bool ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t

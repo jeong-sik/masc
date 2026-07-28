@@ -220,7 +220,6 @@ val chat_waiting : base_path:string -> keeper_name:string -> bool
     admitted (in-flight) turn — an admitted chat holds the slot and is no
     longer waiting. *)
 
-val chat_waiting_since : base_path:string -> keeper_name:string -> float option
 (** Unix epoch seconds for the oldest currently parked chat waiter on this
     keeper's slot, or [None] when no chat request is waiting or the keeper slot
     is unknown. *)
@@ -331,13 +330,11 @@ val snapshot_for : base_path:string -> keeper_name:string -> slot_snapshot
     zero-valued snapshot with [snapshot_slot_created = false]; no slot is
     allocated by observation. *)
 
-val fleet_snapshot : base_path:string -> keeper_names:string list -> fleet_snapshot
 (** Fleet-level admission state for configured [keeper_names] plus any live
     slot already observed under [base_path]. This keeps dashboard/health
     observability from hiding an active slot simply because the meta/config
     scan missed it. *)
 
-val slot_snapshot_to_yojson : slot_snapshot -> Yojson.Safe.t
 
 val fleet_health_json :
   base_path:string -> keeper_names:string list -> Yojson.Safe.t

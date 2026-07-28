@@ -9,7 +9,6 @@ type guard_token =
   | Guard_word of string * bool
   | Guard_separator
 
-val first_token_of_cmd : string -> string option
 (** First flattened command token from a raw shell command. Returns [None] on
     parse failure or empty commands. *)
 
@@ -18,7 +17,6 @@ val cmd_prefix : string -> string
     when possible and falls back to a conservative leading-token extraction for
     unsupported shell shapes. *)
 
-val guard_tokens_of_cmd : string -> guard_token list
 (** Parse a raw shell command into lowercased guard tokens plus command
     separators. Quoted words preserve a [true] quoted flag. Returns [[]] when
     the quote-aware tokenizer cannot recover words. *)

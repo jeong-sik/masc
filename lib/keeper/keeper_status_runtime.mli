@@ -15,8 +15,6 @@ val agent_runtime_status_opt : Yojson.Safe.t -> Masc_domain.agent_status option
 
 val agent_runtime_has_live_signal : Yojson.Safe.t -> bool
 val parse_agent_status : Workspace.config -> agent_name:string -> Yojson.Safe.t
-val keeper_reply_snapshot_of_history :
-  Yojson.Safe.t list -> Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t
 
 val keeper_diagnostic_json :
   meta:keeper_meta ->
@@ -34,25 +32,13 @@ val augment_keeper_diagnostic_json :
   Yojson.Safe.t ->
   Yojson.Safe.t
 
-val keeper_health_to_string : keeper_health -> string
 
 (** Strict parse: returns [None] when the wire string is not one of the
     seven canonical keeper_health labels so drift is visible at the
     call site. *)
 val keeper_health_of_string_opt : string -> keeper_health option
 
-val keeper_continuity_to_string : keeper_continuity -> string
 
-val keeper_health_state :
-  ?fiber_health:fiber_health ->
-  ?keepalive_interval_s:float ->
-  meta:keeper_meta ->
-  keepalive_running:bool ->
-  agent_status:Yojson.Safe.t ->
-  quiet_reason:string option ->
-  now_ts:float ->
-  unit ->
-  keeper_health
 
 (** Keeper display status derived from (keeper_health x agent_status). Closed so
     consumers that classify it match exhaustively. "paused" is a control-plane

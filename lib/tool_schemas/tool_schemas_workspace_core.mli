@@ -10,7 +10,6 @@
     [test_types.ml :: assertion_kind_ssot] catches drift. *)
 
 (** Enum of valid [masc_check] assertion strings. *)
-val assertion_kind_enum_strings : string list
 
 (** Tool schemas: [masc_status], [masc_reset], [masc_check], [masc_heartbeat]. *)
 val schemas : Masc_domain.tool_schema list

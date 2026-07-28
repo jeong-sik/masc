@@ -20,10 +20,6 @@ val owned_active_tasks_for_meta :
 
 (** Shutdown transaction variant. Ownership is the exact persisted
     [meta.agent_name]; backlog read failures are returned. *)
-val owned_active_tasks_for_meta_strict :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  (owned_active_task list, string) result
 
 (** Strict ownership, task records, and the backlog CAS version captured by the
     same read. The complete task snapshot lets lifecycle transactions reconcile

@@ -7,7 +7,6 @@ val generate_trace_id : ?now:float -> unit -> string
     for deterministic output.  The counter guarantees uniqueness even when
     [now] is pinned to the same value across consecutive calls. *)
 val keeper_name_from_agent_name : string -> string option
-val is_keeper_agent_alias : string -> bool
 val canonical_keeper_name_from_agent_name : string -> string option
 val is_keeper_principal_agent_name : string -> bool
 (** [is_keeper_principal_agent_name name] returns true for task-owner

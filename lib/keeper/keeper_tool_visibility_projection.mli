@@ -36,9 +36,7 @@ type schema_resolution =
       }
   | Unknown_name of string
 
-val allowed_set : string list -> (string, unit) Hashtbl.t
 
-val public_aliases_for_internal_name : string -> string list
 
 val public_alias_for_internal : string -> string option
 (** First descriptor-backed public alias for an internal name, or [None]. *)

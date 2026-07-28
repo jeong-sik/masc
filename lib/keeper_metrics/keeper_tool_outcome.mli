@@ -31,7 +31,5 @@ val of_json : Yojson.Safe.t -> t option
     [None] is [false], preserving the legacy name-based behavior when a tool
     does not emit a typed outcome. Single owner of the outcome gate shared by
     the no-progress detector and the unified-metrics substantive check. *)
-val is_nonprogress : t option -> bool
 
 (** Remove [typed_outcome] field from JSON before returning to LLM. *)
-val strip_from_json : Yojson.Safe.t -> Yojson.Safe.t

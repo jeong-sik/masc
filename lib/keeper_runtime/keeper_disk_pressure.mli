@@ -22,10 +22,6 @@ val note_exception : ?site:string -> exn -> unit
 (** Record and log only typed [Unix_error (ENOSPC, _, _)]. *)
 
 val reset_for_tests : unit -> unit
-val probe_path : ?now:float -> string -> snapshot_result
-val probe_masc_root : ?now:float -> masc_root:string -> unit -> snapshot_result
-val disk_snapshot_to_json : disk_snapshot -> Yojson.Safe.t
-val snapshot_result_to_json : snapshot_result -> Yojson.Safe.t
 val observation_fields : unit -> (string * Yojson.Safe.t) list
 val snapshot_json : ?now:float -> masc_root:string -> unit -> Yojson.Safe.t
 

@@ -13,7 +13,6 @@ type agent_card_action =
   | Agent_card_get
   | Agent_card_refresh
 
-val agent_card_action_to_string : agent_card_action -> string
 val valid_agent_card_action_strings : string list
 
 (** Dispatch handler. Returns Some Tool_result.result if handled, None otherwise *)

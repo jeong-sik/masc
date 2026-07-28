@@ -6,8 +6,6 @@ open Workspace_utils
 
 val backlog_path : Workspace_utils_backend_setup.config -> string
 val backlog_recovery_path : Workspace_utils_backend_setup.config -> string
-val decode_backlog : path:string ->
-           Yojson.Safe.t -> (Masc_domain.backlog, string) result
 val read_backlog_r : Workspace_utils_backend_setup.config ->
            (Masc_domain.backlog, string) result
 val read_backlog : Workspace_utils_backend_setup.config -> Masc_domain.backlog

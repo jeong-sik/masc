@@ -9,8 +9,3 @@ val check_read_target :
   (unit, string) result
 
 (** [check_write_target] applies the corresponding effective write roots. *)
-val check_write_target :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  target:string ->
-  (unit, string) result

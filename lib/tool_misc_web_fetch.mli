@@ -11,7 +11,6 @@
 val default_timeout_sec : int
 (** Default timeout for HTTP fetch operations (seconds). *)
 
-val default_max_chars : int
 (** Default maximum output length for extracted content. *)
 
 val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result

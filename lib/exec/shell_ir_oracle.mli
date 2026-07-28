@@ -10,7 +10,6 @@ type parse_status =
   | Timeout
   | Unavailable
 
-val parse_status_of_string : string -> (parse_status, string) result
 val string_of_parse_status : parse_status -> string
 
 type features = {

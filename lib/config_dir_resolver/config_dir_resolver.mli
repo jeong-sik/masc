@@ -155,7 +155,6 @@ val data_dir : base_path:string -> string
 
 (** {2 Config-rooted file accessors} *)
 
-val repositories_toml_basename : string
 (** ["repositories.toml"]. SSOT basename of the repository catalog file, so
     callers that surface *which* config file gated a decision (e.g. the
     playground repo [policy_source] field) label it from one constant instead
@@ -171,7 +170,6 @@ val keeper_repo_mappings_toml_path : base_path:string -> string
 (** [<base_path>/.masc/config/keeper_repo_mappings.toml]. Same caveat as
     [repositories_toml_path]. *)
 
-val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid
     MASC config directory (has runtime.toml, prompts/, keepers/, or personas/). *)
 
@@ -227,9 +225,7 @@ val sanitize_inherited_test_base_path_opt :
   home:string option ->
   string option
 
-val path_from_executable : cwd:string -> string -> string option
 
-val path_from_cwd : string -> string option
 
 (** {1 Warnings and logging} *)
 
@@ -250,4 +246,3 @@ val to_json : resolution -> Yojson.Safe.t
 
 (** {1 Utility} *)
 
-val dedupe_paths : string list -> string list

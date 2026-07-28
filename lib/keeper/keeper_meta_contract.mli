@@ -205,7 +205,6 @@ val blocker_info_to_json : blocker_info -> Yojson.Safe.t
     a structured object so the inner [runtime_exhaustion_reason] is
     preserved across read/write cycles. *)
 
-val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
 (** Parses the JSON shape emitted by {!blocker_info_to_json}.
     Returns [None] for [`Null] or any value whose [klass] field is
     absent / not recognisable. *)
@@ -225,8 +224,6 @@ type runtime_attempt_record = {
 val runtime_attempt_record_to_json :
   runtime_attempt_record -> Yojson.Safe.t
 
-val runtime_attempt_record_of_json :
-  Yojson.Safe.t -> runtime_attempt_record option
 
 (** {1 Agent runtime state record} *)
 
@@ -365,10 +362,6 @@ val map_runtime :
 (** [map_runtime f m] returns [{ m with runtime = f m.runtime }] —
     pure functional update of the runtime sub-record. *)
 
-val map_usage :
-  (usage_metrics -> usage_metrics) ->
-  keeper_meta ->
-  keeper_meta
 (** [map_usage f m] is [map_runtime (fun rt -> { rt with usage =
     f rt.usage }) m] — convenience for usage-only updates. *)
 
@@ -388,15 +381,10 @@ val map_compaction_rt :
   keeper_meta
 (** Nested update of [m.runtime.compaction_rt]. *)
 
-val map_proactive_rt :
-  (proactive_runtime -> proactive_runtime) ->
-  keeper_meta ->
-  keeper_meta
 (** Nested update of [m.runtime.proactive_rt]. *)
 
 (** {1 Removed model-arg marker list} *)
 
-val removed_keeper_model_arg_names : string list
 (** Names of removed keeper-creation tool arguments that have
     been retired because runtime/provider/model selection is not part
     of the keeper contract

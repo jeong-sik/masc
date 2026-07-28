@@ -42,7 +42,6 @@ val get_origin_url : local_path:string -> (string, string) result
 (** [get_origin_url ~local_path] returns the configured [origin] remote URL
     for the repository at [local_path]. *)
 
-val worktree_root : local_path:string -> (string, string) result
 (** [worktree_root ~local_path] returns Git's [--show-toplevel] path for
     [local_path]. It is read-only and bounded; callers use it to avoid treating
     an arbitrary file's dirname as a repository root. *)

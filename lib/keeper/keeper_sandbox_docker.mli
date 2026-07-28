@@ -27,11 +27,6 @@ val docker_private_workspace_cwd :
 (** Translate keeper-private in-container absolute paths back to their host
     playground paths for host-side path validation. Actual Docker execution
     still receives the original container paths. *)
-val rewrite_docker_command_paths_for_host_validation :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  string ->
-  string
 
 (** Resolve [(sandbox_profile, network_mode)] from the keeper's declared
     profile. The declared sandbox profile is the execution contract:
@@ -48,8 +43,6 @@ val ensure_keeper_sandbox_runtime :
 
 (** [-v <host>:<container>:ro] mount list, or [[]] when [host] is
     blank or missing. *)
-val optional_ro_mount :
-  host:string -> container:string -> string list
 
 
 

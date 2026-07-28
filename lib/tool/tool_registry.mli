@@ -38,12 +38,10 @@ val record_call_if_known :
 
 (** {1 Queries} *)
 
-val is_known_tool : string -> bool
 (** [is_known_tool name] returns whether [name] is admitted to in-memory call
     stats.  This is not a public-surface visibility predicate. *)
 val get_stats : unit -> (string * call_stats) list
 val get_top_n : int -> (string * call_stats) list
-val get_unused_since : float -> string list
 val get_never_called : string list -> string list
 val total_calls : unit -> int
 val distinct_tools_called : unit -> int

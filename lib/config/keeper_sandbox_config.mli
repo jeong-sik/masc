@@ -25,10 +25,6 @@ val sandbox_profile_of_agent :
   agent_name:string ->
   sandbox_profile
 
-val is_docker :
-  base_path:string ->
-  agent_name:string ->
-  bool
 
 val host_root_rel_of_profile :
   sandbox_profile ->
@@ -57,8 +53,3 @@ val container_root_of_agent :
     see. Local keepers receive [host_path]. Docker keepers receive the
     matching container path when [host_path] is under their configured
     repos root; paths outside that root are returned unchanged. *)
-val visible_path_of_host_path :
-  base_path:string ->
-  agent_name:string ->
-  host_path:string ->
-  string

@@ -124,7 +124,6 @@ val embed_field_value_limit : int
 
 val color_blue : int
 val color_green : int
-val color_red : int
 (** Predefined embed colors: blue=running, green=success, red=error. *)
 
 val link_embed :

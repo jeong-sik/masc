@@ -63,14 +63,6 @@ val last_compaction : t -> compaction
 val compaction_source_to_string : compaction_source -> string
 val compaction_source_of_string_opt : string -> compaction_source option
 
-val read_summary :
-  config:Workspace.config ->
-  name:string ->
-  ?max_bytes:int ->
-  ?max_lines:int ->
-  ?recent_limit:int ->
-  unit ->
-  (summary, read_error) result
 
 val read :
   config:Workspace.config ->
@@ -89,5 +81,4 @@ val append_from_tool_results :
   int
 
 val summary_to_json : summary -> Yojson.Safe.t
-val compaction_to_json : compaction -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t

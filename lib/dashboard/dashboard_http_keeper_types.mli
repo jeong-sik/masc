@@ -65,10 +65,6 @@ val source_health_fields :
 (** {1 Internal metric / list / decision helpers} *)
 
 val nonempty_string_opt : string -> string option
-val parse_json_line_opt : string -> Yojson.Safe.t option
-val metric_ts : Yojson.Safe.t -> float
-val sort_by_latest_ts : Yojson.Safe.t list -> Yojson.Safe.t list
-val string_member_nonempty : string -> Yojson.Safe.t -> string option
 val int_member_fallback : string -> Yojson.Safe.t -> int option
 val take_list : int -> 'a list -> 'a list
 val percentile_sorted_float : float array -> float -> float

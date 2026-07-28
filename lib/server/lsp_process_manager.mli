@@ -27,7 +27,6 @@ val command_for_lang : string -> (string * string list) option
 val lang_of_path : string -> string
 
 (** Allocate a fresh JSON-RPC request ID for this process. *)
-val alloc_id : lsp_process -> int
 
 (** Write a JSON-RPC message to the process stdin with Content-Length framing. *)
 val write_message : lsp_process -> string -> unit

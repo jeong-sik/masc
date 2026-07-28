@@ -92,9 +92,4 @@ val parse_stdout :
     through the [ok]/[error] envelope (e.g. tests that inject
     synthetic results into the parser). *)
 
-val run_result_to_yojson :
-  Worker_container_types.run_result -> Yojson.Safe.t
 
-val run_result_of_yojson :
-  Yojson.Safe.t ->
-  (Worker_container_types.run_result, string) result

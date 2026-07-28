@@ -306,8 +306,6 @@ val set_turn_selected_model :
     overflow recovery. Preserves the bound measurement, but clears the
     previous runtime attempt and selected model so the next retry starts
     from [Prompting + Guard_ok + Runtime_idle]. *)
-val prepare_turn_retry_after_compaction :
-  base_path:string -> string -> unit
 
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps
@@ -388,7 +386,6 @@ val exact_update_succeeded :
   registry_entry -> site:string -> exact_update_result -> bool
 
 (** Set or clear the gRPC close callback. *)
-val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 
 (** Check if a keeper is in Running state. *)
 val is_running : base_path:string -> string -> bool

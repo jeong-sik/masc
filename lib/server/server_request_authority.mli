@@ -91,8 +91,6 @@ val scheme_to_string : scheme -> string
 val trust_class : authority -> trust_class
 val rendered : authority -> string
 
-val equivalent_for_scheme :
-  scheme:scheme -> authority -> authority -> bool
 (** Compare normalized host and effective port.  [http] and [https] apply
     their standard default ports; IPv4/IPv6 textual aliases are canonicalized
     during parsing. *)
@@ -106,7 +104,6 @@ val parse_serialized_origin :
     trailing bytes, and non-HTTP(S) schemes. *)
 
 val serialized_origin_host : serialized_origin -> string
-val serialized_origin_scheme : serialized_origin -> scheme
 
 val serialized_origin_equal :
   serialized_origin -> serialized_origin -> bool

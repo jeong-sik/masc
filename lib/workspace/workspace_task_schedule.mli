@@ -34,29 +34,9 @@ val agent_current_task_matches_assignments
   -> string
   -> bool
 
-val agent_current_task_matches_backlog
-  :  Masc_domain.backlog
-  -> agent_name:string
-  -> string
-  -> bool
 
-val reconcile_agent_current_task_with_backlog
-  :  config
-  -> ?touch_last_seen:bool
-  -> agent_name:string
-  -> Masc_domain.backlog
-  -> unit
 
-val reconcile_all_agent_current_tasks_with_backlog
-  :  config
-  -> ?touch_last_seen:bool
-  -> Masc_domain.backlog
-  -> unit
 
-val reconcile_all_agent_current_tasks_with_fresh_backlog
-  :  ?touch_last_seen:bool
-  -> config
-  -> Masc_domain.backlog
 
 val claim_next_r
   :  config

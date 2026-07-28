@@ -50,24 +50,14 @@ val turn_tool_completed_count : turn_tool_event_tracker -> int
 
 (** Append [input] to the pending FIFO queue for [tool_name]. Returns the
     updated tracker. *)
-val push_turn_tool_input :
-  turn_tool_event_tracker -> string -> Yojson.Safe.t -> turn_tool_event_tracker
 
 (** Remove and return the oldest pending input for [tool_name], or [None]
     if the queue is empty. Returns the updated tracker as the second
     component. *)
-val pop_turn_tool_input :
-  turn_tool_event_tracker -> string -> Yojson.Safe.t option * turn_tool_event_tracker
 
 (** Record an unmatched [ToolCompleted] (no prior [ToolCalled]) into the
     tracker. Logs the violation and stores the first observed integrity error.
     Returns the updated tracker. *)
-val record_unmatched_tool_completed :
-  turn_tool_event_tracker ->
-  keeper_name:string ->
-  tool_name:string ->
-  outcome:string ->
-  turn_tool_event_tracker
 
 (** Drive the tracker over a batch of [Agent_sdk.Event_bus.event]s,
     matching [ToolCalled] <-> [ToolCompleted] pairs and recording integrity

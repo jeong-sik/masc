@@ -145,8 +145,6 @@ val set_sidecar_failure_observer : (site:string -> exn -> unit) -> unit
     [masc_bg_task_sidecar_failures_total]; [bg_task] keeps the hook here
     to avoid a lower-library dependency cycle. *)
 
-val set_drain_failure_observer :
-  (fd_kind:string -> err_kind:string -> unit) -> unit
 (** Install the process-local observer for unexpected (non-EAGAIN /
     EWOULDBLOCK / EINTR / EOF) errors raised by [Unix.read] inside
     [drain_fd_to_buf].  The top-level Otel_metric_store module wires this to

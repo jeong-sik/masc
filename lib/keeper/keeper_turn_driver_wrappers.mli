@@ -64,25 +64,4 @@ val run_named_with_masc_tools :
     lane ownership in runtime manifests and metrics; the default retains
     compatibility for non-Keeper callers. *)
 
-val run_model_with_masc_tools :
-  model_label:string ->
-  goal:string ->
-  ?system_prompt:string ->
-  masc_tools:Masc_domain.tool_schema list ->
-  dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  ?stream_idle_timeout_s:float ->
-  ?temperature:float ->
-  ?max_tokens:int ->
-  ?hooks:Agent_sdk.Hooks.hooks ->
-  ?enable_thinking:bool ->
-  ?provider_config_transform:
-    (Llm_provider.Provider_config.t ->
-    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
-  ?raw_trace:Agent_sdk.Raw_trace.t ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
-  ?transport:Masc_grpc_transport.t ->
-  ?sw:Eio.Switch.t ->
-  ?net:Eio_context.eio_net ->
-  unit ->
-  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 (** [run_model_by_label] variant that bridges MASC tool schemas into OAS tools. *)

@@ -29,8 +29,6 @@ val runtime_blocker_surface_of_typed_class :
 val runtime_blocker_surface_of_failure_reason :
   Keeper_registry.failure_reason -> runtime_blocker_surface option
 
-val runtime_blocker_surface_opt :
-  Workspace_utils.config -> keeper_meta -> runtime_blocker_surface option
 
 val drift_surface_json : unknown_toml_keys:string list -> Yojson.Safe.t
 

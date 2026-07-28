@@ -90,7 +90,6 @@ val pre_turn_complete_heartbeat : turn_running:bool ref -> unit
 val post_turn_complete_heartbeat : turn_running:bool ref -> unit
 val post_wakeup_signal : wakeup:bool Atomic.t -> unit
 val post_submit_task : meta:keeper_meta -> task_id:Keeper_id.Task_id.t -> unit
-val post_heartbeat_tick : wakeup:bool Atomic.t -> unit
 
 (** Outcome of an [interruptible_sleep] call. Mirrors the three terminal
     branches of the polling loop, so callers can distinguish an exact Keeper
@@ -155,16 +154,8 @@ val stage_timing_to_json :
 
 val format_since_last_scheduled_autonomous : int option -> string
 
-val keepalive_entry_accepts_late_event :
-  ctx:'a context -> keeper_name:string -> bool
 
 val dispatch_keepalive_event :
   ctx:'a context -> keeper_name:string ->
   Keeper_state_machine.event -> unit
 
-val dispatch_keepalive_event_with_audit :
-  ctx:'a context -> keeper_name:string ->
-  snapshot:Keeper_measurement.measurement_snapshot ->
-  events_fired:Keeper_state_machine.event list ->
-  selected_event:Keeper_state_machine.event ->
-  Keeper_state_machine.event -> unit

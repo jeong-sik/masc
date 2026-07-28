@@ -82,7 +82,6 @@ val docker_image_inspect_next_action : string
 (** [docker_image_present ~image ~timeout_sec] checks whether the configured
     keeper sandbox image can be inspected locally. [Error message] includes
     daemon/socket access failures as well as missing-image failures. *)
-val docker_image_present : image:string -> timeout_sec:float -> (unit, string) result
 val docker_image_present_optional : image:string -> ?timeout_sec:float -> unit -> (unit, string) result
 
 (** Docker [--label] argv fragment for containers owned by the keeper
@@ -342,7 +341,6 @@ val reset_last_cleanup_for_tests : unit -> unit
 val docker_preflight : timeout_sec:float -> unit -> docker_preflight option
 
 val docker_preflight_to_yojson : docker_preflight -> Yojson.Safe.t
-val docker_preflight_failure_message : docker_preflight -> string
 
 (** Lightweight image-presence check for the concrete execution path. Docker
     execution calls it immediately before [docker run] so an absent image is
@@ -353,11 +351,6 @@ val ensure_keeper_sandbox_image_present
   -> timeout_sec:float
   -> (unit, string) result
 
-val ensure_keeper_sandbox_image_present_optional
-  :  image:string
-  -> ?timeout_sec:float
-  -> unit
-  -> (unit, string) result
 
 val ensure_keeper_sandbox_image_present_with_class
   :  image:string
@@ -370,7 +363,6 @@ val ensure_keeper_sandbox_image_present_with_class_optional
   -> unit
   -> (unit, classified_error) result
 
-val docker_image_preflight_error_code : classified_error -> string
 val docker_image_preflight_failure_message : prefix:string -> classified_error -> string
 
 (** Returns the [--security-opt seccomp=...] argv fragment when the

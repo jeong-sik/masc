@@ -5,7 +5,6 @@
     reject"). Exposed so the keeper failure-circuit-breaker gates can be tested
     end-to-end: the resulting payload is exempt from the health breaker (Gate
     #1) yet still counted by the per-(tool,args) breaker (Gate #2). *)
-val validation_error_json : string -> string
 
 val handle_keeper_task_tool :
   config:Workspace.config ->

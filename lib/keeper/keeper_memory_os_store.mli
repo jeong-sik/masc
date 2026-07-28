@@ -249,14 +249,11 @@ val commit_receipt_settlement_warnings :
   commit_receipt ->
   settlement_warning list
 
-val pending_publication_operation_id : pending_publication -> string
-val pending_publication_generation : pending_publication -> int64
 val pending_publication_receipt_id : pending_publication -> Sha256.t
 val pending_publication_settlement_warnings :
   pending_publication ->
   settlement_warning list
 
-val settlement_warning_to_string : settlement_warning -> string
 val error_settlement_warnings : error -> settlement_warning list
 val error_implementation_safety_violation :
   error ->

@@ -17,10 +17,8 @@
 (** Cap on tracked per-path entries. When exceeded, entries with
     [Atomic.get active = 0] older than {!stale_lock_seconds} are
     pruned. *)
-val max_lock_entries : int
 
 (** Staleness threshold for inactive entries (seconds). *)
-val stale_lock_seconds : float
 
 (** {1 Low-level flock helpers}
 
@@ -68,23 +66,9 @@ val acquire_flock_retry :
     is used for [openfile], [F_TLOCK], and retry sleeps (unless a
     clock is supplied, in which case [Eio.Time.sleep] yields to the
     Eio scheduler). *)
-val acquire_flock_retry_cooperative :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  lock_path:string ->
-  mode:Unix.open_flag list ->
-  perm:int ->
-  ?max_attempts:int ->
-  ?sleep_sec:float ->
-  caller:string ->
-  unit ->
-  Unix.file_descr
 
 (** Convenience wrapper using [O_CREAT;O_WRONLY], mode [0o644],
     caller tag ["File_lock_eio"]. *)
-val acquire_flock_fd :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  string ->
-  Unix.file_descr
 
 (** [release_flock_fd fd] unlocks (best-effort) and closes [fd]. *)
 val release_flock_fd : Unix.file_descr -> unit

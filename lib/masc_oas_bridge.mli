@@ -10,7 +10,6 @@ type caller =
   | Fusion_panel
 
 (** Stable observation label for the closed caller vocabulary. *)
-val caller_key : caller -> string
 
 (** Run a generic OAS operation without imposing a MASC wall-clock budget.
     A genuine inner [Eio.Time.Timeout] becomes a typed SDK timeout;

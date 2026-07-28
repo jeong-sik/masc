@@ -8,7 +8,6 @@ include module type of Keeper_config
 
 (** Resolve the keeper base directory ([.masc/keepers]) for [config],
     creating it if missing. *)
-val keeper_dir_ : Workspace.config -> string
 
 (** Resolve the trace base directory ([.masc/traces]) for [config],
     creating it if missing. *)
@@ -75,7 +74,6 @@ val keeper_history_path : Workspace.config -> string -> string
 val keeper_internal_history_path : Workspace.config -> string -> string
 
 (** Trim + lowercase a history-source label. *)
-val normalize_history_source : string -> string
 
 (** Whether [source] denotes the world-state prompt history channel. *)
 val is_prompt_history_source : string -> bool

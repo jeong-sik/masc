@@ -85,10 +85,8 @@ val tool_cost_estimate : string -> float
 
 (** {1 JSON serialization} *)
 
-val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
-val default_result_truncation : int
 val default_thinking_truncation : int
 val entry_to_json :
   ?result_max_len:int ->
@@ -104,7 +102,6 @@ val tool_call_entry_of_json :
     JSON. The [bool] is true when the gate field parsed from a
     persisted value rather than the legacy default. Exposed for
     RFC-0233 consumers that join rows on [execution_id]. *)
-val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
@@ -119,9 +116,6 @@ val append_entry :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   tool_call_entry -> unit
 
-val append_summary :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  trajectory -> unit
 
 val append_thinking :
   masc_root:string -> keeper_name:string -> trace_id:string ->

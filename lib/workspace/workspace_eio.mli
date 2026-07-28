@@ -93,19 +93,15 @@ val test_config : fs:Eio.Fs.dir_ty Eio.Path.t -> string -> config
 (** {1 Key Utilities} *)
 
 (** Key prefix for agents namespace. *)
-val agents_key : string
 
 (** Key prefix for messages namespace. *)
-val messages_key : string
 
 (** Key prefix for locks namespace. *)
-val locks_key : string
 
 (** Key for workspace state. *)
 val state_key : string
 
 (** Key prefix for events namespace. *)
-val events_key : string
 
 (** Key for a specific agent. *)
 val agent_key : string -> string
@@ -216,7 +212,6 @@ val log_event :
   payload:Yojson.Safe.t -> event
 
 (** Retrieve an event by sequence number, or [None] if missing. *)
-val get_event : config -> seq:int -> Yojson.Safe.t option
 
 (** Retrieve the [limit] most recent events. *)
 val get_recent_events : config -> limit:int -> Yojson.Safe.t list
@@ -226,7 +221,6 @@ val get_recent_events : config -> limit:int -> Yojson.Safe.t list
 (** In-process counters for [atomic_update_state] attempts and failures.
     Returns a JSON object with [state_update_attempts], [state_update_failures],
     and [failure_rate]. *)
-val state_health_counters : unit -> Yojson.Safe.t
 
 (** Run a health check against the backend. *)
 val health_check : config -> (Backend_types.health_result, string) result

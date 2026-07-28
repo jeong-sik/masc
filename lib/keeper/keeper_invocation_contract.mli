@@ -45,7 +45,6 @@ val request_error_to_string : request_error -> string
 val target_name : request -> string
 val prompt : request -> string
 val target_of_json : Yojson.Safe.t -> (target, request_error) result
-val target_to_json : target -> Yojson.Safe.t
 val target_name_of_target : target -> string
 val run_ref_of_json : Yojson.Safe.t -> (run_ref, request_error) result
 val run_ref_to_json : run_ref -> Yojson.Safe.t
@@ -61,8 +60,6 @@ val submit
   -> unit
   -> (Keeper_msg_async.submit_outcome, Keeper_msg_async.submit_error) result
 
-val submission_receipt
-  :  request -> Keeper_msg_async.submit_outcome -> submission_receipt
 
 val result_contract : Keeper_msg_async.entry -> result_contract
 

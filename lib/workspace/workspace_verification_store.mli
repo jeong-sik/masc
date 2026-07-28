@@ -67,4 +67,3 @@ val inspect_submitted_evidence :
   submitted_evidence_access
 val verifications_dir : string -> string
 val request_path : string -> string -> string
-val list_request_headers : string -> request_header list

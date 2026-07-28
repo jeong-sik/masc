@@ -24,10 +24,6 @@ val build_agent :
 
 (** {1 Tool Tracking} *)
 
-val make_tool_tracking_hooks :
-  ?context:Agent_sdk.Context.t ->
-  unit ->
-  string list ref * Agent_sdk.Hooks.hooks
 
 (** {1 Worker Execution} *)
 
@@ -63,10 +59,6 @@ val resume_worker_via_oas :
 
 (** {1 Checkpoint Helpers} *)
 
-val resume_model_id_of_checkpoint :
-  Worker_container_types.worker_container_meta ->
-  Agent_sdk.Checkpoint.t ->
-  string
 
 module For_testing : sig
   val begin_worker_mcp_client_session :

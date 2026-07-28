@@ -123,7 +123,6 @@ val last_namespace_truth_snapshot_hash :
     Tests reset to [None] to force re-broadcast in scenarios
     that exercise the dedup path. *)
 
-val hash_namespace_truth_snapshot : Yojson.Safe.t -> Digestif.SHA256.t
 (** [hash_namespace_truth_snapshot snapshot] computes an incremental SHA-256
     over [snapshot], skipping the volatile [generated_at]/[generated_at_iso]
     fields. One O(n) walk with no intermediate Yojson/string allocation;

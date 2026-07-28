@@ -115,16 +115,6 @@ type runtime_metrics_capture
     a {!runtime_observation} via
     {!runtime_observation_with_metrics}. *)
 
-val runtime_attempt_terminal_event_json :
-  ?slot_release_at_phase:string ->
-  ?productive_phase_elapsed_ms:int ->
-  ?retry_phase_elapsed_ms:int ->
-  model_id:string ->
-  model_label:string option ->
-  latency_ms:int option ->
-  error:string option ->
-  unit ->
-  Yojson.Safe.t
 (** Builds the structured JSON payload emitted to system_log for one
     runtime candidate's terminal state. Exposed for tests so the shape
     contract (`event`, `model_id`, `model_label`, `latency_ms`, `outcome`,
@@ -177,12 +167,6 @@ val runtime_observation_with_metrics :
 
 (** {1 Fallback recorder} *)
 
-val record_fallback_event :
-  runtime_metrics_capture ->
-  from_model:string ->
-  to_model:string ->
-  reason:string ->
-  unit
 (** Appends a fallback event to [capture].  The public event keeps the
     historical field names but records runtime-lane labels rather than
     concrete provider/model identities. *)
@@ -195,20 +179,12 @@ val start_actor_if_needed : sw:Eio.Switch.t -> unit
     Idempotent — a second call is a no-op so the bootstrap
     paths can call it from multiple entry points. *)
 
-val record_runtime :
-  ?keeper_name:string ->
-  observation:runtime_observation option ->
-  runtime_id:string ->
-  outcome:[ `Success | `Failure | `Rejected ] ->
-  unit ->
-  unit
 (** Posts a record-runtime message onto the audit stream.
     The actor consumes it asynchronously, bumping the
     per-runtime counters and persisting the audit JSON
     via {!record_runtime_audit}.  Non-blocking — the
     caller does not wait for the actor to drain. *)
 
-val reset_runtime_counters_for_test : unit -> unit
 (** Posts a reset message onto the stream.  Test-only
     isolator; no-op outside the actor's lifetime. *)
 
@@ -222,8 +198,6 @@ val runtime_metrics_json : unit -> Yojson.Safe.t
     [Runtime_agent] re-exposes it via the
     [include Runtime_observation] module. *)
 
-val runtime_observation_to_json :
-  runtime_observation -> Yojson.Safe.t
 (** Wire encoder for {!runtime_observation} — flattens
     [attempts] / [fallback_events] / outcome metadata
     into a single [`Assoc].  Pinned because the runtime-

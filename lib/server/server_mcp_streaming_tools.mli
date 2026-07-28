@@ -3,7 +3,6 @@
 
     See implementation for the policy that governs membership. *)
 
-val streaming_capable_tools : string list
 (** The full registry as an ordered list, for diagnostics and tests. *)
 
 val is_streaming_capable : string -> bool

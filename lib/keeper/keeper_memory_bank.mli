@@ -176,21 +176,14 @@ val memory_compaction_target_notes : unit -> int
 val memory_compaction_trigger_bytes : target_notes:int -> int
 (** File size that triggers a compaction pass for the given target. *)
 
-val memory_kind_caps_for_compaction :
-  target_notes:int -> (memory_kind, int) Hashtbl.t
 (** Per-kind caps used inside the compaction pass; tighter than
     [kind_caps] because compaction is a recovery action. *)
 
-val memory_row_key : keeper_memory_row_raw -> string
 (** Dedup key for compaction passes. *)
 
-val compaction_priority :
-  current_generation:int -> keeper_memory_row_raw -> int
 (** Per-row priority during compaction; older / lower-priority /
     out-of-generation rows are evicted first. *)
 
-val write_memory_bank_rows :
-  string -> keeper_memory_row_raw list -> (unit, string) result
 (** Atomically replace the bank file with [rows]. *)
 
 val compact_memory_bank_if_needed :

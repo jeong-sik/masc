@@ -9,11 +9,6 @@ val normalize_path : string -> string
 val playground_root_no_create :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> string
 
-val candidate_repo_roots_no_create :
-  base_path:string ->
-  keeper_id:string ->
-  repository_id:string ->
-  string list
 (** Candidate host-side sandbox repo roots for [repository_id] under
     [keeper_id]'s known sandbox backends. Returns [[]] when [repository_id] is
     not a safe single path component. This performs no filesystem mutation and
@@ -28,11 +23,6 @@ type path_context =
 (** Path-only facts for any path inside a keeper sandbox repo. [path_root] is
     the repo root for the path. *)
 
-val classify_path :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  path:string ->
-  path_context option
 (** Classify [path] as a keeper sandbox repo path. This performs no git probes
     and no repo setup. *)
 
@@ -45,11 +35,6 @@ type cwd_context =
 (** Path-only facts for a cwd inside a keeper sandbox repo. [path_root] is the
     repo root expected for the cwd. *)
 
-val classify_cwd :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  cwd_context option
 (** Classify [cwd] as a keeper sandbox repo cwd. This reports path facts only;
     callers own command-shape and write-gate policy. *)
 

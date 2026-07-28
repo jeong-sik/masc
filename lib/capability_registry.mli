@@ -107,7 +107,6 @@ val spawned_agent_prefixed_tools : string list
 
 (** {1 Keeper surface naming} *)
 
-val keeper_backend_tool_name : string -> string
 (** Resolve a keeper-facing tool alias to its [masc_*] backend
     name; identity for non-aliased tools. Pulls from
     runtime-owned aliases are resolved behind the runtime boundary. *)

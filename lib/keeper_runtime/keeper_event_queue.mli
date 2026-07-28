@@ -277,7 +277,6 @@ val uniq_stimuli : stimulus list -> stimulus list
 val dedup_by_identity : t -> t
 (** Collapse duplicate durable-event identities in a queue. *)
 
-val remove_by_post_id_pair : post_id -> t -> t -> stimulus list * t * t
 (** Remove matching stimuli from two queues and return the de-duplicated
     removed stimuli plus both remaining queues. *)
 

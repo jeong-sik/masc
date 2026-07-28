@@ -19,24 +19,12 @@
 
 (** {1 Active publishers} *)
 
-val publish_broadcast :
-  agent_name:string -> content:string -> unit
 (** Publishes [masc.broadcast] with payload
     [{agent_name, content, timestamp}]. *)
 
-val publish_heartbeat :
-  agent_name:string ->
-  turn:int ->
-  context_pct:float ->
-  unit
 (** Publishes [masc.heartbeat] with payload
     [{agent_name, turn, context_pct, timestamp}]. *)
 
-val publish_task_transition :
-  agent_name:string ->
-  task_id:string ->
-  transition:Masc_domain.task_action ->
-  unit
 (** Publishes [masc.task_transition] with payload
     [{agent_name, task_id, transition, timestamp}].
 
@@ -49,12 +37,6 @@ val publish_task_transition :
 
 (** {1 Keeper snapshot + lifecycle} *)
 
-val publish_keeper_snapshot :
-  keeper_name:string ->
-  generation:int ->
-  context_ratio:float ->
-  message_count:int ->
-  unit
 (** Publishes [masc.keeper.snapshot] with payload
     [{keeper_name, generation, context_ratio, message_count, timestamp}].
     Emitted alongside SSE broadcast in [keeper_keepalive]. *)

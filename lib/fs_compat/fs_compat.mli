@@ -1154,7 +1154,6 @@ val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
-val durable_append_failure_to_string : durable_append_failure -> string
 
 (** Render a structured durable-append failure without discarding the original
     [Unix.error] or rollback failures. *)
@@ -1296,7 +1295,6 @@ val close_all_cached_writers : unit -> unit
     this a later [append_jsonl] would write to the orphaned file.
     Serialization with concurrent [append_jsonl] calls is handled by the
     same per-path append mutex used by the append path. *)
-val invalidate_cached_writer : string -> unit
 
 (** Drop and close every cached writer. Test-only — production
     relies on process-lifetime persistence and [at_exit] drain. *)

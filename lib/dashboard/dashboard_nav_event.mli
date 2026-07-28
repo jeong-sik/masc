@@ -16,18 +16,14 @@ type event =
 
 (** Strict allowlist of valid surface IDs. Mirrors [VALID_TABS] in
     [dashboard/src/types/sse.ts]. *)
-val valid_surfaces : string list
 
 (** Strict allowlist of [(surface, section)] pairs. Generated from
     [dashboard/src/config/navigation.ts]. *)
-val valid_sections : (string * string list) list
 
 (** [is_valid_surface s] returns [true] iff [s] is in [valid_surfaces]. *)
-val is_valid_surface : string -> bool
 
 (** [is_valid_section ~surface section] checks the pair against the
     allowlist. Returns [true] for known visible *and* hidden sections. *)
-val is_valid_section : surface:string -> string -> bool
 
 (** [parse_event_json json] parses the request body. Returns [Error msg]
     for any of: malformed JSON shape, missing [surface], unknown

@@ -16,7 +16,6 @@ val register_all : unit -> unit
 (** Register tags (+ placeholder schemas where needed) for all names in the
     unified name sources that are not already present in the tag registry. *)
 
-val visible_schemas_missing_tags : unit -> string list
 (** Return the names of LLM-visible schemas that still lack a dispatch tag.
     Empty when the ratchet is complete. *)
 

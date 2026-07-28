@@ -7,7 +7,6 @@
 type Runtime_events.User.tag +=
   | Turn
 
-val ev_turn : Runtime_events.Type.span Runtime_events.User.t
 (** Span event bracketing an agent turn.  Consumers register with
     [Runtime_events.Callbacks.add_user_event Runtime_events.Type.span]
     to receive both bounds keyed by timestamp; no external

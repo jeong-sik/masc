@@ -48,7 +48,6 @@ val of_execution_result :
   t list
 
 
-val task_seed_to_json : task_seed -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t
 
 val delegation_request_json :

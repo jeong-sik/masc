@@ -80,10 +80,6 @@ val store_artifact
 (** Store image bytes in the content-addressed artifact store. Blocking
     filesystem work is offloaded when the Eio runtime is active. *)
 
-val load_artifact
-  :  dir:string
-  -> Multimodal.Vision_artifact_store.handle
-  -> (string, string) result
 (** Load image bytes from the content-addressed artifact store. Blocking
     filesystem work is offloaded when the Eio runtime is active. *)
 

@@ -61,7 +61,6 @@ type ownership =
   | Self_owned
   | Foreign
 
-val ownership_to_string : ownership -> string
 
 type scenario = {
   id : string;
@@ -153,8 +152,6 @@ val compute_pass_at_k : k:int -> n:int -> c:int -> float
     [c] successes out of [n] total. The unbiased estimator from the
     agent-eval / METR literature. *)
 
-val summarize_runs :
-  scenario:scenario -> k:int -> eval_run list -> eval_result
 (** Aggregate the runs of a single scenario into an
     {!eval_result} (pass@k, mean score, consistency, total cost). *)
 
@@ -173,6 +170,4 @@ val report_to_string : eval_suite_result -> string
 (** Pretty-print a suite result as a human-readable report
     (overall pass rate, per-scenario score breakdown). *)
 
-val write_results_jsonl :
-  path:string -> eval_suite_result -> unit
 (** Append each {!eval_run} to [path] as one JSON object per line. *)

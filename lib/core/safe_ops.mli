@@ -47,7 +47,6 @@ val persistence_utf8_repair_stats : unit -> utf8_repair_stats
 (** Process-local cumulative count of malformed UTF-8 repairs seen by
     persistence read helpers. *)
 
-val set_persistence_utf8_repair_metric_hook : (unit -> unit) -> unit
 (** Install the higher-level metrics hook called once for each persistence
     UTF-8 repair. Safe_ops lives below Otel_metric_store, so the hook keeps the
     dependency direction one-way. *)

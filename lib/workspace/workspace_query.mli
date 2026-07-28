@@ -109,7 +109,6 @@ val is_valid_filename : string -> bool
 
 (** Extract a sequence number from a message filename like
     ["000001885_unknown_broadcast.json"]. Returns 0 on parse failure. *)
-val extract_seq_from_filename : string -> int
 
 (** {1 Internal Helpers (used by sibling workspace modules)} *)
 
@@ -121,6 +120,3 @@ val take_first : int -> 'a list -> 'a list
 
 (** Read most-recent messages from filesystem or PG backend without
     parsing the entire history directory. *)
-val collect_recent_messages :
-  config -> msgs_path:string -> since_seq:int -> limit:int ->
-  warn_label:string -> Masc_domain.message list

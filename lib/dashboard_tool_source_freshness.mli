@@ -15,7 +15,6 @@
     {!latest_ts_of_record} / {!freshness_fields} /
     {!health_fields} composition layer instead. *)
 
-val latest_ts_of_record : Yojson.Safe.t -> float option
 (** Extract the most recent timestamp from a JSON record,
     trying [ts_unix] / [ts] / [timestamp] (numeric) first and
     [ts_iso] (ISO-8601) as a fallback via
@@ -43,15 +42,6 @@ val freshness_fields :
     fields render as [`Null] so dashboard consumers can
     distinguish "missing" from "deliberately blank". *)
 
-val health_fields :
-  now:float ->
-  exists:bool ->
-  entry_count:int ->
-  latest_ts:float option ->
-  freshness_slo_s:float ->
-  ?coverage_gap:Yojson.Safe.t ->
-  unit ->
-  (string * Yojson.Safe.t) list
 (** Compute the [(health, stale_reason)] pair for a source card.
 
     Decision order:
@@ -79,10 +69,6 @@ val active_coverage_gaps :
 (** Filter coverage gaps down to the entries still active for the
     current source timestamp. *)
 
-val coverage_gaps_for_store :
-  source_name:string ->
-  durable_store:string ->
-  Yojson.Safe.t list
 (** Read the most recent 50 telemetry coverage-gap entries
     (via {!Telemetry_coverage_gap.read_recent}) under
     [<dirname durable_store>] and filter them down to entries

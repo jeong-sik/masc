@@ -80,8 +80,6 @@ type compaction_outcome =
 
 (** {1 Own-module vals} *)
 
-val payload_role_to_string : payload_role -> string
-val payload_role_of_string : string -> payload_role option
 
 val source_clock_to_string : source_clock -> string
 val source_clock_of_string : string -> source_clock option
@@ -89,14 +87,12 @@ val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
 val manifest_file_suffix : string
-val safe_segment : string -> string
 
 val status_of_string : string -> status
 val status_to_string : status -> string
 val status_is_skipped : t -> bool
 val compaction_outcome_key : string
 val compaction_outcome_to_string : compaction_outcome -> string
-val compaction_outcome_of_string : string -> compaction_outcome option
 
 val clock_refs :
   ?edge_id:string ->
@@ -191,7 +187,6 @@ val base_dir : Workspace.config -> keeper_name:string -> string
     [trace_id] is sanitized as a path segment. *)
 val path_for_trace : Workspace.config -> keeper_name:string -> trace_id:string -> string
 
-val append_to_path : string -> t -> (unit, string) result
 val append : Workspace.config -> t -> (unit, string) result
 val append_best_effort : ?site:string -> Workspace.config -> t -> unit
 

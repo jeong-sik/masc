@@ -123,18 +123,14 @@ type _ strategy =
 
 (** TLA+ symbol for {!error_mode}, matching
     [specs/resilience/ResilienceDegradation.tla] [ErrorModes]. *)
-val error_mode_to_tla_symbol : error_mode -> string
 
 (** Complete TLA+ [ErrorModes] mirror for payload-bearing
     {!error_mode} constructors. *)
-val all_error_mode_tla_symbols : string list
 
 (** TLA+ symbol for {!strategy}, matching
     [specs/resilience/ResilienceDegradation.tla] [Strategies]. *)
-val strategy_to_tla_symbol : 'a strategy -> string
 
 (** Complete TLA+ [Strategies] mirror for {!strategy}. *)
-val all_strategy_tla_symbols : string list
 
 (** {1 Untyped classification} *)
 
@@ -224,10 +220,6 @@ val resource_exhausted :
   limit:float ->
   error_mode
 
-val resource_exhausted_unknown :
-  resource:[ `Tokens | `Time | `Cost | `Memory | `Disk ] ->
-  detail:string ->
-  error_mode
 
 val ambiguity : detail:string -> branches:string list -> error_mode
 

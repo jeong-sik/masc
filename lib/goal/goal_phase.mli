@@ -30,7 +30,6 @@ val all : t list
 (** Every phase in declaration order. SSOT for callers that need the full
     string set (MCP schema enum, validator) via [List.map to_string all]. *)
 
-val admits_self_directed_progress : t -> bool
 (** Whether a keeper waking on this goal can make progress on it. *)
 
 (** Operator / system actions that may drive a transition. *)

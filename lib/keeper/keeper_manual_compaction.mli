@@ -92,10 +92,6 @@ val run_under_admission
     No nested admission or release occurs. *)
 
 val failure_to_string : failure -> string
-val observe_manifest : keeper_name:string -> (unit, string) result -> unit
-val queue_commit_of_applied_receipt
-  :  applied_receipt
-  -> Keeper_event_queue_state.manual_compaction_commit
 
 module For_testing : sig
   val preserve_no_compaction_after_final_admission_busy

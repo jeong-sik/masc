@@ -18,7 +18,6 @@ type t =
 val id_of_binding : binding -> string
 val of_binding : config -> binding -> t option
 
-val of_binding_result : config -> binding -> (t, string) result
 (** Reason-preserving form of {!of_binding}. [Error reason] when the binding's
     provider/model id is unresolved or the provider transport/protocol cannot be
     materialized into a {!Llm_provider.Provider_config.t} (e.g. a [messages-http]
@@ -364,11 +363,9 @@ val top_p_of_runtime_id : string -> float option
     or [None] when the runtime is not configured or no explicit value is
     declared.  This projects the Provider_config SSOT used for dispatch. *)
 
-val top_k_of_runtime_id : string -> int option
 (** Request [top_k] from the materialized OAS provider config for runtime [id],
     or [None] when absent. *)
 
-val min_p_of_runtime_id : string -> float option
 (** Request [min_p] from the materialized OAS provider config for runtime [id],
     or [None] when absent. *)
 
@@ -464,7 +461,6 @@ val default_max_context : unit -> int
     [Runtime_runtime.resolve_*_max_context] label scans. Falls back to
     [Runtime_constants.fallback_context_window] before {!init_default} runs. *)
 
-val default_model_api_name : unit -> string
 (** API model name of the default runtime, sent to the runtime completion
     endpoint (RFC-0206 single-binding). Replaces the deleted
     [Runtime_runtime.default_local_model_label_and_id]. Falls back to ["auto"]

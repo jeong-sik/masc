@@ -8,11 +8,7 @@ module type Store = sig
 end
 
 val strip_trailing_slash : string -> string
-val is_path_prefix : prefix:string -> string -> bool
-val rel_under_path : prefix:string -> string -> string
 
-val longest_local_path :
-  ('repo * string * 'rel) list -> ('repo * string * 'rel) option
 
 module Make (Store : Store) : sig
   val find_url_by_id : base_path:string -> repository_id -> string option

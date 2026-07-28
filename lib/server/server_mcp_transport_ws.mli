@@ -199,7 +199,6 @@ val new_session : id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
     inserts the result into {!sessions} under
     {!with_sessions_rw}. *)
 
-val is_session_closed : ws_session -> bool
 (** [true] once the session has been closed locally or the httpun-ws writer
     has shut down.  Safe to call from any fiber. *)
 
@@ -352,50 +351,23 @@ val set_dashboard_snapshot_provider :
     {!dashboard_subscribe} when seeding initial state.
     Called once at server bootstrap. *)
 
-val dashboard_hello :
-  base_path:string ->
-  session_id:string ->
-  ?token:string ->
-  unit ->
-  (Yojson.Safe.t, string) result
 (** Authenticates the dashboard session.  [Ok payload]
     on success carries the protocol version + per-slice
     snapshot; [Error msg] otherwise (unknown session,
     bad token, etc). *)
 
-val dashboard_subscribe :
-  session_id:string ->
-  ?route:string ->
-  slices:string list ->
-  unit ->
-  (Yojson.Safe.t, string) result
 (** Adds [slices] to the session's subscription set
     (after validating each slice is known).  Requires a
     prior {!dashboard_hello}. *)
 
-val dashboard_unsubscribe :
-  session_id:string ->
-  ?slices:string list ->
-  unit ->
-  (Yojson.Safe.t, string) result
 (** Drops [slices] from the subscription set.  When
     [?slices] is [None], unsubscribes from every slice.
     Requires a prior {!dashboard_hello}. *)
 
-val dashboard_ping :
-  session_id:string ->
-  unit ->
-  (Yojson.Safe.t, string) result
 (** Lightweight heartbeat endpoint for browser dashboards.
     Requires a prior {!dashboard_hello}; stale or unauthenticated sessions
     fail so the client can reconnect and re-handshake. *)
 
-val dashboard_ack :
-  session_id:string ->
-  seq:int ->
-  ?buffered_amount:int ->
-  unit ->
-  (Yojson.Safe.t, string) result
 (** Records the client's ack of [seq] and the optional
     [WebSocket.bufferedAmount] reading.  Used by the
     backpressure observer to gate further sends when the

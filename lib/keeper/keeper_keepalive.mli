@@ -8,7 +8,6 @@ module StringMap = Set_util.StringMap
 val set_bus : Agent_sdk.Event_bus.t -> unit
 
 (** Retrieve the shared Event_bus, if set. *)
-val get_bus : unit -> Agent_sdk.Event_bus.t option
 
 val register_grpc_heartbeat_starter : Keeper_keepalive_signal.grpc_heartbeat_starter_fn -> unit
 
@@ -33,7 +32,6 @@ val wakeup_keeper :
   string -> unit
 
 val not_in_registry_warn_cooldown_s : float
-val not_in_registry_warn_max_entries : int
 
 type not_in_registry_warn_decision =
   | Warn_unknown_keeper
@@ -122,4 +120,3 @@ val request_entry_stop : Keeper_registry.registry_entry -> unit
 val stop_keepalive_and_await :
   base_path:string -> string -> joined_stop_result
 
-val stop_all_keepalives : unit -> unit

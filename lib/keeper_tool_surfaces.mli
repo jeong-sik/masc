@@ -43,11 +43,6 @@ val dedupe_schemas :
 (** [dedupe_schemas schemas] removes duplicate-by-[name] entries
     while preserving first-occurrence order. *)
 
-val lookup_schemas_by_name_exn :
-  label:string ->
-  Masc_domain.tool_schema list ->
-  string list ->
-  Masc_domain.tool_schema list
 (** [lookup_schemas_by_name_exn ~label all_schemas values] returns
     the schemas in [all_schemas] whose names appear in [values],
     raising [Invalid_argument "<label>: unknown tool schema(s): <list>"]
@@ -68,30 +63,22 @@ val spawned_agent_public_tool_names : string list
 val local_worker_public_tool_names : string list
 (** SSOT: {!Tool_catalog_surfaces.local_worker_surface_tools}. *)
 
-val local_worker_contract_schemas : Masc_domain.tool_schema list
 (** Re-export of {!Sdk_tool_contract.sdk_tool_schemas}. *)
 
 val local_worker_internal_schemas : Masc_domain.tool_schema list
 (** Internal-only schemas (currently just [masc_heartbeat]).
     Filtered from {!Tool_schemas_workspace_core.schemas}. *)
 
-val local_worker_run_schemas : Masc_domain.tool_schema list
 (** Domain-grouped schema bundle (run)
     used by {!select_public_local_worker_schemas} and the
     autonomous catalogue resolver. *)
 
-val select_public_local_worker_schemas :
-  unit -> Masc_domain.tool_schema list
 (** [select_public_local_worker_schemas ()] returns the union of
     board / workspace-core / workspace-extra / agent / run / spawn schemas,
     deduped, intersected with
     {!local_worker_public_tool_names}.  This is the public local-
     worker surface as the dashboard sees it. *)
 
-val resolve_named_schemas :
-  Masc_domain.tool_schema list ->
-  string list ->
-  (Masc_domain.tool_schema list, string) Result.t
 (** [resolve_named_schemas all_schemas values] is the [Result]-
     typed sibling of {!lookup_schemas_by_name_exn}: returns
     [Error "unknown tool schema(s): <list>"] for missing names

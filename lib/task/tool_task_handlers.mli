@@ -17,7 +17,6 @@ type task_owner_hooks =
 val push_event_to_sessions_fn : (Yojson.Safe.t -> unit) Atomic.t
 
 val set_task_owner_hooks : task_owner_hooks -> unit
-val current_task_owner_hooks : unit -> task_owner_hooks
 
 include module type of Tool_task_payloads
 include module type of Tool_task_args

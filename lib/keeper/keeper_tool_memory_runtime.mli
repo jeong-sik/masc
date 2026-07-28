@@ -8,9 +8,6 @@ type memory_search_source =
   | History
   | All
 
-val memory_search_source_to_string : memory_search_source -> string
-val memory_search_source_of_string_opt : string -> memory_search_source option
-val all_memory_search_sources : memory_search_source list
 val valid_memory_search_source_strings : string list
 
 val keeper_memory_search_json
@@ -68,7 +65,6 @@ val keeper_memory_write_with_outcome
   -> Keeper_tool_execution.t
 
 (** Title length cap exposed for sync regression tests. *)
-val keeper_memory_write_max_title_chars : int
 
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a

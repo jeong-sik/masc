@@ -64,4 +64,3 @@ val canonical_tool_name : string -> string
     [tool] / [routed_to] / [result] labels. Use only at the keeper turn
     observation boundary. Non-observation call sites should use
     [canonical_tool_name] to avoid double-counting. *)
-val canonical_tool_name_observed : string -> string

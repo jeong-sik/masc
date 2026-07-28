@@ -28,7 +28,6 @@ type consolidation_plan =
   ; drop_indices : int list
   }
 
-val empty_plan : consolidation_plan
 
 type output_rejection_reason =
   | Non_json

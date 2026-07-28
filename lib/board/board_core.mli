@@ -407,7 +407,6 @@ val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
 (** Snapshots [store.sub_boards] under the state lock, then atomically
     rewrites {!sub_boards_path} under the persist lock. *)
-val rewrite_sub_boards : store -> unit
 
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.

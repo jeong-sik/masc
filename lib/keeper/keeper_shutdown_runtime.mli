@@ -52,9 +52,6 @@ val submit_dormant :
 (** Recover operations left by an earlier server process. Must run before
     Keeper autoboot so a stopped Keeper cannot acquire a replacement lane
     ahead of settlement. Returns one explicit result per durable operation. *)
-val recover_at_boot :
-  config:Workspace.config ->
-  (Keeper_shutdown_types.t, string) result list
 
 (** Recover one durable operation without consulting global inventory. This
     lets bootstrap isolate every Keeper in its own process-lifetime fiber. *)

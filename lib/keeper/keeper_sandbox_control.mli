@@ -6,7 +6,6 @@ val managed_kind : string
 
 val turn_kind : string
 
-val all_kind : string
 
 type stop_scope = Keeper_sandbox_control_contract.stop_scope =
   | Stop_managed
@@ -26,12 +25,6 @@ val start_managed_container :
   unit ->
   (Yojson.Safe.t, string) result
 
-val stop_managed_containers :
-  ?keeper_name:string ->
-  config:Workspace.config ->
-  timeout_sec:float ->
-  unit ->
-  Keeper_sandbox_runtime.stop_result
 
 val stop_containers :
   ?keeper_name:string ->

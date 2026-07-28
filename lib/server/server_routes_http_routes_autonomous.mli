@@ -22,11 +22,9 @@
     [autonomous_meta] from working_context) is reserved for a
     follow-up PR — this module only ships the static enumeration. *)
 
-val phases_response : unit -> Yojson.Safe.t
 (** [{ "count": 8, "phases": [{ "tag": "idle", "symbol": "idle" }, ...] }]
     listing every phase witness. *)
 
-val transitions_response : unit -> Yojson.Safe.t
 (** [{ "count": 19, "transitions": [{ "tag": "T_idle_to_perceiving",
        "symbol": "idle->perceiving" }, ...] }] listing every
     valid transition. *)

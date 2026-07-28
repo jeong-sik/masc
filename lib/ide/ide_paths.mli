@@ -14,7 +14,6 @@
     identity. The slug helpers are pure additions in PR-1a and have
     zero callers until PR-1b/c wire them. *)
 
-val store_subdir : string
 (** The literal subdirectory name [".masc-ide"]. *)
 
 val store_path : base_dir:string -> string

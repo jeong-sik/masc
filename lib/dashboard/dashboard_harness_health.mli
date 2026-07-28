@@ -99,14 +99,6 @@ val record_pre_compact
 (** Timestamp-injection variant of {!record_pre_compact}.
     Test-only seam — production callers thread the wall
     clock via {!record_pre_compact}. *)
-val record_pre_compact_at
-  :  timestamp:float
-  -> keeper_name:string
-  -> checkpoint_bytes:int
-  -> message_count:int
-  -> strategies:string list
-  -> trigger:Compaction_trigger.t
-  -> pre_compact_event
 
 (** Records one wake-time payload sample and returns the
     constructed event.  Threaded by [keeper_agent_run] /

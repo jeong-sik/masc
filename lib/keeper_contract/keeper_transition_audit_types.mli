@@ -10,7 +10,6 @@ type transition_record =
   ; wall_clock_at_decision : float
   }
 
-val event_type_of_event : Keeper_state_machine.event -> string
 val to_json : transition_record -> Yojson.Safe.t
 
 type completed_turn_outcome =
@@ -34,8 +33,6 @@ type turn_fsm_transition_record =
   ; turn_fsm_wall_clock_at : float
   }
 
-val completed_turn_outcome_to_json : completed_turn_outcome -> Yojson.Safe.t
-val completed_turn_outcome_of_json : Yojson.Safe.t -> completed_turn_outcome option
 val completed_turn_to_json : completed_turn_record -> Yojson.Safe.t
 val turn_fsm_transition_to_json : turn_fsm_transition_record -> Yojson.Safe.t
 val completed_turn_of_json : Yojson.Safe.t -> completed_turn_record option

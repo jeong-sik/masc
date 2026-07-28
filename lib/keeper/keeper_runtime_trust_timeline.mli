@@ -6,7 +6,6 @@ val json_float_opt_member : string -> Yojson.Safe.t -> float option
 
 val json_string_opt_member : string -> Yojson.Safe.t -> string option
 
-val json_string_opt_value : Yojson.Safe.t -> string option
 
 val json_bool_opt_member : string -> Yojson.Safe.t -> bool option
 
@@ -17,7 +16,6 @@ val assoc_bool_default :
 
 val assoc_string_opt : string -> (string * Yojson.Safe.t) list -> string option
 
-val assoc_json_opt : string -> (string * Yojson.Safe.t) list -> Yojson.Safe.t option
 
 val take : int -> 'a list -> 'a list
 
@@ -68,10 +66,6 @@ val blocker_timeline_event :
 
 val latest_tool_call_json : keeper_name:string -> Yojson.Safe.t option
 
-val pending_approval_json :
-  base_path:string ->
-  keeper_name:string ->
-  (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result
 
 val pending_approval_json_with_reader :
   read_pending:

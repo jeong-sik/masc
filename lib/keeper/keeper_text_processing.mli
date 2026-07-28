@@ -13,7 +13,6 @@ val truncate_utf8_prefix : max_bytes:int -> string -> string * bool
 val normalize_proactive_text : string -> string
 
 (** Extract check-in text from a proactive reply. *)
-val extract_checkin_text : string -> string option
 
 (** {1 Terminal Ending Detection} *)
 
@@ -21,7 +20,6 @@ val extract_checkin_text : string -> string option
 val proactive_has_terminal_punct : string -> bool
 
 (** Check for terminal Korean verb endings. *)
-val proactive_has_terminal_korean_ending : string -> bool
 
 (** Check for any terminal ending (punctuation or Korean). *)
 val proactive_has_terminal_ending : string -> bool

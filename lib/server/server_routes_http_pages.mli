@@ -146,8 +146,6 @@ val bonsai_api_keepers_summary :
     endpoint.  Consumes the registry through
     {!keepers_summary_from_registry}. *)
 
-val keepers_summary_from_registry :
-  base_path:string -> Masc_dashboard_api_types.Keepers.response
 (** Returns the keepers-summary projection consumed by
     the Bonsai dashboard JSON endpoint and asserted on
     by [test/test_keeper_registry] via the

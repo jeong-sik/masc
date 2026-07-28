@@ -120,7 +120,6 @@ val tool_annotations_for_profile :
     Subjective mutation severity and open-world classifications are not
     inferred. [profile] currently does not alter these exact annotations. *)
 
-val tool_title_of_name : string -> string
 (** [tool_title_of_name name] returns the human-readable title:
 
     + Custom title from the internal [custom_tool_titles] table
@@ -128,7 +127,6 @@ val tool_title_of_name : string -> string
     + Otherwise auto-generated Title Case from the identifier
       (drops [masc_] prefix, splits on [_], capitalises each word). *)
 
-val tool_output_schema_field : string -> Yojson.Safe.t option
 (** [tool_output_schema_field _] currently returns [None] for
     every tool — outputSchema advertising is intentionally
     disabled until handlers can guarantee structuredContent.

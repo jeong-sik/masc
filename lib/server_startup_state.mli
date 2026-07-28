@@ -48,14 +48,12 @@ val is_live : unit -> bool
 val pending_lazy_tasks : unit -> string list
 
 (** [true] iff {!pending_lazy_tasks} is empty. *)
-val lazy_tasks_complete : unit -> bool
 
 (** Seconds elapsed since startup began. *)
 val elapsed_since_start : unit -> float
 
 (** Default startup watchdog timeout in seconds
     ([MASC_STARTUP_WATCHDOG_SEC] default). *)
-val default_watchdog_timeout_sec : float
 
 (** Effective watchdog timeout from env, clamped to [[30, 600]]. *)
 val watchdog_timeout_sec : unit -> float
@@ -121,7 +119,6 @@ val mark_degraded : error:string -> unit
 
 (** Record the fallback reason (e.g. ["using filesystem backend
     because PG unreachable"]). *)
-val note_fallback : string -> unit
 
 (** Persist path-diagnostics and config-resolution JSON snapshots
     for the next {!to_yojson} call. *)

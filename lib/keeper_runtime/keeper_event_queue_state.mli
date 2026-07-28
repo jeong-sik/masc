@@ -223,17 +223,10 @@ type manual_compaction_commit =
 type manual_compaction_followup =
   | Compaction_commit_ack
 
-val manual_compaction_commit_requires_operator_action
-  :  manual_compaction_commit
-  -> bool
 
 val no_compaction_reason_label : no_compaction_reason -> string
-val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
 val no_compaction_reason_to_string : no_compaction_reason -> string
 val exact_execution_terminal_cause_label : exact_execution_terminal_cause -> string
-val exact_execution_terminal_cause_of_label
-  :  string
-  -> (exact_execution_terminal_cause, string) result
 val exact_execution_terminal_to_string : exact_execution_terminal -> string
 
 type settlement =
@@ -371,7 +364,6 @@ val source_terminal_receipt_of_stimulus :
 (** Accept only [Fusion_completed], [Bg_completed], or [Hitl_resolved] and
     retain their exact typed terminal payload. *)
 
-val replay_transition_receipt : transition_receipt -> t -> (t, string) result
 (** Apply one canonical durable receipt to its exact active lease. Replaying
     the same retained receipt is idempotent; a different receipt or a missing
     lease is an explicit conflict. *)

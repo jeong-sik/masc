@@ -15,8 +15,6 @@ type read_result = {
 val fixed_store_dir : masc_root:string -> base_path:string -> source -> string option
 val source_freshness_slo_s : source -> float
 val source_producer : source -> string
-val source_dashboard_surface : source -> string
-val source_durable_store : masc_root:string -> base_path:string -> source -> string
 val source_metadata_fields : base_path:string -> masc_root:string -> source -> (string * Yojson.Safe.t) list
 val replay_retention_json : base_path:string -> masc_root:string -> sources:source list -> Yojson.Safe.t
 

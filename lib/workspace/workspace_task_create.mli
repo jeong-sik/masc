@@ -70,11 +70,6 @@ val batch_add_tasks :
   ?created_by:string ->
   config -> (string * int * string * string option) list -> string
 
-val batch_add_tasks_with_contracts :
-  ?created_by:string ->
-  config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
-  string
 
 val batch_add_tasks_with_contracts_result :
   ?created_by:string ->
@@ -82,10 +77,5 @@ val batch_add_tasks_with_contracts_result :
   (string * int * string * Masc_domain.task_contract option * string option) list ->
   (batch_add_tasks_success, batch_add_tasks_error) result
 
-val batch_add_tasks_internal :
-  ?created_by:string ->
-  config ->
-  (string * int * string * Masc_domain.task_contract option * string option) list ->
-  string
 (** Internal batch implementation shared by [batch_add_tasks] and
     [batch_add_tasks_with_contracts]. *)

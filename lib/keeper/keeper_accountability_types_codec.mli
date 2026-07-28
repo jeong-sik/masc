@@ -60,7 +60,6 @@ val accountability_emit_skip_metric : string
 val record_emit_skip : kind:string -> reason:string -> unit
 val keeper_name_of_agent : string -> string
 val normalize_keeper_name : string -> string
-val accountability_dir : string -> string
 val get_store : Workspace_query.config -> Dated_jsonl.t
 val json_string_opt : string -> Yojson.Safe.t -> string option
 val json_int_opt :
@@ -72,10 +71,6 @@ val json_bool : string -> default:bool -> Yojson.Safe.t -> bool
 val option_string_field :
   'a -> string option -> ('a * [> `String of string ]) list
 val option_int_field : 'a -> 'b option -> ('a * [> `Int of 'b ]) list
-val option_claim_kind_field :
-  'a ->
-  Keeper_accountability_claim_types.claim_kind option ->
-  ('a * [> `String of string ]) list
 val claim_event_to_json :
   claim_event ->
   [> `Assoc of

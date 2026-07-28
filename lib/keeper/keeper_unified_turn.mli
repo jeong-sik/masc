@@ -184,9 +184,6 @@ type source_lease_disposition =
     the configured in-turn policy already handled the terminal failure; the
     cycle remains failed for receipts, counters, and heartbeat freshness. *)
 
-val source_lease_disposition_after_no_compaction
-  :  Keeper_event_queue_state.no_compaction
-  -> source_lease_disposition
 (** Compiler-checked partition of no-compaction outcomes. Missing-lane,
     effect-boundary, and domain-invalid outcomes return
     [Escalate_after_exact_output_terminal]; all other deterministic no-progress

@@ -50,12 +50,7 @@ type execution_policy_error =
 
 val default_metadata : metadata
 
-val hidden_active :
-  ?canonical_name:string -> ?replacement:string ->
-  ?allow_direct_call_when_hidden:bool ->
-  ?implementation_status:implementation_status -> string -> metadata
 
-val placeholder_tools_enabled : unit -> bool
 
 (** {1 Public tool surface} *)
 
@@ -74,7 +69,6 @@ val execution_policy_of_metadata :
 val execution_policy_error_to_string : execution_policy_error -> string
 val implementation_status : string -> implementation_status
 val canonical_tool_name : string -> string
-val is_placeholder : string -> bool
 val is_visible : ?include_hidden:bool -> string -> bool
 val allow_direct_call : string -> bool
 
@@ -82,14 +76,12 @@ val allow_direct_call : string -> bool
 
 val visibility_to_string : visibility -> string
 val lifecycle_to_string : lifecycle -> string
-val implementation_status_to_string : implementation_status -> string
 
 (** {1 JSON metadata} *)
 
 val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 (** Full metadata as JSON key-value pairs. *)
 
-val public_contract_fields : string -> (string * Yojson.Safe.t) list
 (** Minimal metadata for public contract responses. *)
 
 val register_metadata : string -> metadata -> unit

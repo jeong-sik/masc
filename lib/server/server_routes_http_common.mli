@@ -115,16 +115,8 @@ val get_protocol_version_for_session :
 val current_server_state_opt :
   unit -> Mcp_server.server_state option
 
-val state_switch_opt :
-  Mcp_server.server_state option -> Eio.Switch.t option
 
-val state_clock_opt :
-  Mcp_server.server_state option ->
-  float Eio.Time.clock_ty Eio.Resource.t option
 
-val state_net_opt :
-  Mcp_server.server_state option ->
-  Eio_context.eio_net option
 
 (** {1 Origin / Accept negotiation} *)
 
@@ -137,7 +129,6 @@ val validate_origin :
 (** Validate a browser Origin against the authority admitted at request entry.
     Requests without Origin are native clients and remain valid. *)
 
-val accepts_sse : Httpun.Request.t -> bool
 val accepts_streamable_mcp : Httpun.Request.t -> bool
 val request_force_json_response : Httpun.Request.t -> bool
 val classify_mcp_accept :
@@ -149,8 +140,6 @@ val get_last_event_id : Httpun.Request.t -> int option
 (** {1 Header builders} *)
 
 val mcp_headers : string -> string -> (string * string) list
-val mcp_transport_json_headers :
-  string -> string -> string -> (string * string) list
 val json_headers : string -> string -> string -> (string * string) list
 
 (** {1 SSE session control} *)

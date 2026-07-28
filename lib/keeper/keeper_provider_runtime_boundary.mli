@@ -16,9 +16,6 @@ type stream_idle_state =
   | Streaming_done
   | Streaming_unknown
 
-val stream_idle_state_to_label : stream_idle_state -> string
-val stream_idle_state_of_label : string -> stream_idle_state option
-val stream_idle_state_is_activity : stream_idle_state -> bool
 
 type timeout_phase =
   | First_token
@@ -34,8 +31,6 @@ type timeout_phase =
   | Unknown_timeout
 
 val timeout_phase_to_label : timeout_phase -> string
-val timeout_phase_of_label : string -> timeout_phase option
-val timeout_phase_is_streaming_activity : timeout_phase -> bool
 
 type timeout_source =
   | Oas_api
@@ -62,5 +57,4 @@ val classify_provider_runtime_error_record
     ["provider_error_timeout:http_operation"]. [detail] remains in the
     signature for existing callers, but is not trusted for classification. *)
 
-val is_provider_timeout : t -> bool
 val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool

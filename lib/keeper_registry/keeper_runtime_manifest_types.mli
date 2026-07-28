@@ -32,9 +32,7 @@ type retired_event_kind =
   | State_snapshot_sidecar_saved
   | Working_state_sidecar_saved
 
-val all_retired_event_kinds : retired_event_kind list
 val retired_event_kind_to_string : retired_event_kind -> string
-val retired_event_kind_of_string : string -> retired_event_kind option
 
 type event_wire_class =
   | Active_event of event_kind

@@ -141,7 +141,6 @@ val load_recent_episodes_jsonl : limit:int -> episode list
     is on-disk order (oldest first within the returned
     slice). *)
 
-val cap_episodes_jsonl : ?max_lines:int -> unit -> int
 (** Atomically rewrites {!episodes_jsonl_path} to keep the
     most recent [max_lines] entries (default 500).  Returns
     the number of lines dropped (0 when no rewrite was

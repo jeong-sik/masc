@@ -62,7 +62,6 @@ val decode_agent : Yojson.Safe.t -> (agent, string) result
 val decode_task : Yojson.Safe.t -> (task, string) result
 val decode_keeper : filename:string -> Yojson.Safe.t -> (keeper, string) result
 val parse_log_entry : string -> (log_entry, string) result
-val parse_http_response : string -> (http_response, string) result
 val is_success_http_status : int -> bool
 val http_status_error : http_response -> string
 val decode_json_response_body :
@@ -75,7 +74,6 @@ val optional_string_field :
 val required_int_field : Yojson.Safe.t -> string -> (int, string) result
 val required_int_any_field : Yojson.Safe.t -> string list -> (int, string) result
 val int_field_or : Yojson.Safe.t -> string -> default:int -> (int, string) result
-val required_display_field : Yojson.Safe.t -> string -> (string, string) result
 val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result

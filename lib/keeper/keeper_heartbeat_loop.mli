@@ -136,9 +136,6 @@ type keepalive_turn_outcome = {
 val record_crashed_cycle_failure :
   base_path:string -> keeper_name:string -> exn -> unit
 
-val compaction_outcome_of_cycle_outcome :
-  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
-  [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
 (** Pure mapping from a settled cycle outcome to the compaction-streak stamp
     ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
     applied/failed outcomes and in-lane provider-overflow dispositions join

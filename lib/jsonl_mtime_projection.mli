@@ -14,7 +14,6 @@ type 'a t
 val create : unit -> 'a t
 (** A fresh, empty cache. Typically created once at module load. *)
 
-val file_signature : string -> float * int
 (** [(mtime, size)] for [path]; [(0., -1)] marker components for a missing
     file so that its appearance or removal invalidates a dependent entry. *)
 

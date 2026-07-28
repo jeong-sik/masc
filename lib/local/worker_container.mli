@@ -42,8 +42,6 @@ end
 
 (** {1 Per-worker filesystem paths} *)
 
-val worker_container_dir :
-  base_path:string -> worker_name:string -> string
 (** Resolves [<base_path>/.masc/local-workers/<safe-token>/].
     [worker_name] is sanitised to ASCII alphanumeric +
     [-_.] before being joined onto the root, so a name
@@ -65,10 +63,6 @@ val ensure_worker_container_dirs :
 
 (** {1 Worker meta (JSON-persisted)} *)
 
-val load_worker_meta :
-  base_path:string ->
-  worker_name:string ->
-  worker_container_meta option
 (** Reads [meta.json] under {!worker_container_dir}.
     Returns [None] when the file is missing, the JSON
     fails to parse, or validation rejects unknown fields.
@@ -132,7 +126,6 @@ val evidence_session_id_of_worker_run :
 
 (** {1 Tool catalogue} *)
 
-val session_min_tool_names : string list
 (** Minimal MASC tool surface a local worker needs.  Used
     as the [allowed_names] filter in
     {!build_oas_mcp_tools}. *)

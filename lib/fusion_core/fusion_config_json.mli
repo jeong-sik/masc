@@ -9,4 +9,3 @@
 val to_yojson : Fusion_policy.t -> Yojson.Safe.t
 
 (** [preset_to_yojson p] projects a single preset; exposed for tests. *)
-val preset_to_yojson : Fusion_policy.preset -> Yojson.Safe.t

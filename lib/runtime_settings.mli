@@ -64,17 +64,14 @@ val keeper_stage_timing_ring_size : int Runtime_params.param
 
 (** {1 Drift guard (uncalibrated)} *)
 
-val drift_factual_coverage_floor : float Runtime_params.param
 (** Token-coverage floor — handoffs below this are flagged as
     factual drift.  Range \[0.0, 1.0].  Default 0.55.  Initial
     estimate; not corpus-calibrated. *)
 
-val drift_factual_size_ratio_floor : float Runtime_params.param
 (** Size-ratio floor (handoff/original) — captures
     "content replaced" vs "content edited".  Range \[0.0, 1.0].
     Default 0.6. *)
 
-val drift_structural_divergence_threshold : float Runtime_params.param
 (** Cosine-jaccard divergence threshold for structural drift.
     Range \[0.0, 1.0].  Default 0.18. *)
 

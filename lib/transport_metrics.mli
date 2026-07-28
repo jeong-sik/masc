@@ -243,7 +243,6 @@ val observe_ws_message_bytes_sent : int -> unit
     [max 0 n]) into [masc_ws_message_bytes{direction="recv"}].
     Observed at the inbound frame boundary before message
     re-assembly. *)
-val observe_ws_message_bytes_recv : int -> unit
 
 (** Increments [masc_ws_delta_built]. *)
 val inc_ws_delta_built : unit -> unit

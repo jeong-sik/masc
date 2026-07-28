@@ -19,12 +19,9 @@ val public_names_for_allowed_internal_names : string list -> string list
     "is this runtime-observed name the descriptor-backed public MCP surface
     name?" Keep per-turn keeper classification behind this projection instead
     of letting turn setup query the MCP catalog directly. *)
-val is_public_mcp_surface_name : string -> bool
 
 val capability_has : Tool_capability.kind -> string -> bool
 
-val descriptor_and_input_for_tool_call :
-  tool_name:string -> input:Yojson.Safe.t -> (Keeper_tool_descriptor.t * Yojson.Safe.t) option
 
 val validate_public_input_for_tool_call :
   tool_name:string -> input:Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result option
@@ -34,8 +31,6 @@ val validated_descriptor_and_input_for_tool_call :
   input:Yojson.Safe.t ->
   ((Keeper_tool_descriptor.t * Yojson.Safe.t), Tool_result.result) result option
 
-val readonly_for_tool_name : string -> bool option
 
 val readonly_for_tool_call : tool_name:string -> input:Yojson.Safe.t -> bool option
 
-val descriptors_for_tool_names : string list -> Keeper_tool_descriptor.t list

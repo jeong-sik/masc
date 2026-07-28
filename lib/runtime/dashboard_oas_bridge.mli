@@ -181,10 +181,8 @@ val status_to_yojson : status -> Yojson.Safe.t
 val sample_to_yojson : sample -> Yojson.Safe.t
 (** JSON projection of the twelve-signal sample fields. *)
 
-val sample_entry_to_yojson : sample * float -> Yojson.Safe.t
 (** JSON projection of [(sample, recorded_at)]. *)
 
-val summary_to_yojson : summary -> Yojson.Safe.t
 (** JSON projection of aggregate fields from {!summary}. *)
 
 val recent_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t

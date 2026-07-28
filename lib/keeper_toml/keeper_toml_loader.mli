@@ -42,8 +42,6 @@ val update_field_in_content :
 (** Update a field in a keeper TOML file on disk.
     Reads the file, modifies the field under [\[keeper\]], and writes back.
     Returns [Ok ()] on success or [Error reason] on failure. *)
-val update_keeper_toml_field :
-  path:string -> key:string -> value:string -> (unit, string) result
 
 (** Atomically update boolean fields under [\[keeper\]]. *)
 val update_keeper_toml_bool_fields :

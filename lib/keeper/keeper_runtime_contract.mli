@@ -9,7 +9,6 @@ val validate_active_goal_ids :
 (** Cross-check [meta.active_goal_ids] against the live MASC goal store.
     Returns only goal IDs that actually exist. Logs pruned IDs at warn level. *)
 
-val backend_of_meta : Keeper_meta_contract.keeper_meta -> string
 val task_is_linked_to_keeper_goals :
   ?task_goal_index:(string, string list) Hashtbl.t -> string list -> Masc_domain.task -> bool
 
@@ -50,15 +49,8 @@ val resolve_claim_goal_scope_for_tasks :
     that this keeper cannot claim must not suppress fallback to eligible
     out-of-scope work. *)
 
-val resolve_observation_claim_goal_scope :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  unit ->
-  claim_goal_scope
 (** Signal-only claim scope for world observations. *)
 
-val runtime_contract_json :
-  config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Keeper-visible runtime contract. Backend implementation details such as
     [sandbox_profile], [network_mode], [backend], and [sandbox_target] are
     intentionally omitted; use [runtime_observability_contract_json] for

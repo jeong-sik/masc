@@ -28,7 +28,6 @@ val accept_rejection_kind_to_string : accept_rejection_kind -> string
     keeper progress contract. The reason reports response shape and counts only;
     it never includes hidden thinking text. Returns [None] when the built-in
     keeper progress contract would accept the response. *)
-val response_accept_rejection : Agent_sdk.Types.api_response -> accept_rejection option
 
 (** Format an accept rejection reason for a runtime attempt. When the built-in
     keeper progress contract would accept the response, the returned reason is

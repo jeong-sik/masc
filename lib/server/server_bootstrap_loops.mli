@@ -103,7 +103,6 @@ val keeper_persistence_report :
 val keeper_persistence_prepare_error_to_string :
   keeper_persistence_prepare_error -> string
 
-val keeper_persistence_failure_to_string : keeper_persistence_failure -> string
 
 val claim_prepared_keeper_persistence :
   config:Workspace.config ->

@@ -42,7 +42,6 @@ val state_of_json : Yojson.Safe.t -> tempo_state option
 (** Reads [.masc/tempo.json]. On missing file or load/parse failure
     returns a [default_config.default_interval_s] state with reason
     ["default"]. *)
-val load_state : Workspace_utils.config -> tempo_state
 
 (** Persists [state] to [tempo_file config] (creates parent dir). *)
 val save_state : Workspace_utils.config -> tempo_state -> unit
@@ -52,8 +51,6 @@ val save_state : Workspace_utils.config -> tempo_state -> unit
 (** [set_tempo config ~interval_s ~reason] clamps [interval_s] to
     [[min_interval_s; max_interval_s]], updates [last_adjusted], and
     persists. *)
-val set_tempo :
-  Workspace_utils.config -> interval_s:float -> reason:string -> tempo_state
 
 (** Alias for {!load_state}. *)
 val get_tempo : Workspace_utils.config -> tempo_state
@@ -69,7 +66,6 @@ val calculate_adaptive_tempo : Masc_domain.task list -> float * string
 
 (** Adjusts tempo from [Workspace.get_tasks_raw config] via
     {!calculate_adaptive_tempo} and persists. *)
-val adjust_tempo : Workspace_utils.config -> tempo_state
 
 (** {1 Presentation} *)
 
@@ -78,4 +74,3 @@ val adjust_tempo : Workspace_utils.config -> tempo_state
 val format_state : tempo_state -> string
 
 (** Writes [default_interval_s] with reason ["reset to default"]. *)
-val reset_tempo : Workspace_utils.config -> tempo_state

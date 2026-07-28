@@ -121,17 +121,6 @@ type body_progress = {
 
 val empty_body_progress : body_progress
 
-val request_with_idle_timeout :
-  t ->
-  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  idle_timeout_sec:float ->
-  ?total_timeout_sec:float ->
-  method_:http_method ->
-  url:string ->
-  ?headers:(string * string) list ->
-  ?body:string ->
-  unit ->
-  (response * body_progress, string * body_progress) result
 (** Issue a request with body-idle cancellation. Chunk delivery resets
     the idle timer; absence of bytes for [idle_timeout_sec] cancels the
     fiber. [total_timeout_sec] is an optional hard cap that bounds the

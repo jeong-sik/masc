@@ -4,7 +4,6 @@ type source =
   | Omitted
   | Explicit_override
 
-val source_of_value : int option -> source
 val source_to_string : source -> string
 
 val telemetry_fields : int option -> (string * Yojson.Safe.t) list

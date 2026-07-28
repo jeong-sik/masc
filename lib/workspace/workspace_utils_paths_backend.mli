@@ -39,7 +39,6 @@ val root_state_path : config -> string
 
 (** Pre-rename cluster-root state path (legacy [.masc/state.json]).
     Kept exposed for fallback existence checks during migration. *)
-val legacy_root_state_path : config -> string
 
 (** Project-scoped key prefix for backend keys (e.g.
     ["proj:default"]). Used by broadcast/pubsub channel naming. *)
@@ -65,11 +64,7 @@ val backend_exists :
 val backend_list_keys :
   config -> prefix:string -> (string list, Backend_types.error) result
 
-val backend_get_all :
-  config -> prefix:string -> ((string * string) list, Backend_types.error) result
 
-val backend_set_if_not_exists :
-  config -> key:string -> value:string -> (bool, Backend_types.error) result
 
 val backend_acquire_lock :
   config -> key:string -> ttl_seconds:int -> owner:string ->
@@ -79,12 +74,7 @@ val backend_release_lock :
   config -> key:string -> owner:string ->
   (bool, Backend_types.error) result
 
-val backend_extend_lock :
-  config -> key:string -> ttl_seconds:int -> owner:string ->
-  (bool, Backend_types.error) result
 
-val backend_health_check :
-  config -> (Backend_types.health_result, Backend_types.error) result
 
 (** Returns [Ok n] where [n] is the number of subscribers notified
     (forwarded from [Pubsub_mem.publish]). *)
@@ -100,7 +90,6 @@ val backend_name : config -> string
 
 (** [true] iff the backend mirrors keys to local-filesystem
     directories (FileSystem backend). *)
-val backend_supports_local_dir : storage_backend -> bool
 
 val backend_cleanup_pubsub :
   config -> days:int -> max_messages:int ->

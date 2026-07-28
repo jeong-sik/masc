@@ -55,7 +55,6 @@ val max_jsonl_bytes : int
 val rotate_if_needed : string -> unit
 
 val posts_jsonl_unlocked : store -> string
-val save_posts_jsonl_result : string -> (unit, board_error) result
 val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
@@ -67,10 +66,8 @@ val append_comment : comment -> (unit, board_error) result
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option
 val sub_board_post_counts_unlocked : store -> (string, int) Hashtbl.t
-val sub_board_post_count_from_counts : (string, int) Hashtbl.t -> string -> int
 val sub_board_with_post_count_unlocked : store -> sub_board -> sub_board
 val sub_board_with_post_count : (string, int) Hashtbl.t -> sub_board -> sub_board
-val sub_board_author_allowed : sub_board -> author_id:Agent_id.t -> bool
 val validate_sub_board_post_policy_unlocked :
   store -> author_id:Agent_id.t -> hearth:string option -> (unit, board_error) result
 

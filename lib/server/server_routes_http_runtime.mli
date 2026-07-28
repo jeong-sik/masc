@@ -94,10 +94,6 @@ val websocket_discovery_json :
     enabled / runtime-listening pair.  Used by [GET /ws]
     on both HTTP/1.1 and HTTP/2 listeners. *)
 
-val transport_json :
-  request_authority:Server_request_authority.authority ->
-  Httpun.Request.t ->
-  Yojson.Safe.t
 (** [transport_json ~request_authority request] returns the full transport status
     JSON (HTTP + WS + protocol set).  Sub-projection used by
     {!make_health_json}'s [transport] field. *)
@@ -214,11 +210,6 @@ val make_health_json :
     at the contract seam: a future "drop unused metric" PR
     must touch this. *)
 
-val make_health_probe_json :
-  ?listener:string ->
-  request_authority:Server_request_authority.authority ->
-  Httpun.Request.t ->
-  Yojson.Safe.t
 (** [make_health_probe_json ?listener ~request_authority request] builds the cheap default
     [/health] probe body.  It keeps liveness/readiness-facing fields such as
     [startup], [paths], [transport], [logs], and quick GC counters, but skips

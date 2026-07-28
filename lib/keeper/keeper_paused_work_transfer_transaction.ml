@@ -5,7 +5,6 @@ type request =
   ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
-  ; settled_at : float
   }
 
 type projection_stage =
@@ -154,8 +153,6 @@ let validate_request ~from_keeper ~to_keeper request =
   then Error "source post id must not be empty"
   else if String.equal (String.trim request.operator_operation_id) ""
   then Error "operator operation ID must not be empty"
-  else if not (Float.is_finite request.settled_at)
-  then Error "settlement time must be finite"
   else if
     request.continuation_binding
     <> Keeper_paused_work_disposition_receipt.continuation_binding_of_source
@@ -254,7 +251,6 @@ let receipt_matches_request ~from_keeper ~to_keeper request receipt =
     && Int.equal transfer.target_generation request.target_generation
     && transfer.source = request.source
     && Int64.equal transfer.source_revision request.source_revision
-    && Float.equal transfer.settled_at request.settled_at
     && transfer.continuation_binding = request.continuation_binding
 ;;
 
@@ -271,7 +267,6 @@ let create_receipt config ~from_keeper ~to_keeper request =
     ; target_generation = request.target_generation
     ; source = request.source
     ; source_revision = request.source_revision
-    ; settled_at = request.settled_at
     ; continuation_binding = request.continuation_binding
     }
   in
@@ -329,11 +324,13 @@ let ack_source config receipt transfer =
       then Error Source_owner_identity_changed
       else Ok ()
     in
+    (* The receipt is the durable transfer-acceptance boundary, so its stored
+       request time is the sole timestamp for the source ACK. *)
     Keeper_registry_event_queue.transfer_pending_accepted_result
       ~base_path
       transfer.from_keeper
       ~current_owner_nonce:current.runtime.nonce
-      ~settled_at:transfer.settled_at
+      ~settled_at:receipt.requested_at
       ~transfer:causal
     |> Result.map_error (fun detail ->
       Committed_projection_failed { stage = Source_ack; detail })

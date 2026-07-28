@@ -7,7 +7,6 @@ type request =
   ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
-  ; settled_at : float
   }
 
 type projection_stage =

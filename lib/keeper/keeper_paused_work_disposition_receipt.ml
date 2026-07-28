@@ -9,7 +9,6 @@ type transfer_owner =
   ; target_generation : int
   ; source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; settled_at : float
   ; continuation_binding : continuation_binding
   }
 
@@ -91,8 +90,6 @@ let validate receipt =
       then Error "paused-work transfer target generation must not be negative"
       else if Int64.compare transfer.source_revision 0L < 0
       then Error "paused-work transfer source revision must not be negative"
-      else if not (Float.is_finite transfer.settled_at)
-      then Error "paused-work transfer settlement time must be finite"
       else if String.equal (String.trim transfer.source.post_id) ""
       then Error "paused-work transfer source post id must not be empty"
       else if
@@ -147,7 +144,6 @@ let transfer_owner_to_yojson transfer =
     ; "target_generation", `Int transfer.target_generation
     ; "source", Keeper_event_queue.stimulus_to_yojson transfer.source
     ; "source_revision", `Intlit (Int64.to_string transfer.source_revision)
-    ; "settled_at", `Float transfer.settled_at
     ; "continuation_binding", continuation_binding_to_yojson transfer.continuation_binding
     ]
 ;;
@@ -188,7 +184,7 @@ let to_yojson receipt =
   | Transfer_owner transfer ->
     common
       "transfer_owner"
-      "masc.keeper.paused-work-disposition.v2"
+      "masc.keeper.paused-work-disposition.v4"
       [ "transfer", transfer_owner_to_yojson transfer ]
   | Settle_from_source_terminal operation ->
     common
@@ -236,7 +232,6 @@ let transfer_owner_of_yojson = function
     (match sorted fields with
      | [ ("continuation_binding", continuation_binding_json)
        ; ("from_keeper", `String from_keeper)
-       ; ("settled_at", settled_at_json)
        ; ("source", source_json)
        ; ("source_revision", source_revision_json)
        ; ("target_generation", `Int target_generation)
@@ -246,7 +241,6 @@ let transfer_owner_of_yojson = function
        let* target_trace_id = Keeper_id.Trace_id.of_string target_trace_id in
        let* source = Keeper_event_queue.stimulus_of_yojson source_json in
        let* source_revision = source_revision_of_yojson source_revision_json in
-       let* settled_at = requested_at_of_yojson settled_at_json in
        let* continuation_binding =
          continuation_binding_of_yojson continuation_binding_json
        in
@@ -257,7 +251,6 @@ let transfer_owner_of_yojson = function
          ; target_generation
          ; source
          ; source_revision
-         ; settled_at
          ; continuation_binding
          }
      | _ -> Error "paused-work transfer fields are not exact")
@@ -335,7 +328,7 @@ let of_yojson = function
        ; ("operation", `String "transfer_owner")
        ; ("operator_operation_id", `String operator_operation_id)
        ; ("requested_at", requested_at_json)
-       ; ("schema", `String "masc.keeper.paused-work-disposition.v2")
+       ; ("schema", `String "masc.keeper.paused-work-disposition.v4")
        ; ("transfer", transfer_json)
        ] ->
        let* transfer = transfer_owner_of_yojson transfer_json in

@@ -422,11 +422,18 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
     true
 ;;
 
-type terminal_schedule_reconciliation =
-  | Not_terminal_schedule
-  | Terminal_schedule_acknowledged
+(* A selection can be ready to intake and still have nothing left for a turn to
+   do, because the work it refers to settled elsewhere. Delivering one costs a
+   full turn and leaves the entry at the queue head, so a turn that checkpoints
+   instead of completing re-reads the same entry on the next cycle and the
+   Keeper makes no progress for as long as that entry stays spent. Retire them
+   here, before a turn is spent on them. *)
+type spent_selection_reconciliation =
+  | Selection_actionable
+  | Spent_schedule_acknowledged
+  | Spent_grant_replay_acknowledged
 
-let reconcile_terminal_schedule_selection ~config ~keeper_name selection =
+let reconcile_spent_selection ~config ~keeper_name selection =
   match
     selection.Keeper_registry_event_queue.kind,
     selection.Keeper_registry_event_queue.stimuli
@@ -466,7 +473,7 @@ let reconcile_terminal_schedule_selection ~config ~keeper_name selection =
            with
            | Error message ->
              Error ("schedule terminal reconciliation ack failed: " ^ message)
-           | Ok () -> Ok Terminal_schedule_acknowledged)
+           | Ok () -> Ok Spent_schedule_acknowledged)
         | Some
             { Schedule_domain.status =
                 ( Schedule_domain.Execution_running
@@ -474,10 +481,43 @@ let reconcile_terminal_schedule_selection ~config ~keeper_name selection =
             ; _
             }
         | None ->
-          Ok Not_terminal_schedule))
+          Ok Selection_actionable))
+  | Keeper_event_queue_persistence.Single,
+    [ { Keeper_event_queue.payload =
+          Hitl_resolved { approval_id; decision = Keeper_event_queue.Hitl_approved; _ }
+      ; _
+      }
+    ] ->
+    (* An approved grant is one-shot. Once consumed, this wake authorizes
+       nothing further — [Keeper_unified_turn] renders it as "authorization
+       already consumed" — so the turn it costs can only observe that fact and
+       re-enter the queue behind the same entry. Observed 2026-07-28: one
+       consumed grant held a Keeper's queue head while 42 stimuli accumulated
+       behind it, 0 consumed all day, ~204k input tokens burned every 45s.
+
+       No lock: consumption is monotonic. A state read as [Resolution_consumed]
+       never returns to unconsumed, so the ACK cannot race a grant becoming
+       usable again. A read error leaves the entry actionable, which keeps a
+       transient journal failure from discarding a live grant. *)
+    (match Keeper_approval_queue.approved_resolution_state
+             ~base_path:config.Workspace_utils.base_path
+             ~id:approval_id
+     with
+     | Ok Keeper_approval_queue.Resolution_consumed ->
+       (match
+          Keeper_registry_event_queue.ack_pending_result
+            ~base_path:config.Workspace_utils.base_path
+            keeper_name
+            ~selection
+        with
+        | Error message ->
+          Error ("spent grant replay ack failed: " ^ message)
+        | Ok () -> Ok Spent_grant_replay_acknowledged)
+     | Ok Keeper_approval_queue.Resolution_unconsumed | Error _ ->
+       Ok Selection_actionable)
   | Keeper_event_queue_persistence.Single, _
   | Keeper_event_queue_persistence.Board_batch, _ ->
-    Ok Not_terminal_schedule
+    Ok Selection_actionable
 ;;
 
 let heartbeat_event_intake
@@ -498,27 +538,30 @@ let heartbeat_event_intake
       keeper_name
       ~ready:(stimulus_ready_for_intake ~base_path)
   in
-  let rec select_pending_after_terminal_reconciliation () =
+  let rec select_pending_after_spent_reconciliation () =
     match select_pending () with
     | Error _ as error -> error
     | Ok None as empty -> empty
     | Ok (Some selection) ->
       (match
-         reconcile_terminal_schedule_selection
-           ~config:ctx.config
-           ~keeper_name
-           selection
+         reconcile_spent_selection ~config:ctx.config ~keeper_name selection
        with
        | Error message -> Error message
-       | Ok Not_terminal_schedule -> Ok (Some selection)
-       | Ok Terminal_schedule_acknowledged ->
+       | Ok Selection_actionable -> Ok (Some selection)
+       | Ok Spent_schedule_acknowledged ->
          Log.Keeper.info
            "turn entry: acknowledged already-terminal scheduled occurrence \
             without duplicate turn keeper=%s"
            keeper_name;
-         select_pending_after_terminal_reconciliation ())
+         select_pending_after_spent_reconciliation ()
+       | Ok Spent_grant_replay_acknowledged ->
+         Log.Keeper.info
+           "turn entry: acknowledged spent Gate grant replay without a turn \
+            keeper=%s"
+           keeper_name;
+         select_pending_after_spent_reconciliation ())
   in
-  let pending_selection = select_pending_after_terminal_reconciliation () in
+  let pending_selection = select_pending_after_spent_reconciliation () in
   let queued_observations, consumed_stimuli, pending_selection, event_queue_intake_error =
     match pending_selection with
     | Error message ->

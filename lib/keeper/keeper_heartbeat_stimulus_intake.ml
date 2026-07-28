@@ -22,28 +22,109 @@ let stimulus_urgency_to_string = function
   | Keeper_event_queue.Low -> "low"
 ;;
 
-let pending_board_event_of_stimulus ~meta_after_triage stim =
-  Keeper_world_observation.pending_board_event_of_stimulus
-    ~meta:meta_after_triage
-    stim
+let forced_transient_board_reads_for_test : int Atomic.t = Atomic.make 0
+
+module For_testing = struct
+  let force_transient_board_reads count =
+    Atomic.set forced_transient_board_reads_for_test (Int.max 0 count)
+  ;;
+end
+
+let consume_forced_transient_board_read () =
+  let rec loop () =
+    let remaining = Atomic.get forced_transient_board_reads_for_test in
+    if remaining <= 0
+    then false
+    else
+      Atomic.compare_and_set
+        forced_transient_board_reads_for_test
+        remaining
+        (remaining - 1)
+      || loop ()
+  in
+  loop ()
 ;;
 
-(* Board-unavailable-result: the intake layer is where the poison/transient
-   distinction is acted on (Keeper_world_observation only reports the read
-   failure). Both dispositions return [] for this turn — the leased stimulus
-   is treated as consumed either way; see [keeper_heartbeat_loop.ml]'s
-   settlement path, which acks the claimed lease based on the turn outcome,
-   not on whether any one board rendering succeeded. Permanent unavailability
-   (the dominant real cause, e.g. a swept post) must never resurface, so
-   dropping it is the fix. Transient unavailability is logged distinctly so
-   operators can tell the two apart, but — unlike the cursor-based scan path
-   in [Keeper_world_observation.collect_board_events], which can locally
-   retain its cursor — this queued-stimulus path has no per-stimulus
-   requeue lever below the whole-lease Ack/Requeue decision, so a genuine
-   retry for this one stimulus is not wired here. *)
+let pending_board_event_of_stimulus ~meta_after_triage stim =
+  match stim.Keeper_event_queue.payload with
+  | (Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _)
+    when consume_forced_transient_board_read () ->
+    Error
+      { Keeper_world_observation_board_signal.operation =
+          Keeper_world_observation_board_signal.Get_post
+      ; post_id = stim.post_id
+      ; error = Board.Io_error "forced transient Board stimulus read failure"
+      }
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Bg_completed _
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Manual_compaction_requested
+  | Keeper_event_queue.Goal_assigned _
+  | Keeper_event_queue.Goal_reconciliation_ready _ ->
+    Keeper_world_observation.pending_board_event_of_stimulus
+      ~meta:meta_after_triage
+      stim
+;;
+
+type stimulus_intake_result =
+  | Stimulus_consumed of Keeper_world_observation.pending_board_event list
+  | Stimulus_retry_later of
+      Keeper_world_observation_board_signal.board_unavailable
+
+type event_queue_intake_error =
+  | Pending_selection_failed of string
+  | Invalid_single_selection of { selected_count : int }
+  | Transient_board_read of
+      Keeper_world_observation_board_signal.board_unavailable
+
+let event_queue_intake_error_to_string = function
+  | Pending_selection_failed detail ->
+    "event queue pending selection failed: " ^ detail
+  | Invalid_single_selection { selected_count } ->
+    Printf.sprintf
+      "event queue Single selection contained %d stimuli instead of exactly one"
+      selected_count
+  | Transient_board_read unavailable ->
+    "event queue stimulus intake retry: "
+    ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable
+;;
+
+let event_queue_intake_error_reason_label = function
+  | Pending_selection_failed _ -> "event_queue_selection_failed"
+  | Invalid_single_selection _ -> "event_queue_selection_invalid"
+  | Transient_board_read _ -> "event_queue_transient_board_read"
+;;
+
+let event_queue_intake_error_counts_as_cycle_failure = function
+  | Pending_selection_failed _ | Invalid_single_selection _ -> true
+  | Transient_board_read _ -> false
+;;
+
+let classify_pending_board_event_result = function
+  | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
+  | Error
+      (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
+    (match
+       Keeper_world_observation_board_signal.disposition_of_unavailable unavailable
+     with
+     | Keeper_world_observation_board_signal.Permanent -> Stimulus_consumed []
+     | Keeper_world_observation_board_signal.Transient ->
+       Stimulus_retry_later unavailable)
+;;
+
+(* Board-unavailable-result: permanent poison is consumed so a swept post
+   cannot crash-loop forever. A transient environment failure remains a typed
+   retry; the queue selection came from [peek_when_result], so retaining it
+   requires no mutation — only withholding consumption and ACK. *)
 let pending_board_events_of_stimulus_result ~meta_after_triage stim =
-  match pending_board_event_of_stimulus ~meta_after_triage stim with
-  | Ok events_opt -> Option.to_list events_opt
+  let read_result = pending_board_event_of_stimulus ~meta_after_triage stim in
+  match read_result with
+  | Ok _ -> classify_pending_board_event_result read_result
   | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
@@ -62,12 +143,12 @@ let pending_board_events_of_stimulus_result ~meta_after_triage stim =
          (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
      | Keeper_world_observation_board_signal.Transient ->
        Log.Keeper.warn
-         "stimulus intake: board read transiently unavailable, dropping this turn's \
-          rendering stimulus_id=%s keeper=%s: %s"
+         "stimulus intake: board read transiently unavailable, retaining exact \
+          pending source stimulus_id=%s keeper=%s: %s"
          stim.Keeper_event_queue.post_id
          meta_after_triage.name
          (Keeper_world_observation_board_signal.unavailable_to_string unavailable));
-    []
+    classify_pending_board_event_result read_result
 ;;
 
 let record_event_queue_stimulus_turn_started
@@ -96,7 +177,7 @@ type heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_registry_event_queue.pending_selection option;
-  event_queue_claim_error : string option;
+  event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
@@ -146,137 +227,142 @@ let consume_single_heartbeat_stimulus
       (stim : Keeper_event_queue.stimulus)
   =
   let class_str = Keeper_event_queue.payload_kind_label stim.payload in
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string StimulusConsumed)
-    ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
-    ();
-  Log.Keeper.info
-    "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s (keeper=%s)"
-    stim.post_id
-    (stimulus_urgency_to_string stim.urgency)
-    class_str
-    meta_after_triage.name;
-  match stim.payload with
-  | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
-    pending_board_events_of_stimulus_result ~meta_after_triage stim
-  | Keeper_event_queue.Fusion_completed c ->
-    (* RFC-0266: an async fusion deliberation finished and woke this keeper.
-       Surface the resolved answer as a pending_board_event so this turn acts
-       on it (a non-empty list, unlike Bootstrap which
-       inject nothing — returning [] here would silently drop the result). *)
-    let terminal =
-      match c.terminal with
-      | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
-      | Keeper_event_queue.Fusion_failed _ -> "failed"
-      | Keeper_event_queue.Fusion_cancelled -> "cancelled"
-    in
+  let intake_result =
+    match stim.payload with
+    | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Fusion_completed c ->
+      (* RFC-0266: an async fusion deliberation finished and woke this keeper.
+         Surface the resolved answer as a pending_board_event so this turn acts
+         on it (a non-empty list, unlike Bootstrap which injects nothing). *)
+      let terminal =
+        match c.terminal with
+        | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
+        | Keeper_event_queue.Fusion_failed _ -> "failed"
+        | Keeper_event_queue.Fusion_cancelled -> "cancelled"
+      in
+      Log.Keeper.info
+        "turn entry: fusion result delivered run_id=%s terminal=%s (keeper=%s)"
+        c.run_id terminal meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Bg_completed c ->
+      (* RFC-0290: a background job finished and woke this keeper. Surface the
+         outcome as a pending_board_event so this turn acts on it. *)
+      Log.Keeper.info
+        "turn entry: bg result delivered run_id=%s kind=%s ok=%b (keeper=%s)"
+        c.bg_run_id
+        (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
+        (match c.bg_outcome with
+         | Keeper_event_queue.Bg_ok _ -> true
+         | Keeper_event_queue.Bg_failed _ -> false)
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Schedule_due sw ->
+      Log.Keeper.info
+        "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
+        sw.schedule_id
+        sw.due_at
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Goal_assigned ga ->
+      (* RFC-0315 P3 W0: a newly assigned standing objective is actionable
+         work. Promote it to a pending observation so the assignment turn does
+         not wake empty. *)
+      Log.Keeper.info
+        "turn entry: goal assignment delivered goal_id=%s assigned_by=%s (keeper=%s)"
+        ga.ga_goal_id
+        ga.ga_assigned_by
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Goal_reconciliation_ready ready ->
+      Log.Keeper.info
+        "turn entry: goal reconciliation ready goal_id=%s triggering_task_id=%s \
+         (keeper=%s)"
+        ready.gr_goal_id
+        ready.gr_triggering_task_id
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Manual_compaction_requested ->
+      Log.Keeper.info
+        "turn entry: manual compaction request delivered (keeper=%s)"
+        meta_after_triage.name;
+      Stimulus_consumed []
+    | Keeper_event_queue.Bootstrap ->
+      Log.Keeper.info
+        "turn entry: bootstrap stimulus consumed (keeper=%s)"
+        meta_after_triage.name;
+      Stimulus_consumed []
+    | Keeper_event_queue.Connector_attention ca ->
+      (* RFC-connector-ambient-attention-wake: the stimulus woke this keeper.
+         The event_id is a pointer only; the message/surface content stays in
+         Keeper_external_attention. Load it here and promote it to a pending
+         observation so the turn has real connector context instead of a
+         contentless wake reason. *)
+      let pending_events =
+        match
+          recorded_attention_item_by_event_id
+            ~base_path:ctx.config.base_path
+            ~keeper_name:meta_after_triage.name
+            ~event_id:ca.event_id
+        with
+        | Some item ->
+          [ Keeper_world_observation.pending_board_event_of_external_attention
+              ~meta:meta_after_triage
+              item
+          ]
+        | None ->
+          Log.Keeper.warn
+            "connector attention stimulus missing recorded item event_id=%s (keeper=%s)"
+            ca.event_id
+            meta_after_triage.name;
+          []
+      in
+      (match
+         Keeper_external_attention.claim_for_turn
+           ~base_path:ctx.config.base_path
+           ~keeper_name:meta_after_triage.name
+           ~event_ids:[ ca.event_id ]
+           ~claim_id:(Printf.sprintf "heartbeat-wake:%s" stim.post_id)
+           ~turn_id:None
+           ()
+       with
+       | Ok () -> ()
+       | Error err ->
+         Log.Keeper.warn
+           "connector attention claim_for_turn failed event_id=%s (keeper=%s): %s"
+           ca.event_id
+           meta_after_triage.name
+           err);
+      Log.Keeper.info
+        "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
+        ca.event_id
+        meta_after_triage.name;
+      Stimulus_consumed pending_events
+    | Keeper_event_queue.Hitl_resolved r ->
+      (* The approval has left the queue, so this cycle no longer skips. There
+         is no observation to fabricate: the typed resolution itself is
+         threaded as cycle context. *)
+      Log.Keeper.info
+        "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
+        r.approval_id
+        (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
+        meta_after_triage.name;
+      Stimulus_consumed []
+  in
+  match intake_result with
+  | Stimulus_retry_later _ -> intake_result
+  | Stimulus_consumed _ ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string StimulusConsumed)
+      ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
+      ();
     Log.Keeper.info
-      "turn entry: fusion result delivered run_id=%s terminal=%s (keeper=%s)"
-      c.run_id terminal meta_after_triage.name;
-    pending_board_events_of_stimulus_result ~meta_after_triage stim
-  | Keeper_event_queue.Bg_completed c ->
-    (* RFC-0290: a background job finished and woke this keeper. Surface the
-       outcome as a pending_board_event so the turn acts on it. Returning []
-       would compile but silently drop the completed job result. *)
-    Log.Keeper.info
-      "turn entry: bg result delivered run_id=%s kind=%s ok=%b (keeper=%s)"
-      c.bg_run_id
-      (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
-      (match c.bg_outcome with
-       | Keeper_event_queue.Bg_ok _ -> true
-       | Keeper_event_queue.Bg_failed _ -> false)
+      "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s (keeper=%s)"
+      stim.post_id
+      (stimulus_urgency_to_string stim.urgency)
+      class_str
       meta_after_triage.name;
-    pending_board_events_of_stimulus_result ~meta_after_triage stim
-  | Keeper_event_queue.Schedule_due sw ->
-    Log.Keeper.info
-      "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
-      sw.schedule_id
-      sw.due_at
-      meta_after_triage.name;
-    pending_board_events_of_stimulus_result ~meta_after_triage stim
-  | Keeper_event_queue.Goal_assigned ga ->
-    (* RFC-0315 P3 W0: a newly assigned standing objective is actionable
-       work. Promote it to a pending observation so the assignment turn does
-       not wake empty — returning [] would silently drop the edge. *)
-    Log.Keeper.info
-      "turn entry: goal assignment delivered goal_id=%s assigned_by=%s (keeper=%s)"
-      ga.ga_goal_id
-      ga.ga_assigned_by
-      meta_after_triage.name;
-    pending_board_events_of_stimulus_result ~meta_after_triage stim
-  | Keeper_event_queue.Goal_reconciliation_ready ready ->
-    Log.Keeper.info
-      "turn entry: goal reconciliation ready goal_id=%s triggering_task_id=%s \
-       (keeper=%s)"
-      ready.gr_goal_id
-      ready.gr_triggering_task_id
-      meta_after_triage.name;
-    pending_board_events_of_stimulus_result ~meta_after_triage stim
-  | Keeper_event_queue.Manual_compaction_requested ->
-    Log.Keeper.info
-      "turn entry: manual compaction request delivered (keeper=%s)"
-      meta_after_triage.name;
-    []
-  | Keeper_event_queue.Bootstrap ->
-    Log.Keeper.info
-      "turn entry: bootstrap stimulus consumed (keeper=%s)"
-      meta_after_triage.name;
-    []
-  | Keeper_event_queue.Connector_attention ca ->
-    (* RFC-connector-ambient-attention-wake: the stimulus woke this keeper.
-       The event_id is a pointer only; the message/surface content stays in
-       Keeper_external_attention. Load it here and promote it to a pending
-       observation so the turn has real connector context instead of a
-       contentless wake reason. *)
-    let pending_events =
-      match
-        recorded_attention_item_by_event_id
-          ~base_path:ctx.config.base_path
-          ~keeper_name:meta_after_triage.name
-          ~event_id:ca.event_id
-      with
-      | Some item ->
-        [ Keeper_world_observation.pending_board_event_of_external_attention
-            ~meta:meta_after_triage
-            item
-        ]
-      | None ->
-        Log.Keeper.warn
-          "connector attention stimulus missing recorded item event_id=%s (keeper=%s)"
-          ca.event_id
-          meta_after_triage.name;
-        []
-    in
-    (match
-       Keeper_external_attention.claim_for_turn
-         ~base_path:ctx.config.base_path
-         ~keeper_name:meta_after_triage.name
-         ~event_ids:[ ca.event_id ]
-         ~claim_id:(Printf.sprintf "heartbeat-wake:%s" stim.post_id)
-         ~turn_id:None
-         ()
-     with
-     | Ok () -> ()
-     | Error err ->
-       Log.Keeper.warn
-         "connector attention claim_for_turn failed event_id=%s (keeper=%s): %s"
-         ca.event_id meta_after_triage.name err);
-    Log.Keeper.info
-      "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
-      ca.event_id
-      meta_after_triage.name;
-    pending_events
-  | Keeper_event_queue.Hitl_resolved r ->
-    (* The approval has left the queue, so this cycle no longer skips. There is
-       no observation to fabricate: the typed resolution itself is threaded as
-       cycle context. An approved exact-action grant is consumed at the Gate;
-       reject/edit wakes carry no grant. *)
-    Log.Keeper.info
-      "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
-      r.approval_id
-      (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
-      meta_after_triage.name;
-    []
+    intake_result
 ;;
 
 let consume_board_stimulus_batch ~meta_after_triage batch =
@@ -286,8 +372,19 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
       "turn digest: coalesced %d board signals into one turn (keeper=%s)"
       batch_len
       meta_after_triage.name;
-  List.concat_map
-    (fun (stim : Keeper_event_queue.stimulus) ->
+  let rec render_batch acc = function
+    | [] -> Stimulus_consumed (List.concat (List.rev acc))
+    | (stim : Keeper_event_queue.stimulus) :: rest ->
+      (match pending_board_events_of_stimulus_result ~meta_after_triage stim with
+       | Stimulus_retry_later _ as retry -> retry
+       | Stimulus_consumed events -> render_batch (events :: acc) rest)
+  in
+  let intake_result = render_batch [] batch in
+  (match intake_result with
+   | Stimulus_retry_later _ -> ()
+   | Stimulus_consumed _ ->
+     List.iter
+       (fun (stim : Keeper_event_queue.stimulus) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string StimulusConsumed)
          ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
@@ -297,9 +394,9 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
           (keeper=%s)"
          stim.post_id
          (stimulus_urgency_to_string stim.urgency)
-         meta_after_triage.name;
-       pending_board_events_of_stimulus_result ~meta_after_triage stim)
-    batch
+         meta_after_triage.name)
+       batch);
+  intake_result
 ;;
 
 let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus) =
@@ -422,27 +519,39 @@ let heartbeat_event_intake
          select_pending_after_terminal_reconciliation ())
   in
   let pending_selection = select_pending_after_terminal_reconciliation () in
-  let queued_observations, consumed_stimuli, pending_selection, event_queue_claim_error =
+  let queued_observations, consumed_stimuli, pending_selection, event_queue_intake_error =
     match pending_selection with
     | Error message ->
       Log.Keeper.error
         "turn entry: event queue claim failed keeper=%s: %s"
         keeper_name
         message;
-      [], [], None, Some message
+      [], [], None, Some (Pending_selection_failed message)
     | Ok None -> [], [], None, None
     | Ok (Some selection) ->
       let stimuli = selection.Keeper_registry_event_queue.stimuli in
-      let observations =
+      let intake_result, selection_error =
         match selection.kind, stimuli with
         | Keeper_event_queue_persistence.Board_batch, batch ->
-          consume_board_stimulus_batch ~meta_after_triage batch
+          consume_board_stimulus_batch ~meta_after_triage batch, None
+        | Keeper_event_queue_persistence.Single, [ stimulus ] ->
+          ( consume_single_heartbeat_stimulus
+              ~ctx
+              ~meta_after_triage
+              stimulus
+          , None )
         | Keeper_event_queue_persistence.Single, stimuli ->
-          List.concat_map
-            (consume_single_heartbeat_stimulus ~ctx ~meta_after_triage)
-            stimuli
+          ( Stimulus_consumed []
+          , Some
+              (Invalid_single_selection
+                 { selected_count = List.length stimuli }) )
       in
-      observations, stimuli, Some selection, None
+      (match selection_error, intake_result with
+       | Some error, _ -> [], [], Some selection, Some error
+       | None, Stimulus_consumed observations ->
+         observations, stimuli, Some selection, None
+       | None, Stimulus_retry_later unavailable ->
+         [], [], Some selection, Some (Transient_board_read unavailable))
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in
@@ -484,7 +593,7 @@ let heartbeat_event_intake
   ; consumed_stimulus_count
   ; consumed_stimuli
   ; pending_selection
-  ; event_queue_claim_error
+  ; event_queue_intake_error
   ; event_queue_triggers
   }
 ;;

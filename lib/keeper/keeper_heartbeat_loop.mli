@@ -59,7 +59,8 @@ type heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_registry_event_queue.pending_selection option;
-  event_queue_claim_error : string option;
+  event_queue_intake_error :
+    Keeper_heartbeat_stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
@@ -77,6 +78,14 @@ val heartbeat_event_intake :
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   heartbeat_event_intake
+
+(** Source-authority gate applied after world scheduling. A selected stimulus
+    whose intake failed must remain pending and cannot reach the provider. *)
+val should_run_turn_after_event_intake :
+  scheduled:bool ->
+  event_queue_intake_error:
+    Keeper_heartbeat_stimulus_intake.event_queue_intake_error option ->
+  bool
 
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;

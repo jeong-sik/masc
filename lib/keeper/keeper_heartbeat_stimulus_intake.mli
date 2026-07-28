@@ -24,18 +24,47 @@ val pending_board_event_of_stimulus
   -> Keeper_event_queue.stimulus
   -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
+(** Closed consumption result for an Event-Layer stimulus. A transient Board
+    read cannot be represented as an empty successful rendering: it retains
+    the exact pending queue selection for a later heartbeat. *)
+type stimulus_intake_result =
+  | Stimulus_consumed of Keeper_world_observation.pending_board_event list
+  | Stimulus_retry_later of
+      Keeper_world_observation_board_signal.board_unavailable
+
+(** Pure disposition boundary for one rendered Board event. Permanent
+    unavailability is consumed as an empty event; transient unavailability
+    remains a typed retry. *)
+val classify_pending_board_event_result
+  :  (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
+  -> stimulus_intake_result
+
 (** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
     [stim] into zero-or-one pending board events. On [Error unavailable] it
     classifies the failure via
     {!Keeper_world_observation_board_signal.disposition_of_unavailable},
-    logs and counts it, and returns [] — the stimulus is treated as consumed
-    for this turn either way. See the [.ml] for why a queued stimulus has no
-    per-item requeue lever distinct from the whole-lease Ack/Requeue
-    decision. *)
+    logs and counts it, and returns either [Stimulus_consumed []] for a
+    permanent failure or [Stimulus_retry_later unavailable] for a transient
+    failure. *)
 val pending_board_events_of_stimulus_result
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
-  -> Keeper_world_observation.pending_board_event list
+  -> stimulus_intake_result
+
+type event_queue_intake_error =
+  | Pending_selection_failed of string
+  | Invalid_single_selection of { selected_count : int }
+  | Transient_board_read of
+      Keeper_world_observation_board_signal.board_unavailable
+
+val event_queue_intake_error_to_string : event_queue_intake_error -> string
+val event_queue_intake_error_reason_label : event_queue_intake_error -> string
+
+(** Only durable selection corruption/read failures count as a crashed cycle.
+    A transient Board read is an expected retry condition: it blocks dispatch
+    and retains the exact source without advancing Keeper failure state. *)
+val event_queue_intake_error_counts_as_cycle_failure :
+  event_queue_intake_error -> bool
 
 (** [record_event_queue_stimulus_turn_started ~ctx ~keeper_name stim] writes
     a generic [Turn_started] reaction for an event-queue stimulus after the
@@ -54,27 +83,27 @@ type heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_registry_event_queue.pending_selection option;
-  event_queue_claim_error : string option;
+  event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
-    increments Otel_metric_store, logs the consumption, and returns a list of
-    pending board events derived from [stim] (empty for non-board
-    classes). *)
+    increments Otel_metric_store and logs only after consumption is known.
+    A transient Board read returns [Stimulus_retry_later] without incrementing
+    the consumed counter. *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
-  -> Keeper_world_observation.pending_board_event list
+  -> stimulus_intake_result
 
-(** [consume_board_stimulus_batch ~meta_after_triage batch] increments
-    Otel_metric_store per stimulus, logs debounce coalescing, and returns the
-    pending board events derived from [batch]. *)
+(** [consume_board_stimulus_batch ~meta_after_triage batch] consumes the whole
+    exact batch only when every Board read is available or permanently
+    unavailable. Any transient read retains the full batch for retry. *)
 val consume_board_stimulus_batch
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus list
-  -> Keeper_world_observation.pending_board_event list
+  -> stimulus_intake_result
 
 type terminal_schedule_reconciliation =
   | Not_terminal_schedule
@@ -96,10 +125,18 @@ val reconcile_terminal_schedule_selection
     accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be leased.
-    Runtime/provider availability cannot defer a durable claim; boundary
-    failures settle explicitly through the existing failure route. *)
+    A transient Board read returns no consumed stimuli, keeps the exact
+    [pending_selection], and sets [event_queue_intake_error]; the heartbeat
+    loop must not dispatch or acknowledge that selection. *)
 val heartbeat_event_intake
   :  ctx:'a context
   -> meta_after_triage:keeper_meta
   -> pending_board_events:Keeper_world_observation.pending_board_event list
   -> heartbeat_event_intake
+
+module For_testing : sig
+  (** Force the next [count] Board stimulus reads to report a transient
+      [Io_error], allowing the durable retry path to be exercised without a
+      real store outage. *)
+  val force_transient_board_reads : int -> unit
+end

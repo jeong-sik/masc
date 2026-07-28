@@ -1,8 +1,8 @@
-(** Keeper_memory_os_io — append-only atomic I/O for tiered memory files.
+(** Keeper_memory_os_io — durable I/O for tiered memory files.
 
-    All writes are append-only and best-effort atomic (temp file + rename
-    for single-record files; direct append with O_APPEND semantics for
-    JSONL logs). Reads are bounded tail reads to keep startup cost low. *)
+    Fact/event writes are normally append-only, while recognition recovery uses
+    atomic replacement to make its cross-file bundle replay-safe. Single-record
+    files use temp + rename. Reads are bounded tail reads where applicable. *)
 
 open Keeper_memory_os_types
 open Result.Syntax
@@ -676,6 +676,81 @@ let read_episode_file path =
        let len = in_channel_length ic in
        let buf = really_input_string ic len in
        parse_json_line episode_of_json buf)
+;;
+
+let same_episode left right =
+  Yojson.Safe.equal (episode_to_json left) (episode_to_json right)
+;;
+
+let recognition_episode_path ~keeper_id ~publication_id =
+  Filename.concat
+    (episodes_dir ~keeper_id)
+    (Printf.sprintf "recognition-%s.json" publication_id)
+;;
+
+(* Recognition recovery can replay after any process boundary. A deterministic
+   publication path turns the episode-file write into an idempotent atomic
+   ensure: the same payload is success, while an id collision with different
+   content fails closed. *)
+let ensure_recognition_episode ~keeper_id ~publication_id episode =
+  let path = recognition_episode_path ~keeper_id ~publication_id in
+  try
+    if Sys.file_exists path
+    then (
+      match read_episode_file path with
+      | Some stored when same_episode stored episode -> Ok ()
+      | Some _ -> Error ("recognition episode identity collision: " ^ path)
+      | None -> Error ("recognition episode is malformed: " ^ path))
+    else (
+      write_file_atomically path (Yojson.Safe.pretty_to_string (episode_to_json episode));
+      Ok ())
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let episode_event_identity_equal left right =
+  String.equal left.trace_id right.trace_id
+  && Int.equal left.generation right.generation
+  && Float.equal left.created_at right.created_at
+;;
+
+(* Events remain the reader-visible commit log. Recognition publication needs
+   replay-safe exact-once semantics, so read it strictly under the caller-held
+   episode-bundle lock and atomically replace the full file when the event is
+   absent. A crash observes either the old file or the complete new file. *)
+let ensure_recognition_event ~keeper_id episode =
+  let path = events_path ~keeper_id in
+  try
+    let rec decode line_number acc = function
+      | [] -> Ok (List.rev acc)
+      | line :: rest ->
+        (match parse_json_line episode_of_json line with
+         | Some parsed -> decode (line_number + 1) (parsed :: acc) rest
+         | None ->
+           Error
+             (Printf.sprintf
+                "memory episode decode failed during recognition recovery: %s:%d"
+                path
+                line_number))
+    in
+    match decode 1 [] (read_lines_all path) with
+    | Error _ as error -> error
+    | Ok stored ->
+      (match List.find_opt (episode_event_identity_equal episode) stored with
+       | Some existing when same_episode existing episode -> Ok ()
+       | Some _ -> Error ("recognition event identity collision: " ^ path)
+       | None ->
+         let content =
+           stored @ [ episode ]
+           |> List.map (fun item -> episode_to_json item |> Yojson.Safe.to_string)
+           |> String.concat "\n"
+         in
+         write_file_atomically path (content ^ "\n");
+         Ok ())
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 ;;
 
 (* Strict counterpart of [read_episode_file]: a malformed episode file is an

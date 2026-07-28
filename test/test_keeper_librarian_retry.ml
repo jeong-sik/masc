@@ -614,6 +614,25 @@ let test_rejects_reinforce_turn_outside_conversation_slice () =
        ())
 ;;
 
+let test_rejects_add_turn_outside_conversation_slice () =
+  let one_message_input =
+    let base = input ~trace_id:"one-message-slice" in
+    { base with messages = [ List.hd base.messages ] }
+  in
+  match
+    Lib.recognition_output_of_output_result
+      ~now:1_000_000.0
+      one_message_input
+      (output_json_string
+         ~operations:[ add_op_json ~source_turn:(`Int 999) () ]
+         ())
+  with
+  | Error _ -> ()
+  | Ok _ ->
+    Alcotest.fail
+      "add source_turn 999 must be rejected against a one-message slice"
+;;
+
 let test_revise_claim_kind_tri_state_parses () =
   let parse_kind field =
     output_json_string
@@ -817,6 +836,8 @@ let () =
             test_rejects_indices_outside_visible_snapshot;
           test_case "rejects reinforce turn outside conversation slice" `Quick
             test_rejects_reinforce_turn_outside_conversation_slice;
+          test_case "rejects add turn outside conversation slice" `Quick
+            test_rejects_add_turn_outside_conversation_slice;
           test_case "revise claim_kind parses as tri-state" `Quick
             test_revise_claim_kind_tri_state_parses;
           test_case "rejects non-string revise category" `Quick

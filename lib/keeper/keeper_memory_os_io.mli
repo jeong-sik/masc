@@ -76,6 +76,19 @@ val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
 
+(** Idempotently publish the episode artifact for a recognition publication.
+    The path is derived from [publication_id]; an existing byte-equivalent
+    episode succeeds and a conflicting payload fails closed. Caller holds the
+    episode-bundle lock. *)
+val ensure_recognition_episode :
+  keeper_id:string -> publication_id:string -> episode -> (unit, string) result
+
+(** Idempotently publish the reader-visible recognition event. The event store
+    is strictly decoded and atomically replaced, so replay adds the episode
+    exactly once or reports a conflict/malformed store. Caller holds the
+    episode-bundle lock. *)
+val ensure_recognition_event : keeper_id:string -> episode -> (unit, string) result
+
 (** Lock path used by {!with_episode_bundle_lock}; the episode retention sweep
     serializes against episode writers on the same lock. *)
 val episode_bundle_lock_path : keeper_id:string -> string

@@ -73,6 +73,10 @@ val render_if_enabled
     [Some block] with an explicit unavailable advisory when recall fails after
     the flag is on, and [None] when disabled or when no memory exists. Intended
     for the [extra_system_context] assembly site.
+    Before rendering, this is also the restart/read-admission consumer for
+    recoverable recognition publications: it settles any prepared facts /
+    episode / event bundle under the writer's lock order, or returns an explicit
+    unavailable advisory rather than exposing a partial publication.
     As a side effect (RFC-0264 P2) it appends a best-effort recall-injection
     record — which fact/episode keys reached the prompt — keyed by
     [trace_id]/[turn]; the write never affects the returned block. *)

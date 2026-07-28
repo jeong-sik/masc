@@ -526,8 +526,6 @@ let test_librarian_zero_op_metadata_persists_episode () =
     | Error error ->
       Alcotest.fail
         (Librarian_runtime.extraction_error_to_string error)
-    | Ok Librarian_runtime.Nothing_recognized ->
-      Alcotest.fail "zero-op episode metadata was discarded"
     | Ok (Librarian_runtime.Recognized episode) ->
       Alcotest.(check (list string))
         "open items persist"

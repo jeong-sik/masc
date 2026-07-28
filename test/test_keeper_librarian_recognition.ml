@@ -14,6 +14,8 @@ open Alcotest
 module Recognition = Masc.Keeper_librarian_recognition
 module Consolidation = Masc.Keeper_memory_os_consolidation
 module Ledger = Masc.Keeper_librarian_recognition_ledger
+module Memory_io = Masc.Keeper_memory_os_io
+module Recall = Masc.Keeper_memory_os_recall
 module Types = Masc.Keeper_memory_os_types
 
 let now = 2_000_000.0
@@ -39,6 +41,22 @@ let fact ?(claim = "c") ?(category = Types.Fact) ?claim_kind ?claim_id
 let claims facts = List.map (fun (f : Types.fact) -> f.Types.claim) facts
 
 let apply operations facts = Recognition.apply ~now ~operations facts
+
+let episode ?(claims = []) () : Types.episode =
+  { trace_id = "trace-current"
+  ; generation = 7
+  ; episode_summary = "recognition publication"
+  ; claims
+  ; open_items = [ "follow up" ]
+  ; constraints = [ "preserve evidence" ]
+  ; preserved_tool_refs = []
+  ; source_turn_range = Some (1, 1)
+  ; created_at = now
+  ; valid_until = None
+  ; terminal_marker = None
+  ; schema_version = Types.schema_version
+  }
+;;
 
 let merge ?claim_id ?(source_turn = 9) group =
   Recognition.Merge { group; claim_id; source_turn }
@@ -233,6 +251,8 @@ let test_rewrite_failure_never_commits_publication () =
       ~rewrite:(fun () ->
         rewritten := true;
         Error "injected rewrite failure")
+      ~episode:(fun () -> Ok ())
+      ~event:(fun () -> Ok ())
       ~commit:(fun () ->
         committed := true;
         Ok ())
@@ -249,6 +269,7 @@ let test_publication_rows_distinguish_prepared_from_committed () =
   let before = [ fact ~claim:"before" () ] in
   let operation = Recognition.Add (fact ~claim:"after" ()) in
   let applied = apply [ operation ] before in
+  let episode = episode ~claims:applied.Recognition.recognized_facts () in
   let publication_id =
     Ledger.publication_id
       ~keeper_id:"keeper-a"
@@ -258,6 +279,7 @@ let test_publication_rows_distinguish_prepared_from_committed () =
       ~operations:[ operation ]
       ~dispositions:applied.Recognition.dispositions
       ~store_after:applied.Recognition.facts
+      ~episode
   in
   let state = function
     | `Assoc fields ->
@@ -276,6 +298,7 @@ let test_publication_rows_distinguish_prepared_from_committed () =
       ~operations:[ operation ]
       ~dispositions:applied.Recognition.dispositions
       ~store_after:applied.Recognition.facts
+      ~episode
       ~now
       ()
   in
@@ -290,6 +313,134 @@ let test_publication_rows_distinguish_prepared_from_committed () =
   in
   check string "pre-rewrite evidence is not published" "prepared" (state prepared);
   check string "post-rewrite marker is explicit" "committed" (state committed)
+;;
+
+let test_read_admission_recovers_every_publication_boundary_exactly_once () =
+  let run boundary =
+    let marker = Filename.temp_file ("recognition-" ^ boundary) ".tmp" in
+    Sys.remove marker;
+    let keepers_dir = Filename.concat marker "keepers" in
+    let masc_root = Filename.concat marker "masc" in
+    Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+      let keeper_id = "keeper-recovery" in
+      let before = [ fact ~claim:"before" () ] in
+      let operation = Recognition.Add (fact ~claim:"after" ()) in
+      let applied = apply [ operation ] before in
+      let episode = episode ~claims:applied.Recognition.recognized_facts () in
+      let publication_id =
+        Ledger.publication_id
+          ~keeper_id
+          ~trace_id:episode.trace_id
+          ~generation:episode.generation
+          ~store_before:before
+          ~operations:[ operation ]
+          ~dispositions:applied.Recognition.dispositions
+          ~store_after:applied.Recognition.facts
+          ~episode
+      in
+      Memory_io.rewrite_facts_atomically ~keeper_id before;
+      (match
+         Ledger.append_prepared
+           ~masc_root
+           ~publication_id
+           ~keeper_id
+           ~trace_id:episode.trace_id
+           ~generation:episode.generation
+           ~store_before:before
+           ~operations:[ operation ]
+           ~dispositions:applied.Recognition.dispositions
+           ~store_after:applied.Recognition.facts
+           ~episode
+           ~now
+           ()
+       with
+       | Ok () -> ()
+       | Error detail -> fail ("prepare fixture failed: " ^ detail));
+      if not (String.equal boundary "after_prepare")
+      then Memory_io.rewrite_facts_atomically ~keeper_id applied.Recognition.facts;
+      if
+        String.equal boundary "after_episode"
+        || String.equal boundary "after_event"
+        || String.equal boundary "after_commit"
+      then
+        (match
+           Memory_io.ensure_recognition_episode
+             ~keeper_id
+             ~publication_id
+             episode
+         with
+         | Ok () -> ()
+         | Error detail -> fail ("episode fixture failed: " ^ detail));
+      if String.equal boundary "after_event" || String.equal boundary "after_commit"
+      then
+        (match Memory_io.ensure_recognition_event ~keeper_id episode with
+         | Ok () -> ()
+         | Error detail -> fail ("event fixture failed: " ^ detail));
+      if String.equal boundary "after_commit"
+      then
+        (match
+           Ledger.append_committed
+             ~masc_root
+             ~publication_id
+             ~keeper_id
+             ~trace_id:episode.trace_id
+             ~generation:episode.generation
+             ~now
+             ()
+         with
+         | Ok () -> ()
+         | Error detail -> fail ("commit fixture failed: " ^ detail));
+      List.iter
+        (fun turn ->
+           ignore
+             (Recall.render_if_enabled
+                ~keeper_id
+                ~now:(now +. Float.of_int turn)
+                ~trace_id:"restart-read"
+                ~turn
+                ~masc_root
+                ()))
+        [ 1; 2 ];
+      (match
+         Ledger.recover_pending
+           ~masc_root
+           ~keeper_id
+           ~current_store:
+             (if String.equal boundary "after_prepare"
+              then before
+              else applied.Recognition.facts)
+           ~now:(now +. 2.0)
+           ()
+       with
+       | Ok Ledger.No_pending_publication -> ()
+       | Ok _ -> fail "read admission did not settle the publication"
+       | Error detail -> fail ("post-read publication check failed: " ^ detail));
+      (match Memory_io.read_facts_all_strict ~keeper_id with
+       | Ok facts ->
+         check
+           (list string)
+           "facts match the crash boundary"
+           (if String.equal boundary "after_prepare"
+            then [ "before" ]
+            else [ "before"; "after" ])
+           (claims facts)
+       | Error detail -> fail ("fact read failed: " ^ detail));
+      let expected_artifacts =
+        if String.equal boundary "after_prepare" then 0 else 1
+      in
+      (match Memory_io.read_episode_files_all_strict ~keeper_id with
+       | Ok episodes ->
+         check int
+           (boundary ^ " episode count")
+           expected_artifacts
+           (List.length episodes)
+       | Error detail -> fail ("episode read failed: " ^ detail));
+      check int (boundary ^ " event count") expected_artifacts
+        (List.length (Memory_io.read_events_tail ~keeper_id ~n:10)))
+  in
+  List.iter
+    run
+    [ "after_prepare"; "after_facts"; "after_episode"; "after_event"; "after_commit" ]
 ;;
 
 let test_recalled_reinforcement_is_rejected_by_provenance () =
@@ -517,6 +668,10 @@ let () =
             test_rewrite_failure_never_commits_publication;
           test_case "publication rows distinguish prepared and committed" `Quick
             test_publication_rows_distinguish_prepared_from_committed;
+          test_case
+            "read admission recovers every publication boundary exactly once"
+            `Quick
+            test_read_admission_recovers_every_publication_boundary_exactly_once;
           test_case "recalled reinforcement is rejected by provenance" `Quick
             test_recalled_reinforcement_is_rejected_by_provenance;
           test_case "add appends" `Quick test_add_appends;

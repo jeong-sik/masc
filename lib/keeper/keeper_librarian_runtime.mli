@@ -155,11 +155,9 @@ val extract_with_exact_output_classified
 (** What an accepted recognition pass produced. A schema-valid empty operation
     list still produces [Recognized] because its episode summary and metadata
     belong to the current conversation slice; it does not rewrite facts or
-    append an O(store) recognition-ledger row. [Nothing_recognized] remains
-    for compatibility with callers handling older implementations. *)
+    append an O(store) recognition-ledger row. *)
 type recognition_write =
   | Recognized of Keeper_memory_os_types.episode
-  | Nothing_recognized
 
 module For_testing : sig
   val apply_and_persist

@@ -218,20 +218,42 @@ let log_truncation ~keeper_id ~kind ~metric ~store_count ~injected_count ~droppe
     budget
 ;;
 
-let render_context_exn ~keeper_id ~now () =
-  let all_facts =
-    File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-      Keeper_memory_os_io.read_facts_all ~keeper_id
-      |> List.filter (fact_is_current ~now))
+let render_context_exn ?masc_root ~keeper_id ~now () =
+  (* Recognition publishes facts, episode, and event as one recoverable bundle.
+     Recall is the pre-turn read-admission boundary, so settle any publication
+     stranded by a process crash while holding the same lock order as the
+     writer. Keeping both reads inside those locks also prevents a live writer's
+     rewritten facts from becoming visible before its episode/event. *)
+  let all_facts, all_episodes =
+    Keeper_memory_os_io.with_episode_bundle_lock ~keeper_id (fun () ->
+      File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
+        let facts =
+          match Keeper_memory_os_io.read_facts_all_strict ~keeper_id with
+          | Ok facts -> facts
+          | Error detail -> failwith detail
+        in
+        (match masc_root with
+         | None -> ()
+         | Some masc_root ->
+           (match
+              Keeper_librarian_recognition_ledger.recover_pending
+                ~masc_root
+                ~keeper_id
+                ~current_store:facts
+                ~now
+                ()
+            with
+            | Ok _ -> ()
+            | Error detail ->
+              failwith ("recognition publication recovery failed: " ^ detail)));
+        facts, Keeper_memory_os_io.read_episodes_all ~keeper_id))
   in
+  let all_facts = List.filter (fact_is_current ~now) all_facts in
   (* Diagnostic: the TOTAL store size, independent of the selection budget
      below -- this is what tells an operator "the store has grown past what
      recall injects" rather than silently equalling whatever got selected. *)
   let n_facts_in_store = List.length all_facts in
-  let all_episodes =
-    Keeper_memory_os_io.read_episodes_all ~keeper_id
-    |> List.filter (episode_is_current ~now)
-  in
+  let all_episodes = List.filter (episode_is_current ~now) all_episodes in
   let max_facts = Keeper_config.keeper_memory_os_recall_max_facts () in
   let max_episodes = Keeper_config.keeper_memory_os_recall_max_episodes () in
   let facts, facts_dropped =
@@ -361,7 +383,7 @@ let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
        and never affects the returned block. *)
     let result =
       try
-        render_context_exn ~keeper_id ~now ()
+        render_context_exn ~masc_root ~keeper_id ~now ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

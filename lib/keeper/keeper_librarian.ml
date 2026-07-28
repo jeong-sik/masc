@@ -338,7 +338,11 @@ let revise_claim_kind_update_field fields =
   | _ -> None
 ;;
 
-let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
+let source_turn_is_visible ~message_count source_turn =
+  source_turn >= 0 && source_turn < message_count
+;;
+
+let fact_of_json ~trace_id ~now ~message_count (json : Yojson.Safe.t) : fact option =
   match json with
   | `Assoc fields ->
     (match
@@ -357,7 +361,7 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
        , Some claim_id
        , Some tool_call_id
        , Some valid_for_days )
-       when turn >= 0 ->
+       when source_turn_is_visible ~message_count turn ->
       (* Parse the provider's category once at the producer boundary. It remains
          context and never creates a validity horizon. *)
       let category = category_of_string category_str in
@@ -454,9 +458,6 @@ let operation_of_json
   :
   (Recognition.operation, parse_error) result
   =
-  let valid_source_turn source_turn =
-    source_turn >= 0 && source_turn < message_count
-  in
   match json with
   | `Assoc fields ->
     (match first_unexpected_field ~allowed:wire_operation_fields fields with
@@ -473,7 +474,13 @@ let operation_of_json
                 (match unexpected_claim_field fact_json with
                  | Some field -> Error (Unexpected_field field)
                  | None ->
-                   (match fact_of_json ~trace_id ~now fact_json with
+                   (match
+                      fact_of_json
+                        ~trace_id
+                        ~now
+                        ~message_count
+                        fact_json
+                    with
                     | Some fact -> Ok (Recognition.Add fact)
                     | None -> Error Claim_schema_mismatch))
               | Some _ | None -> operation_mismatch op "missing fact object"))
@@ -489,7 +496,8 @@ let operation_of_json
                 index_field ~visible_indices fields
                 , int_field wire_field_source_turn fields
               with
-              | Some index, Some source_turn when valid_source_turn source_turn ->
+              | Some index, Some source_turn
+                when source_turn_is_visible ~message_count source_turn ->
                 Ok (Recognition.Reinforce { index; source_turn })
               | _ ->
                 operation_mismatch
@@ -522,7 +530,7 @@ let operation_of_json
                 , Some claim_id
                 , Some source_turn )
                 when List.length (List.sort_uniq Int.compare member_indices) >= 2
-                     && valid_source_turn source_turn ->
+                     && source_turn_is_visible ~message_count source_turn ->
                 Ok
                   (Recognition.Merge
                      { group =
@@ -570,7 +578,7 @@ let operation_of_json
                 , Some claim_kind_update
                 , Some valid_until_update
                 , Some source_turn )
-                when valid_source_turn source_turn ->
+                when source_turn_is_visible ~message_count source_turn ->
                 Ok
                   (Recognition.Revise
                      { index

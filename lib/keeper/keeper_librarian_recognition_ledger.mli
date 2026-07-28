@@ -1,10 +1,11 @@
 (** Keeper_librarian_recognition_ledger — recoverable recognition publication.
 
     An applied pass appends a [prepared] row containing its exact before/after
-    evidence before the fact rewrite, then a [committed] marker only after the
-    rewrite succeeds. Readers must treat only committed publication ids as
-    published; a stranded prepared row is explicit recoverable evidence, never
-    a false claim that the fact store changed.
+    evidence plus the complete episode payload before the fact rewrite, then a
+    [committed] marker only after facts, the deterministic episode file, and the
+    idempotent event are durable. Readers must treat only committed publication
+    ids as published; a stranded prepared row is explicit recoverable evidence,
+    never a false claim that the whole bundle was published.
 
     Row size is O(store) by design — the issue's anti-black-box requirement
     persists both full snapshots, deliberately unlike the recall ledger's
@@ -28,6 +29,7 @@ val publication_id
   -> operations:Keeper_librarian_recognition.operation list
   -> dispositions:Keeper_librarian_recognition.disposition list
   -> store_after:fact list
+  -> episode:episode
   -> string
 
 (** Pure serializers exposed for regression tests and audit consumers. *)
@@ -40,6 +42,7 @@ val prepared_to_json
   -> operations:Keeper_librarian_recognition.operation list
   -> dispositions:Keeper_librarian_recognition.disposition list
   -> store_after:fact list
+  -> episode:episode
   -> now:float
   -> unit
   -> Yojson.Safe.t
@@ -63,6 +66,7 @@ val append_prepared
   -> operations:Keeper_librarian_recognition.operation list
   -> dispositions:Keeper_librarian_recognition.disposition list
   -> store_after:fact list
+  -> episode:episode
   -> now:float
   -> unit
   -> (unit, string) result
@@ -77,16 +81,41 @@ val append_committed
   -> unit
   -> (unit, string) result
 
+type recovery_outcome =
+  | No_pending_publication
+  | Recovered_committed of string
+  | Recovered_aborted of string
+
+(** Settle the one serialized pending publication against the canonical fact
+    store while the caller holds the episode-bundle and facts locks. If current
+    facts equal its [store_after] digest, idempotently ensure the prepared
+    episode and event before appending the missing committed marker; if they
+    equal [store_before], append an aborted marker. Any third state or multiple
+    unresolved publications fails closed. Repeated calls are idempotent because
+    artifact writes are identity-checked and terminal markers remove the id. *)
+val recover_pending
+  :  masc_root:string
+  -> keeper_id:string
+  -> current_store:fact list
+  -> now:float
+  -> unit
+  -> (recovery_outcome, string) result
+
 type publication_failure =
   | Prepare_failed of string
   | Rewrite_failed of string
+  | Episode_failed of string
+  | Event_failed of string
   | Commit_failed of string
 
-(** Enforce prepare -> fact rewrite -> commit ordering. Exposed so runtime and
-    fault-injection tests exercise the same publication state machine. *)
+(** Enforce prepare -> fact rewrite -> episode -> event -> commit ordering.
+    Exposed so runtime and fault-injection tests exercise the same publication
+    state machine. *)
 val publish
   :  prepare:(unit -> (unit, string) result)
   -> rewrite:(unit -> (unit, string) result)
+  -> episode:(unit -> (unit, string) result)
+  -> event:(unit -> (unit, string) result)
   -> commit:(unit -> (unit, string) result)
   -> (unit, publication_failure) result
 

@@ -41,6 +41,11 @@ let write_json path json =
     output_string channel (Yojson.Safe.to_string json))
 ;;
 
+let write_text path text =
+  mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun channel -> output_string channel text)
+;;
+
 let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
 
 let receipt_path config ~keeper_name ~operator_operation_id =
@@ -124,15 +129,176 @@ let with_source_terminal_lane f =
 
 let check_applied = function
   | Transaction.Applied
-      (Keeper_registry_event_queue.Settled _
-      | Keeper_registry_event_queue.Already_settled _) -> ()
+      (Keeper_registry_event_queue.Acked _
+      | Keeper_registry_event_queue.Already_acked _) -> ()
   | Transaction.Applied
-      (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
+      (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ }) ->
     Alcotest.fail detail
   | Transaction.Committed_followup_failed failure ->
     Alcotest.fail
       (Transaction.error_to_string
          { cause = failure; reservation_release = None })
+;;
+
+let replace_field name value fields =
+  List.map (fun (field, current) -> if String.equal field name then field, value else field, current) fields
+;;
+
+let source_ack_wire_fields json =
+  match json with
+  | `Assoc state_fields ->
+    (match List.assoc_opt "transition_outbox" state_fields with
+     | Some (`List [ `Assoc outbox_fields ]) ->
+       (match List.assoc_opt "receipt" outbox_fields with
+        | Some (`Assoc receipt_fields) ->
+          (match List.assoc_opt "settlement" receipt_fields with
+           | Some (`Assoc settlement_fields) ->
+             state_fields, outbox_fields, receipt_fields, settlement_fields
+           | Some _ | None -> Alcotest.fail "source ACK settlement must be an object")
+        | Some _ | None -> Alcotest.fail "source ACK outbox receipt must be an object")
+     | Some _ | None -> Alcotest.fail "source ACK must retain exactly one durable outbox entry")
+  | _ -> Alcotest.fail "source ACK state must be a JSON object"
+;;
+
+let source_ack_transition_state request state =
+  let source_terminal : State.accepted_source_terminal =
+    { source = request.source
+    ; source_revision = request.source_revision
+    ; owner_nonce = request.owner_nonce
+    ; operator_operation_id = request.operator_operation_id
+    ; source_receipt = request.source_receipt
+    }
+  in
+  State.ack_pending_source_terminal
+    ~current_owner_nonce:request.owner_nonce
+    ~settled_at:2.0
+    ~source_terminal
+    state
+  |> require_ok "create source ACK transition"
+;;
+
+let required_string_field label field fields =
+  match List.assoc_opt field fields with
+  | Some (`String value) -> value
+  | Some _ | None -> Alcotest.failf "%s omitted %s" label field
+;;
+
+let test_source_ack_wire_is_canonical_and_recovers_v8 () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
+    let original =
+      Persistence.load_state_result ~base_path:config.Workspace.base_path ~keeper_name
+      |> require_ok "load source ACK state"
+    in
+    let acknowledged, result = source_ack_transition_state request original in
+    (match result with
+     | State.Settled _ -> ()
+     | State.Already_settled _ -> Alcotest.fail "first source ACK was a replay");
+    let canonical_json = State.to_yojson acknowledged in
+    let state_fields, outbox_fields, receipt_fields, settlement_fields =
+      source_ack_wire_fields canonical_json
+    in
+    Alcotest.(check (option string))
+      "source ACK writes v9 state"
+      (Some State.schema)
+      (match List.assoc_opt "schema" state_fields with
+       | Some (`String schema) -> Some schema
+       | Some _ | None -> None);
+    Alcotest.(check (option string))
+      "source ACK writes its own durable kind"
+      (Some "ack_source_terminal")
+      (match List.assoc_opt "kind" settlement_fields with
+       | Some (`String kind) -> Some kind
+       | Some _ | None -> None);
+    let legacy_transition_id =
+      match List.assoc_opt "lease_id" receipt_fields with
+      | Some (`String lease_id) -> lease_id ^ ":settle_from_source_terminal"
+      | Some _ | None -> Alcotest.fail "source ACK receipt omitted lease identity"
+    in
+    let legacy_event_id = "keeper-event-queue-transition:" ^ legacy_transition_id in
+    Alcotest.(check string)
+      "source ACK keeps the historical transition identity"
+      legacy_transition_id
+      (required_string_field "source ACK receipt" "transition_id" receipt_fields);
+    Alcotest.(check string)
+      "source ACK keeps the historical event identity"
+      legacy_event_id
+      (required_string_field "source ACK receipt" "event_id" receipt_fields);
+    let legacy_settlement =
+      replace_field "kind" (`String "settle_from_source_terminal") settlement_fields
+    in
+    let legacy_receipt =
+      replace_field "settlement" (`Assoc legacy_settlement) receipt_fields
+    in
+    let legacy_outbox = replace_field "receipt" (`Assoc legacy_receipt) outbox_fields in
+    let legacy_state =
+      state_fields
+      |> replace_field "schema" (`String "keeper.event_queue.state.v8")
+      |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
+      |> fun fields -> `Assoc fields
+    in
+    let recovered = State.of_yojson legacy_state |> require_ok "recover v8 source ACK outbox" in
+    let recovered_json = State.to_yojson recovered in
+    let recovered_fields, _, recovered_receipt, recovered_settlement =
+      source_ack_wire_fields recovered_json
+    in
+    Alcotest.(check (option string))
+      "recovery rewrites v8 as v9"
+      (Some State.schema)
+      (match List.assoc_opt "schema" recovered_fields with
+       | Some (`String schema) -> Some schema
+       | Some _ | None -> None);
+    Alcotest.(check (option string))
+      "recovery removes legacy source settlement kind"
+      (Some "ack_source_terminal")
+      (match List.assoc_opt "kind" recovered_settlement with
+       | Some (`String kind) -> Some kind
+       | Some _ | None -> None);
+    Alcotest.(check string)
+      "v8 recovery preserves transition identity"
+      legacy_transition_id
+      (required_string_field "recovered source ACK receipt" "transition_id" recovered_receipt);
+    Alcotest.(check string)
+      "v8 recovery preserves event identity"
+      legacy_event_id
+      (required_string_field "recovered source ACK receipt" "event_id" recovered_receipt);
+    let legacy_wal_row =
+      `Assoc
+        [ "schema", `String "masc.keeper_event_queue.settlement.v2"
+        ; "base_path", `String config.Workspace.base_path
+        ; "keeper_name", `String keeper_name
+        ; "outbox_entry", `Assoc legacy_outbox
+        ]
+    in
+    let wal_path =
+      Filename.concat
+        (Filename.concat
+           (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
+           keeper_name)
+        "event-queue-settlements.jsonl"
+    in
+    write_text wal_path (Yojson.Safe.to_string legacy_wal_row ^ "\n");
+    let recovered_wal =
+      Persistence.load_state_result ~base_path:config.Workspace.base_path ~keeper_name
+      |> require_ok "recover v2 source ACK WAL"
+    in
+    Alcotest.(check int) "v2 WAL replay removes source" 0 (Queue.length (State.pending recovered_wal));
+    let _, _, recovered_wal_receipt, recovered_wal_settlement =
+      State.to_yojson recovered_wal |> source_ack_wire_fields
+    in
+    Alcotest.(check (option string))
+      "v2 WAL replay canonicalizes to ACK"
+      (Some "ack_source_terminal")
+      (match List.assoc_opt "kind" recovered_wal_settlement with
+       | Some (`String kind) -> Some kind
+       | Some _ | None -> None);
+    Alcotest.(check string)
+      "v2 WAL replay preserves transition identity"
+      legacy_transition_id
+      (required_string_field "recovered v2 WAL receipt" "transition_id" recovered_wal_receipt);
+    Alcotest.(check string)
+      "v2 WAL replay preserves event identity"
+      legacy_event_id
+      (required_string_field "recovered v2 WAL receipt" "event_id" recovered_wal_receipt))
 ;;
 
 let test_exact_terminal_receipt_acks_pending () =
@@ -367,6 +533,10 @@ let () =
     "keeper paused-work source-terminal transaction"
     [ ( "Ack_source_terminal"
       , [ Alcotest.test_case
+            "writes ACK wire and recovers v8 outbox"
+            `Quick
+            test_source_ack_wire_is_canonical_and_recovers_v8
+        ; Alcotest.test_case
             "exact receipt ACKs pending"
             `Quick
             test_exact_terminal_receipt_acks_pending

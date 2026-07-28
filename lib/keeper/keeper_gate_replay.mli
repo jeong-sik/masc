@@ -12,14 +12,37 @@
     (device/inode) authoritative: a target replaced between approval and
     replay no longer matches and stays unapplied. *)
 
+type replay_journal =
+  | Replay_journal_recorded
+  | Replay_journal_already_recorded
+  | Replay_grant_not_consumed
+  | Replay_journal_failed of string
+
 type outcome =
   | Not_applicable
       (** No unconsumed approval, or the approved operation is not one this
           module replays. *)
-  | Applied of string  (** Opaque human-readable summary of the replay. *)
-  | Failed of string
+  | Applied of
+      { operation : string
+      ; output : string
+      ; journal : replay_journal
+      }
+  | Failed of
+      { operation : string
+      ; detail : string
+      ; journal : replay_journal
+      }
 
 val outcome_to_string : outcome -> string
+(** Render operation, journal state, payload byte count, and SHA-256 only. Exact
+    replay output remains in the typed outcome and durable approval journal; it
+    is never copied into operational logs by this renderer. *)
+
+val append_model_evidence :
+  approval_id:string -> user_message:string -> outcome -> string
+(** Append exact host replay evidence to the current model turn. Applied tool
+    output is labelled as untrusted data, and both outcomes explicitly forbid
+    blindly requesting the same approved operation again. *)
 
 (** Reconstruct the write tool arguments from the approved Gate input.
 
@@ -36,9 +59,16 @@ val execute_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
     upserted into those arguments rides along. The envelope's own sandbox
     fields stay behind for the handler to re-derive. *)
 
+val network_read_of_gate_input :
+  Yojson.Safe.t ->
+  (Keeper_tool_in_process_runtime.network_read_replay, string) result
+(** Decode the producer-owned [network_read] envelope without reconstructing
+    WebSearch or WebFetch arguments. *)
+
 type replayable =
   | Replay_write
   | Replay_execute
+  | Replay_network_read
 
 val replayable_of_operation : string -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the
@@ -47,10 +77,10 @@ val replayable_of_operation : string -> replayable option
 
 (** Replay the approved effect behind [approval_id] exactly once.
 
-    Covers the two operations whose approvals a Keeper must otherwise re-earn
-    by re-emitting a byte-identical call: [filesystem_write] and
-    [tool_execute]. Any other operation is {!Not_applicable} and still
-    requires resubmission.
+    Covers operations whose approvals a Keeper must otherwise re-earn by
+    re-emitting a byte-identical call: [filesystem_write], [tool_execute], and
+    producer-typed [network_read] (WebSearch/WebFetch). Any other operation is
+    {!Not_applicable} and still requires resubmission.
 
     [gate_context] is the same causal-context provider the model-issued write
     path supplies. A replay whose re-derived input no longer matches its

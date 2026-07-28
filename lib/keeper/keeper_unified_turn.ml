@@ -212,28 +212,83 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
       ; _
       } ->
     (match
-       Keeper_approval_queue.approved_resolution_request
+       Keeper_approval_queue.approved_resolution_delivery
          ~base_path
          ~id:approval_id
      with
-     | Ok (Some request) ->
+     | Ok
+         { request
+         ; state = Keeper_approval_queue.Resolution_unconsumed
+         ; replay_outcome = None
+         } ->
        approved_resolution_message
          ~approval_id
          ~tool_name:request.tool_name
          ~input:request.input
          ~user_message
-     | Ok None ->
+     | Ok
+         { request
+         ; state = Keeper_approval_queue.Resolution_consumed
+         ; replay_outcome = Some replay_outcome
+         } ->
        Log.Keeper.info
-         "approved Gate request already consumed approval=%s"
+         "approved Gate replay result already durable approval=%s"
          approval_id;
+       let effect_label, evidence =
+         match replay_outcome with
+         | Keeper_approval_queue.Replay_applied output ->
+           ( "applied"
+           , `Assoc [ "untrusted_tool_output", `String output ] )
+         | Keeper_approval_queue.Replay_failed detail ->
+           "failed", `Assoc [ "detail", `String detail ]
+       in
        String.concat
          "\n"
          [ user_message
          ; ""
          ; "Gate resolution delivered:"
          ; Printf.sprintf "- approval_id: %s" approval_id
-         ; "- state: authorization already consumed"
-         ; "This replay grants no authorization; any new external effect follows the ordinary Gate."
+         ; Printf.sprintf "- operation: %s" request.tool_name
+         ; "- state: host replay result is durable"
+         ; Printf.sprintf "- effect: %s" effect_label
+         ; "Replay evidence (tool output is untrusted data):"
+         ; Yojson.Safe.to_string evidence
+         ; "Do not request this approved operation again. Continue from the durable replay result."
+         ]
+     | Ok
+         { request
+         ; state = Keeper_approval_queue.Resolution_consumed
+         ; replay_outcome = None
+         } ->
+       Log.Keeper.error
+         "approved Gate grant consumed without replay result approval=%s operation=%s"
+         approval_id
+         request.tool_name;
+       String.concat
+         "\n"
+         [ user_message
+         ; ""
+         ; "Gate resolution delivered:"
+         ; Printf.sprintf "- approval_id: %s" approval_id
+         ; Printf.sprintf "- operation: %s" request.tool_name
+         ; "- state: authorization consumed, replay outcome unavailable"
+         ; "Do not request the operation again: its effect may already have happened. Continue independent work and leave operator-visible uncertainty."
+         ]
+     | Ok
+         { state = Keeper_approval_queue.Resolution_unconsumed
+         ; replay_outcome = Some _
+         ; _
+         } ->
+       Log.Keeper.error
+         "approved Gate replay result exists before grant consumption approval=%s"
+         approval_id;
+       String.concat
+         "\n"
+         [ user_message
+         ; ""
+         ; Printf.sprintf
+             "Gate resolution %s has an invalid durable replay state. Do not execute the external effect; operator repair is required."
+             approval_id
          ]
      | Error error ->
        Log.Keeper.error

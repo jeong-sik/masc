@@ -184,6 +184,55 @@ let with_external_gate_execution
       blocked.payload
 ;;
 
+let network_read_gate_operation = "network_read"
+
+type network_read_replay =
+  | Replay_web_search of Yojson.Safe.t
+  | Replay_web_fetch of Yojson.Safe.t
+
+let unique_field key fields =
+  match List.filter_map (fun (name, value) -> if String.equal name key then Some value else None) fields with
+  | [ value ] -> Ok value
+  | [] -> Error (Printf.sprintf "approved network_read input is missing %S" key)
+  | _ -> Error (Printf.sprintf "approved network_read input repeats %S" key)
+;;
+
+let reject_unknown_network_read_fields fields =
+  let unknown =
+    fields
+    |> List.filter_map (fun (name, _) ->
+      if String.equal name "capability" || String.equal name "input"
+      then None
+      else Some name)
+    |> List.sort_uniq String.compare
+  in
+  match unknown with
+  | [] -> Ok ()
+  | names ->
+    Error
+      (Printf.sprintf
+         "approved network_read input has unknown field(s): %s"
+         (String.concat ", " names))
+;;
+
+let network_read_replay_of_gate_input = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* () = reject_unknown_network_read_fields fields in
+    let* capability = unique_field "capability" fields in
+    let* input = unique_field "input" fields in
+    (match capability with
+     | `String "web_search" -> Ok (Replay_web_search input)
+     | `String "web_fetch" -> Ok (Replay_web_fetch input)
+     | `String capability ->
+       Error
+         (Printf.sprintf
+            "approved network_read capability %S is not replayable"
+            capability)
+     | _ -> Error "approved network_read capability must be a string")
+  | _ -> Error "approved network_read input must be an object"
+;;
+
 let handle_web_search_with_outcome
       ~config
       ~(meta : keeper_meta)
@@ -200,7 +249,7 @@ let handle_web_search_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ~operation:"network_read"
+    ~operation:network_read_gate_operation
     ~input
   @@ fun () ->
   let tool_name = "masc_web_search" in
@@ -229,7 +278,7 @@ let handle_web_fetch_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
-    ~operation:"network_read"
+    ~operation:network_read_gate_operation
     ~input
   @@ fun () ->
   Tool_misc_web_fetch.handle

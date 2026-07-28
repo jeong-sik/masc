@@ -168,6 +168,7 @@ let prepare_agent_setup
     { Keeper_tools_oas.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
+    ; gate_replay_delivery
     }
     =
     Keeper_tools_oas_bundle.make_tool_bundle
@@ -181,6 +182,21 @@ let prepare_agent_setup
       ~gate_context
       ?hitl_resolution
       ()
+  in
+  let user_message =
+    match gate_replay_delivery with
+    | None -> user_message
+    | Some { Keeper_tools_oas.approval_id; outcome } ->
+      Keeper_gate_replay.append_model_evidence
+        ~approval_id
+        ~user_message
+        outcome
+  in
+  let prompt_metrics =
+    Keeper_agent_prompt_metrics.build_prompt_metrics
+      ~system_prompt:turn_system_prompt
+      ~dynamic_context
+      ~user_message
   in
   let tools = keeper_tools in
   let registered_descriptors = Keeper_tool_descriptor.all_descriptors () in

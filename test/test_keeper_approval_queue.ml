@@ -1001,6 +1001,48 @@ let test_resolution_is_durable_and_origin_scoped () =
         | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
           Alcotest.fail "exact request did not consume its grant"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let replay_output = {|{"result":"durable replay"}|} in
+       (match
+          AQ.record_consumed_resolution_replay
+            ~base_path
+            ~id
+            ~outcome:(AQ.Replay_applied replay_output)
+        with
+        | Ok AQ.Replay_recorded -> ()
+        | Ok AQ.Replay_already_recorded ->
+          Alcotest.fail "first replay outcome write was already present"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (match
+          AQ.record_consumed_resolution_replay
+            ~base_path
+            ~id
+            ~outcome:(AQ.Replay_applied replay_output)
+        with
+        | Ok AQ.Replay_already_recorded -> ()
+        | Ok AQ.Replay_recorded ->
+          Alcotest.fail "identical replay outcome was rewritten as new"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (match
+          AQ.record_consumed_resolution_replay
+            ~base_path
+            ~id
+            ~outcome:(AQ.Replay_failed "different outcome")
+        with
+        | Error (AQ.Grant_replay_outcome_conflict actual_id) ->
+          Alcotest.(check string) "conflict identifies approval" id actual_id
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+        | Ok _ -> Alcotest.fail "conflicting replay outcome replaced durable truth");
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       (match AQ.approved_resolution_delivery ~base_path ~id with
+        | Ok
+            { state = AQ.Resolution_consumed
+            ; replay_outcome = Some (AQ.Replay_applied output)
+            ; _
+            } ->
+          Alcotest.(check string) "replay output survives restart" replay_output output
+        | Ok _ -> Alcotest.fail "restart lost the consumed replay outcome"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 

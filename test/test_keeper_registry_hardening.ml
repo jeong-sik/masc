@@ -37,6 +37,21 @@ let make_meta name =
   | Error e -> failwith ("make_meta failed: " ^ e)
 ;;
 
+let make_goal_reconciler_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "goal-reconciler"
+        ; "agent_name", `String "keeper-goal-reconciler-agent"
+        ; "trace_id", `String "trace-goal-reconciler"
+        ; "allowed_paths", `List [ `String "*" ]
+        ; "autoboot_enabled", `Bool false
+        ])
+  with
+  | Ok meta -> meta
+  | Error detail -> failwith ("goal reconciler meta failed: " ^ detail)
+;;
+
 let register name =
   let meta = make_meta name in
   KR.For_testing.register ~base_path meta.name meta
@@ -551,6 +566,106 @@ let test_goal_assignment_defers_offline_lane_after_queue_commit () =
        | _ -> fail "goal assignment was not retained in the offline lane")
 ;;
 
+let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
+  let dir = temp_dir "registry_goal_reconciliation" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let config = Masc.Workspace.default_config dir in
+       let meta = make_goal_reconciler_meta () in
+       ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
+       Masc.Workspace_metric_hooks.install ();
+       ignore (KR.register_offline ~base_path:config.base_path meta.name meta);
+       let goal, _ =
+         match
+           Goal_store.upsert_goal
+             config
+             ~id:"goal-reconciliation-test"
+             ~title:"Reconcile after terminal tasks"
+             ()
+         with
+         | Ok result -> result
+         | Error detail -> fail detail
+       in
+       ignore
+         (Workspace_task.add_task
+            ~goal_id:goal.id
+            config
+            ~title:"first"
+            ~priority:2
+            ~description:"first linked task");
+       ignore
+         (Workspace_task.add_task
+            ~goal_id:goal.id
+            config
+            ~title:"second"
+            ~priority:2
+            ~description:"second linked task");
+       let agent_name = "keeper-goal-reconciler-agent" in
+       let transition task_id action =
+         match
+           Masc.Workspace.transition_task_r
+             config
+             ~agent_name
+             ~task_id
+             ~action
+             ()
+         with
+         | Ok _ -> ()
+         | Error error -> fail (Masc_domain.masc_error_to_string error)
+       in
+       let finish task_id =
+         transition task_id Masc_domain.Claim;
+         transition task_id Masc_domain.Start;
+         transition task_id Masc_domain.Cancel
+       in
+       finish "task-001";
+       check int "no early durable wake" 0
+         (registry_snapshot ~base_path:config.base_path meta.name
+          |> Keeper_event_queue.length);
+       finish "task-002";
+       check int "last terminal commit enqueued reconciliation" 1
+         (registry_snapshot ~base_path:config.base_path meta.name
+          |> Keeper_event_queue.length);
+       (match
+          Masc.Keeper_goal_reconciliation_wake.enqueue_if_ready
+            ~config
+            ~completing_agent_name:agent_name
+            ~task_id:"task-002"
+        with
+        | Masc.Keeper_goal_reconciliation_wake.Already_present _ -> ()
+        | _ -> fail "terminal replay did not deduplicate reconciliation");
+       check int "exactly one pending reconciliation" 1
+         (registry_snapshot ~base_path:config.base_path meta.name
+          |> Keeper_event_queue.length);
+       KR.For_testing.clear ();
+       (match
+          Keeper_event_queue_persistence.load_pending_result
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+        with
+        | Ok queue ->
+          (match Keeper_event_queue.to_list queue with
+           | [ { payload =
+                   Keeper_event_queue.Goal_reconciliation_ready ready
+               ; _
+               } ] ->
+             check string "durable goal id" goal.id ready.gr_goal_id;
+             check string "triggering task id" "task-002"
+               ready.gr_triggering_task_id
+           | _ -> fail "durable reconciliation stimulus was not retained")
+        | Error detail -> fail detail);
+       match Goal_store.get_goal config ~goal_id:goal.id with
+       | Some { phase = Goal_phase.Executing; _ } -> ()
+       | Some _ -> fail "Task completion must not auto-complete its Goal"
+       | None -> fail "Goal disappeared")
+;;
+
 let contains_substring text needle =
   let text_len = String.length text in
   let needle_len = String.length needle in
@@ -734,6 +849,10 @@ let () =
             "goal assignment persists while offline wake is deferred"
             `Quick
             test_goal_assignment_defers_offline_lane_after_queue_commit
+        ; test_case
+            "goal reconciliation persists once after last terminal task"
+            `Quick
+            test_goal_reconciliation_enqueues_once_after_last_terminal_task
         ] )
     ; ( "tool_dispatch_exact_resources"
       , [ test_case "preserves exact meta after healthy entry replacement" `Quick

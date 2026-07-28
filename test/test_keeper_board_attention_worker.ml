@@ -212,7 +212,8 @@ let relevant_delivery_count ~base_path ~candidate_id =
           | Event_queue.Connector_attention _
           | Event_queue.Hitl_resolved _
           | Event_queue.Manual_compaction_requested
-          | Event_queue.Goal_assigned _ -> count)
+          | Event_queue.Goal_assigned _
+          | Event_queue.Goal_reconciliation_ready _ -> count)
        0
 ;;
 

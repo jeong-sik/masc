@@ -267,6 +267,13 @@ let push_task_event_fn
   : (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
   = Atomic.make (fun ~event_type:_ ~details:_ -> ())
 
+let task_terminal_committed_fn
+  : (Workspace_utils_backend_setup.config ->
+     agent_name:string ->
+     task_id:string ->
+     unit) Atomic.t
+  = Atomic.make (fun _config ~agent_name:_ ~task_id:_ -> ())
+
 let verification_submit_request_fn
   : (Workspace_utils_backend_setup.config ->
      task:Masc_domain.task ->

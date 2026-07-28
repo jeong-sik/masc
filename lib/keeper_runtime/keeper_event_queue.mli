@@ -93,6 +93,10 @@ type stimulus_payload =
           stimulus; the owning Keeper consumes it under its turn slot. *)
   | Goal_assigned of goal_assignment
       (** A goal was newly added to this keeper's [active_goal_ids]. *)
+  | Goal_reconciliation_ready of goal_reconciliation_ready
+      (** Every Task linked to an executing Goal is terminal. This wakes a
+          Keeper to re-read SSOT and choose a Goal action; it does not authorize
+          automatic completion. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -186,6 +190,12 @@ and goal_assignment = {
 }
 (** Payload for [Goal_assigned]. *)
 
+and goal_reconciliation_ready = {
+  gr_goal_id : string;
+  gr_triggering_task_id : string;
+}
+(** Identifier-only payload for [Goal_reconciliation_ready]. *)
+
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always
     ["fusion-run:<run_id>"]. Board projection availability is not event
@@ -203,6 +213,9 @@ val hitl_resolution_post_id : hitl_resolution -> post_id
 val manual_compaction_post_id : post_id
 
 val goal_assignment_post_id : goal_assignment -> post_id
+
+val goal_reconciliation_ready_post_id :
+  goal_reconciliation_ready -> post_id
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)

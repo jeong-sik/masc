@@ -118,6 +118,18 @@ let contains_substring ~needle haystack =
   in
   String.equal needle "" || scan 0
 
+let event_queue_test_meta keeper_name trace_id =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
+        ; "trace_id", `String trace_id
+        ])
+  with
+  | Ok meta -> meta
+  | Error detail -> Alcotest.fail detail
+
 let with_strict_executor f =
   Eio_main.run
   @@ fun env ->
@@ -558,6 +570,50 @@ let () =
     }
   in
   assert (stimulus_identity_equal assignment_stim assignment_retitled);
+  let reconciliation =
+    { gr_goal_id = "goal-9"; gr_triggering_task_id = "task-4" }
+  in
+  let reconciliation_stim =
+    { post_id = goal_reconciliation_ready_post_id reconciliation
+    ; urgency = Immediate
+    ; arrived_at = 9.0
+    ; payload = Goal_reconciliation_ready reconciliation
+    }
+  in
+  assert (
+    String.equal
+      reconciliation_stim.post_id
+      "goal-reconciliation-ready:goal-9");
+  assert (
+    String.equal
+      (payload_kind_label reconciliation_stim.payload)
+      "goal_reconciliation_ready");
+  (match stimulus_of_yojson (stimulus_to_yojson reconciliation_stim) with
+   | Ok { payload = Goal_reconciliation_ready decoded; _ } ->
+     assert (String.equal decoded.gr_goal_id "goal-9");
+     assert (String.equal decoded.gr_triggering_task_id "task-4")
+   | Ok _ -> Alcotest.fail "Goal_reconciliation_ready codec changed payload"
+   | Error msg ->
+     Alcotest.fail
+       ("Goal_reconciliation_ready stimulus round-trip failed: " ^ msg));
+  let prompt_event =
+    match
+      Masc.Keeper_world_observation.pending_board_event_of_stimulus
+        ~meta:(event_queue_test_meta "goal-reconciler" "trace-goal-reconciler")
+        reconciliation_stim
+    with
+    | Ok (Some event) -> event
+    | Ok None -> Alcotest.fail "goal reconciliation wake produced no prompt event"
+    | Error _ -> Alcotest.fail "goal reconciliation wake prompt projection failed"
+  in
+  assert (
+    match prompt_event.event_kind with
+    | Masc.Keeper_world_observation.Goal_reconciliation_ready -> true
+    | _ -> false);
+  assert (
+    contains_substring
+      ~needle:"Re-read Goal and Task SSOT"
+      prompt_event.preview);
   (* Producer diff is edge-only: additions wake, removals and unchanged ids
      never do. *)
   assert (

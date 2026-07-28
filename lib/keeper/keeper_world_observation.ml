@@ -27,6 +27,7 @@ type pending_board_event_kind =
   | Schedule_due
   | External_attention
   | Goal_assigned
+  | Goal_reconciliation_ready
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -588,6 +589,36 @@ let pending_board_event_of_goal_assignment
   }
 ;;
 
+let pending_board_event_of_goal_reconciliation_ready
+      ~meta
+      ~(arrived_at : float)
+      (ready : Keeper_event_queue.goal_reconciliation_ready)
+  : pending_board_event
+  =
+  { event_kind = Goal_reconciliation_ready
+  ; post_id = Keeper_event_queue.goal_reconciliation_ready_post_id ready
+  ; author = "masc"
+  ; title = Printf.sprintf "Goal reconciliation ready: %s" ready.gr_goal_id
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Task %s made every linked Task terminal. Re-read Goal and Task SSOT; \
+            choose masc_goal_transition request_complete or block, or create a \
+            follow-up Task. Do not infer Goal completion from task counts."
+           ready.gr_triggering_task_id)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = true
+  ; matched_targets = [ meta.name; ready.gr_goal_id ]
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
@@ -631,6 +662,13 @@ let pending_board_event_of_stimulus
             ~meta
             ~arrived_at:stimulus.arrived_at
             ga))
+  | Keeper_event_queue.Goal_reconciliation_ready ready ->
+    Ok
+      (Some
+         (pending_board_event_of_goal_reconciliation_ready
+            ~meta
+            ~arrived_at:stimulus.arrived_at
+            ready))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _

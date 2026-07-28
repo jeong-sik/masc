@@ -833,6 +833,7 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.Hitl_resolved
     ; Keeper_reaction_ledger.Manual_compaction
     ; Keeper_reaction_ledger.Goal_assigned
+    ; Keeper_reaction_ledger.Goal_reconciliation_ready
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))

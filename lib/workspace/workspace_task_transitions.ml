@@ -481,6 +481,15 @@ let transition_task_outcome_r
             Masc_domain.task_status_is_done new_status
             && not (Masc_domain.task_status_is_done task.task_status)
           in
+          let became_terminal =
+            Masc_domain.task_status_is_terminal new_status
+            && not (Masc_domain.task_status_is_terminal task.task_status)
+          in
+          if became_terminal then
+            (Atomic.get Workspace_hooks.task_terminal_committed_fn)
+              config
+              ~agent_name
+              ~task_id;
           let phase_duration_ms () =
             Some
               (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))

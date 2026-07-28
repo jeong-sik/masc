@@ -26,6 +26,9 @@ type pending_board_event_kind =
   | Goal_assigned
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
           the assignment edge surfaces as actionable turn input. *)
+  | Goal_reconciliation_ready
+      (** All linked Tasks are terminal; the Keeper must re-read SSOT and
+          choose completion, blocking, or follow-up work. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;

@@ -438,6 +438,14 @@ let install () =
     ) in
     Subscriptions.push_event_to_sessions payload);
 
+  Atomic.set Workspace_hooks.task_terminal_committed_fn
+    (fun config ~agent_name ~task_id ->
+       ignore
+         (Keeper_goal_reconciliation_wake.enqueue_if_ready
+            ~config
+            ~completing_agent_name:agent_name
+            ~task_id));
+
   Atomic.set Workspace_hooks.verification_submit_request_fn
     (fun config ~task ~assignee ~verification_id ~evidence_refs ->
        Verification_protocol.create_submit_request

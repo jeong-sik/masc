@@ -126,6 +126,12 @@ val record_thompson_result_fn :
 val push_task_event_fn :
   (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
 
+val task_terminal_committed_fn :
+  (Workspace_utils_backend_setup.config ->
+   agent_name:string ->
+   task_id:string ->
+   unit) Atomic.t
+
 val verification_submit_request_fn :
   (Workspace_utils_backend_setup.config ->
    task:Masc_domain.task ->

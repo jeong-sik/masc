@@ -80,9 +80,9 @@ describe('keeperDisplayStatus stays inside the token union', () => {
     ['backend status idle', { name: 'k', status: 'idle' } as Keeper, 'idle'],
     ['backend status listening', { name: 'k', status: 'listening' } as Keeper, 'listening'],
     [
-      'offline residual: agent record exists but no turn was ever run',
-      { name: 'k', status: 'offline', agent: { exists: true } } as unknown as Keeper,
-      'offline',
+      'offline residual: no recorded activity renders unbooted',
+      { name: 'k', status: 'offline' } as Keeper,
+      'unbooted',
     ],
   ]
 

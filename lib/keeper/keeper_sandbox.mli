@@ -26,6 +26,55 @@ type t = {
   task_overlay_pattern : string;
 }
 
+(** {1 Keeper-visible paths} *)
+
+(** Phantom-tagged filesystem paths, so that handing a keeper a path it
+    cannot use is a type error rather than a review comment.
+
+    Every path shown to a keeper LLM must be a [visible t], and the only
+    way to obtain one is {!visible_path_of_host} or {!visible_path_of_raw}
+    below. A [host t] does not unify with a [visible t], and [t] is fully
+    abstract rather than [private string], so [(p :> string)] does not
+    compile either — the sole erasure is {!Path.unsafe_to_string}, kept
+    greppable on purpose.
+
+    This exists because the convention was already tried and lost. This
+    file has told callers to project before surfacing a path since #10650
+    ("keeper_context_status sandbox_root leaks HOST absolute path",
+    ~890 failed docker execs/day), and the mapping was nonetheless
+    reimplemented five more times, three of them with a fallback that
+    emits a path the keeper cannot use. *)
+module Path : sig
+  type host
+  type container
+  type visible
+
+  type +'space t
+
+  (** Reads an absolute host path, normalising it lexically. Total: any
+      absolute string denotes some host location. Whether that location is
+      one the keeper may touch is containment, decided by
+      [Keeper_alerting_path], not here. *)
+  val of_host_abs : string -> host t
+
+  (** The sanctioned rendering for anything a keeper will read. *)
+  val visible_to_string : visible t -> string
+
+  (** Erasure that drops the guarantee. Every call site is a place the type
+      stopped protecting the caller, so this stays deliberately awkward to
+      name and easy to grep. *)
+  val unsafe_to_string : _ t -> string
+
+  type conversion_error =
+    | Outside_sandbox_root of {
+        path : string;
+        host_root : string;
+      }
+    | Container_root_missing of { path : string }
+
+  val conversion_error_to_string : conversion_error -> string
+end
+
 (** {1 Backend helpers} *)
 
 val backend_to_string : backend -> string
@@ -135,6 +184,40 @@ val allowed_root_rel_of_meta :
     Docker keeper makes the LLM emit host paths inside the container,
     which fails because that path does not exist there (#10650). *)
 val keeper_visible_root_abs : t -> string
+
+(** [visible_path_of_host t p] projects a host path into the coordinate
+    system the keeper actually runs in. This is the single projection: the
+    five earlier implementations differed only in what they did when the
+    path did not map, and each of those answers — return the host path,
+    collapse to the sandbox root, or search [repos/] for a plausible
+    segment — produces a directory the keeper is then told exists.
+
+    Local keepers share the host filesystem, so the projection is the
+    identity and cannot fail. Docker keepers live in a disjoint tree, so a
+    path outside the sandbox root has no visible spelling and is an
+    [Error]; callers must say what to do about that rather than receive a
+    substitute.
+
+    Containment for Docker is decided in canonical (realpath) coordinates
+    via {!Fs_compat.realpath_lenient}, so symlinked spellings of the same
+    location ([/tmp] vs [/private/tmp] on macOS) project identically
+    regardless of which spelling [config.base_path] or the input uses. *)
+val visible_path_of_host :
+  t ->
+  Path.host Path.t ->
+  (Path.visible Path.t, Path.conversion_error) result
+
+(** [visible_path_of_raw t raw] parses a path that arrived as an untyped
+    string — typically a [cwd] argument decoded from a keeper tool call.
+    A keeper may send either coordinate system, since the payloads it has
+    been shown historically carry both, so the ambiguity is resolved once
+    here instead of in each tool. A string already rooted at the visible
+    root is taken as visible; anything else is read as a host path and
+    projected. *)
+val visible_path_of_raw :
+  t ->
+  string ->
+  (Path.visible Path.t, Path.conversion_error) result
 
 (** {1 Dashboard / status output} *)
 

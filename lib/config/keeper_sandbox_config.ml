@@ -64,11 +64,6 @@ let sandbox_profile_of_agent ~base_path ~agent_name =
   | Ok profile -> profile
   | Error e -> raise (Invalid_keeper_sandbox_config e)
 
-let is_docker ~base_path ~agent_name =
-  match sandbox_profile_of_agent ~base_path ~agent_name with
-  | Docker -> true
-  | Local -> false
-
 let host_root_rel_of_profile profile name =
   match profile with
   | Local -> Playground_paths.bundle_root name
@@ -90,38 +85,3 @@ let container_root_of_agent ~agent_name =
   Filename.concat
     (Env_config_sandbox.Runtime.docker_playground_container_root ())
     (Playground_paths.sanitize_keeper_name agent_name)
-
-let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
-
-let suffix_under ~prefix path =
-  let prefix = strip_trailing_slashes prefix in
-  let path = strip_trailing_slashes path in
-  if String.equal path prefix
-  then Some ""
-  else
-    let prefix_with_sep = prefix ^ "/" in
-    if String.starts_with ~prefix:prefix_with_sep path
-    then
-      Some
-        (String.sub
-           path
-           (String.length prefix_with_sep)
-           (String.length path - String.length prefix_with_sep))
-    else None
-
-let visible_path_of_host_path ~base_path ~agent_name ~host_path =
-  match sandbox_profile_of_agent ~base_path ~agent_name with
-  | Local -> host_path
-  | Docker -> (
-      let host_repos_dir =
-        Filename.concat
-          (host_root_abs_of_agent ~base_path ~agent_name)
-          "repos"
-      in
-      let container_repos_dir =
-        Filename.concat (container_root_of_agent ~agent_name) "repos"
-      in
-      match suffix_under ~prefix:host_repos_dir host_path with
-      | Some "" -> container_repos_dir
-      | Some suffix -> Filename.concat container_repos_dir suffix
-      | None -> host_path)

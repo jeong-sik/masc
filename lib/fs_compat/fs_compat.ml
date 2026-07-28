@@ -1073,6 +1073,32 @@ let realpath (path : string) : string =
     (fun _fs -> Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
 ;;
 
+let realpath_lenient (path : string) : string =
+  try realpath path with
+  | Unix.Unix_error _ ->
+    (* Walk up the directory tree until we find an ancestor that exists and
+       can be resolved via realpath, then reconstruct the suffix.
+       This handles symlinks (e.g., /tmp -> /private/tmp on macOS) even when
+       intermediate directories do not exist on disk.
+       Tail-recursive to avoid stack overflow on deep untrusted paths. *)
+    let rec collect_suffix p acc =
+      let parent = Filename.dirname p in
+      if parent = p
+      then
+        (* Reached filesystem root without a successful realpath. *)
+        p, acc
+      else (
+        match
+          try Some (realpath p) with
+          | Unix.Unix_error _ -> None
+        with
+        | Some resolved -> resolved, acc
+        | None -> collect_suffix parent (Filename.basename p :: acc))
+    in
+    let resolved_base, suffix_parts = collect_suffix path [] in
+    List.fold_left Filename.concat resolved_base suffix_parts
+;;
+
 (** Create directory recursively if not exists.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let mkdir_p (path : string) : unit =

@@ -6,25 +6,6 @@
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
 
-val rewrite_turn_runtime_paths_to_host :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  string ->
-  string
-(** Rewrites occurrences of the keeper sandbox container root back to the
-    corresponding host playground root in path-bearing output. Used by
-    turn-scoped sandbox responses that must preserve host-path contracts
-    for follow-up tool calls. *)
-
-val rewrite_docker_host_paths_to_container :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  string ->
-  string
-(** Rewrites host playground root occurrences in keeper-issued Docker
-    commands to the corresponding in-container playground root before
-    execution. *)
-
 val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->

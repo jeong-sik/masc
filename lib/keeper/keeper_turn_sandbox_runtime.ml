@@ -167,28 +167,6 @@ let container_cwd_of_host (t : t) ~host_cwd =
        | None -> t.container_root)
 ;;
 
-let host_cwd_of_container (t : t) ~container_cwd =
-  let container_root_norm = normalize_path t.container_root in
-  let container_cwd_norm = normalize_path container_cwd in
-  if container_cwd_norm = container_root_norm
-  then Ok t.host_root
-  else if String.starts_with ~prefix:(container_root_norm ^ "/") container_cwd_norm
-  then (
-    let suffix =
-      String.sub
-        container_cwd_norm
-        (String.length container_root_norm + 1)
-        (String.length container_cwd_norm - String.length container_root_norm - 1)
-    in
-    Ok (Filename.concat t.host_root suffix))
-  else
-    Error
-      (Printf.sprintf
-         "host_path_of_container: %s is not inside container root %s"
-         container_cwd_norm
-         t.container_root)
-;;
-
 let format_docker_exec_error ~head_program ~st ~out =
   match st with
   | Unix.WEXITED code ->

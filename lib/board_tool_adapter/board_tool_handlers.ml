@@ -513,7 +513,7 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
                (Board.Post_id.to_string p.id)
                p.title
                (Board.Agent_id.to_string p.author)
-               (Board_tool_format.format_timestamp_relative p.created_at)
+               (Board_tool_format.format_timestamp_absolute p.created_at)
                p.reply_count
                (p.votes_up + p.votes_down))
           targets

@@ -26,34 +26,35 @@ module Float = Stdlib.Float
 let raw_agent_name_meta_key ~field = field ^ "_raw_agent_name"
 let author_raw_agent_name_meta_key = raw_agent_name_meta_key ~field:"author"
 
-let format_timestamp_relative ts =
-  let now = Time_compat.now () in
-  let diff = now -. ts in
-  if Stdlib.Float.compare diff 60.0 < 0
-  then "just now"
-  else if Stdlib.Float.compare diff Masc_time_constants.hour < 0
-  then Printf.sprintf "%dm ago" (Stdlib.Int.of_float (diff /. 60.0))
-  else if Stdlib.Float.compare diff Masc_time_constants.day < 0
-  then Printf.sprintf "%dh ago" (Stdlib.Int.of_float (diff /. Masc_time_constants.hour))
-  else Printf.sprintf "%dd ago" (Stdlib.Int.of_float (diff /. Masc_time_constants.day))
-;;
+(* Board tool payloads are read by an LLM turn, not by a human watching a
+   dashboard, so the same post must render to the same bytes on every call.
 
-let format_ttl_remaining expires_at =
+   The previous [format_timestamp_relative] / [format_ttl_remaining] pair read
+   [Time_compat.now ()] inside functions whose signatures promised a pure
+   [float -> string]: the clock was a hidden second input. A re-listed post
+   therefore drifted "7m ago" -> "8m ago" while nothing about the post changed,
+   which (a) made every payload byte-new, so [Board_tool_cache] could never hit
+   and no downstream dedup was possible, and (b) read to the keeper as "the
+   board moved", re-arming its poll cycle. Measured on rondo turn
+   1785189305806: 44 [masc_board_search] calls, one real change, 44 distinct
+   payloads whose only diff was the minute counter; the turn's tool_result
+   accumulation was 81.3% byte-exact duplication.
+
+   Both now render the instant they were given, so output is a function of the
+   argument alone. The keeper resolves recency against [session:wall_time],
+   which [Masc_context_injector] refreshes per turn. Human-facing relative
+   rendering stays in [Dashboard_labels] / [Tempo], which have a human reader
+   and no cache or dedup contract. *)
+let format_timestamp_absolute ts = Masc_domain.iso8601_of_unix_seconds ts
+
+(* Reports the expiry instant rather than a remaining duration. "permanent" is
+   derived from the stored [0.0] sentinel, not from the clock, so it stays
+   stable too. Callers label this [expires:] rather than [TTL:] because an
+   absolute timestamp must not be misread as a duration. *)
+let format_expiry expires_at =
   if Stdlib.Float.compare expires_at 0.0 = 0
   then "permanent"
-  else (
-    let now = Time_compat.now () in
-    let remaining = expires_at -. now in
-    if Stdlib.Float.compare remaining 0.0 <= 0
-    then "expired"
-    else if Stdlib.Float.compare remaining Masc_time_constants.hour < 0
-    then Printf.sprintf "%dm left" (Stdlib.Int.of_float (remaining /. 60.0))
-    else if Stdlib.Float.compare remaining Masc_time_constants.day < 0
-    then Printf.sprintf "%dh left" (Stdlib.Int.of_float (remaining /. Masc_time_constants.hour))
-    else
-      Printf.sprintf
-        "%dd left"
-        (Stdlib.Int.of_float (remaining /. Masc_time_constants.day)))
+  else Masc_domain.iso8601_of_unix_seconds expires_at
 ;;
 
 let board_error_to_string = function
@@ -95,8 +96,8 @@ let visibility_of_string = Board.visibility_of_string
 
 let format_post (p : Board.post) =
   let vis_str = Board.visibility_to_string p.visibility in
-  let time_str = format_timestamp_relative p.created_at in
-  let ttl_str = format_ttl_remaining p.expires_at in
+  let time_str = format_timestamp_absolute p.created_at in
+  let ttl_str = format_expiry p.expires_at in
   let score = p.votes_up - p.votes_down in
   let hearth_str =
     match p.hearth with
@@ -109,7 +110,7 @@ let format_post (p : Board.post) =
     | None -> ""
   in
   Printf.sprintf
-    "**%s** · %s [%s]%s (by %s, %s, TTL: %s)\n%s\n[↑%d ↓%d = %+d] [%d replies]%s"
+    "**%s** · %s [%s]%s (by %s, %s, expires: %s)\n%s\n[↑%d ↓%d = %+d] [%d replies]%s"
     (Board.Post_id.to_string p.id)
     p.title
     vis_str
@@ -128,7 +129,7 @@ let format_post (p : Board.post) =
 (** Compact one-line format: id, title, author, time, score. Omits
     body/TTL/visibility/thread to minimize token usage. *)
 let format_post_compact (p : Board.post) =
-  let time_str = format_timestamp_relative p.created_at in
+  let time_str = format_timestamp_absolute p.created_at in
   let score = p.votes_up - p.votes_down in
   let hearth_str =
     match p.hearth with
@@ -149,7 +150,7 @@ let format_post_compact (p : Board.post) =
 let format_comment ?(indent = 0) (c : Board.comment) =
   let prefix = String.make indent ' ' in
   let tree_prefix = if indent > 0 then "└─ " else "" in
-  let time_str = format_timestamp_relative c.created_at in
+  let time_str = format_timestamp_absolute c.created_at in
   let vote_str =
     if c.votes_up > 0 || c.votes_down > 0
     then Printf.sprintf ", 👍%d 👎%d" c.votes_up c.votes_down

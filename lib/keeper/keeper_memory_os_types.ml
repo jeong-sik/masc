@@ -81,6 +81,7 @@ let wire_field_member_indices = "member_indices"
 let wire_field_reason = "reason"
 let wire_field_reinforcement_count = "reinforcement_count"
 let wire_field_claim_kind_update = "claim_kind_update"
+let wire_field_valid_for_days_update = "valid_for_days_update"
 let wire_op_add = "add"
 let wire_op_reinforce = "reinforce"
 let wire_op_merge = "merge"
@@ -101,6 +102,7 @@ let wire_librarian_operation_fields =
   ; wire_field_claim_id
   ; wire_field_claim_kind
   ; wire_field_claim_kind_update
+  ; wire_field_valid_for_days_update
   ; wire_field_valid_for_days
   ; wire_field_source_turn
   ; wire_field_reason

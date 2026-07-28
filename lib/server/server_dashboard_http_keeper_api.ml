@@ -9,6 +9,10 @@ let handle_keeper_paused_work_post =
   Server_dashboard_http_keeper_paused_work.handle_post
 ;;
 
+let handle_keeper_recognition_repair_post =
+  Server_dashboard_http_keeper_recognition_repair.handle_post
+;;
+
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 

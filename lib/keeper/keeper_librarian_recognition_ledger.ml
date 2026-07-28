@@ -586,6 +586,59 @@ let load_pending_marker ~masc_root ~keeper_id =
     | exn -> Error (Printexc.to_string exn)
 ;;
 
+let prepared_evidence_exists ~masc_root ~publication_id =
+  let found = ref false in
+  let row_error = ref None in
+  match
+    Dated_jsonl.iter_all_entries_result
+      (make_store ~masc_root ())
+      (fun entry ->
+         match !row_error, entry with
+         | Some _, _ -> ()
+         | None, Dated_jsonl.Malformed_json { path; line_number; detail } ->
+           row_error
+           := Some
+                (Printf.sprintf
+                   "%s%s: malformed recognition audit JSON: %s"
+                   path
+                   (match line_number with
+                    | None -> ""
+                    | Some line -> Printf.sprintf ":%d" line)
+                   detail)
+         | None, Dated_jsonl.Parsed (`Assoc fields) ->
+           (match
+              string_field field_publication_id fields,
+              string_field field_publication_state fields
+            with
+            | Some row_id, Some "prepared"
+              when String.equal row_id publication_id ->
+              found := true
+            | Some _, Some _ -> ()
+            | None, _ | _, None ->
+              row_error
+              := Some
+                   "recognition audit row is missing publication identity/state")
+         | None, Dated_jsonl.Parsed _ ->
+           row_error := Some "recognition audit row is not an object")
+  with
+  | Error error -> Error (Dated_jsonl.read_error_to_string error)
+  | Ok () ->
+    (match !row_error with
+     | Some detail -> Error detail
+     | None -> Ok !found)
+;;
+
+let ensure_prepared_evidence ~masc_root publication =
+  match
+    prepared_evidence_exists
+      ~masc_root
+      ~publication_id:publication.publication_id
+  with
+  | Error _ as error -> error
+  | Ok false -> append_json ~masc_root publication.prepared_json
+  | Ok true -> Ok ()
+;;
+
 let recover_pending_classified ~masc_root ~keeper_id ~current_store ~now () =
   try
     match load_pending_marker ~masc_root ~keeper_id with
@@ -593,11 +646,11 @@ let recover_pending_classified ~masc_root ~keeper_id ~current_store ~now () =
     | Ok None -> Ok No_pending_publication
     | Ok (Some publication) ->
       (* The dated audit retention sweep can remove an old prepared row while
-         its O(1) pending marker remains. Reassert the exact prepared payload on
-         every recovery before writing a terminal state. At-least-once physical
-         duplicates are collapsed by [read_all_canonical]. *)
+         its O(1) pending marker remains. Reassert the exact prepared payload
+         only when its canonical row is absent; a repeatedly observed
+         third-state latch must not append an O(store) duplicate per read. *)
       let prepared_ready =
-        match append_json ~masc_root publication.prepared_json with
+        match ensure_prepared_evidence ~masc_root publication with
         | Error _ as error -> error
         | Ok () ->
           if publication.prepared_logged
@@ -714,6 +767,25 @@ type repair_error =
   | Pending_repair_terminal_failed of string
   | Pending_repair_io_failed of string
 
+let repair_error_to_string = function
+  | No_pending_publication_to_repair ->
+    "no pending recognition publication to repair"
+  | Pending_repair_marker_invalid detail ->
+    "pending recognition marker invalid: " ^ detail
+  | Pending_repair_prepared_failed detail ->
+    "prepared recognition evidence repair failed: " ^ detail
+  | Pending_repair_rewrite_failed detail ->
+    "recognition fact-store repair failed: " ^ detail
+  | Pending_repair_episode_failed detail ->
+    "recognition episode repair failed: " ^ detail
+  | Pending_repair_event_failed detail ->
+    "recognition event repair failed: " ^ detail
+  | Pending_repair_terminal_failed detail ->
+    "recognition terminal marker repair failed: " ^ detail
+  | Pending_repair_io_failed detail ->
+    "recognition repair I/O failed: " ^ detail
+;;
+
 let repair_pending
       ~masc_root
       ~keeper_id
@@ -727,7 +799,7 @@ let repair_pending
     | Error detail -> Error (Pending_repair_marker_invalid detail)
     | Ok None -> Error No_pending_publication_to_repair
     | Ok (Some publication) ->
-      (match append_json ~masc_root publication.prepared_json with
+      (match ensure_prepared_evidence ~masc_root publication with
        | Error detail -> Error (Pending_repair_prepared_failed detail)
        | Ok () ->
          let abort () =

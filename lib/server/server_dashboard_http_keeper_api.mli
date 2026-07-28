@@ -24,6 +24,7 @@ val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
+val keeper_suffix_recognition_repair : string
 
 (** {1 Trajectory merge}
 
@@ -226,6 +227,16 @@ val handle_keeper_paused_work_post :
   unit
 (** Handle authenticated [POST /paused-work] for exact Resume, Transfer,
     Cancel, or source-terminal disposition. *)
+
+val handle_keeper_recognition_repair_post :
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  string ->
+  unit
+(** Handle authenticated [POST /recognition-publication/repair]. The route is
+    wired only behind token-bound [CanAdmin] authorization and keeper turn-slot
+    admission. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->

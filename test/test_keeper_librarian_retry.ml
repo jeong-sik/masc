@@ -23,6 +23,7 @@ let deprecated_field_confidence = "confidence"
 let field_category = Lib.wire_field_category
 let field_source_turn = Lib.wire_field_source_turn
 let field_valid_for_days = Lib.wire_field_valid_for_days
+let field_valid_for_days_update = Lib.wire_field_valid_for_days_update
 let field_open_items = Lib.wire_field_open_items
 let field_constraints = Lib.wire_field_constraints
 let field_preserved_tool_refs = Lib.wire_field_preserved_tool_refs
@@ -492,6 +493,8 @@ let test_parses_all_operation_shapes () =
             [ field_op, `String "revise"
             ; field_index, `Int 3
             ; field_claim, `String "revised claim"
+            ; field_valid_for_days_update, `String "keep"
+            ; field_valid_for_days, `Null
             ; field_source_turn, `Int 4
             ]
         ; `Assoc
@@ -519,6 +522,7 @@ let test_revise_null_clears_expiry_instead_of_preserving_it () =
             [ field_op, `String "revise"
             ; field_index, `Int 0
             ; field_claim, `String "durable correction"
+            ; field_valid_for_days_update, `String "clear"
             ; field_valid_for_days, `Null
             ; field_source_turn, `Int 4
             ]
@@ -530,6 +534,67 @@ let test_revise_null_clears_expiry_instead_of_preserving_it () =
   | Ok _ -> Alcotest.fail "revise null did not retain its clear-expiry meaning"
   | Error error ->
     Alcotest.failf "revise null should parse, got %s" (Lib.parse_error_to_string error)
+;;
+
+let test_revise_validity_tri_state_parses () =
+  let parse update valid_for_days =
+    output_json_string
+      ~operations:
+        [ `Assoc
+            [ field_op, `String "revise"
+            ; field_index, `Int 0
+            ; field_claim, `String "corrected"
+            ; field_valid_for_days_update, `String update
+            ; field_valid_for_days, valid_for_days
+            ; field_source_turn, `Int 4
+            ]
+        ]
+      ()
+    |> parse_out
+  in
+  let cases =
+    [ ( "keep"
+      , `Null
+      , function Recognition.Keep_valid_until -> true | _ -> false )
+    ; ( "clear"
+      , `Null
+      , function Recognition.Clear_valid_until -> true | _ -> false )
+    ; ( "set"
+      , `Int 30
+      , function Recognition.Set_valid_for_days 30 -> true | _ -> false )
+    ]
+  in
+  List.iter
+    (fun (update, valid_for_days, matches) ->
+       match parse update valid_for_days with
+       | Ok
+           { Lib.operations =
+               [ Recognition.Revise { valid_until_update; _ } ]
+           ; _
+           } when matches valid_until_update -> ()
+       | Ok _ -> fail "validity update lost its tri-state meaning"
+       | Error error ->
+         failf
+           "valid revise validity action was rejected: %s"
+           (Lib.parse_error_to_string error))
+    cases;
+  List.iter
+    (fun (update, valid_for_days) ->
+       rejects
+         "mismatched revise validity action/value"
+         (output_json_string
+            ~operations:
+              [ `Assoc
+                  [ field_op, `String "revise"
+                  ; field_index, `Int 0
+                  ; field_claim, `String "corrected"
+                  ; field_valid_for_days_update, `String update
+                  ; field_valid_for_days, valid_for_days
+                  ; field_source_turn, `Int 4
+                  ]
+              ]
+            ()))
+    [ "keep", `Int 30; "clear", `Int 30; "set", `Null ]
 ;;
 
 let test_rejects_reinforce_of_expired_fact () =
@@ -720,6 +785,8 @@ let test_revise_claim_kind_tri_state_parses () =
             ([ field_op, `String "revise"
              ; field_index, `Int 0
              ; field_claim, `String "corrected"
+             ; field_valid_for_days_update, `String "keep"
+             ; field_valid_for_days, `Null
              ; field_source_turn, `Int 4
              ]
              @ field)
@@ -908,6 +975,8 @@ let () =
           test_case "parses all operation shapes" `Quick test_parses_all_operation_shapes;
           test_case "revise null clears expiry" `Quick
             test_revise_null_clears_expiry_instead_of_preserving_it;
+          test_case "revise validity parses as tri-state" `Quick
+            test_revise_validity_tri_state_parses;
           test_case "rejects reinforce of expired fact" `Quick
             test_rejects_reinforce_of_expired_fact;
           test_case "rejects single-member merge" `Quick test_rejects_single_member_merge;

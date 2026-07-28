@@ -167,6 +167,8 @@ type repair_error =
   | Pending_repair_terminal_failed of string
   | Pending_repair_io_failed of string
 
+val repair_error_to_string : repair_error -> string
+
 val repair_pending
   :  masc_root:string
   -> keeper_id:string

@@ -36,6 +36,9 @@ let wire_field_source_tool_call_id = Keeper_memory_os_types.wire_field_source_to
 let wire_field_claim_id = Keeper_memory_os_types.wire_field_claim_id
 let wire_field_claim_kind = Keeper_memory_os_types.wire_field_claim_kind
 let wire_field_claim_kind_update = Keeper_memory_os_types.wire_field_claim_kind_update
+let wire_field_valid_for_days_update =
+  Keeper_memory_os_types.wire_field_valid_for_days_update
+;;
 let wire_field_valid_for_days = Keeper_memory_os_types.wire_field_valid_for_days
 let wire_field_schema_version = Keeper_memory_os_types.wire_field_schema_version
 let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
@@ -309,17 +312,23 @@ let valid_for_days_field fields =
   | Some _ -> None
 ;;
 
-(* Revise has different null semantics from Add: omission preserves the
-   existing row, while an explicit null clears its expiry. Keep that distinction
-   at the wire boundary instead of collapsing it into an option. *)
+(* Revise validity is an explicit tri-state. Because the provider schema
+   requires every flat operation field, omission cannot encode "keep":
+   [valid_for_days_update] owns the action and [valid_for_days] carries a value
+   only for [set]. *)
 let revise_valid_until_update_field fields =
-  match List.assoc_opt wire_field_valid_for_days fields with
-  | None -> Some Recognition.Keep_valid_until
-  | Some `Null -> Some Recognition.Clear_valid_until
-  | Some (`Int days)
+  match
+    ( List.assoc_opt wire_field_valid_for_days_update fields
+    , List.assoc_opt wire_field_valid_for_days fields )
+  with
+  | Some (`String "keep"), Some `Null ->
+    Some Recognition.Keep_valid_until
+  | Some (`String "clear"), Some `Null ->
+    Some Recognition.Clear_valid_until
+  | Some (`String "set"), Some (`Int days)
     when days >= 1 && days <= Keeper_memory_os_types.max_valid_for_days ->
     Some (Recognition.Set_valid_for_days days)
-  | Some _ -> None
+  | _ -> None
 ;;
 
 let revise_claim_kind_update_field fields =
@@ -574,6 +583,7 @@ let operation_of_json
                  ; wire_field_claim_id
                  ; wire_field_claim_kind
                  ; wire_field_claim_kind_update
+                 ; wire_field_valid_for_days_update
                  ; wire_field_valid_for_days
                  ; wire_field_source_turn
                  ]

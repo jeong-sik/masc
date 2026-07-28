@@ -1245,18 +1245,13 @@ let reserve_recognition_input ~keeper_id (inp : Keeper_librarian.input) =
   generation, { inp with Keeper_librarian.generation }
 ;;
 
-let repair_pending_publication
+let repair_pending_publication_for_masc_root
       ?clock
-      ~base_path
+      ~masc_root
       ~keeper_id
       ~action
       ()
   =
-  let masc_root =
-    Workspace_utils.masc_root_dir_from
-      ~base_path
-      ~cluster_name:(Env_config_core.cluster_name ())
-  in
   Keeper_memory_os_io.with_recognition_fact_transaction
     ?clock
     ~masc_root
@@ -1278,6 +1273,26 @@ let repair_pending_publication
          (* NDT-OK: operator-repair audit timestamps are provenance metadata. *)
          ~now:(Unix.gettimeofday ())
          ())
+;;
+
+let repair_pending_publication
+      ?clock
+      ~base_path
+      ~keeper_id
+      ~action
+      ()
+  =
+  let masc_root =
+    Workspace_utils.masc_root_dir_from
+      ~base_path
+      ~cluster_name:(Env_config_core.cluster_name ())
+  in
+  repair_pending_publication_for_masc_root
+    ?clock
+    ~masc_root
+    ~keeper_id
+    ~action
+    ()
 ;;
 
 let preflight_recognition_store ?clock ~base_path ~keeper_id () =

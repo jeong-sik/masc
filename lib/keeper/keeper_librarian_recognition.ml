@@ -339,9 +339,18 @@ let operation_to_json op : Yojson.Safe.t =
            ; wire_field_claim_kind, `String (claim_kind_to_string kind)
            ])
       @ (match valid_until_update with
-         | Keep_valid_until -> []
-         | Clear_valid_until -> [ wire_field_valid_for_days, `Null ]
-         | Set_valid_for_days days -> [ wire_field_valid_for_days, `Int days ])
+         | Keep_valid_until ->
+           [ wire_field_valid_for_days_update, `String "keep"
+           ; wire_field_valid_for_days, `Null
+           ]
+         | Clear_valid_until ->
+           [ wire_field_valid_for_days_update, `String "clear"
+           ; wire_field_valid_for_days, `Null
+           ]
+         | Set_valid_for_days days ->
+           [ wire_field_valid_for_days_update, `String "set"
+           ; wire_field_valid_for_days, `Int days
+           ])
     | Forget { index; reason } ->
       [ wire_field_index, `Int index; wire_field_reason, `String reason ]
   in

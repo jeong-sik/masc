@@ -13,11 +13,11 @@ open Keeper_memory_os_types
 
 type valid_until_update =
   | Keep_valid_until
-  (** [valid_for_days] was absent: preserve the existing expiry. *)
+  (** [valid_for_days_update = "keep"] with a null value preserves expiry. *)
   | Clear_valid_until
-  (** [valid_for_days: null]: make the revised claim durable. *)
+  (** [valid_for_days_update = "clear"] with null makes it durable. *)
   | Set_valid_for_days of int
-  (** [valid_for_days: n]: derive a new expiry from [n]. *)
+  (** [valid_for_days_update = "set"] derives a new expiry from its day count. *)
 
 type claim_kind_update =
   | Keep_claim_kind

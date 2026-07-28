@@ -208,6 +208,17 @@ val repair_pending_publication
     the episode-bundle and facts locks, then performs exactly the explicit
     ledger repair action; it never selects restore/abort/settle heuristically. *)
 
+val repair_pending_publication_for_masc_root
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> masc_root:string
+  -> keeper_id:string
+  -> action:Keeper_librarian_recognition_ledger.pending_repair
+  -> unit
+  -> ( Keeper_librarian_recognition_ledger.repair_outcome
+       , Keeper_librarian_recognition_ledger.repair_error )
+       result
+(** Exact-root variant for authenticated multi-cluster operator surfaces. *)
+
 val extract_and_append_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string

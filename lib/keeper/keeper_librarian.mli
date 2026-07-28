@@ -39,6 +39,7 @@ val wire_field_source_tool_call_id : string
 val wire_field_claim_id : string
 val wire_field_claim_kind : string
 val wire_field_claim_kind_update : string
+val wire_field_valid_for_days_update : string
 
 val wire_field_valid_for_days : string
 (** Producer-declared lifetime in whole days (1..

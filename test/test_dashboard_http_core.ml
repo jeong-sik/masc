@@ -172,6 +172,42 @@ let test_keeper_paused_work_route_is_admin_exact () =
     false
     (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path (path ^ "/extra"))
 
+let test_keeper_recognition_repair_route_is_admin_exact () =
+  let path =
+    "/api/v1/keepers/idealist/recognition-publication/repair"
+  in
+  check bool
+    "recognition repair POST route kind"
+    true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_recognition_repair);
+  check string
+    "recognition repair keeper name"
+    "idealist"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix
+       path
+       Server_dashboard_http_keeper_api.keeper_suffix_recognition_repair);
+  check bool
+    "recognition repair rejects trailing segment"
+    true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route (path ^ "/extra")
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown);
+  let routes = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
+  check bool
+    "recognition repair route is token-bound CanAdmin"
+    true
+    (contains_substring
+       routes
+       {|Keeper_api.Keeper_post_recognition_repair ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin|});
+  let operator =
+    read_file "lib/keeper/keeper_librarian_recognition_operator.ml"
+  in
+  check bool
+    "recognition repair is serialized against keeper turns"
+    true
+    (contains_substring operator "Keeper_turn_admission.run_admin_if_free")
+
 let test_keeper_chat_receipt_route_and_json () =
   let receipt_id =
     match
@@ -2340,6 +2376,8 @@ let () =
             test_keeper_post_route_classifies_catchup_judge;
           test_case "keeper paused-work route is exact" `Quick
             test_keeper_paused_work_route_is_admin_exact;
+          test_case "keeper recognition repair route is admin exact" `Quick
+            test_keeper_recognition_repair_route_is_admin_exact;
           test_case "keeper chat receipt route is typed" `Quick
             test_keeper_chat_receipt_route_and_json;
           test_case "keeper chat recovery route is exact" `Quick

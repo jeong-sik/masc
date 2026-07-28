@@ -16,6 +16,7 @@ module Consolidation = Masc.Keeper_memory_os_consolidation
 module Ledger = Masc.Keeper_librarian_recognition_ledger
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
+module Recognition_operator = Masc.Keeper_librarian_recognition_operator
 module Memory_io = Masc.Keeper_memory_os_io
 module Recall = Masc.Keeper_memory_os_recall
 module Types = Masc.Keeper_memory_os_types
@@ -910,6 +911,68 @@ let test_explicit_operator_repair_actions_settle_pending_third_state () =
   run Ledger.Settle_store_after [ "before"; "after" ] "committed" 1
 ;;
 
+let test_repeated_third_state_recovery_does_not_grow_prepared_audit () =
+  let masc_root = Filename.temp_file "recognition-third-state-growth" ".tmp" in
+  Sys.remove masc_root;
+  let keeper_id = "keeper-third-state-growth" in
+  let before = [ fact ~claim:"before" () ] in
+  let operation = Recognition.Add (fact ~claim:"after" ()) in
+  let applied = apply [ operation ] before in
+  let event = episode ~claims:applied.Recognition.recognized_facts () in
+  let publication_id =
+    Ledger.publication_id
+      ~keeper_id
+      ~trace_id:event.trace_id
+      ~generation:event.generation
+      ~store_before:before
+      ~operations:[ operation ]
+      ~dispositions:applied.Recognition.dispositions
+      ~store_after:applied.Recognition.facts
+      ~episode:event
+      ~facts_rewrite_required:true
+  in
+  (match
+     Ledger.append_prepared
+       ~masc_root
+       ~publication_id
+       ~keeper_id
+       ~trace_id:event.trace_id
+       ~generation:event.generation
+       ~store_before:before
+       ~operations:[ operation ]
+       ~dispositions:applied.Recognition.dispositions
+       ~store_after:applied.Recognition.facts
+       ~episode:event
+       ~facts_rewrite_required:true
+       ~now
+       ()
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("third-state growth fixture failed: " ^ detail));
+  let audit = Dated_jsonl.create ~base_dir:(Ledger.base_dir ~masc_root) () in
+  check int "one initial physical prepared row" 1
+    (Dated_jsonl.count_entries_uncached audit);
+  List.iter
+    (fun attempt ->
+       match
+         Ledger.recover_pending_classified
+           ~masc_root
+           ~keeper_id
+           ~current_store:[ fact ~claim:"third-state" () ]
+           ~now:(now +. Float.of_int attempt)
+           ()
+       with
+       | Error (Ledger.Pending_publication_third_state _) -> ()
+       | Error error ->
+         fail
+           ("wrong repeated recovery classification: "
+            ^ Ledger.recovery_error_to_string error)
+       | Ok _ -> fail "third-state recovery unexpectedly terminalized")
+    [ 1; 2; 3 ];
+  check int "repeated reads do not append duplicate prepared rows" 1
+    (Dated_jsonl.count_entries_uncached audit)
+;;
+
 let test_pending_third_state_blocks_provider_admission () =
   let base_path = Filename.temp_file "recognition-preflight-latch" ".tmp" in
   Sys.remove base_path;
@@ -987,6 +1050,32 @@ let test_pending_third_state_blocks_provider_admission () =
         ("wrong preflight error: "
          ^ Librarian_runtime.extraction_error_to_string error)
     | Ok _ -> fail "third-state preflight admitted provider extraction")
+;;
+
+let test_operator_repair_request_is_strict_and_typed () =
+  let parses action expected =
+    match
+      Recognition_operator.request_of_yojson
+        (`Assoc [ "action", `String action ])
+    with
+    | Ok actual when actual = expected -> ()
+    | Ok _ -> fail ("repair action decoded incorrectly: " ^ action)
+    | Error detail -> fail ("repair action rejected: " ^ detail)
+  in
+  parses "abort_preserving_current" Ledger.Abort_preserving_current;
+  parses "restore_store_before" Ledger.Restore_store_before;
+  parses "settle_store_after" Ledger.Settle_store_after;
+  List.iter
+    (fun json ->
+       match Recognition_operator.request_of_yojson json with
+       | Error _ -> ()
+       | Ok _ -> fail "invalid repair request crossed the typed parser")
+    [ `Assoc [ "action", `String "guess" ]
+    ; `Assoc
+        [ "action", `String "settle_store_after"; "unexpected", `Bool true ]
+    ; `Assoc []
+    ; `String "settle_store_after"
+    ]
 ;;
 
 let test_pending_guard_uses_authoritative_root_matrix () =
@@ -1306,9 +1395,17 @@ let () =
             `Quick
             test_explicit_operator_repair_actions_settle_pending_third_state;
           test_case
+            "repeated third-state recovery does not grow prepared audit"
+            `Quick
+            test_repeated_third_state_recovery_does_not_grow_prepared_audit;
+          test_case
             "pending third state blocks provider admission"
             `Quick
             test_pending_third_state_blocks_provider_admission;
+          test_case
+            "operator repair request is strict and typed"
+            `Quick
+            test_operator_repair_request_is_strict_and_typed;
           test_case
             "pending guard uses authoritative root matrix"
             `Quick

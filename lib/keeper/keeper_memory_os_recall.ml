@@ -226,27 +226,37 @@ let render_context_exn ?masc_root ~keeper_id ~now () =
      rewritten facts from becoming visible before its episode/event. *)
   let all_facts, all_episodes =
     Keeper_memory_os_io.with_episode_bundle_lock ~keeper_id (fun () ->
-      File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-        let facts =
-          match Keeper_memory_os_io.read_facts_all_strict ~keeper_id with
-          | Ok facts -> facts
-          | Error detail -> failwith detail
-        in
-        (match masc_root with
-         | None -> ()
-         | Some masc_root ->
-           (match
-              Keeper_librarian_recognition_ledger.recover_pending
-                ~masc_root
-                ~keeper_id
-                ~current_store:facts
-                ~now
-                ()
-            with
-            | Ok _ -> ()
-            | Error detail ->
-              failwith ("recognition publication recovery failed: " ^ detail)));
-        facts, Keeper_memory_os_io.read_episodes_all ~keeper_id))
+      let facts =
+        File_lock_eio.with_lock
+          (Keeper_memory_os_io.facts_path ~keeper_id)
+          (fun () ->
+             let facts =
+               match Keeper_memory_os_io.read_facts_all_strict ~keeper_id with
+               | Ok facts -> facts
+               | Error detail -> failwith detail
+             in
+             (match masc_root with
+              | None -> ()
+              | Some masc_root ->
+                (match
+                   Keeper_librarian_recognition_ledger.recover_pending
+                     ~masc_root
+                     ~keeper_id
+                     ~current_store:facts
+                     ~now
+                     ()
+                 with
+                 | Ok _ -> ()
+                 | Error detail ->
+                   failwith
+                     ("recognition publication recovery failed: " ^ detail)));
+             facts)
+      in
+      (* The episode-bundle lock keeps recognition publication coherent. The
+         narrower facts lock is no longer needed once recovery and the fact
+         snapshot finish; do not hold it across the unbounded legacy+shard
+         episode scan. *)
+      facts, Keeper_memory_os_io.read_episodes_all ~keeper_id)
   in
   let all_facts = List.filter (fact_is_current ~now) all_facts in
   (* Diagnostic: the TOTAL store size, independent of the selection budget

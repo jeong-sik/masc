@@ -1143,6 +1143,7 @@ let apply_and_persist
                         ~rewrite:(fun () ->
                           try
                             Keeper_memory_os_io.rewrite_facts_atomically
+                              ~allow_recognition_pending:true
                               ~keeper_id
                               result.Recognition.facts;
                             Ok ()

@@ -322,7 +322,7 @@ let test_read_admission_recovers_every_publication_boundary_exactly_once () =
     let marker = Filename.temp_file ("recognition-" ^ boundary) ".tmp" in
     Sys.remove marker;
     let keepers_dir = Filename.concat marker "keepers" in
-    let masc_root = Filename.concat marker "masc" in
+    let masc_root = marker in
     Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
       let keeper_id = "keeper-recovery" in
       let before = [ fact ~claim:"before" () ] in
@@ -360,8 +360,24 @@ let test_read_admission_recovers_every_publication_boundary_exactly_once () =
        with
        | Ok () -> ()
        | Error detail -> fail ("prepare fixture failed: " ^ detail));
+      (match
+         Memory_io.rewrite_facts_atomically
+           ~keeper_id
+           [ fact ~claim:"concurrent-third-state" () ]
+       with
+       | exception Memory_io.Recognition_publication_pending _ -> ()
+       | () -> fail "concurrent fact writer crossed a pending publication");
+      check
+        (list string)
+        "blocked concurrent writer preserves the before snapshot"
+        [ "before" ]
+        (claims (Memory_io.read_facts_all ~keeper_id));
       if not (String.equal boundary "after_prepare")
-      then Memory_io.rewrite_facts_atomically ~keeper_id applied.Recognition.facts;
+      then
+        Memory_io.rewrite_facts_atomically
+          ~allow_recognition_pending:true
+          ~keeper_id
+          applied.Recognition.facts;
       if
         String.equal boundary "after_episode"
         || String.equal boundary "after_event"
@@ -452,7 +468,7 @@ let test_zero_op_read_admission_completes_equal_digest_publication () =
     let marker = Filename.temp_file ("recognition-zero-" ^ boundary) ".tmp" in
     Sys.remove marker;
     let keepers_dir = Filename.concat marker "keepers" in
-    let masc_root = Filename.concat marker "masc" in
+    let masc_root = marker in
     Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
       let keeper_id = "keeper-zero-recovery" in
       let facts = [ fact ~claim:"unchanged" () ] in

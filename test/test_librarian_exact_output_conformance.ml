@@ -506,17 +506,10 @@ let test_missing_clock_fails_before_dispatch () =
    recognition-prompt snapshot) BEFORE any provider dispatch, and re-read
    under the facts lock for the CAS check in [apply_and_persist] — both
    through [Keeper_memory_os_io.read_facts_all_strict_offloaded]. The strict
-   reader under that offload does
-   not catch [Sys_error]; it only returns a typed [Error] for a malformed
-   JSONL line ([parse_fact_json_line_strict]). Shadowing the facts file with
-   a directory (the old write-failure trick) now raises an uncaught
-   [Sys_error "Is a directory"] out of the pre-dispatch read instead of
-   producing a typed [Memory_apply_failed] — so this test is retargeted to
-   the read failure the new architecture can actually surface: a corrupted
-   facts.jsonl line, which fails closed before the first network call.
-   [Memory_apply_failed] itself is only reachable via a facts-lock
-   acquisition timeout ([Keeper_memory_os_io.with_facts_lock]'s
-   [on_timeout]), not via a store I/O failure. *)
+   reader under that offload converts every non-cancellation filesystem
+   exception into its typed [Error] contract. Shadowing the facts file with a
+   directory exercises an open/read failure rather than only a JSON decoder
+   rejection, and must still fail closed before the first network call. *)
 let test_store_read_failure_does_not_publish_episode () =
   with_prompt_registry (fun () ->
   with_temp_keepers_dir (fun _ ->
@@ -533,9 +526,7 @@ let test_store_read_failure_does_not_publish_episode () =
       in
       publish_lane [ slot ];
       let keeper_id = "librarian-store-read-failure-keeper" in
-      Out_channel.with_open_bin
-        (Memory_io.facts_path ~keeper_id)
-        (fun channel -> output_string channel "not-json\n");
+      Unix.mkdir (Memory_io.facts_path ~keeper_id) 0o700;
       match
         extract_and_append_with_exact_output
           ~clock

@@ -183,18 +183,36 @@ let aborted_to_json
 let make_store ~masc_root () = Dated_jsonl.create ~base_dir:(base_dir ~masc_root) ()
 
 let pending_path ~masc_root ~keeper_id =
-  let keeper_key =
-    Digestif.SHA256.digest_string keeper_id |> Digestif.SHA256.to_hex
-  in
-  Filename.concat
-    (Filename.concat masc_root "librarian_recognition_pending")
-    (keeper_key ^ ".json")
+  Keeper_memory_os_io.recognition_pending_path_for_masc_root
+    ~masc_root
+    ~keeper_id
 ;;
 
 let append_json ~masc_root entry =
   try
-    Dated_jsonl.append (make_store ~masc_root ()) entry;
-    Ok ()
+    let dated =
+      Jsonl_writer.dated_path_now ~base_dir:(base_dir ~masc_root)
+    in
+    let suffix = Yojson.Safe.to_string entry ^ "\n" in
+    match
+      Fs_compat.append_private_jsonl_durable_locked_result dated.path suffix
+    with
+    | Fs_compat.Private_file_succeeded () -> Ok ()
+    | Fs_compat.Private_file_succeeded_with_cleanup_failure
+        { value = (); cleanup_failure } ->
+      Log.Keeper.warn
+        "librarian recognition audit append committed with cleanup failure: %s"
+        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+      Ok ()
+    | Fs_compat.Private_file_failed error ->
+      Error (Fs_compat.private_jsonl_append_error_to_string error)
+    | Fs_compat.Private_file_failed_with_cleanup_failure
+        { error; cleanup_failure } ->
+      Error
+        (Printf.sprintf
+           "%s; cleanup failure: %s"
+           (Fs_compat.private_jsonl_append_error_to_string error)
+           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printexc.to_string exn)
@@ -209,10 +227,15 @@ let pending_marker_to_json ~prepared ~prepared_logged =
 
 let save_pending_marker ~masc_root ~keeper_id ~prepared ~prepared_logged =
   let path = pending_path ~masc_root ~keeper_id in
-  let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
-  Keeper_fs.save_json_atomic
-    path
-    (pending_marker_to_json ~prepared ~prepared_logged)
+  match
+    Keeper_fs.save_json_durable_atomic
+      ~ownership_root:masc_root
+      ~pretty:false
+      path
+      (pending_marker_to_json ~prepared ~prepared_logged)
+  with
+  | Ok () -> Ok ()
+  | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
 ;;
 
 let clear_pending_marker ~masc_root ~keeper_id ~publication_id =
@@ -235,8 +258,10 @@ let clear_pending_marker ~masc_root ~keeper_id ~publication_id =
          | Some (`Assoc prepared_fields) ->
            (match List.assoc_opt field_publication_id prepared_fields with
             | Some (`String stored_id) when String.equal stored_id publication_id ->
-              Sys.remove path;
-              Ok ()
+              (match Keeper_fs.remove_file_durable ~ownership_root:masc_root path with
+               | Ok () -> Ok ()
+               | Error error ->
+                 Error (Keeper_fs.durable_remove_error_to_string error))
             | Some (`String _) -> Error "pending recognition publication id changed"
             | Some _ | None -> Error "pending recognition publication has no id")
          | Some _ | None -> Error "pending recognition marker has no prepared payload")

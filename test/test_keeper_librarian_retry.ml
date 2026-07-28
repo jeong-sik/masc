@@ -614,6 +614,57 @@ let test_rejects_reinforce_turn_outside_conversation_slice () =
        ())
 ;;
 
+let test_rejects_merge_metadata_mismatch_before_terminalization () =
+  let base = input ~trace_id:"merge-metadata-gate" in
+  let store =
+    List.mapi
+      (fun index fact ->
+         if index = 1
+         then { fact with Types.claim_kind = Some Types.External_state }
+         else fact)
+      base.store
+  in
+  let operation =
+    `Assoc
+      [ field_op, `String "merge"
+      ; Lib.wire_field_member_indices, `List [ `Int 0; `Int 1 ]
+      ; field_claim, `String "merged"
+      ; field_category, `String "fact"
+      ; field_source_turn, `Int 4
+      ]
+  in
+  match
+    Lib.recognition_output_of_output_result
+      ~now:1_000_000.0
+      { base with store }
+      (output_json_string ~operations:[ operation ] ())
+  with
+  | Error _ -> ()
+  | Ok _ ->
+    Alcotest.fail
+      "merge metadata mismatch must reject the candidate before terminalization"
+;;
+
+let test_rejects_add_when_store_page_is_partial () =
+  let base = input ~trace_id:"partial-store-add" in
+  let store =
+    List.init 100 (fun index ->
+      { (stored_fact index) with
+        claim = Printf.sprintf "stored-%03d-%s" index (String.make 900 'x')
+      })
+  in
+  match
+    Lib.recognition_output_of_output_result
+      ~now:1_000_000.0
+      { base with store }
+      (minimal_output_json ~claim:"possibly already hidden" ())
+  with
+  | Error _ -> ()
+  | Ok _ ->
+    Alcotest.fail
+      "add must fail closed when the bounded store page is incomplete"
+;;
+
 let test_rejects_add_turn_outside_conversation_slice () =
   let one_message_input =
     let base = input ~trace_id:"one-message-slice" in
@@ -836,6 +887,10 @@ let () =
             test_rejects_indices_outside_visible_snapshot;
           test_case "rejects reinforce turn outside conversation slice" `Quick
             test_rejects_reinforce_turn_outside_conversation_slice;
+          test_case "rejects merge metadata mismatch before terminalization" `Quick
+            test_rejects_merge_metadata_mismatch_before_terminalization;
+          test_case "rejects add when store page is partial" `Quick
+            test_rejects_add_when_store_page_is_partial;
           test_case "rejects add turn outside conversation slice" `Quick
             test_rejects_add_turn_outside_conversation_slice;
           test_case "revise claim_kind parses as tri-state" `Quick

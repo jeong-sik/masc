@@ -149,7 +149,8 @@ let format_store_for_prompt inp =
     let page = bounded_store_page inp in
     let header =
       Printf.sprintf
-        "[bounded fact page: visible=%d total=%d; indices are stable snapshot indices]"
+        "[bounded fact page: visible=%d total=%d; indices are stable snapshot indices; \
+         ADD is forbidden unless visible=total]"
         (List.length page)
         (List.length inp.store)
     in
@@ -449,9 +450,23 @@ let member_indices_field ~visible_indices fields =
   | None -> None
 ;;
 
+let merge_members_preserve_metadata ~store member_indices =
+  let members = List.filter_map (List.nth_opt store) member_indices in
+  match members with
+  | [] -> false
+  | (first : fact) :: rest ->
+    List.length members = List.length member_indices
+    && List.for_all
+         (fun (member : fact) ->
+            member.claim_kind = first.claim_kind
+            && member.valid_until = first.valid_until)
+         rest
+;;
+
 let operation_of_json
       ~trace_id
       ~now
+      ~store
       ~visible_indices
       ~message_count
       (json : Yojson.Safe.t)
@@ -530,7 +545,8 @@ let operation_of_json
                 , Some claim_id
                 , Some source_turn )
                 when List.length (List.sort_uniq Int.compare member_indices) >= 2
-                     && source_turn_is_visible ~message_count source_turn ->
+                     && source_turn_is_visible ~message_count source_turn
+                     && merge_members_preserve_metadata ~store member_indices ->
                 Ok
                   (Recognition.Merge
                      { group =
@@ -667,13 +683,29 @@ let recognition_output_of_json_result ?now (inp : input) (json : Yojson.Safe.t) 
                (operation_of_json
                   ~trace_id:inp.trace_id
                   ~now
+                  ~store:inp.store
                   ~visible_indices
                   ~message_count)
                operation_items
            with
            | Error _ as error -> error
            | Ok operations ->
-             if Recognition.operations_have_overlapping_targets operations
+             if
+               List.length visible_indices < List.length inp.store
+               && List.exists
+                    (function
+                      | Recognition.Add _ -> true
+                      | Recognition.Reinforce _
+                      | Recognition.Merge _
+                      | Recognition.Revise _
+                      | Recognition.Forget _ -> false)
+                    operations
+             then
+               Error
+                 (Operation_schema_mismatch
+                    "add requires complete store visibility; emit zero add operations \
+                     for a bounded partial page")
+             else if Recognition.operations_have_overlapping_targets operations
              then
                Error
                  (Operation_schema_mismatch

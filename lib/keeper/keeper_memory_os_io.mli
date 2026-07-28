@@ -10,6 +10,11 @@ open Keeper_memory_os_types
 val facts_path : keeper_id:string -> string
 val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
+val recognition_pending_path_for_masc_root :
+  masc_root:string -> keeper_id:string -> string
+
+exception Recognition_publication_pending of string
+
 (** RFC-0244 Tier 2: keeper ids that currently have a [*.facts.jsonl] store, for
     the cross-keeper consolidation sweep. Excludes the reserved shared id; sorted. *)
 val list_fact_store_keeper_ids : unit -> string list
@@ -102,11 +107,25 @@ val with_episode_bundle_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t -> keeper_id:string -> (unit -> 'a) -> 'a
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
-val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
+(** Atomic fact rewrite. By default a durable pending recognition publication
+    blocks the mutation with {!Recognition_publication_pending}, preventing a
+    concurrent writer from turning its before/after reconciliation into a third
+    state. Only the recognition transaction itself may pass
+    [allow_recognition_pending=true], while holding its bundle and facts locks. *)
+val rewrite_facts_atomically :
+  ?allow_recognition_pending:bool -> keeper_id:string -> fact list -> unit
 val rewrite_facts_atomically_for_keepers_dir :
-  keepers_dir:string -> keeper_id:string -> fact list -> unit
+  ?allow_recognition_pending:bool ->
+  keepers_dir:string ->
+  keeper_id:string ->
+  fact list ->
+  unit
 val rewrite_facts_atomically_for_base_path :
-  base_path:string -> keeper_id:string -> fact list -> unit
+  ?allow_recognition_pending:bool ->
+  base_path:string ->
+  keeper_id:string ->
+  fact list ->
+  unit
 
 (** {1 Facts snapshot CAS} *)
 

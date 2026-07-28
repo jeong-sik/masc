@@ -8,6 +8,8 @@
     never a false claim that the whole bundle was published. A per-keeper atomic
     pending pointer is the O(1) recovery authority; the dated JSONL remains the
     append-only audit history and is never scanned on the pre-turn hot path.
+    Audit rows are at-least-once across crash reconciliation; consumers dedupe
+    by [(publication_id, publication_state)].
 
     Row size is O(store) by design — the issue's anti-black-box requirement
     persists both full snapshots, deliberately unlike the recall ledger's

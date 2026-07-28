@@ -46,6 +46,32 @@ let facts_path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ ".facts.jsonl")
 ;;
 
+let recognition_pending_path_for_masc_root ~masc_root ~keeper_id =
+  let keeper_key =
+    Digestif.SHA256.digest_string keeper_id |> Digestif.SHA256.to_hex
+  in
+  Filename.concat
+    (Filename.concat masc_root "librarian_recognition_pending")
+    (keeper_key ^ ".json")
+;;
+
+let recognition_pending_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  recognition_pending_path_for_masc_root
+    ~masc_root:(Filename.dirname keepers_dir)
+    ~keeper_id
+;;
+
+exception Recognition_publication_pending of string
+
+let reject_pending_recognition ~keepers_dir ~keeper_id =
+  let path = recognition_pending_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  if Sys.file_exists path
+  then
+    raise
+      (Recognition_publication_pending
+         ("fact mutation blocked by pending recognition publication: " ^ path))
+;;
+
 let facts_path ~keeper_id =
   facts_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
@@ -352,12 +378,20 @@ let append_episode ~keeper_id episode =
 let append_episode_bundle ~keeper_id episode =
   with_episode_bundle_lock ~keeper_id (fun () ->
     File_lock_eio.with_lock (facts_path ~keeper_id) (fun () ->
+      reject_pending_recognition ~keepers_dir:(keepers_dir ()) ~keeper_id;
       List.iter (append_fact ~keeper_id) episode.claims);
     append_episode ~keeper_id episode;
     append_event ~keeper_id episode)
 ;;
 
-let rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts =
+let rewrite_facts_atomically_for_keepers_dir
+      ?(allow_recognition_pending = false)
+      ~keepers_dir
+      ~keeper_id
+      facts
+  =
+  if not allow_recognition_pending
+  then reject_pending_recognition ~keepers_dir ~keeper_id;
   let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let content =
     facts
@@ -368,15 +402,25 @@ let rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts =
   write_file_atomically path content
 ;;
 
-let rewrite_facts_atomically_for_base_path ~base_path ~keeper_id facts =
+let rewrite_facts_atomically_for_base_path
+      ?allow_recognition_pending
+      ~base_path
+      ~keeper_id
+      facts
+  =
   rewrite_facts_atomically_for_keepers_dir
+    ?allow_recognition_pending
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
     ~keeper_id
     facts
 ;;
 
-let rewrite_facts_atomically ~keeper_id facts =
-  rewrite_facts_atomically_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id facts
+let rewrite_facts_atomically ?allow_recognition_pending ~keeper_id facts =
+  rewrite_facts_atomically_for_keepers_dir
+    ?allow_recognition_pending
+    ~keepers_dir:(keepers_dir ())
+    ~keeper_id
+    facts
 ;;
 
 (* ---------- Facts snapshot CAS (optimistic concurrency) ---------- *)
@@ -545,7 +589,14 @@ let read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
       let* fact = parse_fact_json_line_strict ~path ~line_number line in
       loop (line_number + 1) (fact :: acc) rest
   in
-  loop 1 [] (read_lines_all path)
+  try loop 1 [] (read_lines_all path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "%s: fact store read failed: %s"
+         path
+         (Printexc.to_string exn))
 ;;
 
 let read_facts_all_strict ~keeper_id =

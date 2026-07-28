@@ -29,6 +29,7 @@ Claim rules for add / revise / merge payloads:
 
 Structural rules:
 - Indices refer ONLY to the stored-facts list below. Each stored fact may be the target of at most one operation.
+- The stored-facts header reports visible and total counts. If visible is less than total, do NOT emit add: an unseen fact may already cover the candidate. Existing visible facts may still be reinforced, revised, merged, or forgotten. Zero operations is the safe answer for a new candidate until a complete store is visible.
 - A stored fact you do not reference survives unchanged. Conservatism is correct: when unsure, do not merge, revise, or forget.
 - episode_summary, open_items, constraints, preserved_tool_refs describe THIS conversation slice, independent of the operations.
 - Emitting zero operations is a valid output when the conversation established nothing worth remembering.

@@ -6,11 +6,6 @@
 
     @since Unified Keeper Loop *)
 
-val format_board_event_text : Keeper_world_observation.pending_board_event -> string
-(** Render a single pending board event as its prompt line. Exposed for tests:
-    RFC-0320 W3(a) verifies that an [External_attention] event steers the woken
-    keeper to reply into the originating conversation via keeper_surface_post. *)
-
 (** Three-channel turn prompt. The observation frame is separated from the
     persisted user message so it can be injected per-turn (via
     [dynamic_context]) instead of accumulating in the OAS conversation.

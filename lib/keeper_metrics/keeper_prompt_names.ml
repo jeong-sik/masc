@@ -22,7 +22,3 @@ let memory_os_recall_context = "keeper.memory_os_recall.context"
 let memory_os_recall_facts_section = "keeper.memory_os_recall.facts_section"
 let memory_os_recall_episodes_section = "keeper.memory_os_recall.episodes_section"
 let memory_os_recall_unavailable = "keeper.memory_os_recall.unavailable"
-
-(** User-prompt "Claimable Work" section body, emitted when a claimable backlog
-    is visible and the keeper holds no task. *)
-let immediate_task_move = "keeper.immediate_task_move"

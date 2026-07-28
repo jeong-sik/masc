@@ -625,22 +625,6 @@ let run_keeper_invocation_turn_admitted
                 else
                   base_system_prompt
               in
-              (* 2. Tool-use guidance *)
-              let prompt =
-                let tool_use_lines = [
-                  "Tool-use guidance:";
-                  "- If the user asks you to speak, use voice, make sound, or output TTS, prefer keeper_voice_session_start and keeper_voice_speak.";
-                  "- Voice sessions are turn-based: operator speech arrives as transcribed text through normal keeper turns; do not wait for a live duplex audio stream.";
-                  "- Do not simulate spoken audio with plain text roleplay when a voice tool can handle the request.";
-                  "- If voice execution fails, say that voice output is unavailable and continue in text.";
-                ] in
-                match tool_use_lines with
-                | [] -> prompt
-                | _ ->
-                    Printf.sprintf "%s\n\n%s"
-                      prompt
-                      (String.concat "\n" tool_use_lines)
-              in
               { system_prompt = prompt; dynamic_context }
             in
             Progress.Tracker.step turn_tracker

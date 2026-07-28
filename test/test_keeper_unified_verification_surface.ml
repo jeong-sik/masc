@@ -61,9 +61,6 @@ let scheduled_automation_observation : WO.scheduled_automation_observation =
         ; payload_kind = Some "masc.board_post"
         ; recurrence_summary = "daily 09:00:00 Asia/Seoul"
         ; due_at = 200.0
-        ; keeper_next_tool = Some "masc_schedule_get"
-        ; keeper_next_action =
-            "Inspect the schedule if needed and monitor dispatch; do not create a duplicate schedule."
         }
       ]
   }
@@ -338,11 +335,7 @@ let test_scheduled_automation_prompt_section () =
   check bool "prompt includes schedule section" true
     (contains_sub "### Scheduled Automation" user_msg);
   check bool "prompt includes ready schedule id" true
-    (contains_sub "schedule_id=sched-ready" user_msg);
-  check bool "prompt points to schedule detail tool" true
-    (contains_sub "masc_schedule_get" user_msg);
-  check bool "prompt includes ready next action" true
-    (contains_sub "do not create a duplicate schedule" user_msg)
+    (contains_sub "schedule_id=sched-ready" user_msg)
 
 let test_scheduled_wake_is_not_rendered_as_board_activity () =
   Masc_test_deps.init_keeper_tool_registry ();

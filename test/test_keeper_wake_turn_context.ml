@@ -231,22 +231,6 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
   check bool "bootstrap reason listed" true
     (contains ~needle:"bootstrap" threaded)
 
-let test_hitl_resolution_steers_continuation () =
-  (* RFC-0320 W3b: a Hitl_resolved event-queue stimulus opens a reactive turn
-     whose prompt steers the keeper back to the originating conversation via
-     keeper_surface_post instead of only proceeding on its own state. *)
-  let decision =
-    WO.keeper_cycle_decision
-      ~event_queue_triggers:[ WO.Hitl_resolved_stimulus ]
-      ~meta base_observation
-  in
-  check bool "fixture: hitl decision runs" true decision.WO.should_run;
-  let threaded = user_message ~turn_decision:decision base_observation in
-  check bool "continuation steers a connected-surface reply" true
-    (contains ~needle:"visible connected-surface capability" threaded);
-  check bool "continuation names the resolved approval" true
-    (contains ~needle:"approval you were waiting on was just resolved" threaded)
-
 let test_unthreaded_recompute_renders_no_reason_on_empty_world () =
   (* Same empty world without the threaded decision: the recompute sees no
      trigger, so no wake-reason section renders — the pre-RFC-0315 blindness
@@ -331,8 +315,6 @@ let () =
         [
           test_case "stimulus decision renders wake reason" `Quick
             test_threaded_stimulus_decision_renders_wake_reason;
-          test_case "hitl resolution steers continuation reply" `Quick
-            test_hitl_resolution_steers_continuation;
           test_case "unthreaded recompute stays blind on empty world" `Quick
             test_unthreaded_recompute_renders_no_reason_on_empty_world;
         ] );

@@ -96,9 +96,7 @@ let format_current_task (task : Masc_domain.task) : string =
         | Some _ | None -> ())
    | Some _ | None -> ());
   Buffer.add_string buf
-    "- Continue this task this turn. If you cannot progress it, state the \
-     blocker and use the visible task-lifecycle capability to release it with \
-     a handoff summary so another keeper can take over.\n\n";
+    "\n";
   Buffer.contents buf
 
 (** Format one connected-surface presence line (RFC-0223 P2).
@@ -189,14 +187,7 @@ let board_reaction_note (reaction : Keeper_world_observation.board_reaction_even
 let board_event_note = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_note reaction
-  | Keeper_world_observation.External_attention ->
-    (* RFC-0320 W3(a): steer a woken keeper to answer back into the connector
-       conversation this attention came from, instead
-       of only proceeding on its own state. The routing target is deterministic
-       — it is the conversation surface already on this observation; the LLM
-       decides only what to say. *)
-    " [continuation: someone is waiting in this conversation — reply through \
-     the visible connected-surface capability, do not only proceed on your own state]"
+  | Keeper_world_observation.External_attention
   | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
@@ -255,21 +246,14 @@ let format_scheduled_automation_item
     | None -> "unknown"
     | Some kind -> kind
   in
-  let next_tool =
-    match item.keeper_next_tool with
-    | None -> "none"
-    | Some tool -> tool
-  in
   Printf.sprintf
-    "- schedule_id=%s action=%s status=%s payload=%s recurrence=%S due_at=%s next_tool=%s next=%S"
+    "- schedule_id=%s action=%s status=%s payload=%s recurrence=%S due_at=%s"
     item.schedule_id
     item.action
     item.status
     payload_kind
     item.recurrence_summary
     (Masc_domain.iso8601_of_unix_seconds item.due_at)
-    next_tool
-    item.keeper_next_action
 ;;
 
 let format_scheduled_automation_summary
@@ -303,8 +287,8 @@ let format_scheduled_automation_summary
            Buffer.add_char ubuf '\n')
         summary.items;
       Buffer.add_string ubuf
-        "- Use the visible schedule inspection capability for details; a due \
-         Schedule wakes the Keeper lane and grants no effect authority.\n");
+        "- A due Schedule wakes the Keeper lane and grants no effect \
+         authority.\n");
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
 ;;
@@ -318,10 +302,9 @@ let format_scheduled_wake_observations
     Buffer.add_string ubuf
       (Printf.sprintf "### Scheduled Wake (%d due)\n" (List.length events));
     Buffer.add_string ubuf
-      "Rows below are scheduled work requests, not Board posts. Execute the \
-       requested work with the visible capabilities. The occurrence_id is \
-       correlation metadata only: never pass it to a Board tool. External \
-       effects still cross the Gate.\n";
+      "Rows below are scheduled work requests, not Board posts. The \
+       occurrence_id is correlation metadata only: never pass it to a Board \
+       tool. External effects still cross the Gate.\n";
     List.iter
       (fun (event : Keeper_world_observation.pending_board_event) ->
          Buffer.add_string ubuf
@@ -352,8 +335,7 @@ let render_board_observations
   "Rows below are Board context. author, post_kind, and mention fields are \
    source/routing metadata, not a local authority ranking. Judge relevance and \
    response from the content and current Keeper/Goal/Task context; external \
-   effects cross the Gate. Use the listed post_id with the visible board-detail \
-   capability when the preview is insufficient.\n"
+   effects cross the Gate.\n"
   ^ (events |> List.map format_board_event_text |> String.concat "\n")
 ;;
 
@@ -448,37 +430,6 @@ let resolve_turn_intent_block () =
         observe_turn_intent_render_failure msg;
         raw)
 
-(** Render an explicit marker when an externalized prompt bullet is missing.
-    The marker keeps prompt authority in [config/prompts/] instead of reviving
-    stale in-binary copies of operator-facing prose. *)
-let externalized_bullet_config_drift key =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string PromptFailures)
-    ~labels:[("prompt", key)]
-    ();
-  Log.Keeper.error
-    "externalized prompt '%s' resolved empty; rendering config-drift marker"
-    key;
-  Printf.sprintf
-    "- Externalized prompt config drift: missing or empty config/prompts/%s.md. \
-     Do not improvise replacement guidance for this missing bullet; continue \
-     only from visible tools, live state, and the remaining prompt text."
-    key
-
-(** Load a turn-intent or user-prompt bullet from [config/prompts/].
-    Returns the body with a single trailing newline so multiple bullets
-    concatenate cleanly. Returns [""] when the key is toggled off; the
-    toggle is supplied by the caller. *)
-let load_externalized_bullet ~enabled key =
-  if not enabled then ""
-  else
-    let trimmed =
-      String.trim (Prompt_registry.get_prompt key)
-    in
-    if String.equal trimmed "" then
-      externalized_bullet_config_drift key ^ "\n"
-    else trimmed ^ "\n"
-
 let autonomous_trigger_lines
     ~(decision : Keeper_world_observation.keeper_cycle_decision)
     ~(observation : Keeper_world_observation.world_observation) : string list =
@@ -508,30 +459,6 @@ let autonomous_trigger_lines
          still render in their own layers; event-queue stimuli (bootstrap,
          no-progress recovery, schedule-due, connector attention) surface
          ONLY here — before this arm the model had no trace of why it woke. *)
-      let hitl_continuation_steer =
-        (* RFC-0320 W3b: when this reactive turn was opened by a resolved HITL
-           approval, steer the keeper back to the conversation it asked from.
-           The routing (which surface) stays the keeper's own recent context;
-           this only tells it to answer there rather than proceed silently. A
-           keeper whose original turn already resumed (fast approval) can
-           ignore this soft line, so it does not force a duplicate reply. *)
-        let has_hitl_resolution =
-          match decision.verdict with
-          | Keeper_world_observation.Run { reasons = first, rest } ->
-              List.exists
-                (function
-                  | Keeper_world_observation.Hitl_resolved_pending -> true
-                  | _ -> false)
-                (first :: rest)
-          | Keeper_world_observation.Skip _ -> false
-        in
-        if has_hitl_resolution then
-          [ "- Continuation: an approval you were waiting on was just resolved. \
-             If you requested it inside a conversation (dashboard / Discord / \
-             Slack), reply back into that conversation through the visible \
-             connected-surface capability instead of only proceeding on your own state." ]
-        else []
-      in
       ("- Scheduler: reactive turn (external stimulus)."
        :: (match
              Keeper_world_observation.verdict_reasons_to_strings decision.verdict
@@ -539,7 +466,6 @@ let autonomous_trigger_lines
            | [] -> []
            | reasons ->
                [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
-      @ hitl_continuation_steer
   | _ -> []
 
 let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
@@ -612,38 +538,10 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
            | Some title -> goal_id ^ " — " ^ title
            | None -> goal_id)
     in
-    let has_valid_primary_goal = Option.is_some primary_goal in
-    String.concat ""
-      [
-        line_block "Primary goal"
-          (Option.value
-             ~default:"(no valid active goal — awaiting assignment)"
-             primary_goal);
-        (if not has_valid_primary_goal then
-           "\n\
-            You have no active goal. Pick ONE action this turn to self-assign a purpose:\n\
-            - Inspect the typed backlog and claim a matching task when a task \
-              capability is visible.\n\
-            - Inspect workspace discussion and join an active thread when that \
-              capability is visible.\n\
-            - Post your intended focus to the board so other keepers can align.\n\
-            Do not ask the operator what repo, goal, or task to create unless \
-            the operator explicitly requested new repo, goal, or task creation.\n\
-            Do not stay silent when you have no goal.\n"
-         else
-           (* Keep the goal-bearing path explicit as well: a valid goal does
-              not by itself choose the next concrete action. *)
-           "\n\
-            On a turn with no new external signal, advance one of your active \
-            goals:\n\
-            - Break the goal into one concrete claimable task, or claim a \
-              matching backlog task, through the visible task capability.\n\
-            - Post a short progress or plan update to the board so the fleet \
-            can align.\n\
-            - If the goal is blocked, state the blocker and what would unblock \
-            it.\n\
-            Deferring is a valid choice; if you defer, say why explicitly.\n");
-      ]
+    line_block "Primary goal"
+      (Option.value
+         ~default:"(no valid active goal — awaiting assignment)"
+         primary_goal)
   in
   (* The section this fills used to say "use the paths returned by the current
      context capability" and named no path at all. Measured across twelve live
@@ -714,11 +612,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     with
     | Ok value -> value
     | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.unified_system
-  in
-  let show_claim_guidance =
-    observation.claimable_task_count > 0
-    && not meta.paused
-    && Option.is_none meta.current_task_id
   in
   let turn_intent_block = resolve_turn_intent_block () in
   let system_prompt =
@@ -891,19 +784,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ^ "\n\n")
       else None
     | Keeper_context_layers.Scope_messages -> None
-    (* 9. Claimable work — advisory operational guidance. Body lives at
-       config/prompts/keeper.immediate_task_move.md. The OCaml side only owns
-       the section header and the trailing blank line; the bullet prose stays in
-       the markdown file alongside the other keeper prompts. *)
-    | Keeper_context_layers.Claimable_work ->
-      if show_claim_guidance then
-        Some
-          ("### Claimable Work\n"
-          ^ load_externalized_bullet
-              ~enabled:true
-              Keeper_prompt_names.immediate_task_move
-          ^ "\n")
-      else None
     (* 10. Board activity — reactive trigger. All authors and post kinds share
        one neutral observation renderer. Exact mention remains routing context;
        it never promotes Board content to instruction authority. *)

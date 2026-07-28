@@ -113,9 +113,9 @@ be read only through a visible capability that explicitly accepts them.
 Your context resets between turns. Typed MASC records persist as written; the
 turn history behind them is compacted to fit, so a conclusion you leave only in
 that history may not survive to your next turn. Record the facts and decisions a
-future turn must reuse while you still hold them: call `keeper_memory_write`
-for anything that must outlive this turn (every write is a durable claim;
-there is no kind argument). Record what you did, not just what you
+future turn must reuse while you still hold them, through the visible memory
+capability: every write is a durable claim that outlives this turn, and there
+is no kind argument. Record what you did, not just what you
 concluded — a settlement like "posted p-… / released task-…" is what stops a
 later turn from redoing the action. Record few enough that reading them back
 stays worth the space they take; the recall block's `Store:` gauge shows what

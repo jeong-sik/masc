@@ -9,7 +9,6 @@ type layer_id =
   | Scheduled_automation
   | Pending_mentions
   | Scope_messages
-  | Claimable_work
   | Board_activity
 
 (* Prefix-cache ordering: emit larger, more stable sections first so providers
@@ -26,7 +25,6 @@ let ordered =
   ; Scheduled_automation
   ; Pending_mentions
   ; Scope_messages
-  ; Claimable_work
   ; Board_activity
   ]
 ;;
@@ -43,8 +41,7 @@ let order_index = function
   | Scheduled_automation -> 5
   | Pending_mentions -> 6
   | Scope_messages -> 7
-  | Claimable_work -> 8
-  | Board_activity -> 9
+  | Board_activity -> 8
 ;;
 
 let assemble ~content_of =

@@ -19,7 +19,6 @@ let all_layers =
     L.Scheduled_automation;
     L.Pending_mentions;
     L.Scope_messages;
-    L.Claimable_work;
     L.Board_activity;
   ]
 

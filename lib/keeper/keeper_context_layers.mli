@@ -21,7 +21,6 @@ type layer_id =
   | Scheduled_automation
   | Pending_mentions
   | Scope_messages
-  | Claimable_work
   | Board_activity
 
 val ordered : layer_id list

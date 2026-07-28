@@ -145,6 +145,25 @@ let test_increment_turn () =
     Trajectory.increment_turn acc;
     Alcotest.(check int) "turn 2" 2 acc.Trajectory.turn)
 
+let test_set_turn_adopts_runtime_turn () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"test-keeper"
+      ~trace_id:"trace-005b" ~generation:0 () in
+    Alcotest.(check int) "turn starts at 0" 0 acc.Trajectory.turn;
+    (* The runtime numbers turns itself; the accumulator adopts that number
+       so tool-call entries land on the same turn as the reasoning entries
+       the transcript joins them with. *)
+    Trajectory.set_turn acc 7;
+    Alcotest.(check int) "adopts runtime turn" 7 acc.Trajectory.turn;
+    (* Monotonic: a stale or repeated lower number must not rewind the
+       counter, which would make calls_in_current_turn recount an earlier
+       turn's rounds. *)
+    Trajectory.set_turn acc 3;
+    Alcotest.(check int) "lower turn is ignored" 7 acc.Trajectory.turn;
+    Trajectory.set_turn acc 7;
+    Alcotest.(check int) "same turn is a no-op" 7 acc.Trajectory.turn)
+
 (* ================================================================ *)
 (* Test: finalize creates trajectory record                          *)
 (* ================================================================ *)
@@ -961,6 +980,7 @@ let () =
       Alcotest.test_case "create" `Quick test_create_accumulator;
       Alcotest.test_case "record_entry" `Quick test_record_entry;
       Alcotest.test_case "increment_turn" `Quick test_increment_turn;
+      Alcotest.test_case "set_turn adopts runtime turn" `Quick test_set_turn_adopts_runtime_turn;
       Alcotest.test_case "calls_in_current_turn" `Quick test_calls_in_current_turn;
     ]);
     ("entropy", [

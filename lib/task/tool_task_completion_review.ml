@@ -59,7 +59,7 @@ let clean_evidence_refs = non_empty_trimmed_strings
 
 (* Typed concat for the verifier request output (observability only).
    Only empty transport values are removed. Evidence meaning and sufficiency
-   belong to the configured LLM completion reviewer. *)
+   belong to the assigned verifier. *)
 let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
     ?submitted_evidence_refs
     (task : Masc_domain.task) =

@@ -23,7 +23,6 @@ let transition_task_outcome_r
       ~action
       ?prepare_verification_request
       ?compensate_verification_request
-      ?prepare_verification_verdict
       ?expected_version
       ?(notes = "")
       ?(reason = "")
@@ -290,27 +289,6 @@ let transition_task_outcome_r
             , _
             , None ) -> Ok ()) [@warning "-4"]
         in
-(* RFC-0221 §3.2: the approve/reject verdict record write is NOT gated here
-   anymore. [task_status] is the sole outcome authority (approve → Done with
-   the verdict in [notes]; reject → InProgress with the reason delivered via
-   the separate post-commit notify), so the record is audit, not content, and
-   it is written best-effort AFTER [write_backlog] commits — see below. The
-   old pre-write gate made an audit-write failure block a decided outcome and
-   re-admitted the drift (record Completed, task AwaitingVerification). *)
-(* #10449: Observe task completion path + contract presence so operators can split bypass-rate by cause (no contract vs. *)
-        (match new_status with
-         | Masc_domain.Done _ ->
-           let contract_state = classify_contract_state task.contract in
-           let path = classify_completion_path ~action in
-           (Atomic.get Workspace_hooks.task_completion_path_observed_fn)
-             ~path
-             ~contract_state
-             ~agent_name
-         | Masc_domain.Todo
-         | Masc_domain.Claimed _
-         | Masc_domain.InProgress _
-         | Masc_domain.AwaitingVerification _
-         | Masc_domain.Cancelled _ -> ());
         (match action, task.task_status with
          | Masc_domain.Release, Masc_domain.Todo ->
 (* Idempotent: already in backlog, nothing to release. *)
@@ -387,70 +365,6 @@ let transition_task_outcome_r
           Task_cache_invariant.clear_stale_agent_task config
             ~agent_name ~task_id ~status:new_status
             ~module_name:"transition_task_r";
-          (* RFC-0221 §3.2: write the verdict audit record best-effort AFTER the
-             commit. The outcome already lives in [task_status] (approve → Done
-             carrying the verdict in [notes]; reject → InProgress, its reason
-             delivered by the separate post-commit notify), so a record-write
-             failure is logged, not surfaced — it can neither block nor
-             contradict the committed outcome. A failure leaves an inert orphan
-             (record non-terminal, task terminal / in-progress) reaped per §3.4;
-             no behavior-driving consumer acts on it (§3.5 consumer audit).
-             [prepare] returns a result on I/O error; a cancellation raises and
-             propagates to the outer handler. Nested exhaustive match (no
-             catch-all) so a new action / status forces review. *)
-          (match prepare_verification_verdict with
-           | None -> ()
-           | Some prepare ->
-             (match action with
-              | Masc_domain.Approve_verification ->
-                (match task.task_status with
-                 | Masc_domain.AwaitingVerification { verification_id; _ } ->
-                   (match
-                      prepare ~task ~verifier:agent_name ~verification_id
-                        ~decision:(`Approve notes)
-                    with
-                    | Ok () -> ()
-                    | Error e ->
-                      Log.TaskState.warn
-                        "[RFC-0221] verdict audit write failed post-commit \
-                         (task=%s vrf=%s decision=approve): %s — outcome stands, \
-                         record left inert"
-                        task_id
-                        verification_id
-                        e)
-                 | Masc_domain.Todo
-                 | Masc_domain.Claimed _
-                 | Masc_domain.InProgress _
-                 | Masc_domain.Done _
-                 | Masc_domain.Cancelled _ -> ())
-              | Masc_domain.Reject_verification ->
-                (match task.task_status with
-                 | Masc_domain.AwaitingVerification { verification_id; _ } ->
-                   let reject_reason = if notes <> "" then notes else reason in
-                   (match
-                      prepare ~task ~verifier:agent_name ~verification_id
-                        ~decision:(`Reject reject_reason)
-                    with
-                    | Ok () -> ()
-                    | Error e ->
-                      Log.TaskState.warn
-                        "[RFC-0221] verdict audit write failed post-commit \
-                         (task=%s vrf=%s decision=reject): %s — outcome stands, \
-                         record left inert"
-                        task_id
-                        verification_id
-                        e)
-                 | Masc_domain.Todo
-                 | Masc_domain.Claimed _
-                 | Masc_domain.InProgress _
-                 | Masc_domain.Done _
-                 | Masc_domain.Cancelled _ -> ())
-              | Masc_domain.Claim
-              | Masc_domain.Start
-              | Masc_domain.Done_action
-              | Masc_domain.Cancel
-              | Masc_domain.Release
-              | Masc_domain.Submit_for_verification -> ()));
           update_local_agent_state config ~agent_name (fun agent ->
             match set_current with
             | Some _ -> { agent with status = Busy; current_task = Some task_id }
@@ -645,7 +559,6 @@ let transition_task_r
       ~action
       ?prepare_verification_request
       ?compensate_verification_request
-      ?prepare_verification_verdict
       ?expected_version
       ?notes
       ?reason
@@ -660,7 +573,6 @@ let transition_task_r
     ~action
     ?prepare_verification_request
     ?compensate_verification_request
-    ?prepare_verification_verdict
     ?expected_version
     ?notes
     ?reason

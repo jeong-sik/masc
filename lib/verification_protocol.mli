@@ -1,28 +1,6 @@
-(** Verification_protocol — task verification FSM transitions
-    (submit -> verdict).
-
-    Two lifecycle phases:
-    + Submit: worker requests verification ({!create_submit_request}
-      / {!notify_submit_for_verification} / {!on_submit_for_verification}).
-    + Verdict: verifier approves or rejects ({!record_approve_verification}
-      / {!notify_approve_verification} for approve;
-      {!record_reject_verification} / {!notify_reject_verification} for
-      reject).
-
-    There is no timeout close phase: RFC-0220 removed the destructive
-    wall-clock deadline (an AwaitingVerification obligation stays claimable
-    by a verifier; long waits surface from the activity-event stream).
-
-    {b record_* vs notify_* split}: \[record_*\] mutates state
-    (Verification.ml FSM + journal entries); \[notify_*\] emits SSE
-    events for dashboards.  Separated so admin overrides can call
-    one without the other (e.g. silent re-issue without dashboard
-    SSE noise).
-
-    Internal: \[submit_request_spec\] (type + builder),
-    \[warn_contract_gap\], \[on_approve_verification\],
-    \[on_reject_verification\] (no external callers). Completion-claim
-    detection is delegated to {!Task_completion_claim}. *)
+(** Verification_protocol -- immutable verification submission plus
+    notifications for committed Task FSM transitions. The request stores only
+    submit-time evidence; Task status owns verifier assignment and outcome. *)
 
 (** {1 Submit phase} *)
 
@@ -71,21 +49,7 @@ val on_submit_for_verification :
     Returns the result of the persist step; SSE notify runs only
     on success. *)
 
-(** {1 Approve verdict} *)
-
-val record_approve_verification :
-  config:Workspace.config ->
-  task_id:string ->
-  verifier:string ->
-  verification_id:string ->
-  notes:string ->
-  (unit, string) result
-(** [record_approve_verification ...] mutates the verification FSM
-    to [Pending -> Completed Pass] and persists the verdict
-    journal entry atomically. It is called by the post-commit Task transition
-    callback after the Task FSM admits the assigned verifier; it is not a
-    standalone authorization surface. Required: non-empty [verification_id];
-    an empty value returns an error message about the missing id. *)
+(** {1 Task verdict notifications} *)
 
 val notify_approve_verification :
   task_id:string ->
@@ -96,20 +60,6 @@ val notify_approve_verification :
 (** [notify_approve_verification ...] emits the SSE
     [masc/verification/verdict] event with [type=approved].
     State-free — no FSM mutation, no journal write. *)
-
-(** {1 Reject verdict} *)
-
-val record_reject_verification :
-  config:Workspace.config ->
-  task_id:string ->
-  verifier:string ->
-  verification_id:string ->
-  reason:string ->
-  (unit, string) result
-(** [record_reject_verification ...] mutates the FSM to
-    [Pending -> Completed Fail] and atomically persists the verdict journal
-    entry through the same post-commit Task-winner boundary as approve.
-    Same [verification_id] requirement as approve. *)
 
 val notify_reject_verification :
   task_id:string ->

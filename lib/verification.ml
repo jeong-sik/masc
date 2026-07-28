@@ -126,49 +126,10 @@ type verification_request = {
   output: Yojson.Safe.t;
   criteria: criterion list;
   worker: string;           (** Agent who produced the output *)
-  verifier: string option;  (** Specific verifier, or None for any *)
   created_at: float;
-  status: request_status;
 }
 
-and request_status =
-  | Pending
-  | Completed of verdict
-[@@deriving show]
-
 (** Serialization *)
-
-let request_status_to_yojson = function
-  | Pending -> `Assoc [("status", `String "pending")]
-  | Completed v ->
-      let base = verdict_to_yojson v in
-      (match base with
-       | `Assoc fields -> `Assoc (("status", `String "completed") :: fields)
-       | _ -> `Assoc [("status", `String "completed")])
-
-let request_status_of_yojson = function
-  | `Assoc fields ->
-      (match List.assoc_opt "status" fields with
-       | Some (`String "pending") -> Ok Pending
-       | Some (`String "completed") ->
-           let* v = verdict_of_yojson (`Assoc fields) in
-           Ok (Completed v)
-       | other ->
-           let got =
-             match other with
-             | Some j -> Printf.sprintf "got %s" (Json_util.excerpt j)
-             | None -> "field missing"
-           in
-           Error
-             (Printf.sprintf
-                "unknown 'status' (expected one of: pending | completed; %s)"
-                got))
-  | other ->
-      Error
-        (Printf.sprintf
-           "request status must be a JSON object, got %s: %s"
-           (Json_util.kind_name other)
-           (Json_util.excerpt other))
 
 let request_to_yojson req =
   `Assoc [
@@ -177,9 +138,7 @@ let request_to_yojson req =
     ("output", req.output);
     ("criteria", `List (List.map criterion_to_yojson req.criteria));
     ("worker", `String req.worker);
-    ("verifier", Json_util.string_opt_to_json req.verifier);
     ("created_at", `Float req.created_at);
-    ("status", request_status_to_yojson req.status);
   ]
 
 let request_of_yojson = function
@@ -212,23 +171,11 @@ let request_of_yojson = function
                  ) l
              | _ -> []
            in
-           let verifier = match List.assoc_opt "verifier" fields with
-             | Some (`String s) -> Some s
-             | _ -> None
-           in
            let created_at = match get_float "created_at" with
              | Some f -> f
              | None -> Time_compat.now ()
            in
-           let status = match List.assoc_opt "status" fields with
-             | Some json -> (match request_status_of_yojson json with
-                 | Ok s -> s
-                 | Error msg ->
-                   Log.Misc.warn "[Verification] unparseable status, falling back to Pending: %s" msg;
-                   Pending)
-             | None -> Pending
-           in
-           Ok { id; task_id; output; criteria; worker; verifier; created_at; status }
+           Ok { id; task_id; output; criteria; worker; created_at }
        | id_opt, task_opt, worker_opt ->
            let missing =
              List.filter_map
@@ -248,19 +195,6 @@ let request_of_yojson = function
            (Json_util.kind_name other)
            (Json_util.excerpt other))
 
-let request_status_is_actionable = function
-  | Pending -> true
-  | Completed _ -> false
-
-let request_is_actionable (req : verification_request) =
-  request_status_is_actionable req.status
-
-(** ID generation — cryptographic random, 128-bit space.
-
-    Prior implementation (#7544) combined [Time_compat.now ()] with
-    [Hashtbl.hash (Unix.gettimeofday ())], which collided inside the
-    same millisecond. Now shared with [Workspace_task]'s verification_id
-    generation via [Random_id], so the algorithm is defined once. *)
 let generate_id () =
   Random_id.prefixed ~prefix:"vrf-" ~bytes:16
 
@@ -513,98 +447,7 @@ let create_request ~base_path ~task_id ~output ~criteria ~worker ?request_id () 
     output;
     criteria;
     worker;
-    verifier = None;
     created_at = Time_compat.now ();
-    status = Pending;
   } in
   let* _req_id = save_request base_path req in
   Ok req
-
-let with_request_lock ~base_path ~req_id ~operation f =
-  let path = request_path base_path req_id in
-  try File_lock_eio.with_lock path f with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Error
-      (Printf.sprintf
-         "%s verification %s: %s"
-         operation
-         req_id
-         (Printexc.to_string exn))
-
-let submit_verdict_internal ~base_path ~req_id ~verifier ~verdict =
-  with_request_lock ~base_path ~req_id ~operation:"submit verdict" @@ fun () ->
-  let* req = load_request base_path req_id in
-  match req.status with
-  | Completed _ ->
-    Error
-      (Printf.sprintf
-         "Verification %s is already completed; terminal verdict cannot be overwritten"
-         req_id)
-  | Pending ->
-    let* () = validate_cross_agent ~worker:req.worker ~verifier in
-    let updated =
-      { req with status = Completed verdict; verifier = Some verifier }
-    in
-    let* _req_id = save_request base_path updated in
-    Ok updated
-
-module Internal = struct
-  let submit_verdict = submit_verdict_internal
-end
-
-(* --- Attribution envelope conversion (Layer 1) ---
-   Verification is hybrid: Schema_match / Contains / Not_contains are Det
-   (rule-based), Custom is NonDet (LLM judge). Origin is derived from
-   criteria. *)
-
-let is_custom_criterion = function
-  | Custom _ -> true
-  | Schema_match _ | Contains _ | Not_contains _ -> false
-
-let origin_of_criteria (criteria : criterion list) : Attribution.origin =
-  if List.exists is_custom_criterion criteria then NonDet else Det
-
-(* Count criteria by kind — keeps evidence compact while signalling the
-   Det/NonDet mix behind the verdict. *)
-let criteria_counts (criteria : criterion list) : Yojson.Safe.t =
-  let schema = ref 0 and contains = ref 0 and not_contains = ref 0 and custom = ref 0 in
-  List.iter (function
-    | Schema_match _ -> incr schema
-    | Contains _ -> incr contains
-    | Not_contains _ -> incr not_contains
-    | Custom _ -> incr custom
-  ) criteria;
-  `Assoc [
-    ("schema_match", `Int !schema);
-    ("contains", `Int !contains);
-    ("not_contains", `Int !not_contains);
-    ("custom", `Int !custom);
-  ]
-
-let to_attribution ~origin ~evidence (v : verdict) : Attribution.t =
-  match v with
-  | Pass ->
-    Attribution.passed ~origin ~gate:"verification" ~evidence
-  | Fail reason ->
-    Attribution.policy_failed ~origin ~gate:"verification" ~evidence ~reason
-  | Partial (score, rationale) ->
-    Attribution.partial_pass ~origin ~gate:"verification" ~evidence
-      ~score ~rationale
-
-let evidence_of_request (req : verification_request) : Yojson.Safe.t =
-  `Assoc [
-    ("request_id", `String req.id);
-    ("task_id", `String req.task_id);
-    ("worker", `String req.worker);
-    ("verifier", Json_util.string_opt_to_json req.verifier);
-    ("criteria_counts", criteria_counts req.criteria);
-  ]
-
-let attribution_of_request (req : verification_request) : Attribution.t option =
-  match req.status with
-  | Pending -> None
-  | Completed verdict ->
-    let origin = origin_of_criteria req.criteria in
-    let evidence = evidence_of_request req in
-    Some (to_attribution ~origin ~evidence verdict)

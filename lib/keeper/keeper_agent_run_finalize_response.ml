@@ -381,7 +381,7 @@ let finalize
   | Error e -> Error e
   | Ok saved_checkpoint ->
     (* Retired proof-ledger evaluation is absent. Task completion judgment is
-       owned by the configured LLM reviewer at the Task boundary. *)
+       owned by the assigned verifier at the Task boundary. *)
     let librarian_messages =
       match saved_checkpoint with
       | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages

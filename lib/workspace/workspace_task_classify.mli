@@ -8,30 +8,6 @@
 include module type of Workspace_utils
 include module type of Workspace_state
 
-(** {1 Task completion path observability (#10449)} *)
-
-(** Three-way classification of a task's contract surface:
-    - ["no_contract"] — [task.contract = None]
-    - ["empty_contract"] — contract record present but both
-      [completion_contract] and [required_evidence] are empty lists
-    - ["with_contract"] — at least one of those lists is non-empty,
-      so [Tool_task]'s LLM completion reviewer receives contract context
-
-    Used as the [contract_state] label of
-    [masc_task_completion_path_total]. *)
-val classify_contract_state : Masc_domain.task_contract option -> string
-
-(** Classify the FSM path that produced a [Done] new_status:
-    - ["via_verification"] — explicit submitted-verification path
-    - ["direct_llm_verdict"] — inline completion-review path
-
-    Used as the [path] label of
-    [masc_task_completion_path_total].  Together with
-    {!classify_contract_state} this lets operators split the
-    bypass-rate documented in issue #10449 by creation-side
-    (missing contracts) vs. gate-side (redirect mis-firing). *)
-val classify_completion_path : action:Masc_domain.task_action -> string
-
 (** {1 Task activity helpers} *)
 
 (** Update the on-disk agent state record under its own

@@ -26,27 +26,19 @@ val equal_verdict : verdict -> verdict -> bool
 val verdict_to_yojson : verdict -> Yojson.Safe.t
 val verdict_of_yojson : Yojson.Safe.t -> (verdict, string) result
 
-type request_status =
-  | Pending
-  | Completed of verdict
-
 type verification_request = {
   id: string;
   task_id: string;
   output: Yojson.Safe.t;
   criteria: criterion list;
   worker: string;
-  verifier: string option;
   created_at: float;
-  status: request_status;
 }
 
 (** {1 Serialization} *)
 
 val request_to_yojson : verification_request -> Yojson.Safe.t
 val request_of_yojson : Yojson.Safe.t -> (verification_request, string) result
-val request_status_is_actionable : request_status -> bool
-val request_is_actionable : verification_request -> bool
 
 (** {1 Evaluation} *)
 
@@ -78,53 +70,3 @@ val create_request :
   ?request_id:string ->
   unit ->
   (verification_request, string) result
-
-module Internal : sig
-  val submit_verdict :
-    base_path:string ->
-    req_id:string ->
-    verifier:string ->
-    verdict:verdict ->
-    (verification_request, string) result
-  (** Low-level atomic receipt writer. This is not an authorization boundary:
-      the sole production caller is [Verification_protocol], after the Task FSM
-      has admitted the assigned verifier and committed the task transition. *)
-end
-
-(** {1 Attribution envelope (Layer 1)}
-
-    Convert verification verdicts into the typed attribution envelope used
-    by SSE emitters. Verification is hybrid: rule-based criteria
-    ([Schema_match], [Contains], [Not_contains]) are [Det], while [Custom]
-    invokes an LLM judge and is [NonDet]. Origin is derived from the
-    criteria set. *)
-
-val origin_of_criteria : criterion list -> Attribution.origin
-(** [Det] when all criteria are rule-based, [NonDet] if any [Custom]
-    criterion is present. *)
-
-val criteria_counts : criterion list -> Yojson.Safe.t
-(** Count criteria by kind ({schema_match, contains, not_contains, custom}).
-    Used as compact evidence payload — signals the Det/NonDet mix without
-    dumping full criterion contents. *)
-
-val to_attribution :
-  origin:Attribution.origin ->
-  evidence:Yojson.Safe.t ->
-  verdict ->
-  Attribution.t
-(** Direct verdict → Attribution conversion. Caller supplies [origin]
-    (typically via [origin_of_criteria]) and [evidence]. Mapping:
-    - [Pass]                → [Attribution.Passed]
-    - [Fail reason]         → [Attribution.Policy_failed { reason }]
-    - [Partial (s, reason)] → [Attribution.Partial_pass { score = s;
-                                 rationale = reason }] *)
-
-val evidence_of_request : verification_request -> Yojson.Safe.t
-(** Standard evidence shape for a verification request:
-    [{ request_id, task_id, worker, verifier, criteria_counts }]. *)
-
-val attribution_of_request : verification_request -> Attribution.t option
-(** Returns [Some attribution] when the request carries a [Completed]
-    verdict (origin derived from criteria, standard evidence shape).
-    [None] for [Pending] — there is no verdict yet. *)

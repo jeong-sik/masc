@@ -42,15 +42,4 @@ val append_claim_observation :
   scope_widened:bool ->
   string
 
-val verdict_to_string : Anti_rationalization.review_result -> string
-
-val is_cross_runtime_verdict : Anti_rationalization.review_result -> bool
-
-val build_verdict_sse_payload :
-  now:float ->
-  task_id:string ->
-  req:Anti_rationalization.review_request ->
-  result:Anti_rationalization.review_result ->
-  Yojson.Safe.t
-
 val validate_task_id : string -> (string, Masc_domain.masc_error) result

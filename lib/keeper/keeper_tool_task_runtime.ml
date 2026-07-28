@@ -314,7 +314,7 @@ let task_op_of_name name =
    count floor is not. RFC-0337 (Withdrawn) removed the mandatory
    evidence floor: "local evidence shape can reject work before the
    configured judge evaluates the actual Task" is the hierarchy it
-   withdrew. Completion is decided by the configured LLM verdict, so a
+   withdrew. Completion is decided by the Task transition, so a
    missing or empty evidence_refs list proceeds to that judgment. *)
 let parse_keeper_task_done_evidence_refs args =
   match args with

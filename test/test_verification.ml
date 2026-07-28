@@ -10,34 +10,6 @@ module CU = Workspace_utils
 module W = Workspace_core
 module VP = Masc.Verification_protocol
 
-let submit_verdict_via_protocol ~base_path ~req_id ~verifier ~verdict =
-  match V.load_request base_path req_id with
-  | Error _ as error -> error
-  | Ok request ->
-    let config = W.default_config base_path in
-    let recorded =
-      match verdict with
-      | V.Pass ->
-        VP.record_approve_verification
-          ~config
-          ~task_id:request.task_id
-          ~verifier
-          ~verification_id:req_id
-          ~notes:"verified"
-      | V.Fail reason ->
-        VP.record_reject_verification
-          ~config
-          ~task_id:request.task_id
-          ~verifier
-          ~verification_id:req_id
-          ~reason
-      | V.Partial _ ->
-        Error "Partial verdict is not a Task verification protocol outcome"
-    in
-    (match recorded with
-     | Error _ as error -> error
-     | Ok () -> V.load_request base_path req_id)
-
 let persistence_surface = "verification"
 
 let persistence_counter reason =
@@ -1049,15 +1021,6 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "second verifier stole the assignment");
-    let request =
-      match V.load_request base_path request_id with
-      | Ok request -> request
-      | Error detail -> Alcotest.fail detail
-    in
-    Alcotest.(check bool)
-      "request remains pending after Task-phase claim"
-      true
-      (match request.status with V.Pending -> true | V.Completed _ -> false);
     let assigned =
       W.list_tasks
         config
@@ -1090,107 +1053,6 @@ let test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier () =
       false
       (contains_substring external_projection "full-cycle-evidence"))
 
-let test_submit_verdict () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-        match submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"codex"
-            ~verdict:V.Pass with
-        | Error e -> Alcotest.fail e
-        | Ok updated ->
-            Alcotest.(check bool) "completed" true
-              (match updated.status with V.Completed V.Pass -> true | _ -> false);
-            (* verifier must be persisted so the dashboard projection never
-               emits "approved with null approved_by" for completed rows. *)
-            Alcotest.(check (option string)) "verifier recorded"
-              (Some "codex") updated.verifier)
-
-let test_submit_verdict_persists_verifier () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-        Alcotest.(check (option string)) "starts unassigned" None req.verifier;
-        match submit_verdict_via_protocol ~base_path ~req_id:req.id
-            ~verifier:"operator:dashboard" ~verdict:V.Pass with
-        | Error e -> Alcotest.fail e
-        | Ok updated ->
-            Alcotest.(check (option string)) "verifier persisted"
-              (Some "operator:dashboard") updated.verifier)
-
-let test_submit_verdict_cannot_overwrite_terminal_receipt () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1"
-        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
-    | Error e -> Alcotest.fail e
-    | Ok req ->
-      (match
-         submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"codex"
-           ~verdict:V.Pass
-       with
-       | Error e -> Alcotest.fail e
-       | Ok _ -> ());
-      (match
-         submit_verdict_via_protocol ~base_path ~req_id:req.id ~verifier:"gemini"
-           ~verdict:(V.Fail "overwrite")
-       with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail "terminal verification receipt was overwritten");
-      match V.load_request base_path req.id with
-      | Error e -> Alcotest.fail e
-      | Ok final ->
-        Alcotest.(check bool)
-          "first terminal verdict survives"
-          true
-          (match final.status, final.verifier with
-           | V.Completed V.Pass, Some "codex" -> true
-           | _ -> false))
-
-let test_concurrent_verdict_is_first_writer_wins () =
-  with_eio_temp_dir (fun base_path ->
-    let req =
-      match
-        V.create_request
-          ~base_path
-          ~task_id:"task-concurrent-verdict"
-          ~output:`Null
-          ~criteria:[]
-          ~worker:"worker"
-          ()
-      with
-      | Ok req -> req
-      | Error detail -> Alcotest.fail detail
-    in
-    let left = ref None in
-    let right = ref None in
-    Eio.Fiber.both
-      (fun () ->
-         left :=
-           Some
-             (V.Internal.submit_verdict
-                ~base_path
-                ~req_id:req.id
-                ~verifier:"verifier-a"
-                ~verdict:V.Pass))
-      (fun () ->
-         right :=
-           Some
-             (V.Internal.submit_verdict
-                ~base_path
-                ~req_id:req.id
-                ~verifier:"verifier-b"
-                ~verdict:(V.Fail "rejected")));
-    match !left, !right with
-    | Some (Ok _), Some (Error _) | Some (Error _), Some (Ok _) -> ()
-    | Some (Ok _), Some (Ok _) ->
-      Alcotest.fail "concurrent verdicts both overwrote the receipt"
-    | Some (Error left), Some (Error right) ->
-      Alcotest.failf "both concurrent verdicts failed: %s / %s" left right
-    | None, _ | _, None -> Alcotest.fail "concurrent verdict fiber did not return")
-
 (* --- ID generation property test (#7544) --- *)
 
 module StringSet = Set.Make (String)
@@ -1210,69 +1072,6 @@ let test_generate_id_no_collisions () =
     seen := StringSet.add id !seen
   done;
   Alcotest.(check int) "all 10k ids unique" n (StringSet.cardinal !seen)
-
-(* --- Attribution conversion tests --- *)
-
-module A = Attribution
-
-let test_origin_det_for_rule_based () =
-  let cs = [ V.Contains "x"; V.Not_contains "y"; V.Schema_match (`Assoc []) ] in
-  Alcotest.(check bool) "Det" true (V.origin_of_criteria cs = A.Det)
-
-let test_origin_nondet_for_custom () =
-  let cs = [ V.Contains "x"; V.Custom "is it good?" ] in
-  Alcotest.(check bool) "NonDet" true (V.origin_of_criteria cs = A.NonDet)
-
-let test_verdict_pass_to_attribution () =
-  let attr = V.to_attribution ~origin:Det ~evidence:`Null V.Pass in
-  Alcotest.(check string) "gate" "verification" attr.gate;
-  Alcotest.(check bool) "outcome=Passed" true
-    (match attr.outcome with A.Passed -> true | _ -> false)
-
-let test_verdict_fail_to_attribution () =
-  let attr =
-    V.to_attribution ~origin:Det ~evidence:`Null
-      (V.Fail "output does not match schema")
-  in
-  match attr.outcome with
-  | A.Policy_failed { reason } ->
-    Alcotest.(check string) "reason" "output does not match schema" reason
-  | _ -> Alcotest.fail "expected Policy_failed"
-
-let test_verdict_partial_to_attribution () =
-  let attr =
-    V.to_attribution ~origin:NonDet ~evidence:`Null
-      (V.Partial (0.75, "partial match"))
-  in
-  match attr.outcome with
-  | A.Partial_pass { score; rationale } ->
-    Alcotest.(check (float 0.0001)) "score" 0.75 score;
-    Alcotest.(check string) "rationale" "partial match" rationale
-  | _ -> Alcotest.fail "expected Partial_pass"
-
-let test_attribution_of_request_none_for_pending () =
-  with_temp_dir (fun base_path ->
-    match V.create_request ~base_path ~task_id:"t1" ~output:`Null
-            ~criteria:[ V.Contains "x" ] ~worker:"w" () with
-    | Error e -> Alcotest.fail ("create failed: " ^ e)
-    | Ok req ->
-      Alcotest.(check bool) "None for Pending" true
-        (V.attribution_of_request req = None))
-
-let test_attribution_of_request_derives_origin () =
-  with_temp_dir (fun base_path ->
-    (* Build a request with a Custom criterion and a Completed Pass verdict. *)
-    match V.create_request ~base_path ~task_id:"t2" ~output:`Null
-            ~criteria:[ V.Contains "hello"; V.Custom "must be kind" ]
-            ~worker:"claude" () with
-    | Error e -> Alcotest.fail ("create failed: " ^ e)
-    | Ok req ->
-      let completed = { req with status = V.Completed V.Pass } in
-      match V.attribution_of_request completed with
-      | Some attr ->
-        Alcotest.(check bool) "origin=NonDet (Custom present)" true
-          (attr.A.origin = A.NonDet)
-      | None -> Alcotest.fail "expected Some attribution")
 
 let () =
   Alcotest.run "Verification" [
@@ -1342,28 +1141,5 @@ let () =
         test_submitted_evidence_requires_exact_task_assignment_identity;
       Alcotest.test_case "keeper task projection assigned verifier only" `Quick
         test_keeper_task_projection_exposes_snapshot_only_to_assigned_verifier;
-      Alcotest.test_case "submit verdict" `Quick test_submit_verdict;
-      Alcotest.test_case "submit verdict persists verifier" `Quick
-        test_submit_verdict_persists_verifier;
-      Alcotest.test_case "submit verdict terminal non-overwrite" `Quick
-        test_submit_verdict_cannot_overwrite_terminal_receipt;
-      Alcotest.test_case "concurrent verdict is first-writer-wins" `Quick
-        test_concurrent_verdict_is_first_writer_wins;
-    ];
-    "attribution", [
-      Alcotest.test_case "origin=Det for rule-based criteria" `Quick
-        test_origin_det_for_rule_based;
-      Alcotest.test_case "origin=NonDet when Custom present" `Quick
-        test_origin_nondet_for_custom;
-      Alcotest.test_case "Pass → Attribution.Passed" `Quick
-        test_verdict_pass_to_attribution;
-      Alcotest.test_case "Fail → Attribution.Policy_failed" `Quick
-        test_verdict_fail_to_attribution;
-      Alcotest.test_case "Partial → Attribution.Partial_pass" `Quick
-        test_verdict_partial_to_attribution;
-      Alcotest.test_case "attribution_of_request None for Pending" `Quick
-        test_attribution_of_request_none_for_pending;
-      Alcotest.test_case "attribution_of_request derives origin" `Quick
-        test_attribution_of_request_derives_origin;
     ];
   ]

@@ -507,35 +507,6 @@ and handle_transition
     | Masc_domain.Reject_verification ->
       None
   in
-  let prepare_verification_verdict =
-    match action with
-    | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
-      Some
-        (fun ~(task : Masc_domain.task) ~verifier ~verification_id ~decision ->
-           match decision with
-           | `Approve notes ->
-             (Atomic.get Workspace_hooks.verification_record_verdict_fn)
-               ctx.config
-               ~task_id:task.id
-               ~verifier
-               ~verification_id
-               ~decision:(`Approve notes)
-           | `Reject reason ->
-             (Atomic.get Workspace_hooks.verification_record_verdict_fn)
-               ctx.config
-               ~task_id:task.id
-               ~verifier
-               ~verification_id
-               ~decision:(`Reject reason))
-    | Masc_domain.Claim
-    | Masc_domain.Start
-    | Masc_domain.Done_action
-    | Masc_domain.Cancel
-    | Masc_domain.Release
-    | Masc_domain.Submit_for_verification ->
-      None
-  in
   (* Capture verification_id from AwaitingVerification state BEFORE transition.
      approve/reject transitions change state, destroying the verification_id.
      Issue #7543. *)
@@ -558,7 +529,6 @@ and handle_transition
       ?handoff_context
       ?prepare_verification_request
       ?compensate_verification_request
-      ?prepare_verification_verdict
       ()
   in
   Result.iter

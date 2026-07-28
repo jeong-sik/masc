@@ -29,6 +29,14 @@ let normalize_response_text_for_finalization
       ~tool_names
       ()
   =
+  match run_result.stop_reason with
+  | Runtime_agent.Awaiting_external_effect _ ->
+    Ok Keeper_agent_run_response_text.external_effect_deferred_acknowledgement
+  | Runtime_agent.Completed
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.InputRequired _ ->
   if
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
       run_result.stop_reason
@@ -244,8 +252,10 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
 
 let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
-  | Keeper_tools_oas.External_effect_deferred ->
+  | Keeper_tools_oas.Deferred_tool_result ->
     Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting)
+  | Keeper_tools_oas.External_effect_deferred ->
+    Ok (Runtime_agent.Yield Runtime_agent.External_effect_deferred)
   | Keeper_tools_oas.Terminal_effect_completed ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
   | Keeper_tools_oas.Terminal_effect_failed

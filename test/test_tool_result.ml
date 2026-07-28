@@ -195,6 +195,23 @@ let test_keeper_execution_preserves_explicit_typed_data () =
      | None -> false)
 ;;
 
+let test_keeper_execution_defer_kind_is_producer_typed () =
+  let data = `Assoc [ "approval_id", `String "approval-1" ] in
+  let generic = Keeper_tool_execution.deferred_data data in
+  let external_effect =
+    Keeper_tool_execution.deferred_external_effect_data data
+  in
+  Alcotest.(check bool)
+    "ordinary deferred execution remains generic"
+    true
+    (generic.deferred_kind = Some Keeper_tool_execution.Generic_deferred);
+  Alcotest.(check bool)
+    "external deferred execution is explicit"
+    true
+    (external_effect.deferred_kind
+     = Some Keeper_tool_execution.External_effect_deferred)
+;;
+
 let test_to_json () =
   let start = Time_compat.now () in
   let r = Tool_result.ok ~tool_name:"masc_transition" ~start_time:start "done" in
@@ -498,6 +515,10 @@ let () =
             "keeper execution preserves typed data"
             `Quick
             test_keeper_execution_preserves_explicit_typed_data
+        ; Alcotest.test_case
+            "keeper execution defer kind is producer typed"
+            `Quick
+            test_keeper_execution_defer_kind_is_producer_typed
         ] )
     ; "to_json", [ Alcotest.test_case "fields present" `Quick test_to_json ]
     ; ( "message"

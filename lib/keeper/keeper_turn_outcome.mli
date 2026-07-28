@@ -7,7 +7,9 @@
     ([Continuation_checkpoint]).  Consumers (lane persistence, stream
     terminal, direct-reply surface, dashboard) match on the decoded
     variant; the legacy ["Continuation checkpoint saved;"] prefix sniff
-    is deleted. *)
+    is deleted. A typed Gate deferral is instead finalized as a visible,
+    host-authored acknowledgement; it must not be projected as a checkpoint
+    transport failure. *)
 
 type t =
   | Visible_reply

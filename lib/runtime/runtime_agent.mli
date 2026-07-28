@@ -23,6 +23,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
   | Completed
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
+  | Awaiting_external_effect of { turns_used : int }
   | Yielded_after_repeated_tool_call of {
       turns_used : int;
       tool_name : string;
@@ -36,6 +37,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
 type cooperative_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
+  | External_effect_deferred
   | Repeated_tool_call of {
       tool_name : string;
       repeated_count : int;
@@ -55,8 +57,11 @@ type cooperative_yield_probe =
     turn slot to a parked dashboard/connector chat request.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
     another durable event is waiting behind the event currently leased by the
-    cycle. [Yielded_after_repeated_tool_call] fires only after repeated exact
-    tool input and output prove that the provider loop is not advancing.
+    cycle. [Awaiting_external_effect] fires when a typed external-effect
+    handler durably defers through Gate; it is distinct because the originating
+    chat must receive an acknowledgement rather than a transport failure.
+    [Yielded_after_repeated_tool_call] fires only after repeated exact tool
+    input and output prove that the provider loop is not advancing.
     [InputRequired] means OAS returned a typed elicitation request whose
     question and checkpoint must be surfaced without provider fallback. These
     typed non-completion stops persist checkpoints rather than claiming a

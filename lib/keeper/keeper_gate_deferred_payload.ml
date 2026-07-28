@@ -33,7 +33,7 @@ let data t =
 ;;
 
 let to_execution t =
-  Keeper_tool_execution.deferred_data (data t)
+  Keeper_tool_execution.deferred_external_effect_data (data t)
 ;;
 
 let to_tool_result ~tool_name ~start_time t =

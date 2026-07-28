@@ -217,6 +217,7 @@ let checkpoint_for_replay_persistence
           pre-turn history prefix")
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_after_repeated_tool_call _ ->
     (* A control-boundary checkpoint retains the current-turn tool result so
        resumption cannot repeat an already committed effect. *)

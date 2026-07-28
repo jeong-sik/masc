@@ -19,6 +19,7 @@ module Stream = Server_routes_http_keeper_stream
 module UT = Masc.Keeper_unified_turn
 module Cycle = Masc.Keeper_heartbeat_loop_cycle
 module Heartbeat = Masc.Keeper_heartbeat_loop.For_testing
+module Response_text = Masc.Keeper_agent_run_response_text
 
 let outcome : TO.t testable =
   testable
@@ -59,6 +60,9 @@ let test_of_stop_reason () =
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
+  check outcome "external effect wait -> visible" TO.Visible_reply
+    (TO.of_stop_reason
+       (Runtime_agent.Awaiting_external_effect { turns_used = 2 }));
   check outcome "repeated tool yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_after_repeated_tool_call
@@ -111,6 +115,10 @@ let test_runtime_stop_reason_controls_durable_source_completion () =
     (Heartbeat.cycle_outcome_acks_source
        (cycle_of_stop_reason
           (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 })));
+  check bool "external effect wait retains durable source" false
+    (Heartbeat.cycle_outcome_acks_source
+       (cycle_of_stop_reason
+          (Runtime_agent.Awaiting_external_effect { turns_used = 2 })));
   check bool "repeated tool yield retains durable source" false
     (Heartbeat.cycle_outcome_acks_source
        (cycle_of_stop_reason
@@ -167,6 +175,40 @@ let test_of_result_surface () =
     TO.No_visible_reply
     (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
 
+let test_external_effect_wait_acknowledgement_is_visible () =
+  let stop_reason = Runtime_agent.Awaiting_external_effect { turns_used = 2 } in
+  let acknowledgement = Response_text.external_effect_deferred_acknowledgement in
+  check bool "external effect acknowledgement is not suppressed" false
+    (Response_text.stop_reason_suppresses_visible_response stop_reason);
+  check bool "external effect acknowledgement is nonblank" true
+    (String.trim acknowledgement <> "");
+  check outcome "external effect acknowledgement reaches chat"
+    TO.Visible_reply
+    (TO.of_result_surface ~response_text:acknowledgement stop_reason)
+
+let test_terminal_effect_defer_kinds_remain_distinct () =
+  let expect_yield label state expected =
+    match Masc.Keeper_agent_run.terminal_effect_boundary_decision state with
+    | Ok (Runtime_agent.Yield actual) ->
+      check string label expected
+        (match actual with
+         | Runtime_agent.Durable_stimulus_waiting -> "durable_stimulus_waiting"
+         | Runtime_agent.External_effect_deferred -> "external_effect_deferred"
+         | Runtime_agent.Chat_waiting -> "chat_waiting"
+         | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
+         | Runtime_agent.Terminal_tool_completed -> "terminal_tool_completed")
+    | Ok Runtime_agent.Continue -> fail (label ^ " unexpectedly continued")
+    | Error error -> fail (label ^ ": " ^ Agent_sdk.Error.to_string error)
+  in
+  expect_yield
+    "generic deferred tool preserves existing checkpoint"
+    Masc.Keeper_tools_oas.Deferred_tool_result
+    "durable_stimulus_waiting";
+  expect_yield
+    "typed external effect uses Gate acknowledgement path"
+    Masc.Keeper_tools_oas.External_effect_deferred
+    "external_effect_deferred"
+
 let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
     : Masc.Keeper_agent_result.tool_call_detail =
   { tool_name
@@ -221,14 +263,16 @@ let test_autonomous_yield_boundary_contract () =
     }
   in
   (match F.runtime_yield_reason chat with
-   | Runtime_agent.Chat_waiting -> ()
-   | Runtime_agent.Durable_stimulus_waiting
-   | Runtime_agent.Repeated_tool_call _
+    | Runtime_agent.Chat_waiting -> ()
+    | Runtime_agent.Durable_stimulus_waiting
+    | Runtime_agent.External_effect_deferred
+    | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Terminal_tool_completed ->
      fail "chat request mapped to the durable reason");
   (match F.runtime_yield_reason durable_stimulus with
-   | Runtime_agent.Durable_stimulus_waiting -> ()
-   | Runtime_agent.Chat_waiting
+    | Runtime_agent.Durable_stimulus_waiting -> ()
+    | Runtime_agent.Chat_waiting
+    | Runtime_agent.External_effect_deferred
    | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Terminal_tool_completed ->
      fail "durable request mapped to the chat reason");
@@ -248,6 +292,7 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.InputRequired _ ->
        false);
@@ -260,6 +305,7 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Completed -> true
      | Runtime_agent.Yielded_to_chat_waiting _
      | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.InputRequired _ -> false)
 
@@ -458,6 +504,10 @@ let () =
           test_case "cooperative yield ignores only active source identity" `Quick
             test_cooperative_yield_ignores_only_active_source_identity;
           test_case "of_result_surface" `Quick test_of_result_surface;
+          test_case "external effect wait acknowledgement is visible" `Quick
+            test_external_effect_wait_acknowledgement_is_visible;
+          test_case "terminal effect defer kinds remain distinct" `Quick
+            test_terminal_effect_defer_kinds_remain_distinct;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
           test_case "autonomous yield boundary contract" `Quick

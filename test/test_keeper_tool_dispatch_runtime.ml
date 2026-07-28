@@ -2886,6 +2886,8 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Ok _ -> fail "handler-level invalid terminal input unexpectedly succeeded");
        (match bundle.terminal_effect_state () with
         | Masc.Keeper_tools_oas.Terminal_effect_open -> ()
+        | Masc.Keeper_tools_oas.Deferred_tool_result ->
+          fail "invalid terminal input unexpectedly deferred a tool result"
         | Masc.Keeper_tools_oas.External_effect_deferred ->
           fail "invalid terminal input unexpectedly deferred an external effect"
         | Masc.Keeper_tools_oas.Terminal_effect_completed ->
@@ -2907,6 +2909,8 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
         | Masc.Keeper_tools_oas.Terminal_effect_open ->
           fail "corrected terminal input left the terminal effect open"
+        | Masc.Keeper_tools_oas.Deferred_tool_result ->
+          fail "corrected terminal input unexpectedly deferred a tool result"
         | Masc.Keeper_tools_oas.External_effect_deferred ->
           fail "corrected terminal input unexpectedly deferred an external effect"
         | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
@@ -2934,6 +2938,8 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        | Masc.Keeper_tools_oas.Terminal_effect_failed _ -> ()
        | Masc.Keeper_tools_oas.Terminal_effect_open ->
          fail "later failure reopened the completed terminal effect"
+       | Masc.Keeper_tools_oas.Deferred_tool_result ->
+         fail "later failure unexpectedly became a generic defer"
        | Masc.Keeper_tools_oas.External_effect_deferred ->
          fail "later failure unexpectedly became an external defer"
        | Masc.Keeper_tools_oas.Terminal_effect_completed ->
@@ -3094,7 +3100,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
        (match runtime_result with
         | Ok
             { Runtime_agent.stop_reason =
-                Runtime_agent.Yielded_to_durable_stimulus _
+                Runtime_agent.Awaiting_external_effect _
             ; _
             } ->
           ()
@@ -3109,6 +3115,8 @@ let test_deferred_web_search_yields_before_provider_retry () =
             (Agent_sdk.Error.to_string error));
        match bundle.terminal_effect_state () with
        | Masc.Keeper_tools_oas.External_effect_deferred -> ()
+       | Masc.Keeper_tools_oas.Deferred_tool_result ->
+         fail "Gate deferred effect became a generic tool defer"
        | Masc.Keeper_tools_oas.Terminal_effect_open ->
          fail "deferred effect was not observed at the tool boundary"
        | Masc.Keeper_tools_oas.Terminal_effect_completed ->
@@ -3203,6 +3211,8 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  (contains_substring failure.diagnostic chat_path)
              | Masc.Keeper_tools_oas.Terminal_effect_open ->
                fail "failed surface delivery left the terminal effect open"
+             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+               fail "failed surface delivery became a generic defer"
              | Masc.Keeper_tools_oas.External_effect_deferred ->
                fail "failed surface delivery became an external defer"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
@@ -3211,6 +3221,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               match terminal_state with
               | Masc.Keeper_tools_oas.Terminal_effect_failed failure -> failure
               | Masc.Keeper_tools_oas.Terminal_effect_open
+              | Masc.Keeper_tools_oas.Deferred_tool_result
               | Masc.Keeper_tools_oas.External_effect_deferred
               | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                 fail "failed surface delivery lost its terminal failure"
@@ -3237,6 +3248,8 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  (failure = first_terminal_failure)
              | Masc.Keeper_tools_oas.Terminal_effect_open ->
                fail "later success reopened the failed terminal effect"
+             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+               fail "later success changed failure into a generic defer"
              | Masc.Keeper_tools_oas.External_effect_deferred ->
                fail "later success changed failure into an external defer"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
@@ -3329,6 +3342,8 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  (contains_substring failure.diagnostic chat_path)
              | Masc.Keeper_tools_oas.Terminal_effect_open ->
                fail "runtime terminal failure was not recorded"
+             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+               fail "runtime terminal failure became a generic defer"
              | Masc.Keeper_tools_oas.External_effect_deferred ->
                fail "runtime terminal failure became an external defer"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->

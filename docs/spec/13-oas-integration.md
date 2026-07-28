@@ -98,7 +98,7 @@ graph TB
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, dispatch, auth |
 | 컨텍스트 축약 | 없음; exact message history를 실행 | Keeper compaction, persisted-history repair, provider-bound artifact projection |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 publish할지, SSE/dashboard 연결 |
-| 장기 메모리 | 없음 | `Masc.Memory.t`, keeper memory bank, institution/procedural stores |
+| 장기 메모리 | 없음 | Memory OS fact store, institution/procedural stores |
 | 조율 상태 | 없음 | workspace, tasks, board, keeper Gate |
 
 ---
@@ -425,7 +425,7 @@ content-addressed markers.
 ## 11. Memory Boundary
 
 Former memory projection is removed. MASC no longer creates or passes OAS
-memory objects; keeper memory bank, institution episodes, and procedural memory
+memory objects; the Memory OS fact store, institution episodes, and procedural memory
 remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 
 ---

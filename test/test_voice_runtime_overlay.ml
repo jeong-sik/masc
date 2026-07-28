@@ -348,44 +348,14 @@ let test_keeper_voice_speak_surfaces_tts_failure () =
       Yojson.Safe.Util.(member "message" json |> to_string))
 ;;
 
-let test_keeper_voice_speak_failure_writes_no_memory_row () =
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let net = Eio.Stdenv.net env in
-  let clock = Eio.Stdenv.clock env in
-  let mono_clock = Eio.Stdenv.mono_clock env in
-  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
-    let config = test_config () in
-    let meta = make_keeper_meta "voice-memory-keeper" in
-    let message = "unspoken voice must not be recorded" in
-    ignore
-      (Masc.Keeper_tool_voice_runtime.handle_voice_tool
-         ~config
-         ~meta
-         ~authorize_external_effect:allow_external_effect
-         ~name:"keeper_voice_speak"
-         ~args:(`Assoc [ "message", `String message; "priority", `Int 3 ])
-         ());
-    let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
-    let rows =
-      read_lines memory_path
-      |> List.filter_map Masc.Keeper_memory_bank.parse_memory_bank_row
-    in
-    let row =
-      rows
-      |> List.find_opt (fun row ->
-        row.Masc.Keeper_memory_bank.source = Masc.Keeper_memory_bank.Voice_output
-        && String.equal row.text message)
-    in
-    check bool "no voice_output row for failed speak" true (Option.is_none row))
-;;
-
-let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
+(* The legacy memory bank is gone (RFC keeper-memory-consolidation Stage 4):
+   a spoken or fallback utterance persists via the chat store only, and the
+   speak response no longer reports a memory write. This pins the removal —
+   if the memory_* response fields return, this fails. *)
+let test_keeper_voice_speak_text_fallback_reports_no_memory_fields () =
   let config = test_config () in
   let meta = make_keeper_meta "voice-fallback-memory-keeper" in
-  let message = "fallback speech should be durable" in
+  let message = "fallback speech is chat-store only" in
   let raw =
     Masc.Keeper_tool_voice_runtime.handle_voice_tool
       ~config
@@ -398,59 +368,10 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
   let json = Yojson.Safe.from_string raw in
   check string "text fallback status" "text_fallback"
     Yojson.Safe.Util.(member "status" json |> to_string);
-  check bool "fallback memory recorded" true
-    Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
-  let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
-  let rows =
-    read_lines memory_path
-    |> List.filter_map Masc.Keeper_memory_bank.parse_memory_bank_row
-  in
-  let row =
-    rows
-    |> List.find_opt (fun row ->
-      row.Masc.Keeper_memory_bank.source = Masc.Keeper_memory_bank.Voice_output
-      && row.kind = Masc.Keeper_memory_bank.Progress
-      && String.equal row.text message)
-  in
-  match row with
-  | Some row ->
-    check string "fallback memory execution" "text_fallback"
-      Yojson.Safe.Util.(member "execution" row.json |> to_string)
-  | None -> fail "expected fallback voice_output progress memory row"
-;;
-
-(* Regression for the 2026-06-14 sangsu voice self-echo loop: the raw
-   voice_output row must stay durable in the memory bank, but it must not
-   appear in the auto-injected recent-note summary that drives the next
-   turn, or the model will answer its own spoken text repeatedly. *)
-let test_voice_output_row_is_excluded_from_memory_recent_notes () =
-  let config = test_config () in
-  let meta = make_keeper_meta "voice-recent-note-filter-keeper" in
-  let message = "this should not echo back as a recent note" in
-  let raw =
-    Masc.Keeper_tool_voice_runtime.handle_voice_tool
-      ~config
-      ~meta
-      ~authorize_external_effect:allow_external_effect
-      ~name:"keeper_voice_speak"
-      ~args:(`Assoc [ "message", `String message ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  check bool "fallback memory recorded" true
-    Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
-  let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
-  let lines = read_lines memory_path in
-  let summary =
-    Masc.Keeper_memory_bank.summarize_memory_bank_lines lines ~recent_limit:4
-  in
-  let has_voice_text =
-    List.exists
-      (fun (row : Masc.Keeper_memory_bank.keeper_memory_line) ->
-         String.equal row.text message)
-      summary.recent_notes
-  in
-  check bool "voice_output source not in recent_notes" false has_voice_text
+  check bool "no memory_recorded field" true
+    Yojson.Safe.Util.(member "memory_recorded" json = `Null);
+  check bool "no memory_rows_written field" true
+    Yojson.Safe.Util.(member "memory_rows_written" json = `Null)
 ;;
 
 let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
@@ -1201,17 +1122,9 @@ let () =
             `Quick
             test_keeper_voice_speak_surfaces_tts_failure
         ; test_case
-            "failed speak writes no memory row"
+            "fallback speak reports no memory fields"
             `Quick
-            test_keeper_voice_speak_failure_writes_no_memory_row
-        ; test_case
-            "keeper_voice_speak fallback records memory"
-            `Quick
-            test_keeper_voice_speak_text_fallback_records_memory_bank_row
-        ; test_case
-            "voice_output row is excluded from memory recent notes"
-            `Quick
-            test_voice_output_row_is_excluded_from_memory_recent_notes
+            test_keeper_voice_speak_text_fallback_reports_no_memory_fields
         ; test_case
             "session_start does not store session_name as voice"
             `Quick

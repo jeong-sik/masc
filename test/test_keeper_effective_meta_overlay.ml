@@ -669,7 +669,6 @@ let test_status_reports_normalized_options () =
     [ "name", `String name
     ; "fast", `Bool false
     ; "include_metrics_overview", `Bool false
-    ; "include_memory_bank", `Bool false
     ; "include_history_tail", `Bool false
     ; "include_compaction_history", `Bool false
     ]

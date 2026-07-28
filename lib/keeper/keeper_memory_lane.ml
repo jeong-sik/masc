@@ -1,7 +1,7 @@
 (** Per-keeper memory execution lane. See keeper_memory_lane.mli (RFC-0257). *)
 
 (* Post-turn memory work splits into two kinds that write different stores
-   under their own locks ([Keeper_memory_bank.with_memory_bank_lock] vs
+   under their own locks (delegation-request persistence vs
    [Keeper_memory_os_io.with_facts_lock] / [with_episode_bundle_lock]), so they
    never needed to serialize against each other. Sharing one lane made them
    compete for one reservation budget anyway, and the librarian holds its
@@ -58,7 +58,7 @@ type reservation =
    extraction; the excess is best-effort and dropped rather than piling up
    fibers. Tunable via environment for fleet-wide capacity experiments. *)
 let max_pending () =
-  Keeper_memory_bank_env.memory_env_int_logged
+  Env_config_memory.get_int_logged
     "MASC_KEEPER_MEMORY_LANE_MAX_PENDING"
     ~default:2
   |> max 1

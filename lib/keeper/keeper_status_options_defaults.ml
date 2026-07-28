@@ -50,7 +50,6 @@ module Argument = struct
   let fast = "fast"
   let include_context = "include_context"
   let include_metrics_overview = "include_metrics_overview"
-  let include_memory_bank = "include_memory_bank"
   let include_history_tail = "include_history_tail"
   let include_compaction_history = "include_compaction_history"
 
@@ -64,7 +63,6 @@ module Argument = struct
     ; fast
     ; include_context
     ; include_metrics_overview
-    ; include_memory_bank
     ; include_history_tail
     ; include_compaction_history
     ]

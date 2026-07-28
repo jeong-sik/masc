@@ -333,5 +333,3 @@ let keeper_decisions_json = Dashboard_http_keeper_feeds.keeper_decisions_json
 let keeper_decisions_log_json =
   Dashboard_http_keeper_feeds.keeper_decisions_log_json
 ;;
-
-let keeper_memory_log_json = Dashboard_http_keeper_feeds.keeper_memory_log_json

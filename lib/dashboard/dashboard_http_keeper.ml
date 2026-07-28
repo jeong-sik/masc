@@ -490,46 +490,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 
           let provider_health_json = `Null in
 
-          (* In compact mode (used by execution surface), skip heavy memory bank I/O.
-             Full memory bank is only needed for individual keeper detail view. *)
-          (* RFC-0149 §3.1 — route through the Result-returning resolver
-             so a memory-bank IO fault surfaces a typed [unavailable]
-             JSON shape that the dashboard frontend can render as a
-             warning state, separate from "Ok summary with empty bank". *)
-          let (memory_bank_json, memory_recent_note) =
-            if compact then
-              (`Assoc [("total_files", `Int 0); ("skipped", `Bool true)], None)
-            else
-              match
-                Keeper_memory.read_keeper_memory_summary_result
-                  config
-                  ~name:m.name
-                  ~max_bytes:120000
-                  ~max_lines:200
-                  ~recent_limit:4
-              with
-              | Ok summary ->
-                let note = match summary.Keeper_memory.recent_notes with
-                  | row :: _ -> Some row.Keeper_memory.text
-                  | [] -> None
-                in
-                (Keeper_memory.memory_summary_to_json summary, note)
-              | Error exn_class ->
-                let label =
-                  Keeper_memory_recall_exn_class.to_label exn_class
-                in
-                let note =
-                  Some (Printf.sprintf "[memory unavailable: %s]" label)
-                in
-                let json =
-                  `Assoc
-                    [ ("total_files", `Int 0)
-                    ; ("unavailable", `Bool true)
-                    ; ("error_class", `String label)
-                    ]
-                in
-                (json, note)
-          in
           let history_path =
             Filename.concat
               (Filename.concat (Keeper_types_profile.session_base_dir config) (Keeper_id.Trace_id.to_string m.runtime.trace_id))
@@ -793,7 +753,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ("last_metrics", match last_metrics with None -> `Null | Some j -> j);
                   ("metrics_series", metrics_series);
                   ("metrics_24h", metrics_24h);
-                  ("memory_bank", memory_bank_json);
                   ("conversation_tail", conversation_tail);
                   ("k2k_recent", k2k_recent);
                   ("trust_observatory", trust_observatory);
@@ -995,23 +954,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             @ [
               ("metrics_window", metrics_window_summary);
               ("metrics_24h_summary", metrics_24h_summary);
-              ("memory_note_count",
-                (match memory_bank_json with
-                 | `Assoc fields ->
-                     (match List.assoc_opt "total_notes" fields with
-                      | Some n -> n
-                      | None -> (match List.assoc_opt "total_files" fields with
-                                 | Some n -> n
-                                 | None -> `Int 0))
-                 | _ -> `Int 0));
-              ("memory_top_kind",
-                (match memory_bank_json with
-                 | `Assoc fields ->
-                     (match List.assoc_opt "top_kind" fields with
-                      | Some (`String _ as s) -> s
-                      | _ -> `Null)
-                 | _ -> `Null));
-              ("memory_recent_note", Json_util.string_opt_to_json memory_recent_note);
               ("recent_input_preview", Json_util.string_opt_to_json (recent_preview_for_role "user"));
               ("recent_output_preview", Json_util.string_opt_to_json (recent_preview_for_role "assistant"));
               ("recent_tool_names", `List (List.map (fun item -> `String item) recent_tool_names));

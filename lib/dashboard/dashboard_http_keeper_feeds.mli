@@ -39,10 +39,3 @@ val parse_decision_event : keeper_name:string -> string -> decision_event option
 val decision_event_to_yojson : decision_event -> Yojson.Safe.t
 (** Render the dashboard payload for a decision event; field set and order match
     the feed output. Exposed for tests. *)
-
-val keeper_memory_log_json :
-  config:Workspace.config ->
-  keepers:Keeper_meta_contract.keeper_meta list ->
-  ?limit:int ->
-  unit ->
-  Yojson.Safe.t

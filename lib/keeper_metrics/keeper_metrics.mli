@@ -126,7 +126,6 @@ type t =
   | DecisionAuditRingOverflows
   | HitlSummaryOutcomes
   | OasEnvKeyRejections
-  | MemoryWriteFailures
   | MemoryLaneUnitFailures
   | MemoryConsolidations
   | MemoryLaneSubmitted
@@ -137,7 +136,6 @@ type t =
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
   | MemoryLaneExecutionSlotBusy
-  | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -177,7 +175,7 @@ type t =
   | ConfigEnvParseFailures
   | PostTurnWireinFailures
   | TurnCleanupFailures
-  | MemoryBankLoadHistorySwallowedExceptions
+  | MemoryRecallHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed

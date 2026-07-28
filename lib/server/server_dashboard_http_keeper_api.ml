@@ -2060,49 +2060,6 @@ let handle_keeper_get_subroutes state req request reqd =
       let runtime_fsm_mermaid =
         state_diagram_runtime_fsm_mermaid runtime_projection
       in
-      (* Memory tier usage: join kind_caps (policy) with kind_counts (bank
-         summary). Each kind reports used / cap so the dashboard tier
-         panel can render saturation without re-reading the memory file.
-
-         RFC-0149 §3.1: route the bank read through the typed Result
-         resolver.  [memory_kind_usage] keeps its [`List …] shape for
-         existing dashboard consumers
-         (dashboard/src/components/keeper-memory-tier-panel.ts,
-         dashboard/src/components/ide/ide-persistence-panel.ts).  The
-         typed [Keeper_memory_recall_exn_class.t] label rides on the
-         sibling [memory_kind_usage_error_class] field so an IO fault is
-         distinguishable from "memory bank empty / no kinds recorded".  *)
-      let used_by_kind, memory_kind_usage_error_class =
-        match meta with
-        | Ok (Some _) ->
-          (match
-             Keeper_memory.read_keeper_memory_summary_result
-               (Mcp_server.workspace_config state)
-               ~name ~max_bytes:120_000 ~max_lines:200 ~recent_limit:0
-           with
-           | Ok summary ->
-             summary.Keeper_memory.kind_counts, None
-           | Error exn_class ->
-             [], Some (Keeper_memory_recall_exn_class.to_label exn_class))
-        | _ -> [], None
-      in
-      let memory_kind_usage : Yojson.Safe.t =
-        let caps = Keeper_memory_policy.kind_caps () in
-        let lookup_used k =
-          List.assoc_opt k used_by_kind |> Option.value ~default:0
-        in
-        `List (List.map (fun (kind, cap) ->
-          let kind_wire = Keeper_memory_policy.memory_kind_to_wire kind in
-          `Assoc [
-            "kind", `String kind_wire;
-            "used", `Int (lookup_used kind_wire);
-            "cap", `Int cap;
-            "priority", `Int (Keeper_memory_policy.priority_for_kind ~kind);
-          ]) caps)
-      in
-      let memory_kind_usage_error_class_json : Yojson.Safe.t =
-        Json_util.string_opt_to_json memory_kind_usage_error_class
-      in
       (* Compaction sub-FSM: only emit a diagram when the keeper is in
          the [Compacting] phase. The three nodes mirror
          [specs/bug-models/MemoryCompaction.tla]. *)
@@ -2135,10 +2092,7 @@ let handle_keeper_get_subroutes state req request reqd =
            ; "runtime_fsm_mermaid", `String runtime_fsm_mermaid
            ; "compaction_submachine_mermaid", compaction_submachine_mermaid
            ]
-           @ runtime_projection_fields
-           @ [ "memory_kind_usage", memory_kind_usage
-             ; "memory_kind_usage_error_class", memory_kind_usage_error_class_json
-             ])
+           @ runtime_projection_fields)
       in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if req_path = prefix ^ "composite" then

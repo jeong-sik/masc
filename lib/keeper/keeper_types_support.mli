@@ -64,6 +64,9 @@ val keeper_raw_trace_turn_path : Workspace.config -> string -> string
     files removed. *)
 val prune_keeper_raw_trace_turn_files : Workspace.config -> string -> int
 
+(** Legacy artifact path (memory bank removed — RFC
+    keeper-memory-consolidation Stage 4). Kept only so keeper purge can
+    delete a pre-removal [.memory.jsonl]. *)
 val keeper_memory_bank_path : Workspace.config -> string -> string
 val keeper_generation_index_path : Workspace.config -> string -> string
 

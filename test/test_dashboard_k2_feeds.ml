@@ -1,4 +1,4 @@
-(** Tests for K2 decisions and memory log telemetry feeds.
+(** Tests for the K2 decisions telemetry feed.
 
     Covers:
     - evidence_refs populated from real reference lists only (not prose)
@@ -280,94 +280,6 @@ let test_decisions_json_terminal_reason_duration_fallback () =
      contains_substring ~needle:"reason: provider_error" s)
 ;;
 
-(* --- Memory log tests --- *)
-
-let memory_horizon kind =
-  match Masc.Keeper_memory_policy.memory_kind_of_wire kind with
-  | Some memory_kind ->
-    Masc.Keeper_memory_policy.memory_horizon_of_kind memory_kind
-  | None -> fail ("unknown memory kind: " ^ kind)
-;;
-
-let memory_row ?(kind = "goal") ?(trace_id = "trace-memory") ?(generation = 1)
-    ~ts text =
-  `Assoc
-    [ "schema_version", `Int 2
-    ; "kind", `String kind
-    ; "horizon", `String (memory_horizon kind)
-    ; "source", `String "tool_result"
-    ; "trace_id", `String trace_id
-    ; "generation", `Int generation
-    ; "text", `String text
-    ; "priority", `Int 10
-    ; "ts_unix", `Float ts
-    ]
-;;
-
-let test_memory_log_ids_distinguish_same_timestamp_rows () =
-  with_config
-  @@ fun config ->
-  let meta = keeper_meta "k2-memory" in
-  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
-  append_jsonl
-    path
-    (memory_row
-       ~trace_id:"trace-memory-alpha"
-       ~ts:2_000.0
-       "Ship K2 memory feed row alpha");
-  append_jsonl
-    path
-    (memory_row
-       ~trace_id:"trace-memory-beta"
-       ~ts:2_000.0
-       "Ship K2 memory feed row beta");
-  let json = Dash.keeper_memory_log_json ~config ~keepers:[ meta ] ~limit:999 () in
-  check int "clamped high limit" 200 Json.(json |> member "limit" |> to_int);
-  let entries = Json.(json |> member "entries" |> to_list) in
-  check int "entries" 2 (List.length entries);
-  let ids = entries |> List.map (fun row -> Json.(row |> member "id" |> to_string)) in
-  match ids with
-  | [ first; second ] -> check bool "ids differ" true (not (String.equal first second))
-  | _ -> fail "expected two memory ids"
-;;
-
-let test_memory_log_kind_mapping () =
-  with_config
-  @@ fun config ->
-  let meta = keeper_meta "k2-memory-kind" in
-  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
-  (* progress -> episode *)
-  append_jsonl
-    path
-    (memory_row
-       ~kind:"progress"
-       ~trace_id:"trace-progress"
-       ~ts:3_000.0
-       "Progress memory row p1");
-  (* goal -> plan *)
-  append_jsonl
-    path
-    (memory_row
-       ~kind:"goal"
-       ~trace_id:"trace-goal"
-       ~ts:3_001.0
-       "Goal memory row g1");
-  (* long_term -> fact *)
-  append_jsonl
-    path
-    (memory_row
-       ~kind:"long_term"
-       ~trace_id:"trace-long-term"
-       ~ts:3_002.0
-       "Long-term memory row fact b1");
-  let json = Dash.keeper_memory_log_json ~config ~keepers:[ meta ] ~limit:10 () in
-  let entries = Json.(json |> member "entries" |> to_list) in
-  check int "entries" 3 (List.length entries);
-  let kinds = List.map (fun e -> Json.(e |> member "kind" |> to_string)) entries in
-  (* sorted newest-first: long_term(3_002), goal(3_001), progress(3_000) *)
-  check (list string) "kind mapping" [ "fact"; "plan"; "episode" ] kinds
-;;
-
 let () =
   run
     "dashboard_k2_feeds"
@@ -383,13 +295,6 @@ let () =
             "terminal reason and duration fallback"
             `Quick
             test_decisions_json_terminal_reason_duration_fallback
-        ] )
-    ; ( "memory log"
-      , [ test_case
-            "ids distinguish same timestamp rows"
-            `Quick
-            test_memory_log_ids_distinguish_same_timestamp_rows
-        ; test_case "kind mapping (episode/fact/plan)" `Quick test_memory_log_kind_mapping
         ] )
     ]
 ;;

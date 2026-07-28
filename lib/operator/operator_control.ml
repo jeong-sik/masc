@@ -136,7 +136,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
             ("fast", `Bool false);
             ("include_context", `Bool false);
             ("include_metrics_overview", `Bool true);
-            ("include_memory_bank", `Bool false);
             ("include_history_tail", `Bool false);
             ("include_compaction_history", `Bool false);
           ]

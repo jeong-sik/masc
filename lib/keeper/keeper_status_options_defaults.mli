@@ -36,7 +36,6 @@ module Argument : sig
   val fast : string
   val include_context : string
   val include_metrics_overview : string
-  val include_memory_bank : string
   val include_history_tail : string
   val include_compaction_history : string
   val all : string list

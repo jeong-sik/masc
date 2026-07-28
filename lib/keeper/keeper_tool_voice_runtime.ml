@@ -48,52 +48,6 @@ type external_effect_authorizer =
   continue:(unit -> Keeper_tool_execution.t) ->
   Keeper_tool_execution.t
 
-type voice_memory_status =
-  { recorded : bool
-  ; rows_written : int
-  ; error : string option
-  }
-
-let record_voice_output
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(provider : string option)
-      ~priority
-      ~execution
-      ~message
-  =
-  match
-    Keeper_memory_bank.append_voice_output
-      config
-      meta
-      ?provider
-      ~execution
-      ~voice_priority:priority
-      ~turn:meta.runtime.usage.total_turns
-      ~message
-      ()
-  with
-  | Ok rows_written ->
-    { recorded = rows_written > 0; rows_written; error = None }
-  | Error err ->
-    Log.Keeper.warn
-      ~keeper_name:meta.name
-      "keeper_voice_speak memory write failed: %s"
-      err;
-    { recorded = false; rows_written = 0; error = Some err }
-
-let memory_status_fields status =
-  [ "memory_recorded", `Bool status.recorded
-  ; "memory_rows_written", `Int status.rows_written
-  ; "memory_source", `String "voice_output"
-  ; "memory_error", Json_util.string_opt_to_json status.error
-  ]
-
-let attach_memory_status json status =
-  match json with
-  | `Assoc fields -> `Assoc (fields @ memory_status_fields status)
-  | other -> `Assoc (("result", other) :: memory_status_fields status)
-
 let handle_speak_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -202,17 +156,7 @@ let handle_speak_with_outcome
                 ~keeper_name:meta.name ~source:"agent"
                 ~content:message
                 ());
-           let memory_status =
-             record_voice_output
-               ~config
-               ~meta
-               ~provider
-               ~priority
-               ~execution:"synchronous"
-               ~message
-           in
-           Keeper_tool_execution.success
-             (Yojson.Safe.to_string (attach_memory_status json memory_status))
+           Keeper_tool_execution.success (Yojson.Safe.to_string json)
           | Ok
               { Voice_bridge.completion = Voice_bridge.Dedup_skipped
               ; payload = json
@@ -226,20 +170,9 @@ let handle_speak_with_outcome
                  ; "message", `String err
                  ]))
     | _ ->
-      let memory_status =
-        record_voice_output
-          ~config
-          ~meta
-          ~provider
-          ~priority
-          ~execution:"text_fallback"
-          ~message
-      in
       Keeper_tool_execution.success
         (Yojson.Safe.to_string
-           (attach_memory_status
-              (keeper_text_fallback_json ~agent_id:meta.name ~message)
-              memory_status)))
+           (keeper_text_fallback_json ~agent_id:meta.name ~message)))
 
 let handle_listen_with_outcome
       ~(meta : keeper_meta)

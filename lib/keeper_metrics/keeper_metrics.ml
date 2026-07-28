@@ -135,7 +135,6 @@ type t =
   | DecisionAuditRingOverflows
   | HitlSummaryOutcomes
   | OasEnvKeyRejections
-  | MemoryWriteFailures
   | MemoryLaneUnitFailures
   | MemoryConsolidations
   | MemoryLaneSubmitted
@@ -146,7 +145,6 @@ type t =
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
   | MemoryLaneExecutionSlotBusy
-  | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -186,7 +184,7 @@ type t =
   | ConfigEnvParseFailures
   | PostTurnWireinFailures
   | TurnCleanupFailures
-  | MemoryBankLoadHistorySwallowedExceptions
+  | MemoryRecallHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
@@ -355,7 +353,6 @@ let to_string = function
   | DecisionAuditRingOverflows -> "masc_keeper_decision_audit_ring_overflows_total"
   | HitlSummaryOutcomes -> "masc_keeper_hitl_summary_outcomes_total"
   | OasEnvKeyRejections -> "masc_keeper_oas_env_key_rejections_total"
-  | MemoryWriteFailures -> "masc_keeper_memory_write_failures_total"
   | MemoryLaneUnitFailures -> "masc_keeper_memory_lane_unit_failures_total"
   | MemoryConsolidations -> "masc_keeper_memory_consolidations_total"
   | MemoryLaneSubmitted -> "masc_keeper_memory_lane_submitted_total"
@@ -366,7 +363,6 @@ let to_string = function
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
   | MemoryLaneLatestPending -> "masc_keeper_memory_lane_latest_pending"
   | MemoryLaneExecutionSlotBusy -> "masc_keeper_memory_lane_execution_slot_busy_total"
-  | MemoryBankCompactionFailures -> "masc_keeper_memory_bank_compaction_failures_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"
   | ChatStoreFailures -> "masc_keeper_chat_store_failures_total"
@@ -407,8 +403,8 @@ let to_string = function
   | ConfigEnvParseFailures -> "masc_keeper_config_env_parse_failures_total"
   | PostTurnWireinFailures -> "masc_keeper_post_turn_wirein_failures_total"
   | TurnCleanupFailures -> "masc_keeper_turn_cleanup_failures_total"
-  | MemoryBankLoadHistorySwallowedExceptions ->
-      "masc_keeper_memory_bank_load_history_swallowed_exceptions_total"
+  | MemoryRecallHistorySwallowedExceptions ->
+      "masc_keeper_memory_recall_history_swallowed_exceptions_total"
   | MemoryRecallReadErrors ->
       "masc_keeper_memory_recall_read_errors_total"
   | MemoryOsRecallUnavailable ->

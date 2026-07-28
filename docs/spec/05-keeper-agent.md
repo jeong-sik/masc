@@ -27,7 +27,7 @@ Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, persona, instructions, typed goal/task links)
 - **context**: `working_context` (system prompt + messages + token count + OAS context)
-- **memory**: memory bank + memory policy + recall scoring
+- **memory**: Memory OS fact/episode store + recall scoring (legacy memory bank 제거 — RFC keeper-memory-consolidation Stage 4)
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
 
 Keeper는 외부 세계를 관찰(`world_observation`)하고, 프롬프트를 구성하고, OAS `Agent.run`에 위임하고, 결과로부터 메트릭을 갱신하는 루프를 반복한다.
@@ -46,7 +46,7 @@ graph LR
     KWC[working_context] --> KEC[exec_context] --> KCS[checkpoint_store]
   end
   subgraph Memory
-    KMB[memory_bank] --> KMP[memory_policy] --> KMR[memory_recall]
+    KMO[memory_os_store] --> KMR[memory_recall]
   end
   subgraph Turn
     KUT[unified_turn] --> KAR[agent_run] --> KTO[tools_oas]
@@ -181,7 +181,7 @@ stateDiagram-v2
   PostTurnLifecycle --> Checkpoint : continuity / checkpoint 정리
   Checkpoint --> CompactCheck : compaction gate
   CompactCheck --> HandoffCheck : handoff gate
-  HandoffCheck --> MemoryWrite : memory bank notes
+  HandoffCheck --> MemoryWrite : librarian extraction (Memory OS)
   MemoryWrite --> [*]
 ```
 
@@ -194,7 +194,7 @@ stateDiagram-v2
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
 6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`가 compaction, handoff rollover, typed checkpoint metadata를 single-writer로 처리
 7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 gate에 따라 compaction 또는 handoff rollover를 실행
-8. **MemoryWrite**: `keeper_agent_run` tail에서 MASC-owned memory bank note append를 수행한다
+8. **MemoryWrite**: `keeper_agent_run` tail에서 Memory OS librarian extraction을 memory lane에 제출한다 (legacy bank append는 제거됨)
 
 ### 4.1.1 Post-turn Persistence Matrix
 
@@ -203,7 +203,7 @@ stateDiagram-v2
 | compaction | `keeper_post_turn.ml` | 현재 trace checkpoint | post-turn single-writer |
 | handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta lineage | `KeeperGenerationLineage.tla`, keeper FSM `Handoff_*` events |
 | typed checkpoint metadata | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
-| memory bank | `keeper_agent_run.ml` | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction |
+| Memory OS facts/episodes | `keeper_librarian_runtime.ml` | `.masc/config/keepers/<name>.facts.jsonl` + `episodes/` | librarian 계약 (RFC-0247/0272) |
 | collaboration activity signal | `workspace_task.ml` + `workspace.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
 ### 4.2 Keeper Supervisor Lifecycle
@@ -289,17 +289,14 @@ effect sink 직전에 opaque operation + normalized input으로 Keeper Gate를
 
 ```
 keeper_memory.ml (facade)
-  |-- keeper_memory_recall.ml (recall scoring, cost calculation)
-       |-- keeper_memory_bank.ml (bank persistence, dedup, filtering)
-            |-- keeper_memory_policy.ml (retention caps, profile-based selection)
+  |-- keeper_memory_recall.ml (recall scoring, history loading, memory eval)
 ```
 
-### 6.2 Memory Bank
+### 6.2 Memory Bank (제거됨)
 
-- 저장 경로: `.masc/keeper-memory/{name}/memory_bank.jsonl`
-- 레코드 형식: `(kind, text, priority)` 튜플
-- Kind 예시: `"goal"`, `"observation"`, `"reflection"`, `"procedure"`
-- Dedup: `normalize_memory_text_key`로 공백/구두점 제거 후 비교
+legacy per-keeper memory bank(`.memory.jsonl`, kind/horizon 어휘)는 제거됐다
+(RFC keeper-memory-consolidation Stage 4). durable 기억은 Memory OS fact
+store가 단일 경로다.
 - Placeholder 필터: `"none"`, `"null"`, `"없음"` 등은 무의미로 간주하여 제외
 
 ### 6.3 Memory Policy
@@ -318,7 +315,6 @@ Profile별 종류당 보존 상한:
 
 - `is_memory_recall_query`: 사용자 메시지가 기억 관련 질의인지 감지 (한국어 + 영어 needle 매칭)
 - `expected_topic_hint`: 질의에서 기대 토픽 추출
-- `read_keeper_memory_summary`: memory bank에서 최근 N개 라인 읽어 요약
 - Cost 계산: `cost_usd_of_usage`로 모델별 가격 추정
 
 ### 6.5 MASC-Owned Memory
@@ -545,7 +541,7 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 
 ### 15.3 keeper_memory 계층의 include chain
 
-`keeper_memory.ml` -> `keeper_memory_recall.ml` -> `keeper_memory_bank.ml` -> `keeper_memory_policy.ml` 순서로 `include`가 연쇄된다. 각 모듈의 경계가 불명확하다.
+`keeper_memory.ml` -> `keeper_memory_recall.ml` 단층 facade만 남았다 (bank/policy 계층은 제거됨).
 
 ### 15.4 Proactive similarity의 Jaccard 한계
 
@@ -557,7 +553,7 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 
 ### 15.6 Memory Boundary
 
-External memory projection은 제거됐다. 남은 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 `Masc.Memory.t`, MASC memory bank, institution, procedural 모듈이 소유한다.
+External memory projection은 제거됐다. 남은 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 Memory OS fact store, institution, procedural 모듈이 소유한다.
 
 ---
 

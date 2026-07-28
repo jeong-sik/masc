@@ -33,7 +33,6 @@
   test_keeper_memory_os_io_fd
   test_keeper_memory_os_external_state_decay
   test_keeper_memory_os_recall_echo
-  test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_keeper_verification_audit
   test_keeper_connector_attention_wake
@@ -342,7 +341,6 @@
   test_keeper_memory_os_io_fd
   test_keeper_memory_os_external_state_decay
   test_keeper_memory_os_recall_echo
-  test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_verification_audit
@@ -1017,7 +1015,6 @@
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
-  test_memory_horizon_classifier
   test_tool_contract_truth
   test_file_lock_eio
   test_error_logging_coverage
@@ -1180,7 +1177,6 @@
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
-  test_memory_horizon_classifier
   test_tool_contract_truth
   test_file_lock_eio
   test_error_logging_coverage
@@ -1954,11 +1950,8 @@
 
 (include stanzas/test_keeper_turn_admission.inc)
 
-(include stanzas/test_keeper_memory_bank_compaction_errors.inc)
 
-(include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
 
-(include stanzas/test_keeper_memory_bank_consolidation_provenance.inc)
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
 
@@ -1991,7 +1984,6 @@
 
 (include stanzas/test_keeper_memory_write.inc)
 
-(include stanzas/test_keeper_memory_row_source.inc)
 
 (include stanzas/test_memory_facade.inc)
 

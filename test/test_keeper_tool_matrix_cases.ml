@@ -325,7 +325,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
   | "keeper_memory_write" ->
-      `Assoc [ ("kind", `String "decision"); ("content", `String "tool matrix memory write content") ]
+      `Assoc [ ("content", `String "tool matrix memory write content") ]
   | "analyze_image" ->
       `Assoc [ ("artifact", `String "tool-matrix-missing-query") ]
   | "keeper_ide_annotate" ->

@@ -40,217 +40,73 @@ let valid_memory_search_source_strings =
   List.map memory_search_source_to_string all_memory_search_sources
 ;;
 
-type memory_match =
-  { kind : Keeper_memory_policy.memory_kind
-  ; horizon : string
-  ; source : string option
-  ; text : string
-  ; priority : int
-  ; generation : int
-  ; turn : int
-  ; ts : string
+(* --- Durable fact search (Memory OS store) --- *)
+
+type fact_match =
+  { claim : string
+  ; category : string
+  ; claim_kind : string option
+  ; first_seen : float
+  ; valid_until : float option
   ; score : float
   }
 
-let memory_bank_persistence_surface = "keeper_tool_memory_bank"
-
-let report_memory_bank_read_drop ~path ~reason ~detail =
-  Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () ->
-      Otel_metric_store.inc_counter
-        Otel_metric_store.metric_persistence_read_drops
-        ~labels:[ "surface", memory_bank_persistence_surface; "reason", reason ]
-        ())
-    ~surface:memory_bank_persistence_surface
-    ~reason
-    ~path
-    ~detail
-;;
-
-let search_memory_bank
-      ~(config : Workspace.config)
+(* Match + rank over the keeper's Memory OS durable facts. Ranking is the
+   matched-token ratio against the claim text, tie-broken by recency
+   ([first_seen] desc). Expired facts (past [valid_until]) are excluded the
+   same way recall excludes them ([fact_is_current]). *)
+let search_durable_facts
       ~(meta : keeper_meta)
       ~(query : string)
-      ~(kind_filter : Keeper_memory_policy.memory_kind option)
       ~(limit : int)
-  : memory_match list * int
+  : fact_match list * int
   =
-  let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
-  let lines =
-    match
-      Keeper_memory_recall.read_file_tail_lines_result path
-        ~max_bytes:(256 * 1024) ~max_lines:500
-    with
-    | Ok lines -> lines
-    | Error exn_class ->
-        Keeper_memory_recall.record_memory_recall_read_error
-          ~site:"keeper_memory_search" path exn_class;
-        []
+  let now = Time_compat.now () in
+  let current =
+    Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name
+    |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
   in
-  let now_ts = Time_compat.now () in
-  let parsed =
-    lines
-    |> List.filter_map (fun line ->
-      match Yojson.Safe.from_string line with
-      | exception Yojson.Json_error detail ->
-        report_memory_bank_read_drop
-          ~path
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-          ~detail;
-        None
-      | `Assoc _ as j ->
-        (try
-           let schema_version = Safe_ops.json_int ~default:0 "schema_version" j in
-           let kind_wire = Safe_ops.json_string ~default:"" "kind" j in
-           let kind = Keeper_memory_policy.memory_kind_of_wire kind_wire in
-           let horizon = Keeper_memory_policy.memory_horizon_of_json_opt j in
-           let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
-           let trace_id = Safe_ops.json_string ~default:"" "trace_id" j |> String.trim in
-           let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
-           let priority = Safe_ops.json_int ~default:0 "priority" j in
-           let generation = Safe_ops.json_int ~default:0 "generation" j in
-           let turn = Safe_ops.json_int ~default:0 "turn" j in
-           let ts = Safe_ops.json_string ~default:"" "ts" j in
-           let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-           if schema_version <> Keeper_memory_policy.keeper_memory_schema_version
-           then (
-             report_memory_bank_read_drop
-               ~path
-               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-               ~detail:"memory bank row has unsupported schema_version";
-             None)
-           else if text = "" || source = "" || trace_id = ""
-           then (
-             report_memory_bank_read_drop
-               ~path
-               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-               ~detail:
-                 "memory bank row is missing required kind, text, source, or trace_id";
-             None)
-           else (
-             match kind, horizon with
-             | None, _ | _, None ->
-               report_memory_bank_read_drop
-                 ~path
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-                 ~detail:"memory bank row has unknown kind or missing horizon";
-               None
-             | Some kind, Some h
-               when not
-                      (String.equal
-                         (Keeper_memory_policy.memory_horizon_of_kind kind)
-                         h) ->
-               report_memory_bank_read_drop
-                 ~path
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-                 ~detail:"memory bank row kind/horizon mismatch";
-               None
-             | Some kind, Some h ->
-               Some
-                 { kind
-                 ; horizon = h
-                 ; source = Some source
-                 ; text
-                 ; priority
-                 ; generation
-                 ; turn
-                 ; ts
-                 ; score = ts_unix
-                 })
-         with
-         | Yojson.Safe.Util.Type_error (detail, _) ->
-           report_memory_bank_read_drop
-             ~path
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-             ~detail;
-           None)
-      | _ ->
-        report_memory_bank_read_drop
-          ~path
-          ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-          ~detail:"memory bank row is not a JSON object";
-        None)
-  in
-  let total_candidates = List.length parsed in
-  (* Structured filter: kind (deterministic) *)
-  let filtered =
-    match kind_filter with
-    | None -> parsed
-    | Some kind -> List.filter (fun memory -> memory.kind = kind) parsed
-  in
-  (* Text match: query against text field (non-deterministic data).
-     Partial-token match (count > 0), not strict token-AND — a natural-language
-     query like "notable event lesson learned" previously matched 0 notes even
-     when 2 of 4 tokens overlapped a stored note. The matched-token ratio is a
-     ranking signal only; priority, recency, horizon, source, and synthetic
-     penalties still participate in the final score. *)
+  let total_candidates = List.length current in
   let matched =
     if query = ""
-    then filtered
-    else List.filter (fun m -> String_util.count_matched_tokens_ci m.text query > 0) filtered
+    then current
+    else
+      List.filter
+        (fun (fact : Keeper_memory_os_types.fact) ->
+          String_util.count_matched_tokens_ci fact.claim query > 0)
+        current
   in
-  (* Scoring: priority * recency_weight.
-     recency_weight normalizes age relative to the oldest note in the result set.
-     No hardcoded decay constant — uses min/max normalization. *)
-  let ts_values = List.map (fun m -> m.score) matched in
-  let min_ts =
-    match ts_values with
-    | [] -> now_ts
-    | ts :: rest -> List.fold_left min ts rest
-  in
-  let max_age = max 1.0 (now_ts -. min_ts) in
   let scored =
     matched
-    |> List.map (fun m ->
-      let age = max 0.0 (now_ts -. m.score) in
-      let recency_weight = max 0.0 (min 1.0 (1.0 -. (0.3 *. (age /. max_age)))) in
-      let horizon_weight =
-        match m.kind with
-        | Keeper_memory_policy.Long_term -> 1.10
-        | Keeper_memory_policy.Progress | Keeper_memory_policy.Open_question ->
-          if m.generation >= meta.runtime.nonce then 1.05 else 0.65
-        | Keeper_memory_policy.Goal | Keeper_memory_policy.Decision -> 1.0
-      in
-      let source_bonus =
-        match m.source with
-        | Some "cross_trace_recurrence" -> 0.04
-        | Some "progress_consolidation" -> 0.02
-        | _ -> 0.0
-      in
-      let synthetic_penalty =
-        if Keeper_synthetic_marker.contains_marker m.text then -0.1 else 0.0
-      in
-      let token_match_weight =
-        if query = "" then 1.0
-        else String_util.matched_token_ratio_ci m.text query
-      in
+    |> List.map (fun (fact : Keeper_memory_os_types.fact) ->
       let score =
-        (float_of_int m.priority /. 100.0
-           *. recency_weight
-           *. horizon_weight
-           *. token_match_weight)
-        +. synthetic_penalty
-        +. source_bonus
+        if query = ""
+        then 1.0
+        else String_util.matched_token_ratio_ci fact.claim query
       in
-      let rounded = Float.round (score *. 1000.0) /. 1000.0 in
-      { m with score = rounded })
+      { claim = fact.claim
+      ; category = Keeper_memory_os_types.category_to_string fact.category
+      ; claim_kind =
+          Option.map Keeper_memory_os_types.claim_kind_to_string fact.claim_kind
+      ; first_seen = fact.first_seen
+      ; valid_until = fact.valid_until
+      ; score = Float.round (score *. 1000.0) /. 1000.0
+      })
+    |> List.sort (fun a b ->
+      match Float.compare b.score a.score with
+      | 0 -> Float.compare b.first_seen a.first_seen
+      | c -> c)
   in
-  let sorted =
-    scored |> List.sort (fun a b -> Float.compare b.score a.score) |> take limit
-  in
-  sorted, total_candidates
+  take limit scored, total_candidates
 ;;
 
-let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
+let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
   `Assoc
-    [ "kind", `String (Keeper_memory_policy.memory_kind_to_wire m.kind)
-    ; "horizon", `String m.horizon
-    ; ( "source", Json_util.string_opt_to_json m.source )
-    ; "text", `String m.text
-    ; "priority", `Int m.priority
-    ; "generation", `Int m.generation
-    ; "turn", `Int m.turn
-    ; "ts", `String m.ts
+    [ "text", `String m.claim
+    ; "category", `String m.category
+    ; "claim_kind", Json_util.string_opt_to_json m.claim_kind
+    ; "first_seen_ts_unix", `Float m.first_seen
+    ; "valid_until_ts_unix", Json_util.float_opt_to_json m.valid_until
     ; "score", `Float m.score
     ]
 ;;
@@ -339,17 +195,9 @@ let keeper_memory_search_with_outcome
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
   let source_raw = Safe_ops.json_string ~default:"memory" "source" args in
-  let kind_raw = Safe_ops.json_string ~default:"" "kind" args in
-  let kind_filter =
-    if String.equal kind_raw ""
-    then Ok None
-    else
-      match Keeper_memory_policy.memory_kind_of_wire kind_raw with
-      | Some kind -> Ok (Some kind)
-      | None -> Error kind_raw
-  in
-  match memory_search_source_of_string_opt source_raw, kind_filter with
-  | None, _ ->
+  let kind_raw = Safe_ops.json_string ~default:"" "kind" args |> String.trim in
+  match memory_search_source_of_string_opt source_raw with
+  | None ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (error_json
@@ -360,27 +208,18 @@ let keeper_memory_search_with_outcome
              , `List (List.map (fun s -> `String s) valid_memory_search_source_strings) )
            ]
          "invalid keeper_memory_search source")
-  | Some _, Error provided_kind ->
+  | Some _ when kind_raw <> "" ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (error_json
          ~fields:
-           [ "error_kind", `String "invalid_memory_kind"
-           ; "provided_kind", `String provided_kind
-           ; ( "supported_kinds"
-             , `List
-                 (List.map
-                    (fun kind -> `String kind)
-                    Keeper_memory_policy.valid_memory_kind_strings) )
+           [ "error_kind", `String "memory_search_kind_removed"
+           ; "provided_kind", `String kind_raw
            ]
-         "invalid keeper_memory_search kind")
-  | Some source, Ok kind_filter ->
+         "the kind filter was removed with the memory bank; matches carry \
+          claim_kind and category fields instead")
+  | Some source ->
     let source_label = memory_search_source_to_string source in
-    let kind_filter_wire =
-      kind_filter
-      |> Option.map Keeper_memory_policy.memory_kind_to_wire
-      |> Option.value ~default:""
-    in
     let result =
     match source with
     | History ->
@@ -395,18 +234,16 @@ let keeper_memory_search_with_outcome
          ]
          @ if no_match then [ "no_match", `Bool true ] else [])
     | All ->
-      let bank_matches, bank_total =
-        search_memory_bank ~config ~meta ~query ~kind_filter ~limit
-      in
-      let history_limit = max 0 (limit - List.length bank_matches) in
+      let fact_matches, fact_total = search_durable_facts ~meta ~query ~limit in
+      let history_limit = max 0 (limit - List.length fact_matches) in
       let history_matches =
         if history_limit > 0
         then search_history ~config ~meta ~ctx_work ~query ~limit:history_limit
         else []
       in
-      let total_matches = List.length bank_matches + List.length history_matches in
+      let total_matches = List.length fact_matches + List.length history_matches in
       let no_match = total_matches = 0 in
-      let bank_jsons = List.map memory_match_to_json bank_matches in
+      let fact_jsons = List.map fact_match_to_json fact_matches in
       let history_jsons =
         List.map
           (fun msg ->
@@ -419,17 +256,15 @@ let keeper_memory_search_with_outcome
       `Assoc
         ([ "query", `String query
          ; "source", `String source_label
-         ; "total_candidates", `Int bank_total
+         ; "total_candidates", `Int fact_total
          ; "match_count", `Int total_matches
-         ; "matches", `List (bank_jsons @ history_jsons)
+         ; "matches", `List (fact_jsons @ history_jsons)
          ]
          @ if no_match then [ "no_match", `Bool true ] else [])
     | Memory ->
-      let matches, total_candidates =
-        search_memory_bank ~config ~meta ~query ~kind_filter ~limit
-      in
+      let matches, total_candidates = search_durable_facts ~meta ~query ~limit in
       let no_match = matches = [] in
-      let match_jsons = List.map memory_match_to_json matches in
+      let match_jsons = List.map fact_match_to_json matches in
       `Assoc
         ([ "query", `String query
          ; "source", `String source_label
@@ -437,11 +272,7 @@ let keeper_memory_search_with_outcome
          ; "match_count", `Int (List.length matches)
          ; "matches", `List match_jsons
          ]
-         @ (if no_match then [ "no_match", `Bool true ] else [])
-         @
-         if String.equal kind_filter_wire ""
-         then []
-         else [ "kind_filter", `String kind_filter_wire ])
+         @ if no_match then [ "no_match", `Bool true ] else [])
   in
   (* Day-1 search logging: append search event to decisions log.
      Extract match_count and top_score from the already-computed result. *)
@@ -474,7 +305,6 @@ let keeper_memory_search_with_outcome
           ; "event", `String "memory_search"
           ; "query", `String query
           ; "source", `String source_label
-          ; "kind_filter", `String kind_filter_wire
           ; "match_count", `Int log_match_count
           ]
           @
@@ -508,25 +338,12 @@ let keeper_context_status_json
       ~(ctx_work : working_context)
   =
   let checkpoint_bytes = Keeper_context_runtime.serialized_bytes ctx_work in
-  (* RFC-0149 §3.1 — route through typed Result resolver so a memory
-     bank IO fault surfaces as the sibling [memory_tier_error_class]
-     field instead of an empty [memory_tier_summary] that is
-     indistinguishable from "no recorded horizons". *)
-  let memory_tier_summary, memory_tier_error_class =
-    match
-      Keeper_memory_recall.read_memory_horizon_counts_result
-        config
-        ~name:meta.name
-        ~max_bytes:(128 * 1024)
-        ~max_lines:300
-    with
-    | Ok counts ->
-      let json =
-        List.map (fun (horizon, count) -> horizon, `Int count) counts
-      in
-      json, None
-    | Error exn_class ->
-      [], Some (Keeper_memory_recall_exn_class.to_label exn_class)
+  let memory_facts_total, memory_facts_current =
+    let now = Time_compat.now () in
+    let facts = Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name in
+    ( List.length facts
+    , List.length
+        (List.filter (Keeper_memory_os_types.fact_is_current ~now) facts) )
   in
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
@@ -551,15 +368,19 @@ let keeper_context_status_json
          ]
          @ Keeper_sandbox.context_status_fields sandbox
          @ [ "sandbox_live", sandbox_live
-           ; "memory_tier_summary", `Assoc memory_tier_summary
-           ; ( "memory_tier_error_class"
-             , Json_util.string_opt_to_json memory_tier_error_class )
+           ; "memory_facts_total", `Int memory_facts_total
+           ; "memory_facts_current", `Int memory_facts_current
            ]))
 ;;
 
 (* --- Explicit memory write (RFC-0035 P4 surface) ----------------- *)
 
 let keeper_memory_write_max_title_chars = 120
+
+(* Upper bound on the composed [**title** content] body. A durable fact is a
+   claim, not a document; the bound matches the cap the retired bank enforced
+   so existing producers see the same boundary. *)
+let keeper_memory_write_max_body_chars = 4096
 
 (* An explicit lifetime is a claim about scope, so it has to be a real
    boundary: a claim that expires today or a decade out is a producer mistake,
@@ -605,30 +426,27 @@ let parse_valid_for_days (args : Yojson.Safe.t) : valid_for_days_arg =
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
 type memory_write_error_kind =
-  | Invalid_memory_kind
+  | Kind_argument_removed
   | Title_too_long
   | Content_empty
-  | Content_rejected
+  | Content_too_long
   | Invalid_valid_for_days
-  | Valid_for_days_on_turn_scoped_kind
   | Persistence_failed
   | No_memory_write_error
 
 let memory_write_error_kind_to_string = function
-  | Invalid_memory_kind -> "invalid_memory_kind"
+  | Kind_argument_removed -> "kind_argument_removed"
   | Title_too_long -> "title_too_long"
   | Content_empty -> "content_empty"
-  | Content_rejected -> "content_rejected"
+  | Content_too_long -> "content_too_long"
   | Invalid_valid_for_days -> "invalid_valid_for_days"
-  | Valid_for_days_on_turn_scoped_kind -> "valid_for_days_on_turn_scoped_kind"
   | Persistence_failed -> "persistence_failed"
   | No_memory_write_error -> ""
 ;;
 
 type memory_write_validation =
   | Memory_write_ok of
-      { kind : Keeper_memory_policy.memory_kind
-      ; body : string
+      { body : string
       ; valid_for_days : int option
         (** Producer-declared lifetime (RFC-0351 S2). [None] means the claim
             carries no expiry, which is what every stored fact says today
@@ -642,14 +460,9 @@ type memory_write_validation =
 (* Each way a lifetime can be wrong gets its own answer. A producer that sent
    the wrong JSON type has not violated the range, and telling it the range is
    1-365 sends it looking for a bug it does not have. *)
-let check_lifetime ~kind lifetime : (int option, memory_write_validation) result =
+let check_lifetime lifetime : (int option, memory_write_validation) result =
   let out_of_range d =
     d < keeper_memory_write_min_valid_days || d > keeper_memory_write_max_valid_days
-  in
-  let durable =
-    match Keeper_memory_policy.memory_write_destination kind with
-    | Keeper_memory_policy.Durable_fact_store -> true
-    | Keeper_memory_policy.Turn_scoped_bank -> false
   in
   match lifetime with
   | Lifetime_absent -> Ok None
@@ -673,62 +486,70 @@ let check_lifetime ~kind lifetime : (int option, memory_write_validation) result
              ; "max_days", `Int keeper_memory_write_max_valid_days
              ]
          })
-  | Lifetime_days _ when not durable ->
-    (* A turn-scoped note already dies with the run. Silently accepting a
-       lifetime for it would report a boundary the store does not keep. *)
-    Error
-      (Memory_write_invalid
-         { error_kind = Valid_for_days_on_turn_scoped_kind
-         ; extras = [ "kind", `String (Keeper_memory_policy.memory_kind_to_wire kind) ]
-         })
   | Lifetime_days d -> Ok (Some d)
 ;;
 
 let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation =
-  let kind_wire = Safe_ops.json_string ~default:"" "kind" args in
+  let provided_kind =
+    match args with
+    | `Assoc fields ->
+      (match List.assoc_opt "kind" fields with
+       | None | Some `Null -> None
+       | Some value -> Some value)
+    | _ -> None
+  in
   let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
   let content = Safe_ops.json_string ~default:"" "content" args |> String.trim in
   let lifetime = parse_valid_for_days args in
-  match Keeper_memory_policy.memory_kind_of_wire kind_wire with
-  | None ->
+  match provided_kind with
+  | Some value ->
+    (* The kind/horizon vocabulary was retired with the memory bank
+       (RFC keeper-memory-consolidation Stage 4): every write is a durable
+       fact. A caller still sending [kind] gets a typed rejection, not a
+       silently ignored argument. *)
     Memory_write_invalid
-      { error_kind = Invalid_memory_kind
+      { error_kind = Kind_argument_removed
       ; extras =
-          [ "provided_kind", `String kind_wire
-          ; ( "supported_kinds"
-            , `List
-                (List.map
-                   (fun k -> `String k)
-                   Keeper_memory_policy.valid_memory_kind_strings) )
+          [ ( "provided_kind"
+            , match value with
+              | `String s -> `String s
+              | other -> `String (json_type_name other) )
           ]
       }
-  | Some kind ->
-    if String.length title > keeper_memory_write_max_title_chars
-    then
-      Memory_write_invalid
-        { error_kind = Title_too_long
-        ; extras =
-            [ "max_chars", `Int keeper_memory_write_max_title_chars
-            ; "title_chars", `Int (String.length title)
-            ]
-        }
-    else if content = ""
-    then Memory_write_invalid { error_kind = Content_empty; extras = [] }
-    else (
-      match check_lifetime ~kind lifetime with
-      | Error invalid -> invalid
-      | Ok valid_for_days ->
-        let body =
-          if title = "" then content else Printf.sprintf "**%s** %s" title content
-        in
-        if Keeper_memory_bank.is_meaningful_memory_text body
-        then Memory_write_ok { kind; body; valid_for_days }
-        else Memory_write_invalid { error_kind = Content_rejected; extras = [] })
+  | None ->
+  if String.length title > keeper_memory_write_max_title_chars
+  then
+    Memory_write_invalid
+      { error_kind = Title_too_long
+      ; extras =
+          [ "max_chars", `Int keeper_memory_write_max_title_chars
+          ; "title_chars", `Int (String.length title)
+          ]
+      }
+  else if content = ""
+  then Memory_write_invalid { error_kind = Content_empty; extras = [] }
+  else (
+    match check_lifetime lifetime with
+    | Error invalid -> invalid
+    | Ok valid_for_days ->
+      let body =
+        if title = "" then content else Printf.sprintf "**%s** %s" title content
+      in
+      if String.length body > keeper_memory_write_max_body_chars
+      then
+        Memory_write_invalid
+          { error_kind = Content_too_long
+          ; extras =
+              [ "max_chars", `Int keeper_memory_write_max_body_chars
+              ; "body_chars", `Int (String.length body)
+              ]
+          }
+      else Memory_write_ok { body; valid_for_days })
 ;;
 
-(* RFC-0351 L1. [Long_term] is the one kind a later turn reads back, so an
-   explicit long-term write goes to the Memory OS fact store rather than the
-   turn-scoped bank, which no prompt block reads (masc#25517).
+(* An explicit write is a durable claim a later turn reads back; the Memory OS
+   fact store is the only store it reaches (the turn-scoped bank and its
+   kind/horizon vocabulary are gone — RFC keeper-memory-consolidation Stage 4).
 
    Provenance is this turn and [tool_call_id] is [None]: the claim is the
    model's own assertion, not an observation carried out of some other tool's
@@ -796,7 +617,7 @@ let append_durable_fact
 ;;
 
 let keeper_memory_write_with_outcome
-      ~(config : Workspace.config)
+      ~config:(_ : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   : Keeper_tool_execution.t
@@ -814,83 +635,30 @@ let keeper_memory_write_with_outcome
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
     respond ~ok:false ~error_kind extras
-  | Memory_write_ok { kind; body; valid_for_days } ->
-    let kind_wire = Keeper_memory_policy.memory_kind_to_wire kind in
-    (match Keeper_memory_policy.memory_write_destination kind with
-     | Keeper_memory_policy.Durable_fact_store ->
-       (match append_durable_fact ~meta ~body ~valid_for_days with
-        | stats ->
-          let merged = stats.Keeper_memory_os_io.merged in
-          respond
-            ~ok:true
-            ~error_kind:No_memory_write_error
-            [ "rows_written", `Int 1
-            ; ( "outcome"
-              , `String (if merged > 0 then "merged_into_existing_claim" else "persisted")
-              )
-            ; "kinds_written", `List [ `String kind_wire ]
-            ; "kind", `String kind_wire
-            ; "store", `String "durable_fact_store"
-            ]
-        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-        | exception exn ->
-          (* The store is the only place a long-term claim survives, so a
-             failed write is reported as failed. Presenting it as saved would
-             lose the claim silently. *)
-          let detail = Printexc.to_string exn in
-          Log.Keeper.warn
-            "explicit durable fact write failed keeper=%s: %s"
-            meta.name
-            detail;
-          respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])
-     | Keeper_memory_policy.Turn_scoped_bank ->
-       (match
-          Keeper_memory_bank.append_explicit_memory_note
-            config
-            meta
-            ~turn:meta.runtime.usage.total_turns
-            ~kind
-            ~text:body
-        with
-        | Error (Keeper_memory_bank.Explicit_memory_kind_not_writable provided_kind) ->
-          (* Unreachable through this tool: the routing above sends every
-             durable kind to the fact store, so the bank only ever sees kinds
-             it accepts. Kept because the bank guards its own invariant. *)
-          respond
-            ~ok:false
-            ~error_kind:Persistence_failed
-            [ ( "detail"
-              , `String
-                  (Printf.sprintf
-                     "memory bank refused kind %s"
-                     (Keeper_memory_policy.memory_kind_to_wire provided_kind)) )
-            ]
-        | Error Keeper_memory_bank.Rejected_explicit_memory_text ->
-          respond ~ok:false ~error_kind:Content_rejected []
-        | Error (Keeper_memory_bank.Explicit_memory_write_failed detail) ->
-          respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]
-        | Ok Keeper_memory_bank.Persisted ->
-          respond
-            ~ok:true
-            ~error_kind:No_memory_write_error
-            [ "rows_written", `Int 1
-            ; "outcome", `String "persisted"
-            ; "kinds_written", `List [ `String kind_wire ]
-            ; "kind", `String kind_wire
-            ; "store", `String "turn_scoped_bank"
-            ]
-        | Ok Keeper_memory_bank.Skipped_bank_writes_disabled ->
-          (* The memory-bank write kill-switch is off. Report accurately (0 rows,
-             not saved) rather than presenting the note as persisted — the caller
-             must not treat a skipped write as saved (spec/12 §Write Contract). *)
-          respond
-            ~ok:true
-            ~error_kind:No_memory_write_error
-            [ "rows_written", `Int 0
-            ; "outcome", `String "skipped_bank_writes_disabled"
-            ; "kind", `String kind_wire
-            ; "store", `String "turn_scoped_bank"
-            ]))
+  | Memory_write_ok { body; valid_for_days } ->
+    (match append_durable_fact ~meta ~body ~valid_for_days with
+     | stats ->
+       let merged = stats.Keeper_memory_os_io.merged in
+       respond
+         ~ok:true
+         ~error_kind:No_memory_write_error
+         [ "rows_written", `Int 1
+         ; ( "outcome"
+           , `String (if merged > 0 then "merged_into_existing_claim" else "persisted")
+           )
+         ; "store", `String "durable_fact_store"
+         ]
+     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+     | exception exn ->
+       (* The store is the only place a long-term claim survives, so a
+          failed write is reported as failed. Presenting it as saved would
+          lose the claim silently. *)
+       let detail = Printexc.to_string exn in
+       Log.Keeper.warn
+         "explicit durable fact write failed keeper=%s: %s"
+         meta.name
+         detail;
+       respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])
 ;;
 
 let keeper_memory_write_json ~config ~meta ~args =

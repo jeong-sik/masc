@@ -6,26 +6,6 @@ module StringMap = Map.Make (String)
 
 let memory_subsystems_entry_cache_ttl_sec = 30.0
 
-(* RFC-0149 §3.1: cache holds typed errors alongside successful rows so the
-   dashboard JSON can surface per-keeper Read failure class instead of silently
-   swallowing them. *)
-let memory_subsystems_entry_cache
-  : (string
-     * float
-     * (string * Keeper_memory_policy.keeper_memory_line) list
-     * (string * string) list)
-      option
-      Atomic.t
-  =
-  Atomic.make None
-;;
-
-(** Single-flight mutex for refreshing the memory-subsystems cache. The cache
-    itself is an [Atomic.t] so readers can check the TTL without contending for
-    the lock; only a miss contends and one fiber performs the expensive IO. *)
-let memory_subsystems_entry_cache_mu = Eio.Mutex.create ()
-;;
-
 let memory_quality_default_recent_limit = 500
 let memory_quality_max_recent_limit = 2_000
 let memory_quality_default_top_key_limit = 10
@@ -42,77 +22,6 @@ let memory_quality_cache
 let memory_quality_cache_mu = Eio.Mutex.create ()
 ;;
 
-let dashboard_memory_subsystems_include_entries request =
-  bool_query_param request "include_memory_entries" ~default:false
-  ||
-  match query_param request "focus" |> Option.map String.trim with
-  | Some "entries" -> true
-  | _ -> false
-;;
-
-let load_memory_subsystems_entries ~(config : Workspace_utils.config) =
-  (* NDT-OK: wall-clock read only gates a dashboard cache TTL. *)
-  let now = Unix.gettimeofday () in
-  let is_fresh = function
-    | Some (base_path, cached_at, _rows, _errors) ->
-      String.equal base_path config.base_path
-      && now -. cached_at < memory_subsystems_entry_cache_ttl_sec
-    | None -> false
-  in
-  match Atomic.get memory_subsystems_entry_cache with
-  | Some (base_path, cached_at, rows, errors) as cached when is_fresh cached ->
-    (rows, errors)
-  | _ ->
-    Eio.Mutex.use_rw ~protect:true memory_subsystems_entry_cache_mu
-    @@ fun () ->
-    (match Atomic.get memory_subsystems_entry_cache with
-     | Some (base_path, cached_at, rows, errors) as cached when is_fresh cached ->
-       (rows, errors)
-     | _ ->
-       let rows, errors =
-         try
-           Keeper_meta_store.keeper_names config
-           |> List.fold_left
-                (fun (rows_acc, errs_acc) keeper ->
-                  match
-                    Keeper_memory_recall.read_keeper_memory_summary_result
-                      config
-                      ~name:keeper
-                      ~max_bytes:120000
-                      ~max_lines:180
-                      ~recent_limit:30
-                  with
-                  | Ok summary ->
-                    let rows =
-                      List.map
-                        (fun (row : Keeper_memory_policy.keeper_memory_line) ->
-                          keeper, row)
-                        summary.recent_notes
-                    in
-                    List.rev_append rows rows_acc, errs_acc
-                  | Error exn_class ->
-                    let label =
-                      Keeper_memory_recall_exn_class.to_label exn_class
-                    in
-                    rows_acc, (keeper, label) :: errs_acc)
-                ([], [])
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | _ -> [], []
-       in
-       let rows = List.rev rows in
-       let errors = List.rev errors in
-       Atomic.set memory_subsystems_entry_cache
-         (Some (config.base_path, now, rows, errors));
-       rows, errors)
-;;
-
-(* The Hebbian synapse weight is a DISPLAY-only saturation scale for the
-   dashboard graph, not a learned or normalized synaptic strength: a keeper pair
-   reaches [max_synapse_weight] once they co-observe [synapse_saturation_facts]
-   shared facts, scaling linearly below that. Named so the scale is explicit and
-   reviewable rather than an unexplained literal (it drives no behavior — purely
-   how thick the dashboard edge renders). *)
 let max_synapse_weight = 1.0
 let synapse_saturation_facts = 10.0
 
@@ -427,15 +336,9 @@ let memory_quality_dashboard_json
 
 let dashboard_memory_subsystems_http_json
       ~(config : Workspace_utils.config)
-      ?include_memory_entries
       request
   : Yojson.Safe.t
   =
-  let include_memory_entries =
-    Option.value
-      include_memory_entries
-      ~default:(dashboard_memory_subsystems_include_entries request)
-  in
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:500 in
   let memory_quality_limit = dashboard_memory_quality_recent_limit request in
   let memory_quality_top_key_limit = dashboard_memory_quality_top_key_limit request in
@@ -467,51 +370,6 @@ let dashboard_memory_subsystems_http_json
      byte without lowercasing the haystack or allocating per position. *)
   let contains_ci haystack needle =
     String.length needle = 0 || String_util.contains_substring_ci haystack needle
-  in
-  let memory_entry_to_json
-        (keeper : string)
-        (row : Keeper_memory_policy.keeper_memory_line)
-    : Yojson.Safe.t
-    =
-    `Assoc
-      [ "keeper", `String keeper
-      ; "kind", `String row.kind
-      ; "text", `String row.text
-      ; "priority", `Int row.priority
-      ; "ts_unix", `Float row.ts_unix
-      ]
-  in
-  let all_memory_entries, memory_entry_errors =
-    if include_memory_entries
-    then load_memory_subsystems_entries ~config
-    else [], []
-  in
-  let memory_total = List.length all_memory_entries in
-  let memory_filtered =
-    all_memory_entries
-    |> List.filter (fun (keeper, (row : Keeper_memory_policy.keeper_memory_line)) ->
-      let keeper_ok =
-        match keeper_filter with
-        | None -> true
-        | Some k -> String.equal keeper k
-      in
-      let search_ok =
-        match search with
-        | None -> true
-        | Some q ->
-          contains_ci keeper q || contains_ci row.kind q || contains_ci row.text q
-      in
-      keeper_ok && search_ok)
-  in
-  let memory_filtered_total = List.length memory_filtered in
-  let memory_entries =
-    memory_filtered
-    |> List.sort
-         (fun
-             (_, (a : Keeper_memory_policy.keeper_memory_line))
-              (_, (b : Keeper_memory_policy.keeper_memory_line))
-            -> compare b.ts_unix a.ts_unix)
-    |> take limit
   in
   let filtered =
     all_episodes
@@ -554,14 +412,7 @@ let dashboard_memory_subsystems_http_json
       all_episodes
       |> List.concat_map (fun (e : Institution_eio.episode) -> e.participants)
     in
-    let memory_keepers = List.map fst all_memory_entries in
-    episode_keepers @ memory_keepers
-    |> List.sort_uniq String.compare
-  in
-  let known_memory_kinds =
-    all_memory_entries
-    |> List.map (fun (_, (row : Keeper_memory_policy.keeper_memory_line)) -> row.kind)
-    |> List.sort_uniq String.compare
+    episode_keepers |> List.sort_uniq String.compare
   in
   let delegation_requests =
     match
@@ -610,33 +461,11 @@ let dashboard_memory_subsystems_http_json
           ; "limit", `Int limit
           ; "items", `List (List.map Institution_eio.episode_to_json episodes)
           ] )
-    ; ( "memory_entries"
-      , `Assoc
-          [ "total", `Int memory_total
-          ; "filtered", `Int memory_filtered_total
-          ; "shown", `Int (List.length memory_entries)
-          ; "limit", `Int limit
-          ; ( "items"
-            , `List
-                (List.map
-                   (fun (keeper, row) -> memory_entry_to_json keeper row)
-                   memory_entries) )
-          ; ( "errors"
-            , `List
-                (List.map
-                   (fun (keeper, error_class) ->
-                     `Assoc
-                       [ "keeper", `String keeper
-                       ; "error_class", `String error_class
-                       ])
-                   memory_entry_errors) )
-          ] )
     ; "delegation_requests", delegation_requests
     ; ( "filters"
       , `Assoc
           [ "keepers", `List (List.map (fun k -> `String k) known_keepers)
           ; "outcomes", `List [ `String "success"; `String "partial"; `String "failure" ]
-          ; "memory_kinds", `List (List.map (fun k -> `String k) known_memory_kinds)
           ] )
     ]
 ;;

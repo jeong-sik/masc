@@ -76,7 +76,6 @@ val trim_opt : string option -> string option
 
 val strip_trailing_slashes : string -> string
 val strip_path_trailing_slashes : string -> string
-val expand_home_prefix : string -> string
 val normalize_path_lexically : string -> string
 val normalize_masc_base_path_input : string -> string
 val existing_dir : string -> bool
@@ -97,13 +96,10 @@ val existing_file : string -> bool
 
 (** {1 HTTP host + port (SSOT for issue 8352)} *)
 
-val default_http_port : string
-val default_http_port_int : int
 val host_env_key : string
 val http_port_env_key : string
 val masc_http_port : unit -> string
 val masc_http_port_int : unit -> int
-val masc_host_opt : unit -> string option
 val default_host : string
 val masc_host : unit -> string
 
@@ -141,12 +137,8 @@ val get_port : default:int -> string -> int
 
 val host_fd_pressure_state_file_env_key : string
 val legacy_host_fd_pressure_state_file_env_key : string
-val host_fd_pressure_poller_disabled_env_key : string
-val host_fd_pressure_poll_interval_sec_env_key : string
-val default_host_fd_pressure_state_file_path : string
 val host_fd_pressure_state_file_path_opt : unit -> string option
 val legacy_host_fd_pressure_state_file_path_opt : unit -> string option
-val host_fd_pressure_state_file_path : unit -> string
 val host_fd_pressure_poller_disabled : unit -> bool
 val host_fd_pressure_poll_interval_sec : unit -> float
 
@@ -165,12 +157,8 @@ val base_path_source_opt : unit -> (string * string) option
    internally; a follow-up RFC migrates those too. *)
 
 val running_under_test_executable : unit -> bool
-val test_allow_home_base_path_env : string
 val base_path_prod_guard : string -> string
 val base_path : unit -> string
-val sb_path_opt : unit -> string option
-val sb_path_result : unit -> (string, string) result
-val sb_path : unit -> string
 val orchestrator_enabled_env_key : string
 
 (** {1 Config / personas / data dir} *)
@@ -183,7 +171,6 @@ val personas_dir_env_key : string
    [Host_config.from_env ()] (fields [config_dir] / [personas_dir]). *)
 
 val data_dir_env_key : string
-val data_dir_opt : unit -> string option
 
 (** {1 Auth} *)
 
@@ -192,7 +179,6 @@ val admin_token_opt : unit -> string option
 
 (** {1 Git} *)
 
-val git_fetch_timeout_sec_env_key : string
 val git_fetch_timeout_sec : unit -> float
 
 (** {1 Logging / telemetry} *)
@@ -205,12 +191,10 @@ val telemetry_enabled_env_key : string
     them to a hard {!Config_error} (fail-fast boot). *)
 val parse_warn_env_key : string
 
-val log_level_opt : unit -> string option
 val telemetry_enabled : unit -> bool
 
 (** Whether malformed env parses are escalated to {!Config_error} (fail-fast)
     instead of warn + default. Controlled by [MASC_PARSE_WARN]. Default: false. *)
-val parse_warn_enabled : unit -> bool
 
 (** {1 Build identity / pubsub} *)
 

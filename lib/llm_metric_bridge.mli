@@ -4,8 +4,6 @@
     provider callbacks update the in-process metric store. The store is then
     exported through the OTel metrics bridge. *)
 
-val http_status_metric : string
-val fallback_triggered_metric : string
 
 val emit_http_status
   :  provider:string
@@ -20,19 +18,9 @@ val emit_request_latency
   -> unit
   -> unit
 
-val emit_capability_drop : model_id:string -> field:string -> unit
 val emit_cache_hit : model_id:string -> unit
-val emit_cache_miss : model_id:string -> unit
-val emit_request_start : model_id:string -> unit
 val emit_error : model_id:string -> error:string -> unit
-val emit_retry : provider:string -> model_id:string -> attempt:int -> unit
 
-val emit_circuit_state
-  :  provider:string
-  -> model_id:string
-  -> provider_key:string
-  -> state:Llm_provider.Metrics.circuit_state
-  -> unit
 
 val emit_token_usage
   :  provider:string
@@ -54,11 +42,6 @@ val emit_usage_details
   -> unit
   -> unit
 
-val emit_tool_calls
-  :  provider:string
-  -> model_id:string
-  -> count:int
-  -> unit
 
 val emit_streaming_first_chunk
   :  provider:string
@@ -73,6 +56,5 @@ val emit_streaming_chunk
   -> inter_chunk_ms:float
   -> unit
 
-val emit_fallback_triggered : kind:string -> detail:string -> unit
 val make_sink : unit -> Llm_provider.Metrics.t
 val install : unit -> unit

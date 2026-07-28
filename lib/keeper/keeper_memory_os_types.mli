@@ -15,16 +15,8 @@ val shared_store_id : string
 (** Canonical JSON wire field names for Memory OS persistence and librarian
     ingestion. The schema module owns these strings so parser, retry prompt,
     persistence codec, and tests share one source. *)
-val wire_field_trace_id : string
-val wire_field_turn : string
-val wire_field_tool_call_id : string
 val wire_field_claim : string
 val wire_field_category : string
-val wire_field_source : string
-val wire_field_first_seen : string
-val wire_field_valid_until : string
-val wire_field_last_verified_at : string
-val wire_field_observed_by : string
 val wire_field_claim_id : string
 val wire_field_claim_kind : string
 
@@ -32,7 +24,6 @@ val wire_field_valid_for_days : string
 (** Producer-declared lifetime in whole days on the librarian claim wire —
     same vocabulary as the explicit keeper_memory_write argument. *)
 val wire_field_schema_version : string
-val wire_field_generation : string
 val wire_field_episode_summary : string
 val wire_field_claims : string
 val wire_field_open_items : string
@@ -40,11 +31,6 @@ val wire_field_constraints : string
 val wire_field_preserved_tool_refs : string
 val wire_field_source_turn : string
 val wire_field_source_tool_call_id : string
-val wire_field_source_turn_range : string
-val wire_field_lo : string
-val wire_field_hi : string
-val wire_field_created_at : string
-val wire_field_terminal_marker : string
 
 (** Episode-object fields accepted from the librarian and rendered in retry
     prompts. [wire_field_schema_version] is accepted separately for compatibility
@@ -195,7 +181,6 @@ val claim_identity : fact -> string
 (** {1 JSON codecs} *)
 
 val provenance_event_to_json : provenance_event -> Yojson.Safe.t
-val provenance_event_of_json : Yojson.Safe.t -> provenance_event option
 
 val fact_to_json : fact -> Yojson.Safe.t
 val fact_of_json : Yojson.Safe.t -> fact option

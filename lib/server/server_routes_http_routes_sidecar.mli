@@ -148,7 +148,6 @@ type sidecar_start_plan = {
     [base_path] without shell interpolation. *)
 
 val sidecar_start_plan : base_path:string -> script:string -> sidecar_start_plan
-val start_sidecar_process : base_path:string -> script:string -> (unit, string) result
 
 (** {1 Declarative state machine} *)
 
@@ -200,19 +199,14 @@ val desired_state_of_string : string -> desired_state option
 val observed_state_to_string : observed_state -> string
 val reconcile_result_to_string : reconcile_result -> string
 
-val attempt_record_json : attempt_record -> Yojson.Safe.t
 val attempt_record_of_json_result :
   Yojson.Safe.t -> (attempt_record, attempt_record_decode_error) result
 val attempt_record_of_json : Yojson.Safe.t -> attempt_record option
-val desired_record_json : desired_record -> Yojson.Safe.t
-val desired_record_of_json : Yojson.Safe.t -> desired_record option
 
-val sidecar_desired_path : base_path:string -> string -> string
 val sidecar_attempt_path : base_path:string -> string -> string
 val read_desired_record : base_path:string -> string -> desired_record option
 val read_attempt_record_result :
   base_path:string -> string -> (attempt_record option, string) result
-val read_attempt_record : base_path:string -> string -> attempt_record option
 
 val ensure_parent_dir : string -> unit
 (** Create the parent directory of [path] if missing. *)
@@ -228,10 +222,8 @@ val write_desired_record :
 val write_attempt_record :
   base_path:string -> id:string -> attempt_record -> (unit, string) result
 
-val observed_state_of_status_json : Yojson.Safe.t -> observed_state
 (** Project [status.json] into the reconciler's observed-state. *)
 
-val retry_backoff_seconds : unit -> float
 (** Backoff duration between reconcile attempts. *)
 
 val retry_backoff_active : now:string -> attempt_record -> bool
@@ -239,10 +231,6 @@ val retry_backoff_active : now:string -> attempt_record -> bool
     last attempt. [now] is parsed at the boundary; the deadline comparison
     uses {!Attempt_state.is_backoff_active}. *)
 
-val next_attempt_record :
-  now:string ->
-  next_retry_at:string ->
-  attempt_record option -> desired_record -> attempt_record
 (** Compute the next [attempt_record] given the previous one and the
     reconciler decision context. *)
 
@@ -258,10 +246,6 @@ val reconcile_desired_once :
     [observed_state], honours backoff, and either invokes
     [start_process] or returns a [Reconcile_noop] reason. *)
 
-val reconcile_preview :
-  ?now:string ->
-  ?previous_attempt:attempt_record ->
-  desired_record -> observed_state -> string
 (** Dry-run preview suitable for a dashboard tooltip. *)
 
 val attempt_fields :
@@ -275,7 +259,6 @@ val lifecycle_json :
   Yojson.Safe.t
 (** Combined lifecycle JSON: status fields + desired/attempt projection. *)
 
-val append_assoc : 'a -> 'b -> ([> `Assoc of ('a * 'b) list ] as 'c) -> 'c
 (** Append a [(key, value)] pair to a JSON assoc. *)
 
 val clamp_lines : int option -> int
@@ -337,15 +320,6 @@ val parse_body_pairs : string -> ((string * string) list, string) result
 
 (** {1 Config / schema / lifecycle handlers} *)
 
-val handle_get_config :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-val handle_put_config :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-val handle_schema :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
 val handle_start :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit

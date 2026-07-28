@@ -24,8 +24,6 @@ val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
 val keeper_suffix_catchup_judge : string
 
-val keeper_chat_receipt_state_json :
-  Keeper_chat_queue.receipt_state -> Yojson.Safe.t
 
 val keeper_chat_receipt_json :
   keeper_name:string ->
@@ -39,7 +37,6 @@ val cache_key_string_segment : string -> string
 (** Length-prefixed cache key segment so delimiter characters in the value
     cannot create key collisions. *)
 
-val cache_key_string_opt_segment : string option -> string
 (** [None] and [Some ""] produce distinct segments. *)
 
 val keeper_config_cache_key : Workspace.config -> string -> string
@@ -90,7 +87,6 @@ type keeper_post_route_kind =
 val classify_keeper_post_route : string -> keeper_post_route_kind
 (** Map a request path to its [keeper_post_route_kind]. *)
 
-val keeper_path_ends_with : string -> string -> bool
 (** [keeper_path_ends_with path suffix]: helper used by the classifier. *)
 
 val extract_keeper_name_for_suffix : string -> string -> string
@@ -100,7 +96,6 @@ val extract_keeper_name_for_suffix : string -> string -> string
 val is_keeper_checkpoints_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/checkpoints] paths. *)
 
-val is_keeper_runtime_trace_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
 
 val is_keeper_paused_work_get_path : string -> bool
@@ -149,11 +144,9 @@ val provider_attempt_row_json :
 val string_contains_substring : string -> string -> bool
 (** Pure: naive substring presence test. *)
 
-val runtime_trace_keeps_provider_attempt_provenance_key : string -> bool
 (** Pure: allowlist for provider/model-related decision keys in
     runtime-trace responses. *)
 
-val runtime_trace_redacts_provider_model_key : string -> bool
 (** Pure: redact-by-substring policy for the runtime-trace public surface. *)
 
 val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
@@ -165,9 +158,7 @@ val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
     Pure helpers for extracting fields out of trajectory tool-call JSON
     records. Used by the runtime-lens response builders. *)
 
-val tool_call_output_text_opt : Yojson.Safe.t -> string option
 val parse_tool_output_json_opt : Yojson.Safe.t -> Yojson.Safe.t option
-val tool_call_runtime_contract : Yojson.Safe.t -> Yojson.Safe.t
 
 val tool_call_matches_trace :
   ?turn_id:int ->
@@ -179,7 +170,6 @@ val tool_call_matches_trace :
 (** {1 Option list + string utilities} *)
 
 val first_string_opt : string option list -> string option
-val first_int_opt : int option list -> int option
 val string_has_prefix : prefix:string -> string -> bool
 
 (** {1 Claim tool-call summary} *)

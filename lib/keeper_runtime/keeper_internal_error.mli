@@ -18,11 +18,7 @@ type capacity_backpressure_source =
   | Client_capacity
   | Runtime_slot
 
-val capacity_backpressure_source_to_string :
-  capacity_backpressure_source -> string
 
-val capacity_backpressure_source_of_string :
-  string -> capacity_backpressure_source option
 
 type capacity_retry_after =
   | Explicit of float
@@ -67,7 +63,6 @@ type accept_rejection_kind =
   | Accept_predicate_rejected
 
 val accept_rejection_kind_to_string : accept_rejection_kind -> string
-val accept_rejection_kind_of_string : string -> accept_rejection_kind option
 
 type accept_response_shape =
   | Accept_response_empty
@@ -78,8 +73,6 @@ type accept_response_shape =
   | Accept_response_mixed_without_deliverable_content
   | Accept_response_has_deliverable_content
 
-val accept_response_shape_to_string : accept_response_shape -> string
-val accept_response_shape_of_string : string -> accept_response_shape option
 val accept_response_shape_of_agent_sdk :
   Agent_sdk.Response_shape.content_shape -> accept_response_shape
 
@@ -140,7 +133,6 @@ type masc_internal_error =
     }
   | Receipt_persistence_failed of { detail : string }
 
-val masc_internal_error_prefix : string
 
 val runtime_runner_execute_site : string
 
@@ -154,7 +146,6 @@ val cap_blocker_detail : string -> string
     preserved up to {!blocker_detail_structured_max_chars}; plain narrative
     text is truncated to the narrative budget (~200). Idempotent. *)
 
-val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 
 val summary_of_masc_internal_error : masc_internal_error -> string option
 
@@ -171,8 +162,6 @@ val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
 val sdk_error_of_masc_internal_error :
   masc_internal_error -> Agent_sdk.Error.sdk_error
 
-val parse_masc_internal_error_json :
-  Yojson.Safe.t -> masc_internal_error option
 
 val classify_masc_internal_error_of_string :
   string -> masc_internal_error option

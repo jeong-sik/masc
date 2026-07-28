@@ -145,16 +145,9 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-val delivery_failure_kind_to_string : delivery_failure_kind -> string
-val delivery_failure_kind_of_string : string -> delivery_failure_kind option
-val delivery_failure_to_yojson : delivery_failure -> Yojson.Safe.t
-val delivery_failure_of_yojson : Yojson.Safe.t -> (delivery_failure, string) result
 val judgment_to_yojson : judgment -> Yojson.Safe.t
 val judgment_of_yojson : Yojson.Safe.t -> (judgment, string) result
-val delivery_to_string : delivery -> string
-val delivery_of_string : string -> delivery option
 val quarantine_failure_category_to_string : quarantine_failure_category -> string
-val quarantine_failure_category_of_string : string -> quarantine_failure_category option
 val resumable_status : status -> resumable_status option
 val quarantine_state : status -> quarantine_state option
 val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t
@@ -164,13 +157,6 @@ val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
     Keeper, and signal identity, then return the one-item exact-flow input.
     Old or partial request JSON is rejected without compatibility decoding. *)
 
-val of_board_evidence :
-  meta:Keeper_meta_contract.keeper_meta ->
-  recorded_at:float ->
-  signal:Board_dispatch.board_signal ->
-  post:Board.post ->
-  comments:Board.comment list ->
-  (candidate, string) result
 
 val of_board_signal :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -190,11 +176,6 @@ val record : base_path:string -> candidate -> record_result
 (** Validate the complete current candidate invariant before changing the
     durable ledger. *)
 
-val record_delivery_failure :
-  base_path:string ->
-  candidate ->
-  delivery_failure ->
-  (candidate, string) result
 
 val record_judgment :
   base_path:string -> candidate -> judgment -> (candidate, string) result

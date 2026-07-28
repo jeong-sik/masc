@@ -18,10 +18,6 @@ val classify_image_inspect_failure :
   status:Unix.process_status -> Keeper_sandbox_runtime_classify.docker_failure_class
 val docker_info_security_options_with_class :
   timeout_sec:float -> (string list, classified_error) result
-val docker_info_security_options_with_class_optional :
-  ?timeout_sec:float -> unit -> (string list, classified_error) result
-val docker_info_security_options :
-  timeout_sec:float -> (string list, string) result
 val docker_info_security_options_optional :
   ?timeout_sec:float -> unit -> (string list, string) result
 type docker_preflight = {
@@ -91,7 +87,6 @@ val docker_network_args :
   Keeper_types_profile_sandbox.network_mode -> string list * string
 val docker_nofile_args : unit -> string list
 val container_masc_runtime_base : container_root:'a -> string
-val container_masc_dir : container_root:'a -> string
 val container_masc_config_dir : container_root:'a -> string
 val host_masc_config_dir : base_path:string -> string
 val docker_masc_config_mount_spec :
@@ -105,12 +100,9 @@ val docker_user_env_args : unit -> string list
 val trim_env_opt : string -> string option
 val docker_config_host_root : base_path:string -> string
 val docker_config_container_root : container_root:'a -> string
-val docker_config_available : string -> bool
 val docker_config_mount_args :
   base_path:string -> container_root:'a -> string list
 type workspace_state_mount_kind = Workspace_state_file | Workspace_state_dir
-val docker_workspace_state_mounts : (workspace_state_mount_kind * string) list
-val workspace_state_path_available : workspace_state_mount_kind -> string -> bool
 val unique_preserving_order : 'a list -> 'a list
 val docker_workspace_state_mount_specs :
   base_path:string -> container_root:'a -> string list
@@ -120,9 +112,7 @@ val docker_config_env_args :
   base_path:string -> container_root:'a -> string list
 val docker_sandbox_env_args :
   base_path:string -> container_root:'a -> string list
-val docker_identity_dir : host_root:string -> string
 val docker_user_identity_mount_args :
   host_root:string -> uid:int -> gid:int -> (string list, string) result
-val is_path_boundary_after : string -> int -> bool
 val rewrite_host_root_to_container_root :
   host_root:string -> container_root:string -> string -> string

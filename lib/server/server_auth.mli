@@ -26,7 +26,6 @@ val split_csv_nonempty : string -> string list
 
 (** {1 Bind host / loopback classification} *)
 
-val configured_bind_host : unit -> string
 (** Currently configured HTTP bind host (env / config). *)
 
 val ipaddr_is_loopback : (Ipaddr.V4.t, Ipaddr.V6.t) Ipaddr.v4v6 -> bool
@@ -34,21 +33,18 @@ val ipaddr_is_unspecified : (Ipaddr.V4.t, Ipaddr.V6.t) Ipaddr.v4v6 -> bool
 val is_loopback_host : string -> bool
 val is_unspecified_host : string -> bool
 
-val base_url_has_non_loopback_host : unit -> bool
 (** [true] when the configured base URL points outside loopback;
     governs whether strict auth must be enabled. *)
 
 val http_auth_strict_enabled : unit -> bool
 (** [true] when strict HTTP token auth is enabled by config. *)
 
-val http_auth_bind_host : unit -> string
 (** Bind host used by HTTP auth checks (mirrors
     [configured_bind_host]). *)
 
 val http_auth_bind_is_loopback : unit -> bool
 (** [true] when [http_auth_bind_host] is loopback. *)
 
-val strict_http_auth_error : string -> string
 (** Render the structured error message returned when a non-loopback
     deployment is missing strict token auth. *)
 
@@ -59,7 +55,6 @@ val ensure_strict_http_token_auth :
 
 (** {1 Token / agent extraction from requests} *)
 
-val bearer_token_from_header : string -> string option
 (** Extract the bearer token from an [Authorization] header value. *)
 
 val auth_token_from_request : Httpun.Request.t -> string option
@@ -71,24 +66,17 @@ val request_carries_auth_credential : Httpun.Request.t -> bool
     distinguish a genuinely anonymous request from a credential that must fail
     closed during parsing or validation. *)
 
-val observer_sse_query_token_from_request : Httpun.Request.t -> string option
 (** Observer/presence/cursor SSE allows the token via query string for browser
     EventSource. *)
 
 val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
 (** Combined header-or-query lookup for the SSE observer endpoint. *)
 
-val agent_from_request : Httpun.Request.t -> string option
 (** Caller-declared agent name from the request (header / query). *)
 
-val internal_keeper_agent_from_request : Httpun.Request.t -> string option
 (** Agent name when the request is recognised as an internal keeper
     subprocess via the dedicated header. *)
 
-val resolve_agent_name_for_auth_raw :
-  base_path:string ->
-  Httpun.Request.t ->
-  token:string option -> (string option, Masc_domain.masc_error) result
 (** Resolve the agent name to use for permission checks given the
     request and bearer [token].  [Ok None] means "no agent context". *)
 
@@ -111,7 +99,6 @@ val verify_operator_mcp_auth :
 val request_actor_hint : Httpun.Request.t -> string option
 (** Caller-supplied actor hint for dashboard audit attribution. *)
 
-val sanitize_dashboard_actor_name : string -> string
 (** Strip non-printable characters and clamp length so the actor name
     is safe to log / render. *)
 
@@ -171,7 +158,6 @@ val sanitized_dashboard_actor_for_request :
 
 (** {1 Origin / CORS} *)
 
-val allow_anonymous_mutations : unit -> bool
 (** Re-reads [MASC_ALLOW_ANONYMOUS_MUTATIONS] on each call.
     When [true] non-loopback mutations skip auth (test fixtures only). *)
 
@@ -197,8 +183,6 @@ val classify_request_origin :
     is parsed as one complete HTTP(S) serialized origin; repeated fields and
     partially consumed values are distinct fail-closed outcomes. *)
 
-val browser_origin_matches_request_authority :
-  request_authority:Server_request_authority.authority -> string -> bool
 (** Compare an HTTP(S) browser origin with the admitted request authority.
     The explicit loopback development allowlist is accepted only when its
     normalized host is also the admitted loopback host. *)
@@ -268,9 +252,6 @@ val public_read_cors_headers :
 (** Header set for public-read responses (looser than the protected
     route policy). *)
 
-val respond_public_read_json :
-  ?status:Httpun.Status.t ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Public-read JSON responder. *)
 
 val respond_public_read_json_value :
@@ -285,8 +266,6 @@ val respond_auth_error :
   Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + CORS. *)
 
-val respond_agent_rate_limited :
-  rl_key:string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Send a 429 Too Many Requests response for a per-agent rate-limit
     violation.  Includes [X-RateLimit-*] headers and CORS so browser
     clients can inspect the response. *)
@@ -296,8 +275,6 @@ val agent_rl_key_of_request : Httpun.Request.t -> string option
     bearer token (SHA-256 prefix) over the declared agent-name header.
     Returns [None] for anonymous requests. *)
 
-val check_agent_rate_limit :
-  Httpun.Request.t -> Httpun.Reqd.t -> (unit, unit) result
 (** Check the per-agent rate limit.  Returns [Ok ()] if allowed.
     Sends a 429 response and returns [Error ()] if rate-limited.
     Anonymous requests (no token, no agent header) are always allowed. *)
@@ -309,19 +286,11 @@ val check_agent_rate_limit :
     a structured auth error via [respond_auth_error].  All combinators
     apply per-agent rate limiting after successful auth. *)
 
-val with_admin_auth :
-  (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Require admin-tier auth (operator MCP). *)
 
 val is_public_read_path : String.t -> bool
 (** [true] when [path] is on the public-read allowlist. *)
 
-val resolve_agent_name_for_auth :
-  base_path:string ->
-  Httpun.Request.t ->
-  token:string option -> (string option, Masc_domain.masc_error) result
 (** Public wrapper of [resolve_agent_name_for_auth_raw]; the raw form
     is exposed for tests that exercise the underlying decision. *)
 
@@ -367,7 +336,6 @@ val authorize_optional_token_bound_permission_request :
     return its canonical agent name. Malformed, empty, invalid, or
     underprivileged credentials are errors rather than anonymous fallbacks. *)
 
-val is_dashboard_bootstrap_path : string -> bool
 (** [true] when the path is part of the dashboard bootstrap surface
     (allowed without bearer token while loopback). *)
 

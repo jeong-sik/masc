@@ -12,7 +12,6 @@
 (** {1 Ollama defaults} *)
 
 (** Default port for Ollama (OpenAI-compatible at [/v1]). *)
-val ollama_default_port : int
 
 (** ["http://127.0.0.1:<ollama_default_port>"]. *)
 val ollama_default_url : string
@@ -20,7 +19,6 @@ val ollama_default_url : string
 (** [":<ollama_default_port>"] — substring used by Ollama URL
     heuristics. Anchored to {!ollama_default_port} so a port change
     updates every classifier in one place. *)
-val ollama_port_needle : string
 
 (** Ollama native API path for the running-models ("process status")
     endpoint. Used by {!Runtime_http_probe} and
@@ -34,7 +32,6 @@ val ollama_api_generate_path : string
 (** Permissive substring check against {!ollama_port_needle}. Works
     for [http://], [https://], [127.0.0.1], [localhost], or bare
     [host:port]. *)
-val is_ollama_url : string -> bool
 
 (** {1 OpenAI-compatible API paths} *)
 
@@ -53,10 +50,8 @@ val openai_models_path : string
 
 (** ["cli:"] — prefix marking a CLI-backed transport (e.g.
     [cli:codex]). *)
-val cli_transport_prefix : string
 
 (** Strict prefix match for {!cli_transport_prefix}. *)
-val is_cli_transport_url : string -> bool
 
 (** {1 Local LLM URL} *)
 
@@ -91,7 +86,6 @@ val normalize_loopback_base_url : string -> string
 
 (** {1 Vite dev frontend} *)
 
-val vite_dev_default_port : int
 
 (** Ordered [127.0.0.1 → localhost → [::1]] on {!vite_dev_default_port};
     matches the historical CORS allowlist. *)
@@ -99,7 +93,6 @@ val vite_dev_default_origins : string list
 
 (** {1 SearXNG & OpenTelemetry} *)
 
-val searxng_default_port : int
 
 val searxng_default_url : string
 

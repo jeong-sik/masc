@@ -27,7 +27,6 @@ val has_episode_store_for_keepers_dir : keepers_dir:string -> keeper_id:string -
 
 (** Base-path-scoped variant of {!list_fact_store_keeper_ids}; avoids ambient
     config-dir reads in multi-workspace dashboard routes. *)
-val list_fact_store_keeper_ids_for_base_path : base_path:string -> string list
 
 val events_path : keeper_id:string -> string
 val events_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
@@ -36,17 +35,10 @@ type legacy_memory_file =
   | Legacy_facts
   | Legacy_events
 
-val supported_legacy_memory_files : legacy_memory_file list
-val legacy_memory_filename : legacy_memory_file -> string
-val current_path_for_legacy_memory_filename :
-  keepers_dir:string -> keeper_id:string -> filename:string -> string option
 (** Map a legacy per-keeper Memory OS filename under [.masc/keepers/<keeper>/]
     to the current store path under [keepers_dir], when the filename is a
     supported legacy memory artifact. *)
 val episodes_dir : keeper_id:string -> string
-val tool_results_dir : keeper_id:string -> string
-val tool_result_path : keeper_id:string -> tool_call_id:string -> string
-val episode_path : keeper_id:string -> trace_id:string -> generation:int -> string
 
 (** Reserve the next episode generation for [(keeper_id, trace_id)].
     The reservation is serialized with a per-trace file lock and a small counter
@@ -92,14 +84,11 @@ val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
 val rewrite_facts_atomically_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> fact list -> unit
-val rewrite_facts_atomically_for_base_path :
-  base_path:string -> keeper_id:string -> fact list -> unit
 
 (** {1 Facts snapshot CAS} *)
 
 (** Canonical-JSON fingerprint of a fact (stable key order — see
     {!Keeper_memory_os_types}). *)
-val fact_fingerprint : fact -> string
 
 (** [same_fact_snapshot snapshot current] is true iff the two fact lists are
     positionally byte-identical. Used for read-outside-lock / rewrite-under-lock
@@ -120,8 +109,6 @@ val with_facts_lock :
   -> on_timeout:(string -> 'a)
   -> (unit -> 'a)
   -> 'a
-val save_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t -> unit
-val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t option
 
 (** {1 Bounded tail reads} *)
 
@@ -134,7 +121,6 @@ val read_facts_all_strict : keeper_id:string -> (fact list, string) result
 val read_facts_all_strict_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (fact list, string) result
 val read_facts_tail : keeper_id:string -> n:int -> fact list
-val read_facts_tail_for_base_path : base_path:string -> keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_all : keeper_id:string -> episode list

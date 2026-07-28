@@ -52,8 +52,6 @@ type agent =
 val agent_to_yojson : agent -> Yojson.Safe.t
 val agent_of_yojson : Yojson.Safe.t -> (agent, string) result
 val iso8601_of_unix_seconds : float -> string
-val normalize_agent_last_seen : session_bound_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
-val short_json_repr : Yojson.Safe.t -> string
 
 type task_action =
   | Claim
@@ -111,7 +109,6 @@ val task_display_assignee : task_status -> string
 val task_assignee_of_status : task_status -> string option
 val task_status_is_terminal : task_status -> bool
 val task_status_is_done : task_status -> bool
-val all_task_status_names : string list
 val valid_task_status_strings : string list
 val task_status_to_yojson : task_status -> Yojson.Safe.t
 val task_status_of_yojson : Yojson.Safe.t -> (task_status, string) result
@@ -139,9 +136,6 @@ type task_reclaim_policy =
 [@@deriving show]
 
 val task_reclaim_policy_to_string : task_reclaim_policy -> string
-val task_reclaim_policy_of_string : string -> (task_reclaim_policy, string) result
-val task_reclaim_policy_to_yojson : task_reclaim_policy -> Yojson.Safe.t
-val task_reclaim_policy_of_yojson : Yojson.Safe.t -> (task_reclaim_policy, string) result
 
 type task_handoff_context =
   { summary : string [@default ""]
@@ -202,8 +196,6 @@ val task_claim_decision :
   task -> task_claim_decision
 (** Deterministic claim decision for queue/admission surfaces. *)
 
-val task_claim_decision_is_available :
-  task -> bool
 
 type task_claim_next_action =
   | Claim_now

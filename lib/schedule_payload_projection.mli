@@ -35,40 +35,25 @@ type support_summary =
   ; unknown_request_count : int
   }
 
-val known_kind_to_string : known_kind -> string
-val dispatch_tool_name : known_kind -> string
 val supported_payload_kinds : string list
 val support_status_to_string : support_status -> string
 val creation_rejection_message : creation_rejection -> string
 val dispatch_rejection_message : dispatch_rejection -> string
 val supported_contracts_to_yojson : unit -> Yojson.Safe.t
-val support_summary : Schedule_domain.schedule_request list -> support_summary
-val support_summary_yojson : support_summary -> Yojson.Safe.t
 val support_summary_to_yojson : Schedule_domain.schedule_request list -> Yojson.Safe.t
-val kind_of_json_result : Yojson.Safe.t -> (string, string) result
 
 val validate_request_payload_for_creation_detailed
   :  payload:Yojson.Safe.t
   -> (unit, creation_rejection) result
 
-val validate_request_payload_for_creation
-  :  payload:Yojson.Safe.t
-  -> (unit, string) result
 
 val dispatch_view_detailed
   :  Schedule_domain.schedule_request
   -> (known_kind * payload_view, dispatch_rejection) result
 
-val dispatch_view
-  :  Schedule_domain.schedule_request
-  -> (known_kind * payload_view, string) result
 
-val support_status_result
-  :  Schedule_domain.schedule_request
-  -> (support_status, string) result
 
 val support_status : Schedule_domain.schedule_request -> support_status
-val kind_result : Schedule_domain.schedule_request -> (string, string) result
 val kind : Schedule_domain.schedule_request -> string option
 
 val dispatch_tool_for_request_result
@@ -76,9 +61,6 @@ val dispatch_tool_for_request_result
   -> (string, dispatch_rejection) result
 
 val dispatch_tool_for_request : Schedule_domain.schedule_request -> string option
-val target_summary_result
-  :  Schedule_domain.schedule_request
-  -> (string option * string option, string) result
 
 val target_summary : Schedule_domain.schedule_request -> string option * string option
 

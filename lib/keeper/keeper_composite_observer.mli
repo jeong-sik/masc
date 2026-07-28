@@ -28,25 +28,21 @@ type turn_phase = Keeper_registry.turn_phase =
   | Turn_finalizing
   | Turn_exhausted
 
-val all_turn_phases : Keeper_registry.packed_turn_phase list
 
 type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
   | Decision_guard_ok
   | Decision_tool_policy_selected
 
-val all_decision_stages : Keeper_registry.packed_decision_stage list
 
 type runtime_state = string
 
-val all_runtime_states : runtime_state list
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
   | Compaction_compacting
   | Compaction_done
 
-val all_compaction_stages : Keeper_registry.packed_compaction_stage list
 
 (** Named TLA actions mirrored as OCaml variants so the observer contract
     can stay 1:1 with [KeeperCompositeLifecycle.tla]. *)
@@ -67,7 +63,6 @@ type tla_action =
   | Action_enter_overflowed
   | Action_overflowed_auto_compact
 
-val all_tla_actions : tla_action list
 
 (** Named TLA invariants mirrored as OCaml variants. *)
 type invariant_key =
@@ -77,7 +72,6 @@ type invariant_key =
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
 
-val all_invariant_keys : invariant_key list
 
 (** Safety invariants from KeeperCompositeLifecycle.tla.
     Each field is [true] when the invariant holds for the observed
@@ -95,8 +89,6 @@ type invariants_check = {
     once per violated invariant. No-op when all invariants hold. Called
     automatically from [observe]; exposed so unit tests can assert the
     counter bump without going through the full snapshot pipeline. *)
-val bump_invariant_violations :
-  keeper_name:string -> invariants_check -> unit
 
 (** {2 Pure invariant predicates}
 
@@ -114,20 +106,14 @@ val bump_invariant_violations :
     when KSM is in [Compacting], the turn phase must also be
     [Turn_compacting]; conversely no other KSM phase may carry a live
     [Turn_compacting]. *)
-val check_phase_turn_alignment : Keeper_state_machine.phase -> Keeper_registry.packed_turn_phase -> bool
 
 (** Mirror of TLA+ I3 [CompactionAtomicity] (KeeperCompositeLifecycle.tla:368):
     [(kmc_compaction = compacting) <=> (phase = Compacting)]. *)
-val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.packed_compaction_stage -> bool
 
 (** Mirror of TLA+ I2 [NoRuntimeBeforeMeasurement]
     (KeeperCompositeLifecycle.tla:361): runtime selection past [idle]
     requires a captured measurement. *)
-val check_no_runtime_before_measurement :
-  runtime_state:runtime_state -> measurement_captured:bool -> bool
 
-val check_phase_derivation_agreement :
-  Keeper_registry.registry_entry -> bool
 (** Runtime-visible mirror of
     [Keeper_invariant_check.DerivePhaseAgreement]: the recorded registry
     phase must equal [Keeper_state_machine.derive_phase conditions]. *)
@@ -377,28 +363,17 @@ val observe :
 (** Observe every registered keeper under [base_path] once. Used by
     [GET /api/v1/keepers/composite] to render fleet-level matrices
     (LT-16a). Preserves registry iteration order. *)
-val all_snapshots : base_path:string -> unit -> snapshot list
 
 val turn_phase_to_string : Keeper_registry.packed_turn_phase -> string
-val turn_phase_of_string : string -> turn_phase option
 
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
-val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
-val decision_stage_of_string : string -> decision_stage option
 
 (** Stringify the runtime-state compatibility field. *)
-val runtime_state_to_string : runtime_state -> string
-val runtime_state_of_string : string -> runtime_state option
 
 (** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)
 val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string
-val compaction_stage_of_string : string -> compaction_stage option
 
-val tla_action_to_string : tla_action -> string
-val tla_action_of_string : string -> tla_action option
 
-val invariant_key_to_string : invariant_key -> string
-val invariant_key_of_string : string -> invariant_key option
 
 (** Serialise a snapshot as the [/api/keepers/:name/composite] payload
     documented in RFC-0003 §7. *)

@@ -302,7 +302,7 @@ let reaction_kind_of_settlement = function
   | Keeper_event_queue_state.No_compaction _ -> Event_queue_no_compaction
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
   | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
-  | Keeper_event_queue_state.Ack_source_terminal _ -> Event_queue_ack
+  | Keeper_event_queue_state.Settle_from_source_terminal _ -> Event_queue_ack
   | Keeper_event_queue_state.Settle_exact
       { semantic = Exact_no_compaction; _ } ->
     Event_queue_no_compaction
@@ -686,7 +686,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
     true
   | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
-  | Event_queue_ack, Keeper_event_queue_state.Ack_source_terminal _ -> true
+  | Event_queue_ack, Keeper_event_queue_state.Settle_from_source_terminal _ -> true
   | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
   | Event_queue_no_compaction,
     Keeper_event_queue_state.Settle_exact
@@ -711,7 +711,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Ack_source_terminal _
+    | Keeper_event_queue_state.Settle_from_source_terminal _
     | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
@@ -720,7 +720,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Ack_source_terminal _
+    | Keeper_event_queue_state.Settle_from_source_terminal _
     | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
@@ -730,7 +730,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Ack_source_terminal _
+    | Keeper_event_queue_state.Settle_from_source_terminal _
     | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_escalated,
@@ -739,7 +739,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
-    | Keeper_event_queue_state.Ack_source_terminal _
+    | Keeper_event_queue_state.Settle_from_source_terminal _
     | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _ ) -> false
 ;;

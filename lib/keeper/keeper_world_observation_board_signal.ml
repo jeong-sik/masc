@@ -14,6 +14,7 @@ type match_result =
 type board_read_operation =
   | Get_post
   | Get_comments
+  | Get_post_and_comments
 
 type board_unavailable =
   { operation : board_read_operation
@@ -66,10 +67,9 @@ let disposition_of_error : Board.board_error -> disposition = function
        next read is expected to succeed once the environment recovers. *)
     Transient
   | Board.Validation_error _ ->
-    (* Not reachable from [get_post]/[get_comments] today (only write paths
-       produce it). Classified [Permanent] for exhaustiveness: it signals
-       the input itself fails a business rule, which retrying does not
-       change. *)
+    (* Not reachable from Board read paths today (only write paths produce it).
+       Classified [Permanent] for exhaustiveness: it signals the input itself
+       fails a business rule, which retrying does not change. *)
     Permanent
   | Board.Already_voted _ ->
     (* Not reachable from a read path. Classified [Permanent]: it names an
@@ -93,6 +93,7 @@ let disposition_of_unavailable (unavailable : board_unavailable) =
 let board_read_operation_to_string = function
   | Get_post -> "get_post"
   | Get_comments -> "get_comments"
+  | Get_post_and_comments -> "get_post_and_comments"
 ;;
 
 let unavailable_to_string unavailable =
@@ -180,22 +181,15 @@ let board_signal_of_board_stimulus
 
 let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
 
-let compare_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
-  let cmp = Float.compare ts_a ts_b in
-  if cmp <> 0 then cmp else String.compare post_id_a post_id_b
-;;
+let compare_cursor_token = Board.compare_post_cursor_token
 
 let cursor_token_of_post (post : Board.post) = post.updated_at, post_id_string post
 
-let list_posts_after_cursor (cursor_ts, cursor_post_id) =
+let list_post_thread_snapshots_after_cursor (cursor_ts, cursor_post_id) =
   let cursor_post_id = Option.value ~default:"" cursor_post_id in
-  let is_after_cursor post =
-    compare_cursor_token (cursor_token_of_post post) (cursor_ts, cursor_post_id) > 0
-  in
-  Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:max_int ()
-  |> List.filter is_after_cursor
-  |> List.sort (fun (a : Board.post) (b : Board.post) ->
-    compare_cursor_token (cursor_token_of_post a) (cursor_token_of_post b))
+  Board_dispatch.list_post_thread_snapshots_after_cursor
+    ~after:(cursor_ts, cursor_post_id)
+    ~limit:Board.Limits.cursor_snapshot_batch_size
 ;;
 
 let text (signal : Board_dispatch.board_signal) =
@@ -273,60 +267,72 @@ let match_signal
     reply_count or updated_at). A prior response is reconsidered only when a new
     external comment arrives after the keeper's own latest contribution, where a
     contribution now includes writing the post. *)
+let thread_status_of_snapshot ~self_ids ~(post : Board.post) ~(comments : Board.comment list) =
+  let is_self_comment (c : Board.comment) =
+    Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string c.author)
+  in
+  let self_post_ts =
+    if Message_scope.is_self_author
+         ~self_ids
+         (Board.Agent_id.to_string post.author)
+    then Some post.created_at
+    else None
+  in
+  (* The keeper's own latest contribution to this thread: the post it wrote,
+     its newest comment, or whichever of the two is later. [None] IS
+     non-participation, so there is no seed timestamp to pick and no state
+     where a missing contribution reads as one at epoch zero. *)
+  let my_latest_contribution =
+    List.fold_left
+      (fun acc (c : Board.comment) ->
+         match acc with
+         | None -> Some c.created_at
+         | Some latest -> Some (Float.max latest c.created_at))
+      self_post_ts
+      (List.filter is_self_comment comments)
+  in
+  match my_latest_contribution with
+  | None -> `Never
+  | Some my_latest_ts ->
+    let external_after =
+      List.filter
+        (fun (c : Board.comment) ->
+           (not (is_self_comment c)) && c.created_at > my_latest_ts)
+        comments
+    in
+    (match external_after with
+     | [] -> `No_new_external
+     | hd :: tl ->
+       let latest =
+         List.fold_left
+           (fun (acc : Board.comment) (c : Board.comment) ->
+              if c.created_at > acc.created_at then c else acc)
+           hd
+           tl
+       in
+       `New_external
+         ( List.length external_after
+         , Board.Agent_id.to_string latest.author
+         , short_preview ~max_len:60 latest.content ))
+;;
+
+type thread_snapshot =
+  { post : Board.post
+  ; status : comment_state
+  }
+
+let read_self_thread_snapshot ~self_ids ~(post_id : string) : thread_snapshot board_read =
+  match Board_dispatch.get_post_and_comments ~post_id () with
+  | Error error ->
+    Unavailable { operation = Get_post_and_comments; post_id; error }
+  | Ok (post, comments) ->
+    Available { post; status = thread_status_of_snapshot ~self_ids ~post ~comments }
+;;
+
 let check_self_thread_status ~self_ids ~(post_id : string) : comment_status =
-  match Board_dispatch.get_post ~post_id with
-  | Error error -> Unavailable { operation = Get_post; post_id; error }
-  | Ok post ->
-  match Board_dispatch.get_comments ~post_id with
-  | Error error -> Unavailable { operation = Get_comments; post_id; error }
-  | Ok comments ->
-    let is_self_comment (c : Board.comment) =
-      Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string c.author)
-    in
-    let self_post_ts =
-      if Message_scope.is_self_author
-           ~self_ids
-           (Board.Agent_id.to_string post.author)
-      then Some post.created_at
-      else None
-    in
-    (* The keeper's own latest contribution to this thread: the post it wrote,
-       its newest comment, or whichever of the two is later. [None] IS
-       non-participation, so there is no seed timestamp to pick and no state
-       where a missing contribution reads as one at epoch zero. *)
-    let my_latest_contribution =
-      List.fold_left
-        (fun acc (c : Board.comment) ->
-           match acc with
-           | None -> Some c.created_at
-           | Some latest -> Some (Float.max latest c.created_at))
-        self_post_ts
-        (List.filter is_self_comment comments)
-    in
-    (match my_latest_contribution with
-     | None -> Available `Never
-     | Some my_latest_ts ->
-      let external_after =
-        List.filter
-          (fun (c : Board.comment) ->
-             (not (is_self_comment c)) && c.created_at > my_latest_ts)
-          comments
-      in
-      match external_after with
-      | [] -> Available `No_new_external
-      | hd :: tl ->
-        let latest =
-          List.fold_left
-            (fun (acc : Board.comment) (c : Board.comment) ->
-               if c.created_at > acc.created_at then c else acc)
-            hd
-            tl
-        in
-        Available
-          (`New_external
-             ( List.length external_after
-             , Board.Agent_id.to_string latest.author
-             , short_preview ~max_len:60 latest.content )))
+  match read_self_thread_snapshot ~self_ids ~post_id with
+  | Unavailable _ as unavailable -> unavailable
+  | Available snapshot -> Available snapshot.status
 ;;
 
 (** Why a keeper woke for a board signal. Closed set replacing the prior
@@ -346,10 +352,11 @@ type wake_reason =
       (** The exact [@@all] Keeper Board address selected every non-author
           lane. *)
   | Thread_reply_after_self_activity
-      (** A new external comment arrived on a post the keeper had commented on. *)
+      (** A new external comment arrived after the keeper authored the post or
+          commented on it. *)
   | Reaction_after_self_activity
-      (** An external reaction landed on a post the keeper authored or a thread
-          the keeper had commented on. *)
+      (** An external reaction landed after the keeper authored the post or
+          commented on it. *)
 
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"

@@ -249,6 +249,13 @@ val get_post_and_comments :
   unit ->
   (Board.post * Board.comment list, Board.board_error) Result.t
 
+val list_post_thread_snapshots_after_cursor :
+  after:(float * string) ->
+  limit:int ->
+  (Board.post * Board.comment list) list
+(** Atomically snapshots a bounded prefix of cursor-newer posts and their full
+    comment streams, stopping before any uncommitted comment mutation. *)
+
 val list_comments : ?limit:int -> unit -> Board.comment list
 
 (** {1 Votes} *)

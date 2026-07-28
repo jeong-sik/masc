@@ -41,7 +41,7 @@ let make_keepalive_meta ~name ~agent_name =
         ("network_mode", `String "inherit");
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta -> meta
 
@@ -193,7 +193,7 @@ let make_board_resume_meta name =
       ; ("network_mode", `String "inherit")
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta -> meta
 ;;
@@ -676,9 +676,9 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
 
 (* #25600 fixture: a [Thread_participants]-audience comment signal is the
    only route that re-reads the board store at signal time
-   ([check_self_comment_status]).  The keeper authored an earlier comment on
+   ([check_self_thread_status]).  The keeper authored an earlier comment on
    the post, so a newer external comment addresses it as
-   [Thread_reply_after_self_comment] — but only if the store read succeeds. *)
+   [Thread_reply_after_self_activity] — but only if the store read succeeds. *)
 let create_thread_fixture config ~keeper_name =
   let meta = make_board_resume_meta keeper_name in
   persist_and_register_board_lane config meta;
@@ -717,6 +717,93 @@ let create_thread_fixture config ~keeper_name =
     }
   in
   meta, signal
+;;
+
+(* The keeper AUTHORS the post and an external agent replies. This is the
+   shape a keeper produces when it raises a blocker: a post, not a comment.
+   The unmentioned reply must cross the Thread_participants route, persist in
+   the durable queue, and wake the author lane. *)
+let create_authored_post_fixture ?(self_reply = false) config ~keeper_name =
+  let meta = make_board_resume_meta keeper_name in
+  persist_and_register_board_lane config meta;
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:meta.Keeper_meta_contract.agent_name
+        ~content:"blocker raised by the keeper itself"
+        ~title:"blocker"
+        ~post_kind:Board.Human_post
+        ~visibility:Board.Internal
+        ()
+    with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let reply_author =
+    if self_reply
+    then meta.Keeper_meta_contract.agent_name
+    else "external-author"
+  in
+  (match
+     Board_dispatch.add_comment
+       ~post_id
+       ~author:reply_author
+       ~content:"resolved - assignment withdrawn"
+       ()
+   with
+   | Error error -> fail (Board.show_board_error error)
+   | Ok _comment -> ());
+  let signal : Board_dispatch.addressed_board_signal =
+    { signal =
+        { kind = Board_dispatch.Board_comment_added
+        ; post_id
+        ; author = reply_author
+        ; title = "blocker"
+        ; content = "resolved - assignment withdrawn"
+        ; hearth = None
+        ; updated_at = Some 200.0
+        }
+    ; audience = Board.Thread_participants
+    }
+  in
+  meta, signal
+;;
+
+let test_post_author_wakes_on_reply_to_own_post () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, signal =
+         create_authored_post_fixture config ~keeper_name:"authorlane"
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "reply to own post is delivered" 1
+         (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "post author woken by the reply" true
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "authorlane registry entry missing")
+;;
+
+let test_post_author_not_woken_by_own_comment () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, signal =
+         create_authored_post_fixture
+           ~self_reply:true
+           config
+           ~keeper_name:"selflane"
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "self-authored comment is not delivered back" 0
+         (board_queue_length config meta.name))
 ;;
 
 (* #25600 regression: a transient store read failure on the
@@ -809,6 +896,10 @@ let () =
             test_thread_participant_wakes_after_transient_store_read_failure
         ; test_case "thread participant drop is bounded under persistent failure" `Quick
             test_thread_participant_drop_is_bounded_under_persistent_failure
+        ; test_case "post author wakes on a reply to its own post" `Quick
+            test_post_author_wakes_on_reply_to_own_post
+        ; test_case "post author is not woken by its own comment" `Quick
+            test_post_author_not_woken_by_own_comment
         ] )
     ; ( "interruptible_cadence"
       , [ test_case "directed wake cuts configured sleep" `Quick

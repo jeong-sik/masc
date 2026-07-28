@@ -40,7 +40,7 @@ type pending_board_event =
   ; updated_at : float
   ; explicit_mention : bool
   ; matched_targets : string list
-  ; self_commented : bool
+  ; self_participated : bool
   ; new_external_since : int
   ; latest_external_author : string option
   ; latest_external_preview : string option
@@ -168,7 +168,6 @@ module Message_scope = Keeper_world_observation_message_scope
 module Inputs = Keeper_world_observation_inputs
 
 let self_ids = Message_scope.self_ids
-let is_self_author = Message_scope.is_self_author
 
 let collect_message_scope = Message_scope.collect_message_scope
 let read_backlog_counts = Inputs.read_backlog_counts
@@ -176,9 +175,12 @@ let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
 let board_signal_match = Board_signal.match_signal
 let check_self_thread_status = Board_signal.check_self_thread_status
+let read_self_thread_snapshot = Board_signal.read_self_thread_snapshot
 let compare_board_cursor_token = Board_signal.compare_cursor_token
 let board_cursor_token_of_post = Board_signal.cursor_token_of_post
-let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
+let list_board_thread_snapshots_after_cursor =
+  Board_signal.list_post_thread_snapshots_after_cursor
+;;
 
 let scheduled_automation_item_limit = 5
 
@@ -342,10 +344,49 @@ let pending_board_event_of_board_signal
   =
   let self_ids = self_ids meta in
   let matched = board_signal_match ~meta ~signal in
-  match Board_dispatch.get_post ~post_id:signal.post_id with
-  | Error error ->
-    Error { Board_signal.operation = Board_signal.Get_post; post_id = signal.post_id; error }
-  | Ok post_snapshot ->
+  let post_and_comment_derived =
+    match signal.kind with
+    | Board_dispatch.Board_post_created ->
+      (match Board_dispatch.get_post ~post_id:signal.post_id with
+       | Error error ->
+         Board_signal.Unavailable
+           { Board_signal.operation = Board_signal.Get_post
+           ; post_id = signal.post_id
+           ; error
+           }
+       | Ok post ->
+         Board_signal.Available (post, (false, 0, None, None)))
+    | Board_dispatch.Board_comment_added ->
+      (match read_self_thread_snapshot ~self_ids ~post_id:signal.post_id with
+       | Board_signal.Unavailable _ as unavailable -> unavailable
+       | Board_signal.Available snapshot ->
+         let comment_derived =
+           match snapshot.status with
+           | `New_external (count, author, preview) ->
+             true, count, Some author, Some preview
+           | `No_new_external ->
+             true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content)
+           | `Never ->
+             false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content)
+         in
+         Board_signal.Available (snapshot.post, comment_derived))
+    | Board_dispatch.Board_reaction_changed _ ->
+      (match read_self_thread_snapshot ~self_ids ~post_id:signal.post_id with
+       | Board_signal.Unavailable _ as unavailable -> unavailable
+       | Board_signal.Available snapshot ->
+         let self_participated =
+           match snapshot.status with
+           | `Never -> false
+           | `No_new_external | `New_external _ -> true
+         in
+         Board_signal.Available (snapshot.post, (self_participated, 0, None, None)))
+  in
+  match post_and_comment_derived with
+  | Board_signal.Unavailable unavailable -> Error unavailable
+  | Board_signal.Available
+      ( post_snapshot
+      , (self_participated, new_external_since, latest_external_author, latest_external_preview)
+      ) ->
     let title, preview, hearth, post_kind, updated_at =
       let post : Board.post = post_snapshot in
       ( post.title
@@ -355,44 +396,22 @@ let pending_board_event_of_board_signal
       , post.updated_at )
     in
     let event_kind = pending_board_event_kind_of_signal signal in
-    let comment_derived =
-      match signal.kind with
-      | Board_dispatch.Board_post_created -> Ok (false, 0, None, None)
-      | Board_dispatch.Board_comment_added ->
-        (match check_self_thread_status ~self_ids ~post_id:signal.post_id with
-         | Board_signal.Unavailable unavailable -> Error unavailable
-         | Board_signal.Available (`New_external (count, author, preview)) ->
-           Ok (true, count, Some author, Some preview)
-         | Board_signal.Available `No_new_external ->
-           Ok (true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content))
-         | Board_signal.Available `Never ->
-           Ok (false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content)))
-      | Board_dispatch.Board_reaction_changed _ ->
-        (match check_self_thread_status ~self_ids ~post_id:signal.post_id with
-         | Board_signal.Unavailable unavailable -> Error unavailable
-         | Board_signal.Available `Never -> Ok (false, 0, None, None)
-         | Board_signal.Available (`No_new_external | `New_external _) ->
-           Ok (true, 0, None, None))
-    in
-    (match comment_derived with
-     | Error unavailable -> Error unavailable
-     | Ok (self_commented, new_external_since, latest_external_author, latest_external_preview) ->
-       Ok
-         { event_kind
-         ; post_id = signal.post_id
-         ; author = signal.author
-         ; title
-         ; preview
-         ; hearth
-         ; post_kind
-         ; updated_at
-         ; explicit_mention = matched.explicit_mention
-         ; matched_targets = matched.matched_targets
-         ; self_commented
-         ; new_external_since
-         ; latest_external_author
-         ; latest_external_preview
-         })
+    Ok
+      { event_kind
+      ; post_id = signal.post_id
+      ; author = signal.author
+      ; title
+      ; preview
+      ; hearth
+      ; post_kind
+      ; updated_at
+      ; explicit_mention = matched.explicit_mention
+      ; matched_targets = matched.matched_targets
+      ; self_participated
+      ; new_external_since
+      ; latest_external_author
+      ; latest_external_preview
+      }
 ;;
 
 (* RFC-0266: fusion answers are the deliberation result the keeper requested,
@@ -433,7 +452,7 @@ let pending_board_event_of_fusion_completion
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
+  ; self_participated = false
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
@@ -477,7 +496,7 @@ let pending_board_event_of_bg_job_completion
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
+  ; self_participated = false
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
@@ -508,7 +527,7 @@ let pending_board_event_of_scheduled_wake
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
+  ; self_participated = false
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
@@ -556,7 +575,7 @@ let pending_board_event_of_external_attention
   ; updated_at = item.received_at
   ; explicit_mention
   ; matched_targets
-  ; self_commented = false
+  ; self_participated = false
   ; new_external_since = 1
   ; latest_external_author = Some actor
   ; latest_external_preview = Some (short_preview ~max_len:80 item.content_preview)
@@ -589,7 +608,7 @@ let pending_board_event_of_goal_assignment
   ; updated_at = arrived_at
   ; explicit_mention = false
   ; matched_targets = []
-  ; self_commented = false
+  ; self_participated = false
   ; new_external_since = 1
   ; latest_external_author = Some ga.ga_assigned_by
   ; latest_external_preview = None
@@ -618,7 +637,7 @@ let pending_board_event_of_goal_reconciliation_ready
   ; updated_at = arrived_at
   ; explicit_mention = true
   ; matched_targets = [ meta.name; ready.gr_goal_id ]
-  ; self_commented = false
+  ; self_participated = false
   ; new_external_since = 0
   ; latest_external_author = None
   ; latest_external_preview = None
@@ -690,11 +709,10 @@ let pending_board_event_of_stimulus
     Cursor state lives in Keeper_registry as [(updated_at, post_id)].
     Returns (structured events, new post count, mention count).
 
-    Comment-stream dedup: after the initial cursor + author filter,
-    each candidate post is scanned for self-authored comments.
-    Posts where the keeper has already commented and no new external
-    replies have arrived are excluded. This prevents duplicate reactive
-    comments while allowing legitimate follow-ups. *)
+    Comment-stream dedup: one atomic cursor snapshot carries each candidate
+    post and its comments. The keeper's latest contribution includes either
+    post authorship or a comment; candidates with no later external reply are
+    skipped while their cursor is still advanced. *)
 let collect_board_events_with_cursor_policy
       ~advance_cursor
       ~(base_path : string)
@@ -728,34 +746,52 @@ let collect_board_events_with_cursor_policy
                ts));
         None)
     in
-    let posts =
+    let thread_snapshots =
       match base_cursor with
       | None -> []
-      | Some cursor -> list_board_posts_after_cursor cursor
+      | Some cursor -> list_board_thread_snapshots_after_cursor cursor
     in
     let self_ids = self_ids meta in
     let recent =
-      List.filter
-        (fun (p : Board.post) ->
-           not (is_self_author ~self_ids (Board.Agent_id.to_string p.author)))
-        posts
+      List.map
+        (fun ((p : Board.post), comments) ->
+           let status =
+             Board_signal.thread_status_of_snapshot
+               ~self_ids
+               ~post:p
+               ~comments
+           in
+           p, comments, status)
+        thread_snapshots
     in
-    let new_count = List.length recent in
+    let status_is_new_for_keeper = function
+      | `No_new_external -> false
+      | `Never | `New_external _ -> true
+    in
+    let is_new_for_keeper (_, _, status) =
+      status_is_new_for_keeper status
+    in
+    let new_count =
+      List.length (List.filter is_new_for_keeper recent)
+    in
     let mention_count =
       List.length
         (List.filter
-           (fun (p : Board.post) ->
-              let signal : Board_dispatch.board_signal =
-                { kind = Board_dispatch.Board_post_created
-                ; post_id = Board.Post_id.to_string p.id
-                ; author = Board.Agent_id.to_string p.author
-                ; title = p.title
-                ; content = p.content
-                ; hearth = p.hearth
-                ; updated_at = Some p.updated_at
-                }
-              in
-              (board_signal_match ~meta ~signal).explicit_mention)
+           (fun ((p : Board.post), _, status) ->
+              if not (status_is_new_for_keeper status)
+              then false
+              else (
+                let signal : Board_dispatch.board_signal =
+                  { kind = Board_dispatch.Board_post_created
+                  ; post_id = Board.Post_id.to_string p.id
+                  ; author = Board.Agent_id.to_string p.author
+                  ; title = p.title
+                  ; content = p.content
+                  ; hearth = p.hearth
+                  ; updated_at = Some p.updated_at
+                  }
+                in
+                (board_signal_match ~meta ~signal).explicit_mention))
            recent)
     in
     (* Board-unavailable-result: classify + log + count a failed read
@@ -793,21 +829,16 @@ let collect_board_events_with_cursor_policy
     in
     let rec consume_posts last_cursor acc = function
       | [] -> List.rev acc, last_cursor
-      | (p : Board.post) :: rest ->
+      | ((p : Board.post), _comments, comment_status) :: rest ->
         let post_id = Board.Post_id.to_string p.id in
         let next_cursor = board_cursor_token_of_post p in
-        let comment_status = check_self_thread_status ~self_ids ~post_id in
         (match comment_status with
-         | Board_signal.Unavailable unavailable ->
-           (match log_and_count_unavailable ~context:"comment status" unavailable with
-            | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
-            | Board_signal.Transient -> List.rev acc, last_cursor)
-         | Board_signal.Available `No_new_external ->
+         | `No_new_external ->
            Log.Keeper.debug
              "board dedup: skipping post_id=%s (no new external since my comment)"
              post_id;
            consume_posts (Some next_cursor) acc rest
-         | Board_signal.Available `Never ->
+         | `Never ->
            let signal : Board_dispatch.board_signal =
              { kind = Board_dispatch.Board_post_created
              ; post_id
@@ -900,14 +931,14 @@ let collect_board_events_with_cursor_policy
                     ; updated_at = p.updated_at
                     ; explicit_mention = matched.explicit_mention
                     ; matched_targets = matched.matched_targets
-                    ; self_commented = false
+                    ; self_participated = false
                     ; new_external_since = 0
                     ; latest_external_author = None
                     ; latest_external_preview = None
                     }
                     :: acc)
                    rest))
-         | Board_signal.Available (`New_external (count, ext_author, ext_preview)) ->
+         | `New_external (count, ext_author, ext_preview) ->
            (
              let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
@@ -933,7 +964,7 @@ let collect_board_events_with_cursor_policy
                 ; updated_at = p.updated_at
                 ; explicit_mention = matched.explicit_mention
                 ; matched_targets = matched.matched_targets
-                ; self_commented = true
+                ; self_participated = true
                 ; new_external_since = count
                 ; latest_external_author = Some ext_author
                 ; latest_external_preview = Some ext_preview

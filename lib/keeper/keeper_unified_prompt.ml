@@ -217,8 +217,8 @@ let format_board_event_text
     | _ -> ""
   in
   let self_note =
-    if event.self_commented && event.new_external_since > 0 then
-      Printf.sprintf " [%d new reply since yours%s]"
+    if event.self_participated && event.new_external_since > 0 then
+      Printf.sprintf " [%d new reply since your latest contribution%s]"
         event.new_external_since
         (match event.latest_external_author, event.latest_external_preview with
          | Some a, Some p -> Printf.sprintf ", latest by %s: %s" a p

@@ -533,6 +533,11 @@ let get_post_and_comments ~post_id ?comment_offset ?comment_limit () =
   match backend () with
   | Jsonl store -> Board.get_post_and_comments store ~post_id ?comment_offset ?comment_limit ()
 
+let list_post_thread_snapshots_after_cursor ~after ~limit =
+  match backend () with
+  | Jsonl store ->
+    Board.list_post_thread_snapshots_after_cursor store ~after ~limit
+
 let add_comment ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   match backend () with

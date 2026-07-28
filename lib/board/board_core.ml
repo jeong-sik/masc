@@ -4,6 +4,22 @@
 
 include Board_core_persist
 
+let begin_comment_commit_unlocked store post_key =
+  let pending =
+    Hashtbl.find_opt store.pending_comment_commits post_key
+    |> Option.value ~default:0
+  in
+  Hashtbl.replace store.pending_comment_commits post_key (pending + 1)
+;;
+
+let end_comment_commit_unlocked store post_key =
+  match Hashtbl.find_opt store.pending_comment_commits post_key with
+  | None | Some 0 -> ()
+  | Some 1 -> Hashtbl.remove store.pending_comment_commits post_key
+  | Some pending ->
+    Hashtbl.replace store.pending_comment_commits post_key (pending - 1)
+;;
+
 let rollback_fresh_comment store ~(comment : comment) ~(previous_post : post) =
   with_lock store (fun () ->
     let post_key = Post_id.to_string comment.post_id in
@@ -27,6 +43,7 @@ let rollback_fresh_comment store ~(comment : comment) ~(previous_post : post) =
          store.posts
          post_key
          { current with reply_count = max 0 (current.reply_count - 1); updated_at });
+    end_comment_commit_unlocked store post_key;
     invalidate_post_caches store;
     invalidate_comment_caches store)
 ;;
@@ -91,6 +108,15 @@ let normalize_comment_page ?comment_offset ?comment_limit total_comments =
     Some (offset, limit)
 ;;
 
+let comments_for_post_unlocked store post_key =
+  Hashtbl.find_opt store.comments_by_post post_key
+  |> Option.value ~default:[]
+  |> List.filter_map (fun comment_id ->
+    Hashtbl.find_opt store.comments comment_id)
+  |> List.sort (fun (a : comment) (b : comment) ->
+    Stdlib.Float.compare a.created_at b.created_at)
+;;
+
 let get_post_and_comments store ~post_id ?comment_offset ?comment_limit () : (post * comment list, board_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string post_id with
@@ -101,18 +127,7 @@ let get_post_and_comments store ~post_id ?comment_offset ?comment_limit () : (po
       match Hashtbl.find_opt store.posts post_key with
       | None -> Error (Post_not_found post_id)
       | Some post ->
-        let comment_ids =
-          Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
-        in
-        let comments =
-          List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
-        in
-        let sorted =
-          List.sort
-            (fun (a : comment) (b : comment) ->
-               Stdlib.Float.compare a.created_at b.created_at)
-            comments
-        in
+        let sorted = comments_for_post_unlocked store post_key in
         let sliced =
           match
             normalize_comment_page
@@ -125,6 +140,52 @@ let get_post_and_comments store ~post_id ?comment_offset ?comment_limit () : (po
             List.filteri (fun i _ -> i >= offset && i < offset + limit) sorted
         in
         Ok (post, sliced))
+;;
+
+let compare_post_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
+  let by_updated_at = Stdlib.Float.compare ts_a ts_b in
+  if by_updated_at <> 0
+  then by_updated_at
+  else String.compare post_id_a post_id_b
+;;
+
+let list_post_thread_snapshots_after_cursor store ~after ~limit =
+  maybe_sweep store;
+  if limit <= 0
+  then []
+  else
+    with_lock store (fun () ->
+      let candidates =
+        Hashtbl.fold
+          (fun post_id (post : post) candidates ->
+             if compare_post_cursor_token (post.updated_at, post_id) after > 0
+             then
+               let commit_pending =
+                 Hashtbl.mem store.pending_comment_commits post_id
+               in
+               (post, commit_pending) :: candidates
+             else candidates)
+          store.posts
+          []
+        |> List.sort (fun ((a : post), _) ((b : post), _) ->
+          compare_post_cursor_token
+            (a.updated_at, Post_id.to_string a.id)
+            (b.updated_at, Post_id.to_string b.id))
+      in
+      let rec collect remaining snapshots = function
+        | [] -> List.rev snapshots
+        | _ when remaining = 0 -> List.rev snapshots
+        | (_, true) :: _ ->
+          (* A staged comment is visible in memory before its persistence
+             outcome is known. Stop at that cursor barrier so no later post
+             can be acknowledged past an update that may still roll back. *)
+          List.rev snapshots
+        | ((post : post), false) :: rest ->
+          let post_id = Post_id.to_string post.id in
+          let comments = comments_for_post_unlocked store post_id in
+          collect (remaining - 1) ((post, comments) :: snapshots) rest
+      in
+      collect limit [] candidates)
 ;;
 
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =
@@ -169,15 +230,11 @@ let current_post_cursor store =
            match latest with
            | None -> Some candidate
            | Some (current : post) ->
-             let updated_cmp =
-               Stdlib.Float.compare candidate.updated_at current.updated_at
-             in
-             if updated_cmp > 0
-                || (updated_cmp = 0
-                    && String.compare
-                         (Post_id.to_string candidate.id)
-                         (Post_id.to_string current.id)
-                       > 0)
+             if
+               compare_post_cursor_token
+                 (candidate.updated_at, Post_id.to_string candidate.id)
+                 (current.updated_at, Post_id.to_string current.id)
+               > 0
              then Some candidate
              else latest)
         store.posts
@@ -247,6 +304,7 @@ let add_comment_with_audience
             match Board_audience.audience_for_comment ~content with
             | Error _ as error -> error
             | Ok audience ->
+            Eio.Mutex.use_rw ~protect:true store.comment_commit_mutex (fun () ->
             let board_result =
               with_lock store (fun () ->
                 (* Verify post exists *)
@@ -261,7 +319,12 @@ let add_comment_with_audience
                   with
                       | Error e -> Error e
                       | Ok () ->
-                    let now = Time_compat.now () in
+                    let wall_now = Time_compat.now () in
+                    let now =
+                      if wall_now > post.updated_at
+                      then wall_now
+                      else Float.succ post.updated_at
+                    in
                     let comment =
                       { id = Comment_id.generate ()
                       ; post_id = pid
@@ -296,6 +359,7 @@ let add_comment_with_audience
                       store.posts
                       post_key
                       { post with reply_count = post.reply_count + 1; updated_at = now };
+                    begin_comment_commit_unlocked store post_key;
                     mark_dirty_post store post_key;
                     mark_dirty_comment store (Comment_id.to_string comment.id);
                     invalidate_post_caches store;
@@ -304,23 +368,48 @@ let add_comment_with_audience
             in
             match board_result with
             | Ok (comment, previous_post, posts_jsonl) ->
-              (match
-                 with_persist_lock store (fun () ->
-                   match append_comment comment with
-                   | Error _ as e -> e
-                   | Ok () ->
-                     save_posts_jsonl posts_jsonl;
-                     Ok ())
-               with
-               | Ok () ->
-                 with_lock store (fun () ->
-                   mark_dirty_post store (Post_id.to_string comment.post_id);
-                   mark_dirty_comment store (Comment_id.to_string comment.id));
-                 Ok { comment; audience }
-               | Error e ->
-                 rollback_fresh_comment store ~comment ~previous_post;
-                 Error e)
-            | Error _ as e -> e))
+              Eio.Cancel.protect (fun () ->
+                let persistence =
+                  try
+                    `Result
+                      (with_persist_lock store (fun () ->
+                         match append_comment comment with
+                         | Error _ as e -> e
+                         | Ok () ->
+                           (* The comment JSONL append is the durable domain
+                              commit. [reply_count]/[updated_at] in posts JSONL
+                              are a derived projection and remain dirty for the
+                              flusher when this eager rewrite fails. Report the
+                              deferred projection loudly without turning the
+                              already-committed comment into a false failure
+                              that a caller might retry as a duplicate. *)
+                           (match save_posts_jsonl_result posts_jsonl with
+                            | Ok () -> ()
+                            | Error error ->
+                              Log.BoardLog.warn
+                                "comment committed; post projection deferred: post_id=%s error=%s"
+                                (Post_id.to_string comment.post_id)
+                                (Board_types.show_board_error error));
+                           Ok ()))
+                  with
+                  | exn -> `Raised exn
+                in
+                match persistence with
+                | `Result (Ok ()) ->
+                  with_lock store (fun () ->
+                    end_comment_commit_unlocked
+                      store
+                      (Post_id.to_string comment.post_id);
+                    mark_dirty_post store (Post_id.to_string comment.post_id);
+                    mark_dirty_comment store (Comment_id.to_string comment.id));
+                  Ok { comment; audience }
+                | `Result (Error e) ->
+                  rollback_fresh_comment store ~comment ~previous_post;
+                  Error e
+                | `Raised exn ->
+                  rollback_fresh_comment store ~comment ~previous_post;
+                  raise exn)
+            | Error _ as e -> e)))
 ;;
 
 let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =

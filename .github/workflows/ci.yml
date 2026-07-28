@@ -718,9 +718,12 @@ jobs:
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
 
-      - name: Run board thread participation regression
+      - name: Run board thread participation regressions
         run: |
-          opam exec -- dune build --root . @test/runtest-test_keeper_board_thread_participation
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_board_thread_participation \
+            @test/runtest-test_keeper_keepalive_helpers \
+            @test/runtest-test_keeper_unified_verification_surface
 
       - name: Check keeper event queue projection boundary
         # This parser uses compiler-libs directly, so keep it beside the sole

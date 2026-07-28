@@ -218,6 +218,8 @@ module Limits : sig
   (** Default number of comments returned by [masc_board_post_get]. *)
   val max_comment_page_limit : int
   (** Maximum comments returned by one [masc_board_post_get] page. *)
+  val cursor_snapshot_batch_size : int
+  (** Maximum post/thread snapshots consumed by one cursor scan. *)
   val default_ttl_hours : int
   (** [0] — permanent (no expiry). *)
   val sweeper_interval_sec : int
@@ -267,12 +269,16 @@ type store = {
   mutex : Eio.Mutex.t;
   persist_mutex : Eio.Mutex.t;
   origin_create_mutex : Eio.Mutex.t;
+  comment_commit_mutex : Eio.Mutex.t;
+  (** Serializes comment staging through its durable append commit point. *)
   mutable karma_cache : (string * int) list option;
   (** [None] = stale. *)
   mutable sorted_posts_cache : post list option;
   (** [None] = stale. *)
   comments_by_post : (string, string list) Hashtbl.t;
   (** post_id -> comment_id list. *)
+  pending_comment_commits : (string, int) Hashtbl.t;
+  (** In-memory comment mutations not yet durably committed, by post id. *)
   reactions : (string, reaction) Hashtbl.t;
   (** Unique reactions keyed by target type, target id, user id, and emoji. *)
   mutable dirty_posts : bool;

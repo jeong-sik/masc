@@ -32,7 +32,7 @@ let sample_board_event : WO.pending_board_event =
     updated_at = 0.0;
     explicit_mention = false;
     matched_targets = [];
-    self_commented = false;
+    self_participated = false;
     new_external_since = 0;
     latest_external_author = None;
     latest_external_preview = None;
@@ -201,6 +201,32 @@ let test_board_authors_share_one_neutral_observation_boundary () =
     (contains_sub "post_kind=direct" human_msg);
   check bool "exact mention remains context" true
     (contains_sub "[mentions test-keeper]" peer_msg)
+;;
+
+let test_board_self_participation_renders_latest_contribution () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  let event =
+    { sample_board_event with
+      self_participated = true
+    ; new_external_since = 1
+    ; latest_external_author = Some "operator"
+    ; latest_external_preview = Some "resolved"
+    }
+  in
+  let observation =
+    { base_observation with pending_board_events = [ event ] }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    Masc.Keeper_unified_prompt.build_prompt
+      ~meta:minimal_meta
+      ~base_path:"/tmp"
+      ~observation
+      ()
+  in
+  check bool "prompt names the latest post-or-comment contribution" true
+    (contains_sub
+       "1 new reply since your latest contribution, latest by operator: resolved"
+       world_state)
 ;;
 
 let test_board_reaction_event_renders_reaction_context () =
@@ -494,6 +520,9 @@ let () =
           test_case
             "prompt: all Board authors share one neutral observation boundary"
             `Quick test_board_authors_share_one_neutral_observation_boundary;
+          test_case
+            "prompt: Board replies use latest contribution semantics"
+            `Quick test_board_self_participation_renders_latest_contribution;
           test_case
             "prompt: board reaction event renders reaction context"
             `Quick test_board_reaction_event_renders_reaction_context;

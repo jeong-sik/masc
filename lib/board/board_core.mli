@@ -304,6 +304,21 @@ val get_post_and_comments
   -> unit
   -> (post * comment list, board_error) Result.t
 
+val compare_post_cursor_token
+  :  float * string
+  -> float * string
+  -> int
+(** Total ordering for Board observation cursors: [updated_at], then post id. *)
+
+val list_post_thread_snapshots_after_cursor
+  :  store
+  -> after:(float * string)
+  -> limit:int
+  -> (post * comment list) list
+(** Atomically snapshots an ordered prefix of posts newer than [after],
+    together with each full comment stream. Stops before a post with an
+    uncommitted comment and returns at most [limit] snapshots. *)
+
 (** Returns posts sorted by [(score desc, created_at desc)]
     with optional visibility / hearth filters. Uses [store.sorted_posts_cache] when
     warm to skip the sort. *)

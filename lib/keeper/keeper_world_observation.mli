@@ -41,10 +41,11 @@ type pending_board_event = {
   updated_at : float;
   explicit_mention : bool;
   matched_targets : string list;
-  self_commented : bool;
-  (** [true] if this keeper has previously commented on this post. *)
+  self_participated : bool;
+  (** [true] if this keeper authored the post or previously commented on it. *)
   new_external_since : int;
-  (** Number of external comments posted after the keeper's latest comment. *)
+  (** Number of external comments posted after the keeper's latest
+      contribution. *)
   latest_external_author : string option;
   (** Author of the most recent external comment (for prompt context). *)
   latest_external_preview : string option;

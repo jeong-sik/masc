@@ -8,6 +8,7 @@ type match_result =
 type board_read_operation =
   | Get_post
   | Get_comments
+  | Get_post_and_comments
 
 type board_unavailable =
   { operation : board_read_operation
@@ -61,7 +62,9 @@ val board_stimulus_of_board_signal
 val post_id_string : Board.post -> string
 val compare_cursor_token : float * string -> float * string -> int
 val cursor_token_of_post : Board.post -> float * string
-val list_posts_after_cursor : float * string option -> Board.post list
+val list_post_thread_snapshots_after_cursor
+  :  float * string option
+  -> (Board.post * Board.comment list) list
 val text : Board_dispatch.board_signal -> string
 val address_text : Board_dispatch.board_signal -> string
 (** Text authored by the current signal producer and therefore allowed to
@@ -80,6 +83,24 @@ val check_self_thread_status
   :  self_ids:Keeper_identity.Keeper_id.t list
   -> post_id:string
   -> comment_status
+
+val thread_status_of_snapshot
+  :  self_ids:Keeper_identity.Keeper_id.t list
+  -> post:Board.post
+  -> comments:Board.comment list
+  -> comment_state
+
+type thread_snapshot =
+  { post : Board.post
+  ; status : comment_state
+  }
+
+val read_self_thread_snapshot
+  :  self_ids:Keeper_identity.Keeper_id.t list
+  -> post_id:string
+  -> thread_snapshot board_read
+(** Read the post and its full comment stream from one atomic Board snapshot,
+    then derive this keeper's participation status from that same snapshot. *)
 
 type wake_reason =
   | Explicit_mention

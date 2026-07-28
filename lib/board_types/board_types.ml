@@ -288,6 +288,7 @@ module Limits = struct
 
   let default_comment_page_limit = 50
   let max_comment_page_limit = 100
+  let cursor_snapshot_batch_size = 100
   let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
   let sweeper_interval_sec = env_int "MASC_BOARD_SWEEPER_INTERVAL_SEC" 10
   let sweeper_batch_size = env_int "MASC_BOARD_SWEEPER_BATCH_SIZE" 100
@@ -339,10 +340,14 @@ type store = {
   mutex: Eio.Mutex.t;
   persist_mutex: Eio.Mutex.t;
   origin_create_mutex: Eio.Mutex.t;
+  comment_commit_mutex: Eio.Mutex.t;
+  (** Serializes comment staging through its durable append commit point. *)
   (* Phase 2 caches *)
   mutable karma_cache: (string * int) list option;       (** None = stale *)
   mutable sorted_posts_cache: post list option;           (** None = stale *)
   comments_by_post: (string, string list) Hashtbl.t;      (** post_id -> comment_id list *)
+  pending_comment_commits: (string, int) Hashtbl.t;
+  (** In-memory comment mutations not yet durably committed, by post id. *)
   reactions: (string, reaction) Hashtbl.t;                 (** unique target/user/emoji reactions *)
   mutable dirty_posts: bool;                               (** Deferred flush flag *)
   mutable dirty_comments: bool;                            (** Deferred flush flag *)

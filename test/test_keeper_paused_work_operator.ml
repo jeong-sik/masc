@@ -34,6 +34,16 @@ let rec remove_tree path =
 
 let int64_json value = `Intlit (Int64.to_string value)
 
+let int64_of_json label = function
+  | `Int value -> Int64.of_int value
+  | `Intlit value ->
+    (match Int64.of_string_opt value with
+     | Some parsed -> parsed
+     | None -> Alcotest.failf "%s: invalid int64 literal %S" label value)
+  | json ->
+    Alcotest.failf "%s: expected int or intlit, got %s" label (Yojson.Safe.to_string json)
+;;
+
 let board_source : Queue.stimulus =
   { post_id = "paused-work-operator-source"
   ; urgency = Queue.Normal
@@ -341,7 +351,7 @@ let test_inventory_exposes_exact_durable_fences () =
       Alcotest.(check int64)
         "inventory revision fence"
         (State.revision state)
-        (Int64.of_int (json |> member "queue" |> member "revision" |> to_int));
+        (json |> member "queue" |> member "revision" |> int64_of_json "queue.revision");
       Alcotest.(check int)
         "inventory exact pending count"
         1

@@ -77,14 +77,7 @@ let test_sources () =
     (slot_string "after_turn" "source")
 
 let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
-  let json : Yojson.Safe.t =
-    `Assoc
-      [
-        "name", `String name;
-        "agent_name", `String name;
-        "trace_id", `String "keeper-hooks-introspection-test";
-      ]
-  in
+  let json : Yojson.Safe.t = `Assoc [ "name", `String name ] in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> ref meta
   | Error e -> failwith ("make_meta_ref: " ^ e)

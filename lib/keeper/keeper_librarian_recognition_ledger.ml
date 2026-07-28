@@ -586,7 +586,7 @@ let load_pending_marker ~masc_root ~keeper_id =
     | exn -> Error (Printexc.to_string exn)
 ;;
 
-let prepared_evidence_exists ~masc_root ~publication_id =
+let prepared_evidence_exists ~masc_root ~publication_id ~prepared_json =
   let found = ref false in
   let row_error = ref None in
   match
@@ -605,14 +605,20 @@ let prepared_evidence_exists ~masc_root ~publication_id =
                     | None -> ""
                     | Some line -> Printf.sprintf ":%d" line)
                    detail)
-         | None, Dated_jsonl.Parsed (`Assoc fields) ->
+         | None, Dated_jsonl.Parsed (`Assoc fields as json) ->
            (match
               string_field field_publication_id fields,
               string_field field_publication_state fields
             with
             | Some row_id, Some "prepared"
               when String.equal row_id publication_id ->
-              found := true
+              if Yojson.Safe.equal json prepared_json
+              then found := true
+              else
+                row_error
+                := Some
+                     "recognition prepared audit row conflicts with its pending \
+                      publication payload"
             | Some _, Some _ -> ()
             | None, _ | _, None ->
               row_error
@@ -633,6 +639,7 @@ let ensure_prepared_evidence ~masc_root publication =
     prepared_evidence_exists
       ~masc_root
       ~publication_id:publication.publication_id
+      ~prepared_json:publication.prepared_json
   with
   | Error _ as error -> error
   | Ok false -> append_json ~masc_root publication.prepared_json

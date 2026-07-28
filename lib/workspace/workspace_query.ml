@@ -394,12 +394,8 @@ let add_verification_evidence_projection
       ~task_verifier
       ~viewer
   with
-  | Workspace_verification_store.Evidence_metadata_only { request; viewer = _ } ->
-    let assigned =
-      match request.verifier with
-      | Some verifier -> verifier
-      | None -> "unassigned"
-    in
+  | Workspace_verification_store.Evidence_metadata_only { request = _; viewer = _ } ->
+    let assigned = Option.value task_verifier ~default:"unassigned" in
     Printf.bprintf buf
       "   └─ verification_request=%s assigned_verifier=%s evidence=metadata_only\n"
       verification_id assigned

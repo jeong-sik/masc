@@ -117,7 +117,6 @@ let resource_is_dynamic uri =
   let lower = String.lowercase_ascii uri in
   not
     (String.contains lower '{'
-     || String.starts_with ~prefix:"masc://schema" lower
      || String.starts_with ~prefix:"masc://institution" lower
      || String.starts_with ~prefix:"masc://tool-help" lower)
 ;;

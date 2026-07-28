@@ -223,35 +223,6 @@ let on_submit_for_verification ~(config : Workspace.config)
     notify_submit_for_verification ~config ~task ~assignee ~verification_id ~evidence_refs;
     Ok ()
 
-let record_approve_verification ~(config : Workspace.config)
-    ~task_id ~verifier ~verification_id ~notes =
-  let base_path = config.Workspace.base_path in
-  (* This low-level receipt write is intentionally not an authorization
-     boundary. The production caller is the post-commit callback installed by
-     [Tool_task]: [Workspace_task_lifecycle] has already admitted [verifier] as
-     the Task phase winner before committing the task transition. The request
-     file lock makes the terminal receipt first-writer-wins. *)
-  if verification_id = "" then
-    Error "verification_id is required for approval verdict persistence"
-  else
-    match
-      Verification.Internal.submit_verdict
-        ~base_path
-        ~req_id:verification_id
-        ~verifier
-        ~verdict:Verification.Pass
-    with
-    | Ok updated ->
-      Verification.attribution_of_request updated
-      |> Option.iter Dashboard_attribution.record;
-      Ok ()
-    | Error e ->
-      Log.Task.error
-        ~keeper_name:task_id
-        "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
-        task_id verification_id verifier e;
-      Error e
-
 let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
   let meta_json = `Assoc [
     ("type", `String "verification_verdict");
@@ -288,41 +259,6 @@ let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
     ("timestamp", `Float (Time_compat.now ()));
   ])
 
-let on_approve_verification ~(config : Workspace.config)
-    ~task_id ~verifier ~verification_id ~notes =
-  match
-    record_approve_verification ~config ~task_id ~verifier ~verification_id ~notes
-  with
-  | Error e -> Error e
-  | Ok () ->
-    notify_approve_verification ~task_id ~verifier ~verification_id ~notes;
-    Ok ()
-
-let record_reject_verification ~(config : Workspace.config)
-    ~task_id ~verifier ~verification_id ~reason =
-  let base_path = config.Workspace.base_path in
-  (* Same Task-winner and post-commit boundary as approval above. *)
-  if verification_id = "" then
-    Error "verification_id is required for rejection verdict persistence"
-  else
-    match
-      Verification.Internal.submit_verdict
-        ~base_path
-        ~req_id:verification_id
-        ~verifier
-        ~verdict:(Verification.Fail reason)
-    with
-    | Ok updated ->
-      Verification.attribution_of_request updated
-      |> Option.iter Dashboard_attribution.record;
-      Ok ()
-    | Error e ->
-      Log.Task.error
-        ~keeper_name:task_id
-        "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
-        task_id verification_id verifier e;
-      Error e
-
 let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
   let meta_json = `Assoc [
     ("type", `String "verification_verdict");
@@ -356,16 +292,6 @@ let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
     ("reason", `String reason);
     ("timestamp", `Float (Time_compat.now ()));
   ])
-
-let on_reject_verification ~(config : Workspace.config)
-    ~task_id ~verifier ~verification_id ~reason =
-  match
-    record_reject_verification ~config ~task_id ~verifier ~verification_id ~reason
-  with
-  | Error e -> Error e
-  | Ok () ->
-    notify_reject_verification ~task_id ~verifier ~verification_id ~reason;
-    Ok ()
 
 let awaiting_verification_deadline
       ~(submitted_at : string)

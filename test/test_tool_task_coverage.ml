@@ -79,14 +79,7 @@ let ensure_test_runtime =
          | Ok () ->
              Atomic.set Workspace_hooks.get_default_runtime_id_fn
                Runtime.get_default_runtime_id;
-             Atomic.set Task.Handlers.record_verdict_fn
-               (fun ~task_id ~req ~result () ->
-                  Eval_calibration.record_verdict ~task_id ~req ~result ());
-             Atomic.set Task.Handlers.sse_broadcast_fn (fun _ -> ());
              Atomic.set Task.Handlers.push_event_to_sessions_fn (fun _ -> ());
-             Atomic.set Task.Handlers.get_few_shot_block_fn (fun () ->
-               Eval_calibration.format_few_shot_block
-                 (Eval_calibration.select_examples ~max_examples:3));
              Atomic.set initialized true
          | Error msg -> failwith msg)
   in
@@ -106,11 +99,7 @@ let install_test_hooks () =
   Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
     (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
-       Ok (Some Task.Anti_rationalization.Approve));
-  Atomic.set Task.Handlers.record_verdict_fn
-    (fun ~task_id ~req ~result () ->
-       Eval_calibration.record_verdict ~task_id ~req ~result ());
-  Atomic.set Task.Handlers.get_few_shot_block_fn (fun () -> "")
+       Ok (Some Task.Anti_rationalization.Approve))
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
@@ -2544,123 +2533,6 @@ let () = test "get_int_opt_present" (fun () ->
 let () = test "get_int_opt_missing" (fun () ->
   let args = `Assoc [] in
   assert (Tool_args.get_int_opt args "key" = None)
-)
-
-(* ================================================================ *)
-(* verdict_recorded SSE payload contract                             *)
-(*                                                                   *)
-(* The payload is built by Task.Tool.build_verdict_sse_payload —     *)
-(* a pure helper — so dashboard subscribers depend on a stable       *)
-(* JSON shape. The cross_runtime bool must match Eval_calibration's    *)
-(* inclusion rule (both runtimes non-empty AND distinct).            *)
-(* ================================================================ *)
-
-let make_review_request () : Task.Anti_rationalization.review_request =
-  { task_title = "Fix login bug";
-    task_description = "desc";
-    completion_notes = "notes";
-    agent_name = "alice";
-    task_id = "test-task-1"; evidence_refs = [] }
-
-let make_review_result
-    ?(verdict = Task.Anti_rationalization.Approve)
-    ?(evaluator_runtime = "verifier")
-    ?generator_runtime
-    ?(gate = Task.Anti_rationalization.Structured_tool)
-    ?fallback_reason
-    () : Task.Anti_rationalization.review_result =
-  { verdict = Some verdict
-  ; evaluator_runtime
-  ; generator_runtime
-  ; gate
-  ; fallback_reason
-  }
-
-let payload_member key (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields -> List.assoc "payload" fields |> (function
-      | `Assoc payload_fields -> List.assoc key payload_fields
-      | _ -> failwith "payload is not an object")
-  | _ -> failwith "top-level is not an object"
-
-let () = test "build_verdict_sse_payload: distinct runtimes = cross_runtime true" (fun () ->
-  let req = make_review_request () in
-  let result =
-    make_review_result
-      ~evaluator_runtime:"verifier"
-      ~generator_runtime:Masc.(Keeper_config.default_runtime_id ())
-      () in
-  let json = Task.Tool.build_verdict_sse_payload
-    ~now:1234567890.0 ~task_id:"t1" ~req ~result in
-  assert (payload_member "cross_runtime" json = `Bool true);
-  assert (payload_member "generator_runtime" json
-          = `String Masc.(Keeper_config.default_runtime_id ()));
-  assert (payload_member "evaluator_runtime" json = `String "verifier");
-  assert (payload_member "task_id" json = `String "t1")
-)
-
-let () = test "build_verdict_sse_payload: same runtime = cross_runtime false" (fun () ->
-  let req = make_review_request () in
-  let result =
-    make_review_result
-      ~evaluator_runtime:"verifier"
-      ~generator_runtime:"verifier"
-      () in
-  let json = Task.Tool.build_verdict_sse_payload
-    ~now:1234567890.0 ~task_id:"t2" ~req ~result in
-  assert (payload_member "cross_runtime" json = `Bool false);
-  assert (payload_member "generator_runtime" json = `String "verifier")
-)
-
-let () = test "build_verdict_sse_payload: no generator = cross_runtime false + null" (fun () ->
-  let req = make_review_request () in
-  let result =
-    make_review_result ~evaluator_runtime:"verifier" () in
-  let json = Task.Tool.build_verdict_sse_payload
-    ~now:1234567890.0 ~task_id:"t3" ~req ~result in
-  assert (payload_member "cross_runtime" json = `Bool false);
-  assert (payload_member "generator_runtime" json = `Null)
-)
-
-let () = test "build_verdict_sse_payload: empty generator string = cross_runtime false" (fun () ->
-  (* Defensive: align with Eval_calibration which excludes empty
-     strings from the denominator. Without this guard SSE and stats
-     would disagree when a runtime is empty. *)
-  let req = make_review_request () in
-  let result =
-    make_review_result
-      ~evaluator_runtime:"verifier"
-      ~generator_runtime:""
-      () in
-  let json = Task.Tool.build_verdict_sse_payload
-    ~now:1234567890.0 ~task_id:"t4" ~req ~result in
-  assert (payload_member "cross_runtime" json = `Bool false);
-  assert (payload_member "generator_runtime" json = `String "")
-)
-
-let () = test "build_verdict_sse_payload: empty evaluator string = cross_runtime false" (fun () ->
-  let req = make_review_request () in
-  let result =
-    make_review_result
-      ~evaluator_runtime:""
-      ~generator_runtime:Masc.(Keeper_config.default_runtime_id ())
-      () in
-  let json = Task.Tool.build_verdict_sse_payload
-    ~now:1234567890.0 ~task_id:"t5" ~req ~result in
-  assert (payload_member "cross_runtime" json = `Bool false)
-)
-
-let () = test "build_verdict_sse_payload: fallback_reason serialized" (fun () ->
-  let req = make_review_request () in
-  let result =
-    make_review_result
-      ~fallback_reason:"llm timeout"
-      ~gate:Task.Anti_rationalization.Evaluator_unavailable
-      () in
-  let json = Task.Tool.build_verdict_sse_payload
-    ~now:1234567890.0 ~task_id:"t6" ~req ~result in
-  assert (payload_member "fallback_reason" json = `String "llm timeout");
-  assert (payload_member "gate" json = `String "evaluator_unavailable")
 )
 
 (* Regression: claim_next should return no_unclaimed when all tasks are terminal (done/cancelled) *)

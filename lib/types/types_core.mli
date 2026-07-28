@@ -71,8 +71,8 @@ val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list
 
-(* RFC-0220: verifier assignment lives only in [task_status]. Verification
-   requests store evidence and terminal verdicts, not assignment. *)
+(* Verifier assignment and outcome live only in [task_status]. Verification
+   requests are immutable submit-time criteria and evidence envelopes. *)
 type verification_phase =
   | Awaiting_verifier
   | Verifier_assigned of { verifier : string }
@@ -96,7 +96,7 @@ type task_status =
     [verifier] has claimed it as its satisfier — status preserved, verifier
     recorded in [phase]. Single construction authority shared by [decide] and
     both claim writers. Authoritative binding: only the recorded verifier may
-    inspect submitted evidence and issue the terminal verdict. *)
+    inspect submitted evidence and approve or reject through the Task FSM. *)
 val bind_verifier
   :  verifier:string
   -> assignee:string

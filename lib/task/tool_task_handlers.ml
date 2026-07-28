@@ -25,18 +25,6 @@ module Workspace = Workspace_core
 
 (* Yojson.Safe.Util removed — use Json_util SSOT helpers instead *)
 
-let record_verdict_fn
-  : (task_id:string -> req:Anti_rationalization.review_request -> result:Anti_rationalization.review_result -> unit -> unit) Atomic.t
-  = Atomic.make (fun ~task_id:_ ~req:_ ~result:_ () -> ())
-
-let sse_broadcast_fn
-  : (Yojson.Safe.t -> unit) Atomic.t
-  = Atomic.make (fun _ -> ())
-
-let get_few_shot_block_fn
-  : (unit -> string) Atomic.t
-  = Atomic.make (fun () -> "")
-
 let push_event_to_sessions_fn
   : (Yojson.Safe.t -> unit) Atomic.t
   = Atomic.make (fun _ -> ())

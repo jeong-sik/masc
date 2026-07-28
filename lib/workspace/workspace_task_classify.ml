@@ -16,28 +16,6 @@ open Workspace_identity
 
 (* activity_workspace_id removed — namespace retired (#unify-namespace). *)
 
-(* #10449: classify a task's contract surface so the completion-path
-   metric can split bypass-rate by creation-side data presence.
-   Three states: missing field, present-but-empty, populated. *)
-let classify_contract_state (contract : Masc_domain.task_contract option) =
-  match contract with
-  | None -> "no_contract"
-  | Some c when c.completion_contract = [] && c.required_evidence = [] -> "empty_contract"
-  | Some _ -> "with_contract"
-;;
-
-(* Completion path is descriptive telemetry only. *)
-let classify_completion_path ~(action : Masc_domain.task_action) =
-  match action with
-  | Masc_domain.Approve_verification -> "via_verification"
-  | Masc_domain.Done_action -> "direct_llm_verdict"
-  | Masc_domain.Claim
-  | Masc_domain.Start
-  | Masc_domain.Cancel | Masc_domain.Release
-  | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification ->
-    "not_completion"
-;;
-
 type task_actor_kind =
   | Agent
   | Operator

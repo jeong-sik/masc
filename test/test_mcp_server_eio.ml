@@ -2818,7 +2818,6 @@ Alpha body
       ("masc://messages.json", "application/json", "[");
       ("masc://events.json", "application/json", "[");
       ("masc://worktrees.json", "application/json", "{");
-      ("masc://schema.json", "application/json", "{");
       ("masc://institution", "text/markdown", "Mission");
       ("masc://institution.json", "application/json", "\"identity\"");
       ("masc://library", "text/markdown", "Library Index");

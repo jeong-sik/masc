@@ -174,8 +174,8 @@ let claim_task_r config ~agent_name ~task_id ()
               The task stays [AwaitingVerification]; [resolve_claim] has bound
               this agent as the verifier in [phase] (Verifier_assigned). Persist
               that status and point the agent at the task. The verifier binding
-              lives only in the task FSM; the verification request remains
-              Pending until the winner records its terminal verdict. *)
+              and outcome live only in the Task FSM; the verification request
+              remains an immutable submit-time evidence envelope. *)
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
            in

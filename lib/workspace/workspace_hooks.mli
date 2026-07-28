@@ -82,8 +82,6 @@ val tool_assigned_fn : (agent_id:string ->
             tool_list:string list ->
             ?config_hash:string -> ?reason:string -> unit -> string)
            Atomic.t
-val task_completion_path_observed_fn : (path:string -> contract_state:string -> agent_name:string -> unit)
-           Atomic.t
 (** Fires once per [Workspace_broadcast.broadcast] return, with the wall-clock
     duration of the broadcast body (next_seq + agent.json read +
     msg.json write + activity emit + on_broadcast_mention).  Wired at
@@ -134,14 +132,6 @@ val verification_submit_request_fn :
    assignee:string ->
    verification_id:string ->
    evidence_refs:string list ->
-   (unit, string) result) Atomic.t
-
-val verification_record_verdict_fn :
-  (Workspace_utils_backend_setup.config ->
-   task_id:string ->
-   verifier:string ->
-   verification_id:string ->
-   decision:[ `Approve of string | `Reject of string ] ->
    (unit, string) result) Atomic.t
 
 (** RFC-0221 §3.1: compensation hook — delete a verification record whose

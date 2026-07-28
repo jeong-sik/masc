@@ -15,17 +15,13 @@ import { signal } from '@preact/signals'
 import {
   fetchVerificationRequests,
   type VerificationRequest,
-  type VerificationRequestStatus,
-  type VerificationRequestVerdict,
   type VerificationRequestsResponse,
 } from '../api/dashboard'
 import { Btn } from './btn'
 import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
-import { StatusChip } from './common/status-chip'
 import { relativeTime } from '../lib/format-time'
-import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -43,9 +39,7 @@ const DEFAULT_LIMIT = 100
  * Pure filter for verification requests.
  *
  * Case-insensitive substring match on `request_id`, `task_id`,
- * `submitted_by`, and `approved_by` so operators can locate a request
- * by partial id, by the owning task, or by the agent that submitted /
- * approved it.
+ * and `submitted_by`.
  *
  * Empty/whitespace query returns the input reference unchanged (no
  * new array allocation, preserves referential equality for memoisation).
@@ -62,28 +56,15 @@ function filterVerificationRequests(
     if (row.request_id.toLowerCase().includes(needle)) return true
     if (row.task_id.toLowerCase().includes(needle)) return true
     if (row.submitted_by.toLowerCase().includes(needle)) return true
-    if (row.approved_by && row.approved_by.toLowerCase().includes(needle)) return true
     return false
   })
 }
 
-type StatusFilter = VerificationRequestStatus | 'all'
-
-const statusFilter = signal<StatusFilter>('all')
 const searchQuery = signal('')
 
 export function __resetVerificationRequestsPanelForTest(): void {
-  statusFilter.value = 'all'
   searchQuery.value = ''
 }
-
-const FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
-  { value: 'all', label: '전체' },
-  { value: 'pending', label: '검증 대기' },
-  { value: 'approved', label: '승인' },
-  { value: 'rejected', label: '반려' },
-  { value: 'timed_out', label: '시간 초과' },
-]
 
 async function loadData(
   resource: ManagedAsyncResource<VerificationRequestsResponse>,
@@ -91,55 +72,6 @@ async function loadData(
   await resource.load(async (signal) => {
     return fetchVerificationRequests({ limit: DEFAULT_LIMIT, signal })
   })
-}
-
-// ── Label + tone maps ─────────────────────────────────
-
-const STATUS_LABEL: Record<VerificationRequestStatus, string> = {
-  pending: '검증 대기',
-  approved: '승인',
-  rejected: '반려',
-  timed_out: '시간 초과',
-}
-
-function statusTone(s: VerificationRequestStatus): 'ok' | 'warn' | 'bad' {
-  switch (s) {
-    case 'approved': return 'ok'
-    case 'rejected': return 'bad'
-    case 'timed_out': return 'bad'
-    case 'pending': return 'warn'
-  }
-}
-
-function statusLabel(row: VerificationRequest): string {
-  if (row.status === 'pending' && row.request_kind === 'conflict_triage') {
-    return '충돌 triage'
-  }
-  return STATUS_LABEL[row.status]
-}
-
-function statusToneForRow(
-  row: VerificationRequest,
-): 'ok' | 'warn' | 'bad' {
-  if (row.status === 'pending' && row.request_kind === 'conflict_triage') {
-    return 'bad'
-  }
-  return statusTone(row.status)
-}
-
-const VERDICT_LABEL: Record<NonNullable<VerificationRequestVerdict>, string> = {
-  pass: 'pass',
-  fail: 'fail',
-  partial: 'partial',
-}
-
-function verdictTone(v: VerificationRequestVerdict): 'ok' | 'warn' | 'bad' {
-  switch (v) {
-    case 'pass': return 'ok'
-    case 'partial': return 'warn'
-    case 'fail': return 'bad'
-    case null: return 'warn'
-  }
 }
 
 function DetailLabel({ children }: { children: unknown }) {
@@ -167,15 +99,9 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
     hasEvidenceProjectionError ||
     hasTaskTitle ||
     hasRequestSummary ||
-    hasNextAction ||
-    row.verdict_reason !== ''
+    hasNextAction
   return html`
     <tr class="v2-workspace-row border-b border-[var(--color-border-default)] last:border-b-0 align-top">
-      <td class="py-2 pr-2">
-        <${StatusChip} tone=${statusToneForRow(row)}>
-          ${statusLabel(row)}
-        <//>
-      </td>
       <td class="py-2 pr-2">
         <code class="text-[var(--color-fg-secondary)]" title=${row.request_id}>
           ${truncate(row.request_id, 14)}
@@ -187,21 +113,9 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
         </code>
       </td>
       <td class="py-2 pr-2 text-[var(--color-fg-primary)]">${row.submitted_by}</td>
-      <td class="py-2 pr-2">
-        ${row.approved_by
-          ? html`<span class="text-[var(--color-fg-primary)]">${row.approved_by}</span>`
-          : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
-      </td>
       <td class="py-2 pr-2 text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap"
           title=${row.created_at}>
         ${relativeTime(row.created_at)}
-      </td>
-      <td class="py-2 pr-2">
-        ${row.verdict
-          ? html`<${StatusChip} tone=${verdictTone(row.verdict)}>
-              ${VERDICT_LABEL[row.verdict]}
-            <//>`
-          : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
       </td>
       <td class="py-2">
         ${hasEvidenceProjectionError
@@ -275,14 +189,6 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
                         </div>
                       `
                     : null}
-                  ${row.verdict_reason !== ''
-                    ? html`
-                        <div>
-                          <${DetailLabel}>Verdict Reason</${DetailLabel}>
-                          <div class="text-[var(--color-fg-primary)]">${row.verdict_reason}</div>
-                        </div>
-                      `
-                    : null}
                 </div>
               </details>
             `
@@ -302,7 +208,7 @@ function RequestsTable({
   totalBeforeFilter: number
 }) {
   if (requests.length === 0) {
-    const hasFilter = statusFilter.value !== 'all' || searchQuery.value.trim() !== ''
+    const hasFilter = searchQuery.value.trim() !== ''
     if (hasFilter && totalBeforeFilter > 0) {
       return html`
         <${EmptyState}>
@@ -312,7 +218,7 @@ function RequestsTable({
     }
     return html`
       <${EmptyState}>
-        현재 대기중이거나 완료된 검증 요청이 없습니다.
+        검증 제출이 없습니다.
       <//>
     `
   }
@@ -321,13 +227,10 @@ function RequestsTable({
       <table class="v2-workspace-table w-full text-xs" aria-label="검증 요청 목록">
         <thead>
           <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
-            <${ThLeft}>상태</${ThLeft}>
             <${ThLeft}>요청</${ThLeft}>
             <${ThLeft}>작업</${ThLeft}>
             <${ThLeft}>제출자</${ThLeft}>
-            <${ThLeft}>승인자</${ThLeft}>
             <${ThLeft}>생성</${ThLeft}>
-            <${ThLeft}>판정</${ThLeft}>
             <th scope="col" class="text-left py-1">세부</th>
           </tr>
         </thead>
@@ -374,13 +277,10 @@ export function VerificationRequestsPanel() {
   const current = resource.state.value
   const data = current.data ?? null
   const rows = data?.requests ?? []
-  const filtered = useMemo(() => {
-    const byStatus =
-      statusFilter.value === 'all'
-        ? rows
-        : rows.filter((r) => r.status === statusFilter.value)
-    return filterVerificationRequests(byStatus, searchQuery.value)
-  }, [rows, statusFilter.value, searchQuery.value])
+  const filtered = useMemo(
+    () => filterVerificationRequests(rows, searchQuery.value),
+    [rows, searchQuery.value],
+  )
 
   return html`
     <div class="v2-workspace-surface flex flex-col gap-4">
@@ -398,30 +298,15 @@ export function VerificationRequestsPanel() {
           : null}
         ${data
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">
-              ${statusFilter.value === 'all' && !searchQuery.value
-                ? `총 ${data.total}건`
-                : `${filtered.length} / ${data.total}건`}
+              ${!searchQuery.value ? `총 ${data.total}건` : `${filtered.length} / ${data.total}건`}
             </span>`
           : null}
       </div>
 
-      <${FilterChips}
-        chips=${FILTER_OPTIONS.map((opt) => ({
-          key: opt.value,
-          label: opt.label,
-          count: data
-            ? opt.value === 'all'
-              ? data.total
-              : data.requests.filter((r) => r.status === opt.value).length
-            : null,
-        }))}
-        active=${statusFilter}
-      />
-
       <${TextInput}
         type="search"
         class="max-w-65"
-        placeholder="request / task / 제출자 / 승인자 필터"
+        placeholder="request / task / 제출자 필터"
         ariaLabel="검증 요청 필터"
         value=${searchQuery.value}
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}

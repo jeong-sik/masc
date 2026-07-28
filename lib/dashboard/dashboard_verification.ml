@@ -97,42 +97,8 @@ let next_action_of_output (output : Yojson.Safe.t) : string option =
        | _ -> None)
   | _ -> None
 
-(** Status + verdict + approver triple. Keeps all three derivations in one
-    place so the match is exhaustive over the Verification state machine. *)
-type status_bucket =
-  | Pending
-  | Approved
-  | Rejected
-
-let status_bucket_of_request (req : V.verification_request) : status_bucket =
-  match req.status with
-  | V.Pending -> Pending
-  | V.Completed V.Pass -> Approved
-  | V.Completed (V.Fail _ | V.Partial _) -> Rejected
-
-let status_bucket_to_string = function
-  | Pending -> "pending"
-  | Approved -> "approved"
-  | Rejected -> "rejected"
-
-let derive_status_fields (req : V.verification_request)
-  : string * string option * string * string option =
-  (* returns (status, verdict_opt, verdict_reason, approved_by_opt) *)
-  match req.status with
-  | V.Pending ->
-      status_bucket_to_string Pending, None, "", None
-  | V.Completed V.Pass ->
-      status_bucket_to_string Approved, Some "pass", "", req.verifier
-  | V.Completed (V.Fail reason) ->
-      status_bucket_to_string Rejected, Some "fail", reason, req.verifier
-  | V.Completed (V.Partial (_, reason)) ->
-      status_bucket_to_string Rejected, Some "partial", reason, req.verifier
-
 (** Per-request JSON row. *)
 let request_to_json (req : V.verification_request) : Yojson.Safe.t =
-  let status, verdict_opt, verdict_reason, approved_by =
-    derive_status_fields req
-  in
   let contract = completion_contract_of_criteria req.criteria in
   let required_artifacts, required_artifacts_error =
     string_list_of_output "required_artifacts" req.output
@@ -158,14 +124,8 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     ("request_kind", `String request_kind);
     ("request_summary", `String request_summary);
     ( "next_action", Json_util.string_opt_to_json next_action );
-    (* Keeper name: file-based storage has no dedicated keeper field,
-       but the verifier is a keeper when assigned. Surface None when
-       unassigned rather than inventing a value. *)
-    ("keeper", Json_util.string_opt_to_json req.verifier);
-    ("status", `String status);
     ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
     ("submitted_by", `String req.worker);
-    ("approved_by", Json_util.string_opt_to_json approved_by);
     ("completion_contract",
      `List (List.map (fun s -> `String s) contract));
     ("required_artifacts",
@@ -174,8 +134,6 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
      `List (List.map (fun s -> `String s) submitted_evidence));
     ("evidence_projection_error",
      Json_util.string_opt_to_json evidence_projection_error);
-    ("verdict", Json_util.string_opt_to_json verdict_opt);
-    ("verdict_reason", `String verdict_reason);
   ]
 
 (* ── Snapshot assembly ──────────────────────────────── *)
@@ -233,83 +191,13 @@ let requests_json ~base_path ?task_id ?limit () : Yojson.Safe.t =
   let all = load_requests ~base_path () in
   requests_json_of_requests ?task_id ~limit all
 
-(* ── Summary projection ─────────────────────────────── *)
-
-let max_recent = 20
-let default_recent = 3
-
-let clamp_recent r =
-  let r = Option.value r ~default:default_recent in
-  if r < 0 then 0 else if r > max_recent then max_recent else r
-
-(** Minimal row for the ["recent_rejections"] array — strictly the fields
-    a summary consumer needs (who, why, when, which task). Keeps the
-    payload small and independent of the full [requests_json] schema so
-    future additions to the row shape do not leak into summary. *)
-let rejection_row_json (req : V.verification_request) : Yojson.Safe.t =
-  let _status, _verdict_opt, verdict_reason, approved_by =
-    derive_status_fields req
-  in
-  let task_title = task_title_of_output req.output in
-  `Assoc [
-    ("request_id", `String req.id);
-    ("task_id", `String req.task_id);
-    ("task_title", `String task_title);
-    ("keeper", Json_util.string_opt_to_json approved_by);
-    ("verdict_reason", `String verdict_reason);
-    ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
-  ]
-
-let is_rejected (req : V.verification_request) : bool =
-  match req.status with
-  | V.Completed (V.Fail _) | V.Completed (V.Partial _) -> true
-  | V.Completed V.Pass -> false
-  | V.Pending -> false
-
-let bucket_of_status (req : V.verification_request) : string =
-  req |> status_bucket_of_request |> status_bucket_to_string
-
-(* Compute the summary projection from an already-loaded request list.
-   Factored out so [proof_compose] can share the disk scan between
-   summary and request listing. *)
-let summary_json_of_requests ~recent all : Yojson.Safe.t =
-  let recent = clamp_recent (Some recent) in
-  let total = List.length all in
-  let pending = ref 0 in
-  let approved = ref 0 in
-  let rejected = ref 0 in
-  List.iter (fun req ->
-    match status_bucket_of_request req with
-    | Pending -> incr pending
-    | Approved -> incr approved
-    | Rejected -> incr rejected
-  ) all;
-  let recent_rejections =
-    all
-    |> List.filter is_rejected
-    |> sort_desc
-    |> take recent
-    |> List.map rejection_row_json
-  in
+let summary_json ~base_path ?recent:_ () : Yojson.Safe.t =
+  let all = load_requests ~base_path () in
   `Assoc
     ([ ("updated_at", `String (Masc_domain.now_iso ()))
-     ; ("total", `Int total)
-     ; ( "by_status"
-       , `Assoc
-           [ ("pending", `Int !pending)
-           ; ("approved", `Int !approved)
-           ; ("rejected", `Int !rejected)
-           ; (* timed_out reserved for future state-machine variant; always 0 today *)
-             ("timed_out", `Int 0)
-           ] )
-     ; ("recent_rejections", `List recent_rejections)
+     ; ("total", `Int (List.length all))
      ]
      @ fd_pressure_fields ())
-
-let summary_json ~base_path ?recent () : Yojson.Safe.t =
-  let recent = Option.value recent ~default:default_recent in
-  let all = load_requests ~base_path () in
-  summary_json_of_requests ~recent all
 
 (* Single-load companion for handlers that emit both projections
    side-by-side ([/api/v1/dashboard/proof] is the live caller).
@@ -318,10 +206,15 @@ let summary_json ~base_path ?recent () : Yojson.Safe.t =
    the historic proof handler scanned the verification store twice
    per refresh.  This helper performs one scan and folds the two
    projections from the shared list. *)
-let proof_compose ~base_path ?recent ?limit () : Yojson.Safe.t * Yojson.Safe.t =
-  let recent = Option.value recent ~default:default_recent in
+let proof_compose ~base_path ?recent:_ ?limit () : Yojson.Safe.t * Yojson.Safe.t =
   let limit = clamp_limit limit in
   let all = load_requests ~base_path () in
-  let summary = summary_json_of_requests ~recent all in
+  let summary =
+    `Assoc
+      ([ ("updated_at", `String (Masc_domain.now_iso ()))
+       ; ("total", `Int (List.length all))
+       ]
+       @ fd_pressure_fields ())
+  in
   let requests = requests_json_of_requests ~limit all in
   summary, requests

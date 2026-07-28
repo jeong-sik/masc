@@ -488,10 +488,10 @@ type task_execution_links = {
   session_id : string option; [@default None]
 } [@@deriving show, yojson { strict = false }]
 
-(** Task contract - persisted facts for the LLM completion reviewer.
+(** Task contract - persisted verifier criteria and evidence facts.
 
     [completion_contract], [required_evidence], and [verify_gate_evidence] are
-    supplied to the configured reviewer as task facts. The workspace FSM never
+    supplied to the assigned verifier as task facts. The workspace FSM never
     interprets their prose, counts entries, or derives a completion verdict.
 
     A [required_tools : string list] field was also removed (2026-06-03,

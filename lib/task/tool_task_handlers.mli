@@ -14,16 +14,6 @@ type task_owner_hooks =
       Workspace_core.config -> agent_name:string -> string list
   }
 
-val record_verdict_fn :
-  (task_id:string ->
-   req:Anti_rationalization.review_request ->
-   result:Anti_rationalization.review_result ->
-   unit ->
-   unit)
-    Atomic.t
-
-val sse_broadcast_fn : (Yojson.Safe.t -> unit) Atomic.t
-val get_few_shot_block_fn : (unit -> string) Atomic.t
 val push_event_to_sessions_fn : (Yojson.Safe.t -> unit) Atomic.t
 
 val set_task_owner_hooks : task_owner_hooks -> unit

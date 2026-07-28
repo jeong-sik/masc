@@ -342,8 +342,6 @@ export type {
   KeeperMemoryHealthResponse,
   AuditIntegrityKeeperEntry,
   AuditIntegrityResponse,
-  VerificationRequestStatus,
-  VerificationRequestVerdict,
   VerificationRequest,
   VerificationRequestsResponse,
   TlaSpecCategory,

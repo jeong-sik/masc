@@ -63,9 +63,14 @@ type pending_board_event = {
     does not authorize or block the turn
     (see [Keeper_execution_receipt_types.t.actionable_signal]).
     Wake itself is unaffected: [actionable_signal_present] treats any pending
-    event as actionable, and scheduled stimuli carry their own trigger via
-    [scheduled_automation.due_ready_count]. A misplaced event kind therefore
-    loses its Board classification and prompt section, not its wake.
+    event as actionable, and a consumed [Schedule_due] stimulus carries its
+    own admission trigger —
+    [Keeper_heartbeat_stimulus_intake.event_queue_trigger_of_stimulus] maps
+    it to [Scheduled_automation_stimulus] independently of this partition.
+    ([scheduled_automation.due_ready_count] is a separate live-store
+    observation, not the stimulus's trigger; it can already be zero once
+    dispatch begins.) A misplaced event kind therefore loses its Board
+    classification and prompt section, not its wake.
 
     A new event kind placed on the wrong side compiles cleanly and fails
     silently. Classify by whether the event carries scheduled-work dispatch,

@@ -152,13 +152,30 @@ val extract_with_exact_output_classified
     called from contexts that cannot supply an Eio clock; [None] returns a
     typed [Execution_clock_unavailable] classification before OAS I/O. *)
 
-(** What an accepted recognition pass produced. [Nothing_recognized] is the
-    librarian's explicit empty operation list: nothing is persisted — no
-    store rewrite, no episode/event append, no ledger row — so a quiet
-    keeper does not accumulate empty narrative or O(store) evidence dumps. *)
+(** What an accepted recognition pass produced. A schema-valid empty operation
+    list still produces [Recognized] because its episode summary and metadata
+    belong to the current conversation slice; it does not rewrite facts or
+    append an O(store) recognition-ledger row. [Nothing_recognized] remains
+    for compatibility with callers handling older implementations. *)
 type recognition_write =
   | Recognized of Keeper_memory_os_types.episode
   | Nothing_recognized
+
+module For_testing : sig
+  val apply_and_persist
+    :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> base_path:string
+    -> keeper_id:string
+    -> generation:int
+    -> Keeper_librarian.input
+    -> Keeper_librarian.recognition_output
+    -> (recognition_write, extraction_error) result
+
+  val persist_cadence_backoff
+    :  should_defer:bool
+    -> write:(unit -> (unit, string) result)
+    -> (bool, string) result
+end
 
 val extract_and_append_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

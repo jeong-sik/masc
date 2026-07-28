@@ -38,6 +38,7 @@ val wire_field_source_turn : string
 val wire_field_source_tool_call_id : string
 val wire_field_claim_id : string
 val wire_field_claim_kind : string
+val wire_field_claim_kind_update : string
 
 val wire_field_valid_for_days : string
 (** Producer-declared lifetime in whole days (1..
@@ -59,6 +60,10 @@ val wire_operation_fields : string list
 (** Prompt variables for [keeper.librarian.episode_extraction]:
     [conversation_history] and [current_store]. *)
 val prompt_variables : input -> (string * string) list
+
+val visible_store_indices : input -> int list
+(** Original snapshot indices included in this generation's bounded fact page.
+    Output operations may reference only these indices. *)
 
 (** Structured parse failure for raw librarian output. *)
 type parse_error =
@@ -111,4 +116,5 @@ val episode_of_recognition
   -> input
   -> recognition_output
   -> recognized_facts:Keeper_memory_os_types.fact list
+  -> source_turns:int list
   -> Keeper_memory_os_types.episode

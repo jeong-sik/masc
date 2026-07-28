@@ -420,10 +420,17 @@ let render_prompt key variables =
   | Error msg -> Error (Printf.sprintf "%s: %s" key msg)
 ;;
 
+let input_for_librarian (inp : Keeper_librarian.input) =
+  { inp with
+    messages =
+      select_recent_messages
+        ~max_messages:(prompt_max_messages ())
+        inp.messages
+  }
+;;
+
 let messages_for_librarian (inp : Keeper_librarian.input) =
-  let input =
-    { inp with messages = select_recent_messages ~max_messages:(prompt_max_messages ()) inp.messages }
-  in
+  let input = input_for_librarian inp in
   match render_prompt Keeper_prompt_names.librarian_system [] with
   | Error _ as e -> e
   | Ok system ->
@@ -794,14 +801,19 @@ let extract_with_exact_output_classified_unlocked
   match clock with
   | None -> Error (Execution_clock_unavailable : extraction_error)
   | Some clock ->
+    let validation_input = input_for_librarian inp in
     let* messages =
-      messages_for_librarian inp
+      messages_for_librarian validation_input
       |> Result.map_error (fun detail -> Prompt_render_failed detail)
     in
     let* attempt = prepare_attempt messages in
     let validate flow_success =
       let output = Exact_output.flow_success_output flow_success in
-      match Keeper_librarian.recognition_output_of_json_result inp output.output with
+      match
+        Keeper_librarian.recognition_output_of_json_result
+          validation_input
+          output.output
+      with
       | Ok recognition -> Exact_output.Accept recognition
       | Error error -> Exact_output.Reject_and_advance error
     in
@@ -920,7 +932,24 @@ let apply_and_persist
     (recognition : Keeper_librarian.recognition_output)
   =
   match recognition.Keeper_librarian.operations with
-  | [] -> Ok Nothing_recognized
+  | [] ->
+    (* A schema-valid zero-op result still carries episode metadata authored
+       for this conversation slice. Persist it without touching facts or the
+       O(store) recognition ledger. *)
+    let now = Unix.gettimeofday () in
+    let episode =
+      Keeper_librarian.episode_of_recognition
+        ~now
+        ~generation
+        inp
+        recognition
+        ~recognized_facts:[]
+        ~source_turns:[]
+    in
+    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
+      Keeper_memory_os_io.append_episode ~keeper_id episode;
+      Keeper_memory_os_io.append_event ~keeper_id episode;
+      Ok (Recognized episode))
   | _ :: _ ->
     (* NDT-OK: application timestamps are provenance/retention metadata only. *)
     let now = Unix.gettimeofday () in
@@ -976,28 +1005,66 @@ let apply_and_persist
                      (function Recognition.Applied -> true | _ -> false)
                      result.Recognition.dispositions
                  then
+                   let publication_id =
+                     Recognition_ledger.publication_id
+                       ~keeper_id
+                       ~trace_id:inp.trace_id
+                       ~generation
+                       ~store_before:inp.store
+                       ~operations:recognition.operations
+                       ~dispositions:result.Recognition.dispositions
+                       ~store_after:result.Recognition.facts
+                   in
                    (match
-                      Recognition_ledger.append
-                        ~masc_root:recognition_masc_root
-                        ~keeper_id
-                        ~trace_id:inp.trace_id
-                        ~generation
-                        ~store_before:inp.store
-                        ~operations:recognition.operations
-                        ~dispositions:result.Recognition.dispositions
-                        ~store_after:result.Recognition.facts
-                        ~now
-                        ()
+                      Recognition_ledger.publish
+                        ~prepare:(fun () ->
+                          Recognition_ledger.append_prepared
+                            ~masc_root:recognition_masc_root
+                            ~publication_id
+                            ~keeper_id
+                            ~trace_id:inp.trace_id
+                            ~generation
+                            ~store_before:inp.store
+                            ~operations:recognition.operations
+                            ~dispositions:result.Recognition.dispositions
+                            ~store_after:result.Recognition.facts
+                            ~now
+                            ())
+                        ~rewrite:(fun () ->
+                          try
+                            Keeper_memory_os_io.rewrite_facts_atomically
+                              ~keeper_id
+                              result.Recognition.facts;
+                            Ok ()
+                          with
+                          | Eio.Cancel.Cancelled _ as exn -> raise exn
+                          | exn -> Error (Printexc.to_string exn))
+                        ~commit:(fun () ->
+                          Recognition_ledger.append_committed
+                            ~masc_root:recognition_masc_root
+                            ~publication_id
+                            ~keeper_id
+                            ~trace_id:inp.trace_id
+                            ~generation
+                            ~now
+                            ())
                     with
-                    | Error detail ->
+                    | Ok () -> Ok result
+                    | Error (Recognition_ledger.Prepare_failed detail) ->
                       Error
                         (Memory_apply_failed
-                           ("recognition evidence write failed: " ^ detail))
-                    | Ok () ->
-                      Keeper_memory_os_io.rewrite_facts_atomically
-                        ~keeper_id
-                        result.Recognition.facts;
-                      Ok result)
+                           ("recognition prepare write failed: " ^ detail))
+                    | Error (Recognition_ledger.Rewrite_failed detail) ->
+                      Error
+                        (Memory_apply_failed
+                           ("recognition fact rewrite failed after prepare: "
+                            ^ detail))
+                    | Error (Recognition_ledger.Commit_failed detail) ->
+                      Error
+                        (Memory_apply_failed
+                           ("recognition commit marker failed; prepared \
+                             publication remains recoverable: "
+                            ^ detail)))
                  else
                    Error
                      (Domain_output_invalid
@@ -1013,11 +1080,26 @@ let apply_and_persist
             inp
             recognition
             ~recognized_facts:result.Recognition.recognized_facts
+            ~source_turns:result.Recognition.applied_source_turns
         in
         Keeper_memory_os_io.append_episode ~keeper_id episode;
         Keeper_memory_os_io.append_event ~keeper_id episode;
         Ok (Recognized episode))
 ;;
+
+let persist_cadence_backoff ~should_defer ~write =
+  if not should_defer
+  then Ok false
+  else
+    match write () with
+    | Ok () -> Ok true
+    | Error detail -> Error detail
+;;
+
+module For_testing = struct
+  let apply_and_persist = apply_and_persist
+  let persist_cadence_backoff = persist_cadence_backoff
+end
 
 let extract_and_append_with_exact_output_classified
     ?clock
@@ -1110,20 +1192,22 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
               written: a discarded write failure would log "deferred" while
               the counter stays due, re-dispatching on the very next turn. *)
            let deferred =
-             should_record_cadence_backoff_after_error err
-             && (match
+             match
+               persist_cadence_backoff
+                 ~should_defer:(should_record_cadence_backoff_after_error err)
+                 ~write:(fun () ->
                    durable_cadence_record_completed_attempt
                      ~base_path
                      ~keeper_id
-                     ~trace_id:inp.trace_id
-                 with
-                 | Ok () -> true
-                 | Error detail ->
-                   Log.Keeper.warn
-                     ~keeper_name:keeper_id
-                     "memory os librarian cadence backoff write failed: %s"
-                     detail;
-                   false)
+                     ~trace_id:inp.trace_id)
+             with
+             | Ok deferred -> deferred
+             | Error detail ->
+               Log.Keeper.warn
+                 ~keeper_name:keeper_id
+                 "memory os librarian cadence backoff write failed: %s"
+                 detail;
+               false
            in
            Log.Keeper.warn
              ~keeper_name:keeper_id

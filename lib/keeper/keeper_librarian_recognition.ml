@@ -16,6 +16,11 @@ type valid_until_update =
   | Clear_valid_until
   | Set_valid_for_days of int
 
+type claim_kind_update =
+  | Keep_claim_kind
+  | Clear_claim_kind
+  | Set_claim_kind of claim_kind
+
 type operation =
   | Add of fact
     (* New knowledge, fully authored by the librarian. *)
@@ -27,15 +32,21 @@ type operation =
        identity; only [last_verified_at] and [reinforcement_count] move. The
        re-observation's provenance ([source_turn]) is persisted in the
        recognition ledger, not on the row. *)
-  | Merge of Consolidation.merge_group
+  | Merge of
+      { group : Consolidation.merge_group
+      ; claim_id : string option
+      ; source_turn : int
+      }
     (* Two or more existing rows state the same knowledge; the librarian wrote
        the consolidated claim. Same structural gates as consolidation. *)
   | Revise of
       { index : int
       ; claim : string
       ; category : category option (* None = keep the row's category *)
-      ; claim_id : string option (* None = keep the row's claim_id *)
+      ; claim_id : string option
+      ; claim_kind_update : claim_kind_update
       ; valid_until_update : valid_until_update
+      ; source_turn : int
       }
     (* The claim at [index] is superseded by a corrected statement. *)
   | Forget of
@@ -86,12 +97,13 @@ type apply_result =
        confirms existing knowledge rather than producing new rows. *)
   ; dispositions : disposition list
     (* Positionally 1:1 with the input operations. *)
+  ; applied_source_turns : int list
   }
 
 let target_indices = function
   | Add _ -> []
   | Reinforce { index; _ } | Revise { index; _ } | Forget { index; _ } -> [ index ]
-  | Merge group -> List.sort_uniq compare group.Consolidation.member_indices
+  | Merge { group; _ } -> List.sort_uniq compare group.Consolidation.member_indices
 ;;
 
 let operations_have_overlapping_targets operations =
@@ -120,6 +132,7 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
     { facts
     ; recognized_facts = []
     ; dispositions = List.map (fun _ -> Rejected_target_overlap) operations
+    ; applied_source_turns = []
     }
   else
   let facts_arr = Array.of_list facts in
@@ -133,14 +146,16 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
   let merged_at = Hashtbl.create 8 in
   let added = ref [] in
   let recognized = ref [] in
+  let applied_source_turns = ref [] in
   let target_free i = in_range i && slot.(i) = `Free in
   let apply_one op =
     match op with
     | Add fact ->
       added := fact :: !added;
       recognized := fact :: !recognized;
+      applied_source_turns := fact.source.turn :: !applied_source_turns;
       Applied
-    | Reinforce { index; source_turn = _ } ->
+    | Reinforce { index; source_turn } ->
       if not (in_range index)
       then Rejected_index_out_of_bounds
       else if List.mem index recalled_reinforcement_indices
@@ -155,8 +170,17 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
            ; reinforcement_count = row.reinforcement_count + 1
            };
         slot.(index) <- `Touched;
+        applied_source_turns := source_turn :: !applied_source_turns;
         Applied)
-    | Revise { index; claim; category; claim_id; valid_until_update } ->
+    | Revise
+        { index
+        ; claim
+        ; category
+        ; claim_id
+        ; claim_kind_update
+        ; valid_until_update
+        ; source_turn
+        } ->
       if not (in_range index)
       then Rejected_index_out_of_bounds
       else if slot.(index) <> `Free
@@ -176,6 +200,11 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
                conclusion's slug would alias two different conclusions under
                one claim identity. *)
             claim_id
+          ; claim_kind =
+              (match claim_kind_update with
+               | Keep_claim_kind -> row.claim_kind
+               | Clear_claim_kind -> None
+               | Set_claim_kind kind -> Some kind)
           ; valid_until =
               (match valid_until_update with
                | Keep_valid_until -> row.valid_until
@@ -188,6 +217,7 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
         facts_arr.(index) <- revised;
         slot.(index) <- `Touched;
         recognized := revised :: !recognized;
+        applied_source_turns := source_turn :: !applied_source_turns;
         Applied)
     | Forget { index; reason = _ } ->
       if not (in_range index)
@@ -197,7 +227,7 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
       else (
         slot.(index) <- `Dropped;
         Applied)
-    | Merge group ->
+    | Merge { group; claim_id; source_turn } ->
       (* A member can only be consumed by a preceding non-overlapping operation
          from a direct caller. The parser rejects overlapping model output,
          while this remains a defensive structural gate for the pure API. *)
@@ -229,11 +259,14 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
                  rest
            in
            let merged =
-             Consolidation.consolidated_fact ~now ~members:member_facts group
+             { (Consolidation.consolidated_fact ~now ~members:member_facts group) with
+               claim_id
+             }
            in
            List.iter (fun i -> slot.(i) <- `Dropped) members;
            Hashtbl.replace merged_at anchor merged;
            recognized := merged :: !recognized;
+           applied_source_turns := source_turn :: !applied_source_turns;
            Applied))
   in
   let dispositions = List.map apply_one operations in
@@ -249,6 +282,7 @@ let apply ?(recalled_reinforcement_indices = []) ~now ~operations facts =
   { facts = !out
   ; recognized_facts = List.rev !recognized
   ; dispositions
+  ; applied_source_turns = List.rev !applied_source_turns
   }
 ;;
 
@@ -262,20 +296,48 @@ let operation_to_json op : Yojson.Safe.t =
     | Add fact -> [ wire_field_fact, fact_to_json fact ]
     | Reinforce { index; source_turn } ->
       [ wire_field_index, `Int index; wire_field_source_turn, `Int source_turn ]
-    | Merge { member_indices; consolidated_claim; category } ->
+    | Merge { group = { member_indices; consolidated_claim; category }; claim_id; source_turn } ->
       [ ( wire_field_member_indices
         , `List (List.map (fun i -> `Int i) member_indices) )
       ; wire_field_claim, `String consolidated_claim
       ; wire_field_category, `String (category_to_string category)
       ]
-    | Revise { index; claim; category; claim_id; valid_until_update } ->
-      [ wire_field_index, `Int index; wire_field_claim, `String claim ]
+      @ [ ( wire_field_claim_id
+          , match claim_id with Some id -> `String id | None -> `Null )
+        ; wire_field_source_turn, `Int source_turn
+        ]
+    | Revise
+        { index
+        ; claim
+        ; category
+        ; claim_id
+        ; claim_kind_update
+        ; valid_until_update
+        ; source_turn
+        } ->
+      [ wire_field_index, `Int index
+      ; wire_field_claim, `String claim
+      ; wire_field_source_turn, `Int source_turn
+      ]
       @ (match category with
          | Some c -> [ wire_field_category, `String (category_to_string c) ]
          | None -> [])
       @ (match claim_id with
          | Some id -> [ wire_field_claim_id, `String id ]
-         | None -> [])
+         | None -> [ wire_field_claim_id, `Null ])
+      @ (match claim_kind_update with
+         | Keep_claim_kind ->
+           [ wire_field_claim_kind_update, `String "keep"
+           ; wire_field_claim_kind, `Null
+           ]
+         | Clear_claim_kind ->
+           [ wire_field_claim_kind_update, `String "clear"
+           ; wire_field_claim_kind, `Null
+           ]
+         | Set_claim_kind kind ->
+           [ wire_field_claim_kind_update, `String "set"
+           ; wire_field_claim_kind, `String (claim_kind_to_string kind)
+           ])
       @ (match valid_until_update with
          | Keep_valid_until -> []
          | Clear_valid_until -> [ wire_field_valid_for_days, `Null ]

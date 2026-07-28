@@ -66,6 +66,7 @@ val wire_field_index : string
 val wire_field_member_indices : string
 val wire_field_reason : string
 val wire_field_reinforcement_count : string
+val wire_field_claim_kind_update : string
 val wire_op_add : string
 val wire_op_reinforce : string
 val wire_op_merge : string

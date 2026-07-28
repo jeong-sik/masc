@@ -27,6 +27,8 @@ let nullable_enum_schema values =
     ]
 ;;
 
+let claim_kind_update_tokens = [ "keep"; "clear"; "set" ]
+
 let object_schema ~required properties =
   `Assoc
     [ "type", `String "object"
@@ -92,6 +94,9 @@ let librarian_operation_schema =
     ; Keeper_librarian.wire_field_claim, nullable_string_schema
     ; Keeper_librarian.wire_field_category, nullable_enum_schema category_tokens
     ; Keeper_librarian.wire_field_claim_id, nullable_string_schema
+    ; Keeper_librarian.wire_field_claim_kind, nullable_enum_schema librarian_claim_kind_tokens
+    ; Keeper_librarian.wire_field_claim_kind_update
+      , nullable_enum_schema claim_kind_update_tokens
     ; Keeper_librarian.wire_field_valid_for_days, nullable_integer_schema
     ; Keeper_librarian.wire_field_source_turn, nullable_integer_schema
     ; Keeper_librarian.wire_field_reason, nullable_string_schema

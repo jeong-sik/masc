@@ -42,6 +42,9 @@ val output_rejection_reason_to_string : output_rejection_reason -> string
     the recognition write contract shows the librarian (masc#26122). *)
 val render_numbered_facts : fact list -> string
 
+(** Render facts with caller-supplied stable snapshot indices. *)
+val render_indexed_facts : (int * fact) list -> string
+
 (** Structural merge gates shared with the recognition write contract
     (masc#26122): a merged row has one [claim_kind] / [valid_until] slot, so a
     group mixing explicit values cannot be represented without losing

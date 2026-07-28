@@ -13,6 +13,7 @@
 open Alcotest
 module Recognition = Masc.Keeper_librarian_recognition
 module Consolidation = Masc.Keeper_memory_os_consolidation
+module Ledger = Masc.Keeper_librarian_recognition_ledger
 module Types = Masc.Keeper_memory_os_types
 
 let now = 2_000_000.0
@@ -38,6 +39,10 @@ let fact ?(claim = "c") ?(category = Types.Fact) ?claim_kind ?claim_id
 let claims facts = List.map (fun (f : Types.fact) -> f.Types.claim) facts
 
 let apply operations facts = Recognition.apply ~now ~operations facts
+
+let merge ?claim_id ?(source_turn = 9) group =
+  Recognition.Merge { group; claim_id; source_turn }
+;;
 
 let test_reinforce_updates_in_place () =
   let store = [ fact ~claim:"a" (); fact ~claim:"b" ~reinforcement_count:2 () ] in
@@ -71,7 +76,7 @@ let test_merge_collapses_rows () =
   in
   let result =
     apply
-      [ Recognition.Merge
+      [ merge
           { Consolidation.member_indices = [ 0; 2 ]
           ; consolidated_claim = "one merged claim"
           ; category = Types.Lesson
@@ -101,7 +106,9 @@ let test_revise_rewrites_in_place () =
           ; claim = "new conclusion"
           ; category = None
           ; claim_id = Some "new-slug"
+          ; claim_kind_update = Recognition.Keep_claim_kind
           ; valid_until_update = Recognition.Set_valid_for_days 7
+          ; source_turn = 9
           }
       ]
       store
@@ -127,7 +134,9 @@ let test_revise_null_semantics_clear_expiry () =
           ; claim = "durable revision"
           ; category = None
           ; claim_id = None
+          ; claim_kind_update = Recognition.Keep_claim_kind
           ; valid_until_update = Recognition.Clear_valid_until
+          ; source_turn = 9
           }
       ]
       store
@@ -148,7 +157,9 @@ let test_revise_null_claim_id_clears_stale_slug () =
           ; claim = "corrected conclusion"
           ; category = None
           ; claim_id = None
+          ; claim_kind_update = Recognition.Keep_claim_kind
           ; valid_until_update = Recognition.Keep_valid_until
+          ; source_turn = 9
           }
       ]
       store
@@ -156,6 +167,129 @@ let test_revise_null_claim_id_clears_stale_slug () =
   let revised = List.hd result.Recognition.facts in
   check (option string) "stale slug does not survive the revision" None
     revised.Types.claim_id
+;;
+
+let test_revise_claim_kind_tri_state () =
+  let base = fact ~claim_kind:Types.External_state () in
+  let revise claim_kind_update =
+    apply
+      [ Recognition.Revise
+          { index = 0
+          ; claim = "corrected"
+          ; category = None
+          ; claim_id = None
+          ; claim_kind_update
+          ; valid_until_update = Recognition.Keep_valid_until
+          ; source_turn = 17
+          }
+      ]
+      [ base ]
+    |> fun result -> List.hd result.Recognition.facts
+  in
+  check (option string) "absent preserves kind"
+    (Some "external_state")
+    (Option.map Types.claim_kind_to_string
+       (revise Recognition.Keep_claim_kind).Types.claim_kind);
+  check (option string) "null clears kind" None
+    (Option.map Types.claim_kind_to_string
+       (revise Recognition.Clear_claim_kind).Types.claim_kind);
+  check (option string) "value replaces kind"
+    (Some "durable_knowledge")
+    (Option.map Types.claim_kind_to_string
+       (revise (Recognition.Set_claim_kind Types.Durable_knowledge)).Types.claim_kind)
+;;
+
+let test_merge_uses_authored_claim_id_and_current_turn () =
+  let result =
+    apply
+      [ merge
+          ~claim_id:"merged-conclusion"
+          ~source_turn:42
+          { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "merged"
+          ; category = Types.Lesson
+          }
+      ]
+      [ fact ~claim_id:"historical-a" (); fact ~claim_id:"historical-b" () ]
+  in
+  let merged = List.hd result.Recognition.facts in
+  check (option string) "merge stores the authored conclusion id"
+    (Some "merged-conclusion")
+    merged.Types.claim_id;
+  check (list int) "episode provenance uses the current operation turn"
+    [ 42 ]
+    result.Recognition.applied_source_turns
+;;
+
+let test_rewrite_failure_never_commits_publication () =
+  let prepared = ref false
+  and rewritten = ref false
+  and committed = ref false in
+  match
+    Ledger.publish
+      ~prepare:(fun () ->
+        prepared := true;
+        Ok ())
+      ~rewrite:(fun () ->
+        rewritten := true;
+        Error "injected rewrite failure")
+      ~commit:(fun () ->
+        committed := true;
+        Ok ())
+  with
+  | Error (Ledger.Rewrite_failed "injected rewrite failure") ->
+    check bool "prepare is durable first" true !prepared;
+    check bool "rewrite was attempted" true !rewritten;
+    check bool "failed rewrite has no committed marker" false !committed
+  | Error _ -> fail "unexpected publication failure"
+  | Ok () -> fail "injected rewrite failure unexpectedly committed"
+;;
+
+let test_publication_rows_distinguish_prepared_from_committed () =
+  let before = [ fact ~claim:"before" () ] in
+  let operation = Recognition.Add (fact ~claim:"after" ()) in
+  let applied = apply [ operation ] before in
+  let publication_id =
+    Ledger.publication_id
+      ~keeper_id:"keeper-a"
+      ~trace_id:"trace-current"
+      ~generation:7
+      ~store_before:before
+      ~operations:[ operation ]
+      ~dispositions:applied.Recognition.dispositions
+      ~store_after:applied.Recognition.facts
+  in
+  let state = function
+    | `Assoc fields ->
+      (match List.assoc_opt "publication_state" fields with
+       | Some (`String value) -> value
+       | _ -> fail "publication_state missing")
+    | _ -> fail "publication row must be an object"
+  in
+  let prepared =
+    Ledger.prepared_to_json
+      ~publication_id
+      ~keeper_id:"keeper-a"
+      ~trace_id:"trace-current"
+      ~generation:7
+      ~store_before:before
+      ~operations:[ operation ]
+      ~dispositions:applied.Recognition.dispositions
+      ~store_after:applied.Recognition.facts
+      ~now
+      ()
+  in
+  let committed =
+    Ledger.committed_to_json
+      ~publication_id
+      ~keeper_id:"keeper-a"
+      ~trace_id:"trace-current"
+      ~generation:7
+      ~now
+      ()
+  in
+  check string "pre-rewrite evidence is not published" "prepared" (state prepared);
+  check string "post-rewrite marker is explicit" "committed" (state committed)
 ;;
 
 let test_recalled_reinforcement_is_rejected_by_provenance () =
@@ -220,7 +354,7 @@ let test_merge_kind_mismatch_rejected () =
   in
   let result =
     apply
-      [ Recognition.Merge
+      [ merge
           { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "m"
           ; category = Types.Fact
@@ -240,7 +374,7 @@ let test_merge_valid_until_mismatch_rejected () =
   in
   let result =
     apply
-      [ Recognition.Merge
+      [ merge
           { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "m"
           ; category = Types.Fact
@@ -259,7 +393,7 @@ let test_merge_with_consumed_member_rejects_entirely () =
   let result =
     apply
       [ Recognition.Forget { index = 0; reason = "r" }
-      ; Recognition.Merge
+      ; merge
           { Consolidation.member_indices = [ 0; 1 ]
           ; consolidated_claim = "m"
           ; category = Types.Fact
@@ -283,7 +417,7 @@ let test_merge_never_shrinks_to_free_subset () =
   let result =
     apply
       [ Recognition.Reinforce { index = 1; source_turn = 2 }
-      ; Recognition.Merge
+      ; merge
           { Consolidation.member_indices = [ 0; 1; 2 ]
           ; consolidated_claim = "m"
           ; category = Types.Fact
@@ -302,7 +436,7 @@ let test_merge_out_of_range_member_rejects_entirely () =
   let store = [ fact ~claim:"a" (); fact ~claim:"b" () ] in
   let result =
     apply
-      [ Recognition.Merge
+      [ merge
           { Consolidation.member_indices = [ 0; 1; 9 ]
           ; consolidated_claim = "m"
           ; category = Types.Fact
@@ -331,7 +465,7 @@ let test_mixed_pass_shrinks_store () =
   let result =
     apply
       [ Recognition.Reinforce { index = 0; source_turn = 3 }
-      ; Recognition.Merge
+      ; merge
           { Consolidation.member_indices = [ 1; 3 ]
           ; consolidated_claim = "the deduplicated lesson"
           ; category = Types.Lesson
@@ -375,6 +509,14 @@ let () =
             test_revise_null_semantics_clear_expiry;
           test_case "revise null claim_id clears the stale slug" `Quick
             test_revise_null_claim_id_clears_stale_slug;
+          test_case "revise claim_kind is tri-state" `Quick
+            test_revise_claim_kind_tri_state;
+          test_case "merge keeps authored claim_id and current provenance" `Quick
+            test_merge_uses_authored_claim_id_and_current_turn;
+          test_case "rewrite failure never commits publication" `Quick
+            test_rewrite_failure_never_commits_publication;
+          test_case "publication rows distinguish prepared and committed" `Quick
+            test_publication_rows_distinguish_prepared_from_committed;
           test_case "recalled reinforcement is rejected by provenance" `Quick
             test_recalled_reinforcement_is_rejected_by_provenance;
           test_case "add appends" `Quick test_add_appends;

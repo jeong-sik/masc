@@ -25,9 +25,42 @@ let field_operations = "operations"
 let field_dispositions = "dispositions"
 let field_n_before = "n_before"
 let field_n_after = "n_after"
-let ledger_schema_version = 1
+let field_publication_id = "publication_id"
+let field_publication_state = "publication_state"
+let ledger_schema_version = 2
 
-let to_json
+let publication_id
+      ~keeper_id
+      ~trace_id
+      ~generation
+      ~store_before
+      ~operations
+      ~dispositions
+      ~store_after
+  =
+  `Assoc
+    [ field_keeper_id, `String keeper_id
+    ; field_trace_id, `String trace_id
+    ; field_generation, `Int generation
+    ; field_store_before, `List (List.map fact_to_json store_before)
+    ; field_operations
+      , `List (List.map Keeper_librarian_recognition.operation_to_json operations)
+    ; field_dispositions
+      , `List
+          (List.map
+             (fun disposition ->
+                `String
+                  (Keeper_librarian_recognition.disposition_label disposition))
+             dispositions)
+    ; field_store_after, `List (List.map fact_to_json store_after)
+    ]
+  |> Yojson.Safe.to_string
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
+let prepared_to_json
+      ~publication_id
       ~keeper_id
       ~trace_id
       ~generation
@@ -41,6 +74,8 @@ let to_json
   =
   `Assoc
     [ field_schema_version, `Int ledger_schema_version
+    ; field_publication_id, `String publication_id
+    ; field_publication_state, `String "prepared"
     ; field_keeper_id, `String keeper_id
     ; field_trace_id, `String trace_id
     ; field_generation, `Int generation
@@ -60,10 +95,39 @@ let to_json
     ]
 ;;
 
+let committed_to_json
+      ~publication_id
+      ~keeper_id
+      ~trace_id
+      ~generation
+      ~now
+      ()
+  =
+  `Assoc
+    [ field_schema_version, `Int ledger_schema_version
+    ; field_publication_id, `String publication_id
+    ; field_publication_state, `String "committed"
+    ; field_keeper_id, `String keeper_id
+    ; field_trace_id, `String trace_id
+    ; field_generation, `Int generation
+    ; field_ts, `Float now
+    ]
+;;
+
 let make_store ~masc_root () = Dated_jsonl.create ~base_dir:(base_dir ~masc_root) ()
 
-let append
+let append_json ~masc_root entry =
+  try
+    Dated_jsonl.append (make_store ~masc_root ()) entry;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let append_prepared
       ~masc_root
+      ~publication_id
       ~keeper_id
       ~trace_id
       ~generation
@@ -75,7 +139,8 @@ let append
       ()
   =
   let entry =
-    to_json
+    prepared_to_json
+      ~publication_id
       ~keeper_id
       ~trace_id
       ~generation
@@ -86,13 +151,43 @@ let append
       ~now
       ()
   in
-  try
-    Dated_jsonl.append (make_store ~masc_root ()) entry;
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Error (Printexc.to_string exn)
+  append_json ~masc_root entry
+;;
+
+let append_committed
+      ~masc_root
+      ~publication_id
+      ~keeper_id
+      ~trace_id
+      ~generation
+      ~now
+      ()
+  =
+  committed_to_json
+    ~publication_id
+    ~keeper_id
+    ~trace_id
+    ~generation
+    ~now
+    ()
+  |> append_json ~masc_root
+;;
+
+type publication_failure =
+  | Prepare_failed of string
+  | Rewrite_failed of string
+  | Commit_failed of string
+
+let publish ~prepare ~rewrite ~commit =
+  match prepare () with
+  | Error detail -> Error (Prepare_failed detail)
+  | Ok () ->
+    (match rewrite () with
+     | Error detail -> Error (Rewrite_failed detail)
+     | Ok () ->
+       (match commit () with
+        | Error detail -> Error (Commit_failed detail)
+        | Ok () -> Ok ()))
 ;;
 
 let prune_older_than ~masc_root ~retention_days =

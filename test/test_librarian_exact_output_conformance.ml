@@ -507,7 +507,8 @@ let test_missing_clock_fails_before_dispatch () =
 (* masc#26122: storage is recognition, so the fact store is now read (for the
    recognition-prompt snapshot) BEFORE any provider dispatch, and re-read
    under the facts lock for the CAS check in [apply_and_persist] — both
-   through [Keeper_memory_os_io.read_facts_all_strict]. That function does
+   through [Keeper_memory_os_io.read_facts_all_strict_offloaded]. The strict
+   reader under that offload does
    not catch [Sys_error]; it only returns a typed [Error] for a malformed
    JSONL line ([parse_fact_json_line_strict]). Shadowing the facts file with
    a directory (the old write-failure trick) now raises an uncaught

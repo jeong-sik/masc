@@ -10,6 +10,7 @@ open Alcotest
 module R = Masc.Keeper_librarian_runtime
 module Lib = Masc.Keeper_librarian
 module Recognition = Masc.Keeper_librarian_recognition
+module Types = Masc.Keeper_memory_os_types
 
 let field_episode_summary = Lib.wire_field_episode_summary
 let field_operations = Lib.wire_field_operations
@@ -264,15 +265,79 @@ let test_durable_cadence_survives_a_fresh_read () =
         | Ok true -> ()
         | Ok false ->
           Alcotest.fail "a new trace should be due immediately, not inherit"
-        | Error detail -> Alcotest.fail detail))
+       | Error detail -> Alcotest.fail detail))
+
+let test_failed_cadence_backoff_write_is_surfaced () =
+  match
+    R.For_testing.persist_cadence_backoff
+      ~should_defer:true
+      ~write:(fun () -> Error "injected cadence write failure")
+  with
+  | Error "injected cadence write failure" -> ()
+  | Error detail -> failf "unexpected cadence write error: %s" detail
+  | Ok deferred ->
+    failf
+      "failed cadence write was reported as deferred=%b"
+      deferred
+;;
 
 (* Strict parsing with bounded compatibility for real-world librarian provider
    drift. We accept exact JSON and exact JSON-string wrapping only. Markdown
    fences, prose-wrapped JSON, and embedded JSON must fall into the diagnostic
    fallback path instead of being accepted as a structured recognition output. *)
 
+let stored_fact index : Types.fact =
+  { claim = Printf.sprintf "stored-%d" index
+  ; category = Types.Fact
+  ; claim_kind = None
+  ; source = { trace_id = "historical"; turn = index; tool_call_id = None }
+  ; observed_by = []
+  ; first_seen = Float.of_int index
+  ; valid_until = None
+  ; last_verified_at = None
+  ; schema_version = Types.schema_version
+  ; claim_id = None
+  ; reinforcement_count = 0
+  }
+;;
+
 let input ~trace_id : Lib.input =
-  { trace_id; generation = 0; messages = []; store = [] }
+  { trace_id
+  ; generation = 0
+  ; messages =
+      [ { Agent_sdk.Types.role = Agent_sdk.Types.User
+        ; content = [ Agent_sdk.Types.Text "current conversation" ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      ; { Agent_sdk.Types.role = Agent_sdk.Types.Assistant
+        ; content = [ Agent_sdk.Types.Text "current response" ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      ; { Agent_sdk.Types.role = Agent_sdk.Types.User
+        ; content = [ Agent_sdk.Types.Text "follow-up" ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      ; { Agent_sdk.Types.role = Agent_sdk.Types.Assistant
+        ; content = [ Agent_sdk.Types.Text "decision" ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      ; { Agent_sdk.Types.role = Agent_sdk.Types.User
+        ; content = [ Agent_sdk.Types.Text "final" ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      ]
+  ; store = List.init 5 stored_fact
+  }
 ;;
 
 let parse_out raw =
@@ -421,11 +486,13 @@ let test_parses_all_operation_shapes () =
             ; Lib.wire_field_member_indices, `List [ `Int 1; `Int 2 ]
             ; field_claim, `String "merged claim"
             ; field_category, `String "lesson"
+            ; field_source_turn, `Int 4
             ]
         ; `Assoc
             [ field_op, `String "revise"
             ; field_index, `Int 3
             ; field_claim, `String "revised claim"
+            ; field_source_turn, `Int 4
             ]
         ; `Assoc
             [ field_op, `String "forget"
@@ -453,6 +520,7 @@ let test_revise_null_clears_expiry_instead_of_preserving_it () =
             ; field_index, `Int 0
             ; field_claim, `String "durable correction"
             ; field_valid_for_days, `Null
+            ; field_source_turn, `Int 4
             ]
         ]
       ()
@@ -474,6 +542,7 @@ let test_rejects_single_member_merge () =
              ; Lib.wire_field_member_indices, `List [ `Int 1 ]
              ; field_claim, `String "m"
              ; field_category, `String "fact"
+             ; field_source_turn, `Int 4
              ]
          ]
        ())
@@ -492,9 +561,105 @@ let test_rejects_duplicate_member_merge () =
              ; Lib.wire_field_member_indices, `List [ `Int 3; `Int 3 ]
              ; field_claim, `String "m"
              ; field_category, `String "fact"
+             ; field_source_turn, `Int 4
              ]
          ]
        ())
+;;
+
+let test_rejects_indices_outside_visible_snapshot () =
+  let out_of_range = 5 in
+  List.iter
+    (fun operation ->
+       rejects
+         "operation index outside the visible snapshot"
+         (output_json_string ~operations:[ operation ] ()))
+    [ `Assoc
+        [ field_op, `String "reinforce"
+        ; field_index, `Int out_of_range
+        ; field_source_turn, `Int 4
+        ]
+    ; `Assoc
+        [ field_op, `String "revise"
+        ; field_index, `Int out_of_range
+        ; field_claim, `String "corrected"
+        ; field_source_turn, `Int 4
+        ]
+    ; `Assoc
+        [ field_op, `String "forget"
+        ; field_index, `Int out_of_range
+        ; field_reason, `String "superseded"
+        ]
+    ; `Assoc
+        [ field_op, `String "merge"
+        ; Lib.wire_field_member_indices, `List [ `Int 0; `Int out_of_range ]
+        ; field_claim, `String "merged"
+        ; field_category, `String "fact"
+        ; field_source_turn, `Int 4
+        ]
+    ]
+;;
+
+let test_rejects_reinforce_turn_outside_conversation_slice () =
+  rejects
+    "reinforce source_turn outside conversation slice"
+    (output_json_string
+       ~operations:
+         [ `Assoc
+             [ field_op, `String "reinforce"
+             ; field_index, `Int 0
+             ; field_source_turn, `Int 5
+             ]
+         ]
+       ())
+;;
+
+let test_revise_claim_kind_tri_state_parses () =
+  let parse_kind field =
+    output_json_string
+      ~operations:
+        [ `Assoc
+            ([ field_op, `String "revise"
+             ; field_index, `Int 0
+             ; field_claim, `String "corrected"
+             ; field_source_turn, `Int 4
+             ]
+             @ field)
+        ]
+      ()
+    |> parse_out
+  in
+  let expected =
+    [ ( [ Lib.wire_field_claim_kind_update, `String "keep"
+        ; Lib.wire_field_claim_kind, `Null
+        ]
+      , function Recognition.Keep_claim_kind -> true | _ -> false )
+    ; ( [ Lib.wire_field_claim_kind_update, `String "clear"
+        ; Lib.wire_field_claim_kind, `Null
+        ]
+      , function Recognition.Clear_claim_kind -> true | _ -> false )
+    ; ( [ Lib.wire_field_claim_kind_update, `String "set"
+        ; Lib.wire_field_claim_kind, `String "durable_knowledge"
+        ]
+      , function
+        | Recognition.Set_claim_kind Types.Durable_knowledge -> true
+        | _ -> false )
+    ]
+  in
+  List.iter
+    (fun (field, matches) ->
+       match parse_kind field with
+       | Ok
+           { Lib.operations =
+               [ Recognition.Revise { claim_kind_update; _ } ]
+           ; _
+           } when matches claim_kind_update -> ()
+       | Ok _ -> fail "claim_kind update lost its tri-state meaning"
+       | Error error ->
+         failf
+           "valid revise claim_kind was rejected: %s"
+           (Lib.parse_error_to_string error))
+    expected
 ;;
 
 let test_rejects_non_string_revise_category () =
@@ -509,6 +674,7 @@ let test_rejects_non_string_revise_category () =
              ; field_index, `Int 0
              ; field_claim, `String "corrected"
              ; field_category, `Int 3
+             ; field_source_turn, `Int 4
              ]
          ]
        ())
@@ -524,6 +690,7 @@ let test_rejects_blank_revise_category () =
              ; field_index, `Int 0
              ; field_claim, `String "corrected"
              ; field_category, `String "  "
+             ; field_source_turn, `Int 4
              ]
          ]
        ())
@@ -626,6 +793,8 @@ let () =
           test_case "cadence_step_keyed rollover decision" `Quick test_cadence_step_keyed;
           test_case "durable cadence survives a fresh read" `Quick
             test_durable_cadence_survives_a_fresh_read;
+          test_case "failed cadence backoff write is surfaced" `Quick
+            test_failed_cadence_backoff_write_is_surfaced;
         ] );
       ( "strict_parsing",
         [
@@ -644,6 +813,12 @@ let () =
           test_case "rejects single-member merge" `Quick test_rejects_single_member_merge;
           test_case "rejects duplicate-member merge" `Quick
             test_rejects_duplicate_member_merge;
+          test_case "rejects indices outside visible snapshot" `Quick
+            test_rejects_indices_outside_visible_snapshot;
+          test_case "rejects reinforce turn outside conversation slice" `Quick
+            test_rejects_reinforce_turn_outside_conversation_slice;
+          test_case "revise claim_kind parses as tri-state" `Quick
+            test_revise_claim_kind_tri_state_parses;
           test_case "rejects non-string revise category" `Quick
             test_rejects_non_string_revise_category;
           test_case "rejects blank revise category" `Quick

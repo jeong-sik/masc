@@ -72,9 +72,9 @@ let one_line_claim claim =
    external_state/untagged/self_observation, every natural merge group mixed
    them, and consolidation ran for weeks with before = after. Deterministic
    annotation only — the merge judgement stays with the LLM. *)
-let render_numbered_facts facts =
-  facts
-  |> List.mapi (fun i (f : fact) ->
+let render_indexed_facts indexed_facts =
+  indexed_facts
+  |> List.map (fun (i, (f : fact)) ->
     let kind =
       match f.claim_kind with
       | Some kind -> claim_kind_to_string kind
@@ -93,6 +93,12 @@ let render_numbered_facts facts =
       until
       (one_line_claim f.claim))
   |> String.concat "\n"
+;;
+
+let render_numbered_facts facts =
+  facts
+  |> List.mapi (fun index fact -> index, fact)
+  |> render_indexed_facts
 ;;
 
 (* A merged row has one [claim_kind] slot, so members with different explicit

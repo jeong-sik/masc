@@ -35,6 +35,7 @@ let wire_field_source_turn = Keeper_memory_os_types.wire_field_source_turn
 let wire_field_source_tool_call_id = Keeper_memory_os_types.wire_field_source_tool_call_id
 let wire_field_claim_id = Keeper_memory_os_types.wire_field_claim_id
 let wire_field_claim_kind = Keeper_memory_os_types.wire_field_claim_kind
+let wire_field_claim_kind_update = Keeper_memory_os_types.wire_field_claim_kind_update
 let wire_field_valid_for_days = Keeper_memory_os_types.wire_field_valid_for_days
 let wire_field_schema_version = Keeper_memory_os_types.wire_field_schema_version
 let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
@@ -111,16 +112,57 @@ let format_messages_for_prompt messages =
     |> String.concat "\n\n---\n\n"
 ;;
 
-let format_store_for_prompt store =
-  match store with
+let store_prompt_max_bytes = 32 * 1024
+
+let bounded_store_page (inp : input) =
+  let indexed = List.mapi (fun index fact -> index, fact) inp.store in
+  match indexed with
+  | [] -> []
+  | _ :: _ ->
+    let count = List.length indexed in
+    let start = inp.generation mod count in
+    let before, after =
+      List.partition (fun (index, _) -> index < start) indexed
+    in
+    let rec select remaining selected = function
+      | [] -> List.rev selected
+      | ((_, _) as indexed_fact) :: rest ->
+        let line =
+          Keeper_memory_os_consolidation.render_indexed_facts [ indexed_fact ]
+        in
+        let bytes = String.length line + 1 in
+        if bytes <= remaining
+        then select (remaining - bytes) (indexed_fact :: selected) rest
+        else select remaining selected rest
+    in
+    select store_prompt_max_bytes [] (after @ before)
+;;
+
+let visible_store_indices inp =
+  bounded_store_page inp |> List.map fst
+;;
+
+let format_store_for_prompt inp =
+  match inp.store with
   | [] -> "[no stored facts]"
-  | _ :: _ -> Keeper_memory_os_consolidation.render_numbered_facts store
+  | _ :: _ ->
+    let page = bounded_store_page inp in
+    let header =
+      Printf.sprintf
+        "[bounded fact page: visible=%d total=%d; indices are stable snapshot indices]"
+        (List.length page)
+        (List.length inp.store)
+    in
+    let rendered =
+      Keeper_memory_os_consolidation.render_indexed_facts page
+    in
+    if String.equal rendered "" then header else header ^ "\n" ^ rendered
 ;;
 
 let prompt_variables (inp : input) : (string * string) list =
   [ ( "conversation_history"
     , inp.messages |> format_messages_for_prompt )
-  ; "current_store", format_store_for_prompt inp.store
+  ; "current_store", format_store_for_prompt inp
   ]
 ;;
 
@@ -279,6 +321,23 @@ let revise_valid_until_update_field fields =
   | Some _ -> None
 ;;
 
+let revise_claim_kind_update_field fields =
+  match
+    ( List.assoc_opt wire_field_claim_kind_update fields
+    , List.assoc_opt wire_field_claim_kind fields )
+  with
+  | None, None -> Some Recognition.Keep_claim_kind
+  | Some (`String "keep"), (None | Some `Null) ->
+    Some Recognition.Keep_claim_kind
+  | Some (`String "clear"), Some `Null ->
+    Some Recognition.Clear_claim_kind
+  | Some (`String "set"), Some (`String raw) ->
+    Option.map
+      (fun kind -> Recognition.Set_claim_kind kind)
+      (claim_kind_of_string raw)
+  | _ -> None
+;;
+
 let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   match json with
   | `Assoc fields ->
@@ -332,13 +391,12 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let source_turn_range claims =
-  match claims with
+let source_turn_range turns =
+  match turns with
   | [] -> None
   | first :: rest ->
-    let init = first.source.turn in
-    let lo = List.fold_left (fun acc claim -> min acc claim.source.turn) init rest in
-    let hi = List.fold_left (fun acc claim -> max acc claim.source.turn) init rest in
+    let lo = List.fold_left min first rest in
+    let hi = List.fold_left max first rest in
     Some (lo, hi)
 ;;
 
@@ -370,26 +428,35 @@ let operation_mismatch op detail =
   Error (Operation_schema_mismatch (op ^ ": " ^ detail))
 ;;
 
-let index_field fields =
+let index_field ~visible_indices fields =
   match int_field wire_field_index fields with
-  | Some i when i >= 0 -> Some i
+  | Some i when List.mem i visible_indices -> Some i
   | Some _ | None -> None
 ;;
 
-let member_indices_field fields =
+let member_indices_field ~visible_indices fields =
   match List.assoc_opt wire_field_member_indices fields with
   | Some (`List items) ->
     traverse (function
-      | `Int i when i >= 0 -> Some i
+      | `Int i when List.mem i visible_indices -> Some i
       | _ -> None)
       items
   | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
   | None -> None
 ;;
 
-let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
+let operation_of_json
+      ~trace_id
+      ~now
+      ~visible_indices
+      ~message_count
+      (json : Yojson.Safe.t)
+  :
   (Recognition.operation, parse_error) result
   =
+  let valid_source_turn source_turn =
+    source_turn >= 0 && source_turn < message_count
+  in
   match json with
   | `Assoc fields ->
     (match first_unexpected_field ~allowed:wire_operation_fields fields with
@@ -418,36 +485,58 @@ let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
            with
            | Some field -> operation_mismatch op ("foreign field " ^ field)
            | None ->
-             (match index_field fields, int_field wire_field_source_turn fields with
-              | Some index, Some source_turn when source_turn >= 0 ->
+             (match
+                index_field ~visible_indices fields
+                , int_field wire_field_source_turn fields
+              with
+              | Some index, Some source_turn when valid_source_turn source_turn ->
                 Ok (Recognition.Reinforce { index; source_turn })
-              | _ -> operation_mismatch op "requires index and source_turn"))
+              | _ ->
+                operation_mismatch
+                  op
+                  "requires a visible index and source_turn within the conversation slice"))
         | Some op when String.equal op Keeper_memory_os_types.wire_op_merge ->
           (match
              first_foreign_non_null_field
                ~relevant:
-                 [ wire_field_member_indices; wire_field_claim; wire_field_category ]
+                 [ wire_field_member_indices
+                 ; wire_field_claim
+                 ; wire_field_category
+                 ; wire_field_claim_id
+                 ; wire_field_source_turn
+                 ]
                fields
            with
            | Some field -> operation_mismatch op ("foreign field " ^ field)
            | None ->
              (match
-                ( member_indices_field fields
+                ( member_indices_field ~visible_indices fields
                 , string_field wire_field_claim fields
-                , string_field wire_field_category fields )
+                , string_field wire_field_category fields
+                , claim_id_field fields
+                , int_field wire_field_source_turn fields )
               with
-              | Some (_ :: _ :: _ as member_indices), Some claim, Some category
-                when List.length (List.sort_uniq Int.compare member_indices) >= 2 ->
+              | ( Some (_ :: _ :: _ as member_indices)
+                , Some claim
+                , Some category
+                , Some claim_id
+                , Some source_turn )
+                when List.length (List.sort_uniq Int.compare member_indices) >= 2
+                     && valid_source_turn source_turn ->
                 Ok
                   (Recognition.Merge
-                     { member_indices
-                     ; consolidated_claim = claim
-                     ; category = category_of_string category
+                     { group =
+                         { member_indices
+                         ; consolidated_claim = claim
+                         ; category = category_of_string category
+                         }
+                     ; claim_id
+                     ; source_turn
                      })
               | _ ->
                 operation_mismatch
                   op
-                  "requires member_indices (>= 2 distinct), claim, and category"))
+                  "requires visible member_indices (>= 2 distinct), claim, category, and source_turn"))
         | Some op when String.equal op Keeper_memory_os_types.wire_op_revise ->
           (match
              first_foreign_non_null_field
@@ -456,29 +545,46 @@ let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
                  ; wire_field_claim
                  ; wire_field_category
                  ; wire_field_claim_id
+                 ; wire_field_claim_kind
+                 ; wire_field_claim_kind_update
                  ; wire_field_valid_for_days
+                 ; wire_field_source_turn
                  ]
                fields
            with
            | Some field -> operation_mismatch op ("foreign field " ^ field)
            | None ->
              (match
-                ( index_field fields
+                ( index_field ~visible_indices fields
                 , string_field wire_field_claim fields
                 , revise_category_field fields
                 , claim_id_field fields
-                , revise_valid_until_update_field fields )
+                , revise_claim_kind_update_field fields
+                , revise_valid_until_update_field fields
+                , int_field wire_field_source_turn fields )
               with
-              | Some index, Some claim, Some category, Some claim_id, Some valid_until_update ->
+              | ( Some index
+                , Some claim
+                , Some category
+                , Some claim_id
+                , Some claim_kind_update
+                , Some valid_until_update
+                , Some source_turn )
+                when valid_source_turn source_turn ->
                 Ok
                   (Recognition.Revise
                      { index
                      ; claim
                      ; category = Option.map category_of_string category
                      ; claim_id
+                     ; claim_kind_update
                      ; valid_until_update
+                     ; source_turn
                      })
-              | _ -> operation_mismatch op "requires index and claim"))
+              | _ ->
+                operation_mismatch
+                  op
+                  "requires a visible index, claim, and source_turn"))
         | Some op when String.equal op Keeper_memory_os_types.wire_op_forget ->
           (match
              first_foreign_non_null_field
@@ -487,7 +593,10 @@ let operation_of_json ~trace_id ~now (json : Yojson.Safe.t) :
            with
            | Some field -> operation_mismatch op ("foreign field " ^ field)
            | None ->
-             (match index_field fields, string_field wire_field_reason fields with
+             (match
+                index_field ~visible_indices fields
+                , string_field wire_field_reason fields
+              with
               | Some index, Some reason -> Ok (Recognition.Forget { index; reason })
               | _ -> operation_mismatch op "requires index and reason"))
         | Some op -> Error (Operation_schema_mismatch ("unknown op " ^ op))))
@@ -526,6 +635,8 @@ let recognition_output_of_json_result ?now (inp : input) (json : Yojson.Safe.t) 
       (* NDT-OK: extraction timestamps are provenance/retention metadata only. *)
       Unix.gettimeofday ()
   in
+  let visible_indices = visible_store_indices inp in
+  let message_count = List.length inp.messages in
   match json with
   | `Assoc fields ->
     (match first_unexpected_field ~allowed:accepted_episode_fields fields with
@@ -545,7 +656,11 @@ let recognition_output_of_json_result ?now (inp : input) (json : Yojson.Safe.t) 
           , Some preserved_tool_refs ) ->
           (match
              traverse_result
-               (operation_of_json ~trace_id:inp.trace_id ~now)
+               (operation_of_json
+                  ~trace_id:inp.trace_id
+                  ~now
+                  ~visible_indices
+                  ~message_count)
                operation_items
            with
            | Error _ as error -> error
@@ -584,6 +699,7 @@ let episode_of_recognition
       (inp : input)
       (out : recognition_output)
       ~recognized_facts
+      ~source_turns
   : episode
   =
   { trace_id = inp.trace_id
@@ -593,7 +709,7 @@ let episode_of_recognition
   ; open_items = out.open_items
   ; constraints = out.constraints
   ; preserved_tool_refs = out.preserved_tool_refs
-  ; source_turn_range = source_turn_range recognized_facts
+  ; source_turn_range = source_turn_range source_turns
   ; created_at = now
   ; valid_until = None
   ; terminal_marker = None

@@ -1994,6 +1994,50 @@ let test_recovery_validates_desired_reachable_graph ~fs () =
     (Store.recover_publication reopened obligation)
 ;;
 
+let test_reinforcement_count_changes_digest_and_roundtrips ~fs () =
+  with_root ~fs "masc_memory_os_reinforcement_digest_"
+  @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let zero_state = state "reinforced" in
+  let zero_prepared =
+    prepare_new store empty "reinforcement-zero" zero_state
+  in
+  let zero_receipt = publish_committed store zero_prepared in
+  let zero_snapshot = require_ok (Store.load store) in
+  let reinforced_fact =
+    { (fact "reinforced") with reinforcement_count = 3 }
+  in
+  let reinforced_state : Store.state =
+    { facts = [ reinforced_fact ]; episodes = zero_state.episodes }
+  in
+  let reinforced_prepared =
+    prepare_new
+      store
+      zero_snapshot
+      "reinforcement-three"
+      reinforced_state
+  in
+  let reinforced_receipt =
+    publish_committed store reinforced_prepared
+  in
+  check bool
+    "reinforcement_count participates in the canonical state digest"
+    false
+    (Store.Sha256.equal
+       (Store.commit_receipt_state_sha256 zero_receipt)
+       (Store.commit_receipt_state_sha256 reinforced_receipt));
+  let reopened = require_ok (Store.load store) |> Store.snapshot_state in
+  match reopened.facts with
+  | [ persisted ] ->
+    check int
+      "reinforcement_count survives canonical publish/load"
+      3
+      persisted.Types.reinforcement_count
+  | facts ->
+    failf "expected one persisted fact, got %d" (List.length facts)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
@@ -2055,6 +2099,8 @@ let () =
             (test_exact_implementation_boundary ~fs)
         ; test_case "canonical state and digest parity" `Quick
             test_canonical_state_and_digest_parity
+        ; test_case "reinforcement count changes digest and roundtrips" `Quick
+            (test_reinforcement_count_changes_digest_and_roundtrips ~fs)
         ; test_case "long fact list is stack-safe" `Quick
             (test_long_fact_list_is_stack_safe ~fs)
         ; test_case "long episode claims publish and reopen" `Quick

@@ -19,6 +19,14 @@ type valid_until_update =
   | Set_valid_for_days of int
   (** [valid_for_days: n]: derive a new expiry from [n]. *)
 
+type claim_kind_update =
+  | Keep_claim_kind
+  (** [claim_kind] was absent: preserve the existing kind. *)
+  | Clear_claim_kind
+  (** [claim_kind: null]: clear the existing kind. *)
+  | Set_claim_kind of claim_kind
+  (** [claim_kind: value]: replace the existing kind. *)
+
 type operation =
   | Add of fact
     (** New knowledge, fully authored by the librarian. *)
@@ -29,15 +37,24 @@ type operation =
     (** The claim at [index] was re-recognized in this window: the row keeps
         its identity; [last_verified_at] and [reinforcement_count] move. The
         re-observation provenance is ledger evidence, not row state. *)
-  | Merge of Keeper_memory_os_consolidation.merge_group
+  | Merge of
+      { group : Keeper_memory_os_consolidation.merge_group
+      ; claim_id : string option
+      ; source_turn : int
+      }
     (** Two or more existing rows state the same knowledge; the librarian
-        wrote the consolidated claim. Structural gates as in consolidation. *)
+        wrote the consolidated claim and its identity. Structural gates as in
+        consolidation. [source_turn] records this recognition pass rather than
+        borrowing the historical source of the earliest member. *)
   | Revise of
       { index : int
       ; claim : string
       ; category : category option (** [None] keeps the row's category. *)
-      ; claim_id : string option (** [None] keeps the row's claim_id. *)
+      ; claim_id : string option
+        (** The revised conclusion's identity; [None] explicitly clears it. *)
+      ; claim_kind_update : claim_kind_update
       ; valid_until_update : valid_until_update
+      ; source_turn : int
       }
     (** The claim at [index] is superseded by a corrected statement. *)
   | Forget of
@@ -78,6 +95,10 @@ type apply_result =
         operation order — the episode's [claims]. Reinforce is excluded. *)
   ; dispositions : disposition list
     (** Positionally 1:1 with the input operations. *)
+  ; applied_source_turns : int list
+    (** Current-trace source turns for applied Add/Reinforce/Merge/Revise
+        operations, in operation order. Historical fact sources are not used
+        as episode provenance. *)
   }
 
 (** Apply recognition operations to the store snapshot the librarian saw.

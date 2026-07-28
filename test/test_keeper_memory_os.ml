@@ -454,6 +454,95 @@ let test_librarian_prompt_renders () =
     | _ -> Alcotest.fail "expected prompt sections")
 ;;
 
+let test_librarian_store_page_is_bounded_and_keeps_snapshot_indices () =
+  let store =
+    List.init 100 (fun index ->
+      { (fact_fixture ~now:1_000_000.0 ()) with
+        claim =
+          Printf.sprintf
+            "fact-%03d-%s"
+            index
+            (String.make 900 (Char.chr (97 + (index mod 26))))
+      })
+  in
+  let input generation : Librarian.input =
+    { trace_id = "trace-bounded-store"
+    ; generation
+    ; messages = []
+    ; store
+    }
+  in
+  let current_store inp =
+    Librarian.prompt_variables inp
+    |> List.assoc "current_store"
+  in
+  let first = input 0 and later = input 40 in
+  let first_indices = Librarian.visible_store_indices first in
+  let later_indices = Librarian.visible_store_indices later in
+  Alcotest.(check bool)
+    "the page excludes facts beyond its byte budget"
+    true
+    (List.length first_indices < List.length store);
+  Alcotest.(check bool)
+    "rendered page remains bounded"
+    true
+    (String.length (current_store first) < 33_000);
+  Alcotest.(check bool)
+    "generation advances the page"
+    true
+    (first_indices <> later_indices);
+  Alcotest.(check bool)
+    "original index 40 is rendered without renumbering"
+    true
+    (contains "40: [preference]" (current_store later))
+;;
+
+let test_librarian_zero_op_metadata_persists_episode () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "zero-op-metadata" in
+    let inp : Librarian.input =
+      { trace_id = "trace-zero-op"
+      ; generation = 3
+      ; messages = []
+      ; store = []
+      }
+    in
+    let recognition : Librarian.recognition_output =
+      { episode_summary = "Decision context with no fact-store mutation"
+      ; operations = []
+      ; open_items = [ "follow up later" ]
+      ; constraints = [ "do not change facts" ]
+      ; preserved_tool_refs = [ "call-zero-op" ]
+      }
+    in
+    match
+      Librarian_runtime.For_testing.apply_and_persist
+        ~base_path:"/tmp/librarian-zero-op"
+        ~keeper_id
+        ~generation:4
+        inp
+        recognition
+    with
+    | Error error ->
+      Alcotest.fail
+        (Librarian_runtime.extraction_error_to_string error)
+    | Ok Librarian_runtime.Nothing_recognized ->
+      Alcotest.fail "zero-op episode metadata was discarded"
+    | Ok (Librarian_runtime.Recognized episode) ->
+      Alcotest.(check (list string))
+        "open items persist"
+        [ "follow up later" ]
+        episode.Types.open_items;
+      Alcotest.(check int)
+        "episode is appended without facts"
+        1
+        (List.length (Memory_io.read_events_tail ~keeper_id ~n:10));
+      Alcotest.(check int)
+        "fact store remains empty"
+        0
+        (List.length (Memory_io.read_facts_all ~keeper_id)))
+;;
+
 let test_librarian_prompt_omits_private_blocks () =
   let msg : Agent_sdk.Types.message =
     { role = Agent_sdk.Types.Assistant
@@ -528,7 +617,60 @@ let recognition_episode_of_output ?(store = []) ~now ~generation inp raw =
          ~generation
          inp
          out
-         ~recognized_facts:apply_result.Recognition.recognized_facts)
+         ~recognized_facts:apply_result.Recognition.recognized_facts
+         ~source_turns:apply_result.Recognition.applied_source_turns)
+;;
+
+let test_episode_provenance_uses_current_operation_turn () =
+  let historical =
+    { (fact_fixture ~now:1_000_000.0 ()) with
+      source = { trace_id = "old-trace"; turn = 2; tool_call_id = None }
+    }
+  in
+  let inp : Librarian.input =
+    { trace_id = "current-trace"
+    ; generation = 9
+    ; messages = [ text_message "the conclusion changed" ]
+    ; store = [ historical ]
+    }
+  in
+  let raw =
+    `Assoc
+      [ "episode_summary", `String "Current correction"
+      ; ( "operations"
+        , `List
+            [ `Assoc
+                [ "op", `String "revise"
+                ; "index", `Int 0
+                ; "claim", `String "corrected conclusion"
+                ; "source_turn", `Int 0
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match
+    recognition_episode_of_output
+      ~store:[ historical ]
+      ~now:1_000_000.0
+      ~generation:9
+      inp
+      raw
+  with
+  | Error error ->
+    Alcotest.fail (Librarian.parse_error_to_string error)
+  | Ok episode ->
+    Alcotest.(check (option (pair int int)))
+      "episode range comes from this trace's operation"
+      (Some (0, 0))
+      episode.Types.source_turn_range;
+    Alcotest.(check string)
+      "the historical fact source remains historical"
+      "old-trace"
+      (List.hd episode.Types.claims).Types.source.trace_id
 ;;
 
 let valid_librarian_output () =
@@ -642,10 +784,22 @@ let test_librarian_generation_override () =
         .Recognition.recognized_facts
     in
     let explicit_input =
-      Librarian.episode_of_recognition ~now ~generation:4 inp out ~recognized_facts
+      Librarian.episode_of_recognition
+        ~now
+        ~generation:4
+        inp
+        out
+        ~recognized_facts
+        ~source_turns:[ 0 ]
     in
     let fresh =
-      Librarian.episode_of_recognition ~now ~generation:11 inp out ~recognized_facts
+      Librarian.episode_of_recognition
+        ~now
+        ~generation:11
+        inp
+        out
+        ~recognized_facts
+        ~source_turns:[ 0 ]
     in
     Alcotest.(check int) "explicit input generation" 4 explicit_input.Types.generation;
     Alcotest.(check int) "override uses fresh generation" 11 fresh.Types.generation;
@@ -2810,6 +2964,14 @@ let test_memory_io_preserves_entries_with_installed_domain_pool () =
         "all facts remain"
         [ "fact-01"; "fact-02"; "fact-03"; "fact-04"; "fact-05"; "fact-06" ]
         remaining_facts;
+      (match Memory_io.read_facts_all_strict_offloaded ~keeper_id with
+       | Error detail ->
+         Alcotest.failf "offloaded strict snapshot failed: %s" detail
+       | Ok facts ->
+         Alcotest.(check int)
+           "offloaded strict snapshot returns every fact with an installed pool"
+           6
+           (List.length facts));
       let event_summaries =
         Memory_io.read_events_tail ~keeper_id ~n:10
         |> List.map (fun e -> e.Types.episode_summary)
@@ -4458,6 +4620,18 @@ let () =
             `Quick
             test_fact_decoder_rejects_wrong_schema_version
         ; Alcotest.test_case "librarian prompt renders" `Quick test_librarian_prompt_renders
+        ; Alcotest.test_case
+            "librarian store page is bounded with stable indices"
+            `Quick
+            test_librarian_store_page_is_bounded_and_keeps_snapshot_indices
+        ; Alcotest.test_case
+            "librarian zero-op metadata persists an episode"
+            `Quick
+            test_librarian_zero_op_metadata_persists_episode
+        ; Alcotest.test_case
+            "librarian episode provenance uses current operation turn"
+            `Quick
+            test_episode_provenance_uses_current_operation_turn
         ; Alcotest.test_case
             "librarian prompt omits private blocks"
             `Quick

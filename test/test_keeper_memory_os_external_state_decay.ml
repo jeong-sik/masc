@@ -19,6 +19,7 @@ let fact ~claim_kind ~category ?(first_seen = now -. 60.0) ?(valid_until = None)
   ; last_verified_at
   ; schema_version = Types.schema_version
   ; claim_id = None
+  ; reinforcement_count = 0
   }
 ;;
 

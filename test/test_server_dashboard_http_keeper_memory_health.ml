@@ -26,6 +26,7 @@ let fact ?(valid_until = None) ~now claim =
   ; Types.last_verified_at = Some now
   ; Types.schema_version = Types.schema_version
   ; Types.claim_id = None
+  ; reinforcement_count = 0
   }
 ;;
 

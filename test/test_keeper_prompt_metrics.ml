@@ -351,7 +351,6 @@ let test_ctx_composition_splits_history_bytes () =
     KAR.build_ctx_composition_metrics
       ~system_prompt:"System prompt"
       ~dynamic_context:"Dynamic context"
-      ~memory_context:"Memory context"
       ~temporal_context:"Temporal context"
       ~user_message:"Current user message"
       ~history_messages

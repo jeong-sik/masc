@@ -5,6 +5,7 @@ module Policy = Masc.Keeper_memory_os_policy
 module Memory_io = Masc.Keeper_memory_os_io
 module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
+module Recognition = Masc.Keeper_librarian_recognition
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Keeper_registry = Masc.Keeper_registry
 module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
@@ -76,6 +77,7 @@ let fact_fixture ~now () =
   ; Types.last_verified_at = Some (now -. 3600.0)
   ; Types.schema_version = Types.schema_version
   ; Types.claim_id = None
+  ; reinforcement_count = 0
   }
 ;;
 
@@ -398,6 +400,7 @@ let test_librarian_prompt_renders () =
     { Librarian.trace_id = "trace-abc"
     ; generation = 0
     ; messages = [ text_message "Please remember the project constraint." ]
+    ; store = []
     }
   in
   with_prompt_registry (fun () ->
@@ -415,7 +418,10 @@ let test_librarian_prompt_renders () =
       "contains episode_summary"
       true
       (contains "episode_summary" prompt);
-    Alcotest.(check bool) "contains claims array" true (contains "\"claims\"" prompt);
+    Alcotest.(check bool)
+      "contains operations array"
+      true
+      (contains "\"operations\"" prompt);
     Alcotest.(check bool)
       "contains preserved_tool_refs"
       true
@@ -424,6 +430,14 @@ let test_librarian_prompt_renders () =
       "placeholder replaced"
       false
       (contains "{{conversation_history}}" prompt);
+    Alcotest.(check bool)
+      "store placeholder replaced"
+      false
+      (contains "{{current_store}}" prompt);
+    Alcotest.(check bool)
+      "renders empty-store gauge"
+      true
+      (contains "[no stored facts]" prompt);
     Alcotest.(check bool)
       "contains conversation"
       true
@@ -462,7 +476,7 @@ let test_librarian_prompt_omits_private_blocks () =
     }
   in
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-abc"; generation = 0; messages = [ msg ] }
+    { Librarian.trace_id = "trace-abc"; generation = 0; messages = [ msg ]; store = [] }
   in
   with_prompt_registry (fun () ->
     let prompt = render_librarian_user_prompt inp in
@@ -485,12 +499,44 @@ let test_librarian_prompt_omits_private_blocks () =
       (contains "[tool result omitted: id=call_1 is_error=false]" prompt))
 ;;
 
+(* masc#26122: build a single add-operation object wrapping [fact_fields] as
+   its "fact" payload — the shape every "librarian emits one new claim" test
+   below exercises. Fields absent from [fact_fields] are simply not present on
+   the operation object, which the parser treats the same as an explicit
+   null. *)
+let add_op fact_fields =
+  `Assoc
+    [ Librarian.wire_field_op, `String Types.wire_op_add
+    ; Librarian.wire_field_fact, `Assoc fact_fields
+    ]
+;;
+
+(* Test-only pipeline mirroring the runtime: parse the raw recognition output,
+   apply its operations against [store] (defaults to no prior facts, i.e. a
+   fresh keeper), then build the persisted episode from the recognized
+   (created/rewritten) facts. Generation is threaded through
+   [episode_of_recognition] only — parsing itself is generation-agnostic in
+   the new contract. *)
+let recognition_episode_of_output ?(store = []) ~now ~generation inp raw =
+  match Librarian.recognition_output_of_output_result ~now inp raw with
+  | Error _ as error -> error
+  | Ok out ->
+    let apply_result = Recognition.apply ~now ~operations:out.Librarian.operations store in
+    Ok
+      (Librarian.episode_of_recognition
+         ~now
+         ~generation
+         inp
+         out
+         ~recognized_facts:apply_result.Recognition.recognized_facts)
+;;
+
 let valid_librarian_output () =
   `Assoc
     [ "episode_summary", `String "Strict librarian output should persist"
-    ; ( "claims"
+    ; ( "operations"
       , `List
-          [ `Assoc
+          [ add_op
               [ "claim", `String "Strict librarian claim survives parsing"
               ; "category", `String "test"
               ; "source_turn", `Int 0
@@ -507,14 +553,15 @@ let test_librarian_rejects_extra_confidence_field () =
     { Librarian.trace_id = "trace-extra-confidence"
     ; generation = 4
     ; messages = [ text_message "turn-indexed memory" ]
+    ; store = []
     }
   in
   let raw =
     `Assoc
       [ "episode_summary", `String "summary"
-      ; ( "claims"
+      ; ( "operations"
         , `List
-            [ `Assoc
+            [ add_op
                 [ "claim", `String "claim with deprecated confidence"
                 ; "confidence", `Int 1
                 ; "category", `String "fact"
@@ -527,13 +574,7 @@ let test_librarian_rejects_extra_confidence_field () =
       ]
     |> Yojson.Safe.to_string
   in
-  match
-    Librarian.episode_of_output_result
-      ~now:1_000_000.0
-      ~generation:inp.generation
-      inp
-      raw
-  with
+  match Librarian.recognition_output_of_output_result ~now:1_000_000.0 inp raw with
   | Error (Librarian.Unexpected_field field) ->
     Alcotest.(check string) "unexpected field" "confidence" field
   | Error error ->
@@ -548,14 +589,15 @@ let test_librarian_rejects_unknown_claim_kind () =
     { Librarian.trace_id = "trace-invalid-kind"
     ; generation = 4
     ; messages = [ text_message "typed memory" ]
+    ; store = []
     }
   in
   let raw =
     `Assoc
       [ "episode_summary", `String "summary"
-      ; ( "claims"
+      ; ( "operations"
         , `List
-            [ `Assoc
+            [ add_op
                 [ "claim", `String "claim with an invalid kind"
                 ; "category", `String "fact"
                 ; "claim_kind", `String "not_a_kind"
@@ -565,13 +607,7 @@ let test_librarian_rejects_unknown_claim_kind () =
       ]
     |> Yojson.Safe.to_string
   in
-  match
-    Librarian.episode_of_output_result
-      ~now:1_000_000.0
-      ~generation:inp.generation
-      inp
-      raw
-  with
+  match Librarian.recognition_output_of_output_result ~now:1_000_000.0 inp raw with
   | Error Librarian.Claim_schema_mismatch -> ()
   | Error error ->
     Alcotest.failf
@@ -580,22 +616,43 @@ let test_librarian_rejects_unknown_claim_kind () =
   | Ok _ -> Alcotest.fail "expected unknown claim_kind to be rejected"
 ;;
 
+(* masc#26122: generation is no longer a parsing input — parsing is
+   generation-agnostic and [episode_of_recognition] stamps whatever
+   generation the caller passes at persistence time. Parse once, then build
+   two episodes from the same recognition output with different
+   generations. *)
 let test_librarian_generation_override () =
+  let now = 1_000_000.0 in
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-generation-override"
     ; generation = 4
     ; messages = [ text_message "turn-indexed memory" ]
+    ; store = []
     }
   in
   let raw = valid_librarian_output () |> Yojson.Safe.to_string in
-  match
-    ( Librarian.episode_of_output ~now:1_000_000.0 ~generation:4 inp raw
-    , Librarian.episode_of_output ~now:1_000_000.0 ~generation:11 inp raw )
-  with
-  | Some explicit_input, Some fresh ->
+  match Librarian.recognition_output_of_output_result ~now inp raw with
+  | Error error ->
+    Alcotest.failf
+      "expected librarian output to parse: %s"
+      (Librarian.parse_error_to_string error)
+  | Ok out ->
+    let recognized_facts =
+      (Recognition.apply ~now ~operations:out.Librarian.operations [])
+        .Recognition.recognized_facts
+    in
+    let explicit_input =
+      Librarian.episode_of_recognition ~now ~generation:4 inp out ~recognized_facts
+    in
+    let fresh =
+      Librarian.episode_of_recognition ~now ~generation:11 inp out ~recognized_facts
+    in
     Alcotest.(check int) "explicit input generation" 4 explicit_input.Types.generation;
-    Alcotest.(check int) "override uses fresh generation" 11 fresh.Types.generation
-  | _ -> Alcotest.fail "expected librarian output to parse"
+    Alcotest.(check int) "override uses fresh generation" 11 fresh.Types.generation;
+    Alcotest.(check (list string))
+      "claims are exactly the recognized facts passed in"
+      (List.map (fun f -> f.Types.claim) recognized_facts)
+      (List.map (fun f -> f.Types.claim) explicit_input.Types.claims)
 ;;
 
 let test_librarian_does_not_infer_validity () =
@@ -603,14 +660,14 @@ let test_librarian_does_not_infer_validity () =
   let output =
     `Assoc
       [ "episode_summary", `String "mixed durability claims"
-      ; ( "claims"
+      ; ( "operations"
         , `List
-            [ `Assoc
+            [ add_op
                 [ "claim", `String "checkpoint saved for task T-1"
                 ; "category", `String "ephemeral"
                 ; "source_turn", `Int 0
                 ]
-            ; `Assoc
+            ; add_op
                 [ "claim", `String "the build uses dune 3.x"
                 ; "category", `String "fact"
                 ; "source_turn", `Int 1
@@ -623,10 +680,14 @@ let test_librarian_does_not_infer_validity () =
     |> Yojson.Safe.to_string
   in
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-ttl"; generation = 0; messages = [ text_message "x" ] }
+    { Librarian.trace_id = "trace-ttl"
+    ; generation = 0
+    ; messages = [ text_message "x" ]
+    ; store = []
+    }
   in
-  match Librarian.episode_of_output ~now ~generation:inp.generation inp output with
-  | Some episode ->
+  match recognition_episode_of_output ~now ~generation:inp.generation inp output with
+  | Ok episode ->
     let find cat =
       List.find (fun f -> f.Types.category = cat) episode.Types.claims
     in
@@ -640,7 +701,10 @@ let test_librarian_does_not_infer_validity () =
       "durable fact never hard-expires"
       None
       durable.Types.valid_until
-  | None -> Alcotest.fail "expected librarian output to parse"
+  | Error error ->
+    Alcotest.failf
+      "expected librarian output to parse: %s"
+      (Librarian.parse_error_to_string error)
 ;;
 
 (* RFC-0351 S2: the extracting model may declare a lifetime per claim; the
@@ -652,16 +716,16 @@ let test_librarian_stamps_declared_lifetime () =
   let output =
     `Assoc
       [ "episode_summary", `String "declared lifetime claims"
-      ; ( "claims"
+      ; ( "operations"
         , `List
-            [ `Assoc
+            [ add_op
                 [ "claim", `String "the agent is blocked on a sandbox limit today"
                 ; "category", `String "ephemeral"
                 ; "claim_kind", `String "self_observation"
                 ; "source_turn", `Int 0
                 ; "valid_for_days", `Int 2
                 ]
-            ; `Assoc
+            ; add_op
                 [ "claim", `String "parse boundaries own validation"
                 ; "category", `String "lesson"
                 ; "source_turn", `Int 1
@@ -677,10 +741,11 @@ let test_librarian_stamps_declared_lifetime () =
     { Librarian.trace_id = "trace-declared-lifetime"
     ; generation = 0
     ; messages = [ text_message "x" ]
+    ; store = []
     }
   in
-  match Librarian.episode_of_output ~now ~generation:inp.generation inp output with
-  | Some episode ->
+  match recognition_episode_of_output ~now ~generation:inp.generation inp output with
+  | Ok episode ->
     let find cat = List.find (fun f -> f.Types.category = cat) episode.Types.claims in
     let declared = find Types.Ephemeral in
     let durable = find Types.Lesson in
@@ -700,7 +765,10 @@ let test_librarian_stamps_declared_lifetime () =
       "declared-lifetime claim expires after its boundary"
       false
       (Types.fact_is_current ~now:(now +. (3. *. 86_400.)) declared)
-  | None -> Alcotest.fail "expected librarian output to parse"
+  | Error error ->
+    Alcotest.failf
+      "expected librarian output to parse: %s"
+      (Librarian.parse_error_to_string error)
 ;;
 
 let test_librarian_rejects_invalid_lifetime () =
@@ -708,6 +776,7 @@ let test_librarian_rejects_invalid_lifetime () =
     { Librarian.trace_id = "trace-invalid-lifetime"
     ; generation = 0
     ; messages = [ text_message "x" ]
+    ; store = []
     }
   in
   List.iter
@@ -715,9 +784,9 @@ let test_librarian_rejects_invalid_lifetime () =
        let raw =
          `Assoc
            [ "episode_summary", `String "summary"
-           ; ( "claims"
+           ; ( "operations"
              , `List
-                 [ `Assoc
+                 [ add_op
                      [ "claim", `String "claim with a malformed lifetime"
                      ; "category", `String "ephemeral"
                      ; "source_turn", `Int 0
@@ -730,13 +799,7 @@ let test_librarian_rejects_invalid_lifetime () =
            ]
          |> Yojson.Safe.to_string
        in
-       match
-         Librarian.episode_of_output_result
-           ~now:1_000_000.0
-           ~generation:inp.generation
-           inp
-           raw
-       with
+       match Librarian.recognition_output_of_output_result ~now:1_000_000.0 inp raw with
        | Error Librarian.Claim_schema_mismatch -> ()
        | Error error ->
          Alcotest.failf
@@ -755,18 +818,20 @@ let test_librarian_rejects_invalid_lifetime () =
 ;;
 
 let test_librarian_accepts_nullable_claim_fields () =
+  let now = 1_000_000.0 in
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-nullable-claim-fields"
     ; generation = 3
     ; messages = [ text_message "nullable structured output" ]
+    ; store = []
     }
   in
   let json =
     `Assoc
       [ "episode_summary", `String "nullable fields follow the domain schema"
-      ; ( "claims"
+      ; ( "operations"
         , `List
-            [ `Assoc
+            [ add_op
                 [ "claim", `String "Nullable claim metadata is accepted."
                 ; "category", `String "fact"
                 ; "source_turn", `Int 0
@@ -781,13 +846,14 @@ let test_librarian_accepts_nullable_claim_fields () =
       ; "preserved_tool_refs", `List []
       ]
   in
-  match Librarian.episode_of_json_result ~now:1_000_000.0 ~generation:3 inp json with
+  match Librarian.recognition_output_of_json_result ~now inp json with
   | Error error ->
     Alcotest.failf
       "schema-valid nullable fields were rejected: %s"
       (Librarian.parse_error_to_string error)
-  | Ok episode ->
-    (match episode.Types.claims with
+  | Ok out ->
+    let apply_result = Recognition.apply ~now ~operations:out.Librarian.operations [] in
+    (match apply_result.Recognition.recognized_facts with
      | [ claim ] ->
        Alcotest.(check (option string)) "tool call id" None claim.source.tool_call_id;
        Alcotest.(check (option string)) "claim id" None claim.claim_id;
@@ -800,6 +866,7 @@ let test_librarian_accepts_wrapped_json_output () =
     { Librarian.trace_id = "trace-wrapped-json"
     ; generation = 5
     ; messages = [ text_message "wrapped JSON memory" ]
+    ; store = []
     }
   in
   let json = valid_librarian_output () |> Yojson.Safe.to_string in
@@ -808,13 +875,19 @@ let test_librarian_accepts_wrapped_json_output () =
   in
   List.iter
     (fun (name, raw) ->
-       match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
-       | Some episode ->
-         Alcotest.(check int)
-           (name ^ " claim count")
-           1
-           (List.length episode.Types.claims)
-       | None -> Alcotest.failf "expected %s librarian output to parse" name)
+       match Librarian.recognition_output_of_output_result ~now:1_000_000.0 inp raw with
+       | Ok out ->
+         let add_op_count =
+           out.Librarian.operations
+           |> List.filter (function Recognition.Add _ -> true | _ -> false)
+           |> List.length
+         in
+         Alcotest.(check int) (name ^ " add operation count") 1 add_op_count
+       | Error error ->
+         Alcotest.failf
+           "expected %s librarian output to parse: %s"
+           name
+           (Librarian.parse_error_to_string error))
     cases
 ;;
 
@@ -823,6 +896,7 @@ let test_librarian_rejects_prose_wrapped_json_output () =
     { Librarian.trace_id = "trace-prose-wrapped-json"
     ; generation = 6
     ; messages = [ text_message "prose wrapped JSON memory" ]
+    ; store = []
     }
   in
   let json = valid_librarian_output () |> Yojson.Safe.to_string in
@@ -837,12 +911,8 @@ let test_librarian_rejects_prose_wrapped_json_output () =
        Alcotest.(check bool)
          (name ^ " rejected")
          true
-         (Option.is_none
-            (Librarian.episode_of_output
-               ~now:1_000_000.0
-               ~generation:inp.generation
-               inp
-               raw)))
+         (Result.is_error
+            (Librarian.recognition_output_of_output_result ~now:1_000_000.0 inp raw)))
     cases
 ;;
 
@@ -851,14 +921,15 @@ let test_librarian_defaults_missing_optional_lists () =
     { Librarian.trace_id = "trace-missing-lists"
     ; generation = 6
     ; messages = [ text_message "minimal JSON memory" ]
+    ; store = []
     }
   in
   let raw =
     `Assoc
       [ Librarian.wire_field_episode_summary, `String "Minimal valid librarian output"
-      ; ( Librarian.wire_field_claims
+      ; ( Librarian.wire_field_operations
         , `List
-            [ `Assoc
+            [ add_op
                 [ Librarian.wire_field_claim
                 , `String "Minimal output still records a fact."
                 ; Librarian.wire_field_category, `String "fact"
@@ -868,15 +939,18 @@ let test_librarian_defaults_missing_optional_lists () =
       ]
     |> Yojson.Safe.to_string
   in
-  match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
-  | Some episode ->
-    Alcotest.(check (list string)) "open_items defaults" [] episode.Types.open_items;
-    Alcotest.(check (list string)) "constraints defaults" [] episode.Types.constraints;
+  match Librarian.recognition_output_of_output_result ~now:1_000_000.0 inp raw with
+  | Ok out ->
+    Alcotest.(check (list string)) "open_items defaults" [] out.Librarian.open_items;
+    Alcotest.(check (list string)) "constraints defaults" [] out.Librarian.constraints;
     Alcotest.(check (list string))
       "preserved_tool_refs defaults"
       []
-      episode.Types.preserved_tool_refs
-  | None -> Alcotest.fail "expected missing optional list fields to parse"
+      out.Librarian.preserved_tool_refs
+  | Error error ->
+    Alcotest.failf
+      "expected missing optional list fields to parse: %s"
+      (Librarian.parse_error_to_string error)
 ;;
 
 let memory_runtime_resolution_toml =
@@ -1152,23 +1226,25 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
 
 
 let test_librarian_preserves_admission_memory_text () =
+  let now = 1_000_000.0 in
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-filter-transient-cap"
     ; generation = 1
     ; messages = [ text_message "Goal cap moved while the agent was working." ]
+    ; store = []
     }
   in
   let raw =
     `Assoc
       [ "episode_summary", `String "Mixed durable memory and transient admission state"
-      ; ( "claims"
+      ; ( "operations"
         , `List
-            [ `Assoc
+            [ add_op
                 [ "claim", `String "Goal cap is 3/3, blocking new task claims."
                 ; "category", `String "constraint"
                 ; "source_turn", `Int 3
                 ]
-            ; `Assoc
+            ; add_op
                 [ ( "claim"
                   , `String
                       "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked."
@@ -1191,8 +1267,8 @@ let test_librarian_preserves_admission_memory_text () =
       ]
     |> Yojson.Safe.to_string
   in
-  match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
-  | Some episode ->
+  match recognition_episode_of_output ~now ~generation:inp.generation inp raw with
+  | Ok episode ->
     (match episode.Types.claims with
      | [ transient_fact; diagnostic_fact ] ->
        Alcotest.(check string)
@@ -1222,23 +1298,26 @@ let test_librarian_preserves_admission_memory_text () =
       "source range covers preserved claims"
       (Some (3, 4))
       episode.Types.source_turn_range
-  | None -> Alcotest.fail "expected admission episode to parse"
+  | Error error ->
+    Alcotest.failf "expected admission episode to parse: %s" (Librarian.parse_error_to_string error)
 ;;
 
 let test_librarian_preserves_pure_admission_episode () =
+  let now = 1_000_000.0 in
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-pure-transient-cap"
     ; generation = 1
     ; messages = [ text_message "Claim was rejected by goal cap." ]
+    ; store = []
     }
   in
   let raw =
     `Assoc
       [ ( "episode_summary"
         , `String "Agent is blocked by goal_cap 3/3 and cannot claim new tasks." )
-      ; ( "claims"
+      ; ( "operations"
         , `List
-            [ `Assoc
+            [ add_op
                 [ "claim", `String "Goal cap is 3/3, blocking new task claims."
                 ; "category", `String "constraint"
                 ; "source_turn", `Int 3
@@ -1250,8 +1329,8 @@ let test_librarian_preserves_pure_admission_episode () =
       ]
     |> Yojson.Safe.to_string
   in
-  match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
-  | Some episode ->
+  match recognition_episode_of_output ~now ~generation:inp.generation inp raw with
+  | Ok episode ->
     Alcotest.(check string)
       "summary preserved"
       "Agent is blocked by goal_cap 3/3 and cannot claim new tasks."
@@ -1265,19 +1344,22 @@ let test_librarian_preserves_pure_admission_episode () =
       "constraints preserved"
       [ "Goal cap 3/3 is blocking task claim." ]
       episode.Types.constraints
-  | None -> Alcotest.fail "expected admission-only episode to be preserved"
+  | Error error ->
+    Alcotest.failf
+      "expected admission-only episode to be preserved: %s"
+      (Librarian.parse_error_to_string error)
 ;;
 
 let test_librarian_rejects_invalid_claims () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-invalid"; generation = 0; messages = [] }
+    { Librarian.trace_id = "trace-invalid"; generation = 0; messages = []; store = [] }
   in
   let reject name json =
     let raw = Yojson.Safe.to_string json in
     let accepted =
-      match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
-      | Some _ -> true
-      | None -> false
+      match Librarian.recognition_output_of_output_result ~now:1_000_000.0 inp raw with
+      | Ok _ -> true
+      | Error _ -> false
     in
     Alcotest.(check bool) name false accepted
   in
@@ -1285,9 +1367,9 @@ let test_librarian_rejects_invalid_claims () =
     "rejects empty claim"
     (`Assoc
        [ "episode_summary", `String "summary"
-       ; ( "claims"
+       ; ( "operations"
          , `List
-             [ `Assoc
+             [ add_op
                  [ "claim", `String ""
                  ; "category", `String "fact"
                  ; "source_turn", `Int 0
@@ -1304,9 +1386,9 @@ let test_librarian_rejects_invalid_claims () =
     "rejects missing source turn"
     (`Assoc
        [ "episode_summary", `String "summary"
-       ; ( "claims"
+       ; ( "operations"
          , `List
-             [ `Assoc
+             [ add_op
                  [ "claim", `String "valid text"
                  ; "category", `String "fact"
                  ]

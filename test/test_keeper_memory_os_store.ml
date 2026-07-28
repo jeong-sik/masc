@@ -95,6 +95,7 @@ let fact claim =
   ; last_verified_at = None
   ; schema_version = Types.schema_version
   ; claim_id = Some ("claim-" ^ claim)
+  ; reinforcement_count = 0
   }
 ;;
 

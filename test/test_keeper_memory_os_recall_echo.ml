@@ -32,6 +32,7 @@ let fact ?(claim = "keeper must do zero tool calls and emit one short line")
   ; Types.last_verified_at
   ; Types.schema_version = Types.schema_version
   ; Types.claim_id
+  ; reinforcement_count = 0
   }
 ;;
 

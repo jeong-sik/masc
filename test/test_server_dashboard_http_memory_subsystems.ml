@@ -44,6 +44,7 @@ let fact ?(category = Types.Preference) ?(trace_id = "trace-memory")
   ; last_verified_at
   ; schema_version = Types.schema_version
   ; claim_id = None
+  ; reinforcement_count = 0
   }
 ;;
 
@@ -97,6 +98,7 @@ let shared_fact ?(observed_by = []) ?(last_verified_at = 10.0) claim : Types.fac
   ; last_verified_at = Some last_verified_at
   ; schema_version = Types.schema_version
   ; claim_id = None
+  ; reinforcement_count = 0
   }
 ;;
 

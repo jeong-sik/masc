@@ -30,6 +30,7 @@ let fact
   ; last_verified_at
   ; schema_version = Types.schema_version
   ; claim_id
+  ; reinforcement_count = 0
   }
 ;;
 

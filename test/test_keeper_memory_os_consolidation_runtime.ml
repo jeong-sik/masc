@@ -36,6 +36,7 @@ let fact claim =
   ; last_verified_at = Some now
   ; schema_version = Types.schema_version
   ; claim_id = None
+  ; reinforcement_count = 0
   }
 ;;
 

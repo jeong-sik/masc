@@ -126,6 +126,82 @@ let cadence_counter_entries () =
   Eio_guard.with_mutex_ro cadence_mu (fun () -> Hashtbl.length cadence_counters)
 ;;
 
+(* The live table is dashboard instrumentation only. Provider admission must
+   survive a process restart, so the authoritative counter lives beside the
+   keeper's Memory OS files and is updated under a file lock. *)
+let durable_cadence_path ~base_path ~keeper_id =
+  Filename.concat
+    (Filename.concat
+       (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+       keeper_id)
+    "librarian-cadence.json"
+;;
+
+let durable_cadence_counter_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "counter" fields with
+     | Some (`Int counter) when counter >= fresh_counter -> Ok counter
+     | Some (`Int counter) ->
+       Error (Printf.sprintf "cadence counter below %d: %d" fresh_counter counter)
+     | _ -> Error "cadence state is missing integer counter")
+  | _ -> Error "cadence state is not an object"
+;;
+
+let load_durable_cadence_counter path =
+  if not (Sys.file_exists path)
+  then Ok fresh_counter
+  else
+    try
+      let channel = open_in_bin path in
+      let raw =
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr channel)
+          (fun () -> really_input_string channel (in_channel_length channel))
+      in
+      durable_cadence_counter_of_json (Yojson.Safe.from_string raw)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Error (Printexc.to_string exn)
+;;
+
+let save_durable_cadence_counter path counter =
+  Keeper_fs.save_json_atomic path (`Assoc [ "counter", `Int counter ])
+;;
+
+let observe_live_cadence ~keeper_id ~counter =
+  Eio_guard.with_mutex cadence_mu (fun () ->
+    Hashtbl.replace cadence_counters keeper_id ("durable", counter))
+;;
+
+let update_durable_cadence ~base_path ~keeper_id update =
+  let path = durable_cadence_path ~base_path ~keeper_id in
+  try
+    ignore (Keeper_fs.ensure_dir (Filename.dirname path));
+    File_lock_eio.with_lock path (fun () ->
+      match load_durable_cadence_counter path with
+      | Error _ as error -> error
+      | Ok prior ->
+        let counter, result = update prior in
+        match save_durable_cadence_counter path counter with
+        | Error _ as error -> error
+        | Ok () ->
+          observe_live_cadence ~keeper_id ~counter;
+          Ok result)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let durable_cadence_due ~base_path ~keeper_id =
+  update_durable_cadence ~base_path ~keeper_id (fun prior ->
+    let counter, due = cadence_step ~cadence:(cadence_turns ()) ~counter:prior in
+    counter, due)
+;;
+
+let durable_cadence_record_completed_attempt ~base_path ~keeper_id =
+  update_durable_cadence ~base_path ~keeper_id (fun _ -> 0, ())
+;;
+
 let max_messages () =
   Env_config.KeeperMemoryOs.librarian_max_messages ()
 ;;
@@ -824,6 +900,11 @@ let apply_and_persist
   | _ :: _ ->
     (* NDT-OK: application timestamps are provenance/retention metadata only. *)
     let now = Unix.gettimeofday () in
+    let recognition_masc_root =
+      Workspace_utils.masc_root_dir_from
+        ~base_path
+        ~cluster_name:(Env_config_core.cluster_name ())
+    in
     Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
       let applied =
         Keeper_memory_os_io.with_facts_lock
@@ -848,10 +929,37 @@ let apply_and_persist
                      ~operations:recognition.operations
                      inp.store
                  in
-                 Keeper_memory_os_io.rewrite_facts_atomically
-                   ~keeper_id
-                   result.Recognition.facts;
-                 Ok result))
+                 if
+                   List.exists
+                     (function Recognition.Applied -> true | _ -> false)
+                     result.Recognition.dispositions
+                 then
+                   (match
+                      Recognition_ledger.append
+                        ~masc_root:recognition_masc_root
+                        ~keeper_id
+                        ~trace_id:inp.trace_id
+                        ~generation
+                        ~store_before:inp.store
+                        ~operations:recognition.operations
+                        ~dispositions:result.Recognition.dispositions
+                        ~store_after:result.Recognition.facts
+                        ~now
+                        ()
+                    with
+                    | Error detail ->
+                      Error
+                        (Memory_apply_failed
+                           ("recognition evidence write failed: " ^ detail))
+                    | Ok () ->
+                      Keeper_memory_os_io.rewrite_facts_atomically
+                        ~keeper_id
+                        result.Recognition.facts;
+                      Ok result)
+                 else
+                   Error
+                     (Domain_output_invalid
+                        "recognition output applied no operations to the current store")))
       in
       match applied with
       | Error _ as error -> error
@@ -866,20 +974,6 @@ let apply_and_persist
         in
         Keeper_memory_os_io.append_episode ~keeper_id episode;
         Keeper_memory_os_io.append_event ~keeper_id episode;
-        Recognition_ledger.append
-          ~masc_root:
-            (Workspace_utils.masc_root_dir_from
-               ~base_path
-               ~cluster_name:(Env_config_core.cluster_name ()))
-          ~keeper_id
-          ~trace_id:inp.trace_id
-          ~generation
-          ~store_before:inp.store
-          ~operations:recognition.operations
-          ~dispositions:result.Recognition.dispositions
-          ~store_after:result.Recognition.facts
-          ~now
-          ();
         Ok (Recognized episode))
 ;;
 
@@ -927,13 +1021,16 @@ let extract_and_append_with_exact_output_classified
 ;;
 
 let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
-  (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
-     advances its cadence counter, and a not-due turn skips extraction entirely
-     (the messages remain in the window for the next due turn). The cadence
-     counter is scoped to the active trace so a rollover does not inherit the
-     previous trace's schedule. *)
-  if enabled () && cadence_due ~keeper_id ~trace_id:inp.trace_id
-  then (
+  (* Disabled keepers do not touch cadence. A failed durable read/write is an
+     admission failure, not an excuse to resume per-turn provider requests. *)
+  if enabled () then
+    match durable_cadence_due ~base_path ~keeper_id with
+    | Error detail ->
+      Log.Keeper.warn ~keeper_name:keeper_id
+        "memory os librarian skipped: durable cadence state unavailable: %s"
+        detail
+    | Ok false -> ()
+    | Ok true ->
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
@@ -946,7 +1043,7 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
              inp
          with
          | Ok (Recognized episode) ->
-           cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
+           ignore (durable_cadence_record_completed_attempt ~base_path ~keeper_id);
            Log.Keeper.info
              ~keeper_name:keeper_id
              "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
@@ -956,7 +1053,7 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
          | Ok Nothing_recognized ->
            (* A completed pass that recognized nothing: success for cadence
               (the model did judge the window), zero bytes persisted. *)
-           cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
+           ignore (durable_cadence_record_completed_attempt ~base_path ~keeper_id);
            Log.Keeper.info
              ~keeper_name:keeper_id
              "memory os librarian recognized nothing trace_id=%s"
@@ -967,7 +1064,9 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
              ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
              ();
            if should_record_cadence_backoff_after_error err
-           then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
+           then
+             ignore
+               (durable_cadence_record_completed_attempt ~base_path ~keeper_id);
            Log.Keeper.warn
              ~keeper_name:keeper_id
              "memory os librarian failed lane=%s: %s; cadence deferred=%b"
@@ -988,5 +1087,5 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
       Log.Keeper.warn ~keeper_name:keeper_id
         "memory os librarian failed lane=%s: %s"
         exact_lane_id
-        (Printexc.to_string exn))
+        (Printexc.to_string exn)
 ;;

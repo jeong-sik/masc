@@ -5,10 +5,10 @@
    guarantee: Before/After is always reconstructible from disk, unlike the
    compaction path whose plan/summary content was never persisted.
 
-   Mirrors [Keeper_recall_injection_ledger]: append is wrapped so a write
-   failure degrades to a log line and never propagates into the turn;
-   retention stays out of the hot path and is handled by server maintenance
-   via [prune_older_than]. *)
+   The evidence write is part of recognition publication: callers must receive
+   a typed failure and leave the fact snapshot untouched when it cannot be
+   made durable. Retention stays out of the hot path and is handled by server
+   maintenance via [prune_older_than]. *)
 
 open Keeper_memory_os_types
 
@@ -86,13 +86,13 @@ let append
       ~now
       ()
   in
-  try Dated_jsonl.append (make_store ~masc_root ()) entry with
+  try
+    Dated_jsonl.append (make_store ~masc_root ()) entry;
+    Ok ()
+  with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Keeper.warn
-      "librarian_recognition_ledger: failed to write %s: %s"
-      (base_dir ~masc_root)
-      (Printexc.to_string exn)
+    Error (Printexc.to_string exn)
 ;;
 
 let prune_older_than ~masc_root ~retention_days =

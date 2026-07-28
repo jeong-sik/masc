@@ -52,6 +52,7 @@ let operation_label = function
    referencing failure, never an identity judgment. *)
 type disposition =
   | Applied
+  | Rejected_target_overlap
   | Rejected_index_out_of_bounds
   | Rejected_target_consumed
   | Rejected_kind_mismatch
@@ -60,6 +61,7 @@ type disposition =
 
 let disposition_label = function
   | Applied -> "applied"
+  | Rejected_target_overlap -> "rejected_target_overlap"
   | Rejected_index_out_of_bounds -> "rejected_index_out_of_bounds"
   | Rejected_target_consumed -> "rejected_target_consumed"
   | Rejected_kind_mismatch -> "rejected_kind_mismatch"
@@ -79,12 +81,40 @@ type apply_result =
     (* Positionally 1:1 with the input operations. *)
   }
 
+let target_indices = function
+  | Add _ -> []
+  | Reinforce { index; _ } | Revise { index; _ } | Forget { index; _ } -> [ index ]
+  | Merge group -> List.sort_uniq compare group.Consolidation.member_indices
+;;
+
+let operations_have_overlapping_targets operations =
+  let seen = Hashtbl.create 8 in
+  List.exists
+    (fun operation ->
+       List.exists
+         (fun index ->
+            if Hashtbl.mem seen index
+            then true
+            else (
+              Hashtbl.add seen index ();
+              false))
+         (target_indices operation))
+    operations
+;;
+
 (* Apply recognition operations to the store snapshot the librarian saw.
-   Deterministic and conservative, mirroring [Consolidation.apply_plan]:
-   indices refer to the input snapshot; each row is the target of at most one
-   operation (first operation wins, later references are rejected as
-   [Rejected_target_consumed]); an unreferenced row survives unchanged. *)
+   Target overlap is a malformed operation set, not an ordering policy: a
+   model must not be able to choose a destructive result by merely reordering
+   two operations. The wire parser rejects such output before this boundary;
+   this pure guard gives the same fail-closed result to direct callers. *)
 let apply ~now ~operations facts =
+  if operations_have_overlapping_targets operations
+  then
+    { facts
+    ; recognized_facts = []
+    ; dispositions = List.map (fun _ -> Rejected_target_overlap) operations
+    }
+  else
   let facts_arr = Array.of_list facts in
   let n = Array.length facts_arr in
   let in_range i = i >= 0 && i < n in
@@ -154,12 +184,9 @@ let apply ~now ~operations facts =
         slot.(index) <- `Dropped;
         Applied)
     | Merge group ->
-      (* First-op-wins applies to the WHOLE member set, exactly like the
-         single-index operations: a merge whose member was already consumed
-         rejects entirely rather than silently shrinking to the free subset —
-         otherwise the ledger's recorded member_indices would disagree with
-         the provenance actually folded into the merged row, breaking the
-         evidence guarantee this contract exists for. *)
+      (* A member can only be consumed by a preceding non-overlapping operation
+         from a direct caller. The parser rejects overlapping model output,
+         while this remains a defensive structural gate for the pure API. *)
       let members = List.sort_uniq compare group.Consolidation.member_indices in
       if List.exists (fun i -> not (in_range i)) members
       then Rejected_index_out_of_bounds

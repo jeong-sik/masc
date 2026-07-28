@@ -525,13 +525,19 @@ let recognition_output_of_json_result ?now (inp : input) (json : Yojson.Safe.t) 
            with
            | Error _ as error -> error
            | Ok operations ->
-             Ok
-               { episode_summary
-               ; operations
-               ; open_items
-               ; constraints
-               ; preserved_tool_refs
-               })
+             if Recognition.operations_have_overlapping_targets operations
+             then
+               Error
+                 (Operation_schema_mismatch
+                    "operations must not target the same fact index")
+             else
+               Ok
+                 { episode_summary
+                 ; operations
+                 ; open_items
+                 ; constraints
+                 ; preserved_tool_refs
+                 })
         | _ -> Error Missing_required_fields))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error Top_level_not_object

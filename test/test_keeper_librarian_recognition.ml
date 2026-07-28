@@ -137,7 +137,7 @@ let test_out_of_range_rejects_without_change () =
     (List.map Recognition.disposition_label result.Recognition.dispositions)
 ;;
 
-let test_double_target_first_op_wins () =
+let test_overlapping_targets_reject_the_entire_operation_set () =
   let store = [ fact ~claim:"contested" () ] in
   let result =
     apply
@@ -146,10 +146,10 @@ let test_double_target_first_op_wins () =
       ]
       store
   in
-  check (list string) "first op won; row survives reinforced" [ "contested" ]
+  check (list string) "store is unchanged" [ "contested" ]
     (claims result.Recognition.facts);
-  check (list string) "second reference rejected"
-    [ "applied"; "rejected_target_consumed" ]
+  check (list string) "all operations are rejected as one malformed set"
+    [ "rejected_target_overlap"; "rejected_target_overlap" ]
     (List.map Recognition.disposition_label result.Recognition.dispositions)
 ;;
 
@@ -208,20 +208,16 @@ let test_merge_with_consumed_member_rejects_entirely () =
       ]
       store
   in
-  (* Index 0 was consumed by Forget: first-op-wins covers the whole member
-     set, so the merge rejects entirely and "b" survives untouched. *)
-  check (list string) "merge rejected; survivor untouched" [ "b" ]
+  check (list string) "overlap leaves every row untouched" [ "a"; "b" ]
     (claims result.Recognition.facts);
   check (list string) "dispositions"
-    [ "applied"; "rejected_target_consumed" ]
+    [ "rejected_target_overlap"; "rejected_target_overlap" ]
     (List.map Recognition.disposition_label result.Recognition.dispositions)
 ;;
 
 let test_merge_never_shrinks_to_free_subset () =
-  (* F1 regression (PR #26133 review): a 3-member merge with ONE consumed
-     member must reject entirely — never silently merge the free subset,
-     which would make the ledger's recorded members disagree with the
-     provenance actually folded into the merged row. *)
+  (* A merge sharing one member with another operation is a malformed batch,
+     not a left-to-right conflict resolution policy. *)
   let store =
     [ fact ~claim:"a" (); fact ~claim:"b" (); fact ~claim:"c" () ]
   in
@@ -238,8 +234,8 @@ let test_merge_never_shrinks_to_free_subset () =
   in
   check (list string) "no partial merge; all rows survive" [ "a"; "b"; "c" ]
     (claims result.Recognition.facts);
-  check (list string) "merge rejected as target_consumed"
-    [ "applied"; "rejected_target_consumed" ]
+  check (list string) "batch overlap is typed"
+    [ "rejected_target_overlap"; "rejected_target_overlap" ]
     (List.map Recognition.disposition_label result.Recognition.dispositions)
 ;;
 
@@ -319,7 +315,8 @@ let () =
           test_case "add appends" `Quick test_add_appends;
           test_case "out-of-range rejects without change" `Quick
             test_out_of_range_rejects_without_change;
-          test_case "double target: first op wins" `Quick test_double_target_first_op_wins;
+          test_case "overlapping targets reject the full operation set" `Quick
+            test_overlapping_targets_reject_the_entire_operation_set;
           test_case "merge kind mismatch rejected" `Quick test_merge_kind_mismatch_rejected;
           test_case "merge valid_until mismatch rejected" `Quick
             test_merge_valid_until_mismatch_rejected;

@@ -74,6 +74,17 @@ val cadence_counter_entries : unit -> int
     Uses [Eio_guard.with_mutex_ro] so runtime fibers take a cooperative mutex
     while focused pre-Eio tests keep a direct single-threaded path. *)
 
+val durable_cadence_due :
+  base_path:string -> keeper_id:string -> (bool, string) result
+(** Advance the restart-safe cadence state for one keeper turn. Runtime
+    admission uses this durable state; an unreadable or unwritable state fails
+    closed so a restart cannot create an unbounded provider burst. *)
+
+val durable_cadence_record_completed_attempt :
+  base_path:string -> keeper_id:string -> (unit, string) result
+(** Reset the restart-safe cadence state after a completed provider attempt,
+    whether the structured result was accepted or rejected. *)
+
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
     effective prompt window is this value scaled by [cadence_turns] so skipped

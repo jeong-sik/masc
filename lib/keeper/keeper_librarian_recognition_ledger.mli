@@ -4,8 +4,8 @@
     JSONL row carrying the exact store snapshot the model saw, the typed
     operation list it returned, the per-operation structural dispositions,
     and the resulting store. Before/After is always reconstructible from
-    disk. Append failures degrade to a warning and never propagate into the
-    turn.
+    disk. The evidence write is a publication prerequisite: failure is typed
+    so the caller can leave the fact store unchanged.
 
     Row size is O(store) by design — the issue's anti-black-box requirement
     persists both full snapshots, deliberately unlike the recall ledger's
@@ -33,7 +33,8 @@ val to_json
   -> unit
   -> Yojson.Safe.t
 
-(** Append one recognition evidence row. Write failure logs and returns. *)
+(** Append one recognition evidence row. The row must be durable before the
+    caller publishes the corresponding fact rewrite. *)
 val append
   :  masc_root:string
   -> keeper_id:string
@@ -45,7 +46,7 @@ val append
   -> store_after:fact list
   -> now:float
   -> unit
-  -> unit
+  -> (unit, string) result
 
 (** Drop dated files older than [retention_days]. For server maintenance. *)
 val prune_older_than

@@ -223,6 +223,38 @@ let test_cadence_step_keyed () =
     (("t2", 3), true)
     (R.cadence_step_keyed ~cadence:3 ~current_trace:"t2" ~prior:(Some ("t1", 2)))
 
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+
+let test_durable_cadence_survives_a_fresh_read () =
+  let base_path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "librarian-durable-cadence-%d-%d" (Unix.getpid ())
+         (Random.bits ()))
+  in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_path with _ -> ())
+    (fun () ->
+       Unix.mkdir base_path 0o700;
+       let keeper_id = "durable-cadence" in
+       (match R.durable_cadence_due ~base_path ~keeper_id with
+        | Ok true -> ()
+        | Ok false -> Alcotest.fail "fresh durable cadence should be due"
+        | Error detail -> Alcotest.fail detail);
+       (match R.durable_cadence_record_completed_attempt ~base_path ~keeper_id with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       (match R.durable_cadence_due ~base_path ~keeper_id with
+        | Ok due ->
+          check bool "persisted reset delays the next provider attempt"
+            (R.cadence_turns () <= 1) due
+        | Error detail -> Alcotest.fail detail))
+
 (* Strict parsing with bounded compatibility for real-world librarian provider
    drift. We accept exact JSON and exact JSON-string wrapping only. Markdown
    fences, prose-wrapped JSON, and embedded JSON must fall into the diagnostic
@@ -335,6 +367,32 @@ let test_rejects_foreign_non_null_operation_field () =
       "expected Operation_schema_mismatch, got %s"
       (Lib.parse_error_to_string error)
   | Ok _ -> Alcotest.fail "foreign non-null operation field should reject"
+;;
+
+let test_rejects_overlapping_operation_targets () =
+  let raw =
+    output_json_string
+      ~operations:
+        [ `Assoc
+            [ field_op, `String "reinforce"
+            ; field_index, `Int 0
+            ; field_source_turn, `Int 4
+            ]
+        ; `Assoc
+            [ field_op, `String "forget"
+            ; field_index, `Int 0
+            ; field_reason, `String "superseded"
+            ]
+        ]
+      ()
+  in
+  match parse_out raw with
+  | Error (Lib.Operation_schema_mismatch _) -> ()
+  | Error error ->
+    Alcotest.failf
+      "expected Operation_schema_mismatch, got %s"
+      (Lib.parse_error_to_string error)
+  | Ok _ -> Alcotest.fail "overlapping operation targets must fail closed"
 ;;
 
 let test_parses_all_operation_shapes () =
@@ -485,6 +543,8 @@ let () =
           test_case "cadence table bounded under trace rotation" `Quick
             test_cadence_table_bounded_under_trace_rotation;
           test_case "cadence_step_keyed rollover decision" `Quick test_cadence_step_keyed;
+          test_case "durable cadence survives a fresh read" `Quick
+            test_durable_cadence_survives_a_fresh_read;
         ] );
       ( "strict_parsing",
         [
@@ -495,6 +555,8 @@ let () =
           test_case "rejects unexpected claim field" `Quick test_rejects_unexpected_claim_field;
           test_case "rejects foreign non-null operation field" `Quick
             test_rejects_foreign_non_null_operation_field;
+          test_case "rejects overlapping operation targets" `Quick
+            test_rejects_overlapping_operation_targets;
           test_case "parses all operation shapes" `Quick test_parses_all_operation_shapes;
           test_case "rejects single-member merge" `Quick test_rejects_single_member_merge;
           test_case "rejects unknown op" `Quick test_rejects_unknown_op;

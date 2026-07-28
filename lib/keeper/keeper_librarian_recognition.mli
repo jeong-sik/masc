@@ -45,6 +45,7 @@ val operation_label : operation -> string
     referencing failure, never an identity judgment. *)
 type disposition =
   | Applied
+  | Rejected_target_overlap
   | Rejected_index_out_of_bounds
   | Rejected_target_consumed
   | Rejected_kind_mismatch
@@ -52,6 +53,11 @@ type disposition =
   | Rejected_too_few_members
 
 val disposition_label : disposition -> string
+
+(** [operations_have_overlapping_targets operations] is true when two distinct
+    operations address the same input-snapshot index (including a Merge member).
+    This is structural wire invalidity, not a model identity judgment. *)
+val operations_have_overlapping_targets : operation list -> bool
 
 type apply_result =
   { facts : fact list
@@ -65,16 +71,11 @@ type apply_result =
   }
 
 (** Apply recognition operations to the store snapshot the librarian saw.
-    Deterministic and conservative: indices refer to the input snapshot;
-    each row is the target of at most one operation (first operation wins;
-    later references reject as [Rejected_target_consumed]); an unreferenced
-    row survives unchanged. First-op-wins covers a Merge's WHOLE member set —
-    one already-consumed or out-of-range member rejects the merge entirely
-    (never a silent shrink to the free subset, unlike
-    [Keeper_memory_os_consolidation.apply_plan]'s first-group-wins), so the
-    ledger's recorded members always equal the provenance actually folded.
-    The store can shrink: Forget removes rows and Merge collapses them — no
-    monotonic-growth invariant. *)
+    Overlapping targets fail closed as one malformed operation set, so ordering
+    cannot choose a destructive result. Non-overlapping indices refer to the
+    input snapshot; a later direct-call reference to a row already consumed by
+    a Merge is rejected. The store can shrink: Forget removes rows and Merge
+    collapses them — no monotonic-growth invariant. *)
 val apply : now:float -> operations:operation list -> fact list -> apply_result
 
 (** JSON projection of one operation for the recognition evidence ledger. *)

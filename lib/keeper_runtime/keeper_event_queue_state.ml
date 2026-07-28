@@ -937,6 +937,13 @@ let transition_receipt_equal left right =
   && left.settlement = right.settlement
 ;;
 
+let transition_receipt_same_commit left right =
+  String.equal left.lease_id right.lease_id
+  && Int64.equal left.lease_sequence right.lease_sequence
+  && Float.equal left.settled_at right.settled_at
+  && settlement_equal left.settlement right.settlement
+;;
+
 let validate_accepted_cancellation (cancellation : accepted_cancellation) =
   if String.equal (String.trim cancellation.source.post_id) ""
   then Error "accepted cancellation source post id must not be empty"
@@ -2311,9 +2318,15 @@ let replay_transition_outbox_entry entry state =
                in
                (match replayed.transition_outbox with
                 | [ actual ]
-                  when transition_receipt_equal entry.receipt actual_receipt
-                       && actual = entry ->
-                  Ok replayed
+                  when transition_receipt_same_commit entry.receipt actual_receipt
+                       && actual.stimuli = entry.stimuli ->
+                  (* The v2 receipt was fully validated at the durable decode
+                     boundary. Replaying it through the current ACK writer
+                     constructs a canonical ID, but the accepted historical
+                     row must stay in the outbox: its event ID is the dedupe
+                     key already observed by the reaction ledger. New ACK
+                     commits never take this recovery path. *)
+                  Ok { replayed with transition_outbox = [ entry ] }
                 | [] | [ _ ] | _ :: _ :: _ ->
                   Error
                     (Printf.sprintf

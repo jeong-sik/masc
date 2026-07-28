@@ -1037,7 +1037,7 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
         loop [] [] lines
       in
       let inspected =
-        provenance_index_of_existing existing |> Result.bind inspect
+        Result.bind (provenance_index_of_existing existing) inspect
       in
       match inspected with
       | Error detail -> None, Error detail

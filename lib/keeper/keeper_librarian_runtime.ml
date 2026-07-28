@@ -1118,7 +1118,10 @@ let apply_and_persist
                           | Recognition.Applied
                           | Recognition.Rejected_index_out_of_bounds
                           | Recognition.Rejected_target_overlap
-                          | Recognition.Rejected_target_consumed -> false)
+                          | Recognition.Rejected_target_consumed
+                          | Recognition.Rejected_kind_mismatch
+                          | Recognition.Rejected_valid_until_mismatch
+                          | Recognition.Rejected_too_few_members -> false)
                         result.Recognition.dispositions
                  in
                  if facts_rewrite_required || recalled_echo_only

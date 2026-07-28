@@ -20,6 +20,7 @@ module Recognition_operator = Masc.Keeper_librarian_recognition_operator
 module Memory_io = Masc.Keeper_memory_os_io
 module Recall = Masc.Keeper_memory_os_recall
 module Types = Masc.Keeper_memory_os_types
+module Keeper_fs = Masc.Keeper_fs
 
 let now = 2_000_000.0
 

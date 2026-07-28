@@ -41,7 +41,19 @@ let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
   | Ok () -> dispatch ()
 ;;
 
-let autonomous_yield_request ~base_path ~keeper_name =
+let pending_without_active_sources ~active_source_stimuli pending =
+  pending
+  |> Keeper_event_queue.to_list
+  |> List.filter (fun candidate ->
+    not
+      (List.exists
+         (fun active ->
+            Keeper_event_queue.stimulus_identity_equal active candidate)
+         active_source_stimuli))
+  |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
+;;
+
+let autonomous_yield_request ~base_path ~keeper_name ~active_source_stimuli =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
   | Some _ ->
@@ -57,6 +69,9 @@ let autonomous_yield_request ~base_path ~keeper_name =
        | Ok false ->
          let* pending =
            Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
+         in
+         let pending =
+           pending_without_active_sources ~active_source_stimuli pending
          in
          if Keeper_event_queue.is_empty pending
          then Ok None
@@ -112,6 +127,7 @@ type ctx =
   ; turn_id : int
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   ; on_deferred_runtime_consumed : (unit -> unit) option
+  ; active_source_stimuli : Keeper_event_queue.stimulus list
   }
 
 let run (ctx : ctx)
@@ -150,6 +166,7 @@ let run (ctx : ctx)
       ; attempt = _attempt
       ; deferred_runtime_lane
       ; on_deferred_runtime_consumed
+      ; active_source_stimuli
       } =
     ctx
   in
@@ -274,7 +291,8 @@ let run (ctx : ctx)
                  ~autonomous_yield_requested:(fun () ->
                    autonomous_yield_request
                      ~base_path:config.base_path
-                     ~keeper_name:meta.name)
+                     ~keeper_name:meta.name
+                     ~active_source_stimuli)
                  ()
             with
             | Eio.Cancel.Cancelled _ as exn ->
@@ -503,4 +521,5 @@ module For_testing = struct
     | Declared_runtime_lane_exhausted
 
   let declared_lane_failure_of_error = declared_lane_failure_of_error
+  let pending_without_active_sources = pending_without_active_sources
 end

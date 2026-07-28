@@ -212,6 +212,9 @@ let turn_source_settlement_of_cycle_outcome = function
   | Some Cycle.Manual_compaction_applied _
   | Some Cycle.Manual_compaction_not_applied _ ->
     Settle_source Scheduled_work_succeeded
+  | Some Cycle.Checkpointed _
+  | Some Cycle.Input_required _ ->
+    Retain_unacked
   | Some (Cycle.Failed { failure; _ }) ->
     (match failure.Keeper_unified_turn.source_lease_disposition with
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling
@@ -376,7 +379,9 @@ let compaction_outcome_of_cycle_outcome = function
      | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None)
   | Some (Cycle.Completed _) -> Some `Recovered
   | Some
-      ( Cycle.Cancelled _
+      ( Cycle.Checkpointed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
       | Cycle.Skipped _
       | Cycle.Busy _
       | Cycle.Manual_compaction_not_applied _ )
@@ -422,6 +427,10 @@ module For_testing = struct
     | Transcript_pause_settlement_failed of string
 
   let commit_transcript_corruption = commit_transcript_corruption
+  let cycle_outcome_acks_source cycle_outcome =
+    turn_source_settlement_of_cycle_outcome (Some cycle_outcome)
+    |> settlement_acks_source
+  ;;
 
 end
 
@@ -490,6 +499,8 @@ let run_keepalive_unified_turn
         ()
       | Some
           ( Cycle.Completed _
+          | Cycle.Checkpointed _
+          | Cycle.Input_required _
           | Cycle.Cancelled _
           | Cycle.Skipped _
           | Cycle.Busy _
@@ -764,6 +775,7 @@ let run_keepalive_unified_turn
               ?event_bus
               ?hitl_resolution
               ?continuation_delivery_channel
+              ~active_source_stimuli:!consumed_stimuli
               ~ctx
               ~meta_after_triage
               ~stop
@@ -802,6 +814,8 @@ let run_keepalive_unified_turn
              None)
         | Some
             ( Cycle.Completed _
+            | Cycle.Checkpointed _
+            | Cycle.Input_required _
             | Cycle.Cancelled _
             | Cycle.Skipped _
             | Cycle.Busy _

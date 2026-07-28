@@ -105,8 +105,18 @@ let transcript_corruption error =
 
 type turn_success =
   | Turn_completed of keeper_meta
+  | Turn_checkpointed of keeper_meta
+  | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
+
+let turn_success_of_stop_reason ~meta = function
+  | Runtime_agent.Completed -> Turn_completed meta
+  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+    Turn_checkpointed meta
+  | Runtime_agent.InputRequired _ -> Turn_input_required meta
+;;
 
 let user_message_with_hitl_resolution ~base_path ~user_message = function
   | Some
@@ -628,6 +638,7 @@ let run_keeper_cycle
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
+      ?(active_source_stimuli = [])
       ()
   : (turn_success, turn_failure) result
   =
@@ -751,7 +762,7 @@ let run_keeper_cycle
      resumes inside [main_path]; at that point [phase_opt] is whatever
      the registry returned for an executable phase. *)
   let main_path (turn_state : Keeper_unified_turn_execution.turn_state) phase_opt
-    : (keeper_meta, Agent_sdk.Error.sdk_error) result
+    : (turn_success, Agent_sdk.Error.sdk_error) result
       * Keeper_unified_turn_execution.turn_state
     =
       let _ = phase_opt in
@@ -785,7 +796,7 @@ let run_keeper_cycle
          Keeper routing no longer rewrites runtimes from provider cooldown or
          process-queue probes. *)
       (match None with
-       | Some meta_after_skip -> Ok meta_after_skip, turn_state
+       | Some meta_after_skip -> Ok (Turn_skipped meta_after_skip), turn_state
        | None ->
          (* RFC-0136 PR-3: pre-dispatch validation extracted to
             [Keeper_unified_turn_pre_dispatch].  profile_defaults stays
@@ -1125,7 +1136,8 @@ let run_keeper_cycle
                            ; turn_id = keeper_turn_id
                            ; deferred_runtime_lane
                            ; on_deferred_runtime_consumed
-                         }
+                           ; active_source_stimuli
+                           }
                            ~initial_execution
                            ~turn_state
                            ~before_dispatch_authority
@@ -1211,7 +1223,7 @@ let run_keeper_cycle
                     { turn_state with cycle_completed = true }
                   in
                   post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                  Ok meta, turn_state
+                  Ok (Turn_input_required meta), turn_state
                 | Error err ->
                   (match
                      require_last_execution_for_finalize
@@ -1490,7 +1502,11 @@ dominant source of the observed CAS race exhaustion after
                        { turn_state with cycle_completed = true }
                      in
                      post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                     Ok updated_meta, turn_state)))))
+                     Ok
+                       (turn_success_of_stop_reason
+                          ~meta:updated_meta
+                          result.Keeper_agent_run.stop_reason),
+                     turn_state)))))
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
     Keeper_unified_turn_manifest.append_phase_gate_decision
@@ -1528,7 +1544,7 @@ dominant source of the observed CAS race exhaustion after
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
     let result, turn_state = main_path turn_state phase_opt in
     (match result with
-     | Ok meta -> Ok (Turn_completed meta)
+     | Ok success -> Ok success
      | Error error ->
        Error
          (failure_of_error

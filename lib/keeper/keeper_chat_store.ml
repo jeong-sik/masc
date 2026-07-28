@@ -662,40 +662,63 @@ let provenance_of_line ~line_number line =
   | Yojson.Json_error detail -> fail detail
 ;;
 
-let find_provenance existing ~delivery_key ~transcript_slot =
+module Provenance_key = struct
+  type t =
+    Keeper_chat_delivery_identity.delivery_key
+    * Keeper_chat_delivery_identity.transcript_slot
+
+  let equal (left_key, left_slot) (right_key, right_slot) =
+    Keeper_chat_delivery_identity.delivery_key_equal left_key right_key
+    && Keeper_chat_delivery_identity.transcript_slot_equal left_slot right_slot
+  ;;
+
+  let hash = Hashtbl.hash
+end
+
+module Provenance_index = Hashtbl.Make (Provenance_key)
+
+type indexed_provenance =
+  | Unique_provenance of string
+  | Duplicate_provenance
+
+let provenance_index_of_existing existing =
+  let index = Provenance_index.create 16 in
+  let add_provenance (delivery_key, transcript_slot, row_id) =
+    let key = delivery_key, transcript_slot in
+    match Provenance_index.find_opt index key with
+    | None -> Provenance_index.add index key (Unique_provenance row_id)
+    | Some (Unique_provenance _ | Duplicate_provenance) ->
+      Provenance_index.replace index key Duplicate_provenance
+  in
   existing
   |> String.split_on_char '\n'
-  |> List.mapi (fun index line -> index + 1, line)
+  |> List.mapi (fun offset line -> offset + 1, line)
   |> List.fold_left
        (fun result (line_number, line) ->
           let ( let* ) = Result.bind in
-          let* found = result in
+          let* () = result in
           if String.equal line ""
-          then Ok found
+          then Ok ()
           else
             let* provenance = provenance_of_line ~line_number line in
-            match provenance, found with
-            | None, _ -> Ok found
-            | Some (candidate_key, candidate_slot, row_id), None
-              when
-                Keeper_chat_delivery_identity.delivery_key_equal
-                  delivery_key
-                  candidate_key
-                && Keeper_chat_delivery_identity.transcript_slot_equal
-                     transcript_slot
-                     candidate_slot ->
-              Ok (Some row_id)
-            | Some (candidate_key, candidate_slot, _), Some _
-              when
-                Keeper_chat_delivery_identity.delivery_key_equal
-                  delivery_key
-                  candidate_key
-                && Keeper_chat_delivery_identity.transcript_slot_equal
-                     transcript_slot
-                     candidate_slot ->
-              Error "duplicate Keeper chat delivery provenance rows"
-            | Some _, _ -> Ok found)
-       (Ok None)
+            Option.iter add_provenance provenance;
+            Ok ())
+       (Ok ())
+  |> Result.map (fun () -> index)
+;;
+
+let find_indexed_provenance index ~delivery_key ~transcript_slot =
+  match Provenance_index.find_opt index (delivery_key, transcript_slot) with
+  | None -> Ok None
+  | Some (Unique_provenance row_id) -> Ok (Some row_id)
+  | Some Duplicate_provenance ->
+    Error "duplicate Keeper chat delivery provenance rows"
+;;
+
+let find_provenance existing ~delivery_key ~transcript_slot =
+  let ( let* ) = Result.bind in
+  let* index = provenance_index_of_existing existing in
+  find_indexed_provenance index ~delivery_key ~transcript_slot
 ;;
 
 let append_line_once path ~delivery_key ~transcript_slot ~row_id line =
@@ -992,23 +1015,31 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
       ~result_slot lines =
   match
     Fs_compat.update_private_file_durable_locked_result path (fun existing ->
-      let rec inspect found additions = function
-        | [] -> Ok (found, List.rev additions)
-        | ({ transcript_slot; row_id; line } as candidate) :: rest ->
-          (match find_provenance existing ~delivery_key ~transcript_slot with
-           | Error detail -> Error detail
-           | Ok (Some existing_row_id) ->
-             inspect
-               ((transcript_slot, existing_row_id, true) :: found)
-               additions
-               rest
-           | Ok None ->
-             inspect
-               ((transcript_slot, row_id, false) :: found)
-               (candidate :: additions)
-               rest)
+      let inspect index =
+        let rec loop found additions = function
+          | [] -> Ok (found, List.rev additions)
+          | ({ transcript_slot; row_id; line = _ } as candidate) :: rest ->
+            (match
+               find_indexed_provenance index ~delivery_key ~transcript_slot
+             with
+             | Error detail -> Error detail
+             | Ok (Some existing_row_id) ->
+               loop
+                 ((transcript_slot, existing_row_id, true) :: found)
+                 additions
+                 rest
+             | Ok None ->
+               loop
+                 ((transcript_slot, row_id, false) :: found)
+                 (candidate :: additions)
+                 rest)
+        in
+        loop [] [] lines
       in
-      match inspect [] [] lines with
+      let inspected =
+        provenance_index_of_existing existing |> Result.bind inspect
+      in
+      match inspected with
       | Error detail -> None, Error detail
       | Ok (rows, additions) ->
         let result_row =
@@ -1532,11 +1563,16 @@ let parse_line ~file_path (line : string) : chat_message option =
                 ~detail:(Printf.sprintf "invalid delivery_key: %s" detail);
               None)
     in
-    if role_label = "" || content = "" then (
+    let has_structured_payload =
+      Option.is_some audio
+      || Option.exists (fun values -> values <> []) attachments
+      || Option.exists (fun values -> values <> []) blocks
+    in
+    if role_label = "" || (content = "" && not has_structured_payload) then (
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
         ~path:file_path
-        ~detail:"chat row missing non-empty role/content";
+        ~detail:"chat row missing role and readable text/structured payload";
       None)
     else
       match Role.of_label role_label with
@@ -1583,11 +1619,14 @@ let max_total_lines = 400
 
 let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
 
-(* A turn is persisted as user, tool*, assistant. Evicting the front of
-   the window can leave tool lines whose owning user line is gone;
-   render-wise they are orphans, so trim them. *)
-let rec drop_leading_tool_messages = function
-  | msg :: rest when is_tool_message msg -> drop_leading_tool_messages rest
+(* Old rows without either causal identity can become unrenderable when a
+   window evicts their owning user row. Current tool-only continuations carry
+   [turn_ref] or an idempotent [delivery_key] and remain valid even when they
+   are the first retained row. *)
+let rec drop_leading_orphan_tool_messages = function
+  | ({ turn_ref = None; delivery_key = None; _ } as msg) :: rest
+    when is_tool_message msg ->
+    drop_leading_orphan_tool_messages rest
   | messages -> messages
 
 (* RFC-0226 P2: [load] serves a fixed window ([max_total_lines]) but
@@ -1708,7 +1747,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
       let redaction = redaction_for ~base_dir ~keeper_name in
       Queue.fold (fun acc msg -> msg :: acc) [] q
       |> List.rev
-      |> drop_leading_tool_messages
+      |> drop_leading_orphan_tool_messages
       |> List.map (redact_message redaction)
     in
     { messages; has_more = from > 0 || !evicted }

@@ -107,7 +107,14 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
         t.next_opened_at <- opened_at + 1;
         replace_block t index
           { opened_at; call_id = tool_id; call_name = tool_name; args_fragments = [] })
-    else invalidate_index t index
+    else
+      (match tool_id, tool_name with
+       | None, None ->
+         (* The live OAS bridge emits an identity-free non-tool start without
+            changing index occupancy. Preserve an active tool block and leave
+            an empty index empty so durable history matches the live stream. *)
+         ()
+       | Some _, _ | _, Some _ -> invalidate_index t index)
   | Agent_sdk.Types.ContentBlockDelta
       { index; delta = Agent_sdk.Types.InputJsonDelta fragment } ->
     append_fragment t index fragment

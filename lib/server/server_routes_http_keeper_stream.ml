@@ -1725,7 +1725,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ()
     |> Result.map (fun _ -> ())
   in
-  let append_queued_transport_failure_once ?(tool_calls = []) content =
+  let append_queued_transport_failure_once ?(tool_calls = []) ?turn_ref content =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
     Keeper_chat_store.append_assistant_message_once
@@ -1736,6 +1736,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~tool_calls
       ~surface:chat_surface
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+      ?turn_ref
       ~stream_lifecycle:errored_stream_lifecycle
       ()
     |> Result.map (fun _ -> ())
@@ -1875,7 +1876,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       | Keeper_chat_store.Already_persisted_upstream ->
         ()
   in
-  let persist_failure_reply err =
+  let persist_failure_reply ?turn_ref err =
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
        message it failed to answer stays pending for the keeper's next
@@ -1893,9 +1894,10 @@ let process_single_turn ~user_row_origin ~queued_turn
           ~ok:false
           ~body:err
           ~data:None
-          (Keeper_chat_direct_delivery.Transport_failure { content; tool_calls })
+          (Keeper_chat_direct_delivery.Transport_failure
+             { content; turn_ref; tool_calls })
       else if queued_turn
-      then append_queued_transport_failure_once ~tool_calls content
+      then append_queued_transport_failure_once ~tool_calls ?turn_ref content
       else
         match user_row_origin with
         | Keeper_chat_store.Needs_append ->
@@ -1909,6 +1911,7 @@ let process_single_turn ~user_row_origin ~queued_turn
             ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
             ~tool_calls
             ~assistant_content:content
+            ?turn_ref
             ~stream_lifecycle:errored_stream_lifecycle
             ()
         | Keeper_chat_store.Already_persisted _
@@ -1919,6 +1922,7 @@ let process_single_turn ~user_row_origin ~queued_turn
             ~content
             ~tool_calls
             ~surface:chat_surface
+            ?turn_ref
             ~stream_lifecycle:errored_stream_lifecycle
             ()
     in
@@ -2161,7 +2165,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                  let queued_outcome =
                    if not queued_turn then None
                    else
-                     match persist_failure_reply err with
+                     match persist_failure_reply ?turn_ref err with
                      | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
                      | Error persist_error ->
                          Some
@@ -2172,7 +2176,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                  in
                  if not queued_turn
                  then
-                   (match persist_failure_reply err with
+                   (match persist_failure_reply ?turn_ref err with
                     | Ok () -> ()
                     | Error persist_error ->
                       Log.Keeper.error
@@ -2293,7 +2297,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                        let detail =
                          "queued turn ended with a continuation checkpoint and no delivered reply"
                        in
-                       (match persist_failure_reply detail with
+                       (match persist_failure_reply ?turn_ref detail with
                         | Ok () ->
                             Ok
                               (Some
@@ -2342,7 +2346,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                            then if tool_calls <> [] && not has_visible_blocks
                            then persist_tool_calls_only ()
                            else persist_assistant_reply ~assistant_content:""
-                           else persist_failure_reply detail
+                           else persist_failure_reply ?turn_ref detail
                          in
                          (match persist with
                           | Ok () ->

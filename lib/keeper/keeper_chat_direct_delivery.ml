@@ -26,6 +26,7 @@ type transcript_effect =
       }
   | Transport_failure of
       { content : string
+      ; turn_ref : Ids.Turn_ref.t option
       ; tool_calls : Keeper_chat_store.tool_call list
       }
   | Tool_calls_only of
@@ -387,7 +388,7 @@ let validate_effect (staged : staged_effect) =
        validate_json_text
          "assistant_reply.blocks"
          (Keeper_chat_blocks.blocks_to_yojson blocks))
-  | false, Transport_failure { content; tool_calls } ->
+  | false, Transport_failure { content; tool_calls; _ } ->
     let* () = validate_utf8 "transport_failure.content" content in
     validate_tool_calls tool_calls
   | true, Tool_calls_only { tool_calls = _ :: _ as tool_calls; _ } ->
@@ -562,10 +563,12 @@ let transcript_effect_to_yojson = function
         , string_option_to_yojson (Option.map Ids.Turn_ref.to_string turn_ref) )
       ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
       ]
-  | Transport_failure { content; tool_calls } ->
+  | Transport_failure { content; turn_ref; tool_calls } ->
     `Assoc
       [ "kind", `String "transport_failure"
       ; "content", `String content
+      ; ( "turn_ref"
+        , string_option_to_yojson (Option.map Ids.Turn_ref.to_string turn_ref) )
       ; "tool_calls", `List (List.map tool_call_to_yojson tool_calls)
       ]
   | Tool_calls_only { tool_calls; turn_ref } ->
@@ -896,22 +899,36 @@ let transcript_effect_of_yojson = function
        Ok (Assistant_reply { content; blocks; turn_ref; tool_calls })
      | "transport_failure" ->
        let tool_calls_json = List.assoc_opt "tool_calls" fields in
+       let turn_ref_json = List.assoc_opt "turn_ref" fields in
        let* () =
          validate_fields
            ~context:"transport failure effect"
            ~expected:
-             (match tool_calls_json with
-              | None -> [ "kind"; "content" ]
-              | Some _ -> [ "kind"; "content"; "tool_calls" ])
+             ([ "kind"; "content" ]
+              @ (if Option.is_some turn_ref_json then [ "turn_ref" ] else [])
+              @ (if Option.is_some tool_calls_json then [ "tool_calls" ] else []))
            fields
        in
        let* content = json_string "content" fields in
+       let* turn_ref =
+         match turn_ref_json with
+         | None -> Ok None
+         | Some _ ->
+           let* wire = json_string_option "turn_ref" fields in
+           (match wire with
+            | None -> Ok None
+            | Some wire ->
+              (match Ids.Turn_ref.of_string wire with
+               | Some turn_ref -> Ok (Some turn_ref)
+               | None ->
+                 Error (Decode_failed "transport failure turn_ref is invalid")))
+       in
        let* tool_calls =
          match tool_calls_json with
          | None -> Ok []
          | Some json -> tool_calls_of_yojson json
        in
-       Ok (Transport_failure { content; tool_calls })
+       Ok (Transport_failure { content; turn_ref; tool_calls })
      | "tool_calls_only" ->
        let turn_ref_json = List.assoc_opt "turn_ref" fields in
        let* () =
@@ -1375,10 +1392,11 @@ let redact_effect redaction (staged : staged_effect) =
       in
       let tool_calls = List.map redact_tool_call tool_calls in
       Ok (Assistant_reply { content; blocks; turn_ref; tool_calls })
-    | Transport_failure { content; tool_calls } ->
+    | Transport_failure { content; turn_ref; tool_calls } ->
       Ok
         (Transport_failure
            { content = Keeper_secret_redaction.redact_text redaction content
+           ; turn_ref
            ; tool_calls = List.map redact_tool_call tool_calls
            })
     | Tool_calls_only { tool_calls; turn_ref } ->
@@ -1625,7 +1643,7 @@ let append_staged_transcript ~base_path existing ~user_row_id staged =
     |> Result.map row_id_of_append_once
     |> Result.map_error (fun detail ->
       Transcript_failed { slot = Assistant_transcript; detail })
-  | Transport_failure { content; tool_calls } ->
+  | Transport_failure { content; turn_ref; tool_calls } ->
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
       ~keeper_name:existing.payload.keeper_name
@@ -1635,6 +1653,7 @@ let append_staged_transcript ~base_path existing ~user_row_id staged =
       ~surface:existing.payload.surface
       ?conversation_id:existing.payload.conversation_id
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+      ?turn_ref
       ~stream_lifecycle:
         [ Keeper_chat_store.Run_started
         ; Keeper_chat_store.Text_message_start

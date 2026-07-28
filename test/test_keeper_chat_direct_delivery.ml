@@ -231,6 +231,55 @@ let test_direct_tool_only_transcript_has_no_empty_assistant _env =
     | _ -> fail "expected user and tool rows")
 ;;
 
+let test_direct_transport_failure_keeps_turn_ref _env =
+  with_temp_dir (fun base_path ->
+    let request_id = request_id "direct-failure-turn-ref" in
+    let prepared =
+      Direct.prepare ~base_path ~request_id ~payload:(payload ()) ~now:1.0
+      |> expect_ok
+    in
+    let user_committed =
+      Direct.commit_user_row ~base_path ~identity:prepared ~now:2.0 |> expect_ok
+    in
+    let running =
+      Direct.mark_running ~base_path ~identity:user_committed ~now:3.0
+      |> expect_ok
+    in
+    let turn_ref =
+      Ids.Turn_ref.make ~trace_id:"direct-failure" ~absolute_turn:4
+    in
+    let staged =
+      Direct.stage_effect
+        ~base_path
+        ~identity:running
+        ~staged:
+          { request_result = { ok = false; body = "failed"; data = None }
+          ; transcript_effect =
+              Direct.Transport_failure
+                { content = "Keeper request failed"
+                ; turn_ref = Some turn_ref
+                ; tool_calls = []
+                }
+          }
+        ~now:4.0
+      |> expect_ok
+    in
+    ignore
+      (Direct.commit_transcript ~base_path ~identity:staged ~now:5.0
+       |> expect_ok
+        : Direct.t);
+    match
+      Keeper_chat_store.load ~base_dir:base_path ~keeper_name:"sangsu"
+    with
+    | [ _user; failure ] ->
+      check (option string) "failure row keeps canonical turn provenance"
+        (Some "direct-failure#4")
+        (Option.map Ids.Turn_ref.to_string failure.turn_ref)
+    | history ->
+      failf "expected user and transport failure rows, got %d"
+        (List.length history))
+;;
+
 let fail_after_rename_io () =
   Direct.For_testing.make_io
     ~before_durable_write:(function
@@ -721,6 +770,10 @@ let () =
             "direct tool-only transcript has no empty assistant"
             `Quick
             test_direct_tool_only_transcript_has_no_empty_assistant
+        ; eio_test_case
+            "direct transport failure keeps turn_ref"
+            `Quick
+            test_direct_transport_failure_keeps_turn_ref
         ; eio_test_case
             "post-rename ambiguity is explicit and reconcilable"
             `Quick

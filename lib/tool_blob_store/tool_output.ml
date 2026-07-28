@@ -56,6 +56,58 @@ let make_artifact_ref ~sha256 ~bytes ~preview ~mime =
 
 let with_preview artifact_ref preview = { artifact_ref with preview }
 
+let normalized_artifact_ref_key = "_blob"
+
+let normalized_artifact_ref_to_json { sha256; bytes; preview; mime } =
+  `Assoc
+    [ ( normalized_artifact_ref_key
+      , `Assoc
+          [ "sha256", `String sha256
+          ; "bytes", `Int bytes
+          ; "mime", `String mime
+          ; "preview", `String preview
+          ] )
+    ]
+;;
+
+type normalized_artifact_ref_decode =
+  | Not_normalized_artifact_ref
+  | Invalid_normalized_artifact_ref of { detail : string }
+  | Decoded_normalized_artifact_ref of artifact_ref
+
+let normalized_artifact_ref_of_json = function
+  | `Assoc [ (key, `Assoc fields) ]
+    when String.equal key normalized_artifact_ref_key ->
+    let fields =
+      List.sort
+        (fun (left, _) (right, _) -> String.compare left right)
+        fields
+    in
+    (match fields with
+     | [ "bytes", `Int bytes
+       ; "mime", `String mime
+       ; "preview", `String preview
+       ; "sha256", `String sha256
+       ] ->
+       (match make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+        | Ok reference -> Decoded_normalized_artifact_ref reference
+        | Error error ->
+          Invalid_normalized_artifact_ref
+            { detail = make_error_to_string error })
+     | _ ->
+       Invalid_normalized_artifact_ref
+         { detail =
+             "expected exact _blob fields bytes, mime, preview, and sha256"
+         })
+  | `Assoc [ (key, _) ] when String.equal key normalized_artifact_ref_key ->
+    Invalid_normalized_artifact_ref
+      { detail = "_blob value must be an object" }
+  | `Assoc fields when List.mem_assoc normalized_artifact_ref_key fields ->
+    Invalid_normalized_artifact_ref
+      { detail = "_blob wrapper must contain no sibling fields" }
+  | _ -> Not_normalized_artifact_ref
+;;
+
 type t =
   | Inline of string
   | Stored of artifact_ref

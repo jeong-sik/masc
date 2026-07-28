@@ -51,6 +51,23 @@ val with_preview : artifact_ref -> string -> artifact_ref
 (** Replace the preview, keeping the validated identity fields. Total — the
     existing reference already passed validation. *)
 
+(** The exact structured representation used when a durable consumer stores a
+    blob reference as JSON rather than its OAS marker. The producer and every
+    durable owner must use this codec; a marker-shaped JSON object is never
+    guessed into a reference. *)
+val normalized_artifact_ref_to_json : artifact_ref -> Yojson.Safe.t
+
+type normalized_artifact_ref_decode =
+  | Not_normalized_artifact_ref
+  | Invalid_normalized_artifact_ref of { detail : string }
+  | Decoded_normalized_artifact_ref of artifact_ref
+
+val normalized_artifact_ref_of_json :
+  Yojson.Safe.t -> normalized_artifact_ref_decode
+(** Strictly decode the singleton ["_blob"] wrapper emitted by
+    {!normalized_artifact_ref_to_json}. A malformed wrapper is reported
+    explicitly so retention code fails closed. *)
+
 (** {1 Wire codec} *)
 
 type t =

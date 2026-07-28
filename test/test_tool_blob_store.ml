@@ -89,6 +89,25 @@ let test_stored_roundtrip () =
   | O.Invalid_marker { detail } ->
       Alcotest.failf "expected Decoded, got Invalid_marker: %s" detail
 
+let test_normalized_artifact_ref_roundtrip () =
+  let reference =
+    ref_exn
+      ~sha256:(String.make 64 'b')
+      ~bytes:4096
+      ~mime:"application/json"
+      ~preview:"{\"ok\":true}"
+  in
+  match O.normalized_artifact_ref_of_json (O.normalized_artifact_ref_to_json reference) with
+  | O.Decoded_normalized_artifact_ref decoded ->
+    Alcotest.(check string) "sha256" reference.sha256 decoded.sha256;
+    Alcotest.(check int) "bytes" reference.bytes decoded.bytes;
+    Alcotest.(check string) "mime" reference.mime decoded.mime;
+    Alcotest.(check string) "preview" reference.preview decoded.preview
+  | O.Not_normalized_artifact_ref ->
+    Alcotest.fail "expected normalized artifact reference"
+  | O.Invalid_normalized_artifact_ref { detail } ->
+    Alcotest.failf "normalized artifact reference rejected: %s" detail
+
 let test_encoded_marker_stays_under_externalization_threshold () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
@@ -353,6 +372,100 @@ let test_maintenance_rechecks_candidate_referenced_before_startup () =
         (Some "referenced before startup sweep")
         (fetch_ok store ~sha256:candidate.sha256))
 
+let test_maintenance_keeps_normalized_tool_call_blob_reference () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put
+          store
+          ~bytes:"normalized tool-call output"
+          ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let tool_call_log =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "tool_calls/2026-07/29.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname tool_call_log);
+      Fs_compat.save_file
+        tool_call_log
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "keeper", `String "keeper-tool-log"
+             ; "tool", `String "large_output"
+             ; ( "output"
+               , `Assoc
+                   [ ( "_blob"
+                     , `Assoc
+                         [ "sha256", `String reference.sha256
+                         ; "bytes", `Int reference.bytes
+                         ; "mime", `String reference.mime
+                         ; "preview", `String reference.preview
+                         ] )
+                   ] )
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "normalized tool-call reference is live"
+        1
+        observed.live_references;
+      Alcotest.(check int)
+        "normalized live blob is not a candidate"
+        0
+        observed.candidates_recorded;
+      let swept =
+        maintenance_ok
+          ~base_path
+          ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "normalized live blob is not deleted" 0 swept.deleted;
+      Alcotest.(check (option string))
+        "normalized tool-call blob remains readable"
+        (Some "normalized tool-call output")
+        (fetch_ok store ~sha256:reference.sha256))
+
+let test_maintenance_malformed_normalized_blob_fails_closed () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put store ~bytes:"survive malformed normalized ref" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let tool_call_log =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "tool_calls/2026-07/29.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname tool_call_log);
+      Fs_compat.save_file
+        tool_call_log
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "output"
+               , `Assoc
+                   [ ( "_blob"
+                     , `Assoc [ "sha256", `String reference.sha256 ] )
+                   ] )
+             ])
+         ^ "\n");
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error
+           (M.Malformed_structured_artifact_reference
+             { path; line; _ }) ->
+         Alcotest.(check string) "exact malformed tool-call log" tool_call_log path;
+         Alcotest.(check int) "exact malformed tool-call line" 1 line
+       | Error error ->
+         Alcotest.failf
+           "unexpected normalized-reference error: %s"
+           (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "malformed normalized reference reached deletion");
+      Alcotest.(check (option string))
+        "malformed normalized reference retains every blob"
+        (Some "survive malformed normalized ref")
+        (fetch_ok store ~sha256:reference.sha256))
+
 let test_maintenance_unlink_failure_is_typed () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -609,6 +722,10 @@ let () =
           Alcotest.test_case "inline" `Quick test_inline_roundtrip;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
           Alcotest.test_case
+            "normalized artifact reference"
+            `Quick
+            test_normalized_artifact_ref_roundtrip;
+          Alcotest.test_case
             "encoded marker stays under externalization threshold"
             `Quick
             test_encoded_marker_stays_under_externalization_threshold;
@@ -640,6 +757,14 @@ let () =
             "maintenance rechecks candidate referenced before startup"
             `Quick
             test_maintenance_rechecks_candidate_referenced_before_startup;
+          Alcotest.test_case
+            "maintenance keeps normalized tool-call blob reference"
+            `Quick
+            test_maintenance_keeps_normalized_tool_call_blob_reference;
+          Alcotest.test_case
+            "maintenance malformed normalized blob fails closed"
+            `Quick
+            test_maintenance_malformed_normalized_blob_fails_closed;
           Alcotest.test_case
             "maintenance unlink failure is typed"
             `Quick

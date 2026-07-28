@@ -19,6 +19,11 @@ type error =
       ; offset : int
       ; detail : string
       }
+  | Malformed_structured_artifact_reference of
+      { path : string
+      ; line : int
+      ; detail : string
+      }
   | Candidate_snapshot_invalid of
       { path : string
       ; detail : string
@@ -52,6 +57,12 @@ let error_to_string = function
       path
       line
       offset
+      detail
+  | Malformed_structured_artifact_reference { path; line; detail } ->
+    Printf.sprintf
+      "malformed structured artifact reference path=%s line=%d: %s"
+      path
+      line
       detail
   | Candidate_snapshot_invalid { path; detail } ->
     Printf.sprintf "blob maintenance candidate snapshot invalid path=%s: %s" path detail
@@ -104,13 +115,21 @@ let add_references ~path ~line references text =
 
 let rec references_in_json ~path ~line references = function
   | `String text -> add_references ~path ~line references text
-  | `Assoc fields ->
-    List.fold_left
-      (fun result (_, value) ->
-         Result.bind result (fun current ->
-           references_in_json ~path ~line current value))
-      (Ok references)
-      fields
+  | (`Assoc fields as json) ->
+    (match Tool_output.normalized_artifact_ref_of_json json with
+     | Tool_output.Decoded_normalized_artifact_ref reference ->
+       Ok (String_set.add reference.Tool_output.sha256 references)
+     | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+       Error
+         (Malformed_structured_artifact_reference
+            { path; line; detail })
+     | Tool_output.Not_normalized_artifact_ref ->
+       List.fold_left
+         (fun result (_, value) ->
+            Result.bind result (fun current ->
+              references_in_json ~path ~line current value))
+         (Ok references)
+         fields)
   | `List values
   | `Tuple values ->
     List.fold_left

@@ -32,6 +32,11 @@ type error =
       ; offset : int
       ; detail : string
       }
+  | Malformed_structured_artifact_reference of
+      { path : string
+      ; line : int
+      ; detail : string
+      }
   | Candidate_snapshot_invalid of
       { path : string
       ; detail : string

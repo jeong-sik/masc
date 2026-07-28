@@ -5,7 +5,7 @@
 
 let run
   ~config
-  ~meta
+  ~(meta : Keeper_meta_contract.keeper_meta)
   ~generation
   ~turn
   ~oas_turn_count

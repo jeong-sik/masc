@@ -12,14 +12,6 @@ let request target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
 ;;
 
-let check_include target expected =
-  check
-    bool
-    target
-    expected
-    (Memory_subsystems.dashboard_memory_subsystems_include_entries (request target))
-;;
-
 let temp_dir () =
   Filename.temp_dir "memory_subsystems_dashboard_test" ""
 ;;
@@ -36,52 +28,6 @@ let rm_rf dir =
   in
   try rm dir with
   | _ -> ()
-;;
-
-let test_include_entries_query_param () =
-  check_include "/dashboard/memory-subsystems" false;
-  check_include "/dashboard/memory-subsystems?include_memory_entries=1" true;
-  check_include "/dashboard/memory-subsystems?include_memory_entries=true" true;
-  check_include "/dashboard/memory-subsystems?include_memory_entries=yes" true;
-  check_include "/dashboard/memory-subsystems?include_memory_entries=y" true;
-  check_include "/dashboard/memory-subsystems?include_memory_entries=0" false;
-  check_include "/dashboard/memory-subsystems?include_memory_entries=false" false;
-  check_include "/dashboard/memory-subsystems?include_memory_entries=no" false;
-  check_include "/dashboard/memory-subsystems?include_memory_entries=n" false
-;;
-
-let test_focus_entries_enables_memory_entries () =
-  check_include "/dashboard/memory-subsystems?focus=entries" true;
-  check_include "/dashboard/memory-subsystems?focus=%20entries%20" true;
-  check_include "/dashboard/memory-subsystems?focus=episodes" false
-;;
-
-let test_http_json_explicitly_disabled_entries_surface () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf dir)
-    (fun () ->
-      let config = Workspace_utils.default_config dir in
-      let json =
-        Memory_subsystems.dashboard_memory_subsystems_http_json
-          ~config
-          ~include_memory_entries:false
-          (request "/dashboard/memory-subsystems?limit=9999&focus=entries")
-      in
-      let memory_entries = Json.(json |> member "memory_entries") in
-      check int "memory total" 0 Json.(memory_entries |> member "total" |> to_int);
-      check
-        int
-        "memory filtered"
-        0
-        Json.(memory_entries |> member "filtered" |> to_int);
-      check int "memory shown" 0 Json.(memory_entries |> member "shown" |> to_int);
-      check int "limit clamped" 500 Json.(memory_entries |> member "limit" |> to_int);
-      check
-        int
-        "items empty"
-        0
-        Json.(memory_entries |> member "items" |> to_list |> List.length))
 ;;
 
 let fact ?(category = Types.Preference) ?(trace_id = "trace-memory")
@@ -119,7 +65,6 @@ let test_http_json_surfaces_delegation_requests () =
       let json =
         Memory_subsystems.dashboard_memory_subsystems_http_json
           ~config
-          ~include_memory_entries:false
           (request "/dashboard/memory-subsystems?limit=100")
       in
       let requests = Json.(json |> member "delegation_requests") in
@@ -237,10 +182,9 @@ let test_http_json_surfaces_memory_quality_summary () =
          ~n_facts_in_store:0
          ();
        let json =
-         Memory_subsystems.dashboard_memory_subsystems_http_json
-           ~config
-           ~include_memory_entries:false
-           (request "/dashboard/memory-subsystems?limit=100")
+        Memory_subsystems.dashboard_memory_subsystems_http_json
+          ~config
+          (request "/dashboard/memory-subsystems?limit=100")
        in
        let quality = Json.(json |> member "memory_quality") in
        check string "quality schema" "masc.memory_quality.recall_ledger.v1"
@@ -300,10 +244,9 @@ let test_http_json_surfaces_memory_quality_decode_errors () =
          ();
        append_malformed_recall_record ~config;
        let json =
-         Memory_subsystems.dashboard_memory_subsystems_http_json
-           ~config
-           ~include_memory_entries:false
-           (request
+        Memory_subsystems.dashboard_memory_subsystems_http_json
+          ~config
+          (request
               "/dashboard/memory-subsystems?limit=100&memory_quality_limit=10&memory_quality_top_key_limit=1")
        in
        let quality = Json.(json |> member "memory_quality") in
@@ -350,10 +293,9 @@ let test_http_json_hebbian_derives_from_shared_facts () =
               ~last_verified_at:42.0
               "Shared operational fact");
          let json =
-           Memory_subsystems.dashboard_memory_subsystems_http_json
-             ~config
-             ~include_memory_entries:false
-             (request "/dashboard/memory-subsystems?limit=100")
+          Memory_subsystems.dashboard_memory_subsystems_http_json
+            ~config
+            (request "/dashboard/memory-subsystems?limit=100")
          in
          let hebbian = Json.(json |> member "hebbian") in
          check
@@ -378,10 +320,9 @@ let test_http_json_hebbian_empty_without_shared_facts () =
     (fun () ->
        let config = Workspace_utils.default_config dir in
        let json =
-         Memory_subsystems.dashboard_memory_subsystems_http_json
-           ~config
-           ~include_memory_entries:false
-           (request "/dashboard/memory-subsystems?limit=100")
+        Memory_subsystems.dashboard_memory_subsystems_http_json
+          ~config
+          (request "/dashboard/memory-subsystems?limit=100")
        in
        let hebbian = Json.(json |> member "hebbian") in
        check int "empty synapses" 0 Json.(hebbian |> member "synapses" |> to_list |> List.length);
@@ -410,10 +351,9 @@ let test_http_json_hebbian_dedupes_duplicate_observers () =
               ~last_verified_at:10.0
               "Shared operational fact");
          let json =
-           Memory_subsystems.dashboard_memory_subsystems_http_json
-             ~config
-             ~include_memory_entries:false
-             (request "/dashboard/memory-subsystems?limit=100")
+          Memory_subsystems.dashboard_memory_subsystems_http_json
+            ~config
+            (request "/dashboard/memory-subsystems?limit=100")
          in
          let synapses = Json.(json |> member "hebbian" |> member "synapses" |> to_list) in
          check int "one synapse after dedupe" 1 (List.length synapses)))
@@ -423,22 +363,8 @@ let () =
   Eio_main.run @@ fun _env ->
   Alcotest.run
     "server_dashboard_http_memory_subsystems"
-    [ ( "request"
+    [ ( "json"
       , [ test_case
-            "include_memory_entries accepts explicit bool forms"
-            `Quick
-            test_include_entries_query_param
-        ; test_case
-            "focus entries enables memory entries"
-            `Quick
-            test_focus_entries_enables_memory_entries
-        ] )
-    ; ( "json"
-      , [ test_case
-            "explicit disabled entries keeps empty surface"
-            `Quick
-            test_http_json_explicitly_disabled_entries_surface
-        ; test_case
             "hebbian derives from shared facts"
             `Quick
             test_http_json_hebbian_derives_from_shared_facts

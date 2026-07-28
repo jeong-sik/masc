@@ -120,6 +120,40 @@ let turn_success_of_stop_reason ~meta = function
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
+(* RFC-0356: for the operations [Keeper_gate_replay] dispatches to, the runtime
+   spends the grant itself during tool-bundle setup (#25947, #26089). That
+   happens after this message is composed — [keeper_agent_run.ml:560] runs
+   [prepare_agent_setup] well past [build_turn_context] — so the approval store
+   still reads unconsumed here and the Keeper would be told to emit a call the
+   runtime is about to emit for it. Branching on the same dispatch the replay
+   uses keeps the instruction true for both halves. *)
+let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
+  let closing =
+    match Keeper_gate_replay.replayable_of_operation tool_name with
+    | Some _ ->
+      "The runtime spends this one-shot authorization itself this turn: the \
+       operation above runs from that exact input without you re-emitting it. \
+       A repeat call finds the authorization gone and opens a new Gate request \
+       instead. Other external effects follow the ordinary Gate independently."
+    | None ->
+      "The one-shot authorization belongs to this exact operation and input. \
+       Other external effects follow the ordinary Gate independently."
+  in
+  String.concat
+    "\n"
+    [ user_message
+    ; ""
+    ; "Gate resolution delivered:"
+    ; Printf.sprintf "- approval_id: %s" approval_id
+    ; Printf.sprintf "- operation: %s" tool_name
+    ; "- exact input:"
+    ; "```json"
+    ; Yojson.Safe.pretty_to_string input
+    ; "```"
+    ; closing
+    ]
+;;
+
 let user_message_with_hitl_resolution ~base_path ~user_message = function
   | Some
       { Keeper_event_queue.approval_id
@@ -132,19 +166,11 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          ~id:approval_id
      with
      | Ok (Some request) ->
-       String.concat
-         "\n"
-         [ user_message
-         ; ""
-         ; "Gate resolution delivered:"
-         ; Printf.sprintf "- approval_id: %s" approval_id
-         ; Printf.sprintf "- operation: %s" request.tool_name
-         ; "- exact input:"
-         ; "```json"
-         ; Yojson.Safe.pretty_to_string request.input
-         ; "```"
-         ; "The one-shot authorization belongs to this exact operation and input. Other external effects follow the ordinary Gate independently."
-         ]
+       approved_resolution_message
+         ~approval_id
+         ~tool_name:request.tool_name
+         ~input:request.input
+         ~user_message
      | Ok None ->
        Log.Keeper.info
          "approved Gate request already consumed approval=%s"

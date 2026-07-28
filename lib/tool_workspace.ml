@@ -42,15 +42,6 @@ let all_assertion_kinds = Workspace_assertions.all_assertion_kinds
 let valid_assertion_strings = Workspace_assertions.valid_assertion_strings
 let assertion_kind_of_string_lenient = Workspace_assertions.assertion_kind_of_string_lenient
 
-let take_items limit items =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: xs -> loop (remaining - 1) (x :: acc) xs
-  in
-  loop limit [] items
-;;
-
 type text_cache =
   { mutable key : string option
   ; mutable value : string option
@@ -98,9 +89,6 @@ let effective_cluster_name (config : Workspace.config) =
 ;;
 
 (* Handlers *)
-
-let lifecycle_tools = [ "keeper_task_claim"; "masc_transition" ]
-let is_lifecycle_tool tool = List.exists (String.equal tool) lifecycle_tools
 
 let unique_strings items =
   List.fold_left
@@ -414,40 +402,6 @@ let status_summary_string ~task_list_projection (ctx : context) =
     resolve_current_binding ~assigned_task_ids ~planning_current:current_task
   in
   let planning_state = planning_context_state ctx binding active_tasks in
-  let suggested_next =
-    (* All branches must end with [take_items 2] so masc_status response
-       size stays bounded.  Prior pipeline had a trailing [|> take_items 2]
-       that applied uniformly; restoring that invariant explicitly per
-       branch (Copilot review #14662 thread tool_workspace.ml:492). *)
-    if Option.is_some planning_state.planning_missing_task
-    then []
-    else if Option.is_some planning_state.deliverable_conflict_task
-    then [ "masc_deliver"; "masc_status" ]
-    else (
-      let tools =
-        if Stdlib.List.length binding.assigned_task_ids > 0
-        then [ "masc_heartbeat"; "masc_transition" ]
-        else if fresh_todo_count > 0
-        then [ "keeper_task_claim"; "masc_status" ]
-        else [ "masc_status"; "masc_add_task" ]
-      in
-      let tools =
-        if credential_blocked
-        then List.filter (fun tool -> not (is_lifecycle_tool tool)) tools
-        else (
-          match binding.drift_reason with
-          | Some "no_owned" ->
-            let tools =
-              List.filter (fun tool -> not (String.equal tool "masc_transition")) tools
-            in
-            let tools =
-              if fresh_todo_count > 0 then "keeper_task_claim" :: tools else tools
-            in
-            unique_strings tools
-          | Some _ | None -> tools)
-      in
-      take_items 2 tools)
-  in
   let attention_items =
     let items = [] in
     let items =
@@ -555,7 +509,6 @@ let status_summary_string ~task_list_projection (ctx : context) =
     ~todo_conflict_task_ids
     ~binding
     ~planning_state
-    ~suggested_next
     ~attention_items
     ~state
     ~backlog

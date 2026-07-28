@@ -5,7 +5,7 @@
     main entry point ({!status_summary_string}) renders the
     full operator-visible terminal block (cluster header,
     snapshot line, you-line, task-binding line, planning state,
-    credential state, suggestions, attention items, players,
+    credential state, attention items, players,
     quest board, messages).
 
     Two additional helpers
@@ -63,19 +63,18 @@ val status_summary_string :
   todo_conflict_task_ids:string list ->
   binding:Workspace_types.current_binding ->
   planning_state:Workspace_types.planning_context_state ->
-  suggested_next:string list ->
   attention_items:string list ->
   state:Masc_domain.workspace_state ->
   backlog:Masc_domain.backlog ->
   string
 (** [status_summary_string] renders the full [masc_status]
-    operator-visible string.  All 22 named arguments are
+    operator-visible string.  All 21 named arguments are
     required — there is no convenience overload because every
     line is a deliberate operator surface.
 
-    [task_list_projection] is the typed audience projection for follow-up
-    guidance: external callers receive [masc_tasks], Keeper models receive
-    [keeper_tasks_list].
+    [task_list_projection] is the typed audience projection for the
+    quest-board overflow footer: external callers receive [masc_tasks],
+    Keeper models receive [keeper_tasks_list].
 
     {2 Display caps}
 
@@ -98,12 +97,11 @@ val status_summary_string :
     6. Task binding line (assigned set / drift reason)
     7. Planning lines (missing-task / deliverable-conflict)
     8. Credential line (only when required)
-    9. Suggested-next line (only when non-empty)
-    10. Attention block (only when non-empty)
-    11. Players block (capped at 40)
-    12. Quest Board (capped at 30)
-    13. Summary line
-    14. Messages line
+    9. Attention block (only when non-empty)
+    10. Players block (capped at 40)
+    11. Quest Board (capped at 30)
+    12. Summary line
+    13. Messages line
 
     The icon set (🏢 / 📦 / 📍 / 📁 / ⚡ / 🧭 / 🔎 / 📝 / 🔐 /
     💡 / ⚠️ / 📌 / 📋 / 💬) is operator-visible — runbook

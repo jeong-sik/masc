@@ -230,7 +230,7 @@ let () =
       let message = (Tool_result.message result) in
       assert (str_contains message "Snapshot:");
       assert (str_contains message "🧭 You:");
-      assert (str_contains message "Suggested next:")
+      assert (not (str_contains message "Suggested next:"))
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -672,7 +672,7 @@ let () =
       assert (str_contains result "owned=task-001");
       assert (str_contains result "current=task-002");
       assert_contains result "Do not retry generic masc_plan_init from a drifted surface";
-      assert (not (str_contains result "Suggested next: masc_plan_init -> masc_status"));
+      assert (not (str_contains result "Suggested next:"));
       assert (str_contains result "planning current_task is unset or drifted")
     | None -> failwith "dispatch returned None")
 ;;
@@ -699,8 +699,7 @@ let () =
           "Credential: required=yes | available=no | candidates=test-agent");
       assert (
         str_contains result "Lifecycle actions are credential-blocked for test-agent");
-      assert (not (str_contains result "Suggested next: masc_status -> masc_transition"));
-      assert (not (str_contains result "Suggested next: keeper_task_claim"))
+      assert (not (str_contains result "Suggested next:"))
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -729,12 +728,12 @@ let () =
           (str_contains
              result
              "Lifecycle actions are credential-blocked for keeper-sangsu-agent"));
-      assert (str_contains result "Suggested next:")
+      assert (not (str_contains result "Suggested next:"))
     | None -> failwith "dispatch returned None")
 ;;
 
 let () =
-  test "dispatch_status_no_owned_prefers_claim_next_over_transition" (fun () ->
+  test "dispatch_status_no_owned_reports_drift_without_steering" (fun () ->
     Fun.protect ~finally:Fs_compat.clear_fs
     @@ fun () ->
     Eio_main.run
@@ -752,8 +751,7 @@ let () =
       assert (str_contains result "owned=- | current=task-001");
       assert (str_contains result "drift_reason=no_owned");
       assert (str_contains result "claim_first_suppressed=no");
-      assert_contains result "Suggested next: keeper_task_claim -> masc_status";
-      assert_not_contains result "Suggested next: masc_status -> masc_transition"
+      assert_not_contains result "Suggested next:"
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -783,9 +781,7 @@ let () =
       assert (
         str_contains result "Do not retry generic masc_plan_init from a drifted surface");
       assert (str_contains result "handoff/worktree/test logs as the temporary SSOT");
-      assert (not (str_contains result "Suggested next: masc_plan_init -> masc_status"));
-      assert (not (str_contains result "Suggested next: masc_heartbeat"));
-      assert (not (str_contains result "Suggested next: masc_status -> masc_transition"))
+      assert (not (str_contains result "Suggested next:"))
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -821,9 +817,7 @@ let () =
          assert_contains
            result
            "Owned task task-001 already has a completed-looking deliverable";
-         assert (str_contains result "Suggested next: masc_deliver -> masc_status");
-         assert (
-           not (str_contains result "Suggested next: masc_status -> masc_transition"))
+         assert (not (str_contains result "Suggested next:"))
        | None -> failwith "dispatch returned None")
 ;;
 

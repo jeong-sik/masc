@@ -136,7 +136,7 @@ let outcome_to_yojson = function
     in
     let ok, projection, error =
       match success.projection with
-      | Transfer.Applied { source_settlement = _; target_projection } ->
+      | Transfer.Applied target_projection ->
         let projection =
           match target_projection with
           | Transfer.Enqueued -> "enqueued"

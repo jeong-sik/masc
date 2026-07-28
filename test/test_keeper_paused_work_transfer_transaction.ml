@@ -125,12 +125,7 @@ let with_transfer_lane f =
 ;;
 
 let check_applied ~expected_target = function
-  | Transaction.Applied { source_settlement; target_projection } ->
-    (match source_settlement with
-     | Keeper_registry_event_queue.Settled _
-     | Keeper_registry_event_queue.Already_settled _ -> ()
-     | Keeper_registry_event_queue.Committed_followup_failed { detail; _ } ->
-       Alcotest.fail detail);
+  | Transaction.Applied target_projection ->
     Alcotest.(check bool)
       "target projection status"
       true
@@ -257,7 +252,7 @@ let test_replay_after_target_consumption_has_no_second_effect () =
       (List.length (State.accepted_transfer_projections target)))
 ;;
 
-let test_replay_after_source_settlement_projects_target () =
+let test_replay_after_source_ack_projects_target () =
   with_transfer_lane (fun config from_keeper to_keeper source_meta target_meta request ->
     let transfer : Receipt.transfer_owner =
       { from_keeper
@@ -295,7 +290,7 @@ let test_replay_after_source_settlement_projects_target () =
       ; to_keeper
       }
     in
-    (* fire-and-forget: the settlement value is only a fixture precondition here. *)
+    (* The source ACK is only a fixture precondition here. *)
     ignore
       (Keeper_registry_event_queue.transfer_pending_accepted_result
          ~base_path:config.Workspace.base_path
@@ -303,11 +298,11 @@ let test_replay_after_source_settlement_projects_target () =
          ~current_owner_nonce:request.owner_nonce
          ~settled_at:request.settled_at
          ~transfer:causal
-       |> require_ok "simulate committed source settlement");
+       |> require_ok "simulate committed source ACK");
     let replay =
       Transaction.transfer_pending config ~from_keeper ~to_keeper request
       |> Result.map_error Transaction.error_to_string
-      |> require_ok "resume after source settlement"
+      |> require_ok "resume after source ACK"
     in
     (match replay.commit_status with
      | Transaction.Already_committed -> ()
@@ -368,6 +363,10 @@ let () =
             "stale source revision has no effect"
             `Quick
             test_stale_source_revision_has_no_receipt_or_target_effect
+        ; Alcotest.test_case
+            "replay after source ACK projects target"
+            `Quick
+            test_replay_after_source_ack_projects_target
         ] )
     ]
 ;;

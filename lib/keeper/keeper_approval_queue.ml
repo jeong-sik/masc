@@ -1635,6 +1635,25 @@ let approved_resolution_state ~base_path ~id =
     | Ok (Approved_delivery_unconsumed _) -> Ok Resolution_unconsumed)
 ;;
 
+let approved_resolution_matches
+      ~base_path
+      ~id
+      ~keeper_name
+      ~tool_name
+      ~input
+  =
+  with_pending_store_lock (fun () ->
+    match approved_delivery_unlocked ~base_path ~id with
+    | Error _ as error -> error
+    | Ok Approved_delivery_consumed -> Ok false
+    | Ok (Approved_delivery_unconsumed delivery) ->
+      let entry = delivery.entry in
+      Ok
+        (String.equal entry.keeper_name keeper_name
+         && String.equal entry.tool_name tool_name
+         && String.equal entry.input_hash (normalized_input_hash input)))
+;;
+
 let consume_approved_resolution
       ~base_path
       ~id
@@ -1694,7 +1713,7 @@ let consume_approved_resolution
     Ok Consumption_committed
 ;;
 
-let consume_matching_approved_resolution
+let find_matching_approved_resolution
       ~base_path
       ~keeper_name
       ~tool_name
@@ -1735,42 +1754,11 @@ let consume_matching_approved_resolution
         in
         (match matching_delivery with
          | None -> Ok None
-         | Some (id, delivery) ->
-           let consumed_delivery = { delivery with grant_consumed = true } in
-           let updated_deliveries =
-             SMap.add id consumed_delivery (Atomic.get deliveries)
-           in
-           (match
-              persist_snapshot_unlocked
-                ~base_path
-                ~pending_map:(Atomic.get pending)
-                ~delivery_map:updated_deliveries
-            with
-            | Error error -> Error (Grant_store_unavailable error)
-            | Ok () ->
-              Atomic.set deliveries updated_deliveries;
-              Ok (Some (id, delivery)))))
+         | Some (id, _) -> Ok (Some id)))
   in
   match result with
   | Error _ as error -> error
-  | Ok None -> Ok None
-  | Ok (Some (id, delivery)) ->
-    let entry = delivery.entry in
-    audit_approval_event
-      ~base_path
-      ~event_type:"matching_grant_consumed"
-      ~id
-      ~keeper_name:entry.keeper_name
-      ~tool_name:entry.tool_name
-      ?turn_id:entry.turn_id
-      ?task_id:entry.task_id
-      ?goal_id:entry.goal_id
-      ~goal_ids:entry.goal_ids
-      ~source_approval_id:id
-      ~decision_source:delivery.source
-      ~decision:Decision.Approve
-      ();
-    Ok (Some id)
+  | Ok matching -> Ok matching
 ;;
 
 let input_preview_of_json (json : Yojson.Safe.t) =

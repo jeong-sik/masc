@@ -87,10 +87,11 @@ type auto_judge_resume_report =
   ; queue_error : Keeper_approval_queue.storage_error option
   }
 
-(** Mutable only to serialize consumption inside one Keeper cycle. The durable
-    Gate journal, not the wake event, owns the exact authorization. A match
-    requires the same workspace, Keeper, opaque operation identity, and
-    canonical complete input; provenance fields never become constraints. *)
+(** Mutable only to serialize authorization inside one Keeper cycle. The
+    durable Gate journal, not the wake event, owns the exact authorization. A
+    match requires the same workspace, Keeper, opaque operation identity, and
+    canonical complete input; provenance fields never become constraints.
+    Durable consumption happens only after successful effect completion. *)
 type cycle_grant
 
 val cycle_grant_of_resolution :
@@ -101,13 +102,21 @@ val cycle_grant_of_resolution :
     Auto Judge, and invalid-mode outcomes enqueue durably and return without
     suspending the caller. Explicit Keeper/workspace Always Allow modes do not
     depend on the optional exact-rule store being readable. A supplied one-shot
-    grant that cannot be consumed returns [Unavailable] without evaluating a
-    second authorization path, so the durable grant remains single-use. *)
+    grant that cannot be validated returns [Unavailable] without evaluating a
+    second authorization path. Authorization reserves the grant only for the
+    current process; successful effect completion commits durable consumption. *)
 val decide :
   ?cycle_grant:cycle_grant ->
   keeper_always_allow:bool ->
   request ->
   decision
+
+(** Commit durable consumption after an authorized effect returns a successful
+    completion result. Cancellation, failure, or process loss before this call
+    deliberately leaves a one-shot approval reusable on restart. [None] means
+    the authorization source was not a one-shot approval. *)
+val commit_authorized_effect_completion :
+  request -> authorization -> unit
 
 (** Recover durable Auto Judge work for exactly one workspace. Each exact
     [(base_path, keeper_name)] owner activates at most one entry: the oldest

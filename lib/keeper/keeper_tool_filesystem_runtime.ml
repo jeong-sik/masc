@@ -1150,6 +1150,25 @@ let file_write_gate_input
      @ optional_bool "replace_all" replace_all)
 ;;
 
+let file_write_gate_request
+      ~config
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ~input
+      ()
+  =
+  { Keeper_gate.keeper_name = meta.name
+  ; operation = gate_operation
+  ; input
+  ; base_path = config.Workspace.base_path
+  ; causal_context = Option.map (fun current -> current ()) gate_context
+  ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
+  ; goal_ids = meta.active_goal_ids
+  ; continuation_channel
+  }
+;;
+
 let decide_file_write
       ~config
       ~(meta : keeper_meta)
@@ -1162,15 +1181,13 @@ let decide_file_write
   Keeper_gate.decide
     ?cycle_grant:gate_grant
     ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
-    { keeper_name = meta.name
-    ; operation = gate_operation
-    ; input
-    ; base_path = config.Workspace.base_path
-    ; causal_context = Option.map (fun current -> current ()) gate_context
-    ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-    ; goal_ids = meta.active_goal_ids
-    ; continuation_channel
-    }
+    (file_write_gate_request
+       ~config
+       ~meta
+       ?continuation_channel
+       ?gate_context
+       ~input
+       ())
 ;;
 
 let confined_write_is_keeper_playground
@@ -1999,7 +2016,27 @@ let handle_file_write_with_outcome
           ~keeper_name:meta.name
           "external effect authorized operation=filesystem_write source=%s"
           (Keeper_gate.authorization_source_to_string authorization.source);
-        continue ()
+        let result = continue () in
+        (match result with
+         | Ok (Write_succeeded _) ->
+           let request =
+             file_write_gate_request
+               ~config
+               ~meta
+               ?continuation_channel
+               ?gate_context
+               ~input
+               ()
+           in
+           Keeper_gate.commit_authorized_effect_completion
+             request
+             authorization
+         | Ok
+             ( Write_deferred _
+             | Write_failed _
+             | Write_failed_data _ )
+         | Error _ -> ());
+        result
   in
   let protect_write ~target f =
     try f () with

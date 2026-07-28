@@ -70,8 +70,9 @@ let make_tool_bundle
   (* RFC-0356: the approval owns its effect. Spend the one-shot grant on the
      payload the Gate approved instead of waiting for the model to re-emit a
      byte-identical call, which it cannot do for large write payloads
-     (#25947). Consumption is the durable grant, so a second bundle build in
-     the same cycle replays nothing.
+     (#25947). The cycle-local reservation prevents a second replay in the
+     same bundle; durable consumption is committed only after the reconstructed
+     effect returns a successful completion result.
 
      Replay carries the same causal context the model-issued path carries: a
      replay whose re-derived input no longer matches its approval falls back

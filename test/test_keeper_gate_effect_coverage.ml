@@ -26,7 +26,7 @@ let make_meta ?(always_allow = false) name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String name
-         ; "agent_name", `String name
+         ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
          ; "trace_id", `String ("trace-" ^ name)
          ; "allowed_paths", `List [ `String "*" ]
          ])
@@ -281,6 +281,66 @@ let test_keeper_effects_allow_exact_dispatch () =
        observed)
 ;;
 
+let test_keeper_effect_completion_consumes_reused_approval () =
+  with_clean_gate_runtime @@ fun () ->
+  let base_path = temp_dir "keeper-gate-completion" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  (match Keeper_gate_mode.set config ~actor:"test" Keeper_gate_mode.Manual with
+   | Ok _ -> ()
+   | Error error -> fail ("failed to select manual Gate mode: " ^ error));
+  ignore (install_exn ~base_path);
+  let meta = make_meta "gate-completion-keeper" in
+  let name = "masc_keeper_sandbox_start" in
+  let args = `Assoc [ "opaque", `String "completion" ] in
+  let approval_id =
+    match
+      Keeper_approval_queue.submit_pending
+        ~keeper_name:meta.name
+        ~tool_name:name
+        ~input:args
+        ~base_path
+        ()
+    with
+    | Ok id -> id
+    | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+  in
+  (match
+     Keeper_approval_queue.resolve_with_policy
+       ~base_path
+       ~id:approval_id
+       ~decision:Keeper_approval_queue.Decision.Approve
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_approval_queue.resolve_error_to_string error));
+  with_publication_recovery
+    ~registry_root:base_path
+    ~meta
+  @@ fun publication_recovery ->
+  with_keeper_dispatch_probe @@ fun calls ->
+  let result =
+    Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
+      ~publication_recovery_provider:publication_recovery.provider
+      ~config
+      ~meta
+      ~name
+      ~args
+      ()
+  in
+  expect_completed "approved effect completes" result;
+  check int "effect dispatched once" 1 (List.length !calls);
+  match
+    Keeper_approval_queue.approved_resolution_state
+      ~base_path
+      ~id:approval_id
+  with
+  | Ok Keeper_approval_queue.Resolution_consumed -> ()
+  | Ok Keeper_approval_queue.Resolution_unconsumed ->
+    fail "successful effect completion left the approval reusable"
+  | Error error -> fail (Keeper_approval_queue.grant_error_to_string error)
+;;
+
 let ollama_probe_name = "masc_runtime_ollama_probe"
 let ollama_probe_input =
   `Assoc
@@ -461,6 +521,10 @@ let () =
             "Allow dispatches exact sandbox/lifecycle effect"
             `Quick
             test_keeper_effects_allow_exact_dispatch
+        ; test_case
+            "successful effect consumes reused approval"
+            `Quick
+            test_keeper_effect_completion_consumes_reused_approval
         ] )
     ; ( "network_probe"
       , [ test_case

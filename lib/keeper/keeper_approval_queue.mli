@@ -143,6 +143,18 @@ val approved_resolution_request :
 val approved_resolution_state :
   base_path:string -> id:string -> (approved_resolution_state, grant_error) result
 
+(** Validate an unconsumed approved resolution against the exact Keeper,
+    opaque operation identity, and canonical complete input without consuming
+    it. Successful effect completion, not authorization, owns the durable
+    consumption transition. *)
+val approved_resolution_matches :
+  base_path:string ->
+  id:string ->
+  keeper_name:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  (bool, grant_error) result
+
 (** Atomically consume an approved resolution only when the Keeper, opaque
     operation identity, and canonical complete input match its durable request.
     Turn, Task, Goal, and channel fields remain provenance and never become
@@ -155,12 +167,14 @@ val consume_approved_resolution :
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
 
-(** Atomically consume the earliest unconsumed approved resolution matching
-    the exact Keeper, opaque operation identity, and canonical complete input.
+(** Find the earliest unconsumed approved resolution matching the exact
+    Keeper, opaque operation identity, and canonical complete input without
+    consuming it.
     This lets a restarted originating turn reuse its already-approved effect
     before the separate resolution wake reaches the front of the event queue.
-    [Ok None] means no matching approved resolution exists. *)
-val consume_matching_approved_resolution :
+    The caller must consume it only after the effect completes. [Ok None] means
+    no matching approved resolution exists. *)
+val find_matching_approved_resolution :
   base_path:string ->
   keeper_name:string ->
   tool_name:string ->

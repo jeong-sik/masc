@@ -510,9 +510,18 @@ let handle_tool_execute_typed
                     @ response_cwd_field
                     @ execution_location_fields cwd))
             in
-            if succeeded
-            then Keeper_tool_execution.success payload
-            else Keeper_tool_execution.failure payload
+            let execution =
+              if succeeded
+              then Keeper_tool_execution.success payload
+              else Keeper_tool_execution.failure payload
+            in
+            (match execution.disposition with
+             | Tool_result.Deferred _ | Tool_result.Failed _ -> ()
+             | Tool_result.Completed _ ->
+               Keeper_gate.commit_authorized_effect_completion
+                 gate_request
+                 authorization);
+            execution
         )))
 
 let handle_tool_execute_with_outcome

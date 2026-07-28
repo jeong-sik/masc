@@ -182,24 +182,21 @@ let rec take_matching_cycle_grant grant request =
     if Atomic.compare_and_set grant current reserved
     then (
       match
-        Keeper_approval_queue.consume_approved_resolution
-        ~base_path:request.base_path
-        ~id:entry.approval_id
-        ~keeper_name:request.keeper_name
-        ~tool_name:request.operation
-        ~input:request.input
+        Keeper_approval_queue.approved_resolution_matches
+          ~base_path:request.base_path
+          ~id:entry.approval_id
+          ~keeper_name:request.keeper_name
+          ~tool_name:request.operation
+          ~input:request.input
       with
       | Error error ->
         Atomic.set grant current;
         Cycle_grant_temporarily_unavailable
           (entry.approval_id, Approval_grant_unavailable error)
-      | Ok Keeper_approval_queue.Consumption_not_matching ->
+      | Ok false ->
         Atomic.set grant current;
         Cycle_grant_not_applicable
-      | Ok Keeper_approval_queue.Consumption_already_committed ->
-        Atomic.set grant Cycle_grant_consumed;
-        Cycle_grant_not_applicable
-      | Ok Keeper_approval_queue.Consumption_committed ->
+      | Ok true ->
         Atomic.set grant Cycle_grant_consumed;
         Cycle_grant_authorized entry.approval_id)
     else take_matching_cycle_grant grant request
@@ -294,6 +291,36 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
     ?source_approval_id
     ?decision_source
     ()
+;;
+
+let commit_authorized_effect_completion request authorization =
+  match authorization.source with
+  | Exact_always_rule _ | Keeper_always_allow | Workspace_always_allow ->
+    ()
+  | One_shot_resolution approval_id ->
+    (match
+       Keeper_approval_queue.consume_approved_resolution
+         ~base_path:request.base_path
+         ~id:approval_id
+         ~keeper_name:request.keeper_name
+         ~tool_name:request.operation
+         ~input:request.input
+     with
+     | Ok Keeper_approval_queue.Consumption_committed
+     | Ok Keeper_approval_queue.Consumption_already_committed -> ()
+     | Ok Keeper_approval_queue.Consumption_not_matching ->
+       Log.Keeper.error
+         ~keeper_name:request.keeper_name
+         "completed external effect did not match its one-shot approval operation=%s approval=%s"
+         request.operation
+         approval_id
+     | Error error ->
+       Log.Keeper.error
+         ~keeper_name:request.keeper_name
+         "completed external effect could not durably consume its one-shot approval operation=%s approval=%s error=%s"
+         request.operation
+         approval_id
+         (Keeper_approval_queue.grant_error_to_string error))
 ;;
 
 let submit request =
@@ -1499,7 +1526,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
       Allow { source }
     | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
       (match
-         Keeper_approval_queue.consume_matching_approved_resolution
+         Keeper_approval_queue.find_matching_approved_resolution
            ~base_path:request.base_path
            ~keeper_name:request.keeper_name
            ~tool_name:request.operation

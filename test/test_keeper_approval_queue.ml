@@ -1152,22 +1152,39 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow ->
           Alcotest.fail "different exact input consumed the grant");
-       (match
-          Gate.decide
-            ~cycle_grant:grant
-            ~keeper_always_allow:true
-            (request
-               ~input
-               ~task_id:(Some "task-other")
-               ~goal_ids:[ "goal-other" ])
-          |> source_of
-        with
-        | Gate.One_shot_resolution actual_id ->
-          Alcotest.(check string) "exact approval id" approval_id actual_id
-        | Gate.Exact_always_rule _
-        | Gate.Keeper_always_allow
-        | Gate.Workspace_always_allow ->
-          Alcotest.fail "exact effect did not consume its one-shot grant");
+       let exact_request =
+         request
+           ~input
+           ~task_id:(Some "task-other")
+           ~goal_ids:[ "goal-other" ]
+       in
+       let exact_authorization =
+         match
+           Gate.decide
+             ~cycle_grant:grant
+             ~keeper_always_allow:true
+             exact_request
+         with
+         | Gate.Allow
+             ({ source = Gate.One_shot_resolution actual_id } as authorization) ->
+           Alcotest.(check string) "exact approval id" approval_id actual_id;
+           authorization
+         | Gate.Allow
+             { source =
+                 ( Gate.Exact_always_rule _
+                 | Gate.Keeper_always_allow
+                 | Gate.Workspace_always_allow )
+             } ->
+           Alcotest.fail "exact effect did not reserve its one-shot grant"
+         | Gate.Deferred _ -> Alcotest.fail "exact effect unexpectedly deferred"
+         | Gate.Unavailable reason ->
+           Alcotest.fail (Gate.unavailable_reason_to_string reason)
+       in
+       (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+        | Ok AQ.Resolution_unconsumed -> ()
+        | Ok AQ.Resolution_consumed ->
+          Alcotest.fail "authorization consumed the grant before effect completion"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        (match
           Gate.decide
             ~cycle_grant:grant
@@ -1180,6 +1197,9 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Exact_always_rule _
         | Gate.Workspace_always_allow ->
           Alcotest.fail "one-shot grant was consumed more than once");
+       Gate.commit_authorized_effect_completion
+         exact_request
+         exact_authorization;
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in
        (match AQ.approved_resolution_state ~base_path ~id:approval_id with
@@ -1221,9 +1241,12 @@ let test_restarted_turn_reuses_matching_approved_resolution () =
          ; continuation_channel = None
          }
        in
-       (match Gate.decide ~keeper_always_allow:false request with
-        | Gate.Allow { source = Gate.One_shot_resolution actual_id } ->
-          Alcotest.(check string) "reused approval id" approval_id actual_id
+       let authorize () =
+         match Gate.decide ~keeper_always_allow:false request with
+         | Gate.Allow
+             ({ source = Gate.One_shot_resolution actual_id } as authorization) ->
+           Alcotest.(check string) "reused approval id" approval_id actual_id;
+           authorization
         | Gate.Allow
             { source =
                 ( Gate.Exact_always_rule _
@@ -1234,11 +1257,24 @@ let test_restarted_turn_reuses_matching_approved_resolution () =
         | Gate.Deferred _ ->
           Alcotest.fail "restarted turn created a duplicate approval"
         | Gate.Unavailable reason ->
-          Alcotest.fail (Gate.unavailable_reason_to_string reason));
+          Alcotest.fail (Gate.unavailable_reason_to_string reason)
+       in
+       ignore (authorize ());
+       (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+        | Ok AQ.Resolution_unconsumed -> ()
+        | Ok AQ.Resolution_consumed ->
+          Alcotest.fail "authorization consumed the approved effect before completion"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let retried_authorization = authorize () in
+       Gate.commit_authorized_effect_completion
+         request
+         retried_authorization;
        (match AQ.approved_resolution_state ~base_path ~id:approval_id with
         | Ok AQ.Resolution_consumed -> ()
         | Ok AQ.Resolution_unconsumed ->
-          Alcotest.fail "matching restarted turn did not consume the approved effect"
+          Alcotest.fail "successful retried effect left its approval reusable"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        match AQ.list_pending_entries_for_workspace ~base_path with
        | Ok [] -> ()
@@ -3344,11 +3380,11 @@ let () =
             `Quick
             test_remembered_rule_carries_requested_expiry
         ; Alcotest.test_case
-            "cycle grant binds origin and is consumed once"
+            "cycle grant binds origin and commits after success"
             `Quick
             test_cycle_grant_uses_exact_effect_and_is_consumed_once
         ; Alcotest.test_case
-            "restarted turn reuses matching approved resolution"
+            "restarted turn retries until successful completion"
             `Quick
             test_restarted_turn_reuses_matching_approved_resolution
         ; Alcotest.test_case

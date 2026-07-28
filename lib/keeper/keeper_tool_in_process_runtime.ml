@@ -37,19 +37,22 @@ let external_gate_decision
       ~input
       ()
   =
+  let request : Keeper_gate.request =
+    { keeper_name = meta.name
+    ; operation
+    ; input
+    ; base_path = config.Workspace.base_path
+    ; causal_context = Option.map (fun current -> current ()) gate_context
+    ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
+    ; goal_ids = meta.active_goal_ids
+    ; continuation_channel
+    }
+  in
   match
     Keeper_gate.decide
       ?cycle_grant:gate_grant
       ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
-      { keeper_name = meta.name
-      ; operation
-      ; input
-      ; base_path = config.Workspace.base_path
-      ; causal_context = Option.map (fun current -> current ()) gate_context
-      ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-      ; goal_ids = meta.active_goal_ids
-      ; continuation_channel
-      }
+      request
   with
   | Keeper_gate.Deferred { approval_id; reason } ->
     Error
@@ -80,7 +83,18 @@ let external_gate_decision
       "external effect authorized operation=%s source=%s"
       operation
       (Keeper_gate.authorization_source_to_string authorization.source);
-    Ok ()
+    Ok (request, authorization)
+;;
+
+let commit_completed_authorization
+      request
+      authorization
+      (execution : Keeper_tool_execution.t)
+  =
+  match execution.disposition with
+  | Tool_result.Deferred _ | Tool_result.Failed _ -> ()
+  | Tool_result.Completed _ ->
+    Keeper_gate.commit_authorized_effect_completion request authorization
 ;;
 
 let with_external_gate_tool_result
@@ -104,7 +118,11 @@ let with_external_gate_tool_result
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok (request, authorization) ->
+    let result = continue () in
+    let execution = Keeper_tool_execution.of_tool_result result in
+    commit_completed_authorization request authorization execution;
+    result
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_tool_result
       ~tool_name:operation
@@ -138,7 +156,13 @@ let with_external_gate_tool_result_option
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok (request, authorization) ->
+    (match continue () with
+     | None -> None
+     | Some result ->
+       let execution = Keeper_tool_execution.of_tool_result result in
+       commit_completed_authorization request authorization execution;
+       Some result)
   | Error (Gate_deferred deferred) ->
     Some
       (Keeper_gate_deferred_payload.to_tool_result
@@ -174,7 +198,10 @@ let with_external_gate_execution
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok (request, authorization) ->
+    let execution = continue () in
+    commit_completed_authorization request authorization execution;
+    execution
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_execution deferred
   | Error (Gate_unavailable blocked) ->

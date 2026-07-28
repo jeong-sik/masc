@@ -73,7 +73,14 @@ let test_autonomous_yield_boundary_contract () =
     { reason = Masc.Keeper_agent_run.Chat_waiting }
   in
   let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
-    { reason = Masc.Keeper_agent_run.Durable_stimulus_waiting }
+    { reason =
+        Masc.Keeper_agent_run.Durable_stimulus_waiting
+          { pending_count = 1
+          ; head = None
+          ; head_age_sec = 0.
+          ; kinds = [ Keeper_event_queue.Bootstrap ]
+          }
+    }
   in
   (match F.runtime_yield_reason chat with
    | Runtime_agent.Chat_waiting -> ()

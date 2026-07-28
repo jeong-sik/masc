@@ -256,7 +256,17 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v7"
+let schema = "keeper.event_queue.state.v8"
+
+(* v7 carried [schema; revision; pending] only. The transition outbox lived
+   solely in the settlement WAL, which forced that WAL to stay on disk after
+   its pending mutation had already been absorbed into a saved snapshot - and a
+   later revision bump then made the retained row unreplayable, latching the
+   owner into "reset required" with no runtime exit (#26074). v8 persists the
+   outbox so the WAL carries one obligation with one lifetime. v7 snapshots
+   decode with an empty outbox: any obligation they had is still in their WAL,
+   which replays as before. *)
+let schema_v7 = "keeper.event_queue.state.v7"
 
 let empty =
   { revision = 0L
@@ -3407,6 +3417,8 @@ let to_yojson state =
     [ "schema", `String schema
     ; "revision", int64_json state.revision
     ; "pending", Keeper_event_queue.queue_to_yojson state.pending
+    ; ( "transition_outbox"
+      , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
     ]
 ;;
 
@@ -3557,22 +3569,44 @@ let of_yojson json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
   let* schema_value = string_field ~context "schema" fields in
-  if not (String.equal schema_value schema)
-  then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
-  else
-    let expected_fields = [ "schema"; "revision"; "pending" ] in
-    let* () = exact_fields ~context ~expected:expected_fields fields in
-    let* revision = int64_field ~context "revision" fields in
-    let* pending_json = required_field ~context "pending" fields in
-    let* pending = Keeper_event_queue.queue_of_yojson pending_json in
-    validate_state
-      { revision
-      ; next_lease_sequence = 1L
-      ; pending
-      ; leases = []
-      ; last_settlement = None
-      ; transition_outbox = []
-      ; accepted_transfer_projections = []
-      ; exact_execution_bindings = []
-      }
+  let* expected_fields =
+    if String.equal schema_value schema
+    then Ok [ "schema"; "revision"; "pending"; "transition_outbox" ]
+    else if String.equal schema_value schema_v7
+    then Ok [ "schema"; "revision"; "pending" ]
+    else
+      Error
+        (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
+  in
+  let* () = exact_fields ~context ~expected:expected_fields fields in
+  let* revision = int64_field ~context "revision" fields in
+  let* pending_json = required_field ~context "pending" fields in
+  let* pending = Keeper_event_queue.queue_of_yojson pending_json in
+  let* transition_outbox =
+    if String.equal schema_value schema
+    then list_field ~context "transition_outbox" outbox_entry_of_yojson fields
+    else Ok []
+  in
+  (* [next_lease_sequence] is a private carrier, but it is not free: the state
+     invariant requires it to exceed every receipt sequence still held. A
+     restored outbox brings its receipts' sequences back, so seeding a constant
+     here would reject the very snapshot this decoder just read. Derive it from
+     what was restored; an empty outbox yields 1L, the pre-v8 seed. *)
+  let next_lease_sequence =
+    List.fold_left
+      (fun acc (entry : outbox_entry) -> Int64.max acc entry.receipt.lease_sequence)
+      0L
+      transition_outbox
+    |> Int64.succ
+  in
+  validate_state
+    { revision
+    ; next_lease_sequence
+    ; pending
+    ; leases = []
+    ; last_settlement = None
+    ; transition_outbox
+    ; accepted_transfer_projections = []
+    ; exact_execution_bindings = []
+    }
 ;;

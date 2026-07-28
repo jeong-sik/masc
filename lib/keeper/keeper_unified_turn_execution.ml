@@ -60,10 +60,20 @@ let autonomous_yield_request ~base_path ~keeper_name =
          in
          if Keeper_event_queue.is_empty pending
          then Ok None
-         else
+         else (
+           let summary =
+             Keeper_agent_run.durable_stimulus_summary
+               ~now:(Time_compat.now ())
+               pending
+           in
+           Log.Keeper.info
+             ~keeper_name
+             "autonomous turn yields to durable stimulus: %s"
+             (Keeper_agent_run.durable_stimulus_summary_to_string summary);
            Ok
              (Some
-                Keeper_agent_run.{ reason = Durable_stimulus_waiting }))
+                Keeper_agent_run.
+                  { reason = Durable_stimulus_waiting summary })))
 ;;
 
 (** [run] operates on the immutable [Keeper_unified_turn_types.turn_state]

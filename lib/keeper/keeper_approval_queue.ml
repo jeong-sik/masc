@@ -3409,14 +3409,28 @@ let pending_entry_matches
       ~tool_name
       ~tool_call_id
       ~input_hash
+      ~turn_id
+      ~task_id
+      ~goal_id
+      ~goal_ids
+      ~continuation_channel
   =
   String.equal entry.audit_base_path base_path
   && String.equal entry.keeper_name keeper_name
   && String.equal entry.tool_name tool_name
-  && (match tool_call_id with
-      | None -> false
-      | Some tool_call_id -> entry.tool_call_id = Some tool_call_id)
   && String.equal entry.input_hash input_hash
+  &&
+  match tool_call_id with
+  | Some tool_call_id -> entry.tool_call_id = Some tool_call_id
+  | None ->
+    entry.tool_call_id = None
+    && entry.turn_id = turn_id
+    && entry.task_id = task_id
+    && entry.goal_id = goal_id
+    && entry.goal_ids = goal_ids
+    && Yojson.Safe.equal
+         (Keeper_continuation_channel.to_yojson entry.continuation_channel)
+         (Keeper_continuation_channel.to_yojson continuation_channel)
 ;;
 
 let pending_entry_owns_tool_call_id
@@ -3442,6 +3456,11 @@ let find_pending_id_in_map
       ~tool_name
       ~tool_call_id
       ~input_hash
+      ~turn_id
+      ~task_id
+      ~goal_id
+      ~goal_ids
+      ~continuation_channel
   =
   SMap.fold
     (fun id (entry : pending_approval) acc ->
@@ -3449,28 +3468,35 @@ let find_pending_id_in_map
        | Error _ as error -> error
        | Ok (Some _) as found -> found
        | Ok None ->
-         if
-           pending_entry_owns_tool_call_id
-             entry
-             ~base_path
-             ~keeper_name
-             ~tool_name
-             ~tool_call_id
-         then
-           if
-             pending_entry_matches entry ~base_path ~keeper_name ~tool_name
-               ~tool_call_id ~input_hash
+         (match tool_call_id with
+          | None ->
+            if
+              pending_entry_matches entry ~base_path ~keeper_name ~tool_name
+                ~tool_call_id ~input_hash ~turn_id ~task_id ~goal_id ~goal_ids
+                ~continuation_channel
             then Ok (Some id)
-           else
-             (match tool_call_id with
-              | Some tool_call_id ->
+            else Ok None
+          | Some tool_call_id ->
+            if
+              pending_entry_owns_tool_call_id
+                entry
+                ~base_path
+                ~keeper_name
+                ~tool_name
+                ~tool_call_id:(Some tool_call_id)
+            then
+              if
+                pending_entry_matches entry ~base_path ~keeper_name ~tool_name
+                  ~tool_call_id:(Some tool_call_id) ~input_hash ~turn_id ~task_id
+                  ~goal_id ~goal_ids ~continuation_channel
+              then Ok (Some id)
+              else
                 Error
                   (Printf.sprintf
                      "tool_call_id %s is already pending for a different canonical request (approval %s)"
                      tool_call_id
                      id)
-              | None -> Ok None)
-         else Ok None)
+            else Ok None))
     map
     (Ok None)
 ;;
@@ -3528,6 +3554,11 @@ let submit_pending
              ~tool_name
              ~tool_call_id
              ~input_hash
+             ~turn_id
+             ~task_id
+             ~goal_id
+             ~goal_ids
+             ~continuation_channel
          with
          | Error reason ->
            Error { path = pending_store_path ~base_path; reason }

@@ -317,10 +317,27 @@ let test_tool_call_identity_controls_pending_deduplication () =
            ~input
            ()
        in
+       Alcotest.(check string)
+         "legacy retry without an OAS identity stays one approval"
+         without_identity_first
+         without_identity_second;
+       let without_identity_different_turn =
+         submit_with_context
+           ~turn_id:2
+           ~goal_ids:[ "goal-a" ]
+           ~continuation_channel:dashboard_a
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
        Alcotest.(check bool)
-         "missing tool call identity never deduplicates by input"
+         "legacy distinct request coordinates stay separate"
          true
-         (not (String.equal without_identity_first without_identity_second));
+         (not
+            (String.equal
+               without_identity_first
+               without_identity_different_turn));
        List.iter
          (fun id ->
             Alcotest.(check bool) "distinct origin has its own request" true
@@ -332,7 +349,7 @@ let test_tool_call_identity_controls_pending_deduplication () =
          ; another_channel
          ; another_goal_context
          ; without_identity_first
-         ; without_identity_second
+         ; without_identity_different_turn
          ])
 ;;
 

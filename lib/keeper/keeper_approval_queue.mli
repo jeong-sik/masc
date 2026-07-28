@@ -401,11 +401,11 @@ end
 (** {1 Nonblocking submission and explicit resolution} *)
 
 (** Durably enqueue an exact request without suspending the caller. When
-    supplied, [tool_call_id] must be non-blank. An existing id is reused only
-    when the caller supplies the same durable [tool_call_id], Keeper, operation
-    identity, and canonical input. Turn/task/goal/channel fields are provenance
-    and never deduplication keys. Requests without a [tool_call_id] are never
-    deduplicated. A deduplicated request does not consume a durable queue
+    supplied, [tool_call_id] must be non-blank. An existing id is reused for
+    the same durable [tool_call_id], Keeper, operation identity, and canonical
+    input. When it is absent, legacy callers retain their complete
+    turn/task/goal/channel request identity, so a retry does not create another
+    pending approval. A deduplicated request does not consume a durable queue
     sequence. *)
 val submit_pending :
   keeper_name:string ->

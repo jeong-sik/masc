@@ -1,7 +1,7 @@
 type causal_context =
   { turn_id : int option
   ; tool_call_id : string option
-  ; snapshot : Yojson.Safe.t
+  ; snapshot : Yojson.Safe.t option
   }
 
 type request =
@@ -306,7 +306,7 @@ let submit request =
     ~base_path:request.base_path
     ?turn_id:(request_turn_id request)
     ?tool_call_id:(Option.bind request.causal_context (fun context -> context.tool_call_id))
-    ?request_context:(Option.map (fun context -> context.snapshot) request.causal_context)
+    ?request_context:(Option.bind request.causal_context (fun context -> context.snapshot))
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids
     ?continuation_channel:request.continuation_channel

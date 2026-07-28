@@ -88,7 +88,7 @@ let replay_approved_effect
               | None ->
                 { Keeper_gate.turn_id = None
                 ; tool_call_id = None
-                ; snapshot = `Assoc []
+                ; snapshot = None
                 }
             in
             { base_context with tool_call_id = Some tool_call_id })

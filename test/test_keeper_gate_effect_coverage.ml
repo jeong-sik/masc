@@ -159,9 +159,12 @@ let test_second_tool_snapshot_contains_first_tool_result () =
   let second_call_context = Keeper_gate_causal_context.snapshot context in
   check (option int) "same turn" (Some 17) second_call_context.turn_id;
   let calls =
-    second_call_context.snapshot
-    |> Yojson.Safe.Util.member "completed_tool_calls"
-    |> Yojson.Safe.Util.to_list
+    match second_call_context.snapshot with
+    | Some snapshot ->
+      snapshot
+      |> Yojson.Safe.Util.member "completed_tool_calls"
+      |> Yojson.Safe.Util.to_list
+    | None -> fail "turn-local causal evidence was unexpectedly partial"
   in
   match calls with
   | [ call ] ->

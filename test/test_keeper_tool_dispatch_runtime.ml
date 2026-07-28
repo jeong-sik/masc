@@ -976,7 +976,27 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
                "the raw OAS tool_use_id is not used as a durable identity"
                true
                (not (String.equal identity "toolu-gate-identity"))
-           | None -> fail "OAS execution occurrence identity was not persisted")
+           | None -> fail "OAS execution occurrence identity was not persisted");
+          check bool
+            "missing causal evidence is not persisted as a complete snapshot"
+            true
+            (Option.is_none entry.request_context);
+          let context_bundle =
+            Masc.Hitl_summary_worker.For_testing.build_context_bundle ~entry
+          in
+          check bool
+            "Auto Judge sees missing causal evidence as partial"
+            true
+            Yojson.Safe.Util.(context_bundle |> member "partial_context" |> to_bool);
+          check bool
+            "Auto Judge receives no fabricated causal snapshot"
+            true
+            Yojson.Safe.Util.(context_bundle |> member "request_context" = `Null);
+          check (option string)
+            "Auto Judge still receives the durable tool-call identity"
+            entry.tool_call_id
+            Yojson.Safe.Util.
+              (context_bundle |> member "tool_call_id" |> to_string_option)
         | Ok entries ->
           failf "expected one pending approval, got %d" (List.length entries)
         | Error error ->

@@ -168,7 +168,7 @@ describe('lab navigation', () => {
       '감사 무결성',
     ])
     expect(labSections.find(item => item.id === 'memory-subsystems')?.description).toBe(
-      'Live episodes, user model projection, Hebbian synapses, and gated memory entries.',
+      'Hebbian synapses, recall quality, and delegation requests.',
     )
     expect(labSections.find(item => item.id === 'performance')?.description).toBe(
       'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',

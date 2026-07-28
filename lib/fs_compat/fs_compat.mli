@@ -789,6 +789,15 @@ val remove_tree : string -> unit
 (** Get realpath. *)
 val realpath : string -> string
 
+(** [realpath] with a fallback for paths that do not (fully) exist on
+    disk: walks up the directory tree until an ancestor resolves, then
+    reconstructs the remaining suffix onto the resolved ancestor.  This
+    canonicalizes symlinked spellings (e.g. [/tmp] vs [/private/tmp] on
+    macOS) even when the leaf directories have not been created yet, so
+    two spellings of the same location compare equal.  Total: a path
+    with no resolvable ancestor is returned reconstructed as-is. *)
+val realpath_lenient : string -> string
+
 (** Create directory recursively. *)
 val mkdir_p : string -> unit
 

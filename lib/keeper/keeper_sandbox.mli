@@ -196,7 +196,12 @@ val keeper_visible_root_abs : t -> string
     identity and cannot fail. Docker keepers live in a disjoint tree, so a
     path outside the sandbox root has no visible spelling and is an
     [Error]; callers must say what to do about that rather than receive a
-    substitute. *)
+    substitute.
+
+    Containment for Docker is decided in canonical (realpath) coordinates
+    via {!Fs_compat.realpath_lenient}, so symlinked spellings of the same
+    location ([/tmp] vs [/private/tmp] on macOS) project identically
+    regardless of which spelling [config.base_path] or the input uses. *)
 val visible_path_of_host :
   t ->
   Path.host Path.t ->

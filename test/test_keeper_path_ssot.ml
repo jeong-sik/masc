@@ -248,6 +248,46 @@ let test_raw_accepts_either_coordinate_system () =
        (Filename.concat host_root "repos/masc")
      |> visible_or_fail ~msg:"host spelling")
 
+(* [config.base_path] and an incoming host cwd routinely spell the same
+   location differently: one side through a symlink (/tmp vs /private/tmp
+   on macOS), the other realpath-resolved as [Unix.getcwd] returns it.
+   The superseded factory converter canonicalized both operands before
+   comparing; a lexical-only comparison reports the equivalent path as
+   [Outside_sandbox_root], and the factory's fallback then substitutes
+   the sandbox root — dropping the [repos/<repo>] segment. Both
+   directions are pinned, and deliberately before the playground
+   directories exist on disk. *)
+let test_projection_docker_resolves_symlinked_spelling () =
+  let real_base = temp_dir () in
+  Unix.mkdir (Filename.concat real_base ".masc") 0o755;
+  let link_parent = temp_dir () in
+  let linked_base = Filename.concat link_parent "workspace-link" in
+  Unix.symlink real_base linked_base;
+  let playground_rel = ".masc/playground/docker/sangsu" in
+  let check_projection ~msg ~base_spelling ~cwd_spelling =
+    let config = Workspace.default_config base_spelling in
+    let sandbox, meta = docker_sandbox ~config ~name:"sangsu" in
+    let container_root = Keeper_sandbox.container_root meta.name in
+    let host_cwd =
+      Filename.concat (Filename.concat cwd_spelling playground_rel) "repos/masc"
+    in
+    Alcotest.(check string)
+      msg
+      (Filename.concat container_root "repos/masc")
+      (Keeper_sandbox.visible_path_of_host
+         sandbox
+         (Keeper_sandbox.Path.of_host_abs host_cwd)
+       |> visible_or_fail ~msg)
+  in
+  check_projection
+    ~msg:"realpath-spelled cwd projects into the symlink-configured root"
+    ~base_spelling:linked_base
+    ~cwd_spelling:(Unix.realpath real_base);
+  check_projection
+    ~msg:"symlink-spelled cwd projects into the realpath-configured root"
+    ~base_spelling:(Unix.realpath real_base)
+    ~cwd_spelling:linked_base
+
 let test_config_agent_projection_rejects_legacy_alias () =
   let config = make_config () in
   write_keeper_toml ~config ~name:"sangsu" ~sandbox_profile:"docker_hardened";
@@ -289,5 +329,7 @@ let () =
           test_projection_local_is_identity;
         Alcotest.test_case "raw cwd accepts either coordinate system" `Quick
           test_raw_accepts_either_coordinate_system;
+        Alcotest.test_case "symlinked spellings project identically" `Quick
+          test_projection_docker_resolves_symlinked_spelling;
       ] );
   ]

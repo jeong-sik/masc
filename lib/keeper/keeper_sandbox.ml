@@ -207,26 +207,36 @@ let visible_path_of_host (t : t) (p : Path.host Path.t)
     (match t.container_root with
      | None -> Error (Path.Container_root_missing { path })
      | Some container_root ->
-       let host_root =
-         Env_config_core.normalize_path_lexically t.host_root_abs
-         |> strip_trailing_slashes
-       in
+       (* Compare in canonical (realpath) coordinates, not lexical ones:
+          [config.base_path] and an incoming host cwd routinely spell the
+          same location differently through symlinks (/tmp vs /private/tmp
+          on macOS). A lexical-only comparison reports the equivalent path
+          as [Outside_sandbox_root], which downstream turns into the
+          root-collapse substitute this module exists to remove. The
+          superseded factory converter canonicalized both operands the
+          same way. *)
+       let canonical raw = Fs_compat.realpath_lenient raw |> strip_trailing_slashes in
+       let host_root = canonical t.host_root_abs in
+       let candidate = canonical path in
        let container_root =
          Env_config_core.normalize_path_lexically container_root
          |> strip_trailing_slashes
        in
-       if String.equal path host_root
+       if String.equal candidate host_root
        then Ok container_root
-       else if String.starts_with ~prefix:(host_root ^ "/") path
+       else if String.starts_with ~prefix:(host_root ^ "/") candidate
        then (
          let suffix =
            String.sub
-             path
+             candidate
              (String.length host_root + 1)
-             (String.length path - String.length host_root - 1)
+             (String.length candidate - String.length host_root - 1)
          in
          Ok (Filename.concat container_root suffix))
-       else Error (Path.Outside_sandbox_root { path; host_root }))
+       else
+         (* The error carries the path as submitted, not its canonical
+            respelling: diagnostics should name what the caller said. *)
+         Error (Path.Outside_sandbox_root { path; host_root }))
 ;;
 
 (* Boundary parse for a path that arrived as an untyped string, typically a

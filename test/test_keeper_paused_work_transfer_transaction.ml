@@ -118,7 +118,6 @@ let with_transfer_lane f =
          ; target_generation = target_meta.runtime.nonce
          ; continuation_binding = Receipt.Routed channel
          ; operator_operation_id = "operator-transfer-1"
-         ; settled_at = 3.0
          }
        in
        f config from_keeper to_keeper source_meta target_meta request)
@@ -170,6 +169,27 @@ let test_transfer_commits_exact_pending_move () =
      | Transaction.Committed -> ()
      | Transaction.Already_committed -> Alcotest.fail "first transfer was a replay");
     check_applied ~expected_target:Transaction.Enqueued first.projection;
+    let open Yojson.Safe.Util in
+    Alcotest.(check bool)
+      "transfer receipt omits removed settled_at"
+      true
+      (match Receipt.to_yojson first.receipt |> member "transfer" |> member "settled_at" with
+       | `Null -> true
+       | _ -> false);
+    let obsolete_v2_receipt =
+      match Receipt.to_yojson first.receipt with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (function
+               | "schema", _ -> "schema", `String "masc.keeper.paused-work-disposition.v2"
+               | field -> field)
+             fields)
+      | _ -> Alcotest.fail "transfer receipt must be a JSON object"
+    in
+    (match Receipt.of_yojson obsolete_v2_receipt with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "transfer receipt accepted obsolete v2 schema");
     assert_converged config ~from_keeper ~to_keeper request.source)
 ;;
 
@@ -261,7 +281,6 @@ let test_replay_after_source_ack_projects_target () =
       ; target_generation = request.target_generation
       ; source = request.source
       ; source_revision = request.source_revision
-      ; settled_at = request.settled_at
       ; continuation_binding = request.continuation_binding
       }
     in
@@ -296,7 +315,7 @@ let test_replay_after_source_ack_projects_target () =
          ~base_path:config.Workspace.base_path
          from_keeper
          ~current_owner_nonce:request.owner_nonce
-         ~settled_at:request.settled_at
+         ~settled_at:receipt.requested_at
          ~transfer:causal
        |> require_ok "simulate committed source ACK");
     let replay =

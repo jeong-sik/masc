@@ -11,7 +11,6 @@ type transfer_owner =
   ; target_generation : int
   ; source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; settled_at : float
   ; continuation_binding : continuation_binding
   }
 

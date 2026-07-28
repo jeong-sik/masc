@@ -239,9 +239,22 @@ let runtime_candidate_missing_error id =
        "keeper_turn_driver: lane candidate %S disappeared from runtimes"
        id)
 
+let runtime_candidate_missing_request_cap_error (runtime : Runtime.t) =
+  Agent_sdk.Error.Config
+    (Agent_sdk.Error.InvalidConfig
+       { field = "max-request-body-bytes"
+       ; detail =
+           Printf.sprintf
+             "Keeper runtime %S has no positive serialized-request ceiling"
+             runtime.id
+       })
+
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
-  | Some runtime -> Ok runtime
+  | Some runtime ->
+    (match runtime.Runtime.binding.max_request_body_bytes with
+     | Some cap when cap > 0 -> Ok runtime
+     | None | Some _ -> Error (runtime_candidate_missing_request_cap_error runtime))
   | None -> Error (runtime_candidate_missing_error id)
 
 let resolve_runtime_candidate_for_attempt ?on_missing id =

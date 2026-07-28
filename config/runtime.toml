@@ -207,14 +207,24 @@ supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
 wizard-default = true
+# Keeper application working set, not the provider's 1M-token capability.
+# The exact final JSON body (system/tail + tools + lossless transcript) must
+# remain bounded so durable canonical history cannot become an n,n+1,... wire
+# replay. OAS rejects an oversized serialized body locally before POST; the
+# Keeper turn policy owns any subsequent recovery decision.
+max-request-body-bytes = 524288
 
 [deepseek.deepseek-v4-pro]
+max-request-body-bytes = 524288
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
+max-request-body-bytes = 524288
 
 [glm-coding.glm-4-7-coding]
 wizard-default = true
+# GLM's smaller serving window gets a smaller explicit wire working set.
+max-request-body-bytes = 262144
 
 [models.glm-5-turbo]
 api-name = "GLM-5-Turbo"
@@ -236,6 +246,7 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
+max-request-body-bytes = 262144
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit
 # operator use. Do not route provider-native structured-output lanes here unless
@@ -376,6 +387,7 @@ supports-image-input = false
 supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-deepseek-v4-flash]
+max-request-body-bytes = 524288
 
 [models.ollama-cloud-deepseek-v4-pro]
 api-name = "deepseek-v4-pro"

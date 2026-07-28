@@ -174,6 +174,15 @@ module For_testing : sig
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
 
+  val keeper_dispatch_runtime_ids :
+    default_runtime_id:string ->
+    assignments:(string * string) list ->
+    media_failover:string list ->
+    lanes:Runtime_lane.t list ->
+    string list
+  (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment,
+      declared lane failover, and explicit media failover routing. *)
+
   val save_config_text_with_sync_parent :
     ?runtime_config_path:string ->
     sync_parent:(string -> unit) ->

@@ -362,6 +362,52 @@ let test_maintenance_keeps_wire_capture_reference_within_retention () =
         None
         (fetch_ok store ~sha256:dead.sha256))
 
+let test_maintenance_rejects_uncoordinated_cluster_roots () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"cluster-owned output" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let cluster_capture =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "clusters/secondary/wire-capture/2026-07/28.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname cluster_capture);
+      Fs_compat.save_file
+        cluster_capture
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "response_text", `String (O.encode_for_oas (O.Stored blob)) ])
+         ^ "\n");
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error
+           (M.Clustered_durable_roots_uncoordinated
+             { path; entries }) ->
+         Alcotest.(check string)
+           "exact cluster root"
+           (Filename.concat
+              (Common.masc_dir_from_base_path ~base_path)
+              "clusters")
+           path;
+         Alcotest.(check int) "one cluster entry" 1 entries
+       | Error error ->
+         Alcotest.failf
+           "unexpected clustered maintenance error: %s"
+           (M.error_to_string error)
+       | Ok _ ->
+         Alcotest.fail
+           "shared blob maintenance ran without cross-cluster coordination");
+      Alcotest.(check (option string))
+        "cluster-owned blob remains readable"
+        (Some "cluster-owned output")
+        (fetch_ok store ~sha256:blob.sha256);
+      Alcotest.(check bool)
+        "cluster refusal does not publish a candidate snapshot"
+        false
+        (Sys.file_exists (M.candidate_snapshot_path ~base_path)))
+
 let test_maintenance_malformed_reference_fails_closed () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -882,6 +928,10 @@ let () =
             "maintenance keeps wire-capture reference within retention"
             `Quick
             test_maintenance_keeps_wire_capture_reference_within_retention;
+          Alcotest.test_case
+            "maintenance rejects uncoordinated cluster roots"
+            `Quick
+            test_maintenance_rejects_uncoordinated_cluster_roots;
           Alcotest.test_case
             "maintenance ignores repository mirrors"
             `Quick

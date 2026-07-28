@@ -2,10 +2,11 @@
 
     Live references are the union of exact {!Tool_output} markers in the
     closed durable-consumer registry: Keeper state/checkpoints, Gate replay,
-    tool-call logs, trajectories, traces, messages, and Keeper chat. Repository
-    mirrors, build products, operator config, and observational logs are not
-    blob consumers and are never traversed. A new durable consumer must be
-    added to this registry in the same change that persists a reference.
+    tool-call logs, trajectories, traces, messages, Keeper chat, and bounded
+    wire captures. Repository mirrors, build products, operator config, and
+    unrelated observational logs are not blob consumers and are never
+    traversed. A new durable consumer must be added to this registry in the
+    same change that persists a reference.
 
     Retention is an explicit two-state policy, not an age/count heuristic:
     [Observe_only] records every currently unreferenced blob as a durable
@@ -14,13 +15,20 @@
     unreferenced in the new complete scan. Production calls it only at the
     quiescent startup boundary, so two complete startup scans are required.
     A malformed reference, scan failure, candidate-store failure, or unlink
-    failure aborts visibly. *)
+    failure aborts visibly. Because the blob store is shared across clusters
+    while several consumers are cluster-aware, any non-empty
+    [<base>/.masc/clusters] tree currently disables maintenance fail-closed
+    until cross-cluster writer quiescence has one coordination owner. *)
 
 type mode =
   | Observe_only
   | Delete_previous_candidates
 
 type error =
+  | Clustered_durable_roots_uncoordinated of
+      { path : string
+      ; entries : int
+      }
   | Durable_source_stat_failed of
       { path : string
       ; reason : string

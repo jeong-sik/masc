@@ -5,6 +5,10 @@ type mode =
   | Delete_previous_candidates
 
 type error =
+  | Clustered_durable_roots_uncoordinated of
+      { path : string
+      ; entries : int
+      }
   | Durable_source_stat_failed of
       { path : string
       ; reason : string
@@ -47,6 +51,12 @@ type report =
   }
 
 let error_to_string = function
+  | Clustered_durable_roots_uncoordinated { path; entries } ->
+    Printf.sprintf
+      "tool blob maintenance requires cross-cluster writer coordination before \
+       scanning shared blobs path=%s entries=%d"
+      path
+      entries
   | Durable_source_stat_failed { path; reason } ->
     Printf.sprintf "durable source stat failed path=%s: %s" path reason
   | Durable_source_read_failed { path; reason } ->
@@ -235,13 +245,75 @@ let durable_consumer_roots ~base_path =
   List.map (Filename.concat runtime_root) durable_consumer_basenames
 ;;
 
-let live_references ~base_path =
-  let same_directory (left : Unix.stats) (right : Unix.stats) =
-    left.st_dev = right.st_dev
-    && left.st_ino = right.st_ino
-    && left.st_kind = Unix.S_DIR
-    && right.st_kind = Unix.S_DIR
+let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =
+  left.st_dev = right.st_dev
+  && left.st_ino = right.st_ino
+  && left.st_kind = Unix.S_DIR
+  && right.st_kind = Unix.S_DIR
+  && left.st_size = right.st_size
+  && left.st_mtime = right.st_mtime
+  && left.st_ctime = right.st_ctime
+;;
+
+let reject_uncoordinated_cluster_roots ~base_path =
+  let path =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path)
+      "clusters"
   in
+  let inspect () =
+    match
+      Fs_compat.inspect_owned_directory_chain
+        ~ownership_root:base_path
+        path
+    with
+    | Ok observation -> Ok observation
+    | Error rejection ->
+      Error
+        (Durable_source_stat_failed
+           { path
+           ; reason =
+               Fs_compat.owned_directory_chain_rejection_to_string
+                 rejection
+           })
+  in
+  match inspect () with
+  | Error _ as error -> error
+  | Ok Fs_compat.Owned_directory_missing -> Ok ()
+  | Ok (Fs_compat.Owned_directory before) ->
+    (try
+       let entries = Sys.readdir path in
+       match inspect () with
+       | Error _ as error -> error
+       | Ok Fs_compat.Owned_directory_missing ->
+         Error
+           (Durable_source_stat_failed
+              { path; reason = "cluster root disappeared during scan" })
+       | Ok (Fs_compat.Owned_directory after) ->
+         if not (same_directory_snapshot before after)
+         then
+           Error
+             (Durable_source_stat_failed
+                { path; reason = "cluster root changed during scan" })
+         else if Array.length entries = 0
+         then Ok ()
+         else
+           Error
+             (Clustered_durable_roots_uncoordinated
+                { path; entries = Array.length entries })
+     with
+     | Sys_error reason ->
+       Error (Durable_source_stat_failed { path; reason })
+     | Unix.Unix_error (code, fn, arg) ->
+       Error
+         (Durable_source_stat_failed
+            { path
+            ; reason =
+                Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+            }))
+;;
+
+let live_references ~base_path =
   let read_directory path =
     let inspect () =
       match
@@ -272,7 +344,7 @@ let live_references ~base_path =
             (Durable_source_stat_failed
                { path; reason = "directory disappeared during scan" })
         | Ok (Fs_compat.Owned_directory after) ->
-          if same_directory before after
+          if same_directory_snapshot before after
           then Ok (Some entries)
           else
             Error
@@ -466,6 +538,7 @@ let save_candidate_snapshot ~base_path candidates =
 
 let run ~base_path ~mode =
   let open Result.Syntax in
+  let* () = reject_uncoordinated_cluster_roots ~base_path in
   let store = Tool_blob_store.create ~base_path in
   let* live = live_references ~base_path in
   let* previous_candidates = load_candidate_snapshot ~base_path in

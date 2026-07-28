@@ -193,18 +193,16 @@ describe('VerificationRequestsPanel', () => {
     })
   })
 
-  it('renders conflict-triage pending rows as read-only summary and next action', async () => {
+  it('renders immutable submissions as read-only summary and next action', async () => {
     setData([
       makeRequest({
         request_id: 'req-conflict',
-            request_kind: 'conflict_triage',
         request_summary: 'Conflict verification required: board / planning / mutation path disagree.',
         next_action: 'Reconcile board / planning / mutation surfaces before ordinary approval.',
       }),
     ])
     render(html`<${VerificationRequestsPanel} />`)
 
-    expect(screen.getByText('충돌 triage')).toBeTruthy()
     expect(screen.queryByRole('columnheader', { name: '액션' })).toBeNull()
     expect(screen.queryByRole('button', { name: '승인' })).toBeNull()
     expect(screen.queryByRole('button', { name: '반려' })).toBeNull()

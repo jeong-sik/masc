@@ -850,6 +850,88 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
        ~assistant_content ()
       : (unit, string) result)
 
+(* A turn that executed tools but reached no assistant terminal still has a
+   durable user/tool timeline.  Do not fabricate an assistant utterance (or a
+   transport failure) merely to reuse [append_turn_result]. *)
+let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : string)
+    ~(user_attachments : attachment list) ~(tool_calls : tool_call list) ?surface
+    ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+    ?turn_ref () : (unit, string) result =
+  if tool_calls = [] then Error "tool-only continuation requires at least one tool call"
+  else try
+    ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let user_content = Keeper_secret_redaction.redact_text redaction user_content in
+    let user_attachments = List.map (redact_attachment redaction) user_attachments in
+    let persisted_user_attachments = List.map persisted_attachment user_attachments in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let user_line =
+      encode_line ~role:Role.User ~content:user_content ~ts
+        ~attachments:persisted_user_attachments ?surface ?conversation_id
+        ?external_message_id ?speaker ?turn_ref
+        ~mentions:(user_line_mentions ~extra_mentions user_content) ()
+    in
+    let tool_lines =
+      List.mapi
+        (fun position tc ->
+           encode_line ~role:Role.Tool
+             ~content:(normalize_tool_args tc.args)
+             ~ts
+             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+             ~tool_call_name:tc.call_name
+             ?surface ?conversation_id ?turn_ref ())
+        tool_calls
+    in
+    append_chat_payload_durable path (String.concat "\n" (user_line :: tool_lines) ^ "\n");
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
+      ();
+    let message = Printexc.to_string exn in
+    Log.Keeper.warn "keeper_chat_store: user/tool append failed for %s: %s"
+      (sanitize_name keeper_name) message;
+    Error message
+
+let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call list)
+    ?surface ?conversation_id ?turn_ref () : (unit, string) result =
+  if tool_calls = [] then Error "tool-only continuation requires at least one tool call"
+  else try
+    ensure_dir_once ~base_dir;
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
+    let path = chat_path ~base_dir ~keeper_name in
+    let ts = Time_compat.now () in
+    let tool_lines =
+      List.mapi
+        (fun position tc ->
+           encode_line ~role:Role.Tool
+             ~content:(normalize_tool_args tc.args)
+             ~ts
+             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+             ~tool_call_name:tc.call_name
+             ?surface ?conversation_id ?turn_ref ())
+        tool_calls
+    in
+    append_chat_payload_durable path (String.concat "\n" tool_lines ^ "\n");
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatStoreFailures)
+      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
+      ();
+    let message = Printexc.to_string exn in
+    Log.Keeper.warn "keeper_chat_store: tool-only append failed for %s: %s"
+      (sanitize_name keeper_name) message;
+    Error message
+
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with.
 
@@ -900,6 +982,147 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
       (sanitize_name keeper_name) (Printexc.to_string exn);
     Error (Printexc.to_string exn)
 
+type append_once_line =
+  { transcript_slot : Keeper_chat_delivery_identity.transcript_slot
+  ; row_id : string
+  ; line : string
+  }
+
+let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
+      ~result_slot lines =
+  match
+    Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+      let rec inspect found additions = function
+        | [] -> Ok (found, List.rev additions)
+        | ({ transcript_slot; row_id; line } as candidate) :: rest ->
+          (match find_provenance existing ~delivery_key ~transcript_slot with
+           | Error detail -> Error detail
+           | Ok (Some existing_row_id) ->
+             inspect
+               ((transcript_slot, existing_row_id, true) :: found)
+               additions
+               rest
+           | Ok None ->
+             inspect
+               ((transcript_slot, row_id, false) :: found)
+               (candidate :: additions)
+               rest)
+      in
+      match inspect [] [] lines with
+      | Error detail -> None, Error detail
+      | Ok (rows, additions) ->
+        let result_row =
+          List.find_map
+            (fun (slot, row_id, was_present) ->
+               if Keeper_chat_delivery_identity.transcript_slot_equal slot result_slot
+               then Some (row_id, was_present)
+               else None)
+            rows
+        in
+        (match result_row with
+         | None -> None, Error "idempotent chat append is missing its result slot"
+         | Some (row_id, result_was_present)
+           when reject_partial_after_result && result_was_present && additions <> [] ->
+           None,
+           Error
+             "assistant transcript already exists without its tool-call payload"
+         | Some (row_id, _) ->
+           let result =
+             if additions = []
+             then Already_present { row_id }
+             else Appended { row_id }
+           in
+           let payload =
+             additions
+             |> List.map (fun candidate -> candidate.line ^ "\n")
+             |> String.concat ""
+           in
+           (if additions = [] then None else Some payload), Ok result))
+  with
+  | Error detail -> Error detail
+  | Ok result -> result
+;;
+
+let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
+      tool_calls =
+  List.mapi
+    (fun ordinal tc ->
+       let call_id = normalize_tool_call_id ~position:ordinal tc.call_id in
+       let transcript_slot =
+         Keeper_chat_delivery_identity.Tool_call
+           { execution_id = Ids.Execution_id.of_string call_id; ordinal }
+       in
+       let row_id = mint_message_id ~ts in
+       { transcript_slot
+       ; row_id
+       ; line =
+           encode_line
+             ~role:Role.Tool
+             ~content:(normalize_tool_args tc.args)
+             ~ts
+             ~message_id:row_id
+             ~tool_call_id:call_id
+             ~tool_call_name:tc.call_name
+             ?surface
+             ?conversation_id
+             ?turn_ref
+             ~delivery_key
+             ~transcript_slot
+             ()
+       })
+    tool_calls
+;;
+
+let append_tool_calls_once
+      ~base_dir
+      ~keeper_name
+      ~delivery_key
+      ~(tool_calls : tool_call list)
+      ?surface
+      ?conversation_id
+      ?turn_ref
+      ()
+  =
+  match tool_calls with
+  | [] -> Error "idempotent tool-call append requires at least one tool call"
+  | _ ->
+    try
+      ensure_dir_once ~base_dir;
+      let redaction = redaction_for ~base_dir ~keeper_name in
+      let tool_calls = List.map (redact_tool_call redaction) tool_calls in
+      let path = chat_path ~base_dir ~keeper_name in
+      let ts = Time_compat.now () in
+      let lines =
+        tool_call_append_lines ~ts ?surface ?conversation_id ?turn_ref ~delivery_key
+          tool_calls
+      in
+      let ordinal = List.length tool_calls - 1 in
+      let result_slot =
+        Keeper_chat_delivery_identity.Tool_call
+          { execution_id =
+              Ids.Execution_id.of_string
+                (normalize_tool_call_id
+                   ~position:ordinal
+                   (List.nth tool_calls ordinal).call_id)
+          ; ordinal
+          }
+      in
+      append_lines_once path ~delivery_key ~result_slot lines
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ChatStoreFailures)
+        ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
+        ();
+      let detail = Printexc.to_string exn in
+      Log.Keeper.warn
+        "keeper_chat_store: tool-call append-once failed for %s: %s"
+        (sanitize_name keeper_name)
+        detail;
+      Error detail
+;;
+
 let append_assistant_message_once
       ~base_dir
       ~keeper_name
@@ -908,6 +1131,7 @@ let append_assistant_message_once
       ?surface
       ?conversation_id
       ?(assistant_kind = Row_kind.Utterance)
+      ?(tool_calls = [])
       ?blocks
       ?turn_ref
       ?stream_lifecycle
@@ -917,6 +1141,7 @@ let append_assistant_message_once
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
+    let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let blocks = redact_blocks redaction blocks in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
@@ -940,7 +1165,17 @@ let append_assistant_message_once
         ~transcript_slot
         ()
     in
-    append_line_once path ~delivery_key ~transcript_slot ~row_id line
+    let tool_lines =
+      tool_call_append_lines ~ts ?surface ?conversation_id ?turn_ref ~delivery_key
+        tool_calls
+    in
+    let assistant_line = { transcript_slot; row_id; line } in
+    append_lines_once
+      ~reject_partial_after_result:(tool_lines <> [])
+      path
+      ~delivery_key
+      ~result_slot:transcript_slot
+      (tool_lines @ [ assistant_line ])
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

@@ -62,8 +62,19 @@ let test_parallel_blocks_keep_provider_order () =
   A.on_event t (stop ~index:1);
   A.on_event t (stop ~index:0);
   check (list string) "provider order"
-    [ "call-b"; "call-a" ]
+    [ "call-a"; "call-b" ]
     (List.map (fun (c : Masc.Keeper_chat_store.tool_call) -> c.call_id) (A.to_tool_calls t))
+
+let test_replayed_start_keeps_received_fragments () =
+  let t = A.create () in
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-replayed") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "{\"path\":");
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-replayed") ~tool_name:(Some "Read"));
+  A.on_event t (json_delta ~index:0 "\"a.ml\"}");
+  A.on_event t (stop ~index:0);
+  check (list tool_call) "identical start does not reset fragments"
+    [ { call_id = "call-replayed"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
+    (A.to_tool_calls t)
 
 (* A block with no call id cannot be joined to its output row, so persisting it
    would render an anonymous step. *)
@@ -111,6 +122,7 @@ let () =
       , [ test_case "fragments concatenate in order" `Quick test_fragments_concatenate_in_order
         ; test_case "snapshot replaces fragments" `Quick test_snapshot_replaces_fragments
         ; test_case "parallel blocks keep provider order" `Quick test_parallel_blocks_keep_provider_order
+        ; test_case "replayed start keeps fragments" `Quick test_replayed_start_keeps_received_fragments
         ; test_case "block without call id is dropped" `Quick test_block_without_call_id_is_dropped
         ; test_case "message stop finalizes open blocks" `Quick test_message_stop_finalizes_open_blocks
         ; test_case "non-tool events are ignored" `Quick test_non_tool_events_are_ignored

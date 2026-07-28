@@ -177,6 +177,34 @@ let test_append_turn_roundtrip () =
       Alcotest.(check (option string)) "assistant has no tool id"
         None asst.tool_call_id)
 
+let test_tool_only_continuations_do_not_fabricate_assistant_rows () =
+  let base_dir = temp_base_path "keeper-chat-tool-only" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-tool-only" in
+      let tool_calls =
+        [ { K.call_id = "call-1"; call_name = "Read"; args = {|{"path":"x"}|} } ]
+      in
+      (match
+         K.append_user_and_tool_calls_result ~base_dir ~keeper_name
+           ~user_content:"inspect x" ~user_attachments:[] ~tool_calls ()
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail error);
+      (match K.append_tool_calls_result ~base_dir ~keeper_name ~tool_calls () with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail error);
+      let history = K.load ~base_dir ~keeper_name in
+      Alcotest.(check (list string)) "only durable user/tool rows"
+        [ "user"; "tool"; "tool" ]
+        (roles history);
+      Alcotest.(check bool) "no fabricated assistant row" false
+        (List.exists
+           (fun (message : K.chat_message) ->
+              K.Role.equal message.role K.Role.Assistant)
+           history))
+
 let test_legacy_lines_parse_without_new_fields () =
   let base_dir = temp_base_path "keeper-chat-store-legacy" in
   Fun.protect
@@ -2051,6 +2079,8 @@ let () =
         [
           Alcotest.test_case "append_turn roundtrip" `Quick
             test_append_turn_roundtrip;
+          Alcotest.test_case "tool-only continuations omit assistant rows" `Quick
+            test_tool_only_continuations_do_not_fabricate_assistant_rows;
           Alcotest.test_case "legacy lines parse" `Quick
             test_legacy_lines_parse_without_new_fields;
           Alcotest.test_case "message id minted unique and stable (R3)" `Quick

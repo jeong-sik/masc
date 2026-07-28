@@ -5,6 +5,7 @@
    chat-store boundary. *)
 
 type open_block = {
+  opened_at : int;
   call_id : string option;
   call_name : string option;
   (* Fragments arrive in order and are concatenated at finalize; a snapshot
@@ -15,10 +16,11 @@ type open_block = {
 
 type t = {
   mutable blocks : (int * open_block) list;
-  mutable finalized : Keeper_chat_store.tool_call list;
+  mutable finalized : (int * Keeper_chat_store.tool_call) list;
+  mutable next_opened_at : int;
 }
 
-let create () = { blocks = []; finalized = [] }
+let create () = { blocks = []; finalized = []; next_opened_at = 0 }
 
 let block_for_index t index = List.assoc_opt index t.blocks
 
@@ -35,17 +37,17 @@ let finalize_block t index =
   | None -> ()
   | Some block ->
     drop_block t index;
-    (match block.call_id with
-     | None -> ()
-     | Some call_id ->
+    (match block.call_id, block.call_name with
+     | Some call_id, Some call_name ->
        let args = String.concat "" (List.rev block.args_fragments) in
        let call : Keeper_chat_store.tool_call =
          { call_id
-         ; call_name = Option.value block.call_name ~default:""
+         ; call_name
          ; args
          }
        in
-       t.finalized <- call :: t.finalized)
+       t.finalized <- (block.opened_at, call) :: t.finalized
+     | None, _ | _, None -> ())
 
 let append_fragment t index fragment =
   match block_for_index t index with
@@ -73,11 +75,23 @@ let stream_start_is_tool (evt : Agent_sdk.Types.sse_event) =
 let on_event t (evt : Agent_sdk.Types.sse_event) =
   match evt with
   | Agent_sdk.Types.ContentBlockStart { index; tool_id; tool_name; _ } ->
-    if stream_start_is_tool evt then
-      replace_block t index
-        { call_id = tool_id; call_name = tool_name; args_fragments = [] }
-    else
-      drop_block t index
+    if stream_start_is_tool evt then (
+      match block_for_index t index, tool_id, tool_name with
+      (* Providers may replay a start event after its JSON deltas. It is the
+         same open block, not a replacement, so retaining it preserves the
+         already received fragments. A conflicting replay is malformed and is
+         dropped rather than combining two calls under one block index. *)
+      | Some block, Some call_id, Some call_name
+        when String.equal (Option.value ~default:"" block.call_id) call_id
+             && String.equal (Option.value ~default:"" block.call_name) call_name ->
+        ()
+      | Some _, _, _ -> drop_block t index
+      | None, _, _ ->
+        let opened_at = t.next_opened_at in
+        t.next_opened_at <- opened_at + 1;
+        replace_block t index
+          { opened_at; call_id = tool_id; call_name = tool_name; args_fragments = [] })
+    else drop_block t index
   | Agent_sdk.Types.ContentBlockDelta
       { index; delta = Agent_sdk.Types.InputJsonDelta fragment } ->
     append_fragment t index fragment
@@ -90,4 +104,7 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
   | _ -> ()
 ;;
 
-let to_tool_calls t = List.rev t.finalized
+let to_tool_calls t =
+  t.finalized
+  |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
+  |> List.map snd

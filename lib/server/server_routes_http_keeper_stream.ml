@@ -1709,7 +1709,7 @@ let process_single_turn ~user_row_origin ~queued_turn
     | Keeper_chat_store.Already_persisted_upstream ->
       Ok ()
   in
-  let append_queued_assistant_once ~content ?blocks ?turn_ref () =
+  let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
     Keeper_chat_store.append_assistant_message_once
@@ -1717,6 +1717,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~keeper_name:payload.name
       ~delivery_key
       ~content
+      ~tool_calls
       ~surface:chat_surface
       ?blocks
       ?turn_ref
@@ -1724,7 +1725,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ()
     |> Result.map (fun _ -> ())
   in
-  let append_queued_transport_failure_once content =
+  let append_queued_transport_failure_once ?(tool_calls = []) content =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
     Keeper_chat_store.append_assistant_message_once
@@ -1732,9 +1733,22 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~keeper_name:payload.name
       ~delivery_key
       ~content
+      ~tool_calls
       ~surface:chat_surface
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
       ~stream_lifecycle:errored_stream_lifecycle
+      ()
+    |> Result.map (fun _ -> ())
+  in
+  let append_queued_tool_calls_once tool_calls =
+    let ( let* ) = Result.bind in
+    let* delivery_key = queue_delivery_key () in
+    Keeper_chat_store.append_tool_calls_once
+      ~base_dir:base_path
+      ~keeper_name:payload.name
+      ~delivery_key
+      ~tool_calls
+      ~surface:chat_surface
       ()
     |> Result.map (fun _ -> ())
   in
@@ -1870,6 +1884,7 @@ let process_single_turn ~user_row_origin ~queued_turn
       ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
       ();
     let content = persisted_error_reply err in
+    let tool_calls = Keeper_stream_tool_accum.to_tool_calls worker_tool_accum in
     let persisted =
       if Option.is_some !direct_delivery_checkpoint
       then
@@ -1877,20 +1892,21 @@ let process_single_turn ~user_row_origin ~queued_turn
           ~ok:false
           ~body:err
           ~data:None
-          (Keeper_chat_direct_delivery.Transport_failure { content })
+          (Keeper_chat_direct_delivery.Transport_failure { content; tool_calls })
       else if queued_turn
-      then append_queued_transport_failure_once content
+      then append_queued_transport_failure_once ~tool_calls content
       else
-        match user_row_origin with
-        | Keeper_chat_store.Needs_append ->
-          Keeper_chat_store.append_turn_result
-            ~base_dir:base_path
-            ~keeper_name:payload.name
-            ~user_content:payload.message
-            ~user_attachments:payload.attachments
+                    match user_row_origin with
+                    | Keeper_chat_store.Needs_append ->
+                      Keeper_chat_store.append_user_and_tool_calls_result
+                        ~base_dir:base_path
+                        ~keeper_name:payload.name
+                        ~user_content:payload.message
+                        ~user_attachments:payload.attachments
             ~surface:chat_surface
             ~speaker:chat_speaker
             ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+            ~tool_calls
             ~assistant_content:content
             ~stream_lifecycle:errored_stream_lifecycle
             ()
@@ -1900,6 +1916,7 @@ let process_single_turn ~user_row_origin ~queued_turn
             ~base_dir:base_path
             ~keeper_name:payload.name
             ~content
+            ~tool_calls
             ~surface:chat_surface
             ~stream_lifecycle:errored_stream_lifecycle
             ()
@@ -2180,22 +2197,23 @@ let process_single_turn ~user_row_origin ~queued_turn
                        ~body
                        ~data:payload_json_opt
                        (Keeper_chat_direct_delivery.Assistant_reply
-                          { content = assistant_content; blocks; turn_ref })
+                          { content = assistant_content; blocks; turn_ref; tool_calls })
                    else if queued_turn
                    then
                      append_queued_assistant_once
                        ~content:assistant_content
+                       ~tool_calls
                        ?blocks
                        ?turn_ref
                        ()
                    else
-                     match user_row_origin with
-                     | Keeper_chat_store.Needs_append ->
-                       Keeper_chat_store.append_turn_result
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~user_content:payload.message
-                         ~user_attachments:payload.attachments
+                    match user_row_origin with
+                    | Keeper_chat_store.Needs_append ->
+                      Keeper_chat_store.append_user_and_tool_calls_result
+                        ~base_dir:base_path
+                        ~keeper_name:payload.name
+                        ~user_content:payload.message
+                        ~user_attachments:payload.attachments
                          ~tool_calls
                          ~surface:chat_surface
                          ~speaker:chat_speaker
@@ -2216,6 +2234,39 @@ let process_single_turn ~user_row_origin ~queued_turn
                          ?turn_ref
                          ~stream_lifecycle:completed_stream_lifecycle
                          ()
+                 in
+                 let persist_tool_calls_only () =
+                   if tool_calls = []
+                   then Ok ()
+                   else if Option.is_some !direct_delivery_checkpoint
+                   then
+                     commit_direct_terminal
+                       ~ok:true
+                       ~body
+                       ~data:payload_json_opt
+                       (Keeper_chat_direct_delivery.Tool_calls_only { tool_calls })
+                   else if queued_turn
+                   then append_queued_tool_calls_once tool_calls
+                   else
+                     match user_row_origin with
+                     | Keeper_chat_store.Needs_append ->
+                       Keeper_chat_store.append_turn_result
+                         ~base_dir:base_path
+                         ~keeper_name:payload.name
+                         ~user_content:payload.message
+                         ~user_attachments:payload.attachments
+                         ~tool_calls
+                        ~surface:chat_surface
+                        ~speaker:chat_speaker
+                        ()
+                    | Keeper_chat_store.Already_persisted _
+                    | Keeper_chat_store.Already_persisted_upstream ->
+                      Keeper_chat_store.append_tool_calls_result
+                        ~base_dir:base_path
+                        ~keeper_name:payload.name
+                        ~tool_calls
+                        ~surface:chat_surface
+                        ()
                  in
                  let delivered_after_persist ?content persisted =
                    match
@@ -2246,15 +2297,20 @@ let process_single_turn ~user_row_origin ~queued_turn
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                        (match !direct_delivery_checkpoint with
                         | Some _ ->
-                          commit_direct_terminal
-                            ~ok:true
-                            ~body
-                            ~data:payload_json_opt
-                            Keeper_chat_direct_delivery.No_assistant_reply
-                          |> Result.map (fun () -> None)
+                          if tool_calls = []
+                          then
+                            commit_direct_terminal
+                              ~ok:true
+                              ~body
+                              ~data:payload_json_opt
+                              Keeper_chat_direct_delivery.No_assistant_reply
+                            |> Result.map (fun () -> None)
+                          else persist_tool_calls_only () |> Result.map (fun () -> None)
                         | None ->
                           if has_visible_blocks || tool_calls <> []
-                          then
+                          then if tool_calls <> [] && not has_visible_blocks
+                          then persist_tool_calls_only () |> Result.map (fun () -> None)
+                          else
                             persist_assistant_reply ~assistant_content:""
                             |> Result.map (fun () -> None)
                           else (
@@ -2263,7 +2319,9 @@ let process_single_turn ~user_row_origin ~queued_turn
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
                        if has_visible_blocks || tool_calls <> []
-                       then
+                       then if tool_calls <> [] && not has_visible_blocks
+                       then persist_tool_calls_only () |> delivered_after_persist
+                       else
                          persist_assistant_reply ~assistant_content:""
                          |> delivered_after_persist
                        else if queued_turn

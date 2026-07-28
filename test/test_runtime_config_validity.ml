@@ -745,7 +745,8 @@ let test_repo_runtime_toml_loads () =
       , memory_os_consolidation
       , structured_judge
       , _cross_verifier
-      , _media_failover , _lanes ) ->
+      , media_failover
+      , lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
@@ -802,8 +803,15 @@ List.iter
       default.provider_config.connect_timeout_s;
     check int "public seed has no keeper assignments" 0
       (List.length assignments);
+    let keeper_dispatch_ids =
+      Runtime.For_testing.keeper_dispatch_runtime_ids
+        ~default_runtime_id:default.id
+        ~assignments
+        ~media_failover
+        ~lanes
+    in
     List.iter
-      (fun (runtime_id, expected_bytes) ->
+      (fun runtime_id ->
          match
            List.find_opt
              (fun (runtime : Runtime.t) -> String.equal runtime.id runtime_id)
@@ -811,18 +819,13 @@ List.iter
          with
          | None -> failf "expected bounded Keeper runtime in seed: %s" runtime_id
          | Some runtime ->
-           check
-             (option int)
-             (Printf.sprintf "%s exact request body budget" runtime_id)
-             (Some expected_bytes)
-             runtime.provider_config.max_request_body_bytes)
-      [ "ollama_cloud.deepseek-v4-flash", 524288
-      ; "deepseek.deepseek-v4-pro", 524288
-      ; "deepseek.deepseek-v4-flash", 524288
-      ; "glm-coding.glm-4-7-coding", 262144
-      ; "glm-coding.glm-5-turbo", 262144
-      ; "ollama_cloud.ollama-cloud-deepseek-v4-flash", 524288
-      ];
+           (match runtime.provider_config.max_request_body_bytes with
+            | Some cap when cap > 0 -> ()
+            | None | Some _ ->
+              failf
+                "%s must declare a positive exact request body budget"
+                runtime_id))
+      keeper_dispatch_ids;
     check int "Ollama Cloud canonical seed count"
       (List.length ollama_cloud_seed_cases)
       (List.length
@@ -1527,7 +1530,58 @@ let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
          binding.Runtime_schema.max_request_body_bytes
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
-let test_repo_keeper_runtime_bindings_declare_wire_working_sets () =
+let test_keeper_dispatch_runtime_graph_enumeration () =
+  let lanes =
+    [ Runtime_lane.make
+        ~id:"lane-primary"
+        ~strategy:Runtime_lane.Ordered
+        [ "lane-a"; "lane-b"; "default-a" ]
+    ; Runtime_lane.make
+        ~id:"lane-secondary"
+        ~strategy:Runtime_lane.Ordered
+        [ "lane-c"; "lane-b" ]
+    ]
+  in
+  let actual =
+    Runtime.For_testing.keeper_dispatch_runtime_ids
+      ~default_runtime_id:"default-a"
+      ~assignments:[ "keeper-a", "assigned-b"; "keeper-b", "lane-primary" ]
+      ~media_failover:[ "media-c"; "lane-a" ]
+      ~lanes
+  in
+  check
+    (list string)
+    "default, assignments, every lane candidate, and media failover are \
+     deduplicated in dispatch order"
+    [ "default-a"; "assigned-b"; "lane-a"; "lane-b"; "lane-c"; "media-c" ]
+    actual
+;;
+
+let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime.validate_runtime_config_text ~config_path:"fixture.toml" content with
+  | Ok () -> fail "uncapped Keeper default must fail runtime config validation"
+  | Error detail ->
+    check bool "typed config diagnostic names the cap" true
+      (String_util.contains_substring detail "max-request-body-bytes");
+    check bool "typed config diagnostic names the candidate" true
+      (String_util.contains_substring detail "local.sample")
+;;
+
+let test_repo_keeper_dispatch_graph_declares_wire_working_sets () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   let config =
     match Runtime_toml.parse_file path with
@@ -1537,17 +1591,32 @@ let test_repo_keeper_runtime_bindings_declare_wire_working_sets () =
         "repo runtime.toml should load: %s"
         (render_runtime_toml_errors errors)
   in
-  let expected =
-    [ "ollama_cloud.deepseek-v4-flash", 524288
-    ; "deepseek.deepseek-v4-pro", 524288
-    ; "deepseek.deepseek-v4-flash", 524288
-    ; "glm-coding.glm-4-7-coding", 262144
-    ; "glm-coding.glm-5-turbo", 262144
-    ; "ollama_cloud.ollama-cloud-deepseek-v4-flash", 524288
-    ]
+  let lanes =
+    List.map
+      (fun ({ Runtime_schema.id; strategy; candidate_ids } :
+              Runtime_schema.lane_decl) ->
+         match strategy with
+         | Runtime_schema.Ordered ->
+           Runtime_lane.make
+             ~id
+             ~strategy:Runtime_lane.Ordered
+             candidate_ids)
+      config.Runtime_schema.lane_decls
+  in
+  let default_runtime_id =
+    match config.Runtime_schema.default_runtime_id with
+    | Some id -> id
+    | None -> fail "repo runtime.toml must declare [runtime].default"
+  in
+  let reachable =
+    Runtime.For_testing.keeper_dispatch_runtime_ids
+      ~default_runtime_id
+      ~assignments:config.keeper_assignments
+      ~media_failover:config.media_failover
+      ~lanes
   in
   List.iter
-    (fun (runtime_id, expected_bytes) ->
+    (fun runtime_id ->
        match String.split_on_char '.' runtime_id with
        | provider_id :: model_id_parts ->
          let model_id = String.concat "." model_id_parts in
@@ -1560,13 +1629,15 @@ let test_repo_keeper_runtime_bindings_declare_wire_working_sets () =
           with
           | None -> failf "repo runtime binding %s is missing" runtime_id
           | Some binding ->
-            check
-              (option int)
-              (runtime_id ^ " exact serialized-body working set")
-              (Some expected_bytes)
-              binding.max_request_body_bytes)
+            (match binding.max_request_body_bytes with
+             | Some cap when cap > 0 -> ()
+             | None | Some _ ->
+               failf
+                 "Keeper-dispatch runtime %s must declare a positive exact \
+                  serialized-body working set"
+                 runtime_id))
        | [] -> failf "invalid expected runtime id %S" runtime_id)
-    expected
+    reachable
 ;;
 
 let test_runtime_toml_rejects_non_positive_max_request_body_bytes () =
@@ -1828,6 +1899,7 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
      thinking-support = true\n\
      \n\
      [ollama_cloud.shared]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"ollama_cloud.shared\"\n"
@@ -1989,6 +2061,7 @@ let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [ollama.missing]\n\
      \n\
@@ -2150,6 +2223,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      api-name = \"missing-from-oas-catalog\"\n\
      \n\
      [ollama.good]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [ollama.missing]\n\
      \n\
@@ -2469,6 +2543,7 @@ let test_structured_judge_runtime_routing () =
      supports-structured-output = true\n\
      \n\
      [local.chat]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [local.judge]\n\
      \n\
@@ -2787,6 +2862,7 @@ let test_save_config_text_refreshes_cross_verifier_runtime () =
      supports-response-format-json = true\n\
      \n\
      [local.chat]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [local.libr]\n\
      \n\
@@ -2837,8 +2913,10 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        max-context = 1024\n\
        \n\
        [local.chat]\n\
+       max-request-body-bytes = 65536\n\
        \n\
        [local.libr]\n\
+       max-request-body-bytes = 65536\n\
        \n\
        [runtime]\n\
        default = \"%s\"\n\
@@ -3294,8 +3372,14 @@ let () =
           test_case "omitted max-request-body-bytes stays None" `Quick
             test_runtime_toml_omitted_max_request_body_bytes_is_none;
           test_case
-            "keeper runtime bindings declare exact wire working sets"
-            `Quick test_repo_keeper_runtime_bindings_declare_wire_working_sets;
+            "keeper dispatch graph enumeration"
+            `Quick test_keeper_dispatch_runtime_graph_enumeration;
+          test_case
+            "runtime config rejects uncapped keeper candidate"
+            `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
+          test_case
+            "keeper dispatch graph declares exact wire working sets"
+            `Quick test_repo_keeper_dispatch_graph_declares_wire_working_sets;
           test_case "non-positive max-request-body-bytes is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case

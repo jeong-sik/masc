@@ -1132,11 +1132,28 @@ let probe_blocks_admission
       ~(config : config)
       ~(checkpoint : Agent_sdk.Checkpoint.t)
       ~(stream : bool)
+      ~(continuation : bool)
       (goal_blocks : Agent_sdk.Types.content_block list)
   : (unit, capacity_readmission_failure) result
   =
-  match validate_content_blocks_for_config ~oas_checkpoint:checkpoint ~config goal_blocks with
+  let admitted_goal_blocks = if continuation then [] else goal_blocks in
+  match
+    validate_content_blocks_for_config
+      ~oas_checkpoint:checkpoint
+      ~config
+      admitted_goal_blocks
+  with
   | Error error -> Error (capacity_readmission_failure_of_error error)
+  | Ok () when continuation && not stream ->
+    Error
+      (Readmission_failed
+         (Agent_sdk.Error.Config
+            (Agent_sdk.Error.InvalidConfig
+               { field = "capacity_readmission.continuation"
+               ; detail =
+                   "OAS does not expose a synchronous provider-turn \
+                    continuation entry point"
+               })))
   | Ok () ->
     let observed = Atomic.make false in
     let transport = probe_transport observed in
@@ -1159,14 +1176,22 @@ let probe_blocks_admission
      with
      | Error error -> Error (capacity_readmission_failure_of_error error)
      | Ok agent ->
-       let run_result =
+       let run_result : (unit, Agent_sdk.Error.sdk_error) result =
          let clock =
            match Process_eio.get_clock () with
            | Ok clock -> Some clock
            | Error _ -> Eio_context.get_clock_opt ()
          in
          try
-           if stream
+           if continuation
+           then
+             Agent_sdk.Agent.run_turn_stream
+               ~sw
+               ?clock
+               ~on_event:(fun _ -> ())
+               agent
+             |> Result.map (fun _ -> ())
+           else if stream
            then
              Agent_sdk.Agent.run_stream_blocks
                ~sw
@@ -1174,7 +1199,10 @@ let probe_blocks_admission
                ~on_event:(fun _ -> ())
                agent
                goal_blocks
-           else Agent_sdk.Agent.run_blocks ~sw ?clock agent goal_blocks
+             |> Result.map (fun _ -> ())
+           else
+             Agent_sdk.Agent.run_blocks ~sw ?clock agent goal_blocks
+             |> Result.map (fun _ -> ())
          with
          | Eio.Cancel.Cancelled _ as exn ->
            close_agent_for_cleanup ~propagate_cancel:false ~config:probe_config agent;

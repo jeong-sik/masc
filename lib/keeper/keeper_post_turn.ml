@@ -1152,6 +1152,8 @@ let recover_latest_checkpoint_for_compaction
       ~trigger
       ()
   with
+  | Error (No_compaction no_compaction) ->
+    Already_rejected no_compaction
   | Error error -> Commit_failed { error; committed = None }
   | Ok prepared -> commit_prepared_compaction prepared
 ;;

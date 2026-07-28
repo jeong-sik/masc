@@ -1249,9 +1249,32 @@ let test_reactive_compaction_readmits_same_failed_request () =
             (Post_turn.compaction_recovery_error_to_string error)
         | Ok _ -> fail "reactive compaction bypassed failed-request re-admission"
       in
-      prepare ()
-      |> expect_terminal
-           Keeper_event_queue_state.Failed_request_readmission_unavailable;
+      (match
+         Post_turn.recover_latest_checkpoint_for_compaction
+           ~base_path:config.base_path
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+           ~meta
+           ~trigger
+           ~exact_execution_guard
+           ()
+       with
+       | Post_turn.Already_rejected
+           { reason =
+               Keeper_event_queue_state.Exact_execution_terminal
+                 { cause =
+                     Keeper_event_queue_state.Failed_request_readmission_unavailable
+                 ; _
+                 }
+           ; _
+           } ->
+         ()
+       | Post_turn.Commit_failed { error; _ } ->
+         failf
+           "readmission terminal was converted back into retryable failure: %s"
+           (Post_turn.compaction_recovery_error_to_string error)
+       | _ ->
+         fail
+           "recovery did not preserve readmission rejection as no-compaction");
       prepare
         ~candidate_readmission_probe:(fun _ ->
           Error

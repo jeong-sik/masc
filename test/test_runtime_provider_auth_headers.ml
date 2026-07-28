@@ -1503,10 +1503,12 @@ let with_native_count_server ?(input_tokens = 500) f =
   let net = Eio.Stdenv.net env in
   let port = fresh_loopback_port () in
   let paths = ref [] in
+  let bodies = ref [] in
   let handler _conn request body =
-    let _body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     let path = Cohttp.Request.uri request |> Uri.path in
     paths := path :: !paths;
+    bodies := body :: !bodies;
     if String.equal path "/v1/messages/count_tokens"
     then
       Cohttp_eio.Server.respond_string
@@ -1532,7 +1534,7 @@ let with_native_count_server ?(input_tokens = 500) f =
     Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
   let result = f ~sw ~net ~base_url in
-  result, List.rev !paths
+  result, List.rev !paths, List.rev !bodies
 
 let context_fit_provider_config base_url =
   Llm_provider.Provider_config.make
@@ -1589,7 +1591,7 @@ let check_context_fit_overflow = function
   | Ok _ -> fail "overflowed request must not reach completion dispatch"
 
 let test_runtime_agent_fresh_build_enforces_native_context_fit () =
-  let (), paths =
+  let (), paths, _bodies =
     with_native_count_server
     @@ fun ~sw ~net ~base_url ->
     let config = context_fit_runtime_config base_url in
@@ -1605,7 +1607,7 @@ let test_runtime_agent_fresh_build_enforces_native_context_fit () =
   check (list string) "fresh request paths" [ "/v1/messages/count_tokens" ] paths
 
 let test_runtime_agent_resume_enforces_native_context_fit () =
-  let (), paths =
+  let (), paths, _bodies =
     with_native_count_server
     @@ fun ~sw ~net ~base_url ->
     let config = context_fit_runtime_config base_url in
@@ -1627,7 +1629,7 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
 
 let test_capacity_readmission_probe_stops_before_transport_when_still_over () =
-  let (), paths =
+  let (), paths, _bodies =
     with_native_count_server
     @@ fun ~sw ~net ~base_url ->
     match
@@ -1637,6 +1639,7 @@ let test_capacity_readmission_probe_stops_before_transport_when_still_over () =
         ~config:(context_fit_runtime_config base_url)
         ~checkpoint:(context_fit_checkpoint ())
         ~stream:false
+        ~continuation:false
         [ Agent_sdk.Types.Text "same failed request" ]
     with
     | Error
@@ -1655,8 +1658,8 @@ let test_capacity_readmission_probe_stops_before_transport_when_still_over () =
     [ "/v1/messages/count_tokens" ]
     paths
 
-let test_capacity_readmission_probe_admits_without_provider_dispatch () =
-  let (), paths =
+let test_capacity_readmission_probe_admits_without_completion_dispatch () =
+  let (), paths, _bodies =
     with_native_count_server
       ~input_tokens:400
     @@ fun ~sw ~net ~base_url ->
@@ -1667,6 +1670,7 @@ let test_capacity_readmission_probe_admits_without_provider_dispatch () =
         ~config:(context_fit_runtime_config base_url)
         ~checkpoint:(context_fit_checkpoint ())
         ~stream:false
+        ~continuation:false
         [ Agent_sdk.Types.Text "same failed request" ]
     with
     | Ok () -> ()
@@ -1676,8 +1680,91 @@ let test_capacity_readmission_probe_admits_without_provider_dispatch () =
   in
   check
     (list string)
-    "admitted probe measures but never dispatches provider HTTP"
+    "admitted probe measures but never dispatches completion HTTP"
     [ "/v1/messages/count_tokens" ]
+    paths
+
+let test_capacity_readmission_stream_continuation_does_not_duplicate_goal () =
+  let persisted_marker = "persisted-original-goal" in
+  let duplicate_marker = "must-not-be-appended-again" in
+  let (), paths, bodies =
+    with_native_count_server
+      ~input_tokens:400
+    @@ fun ~sw ~net ~base_url ->
+    let checkpoint =
+      { (context_fit_checkpoint ()) with
+        messages =
+          [ Agent_sdk.Types.text_message
+              Agent_sdk.Types.User
+              persisted_marker
+          ]
+      }
+    in
+    let config =
+      { (context_fit_runtime_config base_url) with
+        initial_messages = checkpoint.messages
+      }
+    in
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config
+        ~checkpoint
+        ~stream:true
+        ~continuation:true
+        [ Agent_sdk.Types.Text duplicate_marker ]
+    with
+    | Ok () -> ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+  in
+  check
+    (list string)
+    "continuation performs measurement but no completion HTTP"
+    [ "/v1/messages/count_tokens" ]
+    paths;
+  let count_body =
+    match bodies with
+    | [ body ] -> body
+    | _ -> fail "continuation did not produce exactly one measurement body"
+  in
+  check bool "persisted continuation is measured" true
+    (String_util.contains_substring count_body persisted_marker);
+  check bool "original goal is not appended twice" false
+    (String_util.contains_substring count_body duplicate_marker)
+
+let test_capacity_readmission_sync_continuation_fails_closed () =
+  let (), paths, _bodies =
+    with_native_count_server
+      ~input_tokens:400
+    @@ fun ~sw ~net ~base_url ->
+    match
+      Runtime_agent.probe_blocks_admission
+        ~sw
+        ~net
+        ~config:(context_fit_runtime_config base_url)
+        ~checkpoint:(context_fit_checkpoint ())
+        ~stream:false
+        ~continuation:true
+        [ Agent_sdk.Types.Text "must not be appended" ]
+    with
+    | Error
+        (Runtime_agent.Readmission_failed
+           (Agent_sdk.Error.Config
+              (Agent_sdk.Error.InvalidConfig
+                 { field = "capacity_readmission.continuation"; _ }))) ->
+      ()
+    | Error (Runtime_agent.Still_over_capacity error)
+    | Error (Runtime_agent.Readmission_failed error) ->
+      fail (Agent_sdk.Error.to_string error)
+    | Ok () -> fail "sync continuation silently changed the failed request"
+  in
+  check
+    (list string)
+    "unsupported sync continuation performs no measurement or completion HTTP"
+    []
     paths
 
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
@@ -1913,9 +2000,17 @@ let () =
             `Quick
             test_capacity_readmission_probe_stops_before_transport_when_still_over
         ; test_case
-            "capacity readmission admits without provider dispatch"
+            "capacity readmission admits without completion dispatch"
             `Quick
-            test_capacity_readmission_probe_admits_without_provider_dispatch
+            test_capacity_readmission_probe_admits_without_completion_dispatch
+        ; test_case
+            "capacity readmission continues without duplicate goal"
+            `Quick
+            test_capacity_readmission_stream_continuation_does_not_duplicate_goal
+        ; test_case
+            "capacity readmission fails closed for sync continuation"
+            `Quick
+            test_capacity_readmission_sync_continuation_fails_closed
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

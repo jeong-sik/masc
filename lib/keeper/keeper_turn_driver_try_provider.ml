@@ -427,6 +427,7 @@ let run_try_provider
                 ~config:readmission_config
                 ~checkpoint
                 ~stream:(Option.is_some ctx.on_event)
+                ~continuation:(Atomic.get ctx.checkpoint_stage_observed)
                 goal_blocks))
       ctx.on_capacity_readmission_probe;
     (* Explicit stream stall detection is handled by OAS's

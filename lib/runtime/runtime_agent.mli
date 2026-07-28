@@ -139,8 +139,9 @@ type capacity_readmission_failure =
 type capacity_readmission_probe =
   Agent_sdk.Checkpoint.t -> (unit, capacity_readmission_failure) result
 (** Rebuild and re-admit the same Keeper provider request against a candidate
-    checkpoint. [Ok ()] means OAS reached its admitted transport boundary;
-    the probe transport performs no provider request. *)
+    checkpoint. [Ok ()] means OAS reached its admitted completion-transport
+    boundary. Provider-native admission measurement may perform its own HTTP
+    request; the probe transport never sends a completion-generation request. *)
 
 module Capacity_readmission_for_testing : sig
   val failure_of_error :
@@ -395,11 +396,16 @@ val probe_blocks_admission :
   config:config ->
   checkpoint:Agent_sdk.Checkpoint.t ->
   stream:bool ->
+  continuation:bool ->
   Agent_sdk.Types.content_block list ->
   (unit, capacity_readmission_failure) result
 (** Execute the exact OAS preparation, provider-native measurement, and
-    admission path with a local transport sentinel. The sentinel is reached
-    only after admission and never dispatches to the provider. *)
+    admission path with a local completion-transport sentinel. Provider-native
+    admission may call a measurement endpoint; the sentinel prevents a
+    completion-generation request. [continuation] resumes an already-persisted
+    post-tool stream turn without appending the original user input again.
+    Synchronous continuation fails closed because OAS does not expose an
+    equivalent public continuation entry point. *)
 (** Resumes from a persisted checkpoint.  Uses
     [Runtime_agent_context.prepare_resume] to reconcile
     [checkpoint.turn_count] with the current config. *)

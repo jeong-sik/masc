@@ -105,18 +105,28 @@ val consume_board_stimulus_batch
   -> Keeper_event_queue.stimulus list
   -> stimulus_intake_result
 
-type terminal_schedule_reconciliation =
-  | Not_terminal_schedule
-  | Terminal_schedule_acknowledged
+type spent_selection_reconciliation =
+  | Selection_actionable
+  | Spent_schedule_acknowledged
+  | Spent_grant_replay_acknowledged
 
-val reconcile_terminal_schedule_selection
+val reconcile_spent_selection
   :  config:Workspace_utils.config
   -> keeper_name:string
   -> Keeper_registry_event_queue.pending_selection
-  -> (terminal_schedule_reconciliation, string) result
-(** Atomically acknowledges an exact schedule stimulus only when its execution
-    is terminal. The schedule ledger remains locked through the queue ACK, so a
-    same-occurrence retry cannot start between the observation and deletion. *)
+  -> (spent_selection_reconciliation, string) result
+(** Acknowledges a selection whose work has already settled elsewhere, so no
+    turn is spent re-observing it. Two kinds settle that way.
+
+    An exact schedule stimulus is acknowledged only when its execution is
+    terminal; the schedule ledger stays locked through the queue ACK, so a
+    same-occurrence retry cannot start between the observation and deletion.
+
+    An approved Gate resolution is acknowledged once its one-shot grant is
+    consumed, because the replay then authorizes nothing and a turn spent on it
+    can only re-read the same entry. That path takes no lock: consumption is
+    monotonic, so a consumed state cannot revert to usable. A read error leaves
+    the selection actionable rather than discarding a possibly live grant. *)
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]

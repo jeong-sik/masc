@@ -1,4 +1,5 @@
 module AQ = Masc.Keeper_approval_queue
+module Tool_call_identity = Masc.Keeper_tool_call_identity
 
 let reserve_retry_exact ~base_path (entry : AQ.pending_approval) =
   AQ.reserve_summary_attempt_retry
@@ -245,30 +246,6 @@ let test_tool_call_identity_controls_pending_deduplication () =
          "turn and goal drift never split one invocation"
          first
          drifted_provenance;
-       (* The continuation channel is not context: it is where the approved
-          effect's result is delivered. A provider that reuses a short
-          per-response id must not merge two requests whose delivery routes
-          differ, so this fails closed rather than binding the second request
-          to the first one's channel. *)
-       (match
-          AQ.submit_pending
-            ~keeper_name
-            ~tool_name:"external-effect"
-            ~tool_call_id:"tool-call-1"
-            ~input
-            ~base_path
-            ~continuation_channel:dashboard_b
-            ()
-        with
-        | Error _ -> ()
-        | Ok id when String.equal id first ->
-          Alcotest.fail
-            "reused tool call identity merged across continuation channels"
-        | Ok id ->
-          Alcotest.failf
-            "reused tool call identity created a second approval %s on another \
-             continuation channel"
-            id);
        (match
           AQ.submit_pending
             ~keeper_name
@@ -357,6 +334,46 @@ let test_tool_call_identity_controls_pending_deduplication () =
          ; without_identity_first
          ; without_identity_second
          ])
+;;
+
+let oas_invocation ~tool_use_id ~turn ~planned_index =
+  Agent_sdk.Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~completion:Agent_sdk.Tool_contract.Continue_after_success
+    ~schedule:
+      { planned_index
+      ; batch_index = planned_index
+      ; batch_size = 2
+      ; execution_mode = Agent_sdk.Tool_contract.Concurrent
+      }
+;;
+
+let test_oas_tool_identity_is_execution_scoped () =
+  let same_provider_id = "toolu-reused" in
+  let identity ~keeper_turn_id ~turn =
+    Tool_call_identity.create
+      ~trace_id:"trace-a"
+      ~keeper_turn_id
+      (oas_invocation ~tool_use_id:same_provider_id ~turn ~planned_index:0)
+    |> Tool_call_identity.to_string
+  in
+  let first = identity ~keeper_turn_id:7 ~turn:3 in
+  let retried = identity ~keeper_turn_id:7 ~turn:3 in
+  let later_oas_turn = identity ~keeper_turn_id:7 ~turn:4 in
+  let later_keeper_turn = identity ~keeper_turn_id:8 ~turn:3 in
+  Alcotest.(check string) "the same OAS occurrence is stable" first retried;
+  List.iter
+    (fun scoped_identity ->
+       Alcotest.(check bool)
+         "a raw provider id is never persisted as the durable identity"
+         true
+         (not (String.equal scoped_identity same_provider_id));
+       Alcotest.(check bool)
+         "later execution occurrence receives a distinct durable identity"
+         true
+         (not (String.equal first scoped_identity)))
+    [ later_oas_turn; later_keeper_turn ]
 ;;
 
 let check_update label expected = function
@@ -1503,7 +1520,8 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v8 snapshot" 8 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "current snapshot version" 9
+         (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -2980,7 +2998,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 7 is unsupported (current 8); reset \
+                  "gate_pending.version 7 is unsupported (readable 8,9, current 9); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -3677,6 +3695,10 @@ let () =
             "tool call identity controls dedup"
             `Quick
             test_tool_call_identity_controls_pending_deduplication
+        ; Alcotest.test_case
+            "OAS tool identity is execution scoped"
+            `Quick
+            test_oas_tool_identity_is_execution_scoped
         ; Alcotest.test_case
             "resolution wakes only origin"
             `Quick

@@ -53,7 +53,7 @@ let keeper_turn_id_of_json json =
       | Some _ as value -> value
       | None -> json_int_opt_member "turn" json)
 
-let timeline_event_json ?trace_id ?keeper_turn_id ?task_id ?(goal_ids = [])
+let timeline_event_json ?trace_id ?keeper_turn_id ?tool_call_id ?task_id ?(goal_ids = [])
     ?next_human_action ?observed_at_unix ?(observation_only = false)
     ~ts_unix ~kind ~title ~summary ~severity () =
   let observed_at_unix = Option.value ~default:ts_unix observed_at_unix in
@@ -67,6 +67,7 @@ let timeline_event_json ?trace_id ?keeper_turn_id ?task_id ?(goal_ids = [])
       ("observation_only", `Bool observation_only);
       ("trace_id", Json_util.string_opt_to_json trace_id);
       ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
+      ("tool_call_id", Json_util.string_opt_to_json tool_call_id);
       ("task_id", Json_util.string_opt_to_json task_id);
       ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
       ("title", `String title);
@@ -141,6 +142,7 @@ let live_pending_approval_timeline_event json =
       in
       Some
         (timeline_event_json
+           ?tool_call_id:(json_string_opt_member "tool_call_id" json)
            ?task_id
            ~ts_unix ~kind:"approval_pending_live"
            ~title:(Printf.sprintf "Operator Decision Pending · %s" tool_name)
@@ -226,6 +228,7 @@ let approval_event_timeline_event json =
       Some
         (timeline_event_json
            ?keeper_turn_id:(keeper_turn_id_of_json json)
+           ?tool_call_id:(json_string_opt_member "tool_call_id" json)
            ?task_id:(json_string_opt_member "task_id" json)
            ~goal_ids:(goal_ids_of_json json)
            ?next_human_action

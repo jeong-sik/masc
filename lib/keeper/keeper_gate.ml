@@ -288,6 +288,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
+    ?tool_call_id:(Option.bind request.causal_context (fun context -> context.tool_call_id))
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
     ~goal_ids:request.goal_ids

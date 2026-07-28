@@ -818,6 +818,20 @@ jobs:
           operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${operator_targets}"
 
+      - name: Run Keeper approval contract suite
+        id: keeper_approval_contract_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          ALCOTEST_QUICK_TESTS: "1"
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          approval_targets="@test/runtest-test_keeper_approval_queue @test/runtest-test_keeper_gate_replay @test/runtest-test_keeper_approval_resolved_history"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${approval_targets}"
+
       - name: Run SSE reconnect e2e
         id: sse_reconnect_e2e
         if: ${{ always() && steps.build_step.outcome == 'success' }}

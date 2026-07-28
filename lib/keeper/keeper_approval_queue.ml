@@ -2111,6 +2111,7 @@ let approved_resolution_delivery ~base_path ~id =
         { request =
             { keeper_name = delivery.entry.keeper_name
             ; tool_name = delivery.entry.tool_name
+            ; tool_call_id = delivery.entry.tool_call_id
             ; input = delivery.entry.input
             }
         ; state = Resolution_unconsumed
@@ -2121,6 +2122,7 @@ let approved_resolution_delivery ~base_path ~id =
         { request =
             { keeper_name = delivery.entry.keeper_name
             ; tool_name = delivery.entry.tool_name
+            ; tool_call_id = delivery.entry.tool_call_id
             ; input = delivery.entry.input
             }
         ; state = Resolution_consumed

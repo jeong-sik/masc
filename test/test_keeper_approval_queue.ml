@@ -1122,7 +1122,15 @@ let test_resolution_is_durable_and_origin_scoped () =
             request.tool_call_id;
           Alcotest.(check bool) "journal complete input" true
             (Yojson.Safe.equal input request.input)
-        | Ok None -> Alcotest.fail "approved journal was consumed before Gate use"
+       | Ok None -> Alcotest.fail "approved journal was consumed before Gate use"
+       | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (match AQ.approved_resolution_delivery ~base_path ~id with
+        | Ok { request; state = AQ.Resolution_unconsumed; replay_outcome = None } ->
+          Alcotest.(check (option string))
+            "delivery preserves tool call identity"
+            (Some tool_call_id)
+            request.tool_call_id
+        | Ok _ -> Alcotest.fail "approved delivery changed before Gate use"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        Alcotest.(check bool) "unrelated Keeper receives no resolution" true
          (Option.is_none

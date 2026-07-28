@@ -2529,12 +2529,18 @@ let test_approved_web_search_replays_without_model_resubmission () =
           ; "limit", `Int 1
           ]
       in
+      let tool_call_id = "web-search-replay-call" in
       let deferred =
         KET.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
           ~publication_recovery
           ~ctx_work
+          ~gate_context:(fun () ->
+            { Masc.Keeper_gate.turn_id = Some 17
+            ; tool_call_id = Some tool_call_id
+            ; snapshot = None
+            })
           ~name:"WebSearch"
           ~input
           ()
@@ -2639,6 +2645,25 @@ let test_approved_web_search_replays_without_model_resubmission () =
          fail "replayed WebSearch did not consume its one-shot grant"
        | Error error ->
          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+      let gate_allowed =
+        Masc.Keeper_approval_queue.read_recent_audit
+          ~base_path:config.base_path
+          ~keeper_name:meta.name
+          ~n:20
+          ()
+        |> List.find_opt (fun event ->
+          let open Yojson.Safe.Util in
+          String.equal (event |> member "event" |> to_string) "gate_allowed"
+          && String.equal (event |> member "id" |> to_string) approval_id)
+      in
+      (match gate_allowed with
+       | Some event ->
+         check (option string)
+           "network replay keeps the approved execution identity"
+           (Some tool_call_id)
+           Yojson.Safe.Util.
+             (event |> member "tool_call_id" |> to_string_option)
+       | None -> fail "network replay emitted no Gate allow audit");
       (match
          Masc.Keeper_approval_queue.approved_resolution_delivery
            ~base_path:config.base_path

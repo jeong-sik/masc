@@ -513,7 +513,7 @@ let replay_approved_effect
             ~config
             ~meta
             ?continuation_channel
-            ?gate_context
+            ?gate_context:replay_gate_context
             ~gate_grant:grant
             ~args
             ()
@@ -527,7 +527,7 @@ let replay_approved_effect
             ~config
             ~meta
             ?continuation_channel
-            ?gate_context
+            ?gate_context:replay_gate_context
             ~gate_grant:grant
             ~args
             ()

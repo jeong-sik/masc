@@ -202,9 +202,9 @@ val consume_approved_resolution :
   (grant_consumption, grant_error) result
 
 (** Durably attach bounded, recoverable host replay evidence to a consumed
-    approval. Outcomes live in an additive sidecar so the v8 [pending.json]
-    wire shape remains readable by a rollback binary. Identical writes are
-    idempotent; conflicting or oversized evidence fails closed. *)
+    approval. Outcomes live in an additive sidecar instead of inflating the
+    strict queue snapshot. Identical writes are idempotent; conflicting or
+    oversized evidence fails closed. *)
 val record_consumed_resolution_replay :
   base_path:string ->
   id:string ->

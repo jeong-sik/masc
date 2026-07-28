@@ -191,42 +191,57 @@ let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
     stimuli
 ;;
 
+(* One turn settles its source selection exactly one way. Acking the selection
+   and committing the scheduled occurrence terminal are two effects of that
+   single decision, not two decisions: an acked selection whose occurrence is
+   still [dispatched] leaks that row forever, because the stimulus that would
+   have carried it back to a turn is gone. Deriving both from one value keeps
+   them from drifting — a new cycle outcome or lease disposition forces one
+   edit here instead of two that no compiler can cross-check. *)
 type scheduled_work_terminal =
   | Scheduled_work_succeeded
   | Scheduled_work_failed of string
 
-let scheduled_work_terminal_of_cycle_outcome = function
-  | Cycle.Completed _
-  | Cycle.Manual_compaction_applied _
-  | Cycle.Manual_compaction_not_applied _ ->
-    Some Scheduled_work_succeeded
-  | Cycle.Failed { failure; _ } ->
+type turn_source_settlement =
+  | Settle_source of scheduled_work_terminal
+  | Retain_unacked
+
+let turn_source_settlement_of_cycle_outcome = function
+  | None -> Retain_unacked
+  | Some Cycle.Completed _
+  | Some Cycle.Manual_compaction_applied _
+  | Some Cycle.Manual_compaction_not_applied _ ->
+    Settle_source Scheduled_work_succeeded
+  | Some (Cycle.Failed { failure; _ }) ->
     (match failure.Keeper_unified_turn.source_lease_disposition with
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling
      | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
-       Some
+       Settle_source
          (Scheduled_work_failed
             (Agent_sdk.Error.to_string failure.Keeper_unified_turn.error))
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
      | Keeper_unified_turn.Requeue_after_context_compaction _
      | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
-       None)
-  | Cycle.Cancelled _
-  | Cycle.Skipped _
-  | Cycle.Busy _
-  | Cycle.Manual_compaction_failed _ ->
-    None
+       Retain_unacked)
+  | Some Cycle.Cancelled _
+  | Some Cycle.Skipped _
+  | Some Cycle.Busy _
+  | Some Cycle.Manual_compaction_failed _ ->
+    Retain_unacked
 ;;
 
-let persist_scheduled_work_terminal
-      ~ctx
-      ~keeper_name
-      ~cycle_outcome
-      stimuli =
-  match scheduled_work_terminal_of_cycle_outcome cycle_outcome with
-  | None -> Ok ()
-  | Some terminal ->
+(* The ack side of the same decision. A source is released only once its
+   scheduled occurrence has a terminal row on disk. *)
+let settlement_acks_source = function
+  | Settle_source _ -> true
+  | Retain_unacked -> false
+;;
+
+let persist_scheduled_work_terminal ~ctx ~keeper_name ~settlement stimuli =
+  match settlement with
+  | Retain_unacked -> Ok ()
+  | Settle_source terminal ->
     let now = Time_compat.now () in
     let rec loop = function
       | [] -> Ok ()
@@ -797,21 +812,21 @@ let run_keepalive_unified_turn
           None
       in
       let meta_after_cycle = meta_after_cycle in
+      let turn_source_settlement =
+        turn_source_settlement_of_cycle_outcome !cycle_outcome_ref
+      in
       let scheduled_work_terminal_committed =
-        match !cycle_outcome_ref with
-        | None -> true
-        | Some cycle_outcome ->
-          (match
-             persist_scheduled_work_terminal
-               ~ctx
-               ~keeper_name:meta_after_triage.name
-               ~cycle_outcome
-               !consumed_stimuli
-           with
-           | Ok () -> true
-           | Error message ->
-             record_settlement_failure message;
-             false)
+        match
+          persist_scheduled_work_terminal
+            ~ctx
+            ~keeper_name:meta_after_triage.name
+            ~settlement:turn_source_settlement
+            !consumed_stimuli
+        with
+        | Ok () -> true
+        | Error message ->
+          record_settlement_failure message;
+          false
       in
       (* Pending remains the authority throughout execution. Remove only an
          exact selection whose turn completed or handled its source locally. *)
@@ -820,31 +835,7 @@ let run_keepalive_unified_turn
          match !pending_selection with
        | None -> ()
        | Some selection ->
-         let should_ack =
-           match !cycle_outcome_ref with
-           | Some
-               ( Cycle.Completed _
-               | Cycle.Manual_compaction_applied _
-               | Cycle.Manual_compaction_not_applied _ ) ->
-             true
-           | Some (Cycle.Failed { failure; _ }) ->
-             (match failure.Keeper_unified_turn.source_lease_disposition with
-              | Keeper_unified_turn.Acknowledge_after_in_turn_handling
-              | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
-                true
-              | Keeper_unified_turn.Follow_failure_route
-              | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
-              | Keeper_unified_turn.Requeue_after_context_compaction _
-              | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
-                false)
-           | Some
-               ( Cycle.Cancelled _
-               | Cycle.Skipped _
-               | Cycle.Busy _
-               | Cycle.Manual_compaction_failed _ )
-           | None ->
-             false
-         in
+         let should_ack = settlement_acks_source turn_source_settlement in
          if should_ack && scheduled_work_terminal_committed
          then
            match

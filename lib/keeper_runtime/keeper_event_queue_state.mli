@@ -170,7 +170,7 @@ type accepted_transfer =
   }
 (** Exact causal authority for terminally transferring one accepted event.
     The durable disposition receipt retains the target continuation binding;
-    this ACK links the source queue terminal effect to that receipt by
+    this settlement links the source queue terminal effect to that receipt by
     stable operator operation ID. *)
 
 type source_terminal_receipt =
@@ -245,7 +245,7 @@ type settlement =
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
-  | Ack_source_terminal of accepted_source_terminal
+  | Settle_from_source_terminal of accepted_source_terminal
   | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
@@ -331,13 +331,13 @@ val transfer_pending_accepted :
     are checked before removal, and the source-bearing WAL remains the replay
     authority until the target projection completes. *)
 
-val ack_pending_source_terminal :
+val settle_pending_from_source_terminal :
   current_owner_nonce:int ->
   settled_at:float ->
   source_terminal:accepted_source_terminal ->
   t ->
   (t * settle_result, string) result
-(** ACK one exact pending event only when its closed payload
+(** Terminally settle one exact pending event only when its closed payload
     exactly matches [source_terminal.source_receipt]. *)
 
 val accepted_pending_cancellation_replay :
@@ -361,7 +361,7 @@ val project_accepted_transfer :
     survives target consumption, so receipt replay cannot enqueue the same
     transferred event again. *)
 
-val accepted_pending_source_terminal_ack_replay :
+val accepted_pending_source_terminal_replay :
   accepted_source_terminal ->
   t ->
   (transition_receipt option, string) result
@@ -389,12 +389,6 @@ val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
 val outbox_entry_to_yojson : outbox_entry -> Yojson.Safe.t
 val outbox_entry_of_yojson : Yojson.Safe.t -> (outbox_entry, string) result
-
-val legacy_source_terminal_ack_outbox_entry_of_yojson :
-  Yojson.Safe.t -> (outbox_entry, string) result
-(** Recovery-only decoder for a v8 source-terminal outbox. It canonicalizes
-    the removed internal settlement label to [Ack_source_terminal] before
-    validating the receipt. New writes never use this path. *)
 val replay_transition_outbox_entry : outbox_entry -> t -> (t, string) result
 (** Replay a source-bearing committed transition. Active-lease settlements use
     their exact lease; pending accepted cancellations reconstruct the same

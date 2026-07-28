@@ -102,7 +102,7 @@ type settlement = Keeper_event_queue_persistence.settlement =
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
-  | Ack_source_terminal of accepted_source_terminal
+  | Settle_from_source_terminal of accepted_source_terminal
   | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
@@ -117,15 +117,6 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
   | Committed_followup_failed of
-      { receipt : transition_receipt
-      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
-      ; detail : string
-      }
-
-type source_ack_result =
-  | Acked of transition_receipt
-  | Already_acked of transition_receipt
-  | Ack_committed_followup_failed of
       { receipt : transition_receipt
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
@@ -445,24 +436,19 @@ let transfer_pending_accepted_result
     ()
 ;;
 
-let ack_pending_source_terminal_result
+let settle_pending_from_source_terminal_result
       ~base_path
       name
       ~current_owner_nonce
-      ~acked_at
+      ~settled_at
       ~source_terminal
   =
-  Keeper_event_queue_persistence.ack_pending_source_terminal_result
+  Keeper_event_queue_persistence.settle_pending_from_source_terminal_result
     ~base_path
     ~keeper_name:name
     ~current_owner_nonce
-    ~acked_at
+    ~settled_at
     ~source_terminal
     ~after_commit:(publish_pending ~base_path name)
     ()
-  |> Result.map (function
-    | Settled receipt -> Acked receipt
-    | Already_settled receipt -> Already_acked receipt
-    | Committed_followup_failed { receipt; stage; detail } ->
-      Ack_committed_followup_failed { receipt; stage; detail })
 ;;

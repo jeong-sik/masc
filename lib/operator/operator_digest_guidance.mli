@@ -13,7 +13,6 @@ val active_guidance_fields :
   actor:string ->
   target_type:string ->
   target_id:string option ->
-  fallback_recommendations:Operator_digest_types.recommended_action list ->
   fallback_summary:Yojson.Safe.t ->
   (string * Yojson.Safe.t) list
 (** Build the digest's [active_*] guidance fields. When a fresh

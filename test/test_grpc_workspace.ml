@@ -412,7 +412,7 @@ let test_get_status_projects_backlog_tasks () =
          ~title:"Fix stale projection"
          ~priority:1
          ~description:"Use backlog SSOT for gRPC status");
-    ignore (Masc.Workspace.claim_next workspace_config ~agent_name:"alpha");
+    ignore (Masc.Workspace.claim_next_r workspace_config ~agent_name:"alpha" ());
     let service =
       Masc_grpc_service.create_service
         ~workspace_config

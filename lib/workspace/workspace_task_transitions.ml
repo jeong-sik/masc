@@ -163,69 +163,17 @@ let transition_task_outcome_r
                   ~requires_verification:(Masc_domain.task_requires_verification task)
                   task.task_status
             in
-(* Concrete remediation. *)
-(* WORKAROUND: task_status (6 ctors) × task_action (9 ctors) = 54 combos, with ~11 specific hint cases. *)
-            let[@warning "-4"] remediation =
-              let own_assignee =
-                match task_assignee_of_status task.task_status with
-                | Some a when same_task_actor config a agent_name -> true
-                | _ -> false
-              in
-              match task.task_status, action with
-              | Masc_domain.Todo, Masc_domain.Release ->
-                " Remediation: task is still in 'todo'. Call masc_transition \
-                 action=claim first, then action=release once you own it."
-              | Masc_domain.Todo, (Masc_domain.Done_action | Masc_domain.Cancel) ->
-                " Remediation: task is still in 'todo'. Call masc_transition \
-                 action=claim, then submit completion evidence for verification."
-              | Masc_domain.Todo, Masc_domain.Start ->
-                " Remediation: task is still in 'todo'. Call masc_transition \
-                 action=claim first — start needs ownership."
-              | Masc_domain.Claimed _, Masc_domain.Release when not own_assignee ->
-                " Remediation: this task is claimed by another keeper. Use \
-                 masc_board_post to ask that agent to release/hand off, or claim a \
-                 different task with keeper_task_claim."
-              | Masc_domain.Claimed _, Masc_domain.Done_action when not own_assignee ->
-                " Remediation: only the current assignee can mark a task done. Pick a \
-                 different task or align via masc_board_post."
-              | (Masc_domain.Claimed _ | Masc_domain.InProgress _), Masc_domain.Cancel
-                when not own_assignee ->
-                " Remediation: cancellation requires owning the task. Use \
-                 masc_board_post to ask the current assignee to cancel or release, or \
-                 claim a different task with keeper_task_claim."
-              | (Masc_domain.Claimed _ | Masc_domain.InProgress _), Masc_domain.Submit_for_verification
-                when not own_assignee ->
-                " Remediation: submit_for_verification requires owning the task. Use \
-                 masc_board_post to ask the current assignee to release, or claim a \
-                 different task with keeper_task_claim."
-              | Masc_domain.InProgress _, Masc_domain.Claim ->
-                " Remediation: task is already in_progress under someone. Use \
-                 keeper_task_claim for unclaimed work."
-              | Masc_domain.InProgress _, Masc_domain.Start ->
-                " Remediation: task is already in_progress. Valid actions from \
-                 in_progress: submit_for_verification, release, or cancel."
-              | Masc_domain.Done _, _ ->
-                " Remediation: task is already in a terminal state (done). To \
-                 re-run this work, create a new task with predecessor_task_id \
-                 via masc_add_task (RFC-0323); use masc_tasks to find claimable \
-                 items."
-              | Masc_domain.Cancelled _, _ ->
-                " Remediation: task is already cancelled. Use masc_add_task for new work \
-                 or masc_tasks to find claimable items."
-              | _ -> ""
-            in
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     (Printf.sprintf
-                       "Invalid transition: %s -> %s (%s, agent=%s%s%s).%s"
+                       "Invalid transition: %s -> %s (%s, agent=%s%s%s)."
                        (task_status_to_string task.task_status)
                        action_s
                        task_id
                        agent_name
                        assignee_hint
-                       actions_hint
-                       remediation)))
+                       actions_hint)))
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in

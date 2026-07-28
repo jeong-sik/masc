@@ -446,13 +446,12 @@ let verification_evidence_projection config ~viewer ~(task : task) =
     (match phase with
      | Masc_domain.Awaiting_verifier ->
        Printf.bprintf buf
-         "   └─ ACTION: keeper_task_claim task_id=%s; do not Read producer \
-          paths; claim first to receive the typed submitted_evidence snapshot\n"
+         "   └─ awaiting_verifier task_id=%s\n"
          task.id
      | Masc_domain.Verifier_assigned { verifier }
        when not (Workspace_task_classify.same_task_actor config verifier viewer) ->
        Printf.bprintf buf
-         "   └─ assigned_verifier=%s ACTION: skip; do not Read producer paths\n"
+         "   └─ assigned_verifier=%s\n"
          verifier
      | Masc_domain.Verifier_assigned _ -> ());
     Some (Buffer.contents buf)

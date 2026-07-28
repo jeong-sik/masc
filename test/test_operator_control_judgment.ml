@@ -56,8 +56,6 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
         "Pause the namespace before taking any destructive action."
         Yojson.Safe.Util.
           (digest |> member "active_summary" |> member "summary" |> to_string);
-      Alcotest.(check string) "active recommendation source" "judgment"
-        Yojson.Safe.Util.(digest |> member "active_recommendation_source" |> to_string);
       Alcotest.(check bool) "judgment present" true
         (Yojson.Safe.Util.member "judgment" digest <> `Null))
 
@@ -106,7 +104,7 @@ let test_guidance_ignores_unsupported_target_type () =
         ~fresh_for_sec:90.0 ();
       let fields =
         Operator_digest_guidance.active_guidance_fields ~config ~actor:"operator"
-          ~target_type:"keeper" ~target_id:None ~fallback_recommendations:[]
+          ~target_type:"keeper" ~target_id:None
           ~fallback_summary:(`Assoc [ ("count", `Int 0) ])
       in
       let guidance = `Assoc fields in

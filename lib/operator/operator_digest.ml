@@ -336,9 +336,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("active_guidance_layer", `String "fallback");
           ("active_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("active_recommended_actions", `List []);
-          ("active_recommendation_source", `String "fallback");
           ("active_recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
-          ("fallback_recommended_actions", `List []);
           ("recent_reviews", recent_reviews);
         ])
   else
@@ -368,7 +366,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             ~config
             ~actor:actor_name
             ~target_type:Operator_action_constants.workspace_target_type
-            ~target_id:None ~fallback_recommendations:recommended_actions
+            ~target_id:None
             ~fallback_summary:fallback_recommendation_summary
         in
         let recent_reviews =

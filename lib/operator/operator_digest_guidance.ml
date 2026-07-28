@@ -33,27 +33,19 @@ let judgment_summary_json judgment_json =
       ("disagreement_with_truth", judgment_json |> U.member "disagreement_with_truth");
     ]
 
-let active_guidance_fields ~config ~actor ~target_type ~target_id
-    ~fallback_recommendations ~fallback_summary =
-  let fallback_recommendation_json =
-    `List
-      (List.map (Operator_digest_types.recommended_action_to_yojson ~actor)
-         fallback_recommendations)
-  in
+(* Only an operator judgment — an LLM's own recorded decision — may carry a
+   recommended action. The read-model fallback used to synthesise one in
+   OCaml (action_type="keeper_probe", reason="Inspect pending external
+   attention") and hand it to the model as though a decision had been made;
+   the summary below states the observed condition instead. *)
+let active_guidance_fields ~config ~actor:_ ~target_type ~target_id
+    ~fallback_summary =
   match fresh_operator_judgment config ~target_type ~target_id with
   | Some judgment_json ->
-      let recommended_action_opt =
-        Json_util.get_object judgment_json "recommended_action"
-      in
       let judgment_actions =
-        match recommended_action_opt with
+        match Json_util.get_object judgment_json "recommended_action" with
         | Some value -> `List [ value ]
-        | None -> fallback_recommendation_json
-      in
-      let recommendation_source =
-        match recommended_action_opt with
-        | Some _ -> "judgment"
-        | None -> "fallback"
+        | None -> `List []
       in
       [
         ("judgment_owner", `String "operator_keeper");
@@ -62,9 +54,7 @@ let active_guidance_fields ~config ~actor ~target_type ~target_id
         ("active_guidance_layer", `String "judgment");
         ("active_summary", judgment_summary_json judgment_json);
         ("active_recommended_actions", judgment_actions);
-        ("active_recommendation_source", `String recommendation_source);
         ("active_recommendation_summary", judgment_summary_json judgment_json);
-        ("fallback_recommended_actions", fallback_recommendation_json);
       ]
   | None ->
       [
@@ -73,8 +63,6 @@ let active_guidance_fields ~config ~actor ~target_type ~target_id
         ("judgment", `Null);
         ("active_guidance_layer", `String "fallback");
         ("active_summary", fallback_summary);
-        ("active_recommended_actions", fallback_recommendation_json);
-        ("active_recommendation_source", `String "fallback");
+        ("active_recommended_actions", `List []);
         ("active_recommendation_summary", fallback_summary);
-        ("fallback_recommended_actions", fallback_recommendation_json);
       ]

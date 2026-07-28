@@ -1662,9 +1662,10 @@ let test_no_unclaimed_tasks_stop_signal () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Claimed" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
-    let result = Workspace.claim_next config ~agent_name:"bob" in
-    Alcotest.(check bool) "contains ACTION stop signal"
-      true (str_contains result "ACTION: Stop task-checking"))
+    (* The empty claim pool is a typed variant, not a prose signal. *)
+    match Workspace.claim_next_r config ~agent_name:"bob" () with
+    | Masc_domain.Claim_next_no_unclaimed -> ()
+    | _ -> Alcotest.fail "expected Claim_next_no_unclaimed")
 
 let () =
   Eio_guard.enable ();

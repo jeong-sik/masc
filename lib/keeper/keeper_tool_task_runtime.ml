@@ -610,7 +610,7 @@ let handle_keeper_task_tool_with_outcome
           if !auto_started_ok then
             message ^ " Task auto-started — begin work now."
           else message
-      | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks."
       | Workspace.Claim_next_no_eligible
           { excluded_count
           ; scope_excluded_count

@@ -33,6 +33,21 @@ val enabled : unit -> bool
     {!Env_config_keeper.KeeperWireCapture}. When [false], {!capture_request} is
     a no-op with no filesystem access. *)
 
+type prune_error =
+  | Retention_prune_failed of
+      { path : string
+      ; detail : string
+      }
+
+val prune_error_to_string : prune_error -> string
+
+val prune_expired : masc_root:string -> (int, prune_error) result
+(** Prune expired capture day-files using this module's configured retention
+    SSOT. This is intentionally ungated: captures written while the feature
+    was enabled must still expire after it is disabled. Startup blob maintenance
+    calls this before scanning references, so expired diagnostic rows cannot
+    retain a blob indefinitely. *)
+
 val capture_request :
   base_path:string ->
   masc_root:string ->

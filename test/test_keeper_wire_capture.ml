@@ -429,6 +429,23 @@ let capture_prunes_old_files () =
         Alcotest.(check int) "only current capture remains" 1
           (List.length (find_jsonl base)))))
 
+let startup_prune_removes_old_files_without_new_capture () =
+  with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_startup_prune" "" in
+    let capture_dir = Filename.concat base "wire-capture" in
+    let old_month = Filename.concat capture_dir "2000-01" in
+    ensure_dir capture_dir;
+    ensure_dir old_month;
+    let old_file = Filename.concat old_month "01.jsonl" in
+    write_file old_file (String.make 1024 'x');
+    match Wire.prune_expired ~masc_root:base with
+    | Ok count ->
+      Alcotest.(check int) "startup owner prune removes expired capture" 1 count;
+      Alcotest.(check bool) "expired capture is gone without a new write" false
+        (Sys.file_exists old_file)
+    | Error error ->
+      Alcotest.fail (Wire.prune_error_to_string error))
+
 let capture_cache_reloads_when_retention_changes () =
   with_flag "1" (fun () ->
     with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "4096" (fun () ->
@@ -606,6 +623,8 @@ let () =
             response_capture_failure_is_best_effort;
           Alcotest.test_case "capture store prunes old files" `Quick
             capture_prunes_old_files;
+          Alcotest.test_case "startup owner prune expires inactive captures" `Quick
+            startup_prune_removes_old_files_without_new_capture;
           Alcotest.test_case "capture store reloads on retention change" `Quick
             capture_cache_reloads_when_retention_changes;
           Alcotest.test_case "current file cap skips oversized record" `Quick

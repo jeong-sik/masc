@@ -209,25 +209,34 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       (match List.assoc_opt "kind" settlement_fields with
        | Some (`String kind) -> Some kind
        | Some _ | None -> None);
+    let canonical_transition_id =
+      match List.assoc_opt "lease_id" receipt_fields with
+      | Some (`String lease_id) -> lease_id ^ ":ack_source_terminal"
+      | Some _ | None -> Alcotest.fail "source ACK receipt omitted lease identity"
+    in
+    let canonical_event_id = "keeper-event-queue-transition:" ^ canonical_transition_id in
+    Alcotest.(check string)
+      "source ACK writes its canonical transition identity"
+      canonical_transition_id
+      (required_string_field "source ACK receipt" "transition_id" receipt_fields);
+    Alcotest.(check string)
+      "source ACK writes its canonical event identity"
+      canonical_event_id
+      (required_string_field "source ACK receipt" "event_id" receipt_fields);
     let legacy_transition_id =
       match List.assoc_opt "lease_id" receipt_fields with
       | Some (`String lease_id) -> lease_id ^ ":settle_from_source_terminal"
       | Some _ | None -> Alcotest.fail "source ACK receipt omitted lease identity"
     in
     let legacy_event_id = "keeper-event-queue-transition:" ^ legacy_transition_id in
-    Alcotest.(check string)
-      "source ACK keeps the historical transition identity"
-      legacy_transition_id
-      (required_string_field "source ACK receipt" "transition_id" receipt_fields);
-    Alcotest.(check string)
-      "source ACK keeps the historical event identity"
-      legacy_event_id
-      (required_string_field "source ACK receipt" "event_id" receipt_fields);
     let legacy_settlement =
       replace_field "kind" (`String "settle_from_source_terminal") settlement_fields
     in
     let legacy_receipt =
-      replace_field "settlement" (`Assoc legacy_settlement) receipt_fields
+      receipt_fields
+      |> replace_field "transition_id" (`String legacy_transition_id)
+      |> replace_field "event_id" (`String legacy_event_id)
+      |> replace_field "settlement" (`Assoc legacy_settlement)
     in
     let legacy_outbox = replace_field "receipt" (`Assoc legacy_receipt) outbox_fields in
     let legacy_state =

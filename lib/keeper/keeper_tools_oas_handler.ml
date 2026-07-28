@@ -25,6 +25,7 @@ let make_keeper_tool_handler
       ?record_gate_result
       ?on_completed
       ?on_deferred
+      ?on_external_effect_deferred
       ?on_failed
       ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
@@ -40,13 +41,20 @@ let make_keeper_tool_handler
   in
   let observe_terminal_execution_result
         ~failure_effect_disposition
+        ~deferred_kind
         (result : Tool_result.result)
     =
     (match result with
      | Tool_result.Completed _ ->
        Option.iter (fun completed -> completed ()) on_completed
      | Tool_result.Deferred _ ->
-       Option.iter (fun deferred -> deferred ()) on_deferred
+       (match deferred_kind with
+        | Some Keeper_tool_execution.External_effect_deferred ->
+          Option.iter
+            (fun deferred -> deferred ())
+            on_external_effect_deferred
+        | None | Some Keeper_tool_execution.Generic_deferred ->
+          Option.iter (fun deferred -> deferred ()) on_deferred)
      | Tool_result.Failed { class_; message; _ } ->
        let effect_disposition =
          Option.value
@@ -176,6 +184,7 @@ let make_keeper_tool_handler
             |> observe_terminal_execution_result
                  ~failure_effect_disposition:
                    execution.failure_effect_disposition
+                 ~deferred_kind:execution.deferred_kind
           in
           run_with_current_eio_context ?clock:current_clock ())
 ;;

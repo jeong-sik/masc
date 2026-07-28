@@ -56,9 +56,10 @@ val durable_stimulus_summary_to_string : durable_stimulus_summary -> string
 val terminal_effect_boundary_decision
   :  Keeper_tools_oas.terminal_effect_state
   -> (Runtime_agent.cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
-(** Production boundary projection for Keeper tool results. Deferred external
-    effects yield the current provider loop so their durable resolution can
-    wake a later turn. Failed terminal effects retain their typed
+(** Production boundary projection for Keeper tool results. Generic deferred
+    tool transitions retain the normal durable-stimulus checkpoint; deferred
+    external effects yield the current provider loop so their durable
+    resolution can wake a later turn. Failed terminal effects retain their typed
     [Tool_result.tool_failure_class] in the exact structured Keeper error
     envelope. *)
 

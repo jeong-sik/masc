@@ -19,7 +19,11 @@ type terminal_effect_failure =
 
 type terminal_effect_state =
   | Terminal_effect_open
+      (** No tool has requested a turn boundary. *)
+  | Deferred_tool_result
+      (** A normal tool transition deferred; it is not a Gate external effect. *)
   | External_effect_deferred
+      (** Gate deferred an external effect and will emit a durable resolution. *)
   | Terminal_effect_completed
   | Terminal_effect_failed of terminal_effect_failure
 

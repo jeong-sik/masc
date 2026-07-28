@@ -29,6 +29,7 @@ let observed_completion_evidence
   | Runtime_agent.InputRequired _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_after_repeated_tool_call _ ->
     Keeper_execution_receipt.Completion_observation_unknown
   | Runtime_agent.Completed ->

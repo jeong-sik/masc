@@ -36,6 +36,7 @@ val make_keeper_tool_handler
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?on_completed:(unit -> unit)
   -> ?on_deferred:(unit -> unit)
+  -> ?on_external_effect_deferred:(unit -> unit)
   -> ?on_failed:(Keeper_tools_oas.terminal_effect_failure -> unit)
   -> ?pre_validate_input:
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)

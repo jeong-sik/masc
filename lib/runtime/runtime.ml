@@ -538,7 +538,8 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
    failover runtimes are separate request-producing Keeper paths and therefore
    share the same serialized-request admission contract. Expand lane ids with
    the same lane-over-runtime precedence as [resolve_assignment], then preserve
-   first occurrence order. No provider/model names live in this policy. *)
+   first occurrence order. No provider/model names live in this policy.
+   TEL-OK: pure runtime-id projection; the caller owns validation telemetry. *)
 let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
@@ -565,6 +566,7 @@ let keeper_dispatch_runtime_ids
   dedupe [] [] (routed_roots @ declared_lane_candidates @ media_failover)
 ;;
 
+(* TEL-OK: pure config validation; the config commit boundary reports errors. *)
 let validate_keeper_dispatch_request_caps
     ~(config_path : string)
     ( runtimes
@@ -1786,6 +1788,7 @@ let commit_runtime_config_text
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path:path content
   in
+  (* TEL-OK: pure validation call inside the existing config commit boundary. *)
   let* () = validate_keeper_dispatch_request_caps ~config_path:path loaded in
   match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
@@ -1854,6 +1857,7 @@ module For_testing = struct
 
   let snapshot () = runtime_state ()
   let restore snapshot = Atomic.set loaded_state_ref snapshot
+  (* TEL-OK: test-only alias for the pure runtime-id projection. *)
   let keeper_dispatch_runtime_ids = keeper_dispatch_runtime_ids
 
   let save_config_text_with_sync_parent

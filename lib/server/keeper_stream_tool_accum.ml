@@ -95,9 +95,11 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
          same open block, not a replacement, so retaining it preserves the
          already received fragments. A conflicting replay is malformed and is
          dropped rather than combining two calls under one block index. *)
+      (* DET-OK: these are exact equality checks on the provider's opaque
+         identifiers; neither absence nor a new identity is defaulted. *)
       | Some block, Some call_id, Some call_name
-        when String.equal (Option.value ~default:"" block.call_id) call_id
-             && String.equal (Option.value ~default:"" block.call_name) call_name ->
+        when Option.equal String.equal block.call_id (Some call_id)
+             && Option.equal String.equal block.call_name (Some call_name) ->
         ()
       | Some _, _, _ -> invalidate_index t index
       | None, _, _ ->

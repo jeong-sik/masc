@@ -423,6 +423,28 @@ let log_exact_error (entry : pending_approval) operation detail =
     detail
 ;;
 
+(* Four distinct flow errors settle as the same [Exact_flow_execution_failed]
+   quarantine cause, and the durable row keeps only that label. An operator
+   therefore reads "Auto Judge exact attempt quarantined: flow_execution_failed"
+   with no way to tell candidate exhaustion from an allocation failure, while the
+   evidence payload each error carries is discarded at this boundary. Observed
+   2026-07-28: 25 approvals quarantined under that one label with nothing in the
+   log naming the branch. Render the per-attempt provenance so the branch and the
+   slot it died on are recoverable. *)
+let flow_evidence_detail (evidence : Exact_output.flow_evidence) =
+  match evidence.attempts with
+  | [] -> "no candidate attempt was recorded"
+  | attempts ->
+    attempts
+    |> List.map (fun (attempt : Exact_output.flow_attempt_snapshot) ->
+      Printf.sprintf
+        "slot=%s call_id=%s"
+        attempt.visit.identity.candidate_id
+        (Exact_output.generation_receipt_snapshot_call_id attempt.receipt
+         |> Exact_output.call_id_to_string))
+    |> String.concat "; "
+;;
+
 let exact_attempt_source_resolved (entry : pending_approval) = function
   | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->
     String.equal approval_id entry.id
@@ -815,29 +837,46 @@ let handle_semantic_exhaustion ~queue_ops (prepared : prepared_flow) trace =
 ;;
 
 let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
-  | Exact_output.Flow_attempt_already_started _ ->
+  | Exact_output.Flow_attempt_already_started evidence ->
     record_outcome "exact_attempt_replay";
+    log_exact_error prepared.entry "attempt replay" (flow_evidence_detail evidence);
     settle_current_or_signal
       ~queue_ops
       prepared.entry
       ~reason:"HITL exact-output flow attempt was replayed"
       ~cause:Exact_attempt_replay
-  | Exact_output.Flow_attempt_start_failed _ ->
+  | Exact_output.Flow_attempt_start_failed { cause; evidence; _ } ->
     record_outcome "exact_attempt_start_failed";
+    let cause_detail =
+      match cause with
+      | Exact_output.Call_id_generation_failed detail -> detail
+    in
+    log_exact_error
+      prepared.entry
+      "candidate attempt allocation"
+      (Printf.sprintf "%s (%s)" cause_detail (flow_evidence_detail evidence));
     settle_current_or_signal
       ~queue_ops
       prepared.entry
       ~reason:"HITL exact-output candidate attempt allocation failed"
       ~cause:Exact_flow_execution_failed
-  | Exact_output.Flow_measurement_start_failed _ ->
+  | Exact_output.Flow_measurement_start_failed { evidence; _ } ->
     record_outcome "exact_measurement_start_failed";
+    log_exact_error
+      prepared.entry
+      "measurement allocation"
+      (flow_evidence_detail evidence);
     settle_current_or_signal
       ~queue_ops
       prepared.entry
       ~reason:"HITL exact-output measurement allocation failed"
       ~cause:Exact_flow_execution_failed
-  | Exact_output.Flow_candidates_exhausted _ ->
+  | Exact_output.Flow_candidates_exhausted { evidence; _ } ->
     record_outcome "exact_candidates_exhausted";
+    log_exact_error
+      prepared.entry
+      "candidate exhaustion before dispatch"
+      (flow_evidence_detail evidence);
     settle_current_or_signal
       ~queue_ops
       prepared.entry

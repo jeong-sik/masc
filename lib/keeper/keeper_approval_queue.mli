@@ -252,17 +252,23 @@ type resolved_history =
 
 val list_recent_resolved :
   base_path:string ->
+  now_ts:float ->
   ?limit:int ->
   ?window_minutes:int ->
   unit ->
   resolved_history
-(** [list_recent_resolved ~base_path ()] returns resolved Gate decisions from
-    the last [window_minutes] (default
+(** [list_recent_resolved ~base_path ~now_ts ()] returns resolved Gate decisions
+    from the last [window_minutes] (default
     {!recent_resolved_default_window_minutes}, clamped to
     [[recent_resolved_min_window_minutes, recent_resolved_max_window_minutes]]),
     newest first, capped at [limit] (default
     {!recent_resolved_history_limit}, clamped to
     [[0, recent_resolved_max_limit]]).
+
+    [now_ts] is supplied by the caller rather than read here, matching
+    {!Dashboard_gate_metrics.tool_rejection_counts}: the observation boundary
+    captures the clock once for the whole projection, and this function stays
+    deterministic so a test can pin an exact window.
 
     Rows without a [ts] are excluded: a wall-clock window cannot place an
     undated decision, and dating it by guesswork would misreport history.

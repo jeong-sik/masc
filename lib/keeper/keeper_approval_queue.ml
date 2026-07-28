@@ -1593,6 +1593,7 @@ let resolved_history_empty ~limit ~window_minutes =
 
 let list_recent_resolved
       ~base_path
+      ~now_ts
       ?(limit = recent_resolved_history_limit)
       ?(window_minutes = recent_resolved_default_window_minutes)
       ()
@@ -1613,9 +1614,8 @@ let list_recent_resolved
     | None -> empty
     | Some store ->
       (try
-         let now = Unix.gettimeofday () in
          let window_start =
-           now -. (float_of_int window_minutes *. Masc_time_constants.minute)
+           now_ts -. (float_of_int window_minutes *. Masc_time_constants.minute)
          in
          let scan_rows = resolved_history_scan_rows limit in
          (* Chronological, oldest first, tail-bounded to [scan_rows]. *)
@@ -1623,7 +1623,7 @@ let list_recent_resolved
            Dated_jsonl.read_range_recent
              store
              ~since:(audit_day_string_of_ts window_start)
-             ~until:(audit_day_string_of_ts now)
+             ~until:(audit_day_string_of_ts now_ts)
              scan_rows
          in
          let scanned_count = List.length scanned in

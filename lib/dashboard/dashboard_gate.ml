@@ -33,8 +33,16 @@ let dashboard_json ~base_path ~limit ~window_minutes =
     | Error error ->
       `Null, Keeper_approval_queue.approval_queue_unavailable_state_json error
   in
+  (* NDT-OK: HTTP observation boundary; captured once for the pure projection,
+     matching [Dashboard_gate_metrics.gate_tool_events_json]. *)
+  let now_ts = Unix.gettimeofday () in
   let resolved_history =
-    Keeper_approval_queue.list_recent_resolved ~base_path ~limit ~window_minutes ()
+    Keeper_approval_queue.list_recent_resolved
+      ~base_path
+      ~now_ts
+      ~limit
+      ~window_minutes
+      ()
   in
   let approval_rules, approval_rules_state =
     match Keeper_approval_queue.list_rules_dashboard_json ~base_path () with

@@ -123,6 +123,11 @@ let ids (history : AQ.resolved_history) =
 
 let minutes n = float_of_int n *. 60.0
 
+(* Fixed clock: 2026-07-28T03:00:00Z. The function under test takes [now_ts]
+   instead of reading the clock, so every window boundary below is exact rather
+   than relative to whenever the suite happens to run. *)
+let now = 1785207600.0
+
 (* The day key follows the audit file layout, which is UTC. 2026-07-27T23:30Z
    is already 2026-07-28 in KST; a local-time key would name the wrong file for
    every such hour. *)
@@ -137,16 +142,15 @@ let test_day_key_is_utc () =
    audit writer stamps [ts] before it takes the append lock, so concurrent
    resolutions can land out of stamp order. *)
 let test_window_excludes_older_decisions base_path =
-  let now = Unix.gettimeofday () in
   seed_resolved ~base_path ~ts:(now -. minutes 10) ~id:"recent" ();
   seed_resolved ~base_path ~ts:(now -. minutes 120) ~id:"two_hours" ();
   seed_resolved ~base_path ~ts:(now -. minutes 1800) ~id:"thirty_hours" ();
-  let hour = AQ.list_recent_resolved ~base_path ~window_minutes:60 () in
+  let hour = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:60 () in
   check (list string) "60m window keeps only the recent decision" [ "recent" ] (ids hour);
   check int "60m matched" 1 hour.resolved_matched;
-  let day = AQ.list_recent_resolved ~base_path ~window_minutes:1440 () in
+  let day = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:1440 () in
   check (list string) "24h window, newest first" [ "recent"; "two_hours" ] (ids day);
-  let week = AQ.list_recent_resolved ~base_path ~window_minutes:10_080 () in
+  let week = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:10_080 () in
   check int "7d window reaches all three" 3 week.resolved_matched
 ;;
 
@@ -156,11 +160,10 @@ let test_window_excludes_older_decisions base_path =
    decision while reporting nothing unusual. The count is chosen to exceed the
    old bound and stay inside the current one. *)
 let test_noise_does_not_consume_the_page base_path =
-  let now = Unix.gettimeofday () in
   seed_resolved ~base_path ~ts:(now -. minutes 40) ~id:"decision_a" ();
   seed_resolved ~base_path ~ts:(now -. minutes 30) ~id:"decision_b" ();
   seed_noise ~base_path ~ts:(now -. minutes 20) ~count:1500;
-  let history = AQ.list_recent_resolved ~base_path ~window_minutes:1440 () in
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:1440 () in
   check (list string) "both decisions survive 1500 buried noise rows"
     [ "decision_b"; "decision_a" ] (ids history);
   check int "matched counts decisions, not rows" 2 history.resolved_matched;
@@ -173,15 +176,13 @@ let test_noise_does_not_consume_the_page base_path =
    it reached the window start, so it says so instead of presenting a partial
    page as the whole window. *)
 let test_row_cap_reports_itself base_path =
-  let now = Unix.gettimeofday () in
   seed_resolved ~base_path ~ts:(now -. minutes 30) ~id:"decision" ();
   seed_noise ~base_path ~ts:(now -. minutes 20) ~count:2500;
-  let history = AQ.list_recent_resolved ~base_path ~window_minutes:1440 () in
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:1440 () in
   check bool "row cap is reported, not hidden" true history.resolved_scan_exhausted
 ;;
 
 let test_limit_caps_rows_and_matched_reports_the_rest base_path =
-  let now = Unix.gettimeofday () in
   for i = 1 to 30 do
     seed_resolved
       ~base_path
@@ -189,7 +190,7 @@ let test_limit_caps_rows_and_matched_reports_the_rest base_path =
       ~id:(Printf.sprintf "d%02d" i)
       ()
   done;
-  let history = AQ.list_recent_resolved ~base_path ~limit:10 ~window_minutes:1440 () in
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~limit:10 ~window_minutes:1440 () in
   check int "returned is capped" 10 (List.length history.resolved_rows);
   check int "matched sees the whole window" 30 history.resolved_matched;
   check int "limit is echoed" 10 history.resolved_limit;
@@ -199,9 +200,8 @@ let test_limit_caps_rows_and_matched_reports_the_rest base_path =
 ;;
 
 let test_limit_zero_returns_empty_page base_path =
-  let now = Unix.gettimeofday () in
   seed_resolved ~base_path ~ts:(now -. minutes 5) ~id:"only" ();
-  let history = AQ.list_recent_resolved ~base_path ~limit:0 () in
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~limit:0 () in
   check (list string) "no rows" [] (ids history);
   check int "matched not claimed" 0 history.resolved_matched;
   check bool "scan not claimed exhausted" false history.resolved_scan_exhausted
@@ -210,16 +210,15 @@ let test_limit_zero_returns_empty_page base_path =
 (* An undated decision cannot be placed in a wall-clock window. It is excluded
    rather than dated by guesswork, and it must not inflate [matched] either. *)
 let test_undated_decision_is_excluded base_path =
-  let now = Unix.gettimeofday () in
   seed_resolved ~base_path ~ts:(now -. minutes 5) ~id:"dated" ();
   seed_resolved ~base_path ~ts:(now -. minutes 5) ~id:"undated" ~ts_field:false ();
-  let history = AQ.list_recent_resolved ~base_path ~window_minutes:1440 () in
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:1440 () in
   check (list string) "only the dated decision" [ "dated" ] (ids history);
   check int "matched excludes the undated row" 1 history.resolved_matched
 ;;
 
 let test_empty_store_is_an_empty_page base_path =
-  let history = AQ.list_recent_resolved ~base_path () in
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now () in
   check (list string) "no rows" [] (ids history);
   check int "matched" 0 history.resolved_matched;
   check int "default window is echoed" AQ.recent_resolved_default_window_minutes
@@ -228,11 +227,11 @@ let test_empty_store_is_an_empty_page base_path =
 ;;
 
 let test_bounds_are_clamped base_path =
-  let over = AQ.list_recent_resolved ~base_path ~limit:100_000 ~window_minutes:999_999 () in
+  let over = AQ.list_recent_resolved ~base_path ~now_ts:now ~limit:100_000 ~window_minutes:999_999 () in
   check int "limit clamped to the max" AQ.recent_resolved_max_limit over.resolved_limit;
   check int "window clamped to the max" AQ.recent_resolved_max_window_minutes
     over.resolved_window_minutes;
-  let under = AQ.list_recent_resolved ~base_path ~limit:5 ~window_minutes:0 () in
+  let under = AQ.list_recent_resolved ~base_path ~now_ts:now ~limit:5 ~window_minutes:0 () in
   check int "window clamped to the min" AQ.recent_resolved_min_window_minutes
     under.resolved_window_minutes;
   check int "a limit inside the range is kept" 5 under.resolved_limit

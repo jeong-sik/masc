@@ -138,6 +138,97 @@ let test_non_object_input_is_rejected () =
   | Error _ -> ()
 ;;
 
+
+(* [tool_execute] is 66% of live approvals and was Not_applicable until now,
+   so a Keeper had to re-emit a byte-identical command to spend its own
+   approval. Unlike the write path nothing is reconstructed: the Gate request
+   wraps the arguments with execution context instead of re-encoding them. *)
+let approved_execute_input =
+  `Assoc
+    [ "schema", `String "masc.keeper_gate.request.v1"
+    ; ( "input"
+      , `Assoc
+          [ "argv", `List [ `String "git"; `String "status" ]
+          ; "timeout_sec", `Int 30
+          ] )
+    ; "cwd", `String "/repo"
+    ; "sandbox_profile", `String "docker"
+    ; "sandbox_target", `String "docker:masc"
+    ]
+;;
+
+let test_execute_args_are_the_approved_arguments () =
+  Alcotest.check
+    result_json
+    "the approved arguments are replayed verbatim"
+    (Ok
+       (`Assoc
+          [ "argv", `List [ `String "git"; `String "status" ]
+          ; "timeout_sec", `Int 30
+          ]))
+    (Masc.Keeper_gate_replay.execute_args_of_gate_input approved_execute_input)
+;;
+
+let test_execute_context_is_not_replayed () =
+  (* cwd and the sandbox fields describe where the approval was granted. The
+     handler re-derives them from the current turn; carrying the stored ones
+     would execute somewhere the approval never described. *)
+  match
+    Masc.Keeper_gate_replay.execute_args_of_gate_input approved_execute_input
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok (`Assoc fields) ->
+    List.iter
+      (fun key ->
+         Alcotest.check
+           Alcotest.bool
+           (key ^ " is not carried into the replayed arguments")
+           false
+           (List.mem_assoc key fields))
+      [ "cwd"; "sandbox_profile"; "sandbox_target"; "schema" ]
+  | Ok _ -> Alcotest.fail "replayed execute arguments are not an object"
+;;
+
+let test_execute_without_input_is_rejected () =
+  match
+    Masc.Keeper_gate_replay.execute_args_of_gate_input
+      (`Assoc [ "cwd", `String "/repo" ])
+  with
+  | Ok _ -> Alcotest.fail "a Gate input with no arguments replayed anyway"
+  | Error _ -> ()
+;;
+
+
+(* The decode functions above are only reachable if dispatch routes to them.
+   An operation that has a decoder but is never dispatched to is
+   indistinguishable from a working replay at the call site — it just returns
+   Not_applicable and the Keeper is left re-emitting its own approved call. *)
+let test_dispatch_covers_both_replayable_operations () =
+  let open Masc.Keeper_gate_replay in
+  Alcotest.check
+    Alcotest.bool
+    "an approved filesystem_write is replayed"
+    true
+    (replayable_of_operation "filesystem_write" = Some Replay_write);
+  Alcotest.check
+    Alcotest.bool
+    "an approved tool_execute is replayed"
+    true
+    (replayable_of_operation "tool_execute" = Some Replay_execute)
+;;
+
+let test_dispatch_refuses_unknown_operations () =
+  let open Masc.Keeper_gate_replay in
+  List.iter
+    (fun operation ->
+       Alcotest.check
+         Alcotest.bool
+         (operation ^ " still requires resubmission")
+         true
+         (replayable_of_operation operation = None))
+    [ "network_read"; "keeper_board_post"; "" ]
+;;
+
 let () =
   Alcotest.run
     "keeper_gate_replay"
@@ -161,6 +252,30 @@ let () =
             "non-object rejected"
             `Quick
             test_non_object_input_is_rejected
+        ] )
+    ; ( "execute replay"
+      , [ Alcotest.test_case
+            "approved arguments replayed verbatim"
+            `Quick
+            test_execute_args_are_the_approved_arguments
+        ; Alcotest.test_case
+            "approval-time context is not replayed"
+            `Quick
+            test_execute_context_is_not_replayed
+        ; Alcotest.test_case
+            "input without arguments rejected"
+            `Quick
+            test_execute_without_input_is_rejected
+        ] )
+    ; ( "dispatch"
+      , [ Alcotest.test_case
+            "covers both replayable operations"
+            `Quick
+            test_dispatch_covers_both_replayable_operations
+        ; Alcotest.test_case
+            "refuses operations it cannot replay"
+            `Quick
+            test_dispatch_refuses_unknown_operations
         ] )
     ]
 ;;

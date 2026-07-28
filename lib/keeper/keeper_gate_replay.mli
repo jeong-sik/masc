@@ -14,8 +14,8 @@
 
 type outcome =
   | Not_applicable
-      (** No unconsumed approval, or the approved operation is not a write
-          this module replays. *)
+      (** No unconsumed approval, or the approved operation is not one this
+          module replays. *)
   | Applied of string  (** Opaque human-readable summary of the replay. *)
   | Failed of string
 
@@ -29,7 +29,29 @@ val outcome_to_string : outcome -> string
     so an approved content write never gains edit fields and vice versa. *)
 val write_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
-(** Replay the approved write behind [approval_id] exactly once.
+val execute_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** Recover the execute tool arguments from the approved Gate input. Nothing is
+    reconstructed: the Gate request wraps the arguments with execution context
+    rather than re-encoding them. *)
+
+type replayable =
+  | Replay_write
+  | Replay_execute
+
+val replayable_of_operation : string -> replayable option
+(** Which approved operations can be spent without the Keeper re-emitting the
+    call. Exposed because a decode function that exists but is never dispatched
+    to is indistinguishable from a working replay at the boundary. *)
+(** Recover the execute tool arguments from the approved Gate input. Nothing is
+    reconstructed: the Gate request wraps the arguments with execution context
+    rather than re-encoding them. *)
+
+(** Replay the approved effect behind [approval_id] exactly once.
+
+    Covers the two operations whose approvals a Keeper must otherwise re-earn
+    by re-emitting a byte-identical call: [filesystem_write] and
+    [tool_execute]. Any other operation is {!Not_applicable} and still
+    requires resubmission.
 
     [gate_context] is the same causal-context provider the model-issued write
     path supplies. A replay whose re-derived input no longer matches its
@@ -39,7 +61,7 @@ val write_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
     Consumption is the durable one-shot grant, so a repeated call after a
     successful replay reports {!Not_applicable} rather than writing twice. *)
-val replay_approved_write :
+val replay_approved_effect :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   publication_recovery:Keeper_publication_recovery_availability.turn_context ->

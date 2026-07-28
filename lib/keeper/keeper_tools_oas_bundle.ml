@@ -87,7 +87,7 @@ let make_tool_bundle
           }
       , Some grant ) ->
       (match
-         Keeper_gate_replay.replay_approved_write
+         Keeper_gate_replay.replay_approved_effect
            ~config
            ~meta
            ~publication_recovery

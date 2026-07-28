@@ -339,6 +339,7 @@ let run_turn
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
       ?on_deferred_runtime_consumed
+      ?on_capacity_readmission_probe
       ?(is_retry = false)
       ?shared_context
       ?event_bus
@@ -611,6 +612,7 @@ let run_turn
     @@ fun () ->
     let tools = s.Keeper_run_tools.tools in
     let hooks = s.Keeper_run_tools.hooks in
+    let request_shaping_hooks = s.Keeper_run_tools.request_shaping_hooks in
     let model_input_projection =
       s.Keeper_run_tools.model_input_projection
     in
@@ -768,6 +770,7 @@ let run_turn
                       ~initial_messages
                       ~model_input_projection
                       ~hooks
+                      ~request_shaping_hooks
                       ~runtime_manifest_context
                       ~runtime_manifest_append:
                         (fun manifest ->
@@ -801,6 +804,7 @@ let run_turn
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
+                      ?on_capacity_readmission_probe
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]

@@ -59,6 +59,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
   ; hooks : Agent_sdk.Hooks.hooks
+  ; request_shaping_hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection : Agent_sdk.Agent.model_input_projection
   ; acc : hook_accumulator
   ; all_tool_names : string list

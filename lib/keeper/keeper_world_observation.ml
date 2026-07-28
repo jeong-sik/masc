@@ -55,7 +55,8 @@ let is_board_activity_event (event : pending_board_event) =
   | Fusion_completed
   | Bg_completed
   | External_attention
-  | Goal_assigned -> true
+  | Goal_assigned
+  | Goal_reconciliation_ready -> true
 ;;
 
 type scheduled_automation_item =

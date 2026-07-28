@@ -55,6 +55,14 @@ val validate_request_payload_for_creation
   :  payload:Yojson.Safe.t
   -> (unit, string) result
 
+(** Extract the wake target keeper name from a creation payload. [Ok (Some name)]
+    for a structurally complete [masc.keeper_wake] payload, [Ok None] for any
+    other kind (creation validation rejects those separately). Total on raw
+    JSON so callers can consult the target before the request is persisted. *)
+val creation_keeper_wake_target
+  :  payload:Yojson.Safe.t
+  -> (string option, string) result
+
 val dispatch_view_detailed
   :  Schedule_domain.schedule_request
   -> (known_kind * payload_view, dispatch_rejection) result

@@ -213,6 +213,26 @@ let validate_request_payload_for_creation ~payload =
   |> Result.map_error creation_rejection_message
 ;;
 
+let creation_keeper_wake_target ~payload =
+  match payload with
+  | `Assoc fields ->
+    (match assoc_string "kind" fields with
+     | Some raw_kind ->
+       (match classify_kind raw_kind with
+        | Some Keeper_wake ->
+          (match List.assoc_opt "body" fields with
+           | Some (`Assoc body) ->
+             (match assoc_string "keeper_name" body with
+              | Some keeper_name -> Ok (Some keeper_name)
+              | None ->
+                Error
+                  (keeper_wake_kind ^ " payload requires non-empty body.keeper_name"))
+           | Some _ | None -> Error (keeper_wake_kind ^ " payload.body must be an object"))
+        | None -> Ok None)
+     | None -> Error "payload.kind is required")
+  | _ -> Error "payload must be a JSON object"
+;;
+
 let dispatch_view_detailed request =
   let* view =
     payload_view request |> Result.map_error (fun msg -> Dispatch_invalid_payload msg)

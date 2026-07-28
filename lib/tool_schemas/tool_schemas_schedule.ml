@@ -35,6 +35,17 @@ let integer_prop ?description name =
   name, `Assoc fields
 ;;
 
+let boolean_prop ?description name =
+  let fields =
+    [ "type", `String "boolean" ]
+    @
+    match description with
+    | None -> []
+    | Some value -> [ "description", `String value ]
+  in
+  name, `Assoc fields
+;;
+
 let object_prop ?description ?(additional_properties = true) name =
   let fields =
     [ "type", `String "object"; "additionalProperties", `Bool additional_properties ]
@@ -123,6 +134,12 @@ let create_schema =
         ~description:
           "Required when recurrence_kind is daily or cron. Fixed-offset only: UTC, Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. DST-aware IANA zones are not supported."
         "recurrence_timezone"
+    ; boolean_prop
+        ~description:
+          "Allow a masc.keeper_wake schedule whose target keeper has no durable \
+           metadata yet. Default false: creation is rejected because such a wake \
+           can never be settled until the keeper exists."
+        "allow_unregistered_keeper"
     ; string_prop ~description:"Requester actor id. Defaults to operator." "requested_by_id"
     ; string_prop ~enum:actor_kinds "requested_by_kind"
     ; string_prop ~description:"Requester display name." "requested_by_display_name"

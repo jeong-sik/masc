@@ -121,6 +121,7 @@ let prepare_agent_setup
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
+  let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
   let manifest_keeper_turn_id =
     match runtime_manifest_context with
@@ -197,9 +198,21 @@ let prepare_agent_setup
       ~hitl_resolution
       ~replay_delivery
   in
-  Option.iter
-    (fun callback -> callback user_message)
-    on_user_message_composed;
+  let* () =
+    match on_user_message_composed with
+    | None -> Ok ()
+    | Some callback ->
+      (match callback user_message with
+       | Ok () -> Ok ()
+       | Error error ->
+         (try keeper_tools_cleanup () with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Log.Keeper.error
+              "keeper tool cleanup after composed-message failure raised: %s"
+              (Printexc.to_string exn));
+         Error error)
+  in
   let prompt_metrics =
     Keeper_agent_prompt_metrics.build_prompt_metrics
       ~system_prompt:turn_system_prompt

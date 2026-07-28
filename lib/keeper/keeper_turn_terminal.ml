@@ -82,7 +82,8 @@ let of_failure ?(tool_call_count = 0) ~raw_error err =
         | Keeper_turn_driver.Internal_contract_rejected _
         | Keeper_turn_driver.Incomplete_tool_transcript _
         | Keeper_turn_driver.Terminal_effect_failed _
-        | Keeper_turn_driver.Receipt_persistence_failed _ ) ->
+        | Keeper_turn_driver.Receipt_persistence_failed _
+        | Keeper_turn_driver.History_persistence_failed _ ) ->
       of_disposition
         ~source:"typed_error"
         (Keeper_turn_disposition.Provider_error

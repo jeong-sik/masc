@@ -98,9 +98,38 @@ let transcript_corruption error =
       | Keeper_internal_error.Internal_bridge_exception _
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Terminal_effect_failed _
-      | Keeper_internal_error.Receipt_persistence_failed _ )
+      | Keeper_internal_error.Receipt_persistence_failed _
+      | Keeper_internal_error.History_persistence_failed _ )
   | None ->
     None
+;;
+
+let execution_boundary_of_turn_failure ~transcript_corruption error =
+  match
+    transcript_corruption,
+    Keeper_internal_error.classify_masc_internal_error error
+  with
+  | Some _, (Some _ | None) ->
+    Keeper_runtime_failure_route.Masc_execution
+  | None, Some (Keeper_internal_error.History_persistence_failed _) ->
+    (* This error is produced by MASC after host replay and before provider
+       dispatch. The shared [Agent_sdk.Error.Internal] carrier must not
+       misattribute that local persistence boundary to OAS. *)
+    Keeper_runtime_failure_route.Masc_execution
+  | None,
+    Some
+      ( Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Capacity_backpressure _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Receipt_persistence_failed _ )
+  | None, None ->
+    Keeper_runtime_failure_route.Oas_execution
 ;;
 
 type turn_success =
@@ -1322,9 +1351,9 @@ dominant source of the observed CAS race exhaustion after
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
                       ~boundary:
-                        (if Option.is_some transcript_corruption
-                         then Keeper_runtime_failure_route.Masc_execution
-                         else Keeper_runtime_failure_route.Oas_execution)
+                        (execution_boundary_of_turn_failure
+                           ~transcript_corruption
+                           err)
                       err
                   in
                   let source_lease_disposition, turn_state =

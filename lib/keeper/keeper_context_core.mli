@@ -100,6 +100,30 @@ val migrate_session_history_logs :
 val persist_message :
   ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
+type history_persist_once_outcome =
+  | History_message_persisted
+  | History_message_already_persisted
+
+type history_persist_once_error =
+  | Invalid_history_idempotency_key
+  | History_entry_rejected_by_policy of { source : string }
+  | History_append_failed of string
+  | History_transaction_settlement_failed of string
+  | History_io_failed of string
+
+val history_persist_once_error_to_string : history_persist_once_error -> string
+
+(** Durably append [msg] once for the semantic event named by
+    [idempotency_key]. The key is stored in the same JSONL row and checked
+    under the append transaction's process/file lock, so a retry or restart
+    observes a completed write instead of duplicating it. *)
+val persist_message_once :
+  idempotency_key:string ->
+  ?source:string ->
+  session_context ->
+  Agent_sdk.Types.message ->
+  (history_persist_once_outcome, history_persist_once_error) result
+
 (** {1 Re-exports from Inference_utils} *)
 
 val timed : (unit -> 'a) -> 'a * int

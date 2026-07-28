@@ -217,6 +217,8 @@ let keeper_internal_history_path config trace_id =
 let normalize_history_source (source : string) =
   source |> String.trim |> String.lowercase_ascii
 
+let hitl_resolution_history_source = "hitl_resolution"
+
 let is_prompt_history_source (source : string) =
   String.equal (normalize_history_source source) "world_state_prompt"
 

@@ -139,6 +139,10 @@ type masc_internal_error =
       diagnostic : string;
     }
   | Receipt_persistence_failed of { detail : string }
+  | History_persistence_failed of {
+      approval_id : string;
+      detail : string;
+    }
 
 val masc_internal_error_prefix : string
 

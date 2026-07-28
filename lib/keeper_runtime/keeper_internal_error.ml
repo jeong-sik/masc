@@ -284,6 +284,10 @@ type masc_internal_error =
   | Receipt_persistence_failed of {
       detail : string;
     }
+  | History_persistence_failed of {
+      approval_id : string;
+      detail : string;
+    }
 
 let masc_internal_error_prefix = "[masc_oas_error] "
 let runtime_runner_execute_site = "runtime_runner.execute"
@@ -478,6 +482,13 @@ let masc_internal_error_to_json = function
         ("kind", `String "receipt_persistence_failed");
         ("detail", `String detail);
       ]
+  | History_persistence_failed { approval_id; detail } ->
+    `Assoc
+      [
+        ("kind", `String "history_persistence_failed");
+        ("approval_id", `String approval_id);
+        ("detail", `String detail);
+      ]
 
 let accept_rejection_summary_max_bytes = 180
 
@@ -597,7 +608,8 @@ let summary_of_masc_internal_error = function
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
-  | Receipt_persistence_failed _ -> None
+  | Receipt_persistence_failed _
+  | History_persistence_failed _ -> None
 
 let kind_of_masc_internal_error = function
   | Runtime_exhausted _ -> "runtime_exhausted"
@@ -610,6 +622,7 @@ let kind_of_masc_internal_error = function
   | Incomplete_tool_transcript _ -> incomplete_tool_transcript_kind
   | Terminal_effect_failed _ -> "terminal_effect_failed"
   | Receipt_persistence_failed _ -> "receipt_persistence_failed"
+  | History_persistence_failed _ -> "history_persistence_failed"
 
 let runtime_id_of_masc_internal_error = function
   | Runtime_exhausted { runtime_id; _ }
@@ -625,7 +638,8 @@ let runtime_id_of_masc_internal_error = function
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
-  | Receipt_persistence_failed _ -> "unknown"
+  | Receipt_persistence_failed _
+  | History_persistence_failed _ -> "unknown"
 
 let accept_no_progress_retry_kind = function
   | Accept_rejected
@@ -657,7 +671,8 @@ let accept_no_progress_retry_kind = function
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
-  | Receipt_persistence_failed _ ->
+  | Receipt_persistence_failed _
+  | History_persistence_failed _ ->
     None
 
 let accept_rejection_has_no_progress_retry_hint err =
@@ -857,6 +872,14 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with
           | Some detail -> Some (Receipt_persistence_failed { detail })
+          | _ -> None)
+      | Some (`String "history_persistence_failed") -> (
+          match
+            string_opt_of_assoc "approval_id" json,
+            string_opt_of_assoc "detail" json
+          with
+          | Some approval_id, Some detail ->
+            Some (History_persistence_failed { approval_id; detail })
           | _ -> None)
       | _ -> None)
   | _ -> None

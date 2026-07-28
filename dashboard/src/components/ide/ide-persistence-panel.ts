@@ -1,15 +1,13 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 
 import {
   fetchKeeperStateDiagram,
   type KeeperStateDiagramResponse,
-  type MemoryKindUsageEntry,
 } from '../../api/keeper'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
 import type { Keeper } from '../../types'
-import { MemoryGraph } from '../common/memory-graph'
 import { PersistenceStatus, type PersistenceState } from '../common/persistence-status'
 import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
@@ -24,29 +22,6 @@ import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
 import { routeLinkLabels } from './ide-context-route-helpers'
 
 type LifecycleState = 'created' | 'active' | 'idle' | 'terminated'
-
-interface GraphNode {
-  id: string
-  label: string
-  x: number
-  y: number
-  color?: string
-}
-
-interface GraphEdge {
-  source: string
-  target: string
-  label?: string
-}
-
-interface MemoryGraphModel {
-  nodes: GraphNode[]
-  edges: GraphEdge[]
-  visibleUsage: MemoryKindUsageEntry[]
-  totalUsed: number
-  totalCap: number
-  saturatedCount: number
-}
 
 interface IdePersistencePanelProps {
   keeperName?: string
@@ -107,57 +82,6 @@ export function persistenceStateFromKeeperPhase(
     default:
       return 'saved'
   }
-}
-
-export function buildMemoryGraphModel(
-  keeperName: string,
-  usage: readonly MemoryKindUsageEntry[],
-): MemoryGraphModel {
-  const visibleUsage = [...usage]
-    .sort((left, right) => right.used - left.used || left.kind.localeCompare(right.kind))
-    .slice(0, 3)
-  const totalUsed = usage.reduce((sum, row) => sum + row.used, 0)
-  const totalCap = usage.reduce((sum, row) => sum + row.cap, 0)
-  const saturatedCount = usage.filter(row => row.cap > 0 && row.used >= row.cap).length
-
-  if (!keeperName.trim()) {
-    return { nodes: [], edges: [], visibleUsage, totalUsed, totalCap, saturatedCount }
-  }
-
-  const positions = [
-    { x: 170, y: 12 },
-    { x: 86, y: 44 },
-    { x: 254, y: 44 },
-  ]
-
-  const nodes: GraphNode[] = [
-    {
-      id: 'keeper',
-      label: keeperName,
-      x: 170,
-      y: 36,
-      color: 'var(--color-bg-elevated)',
-    },
-    ...visibleUsage.map((row, index) => {
-      const saturated = row.cap > 0 && row.used >= row.cap
-      return {
-        id: `memory-${row.kind}`,
-        label: row.kind,
-        x: positions[index]?.x ?? 170,
-        y: positions[index]?.y ?? 92,
-        color: saturated
-          ? 'var(--color-status-warn-bg, var(--warn-20))'
-          : 'var(--color-accent-bg, var(--color-bg-surface))',
-      }
-    }),
-  ]
-  const edges = visibleUsage.map(row => ({
-    source: 'keeper',
-    target: `memory-${row.kind}`,
-    label: `${row.used}/${row.cap}`,
-  }))
-
-  return { nodes, edges, visibleUsage, totalUsed, totalCap, saturatedCount }
 }
 
 function resolveKeeperName(explicit: string | undefined, active: string, rows: readonly Keeper[]): string {
@@ -259,14 +183,12 @@ export function IdePersistencePanel({
     : null
   const [diagram, setDiagram] = useState<KeeperStateDiagramResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     const name = keeperName.trim()
     if (!name) {
       setDiagram(null)
       setError(null)
-      setLoading(false)
       return
     }
 
@@ -274,7 +196,6 @@ export function IdePersistencePanel({
     let timer: number | null = null
 
     const refresh = async () => {
-      setLoading(true)
       try {
         const next = await fetchKeeperStateDiagram(name, { signal: controller.signal })
         if (controller.signal.aborted) return
@@ -285,8 +206,6 @@ export function IdePersistencePanel({
           setDiagram(null)
           setError(err instanceof Error ? err.message : 'state diagram unavailable')
         }
-      } finally {
-        if (!controller.signal.aborted) setLoading(false)
       }
     }
 
@@ -301,8 +220,6 @@ export function IdePersistencePanel({
   const phase = diagram?.current_phase ?? keeper?.phase ?? null
   const lifecycleState = lifecycleStateFromKeeperPhase(phase)
   const persistenceState = persistenceStateFromKeeperPhase(phase, error !== null)
-  const usage = diagram?.memory_kind_usage ?? []
-  const graph = useMemo(() => buildMemoryGraphModel(keeperName, usage), [keeperName, usage])
   const lastSaved = keeper?.last_heartbeat ?? keeper?.updated_at ?? keeper?.created_at ?? null
 
   return html`
@@ -372,61 +289,6 @@ export function IdePersistencePanel({
             <${PersistenceRouteLinks}
               links=${routeLinks}
             />
-
-            <div
-              class="ide-persistence-memory-graph v2-ide-card"
-              style=${{
-                display: 'grid',
-                gap: 'var(--sp-2)',
-                border: '1px solid var(--color-border-default)',
-                borderRadius: 'var(--r-2)',
-                background: 'var(--color-bg-page)',
-                padding: 'var(--sp-1) var(--sp-2)',
-              }}
-            >
-              <div style=${{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-2)', font: 'var(--type-eyebrow)', color: 'var(--color-fg-muted)' }}>
-                <span>MEMORY GRAPH</span>
-                <span>${loading && usage.length === 0 ? 'loading' : `${graph.totalUsed}/${graph.totalCap || 0} · ${graph.saturatedCount} saturated`}</span>
-              </div>
-              <${MemoryGraph}
-                nodes=${graph.nodes}
-                edges=${graph.edges}
-                width=${340}
-                height=${64}
-                ariaLabel="IDE memory graph"
-                testId="ide-memory-graph"
-              />
-              <span
-                style=${{
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: graph.visibleUsage.length === 0 ? 'var(--color-fg-disabled)' : 'var(--color-fg-muted)',
-                  fontSize: 'var(--fs-11)',
-                }}
-                title=${graph.visibleUsage.map(row => `${row.kind} ${row.used}/${row.cap}`).join(' · ')}
-              >
-                ${graph.visibleUsage.length === 0
-                  ? 'memory bank data unavailable'
-                  : graph.visibleUsage.map(row => row.kind).join(' · ')}
-              </span>
-              ${keeper?.memory_recent_note
-                ? html`
-                  <div
-                    style=${{
-                      color: 'var(--color-fg-muted)',
-                      fontSize: 'var(--fs-11)',
-                      lineHeight: 1.35,
-                      borderTop: '1px solid var(--color-border-divider)',
-                      paddingTop: 'var(--sp-2)',
-                    }}
-                  >
-                    ${keeper.memory_recent_note}
-                  </div>
-                `
-                : null}
-            </div>
           </div>
         `
         : html`<div role="status" style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-12)' }}>keeper unavailable</div>`}

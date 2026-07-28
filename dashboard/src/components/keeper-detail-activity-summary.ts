@@ -15,7 +15,6 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
   const hasActivity =
     hasActivitySignal ||
     workPreview ||
-    keeper.memory_recent_note ||
     (keeper.k2k_count ?? 0) > 0
 
   if (!hasActivity) return null
@@ -36,9 +35,6 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
         ? html`<span class="inline-flex items-center gap-1 text-2xs px-2.5 py-1 rounded-[var(--r-1)] bg-[var(--info-soft)] border border-[var(--info-border)] text-[var(--color-fg-muted)]">
             K2K <span class="font-mono font-medium text-[var(--info-fg)]">${keeper.k2k_count}</span>
           </span>`
-        : null}
-      ${keeper.memory_recent_note
-        ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
         : null}
     </div>
     ${workPreview

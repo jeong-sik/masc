@@ -879,7 +879,7 @@ describe('fetchKeeperTurnTranscript', () => {
 })
 
 describe('fetchMemorySubsystems', () => {
-  it('adds the sensitive memory entries query only when requested', async () => {
+  it('builds the query string from the provided filters', async () => {
     const rawResponse = {
       generated_at: '2026-05-06T00:00:00Z',
       hebbian: { synapses: [], last_consolidation: 0 },
@@ -894,21 +894,15 @@ describe('fetchMemorySubsystems', () => {
     ))
     vi.stubGlobal('fetch', fetchMock)
 
-    await fetchMemorySubsystems({ limit: 100 })
+    await fetchMemorySubsystems({ limit: 100, keeper: 'sangsu', outcome: 'success', q: 'note' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    let requestUrl = new URL(fetchMock.mock.calls[0]?.[0] as string, 'http://dashboard.local')
-    expect(requestUrl.searchParams.has('include_memory_entries')).toBe(false)
-
-    fetchMock.mockClear()
-
-    await fetchMemorySubsystems({ limit: 100, includeMemoryEntries: true })
-
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    requestUrl = new URL(fetchMock.mock.calls[0]?.[0] as string, 'http://dashboard.local')
+    const requestUrl = new URL(fetchMock.mock.calls[0]?.[0] as string, 'http://dashboard.local')
     expect(requestUrl.pathname).toBe('/api/v1/dashboard/memory-subsystems')
     expect(requestUrl.searchParams.get('limit')).toBe('100')
-    expect(requestUrl.searchParams.get('include_memory_entries')).toBe('true')
+    expect(requestUrl.searchParams.get('keeper')).toBe('sangsu')
+    expect(requestUrl.searchParams.get('outcome')).toBe('success')
+    expect(requestUrl.searchParams.get('q')).toBe('note')
   })
 })
 

@@ -31,23 +31,6 @@ export interface MemorySubsystemsEpisode {
   context: Record<string, string>
 }
 
-export interface MemorySubsystemsMemoryEntry {
-  keeper: string
-  kind: string
-  text: string
-  priority: number
-  ts_unix: number
-}
-
-/** RFC-0149 §3.1 — per-keeper memory bank read failure, surfaced as
- *  a typed sibling field next to the entry rows.  `error_class` is one
- *  of the closed 4-value `Keeper_memory_recall_exn_class.t` labels
- *  (`yojson_parse_error | io_error | type_error | other`). */
-export interface MemorySubsystemsMemoryEntryError {
-  keeper: string
-  error_class: string
-}
-
 export interface MemorySubsystemsDelegationRequest {
   id: string
   requester: string
@@ -72,18 +55,6 @@ export interface MemorySubsystemsResponse {
     limit: number
     items: MemorySubsystemsEpisode[]
   }
-  memory_entries?: {
-    total: number
-    filtered: number
-    shown: number
-    limit: number
-    items: MemorySubsystemsMemoryEntry[]
-    /** RFC-0149 §3.1 — per-keeper memory bank read failures.  Each
-     *  entry means that keeper's `memory.jsonl` could not be read and
-     *  the corresponding rows are absent from `items`; the rest of
-     *  `items` is still trustworthy. */
-    errors?: MemorySubsystemsMemoryEntryError[]
-  }
   delegation_requests?: {
     total: number
     shown: number
@@ -95,7 +66,6 @@ export interface MemorySubsystemsResponse {
   filters: {
     keepers: string[]
     outcomes: string[]
-    memory_kinds?: string[]
   }
 }
 
@@ -104,7 +74,6 @@ interface MemorySubsystemsQuery {
   keeper?: string
   outcome?: string
   q?: string
-  includeMemoryEntries?: boolean
   signal?: AbortSignal
 }
 
@@ -116,7 +85,6 @@ export function fetchMemorySubsystems(
   if (opts?.keeper) params.set('keeper', opts.keeper)
   if (opts?.outcome) params.set('outcome', opts.outcome)
   if (opts?.q) params.set('q', opts.q)
-  if (opts?.includeMemoryEntries) params.set('include_memory_entries', 'true')
   const qs = params.toString()
   return get<MemorySubsystemsResponse>(
     `/api/v1/dashboard/memory-subsystems${qs ? `?${qs}` : ''}`,

@@ -1281,7 +1281,6 @@ export interface Keeper {
   interests?: string[]
   primaryValue?: string
   activityLevel?: number
-  memory_recent_note?: string | null
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]

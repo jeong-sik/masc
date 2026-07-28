@@ -209,7 +209,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   const [phaseEnteredAtSec, setPhaseEnteredAtSec] = useState<number | null>(null)
   const pendingConfigKeeperRef = useRef<string | null>(null)
   // RFC-0046 §7 #1: single composite snapshot shared with the two
-  // derived panels (state-diagram + memory-tier).
+  // derived panels (state-diagram + compaction).
   const compositeEvidence = useKeeperCompositeEvidence(keeper.name)
   const runtimeTraceEvidence = useKeeperRuntimeTraceEvidence(keeper.name)
   // Surface only the `'fresh'` payload to cascading panels.

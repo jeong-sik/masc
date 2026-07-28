@@ -67,8 +67,9 @@ val accept_rejected_error :
   Agent_sdk.Error.sdk_error
 
 module For_testing : sig
-  val normalize_keeper_tool_choice :
-    Runtime_agent.config -> Runtime_agent.config
+  val validate_keeper_tool_choice :
+    Runtime_agent.config
+    -> (Runtime_agent.config, Agent_sdk.Error.sdk_error) result
 
   val readmission_config_for_checkpoint :
     model_input_projection_for:

@@ -165,25 +165,22 @@ type direct_retry_observed_attempt =
   ; observed_rotation_attempt_count : int
   }
 
-let test_keeper_hook_relaxes_strict_tool_choice () =
+let test_keeper_tool_choice_policy_rejects_strict_without_rewrite () =
   let open Agent_sdk.Types in
-  let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in
-  Alcotest.(check bool) "Any -> Auto" true (relax (Some Any) = Some Auto);
+  let validate = Masc.Keeper_tool_choice_policy.validate_for_keeper in
+  Alcotest.(check bool) "Any rejected" true
+    (Result.is_error (validate (Some Any)));
   Alcotest.(check bool)
-    "Tool -> Auto"
+    "Tool rejected"
     true
-    (relax (Some (Tool "keeper_context_status")) = Some Auto);
-  Alcotest.(check bool)
-    "Auto unchanged"
-    true
-    (relax (Some Auto) = Some Auto);
-  Alcotest.(check bool)
-    "None_ unchanged"
-    true
-    (relax (Some None_) = Some None_);
-  Alcotest.(check bool) "unset unchanged" true (relax None = None)
+    (Result.is_error (validate (Some (Tool "keeper_context_status"))));
+  Alcotest.(check bool) "Auto admitted unchanged" true
+    (validate (Some Auto) = Ok (Some Auto));
+  Alcotest.(check bool) "None_ admitted unchanged" true
+    (validate (Some None_) = Ok (Some None_));
+  Alcotest.(check bool) "unset admitted unchanged" true (validate None = Ok None)
 
-let test_keeper_provider_attempt_uses_relaxed_tool_choice () =
+let test_keeper_provider_attempt_rejects_strict_tool_choice () =
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -198,13 +195,18 @@ let test_keeper_provider_attempt_uses_relaxed_tool_choice () =
       ~provider_cfg
       ~system_prompt:"system"
       ~tools:[]
-    |> Masc.Keeper_turn_driver_try_provider.For_testing.normalize_keeper_tool_choice
   in
-  let request_config = Runtime_agent_context.provider_config_for_request config in
-  Alcotest.(check bool)
-    "provider attempt and exact-body preflight both use Auto"
-    true
-    (request_config.tool_choice = Some Agent_sdk.Types.Auto)
+  match
+    Masc.Keeper_turn_driver_try_provider.For_testing.validate_keeper_tool_choice
+      config
+  with
+  | Error
+      (Agent_sdk.Error.Config
+        (Agent_sdk.Error.InvalidConfig { field = "keeper.tool_choice"; _ })) ->
+    ()
+  | Error error ->
+    Alcotest.failf "wrong typed rejection: %s" (Agent_sdk.Error.to_string error)
+  | Ok _ -> Alcotest.fail "strict Keeper provider config must be rejected"
 
 let test_readmission_config_uses_only_candidate_history_and_context () =
   let original_history =
@@ -1816,13 +1818,13 @@ let () =
             `Quick
             test_replay_projection_failure_preserves_provider_success;
           Alcotest.test_case
-            "strict tool_choice is relaxed to auto"
+            "strict tool_choice is rejected without rewrite"
             `Quick
-            test_keeper_hook_relaxes_strict_tool_choice;
+            test_keeper_tool_choice_policy_rejects_strict_without_rewrite;
           Alcotest.test_case
-            "provider attempt and preflight share relaxed tool_choice"
+            "provider attempt rejects strict tool_choice"
             `Quick
-            test_keeper_provider_attempt_uses_relaxed_tool_choice;
+            test_keeper_provider_attempt_rejects_strict_tool_choice;
           Alcotest.test_case
             "readmission uses only candidate history and context"
             `Quick

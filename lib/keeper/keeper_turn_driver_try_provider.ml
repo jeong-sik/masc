@@ -224,15 +224,19 @@ let request_wire_manifest_decision
       ])
 ;;
 
-let normalize_keeper_tool_choice (config : Runtime_agent.config) =
-  let provider_cfg =
-    { config.provider_cfg with
-      Llm_provider.Provider_config.tool_choice =
-        Keeper_tool_choice_policy.relax_strict_for_keeper
-          config.provider_cfg.tool_choice
-    }
-  in
-  { config with provider_cfg }
+let validate_keeper_tool_choice (config : Runtime_agent.config) =
+  match
+    Keeper_tool_choice_policy.validate_for_keeper
+      config.provider_cfg.tool_choice
+  with
+  | Ok _ -> Ok config
+  | Error rejection ->
+    Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig
+            { field = "keeper.tool_choice"
+            ; detail = Keeper_tool_choice_policy.rejection_to_string rejection
+            }))
 ;;
 
 let request_config_for_keeper_projection (config : Runtime_agent.config) =
@@ -283,8 +287,8 @@ let run_try_provider
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools
         candidate
-      |> normalize_keeper_tool_choice
     in
+    let* base_config = validate_keeper_tool_choice base_config in
     (* Runtime/model configuration is authoritative; the run-level value only
        fills an omitted provider temperature. *)
     let temperature =
@@ -477,6 +481,6 @@ let run_try_provider
 
 module For_testing = struct
   let apply_accept = apply_accept
-  let normalize_keeper_tool_choice = normalize_keeper_tool_choice
   let readmission_config_for_checkpoint = readmission_config_for_checkpoint
+  let validate_keeper_tool_choice = validate_keeper_tool_choice
 end

@@ -52,9 +52,6 @@ type ctx =
   ; tools : Agent_sdk.Tool.t list
   }
 
-let relax_strict_tool_choice_for_keeper =
-  Keeper_tool_choice_policy.relax_strict_for_keeper
-
 let relative_path_has_segment_prefix prefix raw =
   String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
 ;;
@@ -378,13 +375,13 @@ let assemble_hooks
                 let recorded_blocks_for_receipt =
                   extra_system_context_assembly.blocks
                 in
-                (* OAS treats [None] in AdjustParams as "keep the base
-                   config", so strict choices must be explicitly relaxed.
-                   Tools remain available, but the model may finish without
-                   another forced tool call. *)
-                let tool_choice =
-                  relax_strict_tool_choice_for_keeper current_params.tool_choice
-                in
+                (* Tool choice is observational here. Keeper admission rejects
+                   strict provider configuration before dispatch; this hook
+                   must not silently turn a requested [Any]/[Tool] into [Auto].
+                   A composed outer hook may still adjust the value, and OAS
+                   remains the authoritative typed admission boundary for that
+                   final turn parameter. *)
+                let tool_choice = current_params.tool_choice in
                 let lane = computed_turn_lane in
                 record_tool_assignment ~turn ~tool_list:schema_filter ~lane;
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names

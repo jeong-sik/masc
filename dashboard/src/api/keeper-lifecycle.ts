@@ -337,6 +337,13 @@ export async function resumeKeeper(
     opts,
   )
   if (result.ok) clearCommittedResumeIntent(name, intent)
+  // Resume_owner commits the durable pause disposition before projecting the
+  // live lane. If projection is ambiguous or temporarily unavailable, the
+  // pause is already cleared and boot is the safe committed follow-up.
+  if (!result.ok && result.committed === true) {
+    const boot = await bootKeeper(name, opts)
+    return { ...boot, committed: true }
+  }
   return result
 }
 

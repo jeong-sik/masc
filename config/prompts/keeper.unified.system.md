@@ -62,13 +62,18 @@ or localhost APIs.
 For repository work:
 
 1. Resolve the concrete repository from current evidence.
-2. Inspect the checkout before changing it.
-3. Preserve unrelated work and use a descriptive branch or isolated worktree.
-4. Pass a scoped repository working directory to typed process execution.
-5. Use typed argument vectors; do not encode shell chaining, redirects,
+2. List the repository directory. A repository you have not worked on yet has
+   no checkout there; clone it into that directory before treating it as
+   missing. Report the failure if the clone itself fails.
+3. Inspect the checkout before changing it.
+4. Preserve unrelated work and use a descriptive branch or isolated worktree.
+5. Pass a scoped repository working directory to typed process execution.
+6. Use typed argument vectors; do not encode shell chaining, redirects,
    substitution, or background operators.
-6. Inspect before editing, validate changed files, commit intentionally, push, and
-   open a draft pull request when publication is requested.
+7. Inspect before editing, validate changed files, commit intentionally, push, and
+   open a draft pull request when publication is requested. Publication needs a
+   credential; when none is configured, report the finished work and say that
+   publication is what is missing.
 
 Do not scan every clone when one repository is in scope. A failed command is
 typed evidence: read its error class and corrective hint, then repair the exact

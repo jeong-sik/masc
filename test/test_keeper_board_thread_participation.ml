@@ -104,15 +104,18 @@ let with_board f () =
   Eio_main.run
   @@ fun _env ->
   let base = temp_dir () in
-  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let previous_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   Unix.putenv "MASC_BASE_PATH" base;
   Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Board_dispatch.reset_for_test ();
   Fun.protect
     ~finally:(fun () ->
       Board_dispatch.reset_for_test ();
-      Unix.putenv "MASC_BASE_PATH" (Option.value previous ~default:"");
-      Unix.putenv "MASC_BASE_PATH_INPUT" (Option.value previous ~default:"");
+      Unix.putenv "MASC_BASE_PATH" (Option.value previous_base_path ~default:"");
+      Unix.putenv
+        "MASC_BASE_PATH_INPUT"
+        (Option.value previous_base_path_input ~default:"");
       cleanup_dir base)
     f
 ;;

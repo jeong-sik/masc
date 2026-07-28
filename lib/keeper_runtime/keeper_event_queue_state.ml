@@ -24,6 +24,9 @@ type exact_execution_terminal_cause =
   | Domain_invalid_output
   | Compaction_produced_no_reduction
   | Compaction_increased_checkpoint
+  | Failed_request_readmission_unavailable
+  | Failed_request_still_over_capacity
+  | Failed_request_readmission_failed
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch
   | Commit_admission_unavailable
@@ -550,6 +553,12 @@ let exact_execution_terminal_cause_label = function
   | Domain_invalid_output -> "domain_invalid_output"
   | Compaction_produced_no_reduction -> "compaction_produced_no_reduction"
   | Compaction_increased_checkpoint -> "compaction_increased_checkpoint"
+  | Failed_request_readmission_unavailable ->
+    "failed_request_readmission_unavailable"
+  | Failed_request_still_over_capacity ->
+    "failed_request_still_over_capacity"
+  | Failed_request_readmission_failed ->
+    "failed_request_readmission_failed"
   | Invalid_structural_evidence -> "invalid_structural_evidence"
   | Invalid_structural_source_after_dispatch ->
     "invalid_structural_source_after_dispatch"
@@ -567,6 +576,12 @@ let exact_execution_terminal_cause_of_label = function
   | "domain_invalid_output" -> Ok Domain_invalid_output
   | "compaction_produced_no_reduction" -> Ok Compaction_produced_no_reduction
   | "compaction_increased_checkpoint" -> Ok Compaction_increased_checkpoint
+  | "failed_request_readmission_unavailable" ->
+    Ok Failed_request_readmission_unavailable
+  | "failed_request_still_over_capacity" ->
+    Ok Failed_request_still_over_capacity
+  | "failed_request_readmission_failed" ->
+    Ok Failed_request_readmission_failed
   | "invalid_structural_evidence" -> Ok Invalid_structural_evidence
   | "invalid_structural_source_after_dispatch" ->
     Ok Invalid_structural_source_after_dispatch

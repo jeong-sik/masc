@@ -122,6 +122,27 @@ let test_current_schema_round_trip_and_old_schema_rejection () =
   | Ok _ -> Alcotest.fail "old lease schema was accepted"
 ;;
 
+let test_readmission_terminal_causes_round_trip () =
+  let cases =
+    [ ( State.Failed_request_readmission_unavailable
+      , "failed_request_readmission_unavailable" )
+    ; State.Failed_request_still_over_capacity
+      , "failed_request_still_over_capacity"
+    ; State.Failed_request_readmission_failed
+      , "failed_request_readmission_failed"
+    ]
+  in
+  List.iter
+    (fun (cause, expected_label) ->
+       let label = State.exact_execution_terminal_cause_label cause in
+       Alcotest.(check string) "canonical terminal label" expected_label label;
+       match State.exact_execution_terminal_cause_of_label label with
+       | Ok decoded ->
+         Alcotest.(check bool) "terminal cause round trip" true (decoded = cause)
+       | Error detail -> Alcotest.fail detail)
+    cases
+;;
+
 let with_temp_dir prefix f =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
@@ -173,6 +194,10 @@ let () =
             `Quick
             test_changed_selected_snapshot_fails_closed
         ; Alcotest.test_case "fresh schema only" `Quick test_current_schema_round_trip_and_old_schema_rejection
+        ; Alcotest.test_case
+            "readmission terminal causes round trip"
+            `Quick
+            test_readmission_terminal_causes_round_trip
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart ] )

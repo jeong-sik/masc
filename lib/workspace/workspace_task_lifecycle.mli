@@ -6,6 +6,8 @@ type invalid =
   | Verification_claim_required
   | Verification_assigned_to of string
   | Verification_self_claim
+  | Verification_approval_notes_required
+  | Verification_rejection_reason_required
   | Invalid_transition
 
 type decision =
@@ -34,6 +36,7 @@ val decide
   -> agent_name:string
   -> task_id:string
   -> task_status:Masc_domain.task_status
+  -> requires_verification:bool
   -> action:Masc_domain.task_action
   -> now:string
   -> notes:string
@@ -43,4 +46,5 @@ val decide
 val valid_next_actions
   :  same_agent:bool
   -> task_status:Masc_domain.task_status
+  -> requires_verification:bool
   -> Masc_domain.task_action list

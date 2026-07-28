@@ -100,24 +100,6 @@ let log_task_transition_failed ~agent_name err =
       task_agent_log_warn ~agent_name "task transition failed: %s" message
   | _ -> task_agent_log_error ~agent_name "task transition failed: %s" message
 
-(** Client-side FSM gate: reject impossible transitions before server dispatch.
-    Uses [Workspace_task_classify.valid_next_actions_for_status] as SSOT. *)
-let client_side_transition_gate_error ~task_opt ~action ~action_s =
-  match task_opt with
-  | None -> None
-  | Some (task : Masc_domain.task) ->
-    let valid_actions = Workspace_task_classify.valid_next_actions_for_status task.task_status in
-    if List.mem action valid_actions
-    then None
-    else
-      Some
-        (Masc_domain.Task_error.InvalidState
-           (Printf.sprintf
-              "Transition '%s' from status '%s' is not allowed. Valid actions: %s"
-              action_s
-              (Masc_domain.task_status_to_string task.task_status)
-              (String.concat ", " (List.map Masc_domain.task_action_to_string valid_actions))))
-
 include Tool_task_payloads
 
 let sync_planning_current_task_with_owned_task (ctx : context) =

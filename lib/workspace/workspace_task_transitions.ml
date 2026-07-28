@@ -66,8 +66,9 @@ let transition_task_outcome_r
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
-        (* The workspace FSM owns lifecycle and identity invariants. Completion
-           evidence is submitted for an assigned verifier's terminal verdict. *)
+        (* The workspace FSM owns lifecycle and identity invariants. Strict
+           contracts submit evidence for an assigned verifier's terminal
+           verdict; advisory/default tasks preserve direct owner completion. *)
         let* () =
           (match action, task.task_status with
           | Masc_domain.Claim, Masc_domain.Todo ->
@@ -102,6 +103,7 @@ let transition_task_outcome_r
               ~agent_name
               ~task_id
               ~task_status:task.task_status
+              ~requires_verification:(Masc_domain.task_requires_verification task)
               ~action
               ~now
               ~notes
@@ -133,6 +135,18 @@ let transition_task_outcome_r
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     "Submitting worker cannot claim its own verification request"))
+          | Error Workspace_task_lifecycle.Verification_approval_notes_required ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "approve requires non-empty notes explaining the verification \
+                     decision"))
+          | Error Workspace_task_lifecycle.Verification_rejection_reason_required ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "reject requires a non-empty reason or notes explaining what \
+                     must be fixed"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -142,7 +156,12 @@ let transition_task_outcome_r
             in
 (* Issue #7646: ownership-mismatch dominates; only show valid_next_actions when the failure isn't an ownership problem. *)
             let actions_hint =
-              if assignee_hint <> "" then "" else next_actions_hint task.task_status
+              if assignee_hint <> ""
+              then ""
+              else
+                next_actions_hint
+                  ~requires_verification:(Masc_domain.task_requires_verification task)
+                  task.task_status
             in
 (* Concrete remediation. *)
 (* WORKAROUND: task_status (6 ctors) × task_action (9 ctors) = 54 combos, with ~11 specific hint cases. *)

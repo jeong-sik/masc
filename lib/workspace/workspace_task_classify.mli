@@ -101,13 +101,17 @@ val task_assignee_of_status : Masc_domain.task_status -> string option
     LLM keepers see what they SHOULD have called, not just what failed.
     Empty list for terminal states ([Done], [Cancelled]). *)
 val valid_next_actions_for_status
-  :  Masc_domain.task_status
+  :  requires_verification:bool
+  -> Masc_domain.task_status
   -> Masc_domain.task_action list
 
 (** Issue #7646: rendered hint string suitable for embedding in error
     messages, e.g. [", valid_next_actions=[claim;cancel]"]. Returns the
     empty string for terminal states. *)
-val next_actions_hint : Masc_domain.task_status -> string
+val next_actions_hint
+  :  requires_verification:bool
+  -> Masc_domain.task_status
+  -> string
 
 val task_started_at_unix : Masc_domain.task_status -> float
 

@@ -6,6 +6,8 @@ type invalid =
   | Verification_claim_required
   | Verification_assigned_to of string
   | Verification_self_claim
+  | Verification_approval_notes_required
+  | Verification_rejection_reason_required
   | Invalid_transition
 
 type decision =
@@ -64,6 +66,7 @@ let decide
       ~agent_name
       ~task_id
       ~task_status
+      ~requires_verification
       ~action
       ~now
       ~notes
@@ -116,7 +119,9 @@ let decide
       | Masc_domain.InProgress { assignee; _ } ) ) ->
     if not (same_agent assignee)
     then Error Invalid_transition
-    else Error Verification_submission_required
+    else if requires_verification
+    then Error Verification_submission_required
+    else ok (done_status ~assignee ~now ~notes)
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
   | ( Masc_domain.Done_action
     , ( Masc_domain.Todo
@@ -174,6 +179,8 @@ let decide
         } ) ->
     if not (same_agent verifier)
     then Error (Verification_assigned_to verifier)
+    else if String.equal (String.trim notes) ""
+    then Error Verification_approval_notes_required
     else
       ok
         (Masc_domain.Done
@@ -203,6 +210,8 @@ let decide
         { assignee; phase = Masc_domain.Verifier_assigned { verifier }; _ } ) ->
     if not (same_agent verifier)
     then Error (Verification_assigned_to verifier)
+    else if String.equal (String.trim notes) "" && String.equal (String.trim reason) ""
+    then Error Verification_rejection_reason_required
     else ok (Masc_domain.InProgress { assignee; started_at = now })
   | ( Masc_domain.Reject_verification
     , ( Masc_domain.Todo
@@ -213,7 +222,7 @@ let decide
     Error Invalid_transition
 ;;
 
-let valid_next_actions ~same_agent ~task_status =
+let valid_next_actions ~same_agent ~task_status ~requires_verification =
   let same_agent_pred _ = same_agent in
   let try_action action =
     match
@@ -223,10 +232,11 @@ let valid_next_actions ~same_agent ~task_status =
         ~agent_name:""
         ~task_id:""
         ~task_status
+        ~requires_verification
         ~action
         ~now:""
-        ~notes:""
-        ~reason:""
+        ~notes:"preview"
+        ~reason:"preview"
     with
     | Ok _ -> true
     | Error _ -> false

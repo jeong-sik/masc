@@ -204,7 +204,16 @@ let test_done_failed_transition_emits_typed_error () =
             | Some (Outcome.No_progress _) -> "No_progress"
             | Some (Outcome.Error _) -> "Error"))
 
-let test_done_submits_for_ordinary_verification () =
+let strict_contract : Masc_domain.task_contract =
+  { strict = true
+  ; completion_contract = [ "peer verification required" ]
+  ; required_evidence = []
+  ; inspect_gate_evidence = []
+  ; verify_gate_evidence = []
+  ; links = { operation_id = None; session_id = None }
+  }
+
+let test_strict_done_submits_for_verification () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -215,6 +224,7 @@ let test_done_submits_for_ordinary_verification () =
        ignore
          (Masc.Workspace.add_task
             config
+            ~contract:strict_contract
             ~title:"Evidence-bearing completion"
             ~priority:1
             ~description:"");
@@ -258,6 +268,66 @@ let test_done_submits_for_ordinary_verification () =
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+let test_default_done_is_terminal () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "keeper-task-create-test-agent" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Advisory completion"
+            ~priority:1
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name
+            ~capabilities:[]
+            ());
+       (match
+          Masc.Workspace.claim_task_r
+            config
+            ~agent_name
+            ~task_id:"task-001"
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail
+            ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = meta_with_active_goals [] in
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_task_done"
+           ~args:
+             (`Assoc
+               [ "task_id", `String "task-001"
+               ; "result", `String "implementation complete"
+               ; "evidence_refs", `List [ `String "commit:abc123" ]
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () -> fail "default completion was deferred"
+        | Tool_result.Failed _ ->
+          fail ("default completion failed: " ^ execution.raw_output));
+       match Masc.Workspace.get_tasks_raw config with
+       | [ { task_status = Masc_domain.Done _;
+             handoff_context = Some handoff; _ } ] ->
+         check string "result preserved as summary"
+           "implementation complete" handoff.summary;
+         check (list string) "evidence preserved"
+           [ "commit:abc123" ] handoff.evidence_refs
+       | [ _ ] -> fail "advisory/default completion was not terminal"
+       | tasks ->
+         failf "expected exactly one persisted task, got %d" (List.length tasks))
+
 let () =
   run "keeper task outcomes"
     [ ( "outcomes"
@@ -277,7 +347,9 @@ let () =
             `Quick test_done_missing_evidence_refs_emits_typed_error
         ; test_case "rejected done (failed transition) emits typed Error (D1)"
             `Quick test_done_failed_transition_emits_typed_error
-        ; test_case "done submits for ordinary verification"
-            `Quick test_done_submits_for_ordinary_verification
+        ; test_case "strict done submits for verification"
+            `Quick test_strict_done_submits_for_verification
+        ; test_case "default done is terminal"
+            `Quick test_default_done_is_terminal
         ] )
     ]

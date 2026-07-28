@@ -4,17 +4,26 @@ module D = Masc_domain
 let owner = "alice"
 let now = "2026-07-13T00:00:00Z"
 
-let decide ~same_agent ~task_status ~action () =
+let decide
+      ?(requires_verification = true)
+      ?(notes = "evidence at /tmp/proof")
+      ?(reason = "")
+      ~same_agent
+      ~task_status
+      ~action
+      ()
+  =
   L.decide
     ~new_verification_id:(fun () -> "vrf-1")
     ~same_agent:(fun _ -> same_agent)
     ~agent_name:owner
     ~task_id:"task-1"
     ~task_status
+    ~requires_verification
     ~action
     ~now
-    ~notes:"evidence at /tmp/proof"
-    ~reason:""
+    ~notes
+    ~reason
 ;;
 
 let in_progress = D.InProgress { assignee = owner; started_at = now }
@@ -54,6 +63,20 @@ let test_claimed_done_requires_verification_submission () =
   |> expect_error L.Verification_submission_required
 ;;
 
+let test_default_done_is_terminal () =
+  match
+    decide
+      ~requires_verification:false
+      ~same_agent:true
+      ~task_status:in_progress
+      ~action:D.Done_action
+      ()
+  with
+  | Ok { new_status = D.Done { assignee; _ }; _ }
+    when String.equal assignee owner -> ()
+  | Ok _ | Error _ -> failwith "advisory/default owner completion must be terminal"
+;;
+
 let test_verdict_requires_assigned_winner () =
   decide
     ~same_agent:false
@@ -80,6 +103,35 @@ let test_verdict_requires_assigned_winner () =
   | Ok { new_status = D.InProgress { assignee; _ }; _ }
     when String.equal assignee owner -> ()
   | Ok _ | Error _ -> failwith "assigned winner reject must return task to producer"
+;;
+
+let test_verdict_requires_justification_before_commit () =
+  decide
+    ~notes:"  "
+    ~same_agent:true
+    ~task_status:(assigned "verifier")
+    ~action:D.Approve_verification
+    ()
+  |> expect_error L.Verification_approval_notes_required;
+  decide
+    ~notes:""
+    ~reason:" "
+    ~same_agent:true
+    ~task_status:(assigned "verifier")
+    ~action:D.Reject_verification
+    ()
+  |> expect_error L.Verification_rejection_reason_required;
+  match
+    decide
+      ~notes:""
+      ~reason:"missing test evidence"
+      ~same_agent:true
+      ~task_status:(assigned "verifier")
+      ~action:D.Reject_verification
+      ()
+  with
+  | Ok { new_status = D.InProgress _; _ } -> ()
+  | Ok _ | Error _ -> failwith "non-empty rejection reason must be accepted"
 ;;
 
 let task_with_status task_status : D.task =
@@ -132,6 +184,8 @@ let test_awaiting_claim_has_one_non_producer_winner () =
 let () =
   test_done_requires_verification_submission ();
   test_claimed_done_requires_verification_submission ();
+  test_default_done_is_terminal ();
   test_verdict_requires_assigned_winner ();
+  test_verdict_requires_justification_before_commit ();
   test_awaiting_claim_has_one_non_producer_winner ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

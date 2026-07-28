@@ -40,12 +40,6 @@ val result_to_response :
 val log_task_transition_failed :
   agent_name:string -> Masc_domain.masc_error -> unit
 
-val client_side_transition_gate_error :
-  task_opt:Masc_domain.task option ->
-  action:Masc_domain.task_action ->
-  action_s:string ->
-  Masc_domain.Task_error.t option
-
 val sync_planning_current_task_with_owned_task : context -> unit
 val sync_owner_current_task_binding : context -> unit
 val handle_add_task :

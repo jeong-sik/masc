@@ -542,6 +542,7 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
    occurrence order. Every attempt is checked again after its final provider
    config transform in Keeper_turn_driver. No provider/model names live in
    this policy. *)
+(* TEL-OK: pure reachability projection; callers own config-load diagnostics. *)
 let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
@@ -565,6 +566,7 @@ let keeper_dispatch_runtime_ids
   dedupe [] [] (routed_roots @ media_failover)
 ;;
 
+(* TEL-OK: pure fail-closed validation; the load boundary surfaces its error. *)
 let validate_keeper_dispatch_request_caps
     ~(config_path : string)
     ( runtimes
@@ -1786,6 +1788,7 @@ let commit_runtime_config_text
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path:path content
   in
+  (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
   let* () = validate_keeper_dispatch_request_caps ~config_path:path loaded in
   match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
@@ -1851,9 +1854,11 @@ let save_config_text ?runtime_config_path content =
 
 module For_testing = struct
   type snapshot = loaded_state
+  (* TEL-OK: this module only exposes pure state and validation test helpers. *)
 
   let snapshot () = runtime_state ()
   let restore snapshot = Atomic.set loaded_state_ref snapshot
+  (* TEL-OK: test-only alias of the pure reachability projection above. *)
   let keeper_dispatch_runtime_ids = keeper_dispatch_runtime_ids
 
   let save_config_text_with_sync_parent

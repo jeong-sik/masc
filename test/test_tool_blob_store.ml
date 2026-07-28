@@ -257,7 +257,7 @@ let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
       let durable_consumer =
         Filename.concat
           (Common.masc_dir_from_base_path ~base_path)
-          "shared-tool-bridge/history.jsonl"
+          "keepers/keeper-a/sessions/history.jsonl"
       in
       Fs_compat.mkdir_p (Filename.dirname durable_consumer);
       Fs_compat.save_file
@@ -322,7 +322,7 @@ let test_maintenance_malformed_reference_fails_closed () =
       let source =
         Filename.concat
           (Common.masc_dir_from_base_path ~base_path)
-          "gate-replay/malformed.jsonl"
+          "gate/malformed.jsonl"
       in
       Fs_compat.mkdir_p (Filename.dirname source);
       Fs_compat.save_file source "{\"output\":\"[masc:blob garbage]\"}\n";
@@ -338,6 +338,38 @@ let test_maintenance_malformed_reference_fails_closed () =
       Alcotest.(check (option string))
         "blob retained on malformed reference"
         (Some "must survive malformed source")
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_does_not_scan_repository_mirrors () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"not owned by a repository mirror" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let repository_source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "repos/masc/docs/blob-marker.md"
+      in
+      Fs_compat.mkdir_p (Filename.dirname repository_source);
+      Fs_compat.save_file
+        repository_source
+        "documentation example: [masc:blob not-a-reference]";
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "repository source does not claim blob ownership"
+        1
+        observed.candidates_recorded;
+      let swept =
+        maintenance_ok
+          ~base_path
+          ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "stable unowned blob is deleted" 1 swept.deleted;
+      Alcotest.(check (option string))
+        "repository text did not retain the blob"
+        None
         (fetch_ok store ~sha256:blob.sha256))
 
 let test_maintenance_rechecks_candidate_referenced_before_startup () =
@@ -525,8 +557,9 @@ let test_maintenance_rejects_symbolic_link_durable_source () =
       let linked_source =
         Filename.concat
           (Common.masc_dir_from_base_path ~base_path)
-          "linked-consumer.json"
+          "messages/linked-consumer.json"
       in
+      Fs_compat.mkdir_p (Filename.dirname linked_source);
       Unix.symlink outside linked_source;
       (match M.run ~base_path ~mode:M.Observe_only with
        | Error (M.Durable_source_stat_failed { path; _ }) ->
@@ -753,6 +786,10 @@ let () =
             "maintenance malformed reference fails closed"
             `Quick
             test_maintenance_malformed_reference_fails_closed;
+          Alcotest.test_case
+            "maintenance ignores repository mirrors"
+            `Quick
+            test_maintenance_does_not_scan_repository_mirrors;
           Alcotest.test_case
             "maintenance rechecks candidate referenced before startup"
             `Quick

@@ -906,12 +906,11 @@ let initialize_owner_state_blocking
         (Owner_initialization_failed
            (Keeper_persistence_preparation_failed error))
   in
-  (* The periodic maintenance owner only records unreferenced candidates:
-     deleting while live writers can still create references would race the
-     scan. Preparation above has converged recovery writes, while Keeper
+  (* Preparation above has converged recovery writes, while Keeper
      persistence owners have not started yet, so startup is the sole
-     quiescent deletion boundary. A failed scan retains every blob and does
-     not make unrelated server startup unavailable. *)
+     quiescent scan/deletion boundary. A blob must remain unreferenced across
+     two complete startup scans before deletion. A failed scan retains every
+     blob and does not make unrelated server startup unavailable. *)
   (match
      Eio_unix.run_in_systhread (fun () ->
        Tool_blob_maintenance.run

@@ -192,10 +192,23 @@ let references_in_file ~ownership_root path =
       |> snd
 ;;
 
-let live_references ~base_path =
+let durable_consumer_basenames =
+  [ "gate"
+  ; Common.keepers_runtime_dirname
+  ; "keeper_chat"
+  ; "messages"
+  ; "tool_calls"
+  ; "traces"
+  ; Common.keeper_runtime_store_dirname Common.Keeper_trajectories
+  ]
+;;
+
+let durable_consumer_roots ~base_path =
   let runtime_root = Common.masc_dir_from_base_path ~base_path in
-  let blob_root = Tool_blob_store.(create ~base_path |> root_dir) in
-  let candidate_path = candidate_snapshot_path ~base_path in
+  List.map (Filename.concat runtime_root) durable_consumer_basenames
+;;
+
+let live_references ~base_path =
   let same_directory (left : Unix.stats) (right : Unix.stats) =
     left.st_dev = right.st_dev
     && left.st_ino = right.st_ino
@@ -250,48 +263,38 @@ let live_references ~base_path =
              })
   in
   let rec scan_entry path references =
-    if String.equal path blob_root || String.equal path candidate_path
-    then Ok references
-    else
-      try
-        match (Unix.lstat path).Unix.st_kind with
-        | Unix.S_DIR -> scan_directory path references
-        | Unix.S_REG ->
-          Result.map
-            (String_set.union references)
-            (references_in_file ~ownership_root:base_path path)
-        | Unix.S_LNK ->
-          Error
-            (Durable_source_stat_failed
-               { path
-               ; reason =
-                   "symbolic links are not durable maintenance sources"
-               })
-        | Unix.S_CHR
-        | Unix.S_BLK
-        | Unix.S_FIFO
-        | Unix.S_SOCK ->
-          Ok references
-      with
-      | Sys_error reason ->
-        Error (Durable_source_stat_failed { path; reason })
-      | Unix.Unix_error (code, fn, arg) ->
+    try
+      match (Unix.lstat path).Unix.st_kind with
+      | Unix.S_DIR -> scan_directory path references
+      | Unix.S_REG ->
+        Result.map
+          (String_set.union references)
+          (references_in_file ~ownership_root:base_path path)
+      | Unix.S_LNK ->
         Error
           (Durable_source_stat_failed
              { path
-             ; reason =
-                 Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+             ; reason = "symbolic links are not durable maintenance sources"
              })
+      | Unix.S_CHR
+      | Unix.S_BLK
+      | Unix.S_FIFO
+      | Unix.S_SOCK ->
+        Ok references
+    with
+    | Sys_error reason ->
+      Error (Durable_source_stat_failed { path; reason })
+    | Unix.Unix_error (code, fn, arg) ->
+      Error
+        (Durable_source_stat_failed
+           { path
+           ; reason =
+               Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+           })
   and scan_directory path references =
     match read_directory path with
     | Error _ as error -> error
-    | Ok None ->
-      if String.equal path runtime_root
-      then Ok references
-      else
-        Error
-          (Durable_source_stat_failed
-             { path; reason = "directory disappeared during scan" })
+    | Ok None -> Ok references
     | Ok (Some entries) ->
       entries
       |> Array.to_list
@@ -302,7 +305,12 @@ let live_references ~base_path =
                 scan_entry (Filename.concat path name) current))
            (Ok references)
   in
-  scan_directory runtime_root String_set.empty
+  durable_consumer_roots ~base_path
+  |> List.fold_left
+       (fun result root ->
+          Result.bind result (fun references ->
+            scan_directory root references))
+       (Ok String_set.empty)
 ;;
 
 let candidate_snapshot_to_json candidates =

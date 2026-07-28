@@ -1,17 +1,20 @@
 (** Single maintenance owner for the shared {!Tool_blob_store}.
 
-    Live references are the union of exact {!Tool_output} markers in every
-    regular durable file below the workspace runtime root, including Gate
-    replay sidecars and shared [Tool_bridge] consumers. Blob payloads and this
-    module's own candidate snapshot are excluded.
+    Live references are the union of exact {!Tool_output} markers in the
+    closed durable-consumer registry: Keeper state/checkpoints, Gate replay,
+    tool-call logs, trajectories, traces, messages, and Keeper chat. Repository
+    mirrors, build products, operator config, and observational logs are not
+    blob consumers and are never traversed. A new durable consumer must be
+    added to this registry in the same change that persists a reference.
 
     Retention is an explicit two-state policy, not an age/count heuristic:
     [Observe_only] records every currently unreferenced blob as a durable
     candidate and deletes nothing. [Delete_previous_candidates] deletes only
     hashes that were candidates in the previous durable snapshot and remain
-    unreferenced in the new complete scan. The caller owns the quiescent
-    maintenance window. A malformed reference, scan failure, candidate-store
-    failure, or unlink failure aborts visibly. *)
+    unreferenced in the new complete scan. Production calls it only at the
+    quiescent startup boundary, so two complete startup scans are required.
+    A malformed reference, scan failure, candidate-store failure, or unlink
+    failure aborts visibly. *)
 
 type mode =
   | Observe_only

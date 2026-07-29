@@ -74,6 +74,11 @@ let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat
 let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
+let manual_compaction_requested_of_stimuli = function
+  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
+  | [] | [ _ ] | _ :: _ :: _ -> false
+;;
+
 (* Keepalive scheduling decision (record + decide function) extracted to
    [Keeper_heartbeat_loop_scheduling] (godfile decomp). *)
 type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
@@ -85,8 +90,16 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
-let should_run_turn_after_event_intake ~scheduled ~event_queue_intake_error =
-  scheduled && Option.is_none event_queue_intake_error
+let should_run_turn_after_event_intake
+      ~scheduled
+      ~compaction_retry_suspended
+      ~(event_intake : heartbeat_event_intake)
+  =
+  scheduled
+  && Option.is_none event_intake.event_queue_intake_error
+  &&
+  ( (not compaction_retry_suspended)
+  || manual_compaction_requested_of_stimuli event_intake.consumed_stimuli )
 ;;
 
 let provider_timeout_observation_reasons =
@@ -329,11 +342,6 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 ;;
 
-let manual_compaction_requested_of_stimuli = function
-  | [ { Keeper_event_queue.payload = Manual_compaction_requested; _ } ] -> true
-  | [] | [ _ ] | _ :: _ :: _ -> false
-;;
-
 let compaction_outcome_of_cycle_outcome = function
   | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
   | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
@@ -572,17 +580,31 @@ let run_keepalive_unified_turn
          stuck behind sticky blockers. Failed turns record evidence via
          Keeper_registry; recovery is autonomous (next turn's observation)
          or operator-driven (board/keeper_chat), not blocker-driven. *)
+      let compaction_retry_suspended =
+        Keeper_meta_contract.compaction_retry_suspended
+          meta_after_triage.runtime.compaction_rt
+      in
+      let compaction_suspension_blocks_turn =
+        compaction_retry_suspended
+        && not manual_compaction_requested
+      in
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
-          ~event_queue_intake_error:event_intake.event_queue_intake_error
+          ~compaction_retry_suspended
+          ~event_intake
       in
       let verdict_strs =
-        match event_intake.event_queue_intake_error with
-        | None -> scheduling.verdict_reasons
-        | Some error ->
-          Stimulus_intake.event_queue_intake_error_reason_label error
-          :: scheduling.verdict_reasons
+        let reasons =
+          match event_intake.event_queue_intake_error with
+          | None -> scheduling.verdict_reasons
+          | Some error ->
+            Stimulus_intake.event_queue_intake_error_reason_label error
+            :: scheduling.verdict_reasons
+        in
+        if compaction_suspension_blocks_turn
+        then "compaction_retry_suspended" :: reasons
+        else reasons
       in
       let channel_str = scheduling.channel in
       if not should_run_turn

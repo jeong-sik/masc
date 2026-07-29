@@ -54,7 +54,7 @@ val with_in_turn_liveness_pulse :
   stop:bool Atomic.t ->
   (unit -> 'b) -> 'b
 
-type heartbeat_event_intake = {
+type heartbeat_event_intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
@@ -80,11 +80,14 @@ val heartbeat_event_intake :
   heartbeat_event_intake
 
 (** Source-authority gate applied after world scheduling. A selected stimulus
-    whose intake failed must remain pending and cannot reach the provider. *)
+    whose intake failed must remain pending and cannot reach the provider.
+    A suspended compaction retry admits only the exact manual-compaction
+    stimulus selected by [event_intake]; independent booleans cannot invent
+    manual recovery authority. *)
 val should_run_turn_after_event_intake :
   scheduled:bool ->
-  event_queue_intake_error:
-    Keeper_heartbeat_stimulus_intake.event_queue_intake_error option ->
+  compaction_retry_suspended:bool ->
+  event_intake:heartbeat_event_intake ->
   bool
 
 type keepalive_scheduling_decision = {

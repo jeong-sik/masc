@@ -29,7 +29,9 @@ val account_failure_counting
   -> bool
 (** Compute whether this failure observation advances the crash counter,
     consuming empty-completion exemption budget or invalid-request budget
-    when applicable.  Call exactly once per failure observation, before
+    when applicable. Capacity-owned [InvalidRequest] reasons use the canonical
+    compaction transition instead of this generic budget. Call exactly once per
+    failure observation, before
     {!record_failure_observation}. *)
 
 val record_failure_observation

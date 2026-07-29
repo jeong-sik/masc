@@ -62,12 +62,21 @@ let empty_completion_exemption_exhausted ~keeper_name err =
     used > empty_completion_exemption_budget)
 ;;
 
-(* Consume one [InvalidRequest] budget unit for [keeper_name] when [err] is
-   in that class; returns [true] once the consecutive bound is exceeded.
-   Separate counter from the empty-completion budget above — the two
-   exemption classes never share units. *)
+(* Consume one generic deterministic non-capacity [InvalidRequest] budget unit
+   for [keeper_name]. The canonical capacity transition owns request-body
+   limits; borrowing this budget as a second Gate would make the same failure
+   advance two independent retry authorities. Returns [true] once the
+   consecutive bound is exceeded. Separate counter from the empty-completion
+   budget above — the two exemption classes never share units. *)
 let invalid_request_budget_exhausted ~keeper_name err =
-  if not (EC.is_invalid_request_error err)
+  let capacity_owned =
+    match Keeper_turn_runtime_budget.capacity_transition_of_error err with
+    | Keeper_turn_runtime_budget.Compact_next_cycle _ -> true
+    | Keeper_turn_runtime_budget.Not_capacity
+    | Keeper_turn_runtime_budget.Capacity_non_compacting _ ->
+      false
+  in
+  if (not (EC.is_invalid_request_error err)) || capacity_owned
   then false
   else (
     let exhausted = note_invalid_request_failure ~keeper_name in

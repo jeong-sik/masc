@@ -2454,7 +2454,6 @@
  (deps
   ../lib/config_dir_resolver/config_dir_resolver.ml
   ../lib/keeper/keeper_tool_surface_ops.ml
-  ../lib/board_tool_adapter/board_tool_cache.ml
   ../lib/tool_workspace.ml))
 
 ; RFC-0085 PR-12 — Tool_spec list bindings renamed (drop misleading

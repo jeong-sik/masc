@@ -356,6 +356,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   let options : Agent_sdk.Agent.options =
     { Agent_sdk.Agent.default_options with
       hooks = Option.value ~default:Agent_sdk.Hooks.empty config.hooks
+    ; provider_config = Some config.provider_cfg
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; body_timeout_s = config.body_timeout_s
     ; context_injector = config.context_injector

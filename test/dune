@@ -27,6 +27,7 @@
 
 (tests
  (names
+  test_keeper_board_self_attribution
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
@@ -333,6 +334,7 @@
   test_board_rest_routes
   test_board_context_inference_resolution)
  (modules
+  test_keeper_board_self_attribution
   test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate

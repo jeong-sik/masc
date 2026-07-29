@@ -19,10 +19,14 @@
     does not rewrite the provider result. *)
 
 val metric : Keeper_metrics.t
-(** Histogram the admitted byte count lands in, labelled by keeper. *)
+(** Histogram the admitted byte count lands in, labelled by keeper and the
+    exact runtime whose provider configuration admitted the request. *)
 
 val observer :
-  keeper_name:string -> Agent_sdk.Agent.pre_dispatch_serialization_observer
-(** [observer ~keeper_name] records [body_bytes] under {!metric} and admits the
-    observation. It never rejects: this path exists only to measure, and a
-    rejection would manufacture typed failure evidence out of measurement. *)
+  keeper_name:string ->
+  runtime_id:string ->
+  Agent_sdk.Agent.pre_dispatch_serialization_observer
+(** [observer ~keeper_name ~runtime_id] records [body_bytes] under {!metric}
+    and admits the observation. It never rejects: this path exists only to
+    measure, and a rejection would manufacture typed failure evidence out of
+    measurement. *)

@@ -261,7 +261,8 @@ let run_try_provider
           ; pre_dispatch_serialization_observer =
               Some
                 (Keeper_request_wire_observation.observer
-                   ~keeper_name:ctx.keeper_name)
+                   ~keeper_name:ctx.keeper_name
+                   ~runtime_id:ctx.runtime_id)
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool

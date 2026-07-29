@@ -178,11 +178,8 @@ let of_yojson = function
      | Some (`String "resume_owner"), _ -> parse_resume fields
      | Some (`String "cancel_accepted"), Some (`String "pending") ->
        parse_cancel_pending fields
-     | Some (`String "cancel_accepted"), Some (`String "active_lease") ->
-       (* The active-lease arm required an operator-supplied lease that
-          [commit_transition] then had to find in durable state; none has been
-          there since #25969 moved production to peek/ack. *)
-       Error "active-lease cancel_accepted is no longer supported"
+     | Some (`String "cancel_accepted"), Some _ ->
+       Error "cancel_accepted source_state must be pending"
      | Some (`String "transfer_owner"), _ -> parse_transfer fields
      | Some (`String "ack_source_terminal"), _ ->
        parse_source_terminal fields

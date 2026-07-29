@@ -303,11 +303,6 @@ let reaction_kind_of_transition = function
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
   | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
   | Keeper_event_queue_state.Ack_source_terminal _ -> Event_queue_ack
-  | Keeper_event_queue_state.Settle_exact
-      { semantic = Exact_no_compaction; _ } ->
-    Event_queue_no_compaction
-  | Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
-    Event_queue_escalated
   | Keeper_event_queue_state.Requeue _ -> Event_queue_requeued
   | Keeper_event_queue_state.Escalate _ -> Event_queue_escalated
 ;;
@@ -688,22 +683,14 @@ let reaction_kind_matches_transition reaction_kind transition =
   | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
   | Event_queue_ack, Keeper_event_queue_state.Ack_source_terminal _ -> true
   | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
-  | Event_queue_no_compaction,
-    Keeper_event_queue_state.Settle_exact
-      { semantic = Exact_no_compaction; _ } ->
-    true
   | Event_queue_cancelled, Keeper_event_queue_state.Cancel_accepted _ -> true
   | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
   | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
-  | Event_queue_escalated,
-    Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
-    true
   | Turn_started, _
   | Cursor_ack, _
   | Event_queue_ack,
     ( Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
-    | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_no_compaction,
@@ -712,7 +699,6 @@ let reaction_kind_matches_transition reaction_kind transition =
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
     | Keeper_event_queue_state.Ack_source_terminal _
-    | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_cancelled,
@@ -721,7 +707,6 @@ let reaction_kind_matches_transition reaction_kind transition =
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Transfer_accepted _
     | Keeper_event_queue_state.Ack_source_terminal _
-    | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_requeued,
@@ -731,7 +716,6 @@ let reaction_kind_matches_transition reaction_kind transition =
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
     | Keeper_event_queue_state.Ack_source_terminal _
-    | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_escalated,
     ( Keeper_event_queue_state.Ack
@@ -740,7 +724,6 @@ let reaction_kind_matches_transition reaction_kind transition =
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
     | Keeper_event_queue_state.Ack_source_terminal _
-    | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _ ) -> false
 ;;
 
@@ -782,7 +765,6 @@ let decode_transition_source = function
 ;;
 
 let decode_transition_reaction
-      ~legacy_receipt
       ~event_id
       ~metadata
       ~reaction_kind
@@ -825,18 +807,9 @@ let decode_transition_reaction
     | Some value -> Ok value
     | None -> Error Missing_transition_receipt
   in
-  let decode_receipt =
-    if legacy_receipt
-    then Keeper_event_queue_state.legacy_settlement_transition_receipt_of_yojson
-    else
-      match receipt_json with
-      | `Assoc fields
-        when List.mem_assoc "lease_id" fields || List.mem_assoc "lease_sequence" fields ->
-        Keeper_event_queue_state.legacy_transition_receipt_of_yojson
-      | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-        Keeper_event_queue_state.transition_receipt_of_yojson
-  in
-  let* receipt = decode_receipt receipt_json |> Result.map_error (fun _ -> Invalid_transition_receipt)
+  let* receipt =
+    Keeper_event_queue_state.transition_receipt_of_yojson receipt_json
+    |> Result.map_error (fun _ -> Invalid_transition_receipt)
   in
   let expected_event_id = event_queue_transition_event_id receipt source_index in
   let transition_id_matches =
@@ -871,10 +844,9 @@ let decode_reaction_row ~event_id metadata reaction =
     else Error Event_identity_mismatch
   | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
     | Event_queue_requeued | Event_queue_escalated ),
-    ("keeper_event_queue_transition" | "keeper_event_queue_settlement" as source) ->
+    "keeper_event_queue_transition" ->
     let* transition_receipt =
       decode_transition_reaction
-        ~legacy_receipt:(String.equal source "keeper_event_queue_settlement")
         ~event_id
         ~metadata
         ~reaction_kind
@@ -887,12 +859,12 @@ let decode_reaction_row ~event_id metadata reaction =
          { metadata; reaction_kind; transition_receipt = Some transition_receipt })
   | Cursor_ack, "keeper_world_observation.board_cursor" ->
     Error Reaction_source_mismatch
-  | Turn_started, ("keeper_event_queue_transition" | "keeper_event_queue_settlement")
+  | Turn_started, "keeper_event_queue_transition"
   | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_cancelled
     | Event_queue_requeued | Event_queue_escalated ),
     "keeper_event_queue"
   | Cursor_ack,
-    ("keeper_event_queue" | "keeper_event_queue_transition" | "keeper_event_queue_settlement") ->
+    ("keeper_event_queue" | "keeper_event_queue_transition") ->
     Error Reaction_source_mismatch
   | ( Turn_started | Event_queue_ack | Event_queue_no_compaction
     | Event_queue_cancelled | Event_queue_requeued | Event_queue_escalated

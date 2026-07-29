@@ -79,7 +79,9 @@ check_boundary() {
   do
     [[ -f "${candidate}" ]] && mixed_projection_targets+=("${candidate}")
   done
-  if rg -n "${retired_projection_pattern}" "${mixed_projection_targets[@]}"; then
+  if (( ${#mixed_projection_targets[@]} > 0 )) \
+    && rg -n "${retired_projection_pattern}" "${mixed_projection_targets[@]}"
+  then
     fail "retired compaction projection carrier remains in an adjacent mixed-purpose path"
   fi
 
@@ -102,8 +104,6 @@ check_boundary() {
   legacy_label_candidates=(
     "${TARGET}"
     "${REPO_ROOT}/lib/keeper/keeper_compaction_llm_summarizer.mli"
-    "${REPO_ROOT}/lib/keeper/keeper_registry_event_queue_exact_execution.ml"
-    "${REPO_ROOT}/lib/keeper/keeper_registry_event_queue_exact_execution.mli"
     "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_persistence.ml"
     "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_persistence.mli"
     "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.ml"
@@ -119,14 +119,41 @@ check_boundary() {
     fail "retired receipt-phase or legacy durable terminal label remains"
   fi
 
+  local retired_event_queue_pattern
+  local event_queue_candidate
+  local event_queue_candidates=()
+  retired_event_queue_pattern='\b(lease_id|lease_sequence|settlement_id|settle_exact|Settle_exact|settle_exact_terminal_after_cancellation|retain_unacked_pending|source_lease_disposition|exact_execution_binding|exact_source_disposition|allow_legacy_durable)\b|keeper\.event_queue\.state\.v(7|8|9|10|11)|masc\.keeper_event_queue\.settlement|event-queue-settlements|event-queue-inflight'
+  for event_queue_candidate in \
+    "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.ml" \
+    "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.mli" \
+    "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_persistence.ml" \
+    "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_persistence.mli" \
+    "${REPO_ROOT}/lib/keeper/keeper_registry_event_queue.ml" \
+    "${REPO_ROOT}/lib/keeper/keeper_registry_event_queue.mli" \
+    "${REPO_ROOT}/lib/keeper/keeper_unified_turn.ml" \
+    "${REPO_ROOT}/lib/keeper/keeper_unified_turn.mli" \
+    "${REPO_ROOT}/lib/keeper/keeper_heartbeat_loop.ml" \
+    "${REPO_ROOT}/lib/keeper/keeper_paused_work_disposition_receipt.ml" \
+    "${REPO_ROOT}/lib/keeper/keeper_paused_work_disposition_receipt.mli" \
+    "${REPO_ROOT}/lib/keeper/keeper_reaction_ledger.ml"
+  do
+    [[ -f "${event_queue_candidate}" ]] \
+      && event_queue_candidates+=("${event_queue_candidate}")
+  done
+  if (( ${#event_queue_candidates[@]} > 0 )) \
+    && rg -n "${retired_event_queue_pattern}" "${event_queue_candidates[@]}"
+  then
+    fail "retired Event Layer lease or settlement authority remains"
+  fi
+
   echo "[compaction-exact-flow-boundary] OK"
 }
 
 self_test() {
-  local fixture target clean adjacent adjacent_clean alternate
+  local fixture target clean adjacent adjacent_clean alternate event_state
   fixture="$(mktemp -d "${TMPDIR:-/tmp}/compaction-exact-flow-boundary.XXXXXX")"
   trap "rm -rf '${fixture}'" EXIT
-  mkdir -p "${fixture}/lib/keeper" "${fixture}/test"
+  mkdir -p "${fixture}/lib/keeper" "${fixture}/lib/keeper_runtime" "${fixture}/test"
   target="${fixture}/lib/keeper/keeper_compaction_llm_summarizer.ml"
   adjacent="${fixture}/lib/keeper/keeper_post_turn.ml"
   cat >"${target}" <<'EOF'
@@ -147,6 +174,17 @@ EOF
   MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
     MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
     "${BASH_SOURCE[0]}" --check-only >/dev/null
+
+  event_state="${fixture}/lib/keeper_runtime/keeper_event_queue_state.ml"
+  printf '%s\n' 'let lease_id = "retired"' >"${event_state}"
+  if
+    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
+  then
+    fail "self-test retired Event Layer authority unexpectedly passed"
+  fi
+  rm -f "${event_state}"
 
   printf '%s\n' 'let _ = Exact_output.snapshot_flow' >>"${target}"
   if
@@ -234,7 +272,7 @@ EOF
     MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
     "${BASH_SOURCE[0]}" --check-only >/dev/null
   echo \
-    "[compaction-exact-flow-boundary:self-test] clean=pass unrelated=pass duplicate=fail missing=fail legacy=fail forbidden=fail projection=fail dynamic=fail carrier=fail restored=pass"
+    "[compaction-exact-flow-boundary:self-test] clean=pass event-layer=fail unrelated=pass duplicate=fail missing=fail legacy=fail forbidden=fail projection=fail dynamic=fail carrier=fail restored=pass"
 }
 
 case "${1:-}" in

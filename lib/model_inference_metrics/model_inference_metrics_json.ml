@@ -47,8 +47,10 @@ let cost_read_to_json = function
       ; "schema_violation_rows", `Int diagnostics.schema_violation_rows
       ]
   | Error error ->
-    Tool_args.error_assoc
-      [ "detail", `String (Dated_jsonl.read_error_to_string error) ]
+    `Assoc
+      [ "status", `String "error"
+      ; "detail", `String (Dated_jsonl.read_error_to_string error)
+      ]
 ;;
 
 let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)

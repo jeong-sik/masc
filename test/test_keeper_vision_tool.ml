@@ -593,6 +593,46 @@ supports-structured-output = true
 [p3.vision-c]
 |}
 
+(* Vision falls back to every schema-capable image runtime after explicit
+   media_failover ordering. The uncapped fallback is therefore genuinely
+   reachable even though neither [runtime].default nor media_failover names it. *)
+let uncapped_vision_fallback_runtime_toml =
+  {|
+[runtime]
+default = "p0.text"
+media_failover = ["p0.text"]
+
+[providers.p0]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.p4]
+protocol = "ollama-http"
+endpoint = "http://127.0.0.1:2/v1"
+
+[models.text]
+api-name = "text"
+max-context = 4096
+
+[models.text.capabilities]
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[models.vision-a]
+api-name = "vision-a"
+max-context = 4096
+
+[models.vision-a.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+supports-structured-output = true
+
+[p0.text]
+max-request-body-bytes = 65536
+
+[p4.vision-a]
+|}
+
 let test_provider_for_vision_uses_runtime_temperature () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->
     match Vt.first_vision_runtime_id () with
@@ -605,6 +645,32 @@ let test_provider_for_vision_uses_runtime_temperature () =
            Vt.provider_for_vision runtime.Runtime.provider_config
          in
          assert (configured.temperature = Some 1.0)))
+
+let test_uncapped_vision_fallback_rejects_before_provider_call () =
+  with_temp_runtime_toml uncapped_vision_fallback_runtime_toml (fun () ->
+    let provider_calls = ref 0 in
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+      incr provider_calls;
+      Ok (ok_response "provider call must not happen")
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision
+            ~complete
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~query:"describe"
+            ~media_type:"image/png"
+            ~bytes:"\x89PNG\r\n\x1a\nraw"
+            ()))
+    in
+    assert (!provider_calls = 0);
+    match outcome with
+    | Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; detail } ->
+      assert (contains_substring detail "max-request-body-bytes")
+    | _ -> failwith "uncapped vision fallback must fail before provider dispatch")
 
 let schema_unsupported_vision_runtime_toml =
   {|
@@ -1114,6 +1180,7 @@ let () =
      [with_vision_model_catalog]). *)
   with_vision_model_catalog (fun () ->
     test_provider_for_vision_uses_runtime_temperature ();
+    test_uncapped_vision_fallback_rejects_before_provider_call ();
     test_invalid_structured_vision_response_is_runtime_failure ();
     test_run_vision_invalid_structured_response_is_typed ();
     test_retryable_provider_error_tries_next_runtime ();

@@ -71,12 +71,14 @@ let text_of_message (message : Atypes.message) =
 
 (* The fake completion ignores the config, so any valid one works. *)
 let provider_cfg ?max_tokens () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Anthropic
-    ~model_id:"fake"
-    ~base_url:"http://localhost"
-    ?max_tokens
-    ()
+  { (Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~model_id:"fake"
+      ~base_url:"http://localhost"
+      ?max_tokens
+      ()) with
+    max_request_body_bytes = Some 65_536
+  }
 ;;
 
 let with_temp_keepers f =
@@ -484,6 +486,52 @@ let test_consolidate_requires_clock_before_provider_call () =
         | _ -> Alcotest.fail "expected Transport_failed for missing clock"))))
 ;;
 
+let test_consolidate_rejects_uncapped_provider_before_call () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        let called = ref false in
+        let complete : Runtime.complete_fn =
+          fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+          called := true;
+          Ok (fake_response {|{"groups":[],"drop_indices":[]}|})
+        in
+        let uncapped_provider_cfg =
+          { (provider_cfg ()) with
+            Llm_provider.Provider_config.max_request_body_bytes = None
+          }
+        in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:uncapped_provider_cfg
+            ~now
+            ~keeper_id
+            ()
+        in
+        Alcotest.(check bool) "provider was not called" false !called;
+        match outcome with
+        | Runtime.Provider_config_invalid error ->
+          Alcotest.(check bool)
+            "message names request body cap"
+            true
+            (contains
+               "serialized-request ceiling"
+               (Masc.Runtime.request_body_cap_error_to_string error))
+        | _ ->
+          Alcotest.fail
+            "uncapped consolidation config must fail before provider dispatch"))))
+;;
+
 let test_consolidate_respects_provider_config_and_prompt_template () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -660,6 +708,10 @@ let () =
             "requires clock before provider call"
             `Quick
             test_consolidate_requires_clock_before_provider_call
+        ; Alcotest.test_case
+            "rejects uncapped provider before call"
+            `Quick
+            test_consolidate_rejects_uncapped_provider_before_call
         ; Alcotest.test_case
             "respects provider config and prompt template"
             `Quick

@@ -310,24 +310,28 @@ end
    Provider transport owns the only LLM timeout boundary. The output contract is
    resolved once here — not per keeper — because the tier is a function of the
    provider capabilities and the plan schema only. *)
-let run_memory_os_consolidation_tick
+let run_memory_os_consolidation_tick_with_candidates
       ?complete
       ~sw
       ~net
       ?clock
-      ~runtime_id
-      ~provider_cfg
+      ~runtime_candidates
       ~now
       ()
   =
-  let provider_cfg =
-    Keeper_memory_os_consolidation_runtime.resolve_provider_for_consolidation
-      provider_cfg
+  let runtime_candidates =
+    List.map
+      (fun (runtime_id, provider_cfg) ->
+         ( runtime_id
+         , Keeper_memory_os_consolidation_runtime.resolve_provider_for_consolidation
+             provider_cfg ))
+      runtime_candidates
   in
   let keeper_ids = Keeper_memory_os_io.list_fact_store_keeper_ids () in
-  let consolidate_one keeper_id () =
-    try
-      match
+  let rec consolidate_with_candidates keeper_id = function
+    | [] -> None
+    | (runtime_id, provider_cfg) :: rest ->
+      let outcome =
         Keeper_memory_os_consolidation_runtime.consolidate_keeper
           ?complete
           ~sw
@@ -338,14 +342,32 @@ let run_memory_os_consolidation_tick
           ~now
           ~keeper_id
           ()
-      with
-      | Keeper_memory_os_consolidation_runtime.Consolidated { before; after } ->
+      in
+      (match outcome, rest with
+       | Provider_transport_failed msg, (next_runtime_id, _) :: _ ->
+         Log.Server.warn
+           "memory_os_keeper_consolidation: keeper=%s runtime=%s transport_failed: %s; retrying runtime=%s"
+           keeper_id
+           runtime_id
+           msg
+           next_runtime_id;
+         consolidate_with_candidates keeper_id rest
+       | _ -> Some outcome)
+  in
+  let consolidate_one keeper_id () =
+    try
+      match consolidate_with_candidates keeper_id runtime_candidates with
+      | None ->
+        Log.Server.error
+          "memory_os_keeper_consolidation: keeper=%s has no configured runtime candidate"
+          keeper_id
+      | Some (Keeper_memory_os_consolidation_runtime.Consolidated { before; after }) ->
         Log.Server.info
           "memory_os_keeper_consolidation: keeper=%s before=%d after=%d"
           keeper_id
           before
           after
-      | Plan_rejected_total_deletion { before } ->
+      | Some (Plan_rejected_total_deletion { before }) ->
         (* Warn, not info: the store survived, but the model asked to erase it.
            A recurring rejection for one keeper means its plans are malformed
            (truncation is the likely cause), which info-level volume would bury. *)
@@ -354,31 +376,41 @@ let run_memory_os_consolidation_tick
            before=%d"
           keeper_id
           before
-      | Skipped_too_few n ->
+      | Some (Skipped_too_few n) ->
         Log.Server.info
           "memory_os_keeper_consolidation: keeper=%s skipped_too_few=%d"
           keeper_id
           n
-      | Transport_failed msg ->
+      | Some (Provider_config_invalid error) ->
+        Log.Server.error
+          "memory_os_keeper_consolidation: keeper=%s provider_config_invalid: %s"
+          keeper_id
+          (Runtime.request_body_cap_error_to_string error)
+      | Some (Provider_transport_failed msg) ->
+        Log.Server.warn
+          "memory_os_keeper_consolidation: keeper=%s provider_transport_failed: %s"
+          keeper_id
+          msg
+      | Some (Transport_failed msg) ->
         Log.Server.warn
           "memory_os_keeper_consolidation: keeper=%s transport_failed: %s"
           keeper_id
           msg
-      | Unparseable msg ->
+      | Some (Unparseable msg) ->
         Log.Server.warn
           "memory_os_keeper_consolidation: keeper=%s unparseable: %s"
           keeper_id
           msg
-      | Empty_response ->
+      | Some Empty_response ->
         Log.Server.warn
           "memory_os_keeper_consolidation: keeper=%s empty_response"
           keeper_id
-      | Invalid_structured_response msg ->
+      | Some (Invalid_structured_response msg) ->
         Log.Server.warn
           "memory_os_keeper_consolidation: keeper=%s invalid_structured_response: %s"
           keeper_id
           msg
-      | Snapshot_changed { before; current } ->
+      | Some (Snapshot_changed { before; current }) ->
         Log.Server.info
           "memory_os_keeper_consolidation: keeper=%s snapshot_changed before=%d current=%d"
           keeper_id
@@ -398,6 +430,26 @@ let run_memory_os_consolidation_tick
      whole burst (#25401). The tick cadence (600s) dwarfs a serial sweep, and
      [consolidate_one] already contains per-keeper failures. *)
   List.iter (fun keeper_id -> consolidate_one keeper_id ()) keeper_ids
+;;
+
+let run_memory_os_consolidation_tick
+      ?complete
+      ~sw
+      ~net
+      ?clock
+      ~runtime_id
+      ~provider_cfg
+      ~now
+      ()
+  =
+  run_memory_os_consolidation_tick_with_candidates
+    ?complete
+    ~sw
+    ~net
+    ?clock
+    ~runtime_candidates:[ runtime_id, provider_cfg ]
+    ~now
+    ()
 ;;
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
@@ -633,18 +685,21 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            so a 10-minute cadence bounds cost while still shrinking stores. *)
         let interval = 600.0 in
         let rec loop () =
-          (match Runtime.resolve_memory_os_consolidation_runtime () with
+          (match Runtime.resolve_memory_os_consolidation_runtime_candidates () with
            | Error msg ->
              Log.Server.warn
                "memory_os_keeper_consolidation: %s; skipping tick"
                msg
-           | Ok runtime ->
-             run_memory_os_consolidation_tick
+           | Ok runtime_candidates ->
+             run_memory_os_consolidation_tick_with_candidates
                ~sw
                ~net:env#net
                ~clock
-               ~runtime_id:runtime.Runtime.id
-               ~provider_cfg:runtime.Runtime.provider_config
+               ~runtime_candidates:
+                 (List.map
+                    (fun (runtime : Runtime.t) ->
+                       runtime.Runtime.id, runtime.Runtime.provider_config)
+                    runtime_candidates)
                ~now:(Time_compat.now ())
                ());
           Eio.Time.sleep clock interval;

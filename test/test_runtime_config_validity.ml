@@ -807,6 +807,7 @@ List.iter
       Runtime.For_testing.keeper_dispatch_runtime_ids
         ~default_runtime_id:default.id
         ~assignments
+        ~memory_os_consolidation_runtime_id:memory_os_consolidation
         ~media_failover
         ~lanes
     in
@@ -1546,6 +1547,7 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     Runtime.For_testing.keeper_dispatch_runtime_ids
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
+      ~memory_os_consolidation_runtime_id:(Some "memory-os-d")
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
   in
@@ -1553,7 +1555,7 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     (list string)
     "routed lane candidates, assignments, and media failover are deduplicated \
      without admitting a dormant lane"
-    [ "lane-a"; "lane-b"; "assigned-b"; "media-c" ]
+    [ "lane-a"; "lane-b"; "assigned-b"; "media-c"; "memory-os-d" ]
     actual
 ;;
 
@@ -1602,6 +1604,51 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
            (String_util.contains_substring detail "max-request-body-bytes");
          check bool "typed config diagnostic names the candidate" true
            (String_util.contains_substring detail "local.lane"))
+;;
+
+let test_runtime_config_validation_rejects_uncapped_memory_os_runtime () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.default]\n\
+     api-name = \"default\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.consolidation]\n\
+     api-name = \"consolidation\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.default]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [local.consolidation]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.default\"\n\
+     memory_os_consolidation = \"local.consolidation\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "uncapped_memory_os_runtime_" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match Runtime.save_config_text ~runtime_config_path:path content with
+       | Ok () ->
+         fail
+           "uncapped Memory OS consolidation runtime must fail runtime config validation"
+       | Error detail ->
+         check bool "typed config diagnostic names the cap" true
+           (String_util.contains_substring detail "max-request-body-bytes");
+         check bool "typed config diagnostic names the direct runtime" true
+           (String_util.contains_substring detail "local.consolidation"))
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
@@ -3419,6 +3466,10 @@ let () =
           test_case
             "runtime config rejects uncapped keeper candidate"
             `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
+          test_case
+            "runtime config rejects uncapped Memory OS consolidation runtime"
+            `Quick
+            test_runtime_config_validation_rejects_uncapped_memory_os_runtime;
           test_case
             "runtime config allows uncapped dormant lane candidate"
             `Quick

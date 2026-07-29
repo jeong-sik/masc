@@ -9,6 +9,12 @@ type complete_fn = Keeper_provider_subcall.complete_fn
 
 type outcome =
   | Skipped_too_few of int
+  | Provider_config_invalid of Runtime.request_body_cap_error
+      (** The resolved direct provider config lacks a positive serialized-request
+          body ceiling. No provider call was made. *)
+  | Provider_transport_failed of string
+      (** The provider boundary failed. Callers may try the next configured lane
+          candidate without reclassifying local clock or store failures. *)
   | Transport_failed of string
   | Unparseable of string
   | Empty_response

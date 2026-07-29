@@ -128,6 +128,22 @@ val load_list :
 
 val runtime_ids : t list -> string list
 
+type request_body_cap_error = Missing_or_non_positive_request_body_cap of
+  { runtime_id : string
+  }
+(** A materialized runtime configuration reaches a Keeper provider boundary
+    without a positive serialized-request body ceiling. *)
+
+val request_body_cap_error_to_string : request_body_cap_error -> string
+
+val validate_request_body_cap :
+  runtime_id:string
+  -> Llm_provider.Provider_config.t
+  -> (unit, request_body_cap_error) result
+(** Pure final-provider-config guard shared by every Keeper provider-call
+    boundary. Config admission uses it for statically reachable routes; call
+    sites must invoke it again after feature-local transforms. *)
+
 (** {1 Lazy default runtime singleton}
 
     Initialized once at startup via {!init_default}.  All consumer
@@ -177,12 +193,14 @@ module For_testing : sig
   val keeper_dispatch_runtime_ids :
     default_runtime_id:string ->
     assignments:(string * string) list ->
+    memory_os_consolidation_runtime_id:string option ->
     media_failover:string list ->
     lanes:Runtime_lane.t list ->
     string list
   (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment
-      roots (including a same-named lane's candidates) and explicit
-      runtime-only media failover routing. Dormant declared lanes are excluded. *)
+      roots (including a same-named lane's candidates), the explicit
+      Memory OS consolidation runtime, and explicit runtime-only media failover
+      routing. Dormant declared lanes are excluded. *)
 
   val save_config_text_with_sync_parent :
     ?runtime_config_path:string ->
@@ -225,6 +243,12 @@ val resolve_memory_os_consolidation_runtime : unit -> (t, string) result
     [\[runtime\].memory_os_consolidation] inherits [\[runtime\].default].
     An uninitialized state or an explicit id missing from the same snapshot is
     [Error], never a fallback to another runtime. *)
+
+val resolve_memory_os_consolidation_runtime_candidates : unit -> (t list, string) result
+(** Ordered candidates for the periodic Memory OS fact-survival consolidation
+    pass. An absent route inherits the default as a singleton; a configured
+    lane expands to its declared ordered candidates. The maintenance caller
+    retries only provider transport failures across this list. *)
 
 type memory_os_consolidation_source =
   | Consolidation_configured

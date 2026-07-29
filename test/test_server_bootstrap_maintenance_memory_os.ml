@@ -43,11 +43,13 @@ let fake_complete canned : Masc.Keeper_memory_os_consolidation_runtime.complete_
 ;;
 
 let provider_cfg () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Anthropic
-    ~model_id:"fake"
-    ~base_url:"http://localhost"
-    ()
+  { (Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~model_id:"fake"
+      ~base_url:"http://localhost"
+      ()) with
+    max_request_body_bytes = Some 65_536
+  }
 ;;
 
 let with_runtime_config content f =
@@ -233,7 +235,9 @@ api-name = "consolidation"
 max-context = 1024
 
 [local.chat]
+max-request-body-bytes = 65536
 [local.consolidation]
+max-request-body-bytes = 65536
 
 [runtime]
 default = "local.chat"
@@ -287,6 +291,7 @@ api-name = "chat"
 max-context = 1024
 
 [local.chat]
+max-request-body-bytes = 65536
 
 [runtime]
 default = "local.chat"
@@ -327,6 +332,87 @@ default = "local.chat"
          | _ -> Alcotest.fail "dashboard changed inherited snapshot resolution"))
 ;;
 
+let test_consolidation_runtime_lane_expands_to_all_candidates () =
+  let config =
+    {|
+[providers.local]
+display-name = "Local"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.default]
+api-name = "default"
+max-context = 1024
+
+[models.first]
+api-name = "first"
+max-context = 1024
+
+[models.second]
+api-name = "second"
+max-context = 1024
+
+[local.default]
+max-request-body-bytes = 65536
+[local.first]
+max-request-body-bytes = 65536
+[local.second]
+max-request-body-bytes = 65536
+
+[runtime]
+default = "local.default"
+memory_os_consolidation = "consolidation"
+
+[runtime.lanes.consolidation]
+strategy = "ordered"
+candidates = ["local.first", "local.second"]
+|}
+  in
+  with_runtime_config config (fun () ->
+    match Runtime.resolve_memory_os_consolidation_runtime_candidates () with
+    | Error msg -> Alcotest.failf "consolidation lane should resolve: %s" msg
+    | Ok runtimes ->
+      Alcotest.(check (list string))
+        "lane candidate order"
+        [ "local.first"; "local.second" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) runtimes))
+;;
+
+let test_consolidation_tick_retries_next_lane_candidate_on_transport_failure () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        Io.append_fact ~keeper_id (fact "only fact");
+        let calls = ref [] in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+          let model_id = config.Llm_provider.Provider_config.model_id in
+          calls := model_id :: !calls;
+          if String.equal model_id "first"
+          then
+            Error
+              (Llm_provider.Http_client.HttpError
+                 { code = 503; body = "first provider unavailable"; retry_after_header = None })
+          else Ok (fake_response {|{"groups":[],"drop_indices":[]}|})
+        in
+        let cfg model_id =
+          { (provider_cfg ()) with Llm_provider.Provider_config.model_id }
+        in
+        Server_bootstrap_maintenance.run_memory_os_consolidation_tick_with_candidates
+          ~complete
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~runtime_candidates:[ "local.first", cfg "first"; "local.second", cfg "second" ]
+          ~now
+          ();
+        Alcotest.(check (list string))
+          "transport failure retries the next candidate"
+          [ "first"; "second" ]
+          (List.rev !calls)))))
+;;
+
 let () =
   Alcotest.run
     "server_bootstrap_maintenance_memory_os"
@@ -351,6 +437,14 @@ let () =
             "absent route inherits default runtime"
             `Quick
             test_consolidation_runtime_inherits_default
+        ; Alcotest.test_case
+            "lane route expands to all runtime candidates"
+            `Quick
+            test_consolidation_runtime_lane_expands_to_all_candidates
+        ; Alcotest.test_case
+            "transport failure retries the next lane candidate"
+            `Quick
+            test_consolidation_tick_retries_next_lane_candidate_on_transport_failure
         ] )
     ]
 ;;

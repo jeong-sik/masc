@@ -346,33 +346,27 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     match Operator_action_constants.target_type_of_string target_type with
     | Some Operator_action_constants.Workspace ->
         let confirm_scope = pending_confirm_scope ?actor config in
-        let keeper_attention, keeper_recommendations =
-          keeper_attention_projection_items config |> List.split
+        let keeper_attention =
+          keeper_attention_projection_items config |> List.map fst
         in
         let attention_items =
           build_workspace_attention_items config
           @ keeper_attention
           |> List.sort compare_attention
         in
-        let recommended_actions =
-          dedup_recommendations
-            (workspace_recommendations config @ keeper_recommendations)
+        let fallback_observation_summary =
+          summary_of_attention_items attention_items
         in
-        let fallback_recommendation_summary =
-          summary_of_recommendations ~actor:actor_name recommended_actions
-        in
-        let fallback_recommendations =
-          List.map
-            (recommended_action_to_yojson ~actor:actor_name)
-            recommended_actions
+        let empty_recommendation_summary =
+          summary_of_recommendations ~actor:actor_name []
         in
         let active_guidance =
           active_guidance
             ~config
             ~target_type:Operator_action_constants.workspace_target_type
             ~target_id:None
-            ~fallback_recommendations
-            ~fallback_summary:fallback_recommendation_summary
+            ~fallback_observation_summary
+            ~empty_recommendation_summary
         in
         let recent_reviews =
           Operator_review_state.recent_review_decisions_json ~limit:12 config

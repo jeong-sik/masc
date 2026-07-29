@@ -103,7 +103,12 @@ let test_digest_workspace_ignores_stale_operator_judgment () =
       Alcotest.(check string) "active guidance layer fallback" "fallback"
         Yojson.Safe.Util.(digest |> member "active_guidance_layer" |> to_string);
       Alcotest.(check bool) "judgment missing" true
-        (Yojson.Safe.Util.member "judgment" digest = `Null))
+        (Yojson.Safe.Util.member "judgment" digest = `Null);
+      Alcotest.(check int) "stale judgment cannot leave fallback actions" 0
+        Yojson.Safe.Util.(digest |> member "recommended_actions" |> to_list |> List.length);
+      Alcotest.(check int) "stale judgment recommendation summary is empty" 0
+        Yojson.Safe.Util.
+          (digest |> member "recommendation_summary" |> member "count" |> to_int))
 
 let test_guidance_ignores_unsupported_target_type () =
   Eio_main.run @@ fun env ->
@@ -121,8 +126,8 @@ let test_guidance_ignores_unsupported_target_type () =
       let fields =
         Operator_digest_guidance.active_guidance ~config
           ~target_type:"keeper" ~target_id:None
-          ~fallback_recommendations:[]
-          ~fallback_summary:(`Assoc [ ("count", `Int 0) ])
+          ~fallback_observation_summary:(`Assoc [ ("count", `Int 0) ])
+          ~empty_recommendation_summary:(`Assoc [ ("count", `Int 0) ])
       in
       let guidance = `Assoc fields.fields in
       Alcotest.(check string) "judgment owner fallback" "fallback_read_model"
@@ -133,7 +138,9 @@ let test_guidance_ignores_unsupported_target_type () =
       Alcotest.(check string) "active guidance layer fallback" "fallback"
         Yojson.Safe.Util.(guidance |> member "active_guidance_layer" |> to_string);
       Alcotest.(check bool) "judgment missing" true
-        (Yojson.Safe.Util.member "judgment" guidance = `Null))
+        (Yojson.Safe.Util.member "judgment" guidance = `Null);
+      Alcotest.(check int) "fallback cannot synthesize actions" 0
+        (List.length fields.recommended_actions))
 
 let test_operator_judgment_write_and_latest_roundtrip () =
   Eio_main.run @@ fun env ->

@@ -724,10 +724,12 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
           && String.equal "keeper_probe" (row |> member "action_type" |> to_string))
         |> Option.value ~default:`Null
       in
-      Alcotest.(check bool) "keeper probe recommendation present" true
-        (keeper_probe <> `Null);
-      Alcotest.(check bool) "recommendation summary is non-empty" true
-        (digest |> member "recommendation_summary" |> member "count" |> to_int > 0))
+      Alcotest.(check bool) "fallback cannot synthesize keeper probe" true
+        (keeper_probe = `Null);
+      Alcotest.(check int) "fallback recommendation summary is empty" 0
+        (digest |> member "recommendation_summary" |> member "count" |> to_int);
+      Alcotest.(check bool) "observation summary remains visible" true
+        (digest |> member "active_summary" |> member "count" |> to_int > 0))
 
 let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
   Eio_main.run @@ fun env ->

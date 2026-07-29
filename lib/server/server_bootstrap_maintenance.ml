@@ -352,7 +352,16 @@ let run_memory_os_consolidation_tick_with_candidates
            msg
            next_runtime_id;
          consolidate_with_candidates keeper_id rest
-       | _ -> Some outcome)
+       | Provider_transport_failed _, []
+       | Skipped_too_few _, _
+       | Provider_config_invalid _, _
+       | Transport_failed _, _
+       | Unparseable _, _
+       | Empty_response, _
+       | Invalid_structured_response _, _
+       | Snapshot_changed _, _
+       | Consolidated _, _ ->
+         Some outcome)
   in
   let consolidate_one keeper_id () =
     try

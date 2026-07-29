@@ -408,9 +408,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let last_handoff_ago_s =
            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.last_handoff_ts
          in
-         let last_compaction_ago_s =
-           Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.compaction_rt.last_ts
-         in
          let last_proactive_ago_s =
            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_ts
          in
@@ -723,7 +720,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
            ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
            ("last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s);
-           ("last_compaction_ago_s", Json_util.float_opt_to_json last_compaction_ago_s);
            ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
            ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
            ("active_model", `Null);

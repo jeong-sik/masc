@@ -41,7 +41,6 @@ function keeperSignalTimestamp(keeper: Keeper): string | null {
     ?? timestampFromAgeSeconds(keeper.last_turn_ago_s)
     ?? timestampFromAgeSeconds(keeper.last_proactive_ago_s)
     ?? timestampFromAgeSeconds(keeper.last_handoff_ago_s)
-    ?? timestampFromAgeSeconds(keeper.last_compaction_ago_s)
 }
 
 function boardPreview(post: BoardPost): string {

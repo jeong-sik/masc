@@ -44,6 +44,24 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
 }
 
 describe('KpiGrid', () => {
+  it('does not render the removed last-compaction-age KPI', () => {
+    const keeper = {
+      name: 'sangsu',
+      status: 'active',
+      last_heartbeat: '2026-07-29T10:00:00Z',
+      metrics_window: {
+        compaction_saved_ratio: 0.4,
+        avg_compaction_saved_tokens: 120,
+      },
+    } as Keeper
+
+    render(h(KpiGrid, { keeper }))
+
+    expect(screen.getByText('하트비트')).toBeInTheDocument()
+    expect(screen.getByText('압축 절감률')).toBeInTheDocument()
+    expect(screen.queryByText('마지막 압축')).not.toBeInTheDocument()
+  })
+
   it('surfaces latest keeper tok/sec in the detail KPI grid', () => {
     const keeper = {
       name: 'sangsu',

@@ -771,7 +771,7 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('renders context metrics as missing when only a zero default exists', () => {
-    const k = mkKeeper({ context_ratio: 0, compaction_count: 0, last_compaction_ago_s: 0 })
+    const k = mkKeeper({ context_ratio: 0, compaction_count: 0 })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     // v2 collapses the missing-context state into a single "윈도우 사용률 미수신"
     // empty card (.ctx-empty); no fake usage meter and no usage percentage.

@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { formatPct1, formatTokens, formatTokPerSec, isFiniteMetricValue } from '../lib/format-number'
-import { formatDurationCompound } from '../lib/format-time'
 import { Eyebrow } from './common/eyebrow'
 import { StatTile } from './common/stat-tile'
 import type { Keeper, KeeperMetricPoint } from '../types'
@@ -62,13 +61,12 @@ export function OperationalHealth({ keeper }: { keeper: Keeper }) {
   const hb = keeper.last_heartbeat
   const compSavedRatio = mw?.compaction_saved_ratio
   const avgSaved = mw?.avg_compaction_saved_tokens
-  const lastCompAgo = keeper.last_compaction_ago_s
 
   const hbTone: KpiTone = !hb ? 'default' : 'ok'
   const compTone: KpiTone = compSavedRatio == null ? 'default'
     : compSavedRatio >= 0.4 ? 'ok' : compSavedRatio >= 0.2 ? 'warn' : 'bad'
 
-  const hasAny = hb || compSavedRatio != null || lastCompAgo != null
+  const hasAny = hb || compSavedRatio != null
   if (!hasAny) return null
 
   return html`
@@ -86,12 +84,6 @@ export function OperationalHealth({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>압축 절감률</${Eyebrow}>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${formatPct1(compSavedRatio)}</span>
             ${avgSaved != null ? html`<${MutedSpan}>avg ${formatTokens(avgSaved)} saved</${MutedSpan}>` : null}
-          </div>
-        ` : null}
-        ${lastCompAgo != null ? html`
-          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE['default']} flex flex-col gap-0.5 v2-monitoring-card">
-            <${Eyebrow}>마지막 압축</${Eyebrow}>
-            <span class="text-xs font-mono text-[var(--color-fg-secondary)]">${formatDurationCompound(lastCompAgo)} 전</span>
           </div>
         ` : null}
       </div>

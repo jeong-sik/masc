@@ -468,20 +468,24 @@ let autonomous_trigger_lines
                [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
   | _ -> []
 
+let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
+    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option) ()
+  =
+  (* Total deterministic resolution between two known instruction sources
+     (profile default else meta), not a permissive unknown-input default;
+     pre-existing pattern, was the 4th tuple element before RFC-0282. *)
+  (* DET-OK: total default between two known sources (RFC-0282). *)
+  match profile_defaults with
+  | Some d -> Option.value d.instructions ~default:meta.instructions
+  | None -> meta.instructions
+;;
+
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ?(active_goal_summaries : (string * string) list option)
     ()
   =
-  (* Total deterministic resolution between two known instruction sources
-     (profile default else meta), not a permissive unknown-input default;
-     pre-existing pattern, was the 4th tuple element before RFC-0282. *)
-  let instructions =
-    (* DET-OK: total default between two known sources (RFC-0282). *)
-    match profile_defaults with
-    | Some d -> Option.value d.instructions ~default:meta.instructions
-    | None -> meta.instructions
-  in
+  let instructions = effective_instructions ~meta ?profile_defaults () in
   let instructions_block =
     if instructions = "" then ""
     else Printf.sprintf "\nInstructions:\n%s\n" instructions

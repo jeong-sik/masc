@@ -39,6 +39,14 @@ val format_current_task : Masc_domain.task -> string
     lane reuses this renderer so it sees the same task identity, status, and
     handoff as an autonomous wake without persisting that context. *)
 
+val effective_instructions :
+  meta:Keeper_meta_contract.keeper_meta ->
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  unit ->
+  string
+(** Resolve the single instructions value used by every system-prompt
+    entrypoint and its dashboard projection. *)
+
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   base_path:string ->

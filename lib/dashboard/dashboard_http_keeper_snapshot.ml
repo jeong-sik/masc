@@ -158,7 +158,12 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       let prompt =
         `Assoc [
-          ("instructions", `String prompt_instructions);
+          ( "instructions",
+            `String
+              (Keeper_unified_prompt.effective_instructions
+                 ~meta:m
+                 ~profile_defaults:defaults
+                 ()) );
           ( "system_prompt_blocks",
             `Assoc
               [

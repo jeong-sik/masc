@@ -693,11 +693,11 @@ let () =
     "librarian_exact_output_conformance"
     [ ( "exact output"
       , [ Alcotest.test_case
-            "JSON-only target is admitted and persisted"
+            "prompt-only target is admitted and persisted"
             `Quick
             test_prompt_only_target_is_admitted_and_persisted
         ; Alcotest.test_case
-            "missing JSON capability fails before dispatch"
+            "prompt-only target needs no wire JSON capability"
             `Quick
             test_prompt_only_target_needs_no_wire_json_capability
         ; Alcotest.test_case

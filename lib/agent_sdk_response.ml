@@ -15,13 +15,9 @@ let visible_text_response (response : api_response) : api_response =
   }
 ;;
 
-let structured_json_of_response ?(schema_name = "masc_structured_response") response =
+let structured_json_of_response response =
   let schema : Yojson.Safe.t Agent_sdk.Structured.schema =
-    { name = schema_name
-    ; description = "MASC structured JSON response"
-    ; params = []
-    ; parse = (fun json -> Ok json)
-    }
+    { params = []; parse = (fun json -> Ok json) }
   in
   Agent_sdk.Structured.schema_extractor schema (visible_text_response response)
 ;;

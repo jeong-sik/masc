@@ -491,10 +491,10 @@ let persist_compaction_decision config ~keeper_name ~decision
     |> Result.map (fun () -> `Persisted)
 ;;
 
-(* RFC-0351 S0 / #25461, #25538: advance the streak that the heartbeat
-   settlement reads to choose requeue-vs-escalate.  Same read/stamp/merge
-   shape as [persist_compaction_decision] so a concurrent CAS re-applies the
-   stamp instead of dropping it.
+(* RFC-0351 S0 / #25461, #25538: advance the streak that reactive compaction
+   admission reads. Same read/stamp/merge shape as
+   [persist_compaction_decision] so a concurrent CAS re-applies the stamp
+   instead of dropping it.
 
    Reset semantics (#25538): the streak counts consecutive provider-overflow
    episodes, and only a turn that completes without overflow — or an

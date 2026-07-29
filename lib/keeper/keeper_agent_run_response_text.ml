@@ -19,9 +19,7 @@ let stop_reason_suppresses_visible_response = function
     false
 ;;
 
-let finalize ~completion_contract_result:_ ~stop_reason ~raw_response_text
-      ?suppress_response_text
-      ()
+let finalize ~stop_reason ~raw_response_text ?suppress_response_text ()
   =
   let control_checkpoint = stop_reason_suppresses_visible_response stop_reason in
   let suppress_response_text =

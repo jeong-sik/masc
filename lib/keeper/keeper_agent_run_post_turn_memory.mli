@@ -16,7 +16,7 @@ val run :
   oas_turn_count:int ->
   actual_tools:string list ->
   librarian_messages:Agent_sdk.Types.message list ->
-  memory_extraction_record:Keeper_run_prompt.memory_extraction_record ->
+  turn_effect_record:Keeper_run_prompt.turn_effect_record ->
   post_turn_t0:float ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
   ?deliberation_execution:Keeper_deliberation.execution_result ->
@@ -35,9 +35,10 @@ val run :
     delegation request artifacts on this post-turn memory lane rather than on
     the decision-record append path.
 
-    [memory_extraction_record] gates only the librarian sub-stage. On
-    [Skip_inert_turn] the librarian unit is never submitted, so its cadence
-    counter does not advance and an idle stretch spends no extraction budget.
+    [turn_effect_record] gates only the librarian sub-stage. On
+    [Inert_autonomous_turn] the librarian unit is never submitted, so its
+    cadence counter does not advance and an idle stretch spends no extraction
+    budget.
     The deterministic write series runs either way: a model-owned
     [keeper_memory_write] on an otherwise inert turn is an explicit decision to
     remember, not an extraction from prose. *)

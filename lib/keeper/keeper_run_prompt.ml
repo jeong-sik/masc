@@ -42,32 +42,31 @@ let user_turn_record_of_hitl_resolution : _ option -> user_turn_record
   | Some _ -> Record_user_turn
 ;;
 
-type memory_extraction_record =
-  | Extract_turn
-  | Skip_inert_turn
+type turn_effect_record =
+  | Meaningful_turn
+  | Inert_autonomous_turn
 
-(* The librarian fires on a turn cadence, not on activity, so an idle stretch
-   keeps extracting. What it extracts from a bare wake that called no tool is
-   the model's prose about its own idleness, which lands in the fact store as
-   [ephemeral] claims and is recalled on the next turn. Live: 8 of one
-   keeper's 10 most recent claims were "Agent idle across N consecutive
-   autonomous wake cycles", re-injected at 66KB against 3.8KB of world state
-   that reported 122 claimable tasks on the same prompt.
+(* One typed decision owns both replay persistence and librarian extraction.
+   A model response is not itself an external effect: scheduled idle prose has
+   no consumer, yet previously accumulated in the checkpoint and then became
+   librarian input. Existing execution facts are sufficient:
 
-   Both arms are required. A wake that ran a tool changed something; a turn
-   carrying operator or HITL input can hold a durable fact with no tool call.
-   Every pair is listed so a new [user_turn_record] variant fails to compile
-   here rather than defaulting into one side. *)
-let memory_extraction_record_of_turn
+   - operator/HITL input is durable input,
+   - any Keeper tool call may have changed or observed state needed later,
+   - a routed continuation has an external consumer.
+
+   No response-text classifier or duplicate field comparison is involved. *)
+let turn_effect_record_of_turn
       ~(user_turn_record : user_turn_record)
       ~(tool_calls_made : bool)
-  : memory_extraction_record
+      ~(external_delivery_routed : bool)
+  : turn_effect_record
   =
-  match user_turn_record, tool_calls_made with
-  | Skip_uninformative_wake, false -> Skip_inert_turn
-  | Skip_uninformative_wake, true -> Extract_turn
-  | Record_user_turn, false -> Extract_turn
-  | Record_user_turn, true -> Extract_turn
+  match user_turn_record with
+  | Skip_uninformative_wake
+    when not tool_calls_made && not external_delivery_routed ->
+    Inert_autonomous_turn
+  | Skip_uninformative_wake | Record_user_turn -> Meaningful_turn
 ;;
 
 type extra_system_context_assembly =

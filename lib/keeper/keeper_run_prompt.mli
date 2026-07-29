@@ -33,31 +33,30 @@ val user_turn_record_of_hitl_resolution : _ option -> user_turn_record
 (** Map the unified lane's HITL resolution slot to a transcript decision.
     Absent resolution means the user turn is the bare wake marker. *)
 
-type memory_extraction_record =
-  | Extract_turn
-  | Skip_inert_turn
-(** Whether this turn is worth running librarian extraction over.
+type turn_effect_record =
+  | Meaningful_turn
+  | Inert_autonomous_turn
+(** Whether the completed turn produced anything that belongs in durable
+    replay or post-turn memory extraction.
 
-    [Skip_inert_turn] is a bare autonomous wake that also called no tool: the
-    input carried nothing forward ({!Skip_uninformative_wake}) and the turn
-    changed nothing observable. The librarian fires on a turn cadence rather
-    than on activity, so an idle stretch keeps extracting, and what it can
-    extract from such a turn is the model's prose about its own idleness.
-    Those land in the fact store as [ephemeral] claims ("Agent idle across 72
-    consecutive autonomous wake cycles"), are recalled the next turn, and are
-    read back as evidence that there is nothing to do — a loop that runs while
-    the world observation on the same prompt reports claimable tasks.
+    [Inert_autonomous_turn] means the input was only the autonomous wake
+    marker, no Keeper tool ran, and no external continuation route exists.
+    Model-authored prose alone is not a durable effect: persisting it makes an
+    idle fleet grow its transcript and then teaches the librarian about that
+    idleness.
 
-    The distinction is typed and derived from the wake decision plus the
-    turn's tool-call list, never from response text. *)
+    The decision uses existing execution facts only. It does not inspect
+    response text, compare rendered messages, or introduce another completion
+    proof contract. *)
 
-val memory_extraction_record_of_turn
+val turn_effect_record_of_turn
   :  user_turn_record:user_turn_record
   -> tool_calls_made:bool
-  -> memory_extraction_record
-(** [Skip_inert_turn] only when the wake was bare {b and} no tool ran. A wake
-    that called a tool did something worth recording; a turn carrying operator
-    or HITL input can hold a durable fact even with no tool call. *)
+  -> external_delivery_routed:bool
+  -> turn_effect_record
+(** [Inert_autonomous_turn] only when the wake was bare, no tool ran, and no
+    external continuation delivery is routed. Operator/HITL input, any tool
+    execution, or a routed continuation makes the turn meaningful. *)
 
 type extra_system_context_assembly =
   { extra_system_context : string option

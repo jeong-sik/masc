@@ -4,7 +4,6 @@ open Alcotest
 
 module Task = Masc.Keeper_tool_task_runtime
 module Response_text = Masc.Keeper_agent_run_response_text
-module Receipt = Masc.Keeper_execution_receipt
 module U = Yojson.Safe.Util
 (* Tool_result lives in the leaf [masc_tool_types] lib (wrapped false), so
    it is referenced bare — not under [Masc.] — matching existing tests. *)
@@ -100,7 +99,6 @@ let test_tasks_list_returns_producer_owned_typed_data () =
 let test_response_finalization_keeps_visible_reply_only () =
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Completion_response_observed
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text:"Completed with typed tool evidence."
       ()
@@ -111,7 +109,6 @@ let test_response_finalization_keeps_visible_reply_only () =
     finalized.response_text;
   let suppressed =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Completion_response_observed
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text:"Internal completion text"
       ~suppress_response_text:true

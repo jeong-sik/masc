@@ -3,7 +3,6 @@
 
 module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Response_text = Masc.Keeper_agent_run_response_text
-module Receipt = Masc.Keeper_execution_receipt
 module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store
 
@@ -83,7 +82,6 @@ let test_replay_capture_omits_blank_response_text () =
 let test_replay_capture_preserves_model_reply_before_visible_capture () =
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Completion_response_observed
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text:"First line from model\nVisible reply"
       ()
@@ -105,7 +103,6 @@ let test_input_required_question_is_not_suppressed_for_internal_source () =
   let stop_reason = Runtime_agent.InputRequired { turns_used = 2; request } in
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Completion_observation_unknown
       ~stop_reason
       ~raw_response_text:request.question
       ()
@@ -124,45 +121,12 @@ let test_direct_response_observation_preserves_raw_response_text () =
   in
   let finalized =
     Response_text.finalize
-      ~completion_contract_result:Receipt.Completion_response_observed
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text
       ()
   in
   Alcotest.(check string)
     "direct response observation keeps visible response"
-    raw_response_text
-    finalized.response_text
-;;
-
-let test_internal_response_observation_preserves_raw_response_text () =
-  let raw_response_text =
-    "No actionable signal. I will wait for a future autonomous cycle."
-  in
-  let finalized =
-    Response_text.finalize
-      ~completion_contract_result:Receipt.Completion_response_observed
-      ~stop_reason:Runtime_agent.Completed
-      ~raw_response_text
-      ()
-  in
-  Alcotest.(check string)
-    "response observation preserves visible response"
-    raw_response_text
-    finalized.response_text
-;;
-
-let test_contract_observation_finalizer_preserves_response_text_by_default () =
-  let raw_response_text = "Attempted work but produced no tool call." in
-  let finalized =
-    Response_text.finalize
-      ~completion_contract_result:Receipt.Completion_no_visible_output
-      ~stop_reason:Runtime_agent.Completed
-      ~raw_response_text
-      ()
-  in
-  Alcotest.(check string)
-    "completion-contract observation preserves response text"
     raw_response_text
     finalized.response_text
 ;;
@@ -205,14 +169,6 @@ let () =
             "direct response observation preserves raw response text"
             `Quick
             test_direct_response_observation_preserves_raw_response_text
-        ; Alcotest.test_case
-            "response observation preserves raw response text"
-            `Quick
-            test_internal_response_observation_preserves_raw_response_text
-        ; Alcotest.test_case
-            "contract observation preserves by default"
-            `Quick
-            test_contract_observation_finalizer_preserves_response_text_by_default
         ] )
     ]
 ;;

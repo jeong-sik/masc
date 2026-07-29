@@ -11,7 +11,7 @@ let run
   ~oas_turn_count
   ~actual_tools
   ~librarian_messages
-  ~(memory_extraction_record : Keeper_run_prompt.memory_extraction_record)
+  ~(turn_effect_record : Keeper_run_prompt.turn_effect_record)
   ~post_turn_t0
   ~inference_telemetry
   ?deliberation_execution
@@ -90,8 +90,8 @@ let run
       ~lane:Keeper_memory_lane.Deterministic
       det_write_series
   in
-  (match memory_extraction_record with
-   | Keeper_run_prompt.Extract_turn ->
+  (match turn_effect_record with
+   | Keeper_run_prompt.Meaningful_turn ->
      let (_ : Keeper_memory_lane.outcome) =
        Keeper_memory_lane.submit
          ~base_path:config.Workspace.base_path
@@ -100,7 +100,7 @@ let run
          librarian_series
      in
      ()
-   | Keeper_run_prompt.Skip_inert_turn ->
+   | Keeper_run_prompt.Inert_autonomous_turn ->
      (* Not submitted at all, so the cadence counter does not advance either:
         an idle stretch leaves the extraction budget untouched instead of
         spending it on prose about the idleness. *)

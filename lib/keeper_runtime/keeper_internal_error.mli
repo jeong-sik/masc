@@ -93,8 +93,6 @@ type gate_replay_repair_stage =
   | Replay_evidence_storage
   | Replay_evidence_retrieval
   | Replay_journal
-  | Replay_in_flight
-  | Replay_persistence_backpressure
   | Replay_stale_grant_retirement
   | Replay_invalid_resolution_state
 

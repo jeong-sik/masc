@@ -218,10 +218,6 @@ let prepare_agent_setup
                      Keeper_internal_error.Replay_evidence_retrieval
                    | Keeper_gate_replay.Replay_journal ->
                      Keeper_internal_error.Replay_journal
-                   | Keeper_gate_replay.Replay_in_flight ->
-                     Keeper_internal_error.Replay_in_flight
-                   | Keeper_gate_replay.Replay_persistence_backpressure ->
-                     Keeper_internal_error.Replay_persistence_backpressure
                    | Keeper_gate_replay.Stale_grant_retirement ->
                      Keeper_internal_error.Replay_stale_grant_retirement
                    | Keeper_gate_replay.Invalid_resolution_state ->
@@ -238,13 +234,14 @@ let prepare_agent_setup
     | None ->
       Ok ()
   in
-  let user_message =
+  let model_message =
     Keeper_gate_replay.compose_model_message
       ~base_path:config.base_path
       ~user_message
       ~hitl_resolution
       ~replay_delivery
   in
+  let user_message = model_message.Keeper_gate_replay.text in
   let prompt_metrics =
     Keeper_agent_prompt_metrics.build_prompt_metrics
       ~system_prompt:turn_system_prompt
@@ -439,4 +436,5 @@ let prepare_agent_setup
     ~runtime_id_string ~is_retry
     ~config_root ~runtime_config_path
     ~trajectory_acc
+    ?gate_replay_evidence:model_message.replay_evidence
     ?runtime_manifest_context ?runtime_manifest_append ()

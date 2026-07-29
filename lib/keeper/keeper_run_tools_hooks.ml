@@ -17,6 +17,7 @@ type agent_setup =
   ; user_message : string
   ; hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; receipt_turn_count_ref : int option ref
@@ -135,6 +136,7 @@ let assemble_hooks
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(trajectory_acc : Trajectory.accumulator option)
+      ?gate_replay_evidence
       ?runtime_manifest_context
       ?runtime_manifest_append
       ()
@@ -559,7 +561,16 @@ let assemble_hooks
         ~store
         ~keep_recent:(Keeper_artifact_hydrator.keep_recent_from_env ())
     in
-    let model_input_projection messages = Ok (hydrate_model_input messages) in
+    let model_input_projection messages =
+      let messages = hydrate_model_input messages in
+      match gate_replay_evidence with
+      | None -> Ok messages
+      | Some evidence ->
+        Keeper_gate_replay.project_model_input
+          ~base_path:ctx.config.base_path
+          evidence
+          messages
+    in
     Ok
       { tools
       ; cleanup = keeper_tools_cleanup
@@ -567,6 +578,7 @@ let assemble_hooks
       ; user_message
       ; hooks
       ; model_input_projection
+      ; gate_replay_evidence
       ; acc
       ; all_tool_names
       ; receipt_turn_count_ref

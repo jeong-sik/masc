@@ -29,6 +29,23 @@ let cleanup_dir dir =
   | Sys_error _ -> ()
 ;;
 
+let projected_model_text ~base_path
+    (message : Masc.Keeper_gate_replay.model_message) =
+  match message.replay_evidence with
+  | None -> Alcotest.fail "model message has no replay evidence"
+  | Some evidence ->
+    (match
+       Masc.Keeper_gate_replay.project_model_input
+         ~base_path
+         evidence
+         [ Agent_sdk.Types.user_msg message.text ]
+     with
+     | Ok [ _canonical; projected ] ->
+       Agent_sdk.Types.text_of_content projected.content
+     | Ok _ -> Alcotest.fail "replay projection did not append exact evidence"
+     | Error detail -> Alcotest.fail detail)
+;;
+
 (* The pinned resource identity stays in the approved input and is
    deliberately absent from the reconstructed arguments: the write handler
    re-derives it, so a target replaced between approval and replay produces a
@@ -309,37 +326,55 @@ let test_network_read_rejects_unknown_envelope_fields () =
 ;;
 
 let test_applied_replay_result_is_model_visible () =
-  let output = {|{"results":[{"title":"durable"}]}|} in
-  let message =
-    Masc.Keeper_gate_replay.append_model_evidence
-      ~approval_id:"approval-1"
-      ~user_message:"continue"
-      (Masc.Keeper_gate_replay.Applied
-         { operation = "network_read"
-         ; output
-         ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
-         })
-  in
-  let evidence =
-    message
-    |> String.split_on_char '\n'
-    |> List.rev
-    |> List.hd
-    |> Yojson.Safe.from_string
-  in
-  Alcotest.check
-    Alcotest.string
-    "exact replay evidence reaches the current model turn"
-    output
-    Yojson.Safe.Util.(
-      evidence |> member "untrusted_tool_output" |> to_string);
-  Alcotest.check
-    Alcotest.bool
-    "current model turn cannot request the approved effect again"
-    true
-    (String_util.contains_substring
-       message
-       "Do not request the approved operation again")
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let output = {|{"results":[{"title":"durable"}]}|} in
+       let output_ref =
+         match
+           Masc.Keeper_gate_replay.For_testing.persist_replay_artifact
+             ~base_path
+             output
+         with
+         | Ok reference -> reference
+         | Error detail -> Alcotest.fail detail
+       in
+       let message =
+         Masc.Keeper_gate_replay.append_model_evidence
+           ~approval_id:"approval-1"
+           ~user_message:"continue"
+           (Masc.Keeper_gate_replay.Applied
+              { operation = "network_read"
+              ; output_ref
+              ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+              })
+       in
+       Alcotest.check
+         Alcotest.bool
+         "canonical history contains no full replay payload"
+         false
+         (String_util.contains_substring message.text "\"title\":\"durable\"");
+       let evidence =
+         projected_model_text ~base_path message
+         |> String.split_on_char '\n'
+         |> List.rev
+         |> List.hd
+         |> Yojson.Safe.from_string
+       in
+       Alcotest.check
+         Alcotest.string
+         "exact replay evidence reaches the current provider turn"
+         output
+         Yojson.Safe.Util.(
+           evidence |> member "untrusted_tool_output" |> to_string);
+       Alcotest.check
+         Alcotest.bool
+         "current model turn cannot request the approved effect again"
+         true
+         (String_util.contains_substring
+            message.text
+            "Do not request the approved operation again"))
 ;;
 
 let test_large_replay_result_reaches_model_exactly () =
@@ -377,48 +412,76 @@ let test_large_replay_result_reaches_model_exactly () =
         | Ok None -> Alcotest.fail "replay artifact is missing"
         | Error error ->
           Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
-       let outcome =
-         Masc.Keeper_gate_replay.For_testing.durable_replay_outcome
-           ~base_path
-           ~operation:"network_read"
-           ~journal:Masc.Keeper_gate_replay.Replay_journal_recorded
-           (Masc.Keeper_approval_queue.Replay_applied artifact)
-       in
        let message =
          Masc.Keeper_gate_replay.append_model_evidence
            ~approval_id:"approval-large"
            ~user_message:"continue"
-           outcome
+           (Masc.Keeper_gate_replay.Applied
+              { operation = "network_read"
+              ; output_ref = artifact
+              ; journal =
+                  Masc.Keeper_gate_replay.Replay_journal_recorded
+              })
        in
-       (* Above the ordinary-tool externalize threshold the rendered turn
-          carries the standard blob marker, never the raw half-megabyte body:
-          an unbounded injection re-enters the 07-29 request-cap x compaction
-          incident class. The exact bytes stay durable (asserted above). *)
        Alcotest.check
          Alcotest.bool
-         "rendered evidence is the standard blob marker"
-         true
-         (String_util.contains_substring message Tool_output.marker_prefix);
-       Alcotest.check
-         Alcotest.bool
-         "raw oversized body does not enter the model turn"
+         "canonical checkpoint does not retain the full replay tail"
          false
-         (String_util.contains_substring message "LARGE-REPLAY-END");
+         (String_util.contains_substring message.text "LARGE-REPLAY-END");
+       let canonical_evidence =
+         message.text
+         |> String.split_on_char '\n'
+         |> List.rev
+         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> Yojson.Safe.from_string
+       in
+       (match
+          canonical_evidence
+          |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
+          |> Tool_output.normalized_artifact_ref_of_json
+        with
+        | Tool_output.Decoded_normalized_artifact_ref decoded ->
+          Alcotest.check
+            Alcotest.string
+            "canonical replay reference keeps exact sha256"
+            artifact.sha256
+            decoded.sha256;
+          Alcotest.check
+            Alcotest.int
+            "canonical replay reference keeps exact byte count"
+            artifact.bytes
+            decoded.bytes
+        | Tool_output.Not_normalized_artifact_ref ->
+          Alcotest.fail "canonical replay evidence lost its typed artifact reference"
+        | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+          Alcotest.failf "canonical replay artifact reference is invalid: %s" detail);
+       let projected = projected_model_text ~base_path message in
+       let projected_evidence =
+         projected
+         |> String.split_on_char '\n'
+         |> List.rev
+         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> Yojson.Safe.from_string
+       in
+       Alcotest.check
+         Alcotest.string
+         "provider projection receives the full exact replay payload"
+         raw_output
+         Yojson.Safe.Util.(
+           projected_evidence |> member "untrusted_tool_output" |> to_string);
        Alcotest.check
          Alcotest.bool
-         "rendered turn stays bounded"
-         true
-         (String.length message < 16 * 1024))
+         "provider projection does not substitute a preview marker"
+         false
+         (String_util.contains_substring projected Tool_output.marker_prefix))
 ;;
 
-(* At or under the threshold the exact bytes are inlined — the small-output
-   path is unchanged by the marker boundary. *)
-let test_small_replay_result_is_inlined_exactly () =
+let test_multimodal_goal_projects_exact_replay_evidence () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
-       let raw_output = {|{"results":[{"title":"small-exact"}]}|} in
+       let raw_output = "MULTIMODAL-REPLAY-EXACT" in
        let artifact =
          match
            Masc.Keeper_gate_replay.For_testing.persist_replay_artifact
@@ -430,24 +493,153 @@ let test_small_replay_result_is_inlined_exactly () =
        in
        let message =
          Masc.Keeper_gate_replay.append_model_evidence
-           ~approval_id:"approval-small"
-           ~user_message:"continue"
-           (Masc.Keeper_gate_replay.For_testing.durable_replay_outcome
-              ~base_path
-              ~operation:"network_read"
-              ~journal:Masc.Keeper_gate_replay.Replay_journal_recorded
-              (Masc.Keeper_approval_queue.Replay_applied artifact))
+           ~approval_id:"approval-multimodal"
+           ~user_message:"inspect the image"
+           (Masc.Keeper_gate_replay.Applied
+              { operation = "network_read"
+              ; output_ref = artifact
+              ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+              })
+       in
+       let evidence =
+         match message.replay_evidence with
+         | Some evidence -> evidence
+         | None -> Alcotest.fail "multimodal replay evidence is absent"
+       in
+       let image =
+         Agent_sdk.Types.Image
+           { media_type = "image/png"
+           ; data = "aW1hZ2U="
+           ; source_type = Agent_sdk.Types.Base64
+           }
+       in
+       let canonical_blocks =
+         Masc.Keeper_gate_replay.append_model_evidence_block evidence [ image ]
+       in
+       let canonical_message =
+         Agent_sdk.Types.user_msg_blocks canonical_blocks
        in
        Alcotest.check
          Alcotest.bool
-         "small evidence is inlined byte-exact"
-         true
-         (String_util.contains_substring message "small-exact");
-       Alcotest.check
-         Alcotest.bool
-         "no marker below the threshold"
+         "multimodal canonical goal keeps only the artifact identity"
          false
-         (String_util.contains_substring message Tool_output.marker_prefix))
+         (String_util.contains_substring
+            (Agent_sdk.Types.text_of_content canonical_message.content)
+            raw_output);
+       match
+         Masc.Keeper_gate_replay.project_model_input
+           ~base_path
+           evidence
+           [ canonical_message ]
+       with
+       | Error detail -> Alcotest.fail detail
+       | Ok [ original; projected ] ->
+         (match original.content, projected.content with
+          | ( Agent_sdk.Types.Image _ :: Agent_sdk.Types.Text _ :: []
+            , [ Agent_sdk.Types.Text evidence_text ] ) ->
+            Alcotest.check
+              Alcotest.bool
+              "media block survives replay projection"
+              true
+              (String_util.contains_substring evidence_text raw_output)
+          | _ ->
+            Alcotest.fail
+              "multimodal projection did not preserve canonical media and append replay evidence")
+       | Ok _ -> Alcotest.fail "multimodal projection did not append one message")
+;;
+
+let test_replay_projection_fails_closed_when_artifact_is_missing () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let artifact =
+         Tool_output.make_artifact_ref
+           ~sha256:(String.make 64 '0')
+           ~bytes:12
+           ~preview:""
+           ~mime:"text/plain"
+         |> Result.get_ok
+       in
+       let message =
+         Masc.Keeper_gate_replay.append_model_evidence
+           ~approval_id:"approval-missing-artifact"
+           ~user_message:"continue"
+           (Masc.Keeper_gate_replay.Applied
+              { operation = "network_read"
+              ; output_ref = artifact
+              ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+              })
+       in
+       let evidence =
+         match message.replay_evidence with
+         | Some evidence -> evidence
+         | None -> Alcotest.fail "replay evidence is absent"
+       in
+       match
+         Masc.Keeper_gate_replay.project_model_input
+           ~base_path
+           evidence
+           [ Agent_sdk.Types.user_msg message.text ]
+       with
+       | Error _ -> ()
+       | Ok _ ->
+         Alcotest.fail
+           "missing replay artifact allowed provider dispatch without exact evidence")
+;;
+
+let test_replay_projection_recovers_when_canonical_reference_is_absent () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let artifact =
+         match
+           Masc.Keeper_gate_replay.For_testing.persist_replay_artifact
+             ~base_path
+             "available exact output"
+         with
+         | Ok artifact -> artifact
+         | Error detail -> Alcotest.fail detail
+       in
+       let message =
+         Masc.Keeper_gate_replay.append_model_evidence
+           ~approval_id:"approval-missing-reference"
+           ~user_message:"continue"
+           (Masc.Keeper_gate_replay.Applied
+              { operation = "network_read"
+              ; output_ref = artifact
+              ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+              })
+       in
+       let evidence =
+         match message.replay_evidence with
+         | Some evidence -> evidence
+         | None -> Alcotest.fail "replay evidence is absent"
+       in
+       match
+         Masc.Keeper_gate_replay.project_model_input
+           ~base_path
+           evidence
+           [ Agent_sdk.Types.user_msg "reference was dropped" ]
+       with
+       | Error detail -> Alcotest.fail detail
+       | Ok [ original; recovered ] ->
+         Alcotest.check
+           Alcotest.string
+           "original provider input is preserved"
+           "reference was dropped"
+           (Agent_sdk.Types.text_of_content original.content);
+         Alcotest.check
+           Alcotest.bool
+            "exact replay evidence is appended independently of text layout"
+           true
+           (String_util.contains_substring
+              (Agent_sdk.Types.text_of_content recovered.content)
+              "available exact output")
+       | Ok _ ->
+         Alcotest.fail
+           "replay recovery did not append one exact provider message")
 ;;
 
 
@@ -621,13 +813,21 @@ let () =
             `Quick
             test_applied_replay_result_is_model_visible
         ; Alcotest.test_case
-            "large result renders the standard blob marker"
+            "large result reaches exact provider projection"
             `Quick
             test_large_replay_result_reaches_model_exactly
         ; Alcotest.test_case
-            "small result is inlined byte-exact"
+            "multimodal goal projects exact replay evidence"
             `Quick
-            test_small_replay_result_is_inlined_exactly
+            test_multimodal_goal_projects_exact_replay_evidence
+        ; Alcotest.test_case
+            "canonical reference layout does not control projection"
+            `Quick
+            test_replay_projection_recovers_when_canonical_reference_is_absent
+        ; Alcotest.test_case
+            "missing artifact blocks provider dispatch"
+            `Quick
+            test_replay_projection_fails_closed_when_artifact_is_missing
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case

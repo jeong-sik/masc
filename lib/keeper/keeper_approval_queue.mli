@@ -98,14 +98,11 @@ type resolution_replay_outcome =
   | Replay_failed of Tool_output.artifact_ref
   | Replay_indeterminate of Tool_output.artifact_ref
 (** Derived replay evidence points to exact bytes in {!Tool_blob_store}. The
-    Gate sidecar owns only this typed content address; provider input is
-    rehydrated from it through the same inline/marker boundary as ordinary
-    tool outputs ([Tool_bridge] externalize threshold): at or under the
-    threshold the exact bytes are inlined; above it the standard
-    [Tool_output] blob marker is delivered and the exact bytes remain
-    durable in the store. The rendered request therefore stays bounded by
-    the assigned Runtime's request-body cap while the evidence itself is
-    never truncated.
+    Gate sidecar owns only this typed content address. The current provider
+    input rehydrates the full payload at the caller-owned projection boundary;
+    the assigned Runtime measures and admits that exact projected request.
+    Canonical history and checkpoints retain the reference, not a duplicate
+    payload or a size-dependent preview.
     [Replay_indeterminate] is terminal and fail-closed: the effect may already
     have happened, so it must never be replayed. *)
 

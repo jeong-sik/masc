@@ -766,6 +766,7 @@ export function KeeperConversationPanel({
   const markTranscriptSeen = () => {
     if (newestEntryTsUnix !== null) advanceKeeperLastSeen(keeperName, newestEntryTsUnix)
   }
+  const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   // Stable action object so the memoized ChatMessageBubble's shallow prop
   // compare can skip unchanged messages — an inline `{ ...onClick }` literal
   // would be a new reference each render and defeat the memo.
@@ -774,37 +775,41 @@ export function KeeperConversationPanel({
       ...(onInspectTurn
         ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn }
         : {}),
-      onPendingCancel: async (entry: KeeperConversationEntry) => {
-        await cancelKeeperChatPendingEntry(keeperName, entry)
-        showToast('대기 메시지를 취소했습니다.', 'success')
-      },
-      onPendingEdit: async (entry: KeeperConversationEntry) => {
-        const original = await cancelKeeperChatPendingEntry(
-          keeperName,
-          entry,
-          { requireUserInput: true },
-        )
-        if (!original) {
-          throw new Error('수정할 원문을 찾지 못했습니다.')
-        }
-        enqueueInput(
-          keeperName,
-          original.text,
-          original.attachments,
-          undefined,
-          original.blocks,
-          undefined,
-          true,
-        )
-        setQueueVersion(value => value + 1)
-        showToast('서버 대기를 취소하고 편집 화면으로 옮겼습니다.', 'success')
-      },
+      ...(!chatAccess.blocked
+        ? {
+            onPendingCancel: async (entry: KeeperConversationEntry) => {
+              await cancelKeeperChatPendingEntry(keeperName, entry)
+              showToast('대기 메시지를 취소했습니다.', 'success')
+            },
+            onPendingEdit: async (entry: KeeperConversationEntry) => {
+              const original = await cancelKeeperChatPendingEntry(
+                keeperName,
+                entry,
+                { requireUserInput: true },
+              )
+              if (!original) {
+                throw new Error('수정할 원문을 찾지 못했습니다.')
+              }
+              enqueueInput(
+                keeperName,
+                original.text,
+                original.attachments,
+                undefined,
+                original.blocks,
+                original.userBlocks,
+                true,
+              )
+              setQueueVersion(value => value + 1)
+              showToast('서버 대기를 취소하고 편집 화면으로 옮겼습니다.', 'success')
+            },
+          }
+        : {}),
       onRecoveryRequeue: (entry: KeeperConversationEntry) =>
         requeueKeeperChatRecoveryEntry(keeperName, entry),
       onRecoveryCancel: (entry: KeeperConversationEntry, detail: string) =>
         cancelKeeperChatRecoveryEntry(keeperName, entry, detail),
     }),
-    [keeperName, onInspectTurn],
+    [chatAccess.blocked, keeperName, onInspectTurn],
   )
   const transcriptEmptyText =
     hasQuery && visibleThreadWithQueue.length > 0
@@ -829,7 +834,6 @@ export function KeeperConversationPanel({
       </div>
     `
   }
-  const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   const composerDisabled = !keeperName || chatAccess.blocked
   const composerPlaceholder = chatAccess.blocked
     ? '현재 actor는 direct keeper chat 권한이 없습니다'

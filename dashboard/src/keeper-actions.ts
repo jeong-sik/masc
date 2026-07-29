@@ -4,6 +4,7 @@ import {
   cancelKeeperChatPendingReceipt,
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatPending,
   fetchKeeperChatReceipt,
   resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
@@ -837,6 +838,124 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
   if (!keeperName) return
   const generation = (keeperReceiptReconciliationGeneration.get(keeperName) ?? 0) + 1
   keeperReceiptReconciliationGeneration.set(keeperName, generation)
+  const failures: string[] = []
+  try {
+    const pendingSnapshot = await fetchKeeperChatPending(keeperName)
+    if (keeperReceiptReconciliationGeneration.get(keeperName) !== generation) return
+    for (const pending of pendingSnapshot.pending) {
+      const receiptId = pending.receipt.receiptId
+      const timestamp = new Date(pending.submittedAt * 1000).toISOString()
+      const currentWork = pendingSnapshot.currentWork
+      const thread = keeperThreads.value[keeperName] ?? []
+      const existingReceiptEntry = thread.find(entry => (
+        entry.details?.queueReceiptId === receiptId
+      ))
+      const existingRevision = existingReceiptEntry?.details?.queueRevision
+      if (
+        typeof existingRevision === 'string'
+        && compareKeeperQueueRevisions(pending.receipt.revision, existingRevision) < 0
+      ) {
+        continue
+      }
+      const userEntry = thread.find(entry => (
+        entry.role === 'user' && entry.details?.queueReceiptId === receiptId
+      ))
+      if (userEntry) {
+        updateThreadEntry(keeperName, userEntry.id, entry => ({
+          ...entry,
+          text: pending.content,
+          timestamp,
+          attachments: pending.attachments.length > 0 ? pending.attachments : undefined,
+          userBlocks: pending.userBlocks.length > 0 ? pending.userBlocks : undefined,
+          details: {
+            ...(entry.details ?? {}),
+            queueReceiptId: receiptId,
+            queueRevision: pending.receipt.revision,
+          },
+        }))
+      } else {
+        appendThreadEntry(keeperName, {
+          id: `pending-receipt-user-${receiptId}`,
+          role: 'user',
+          source: 'direct_user',
+          label: 'You',
+          text: pending.content,
+          timestamp,
+          delivery: 'delivered',
+          streamState: null,
+          streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
+            deliveryReceipt: 'server_durable_receipt',
+            reason: `pending receipt ${receiptId}`,
+          }),
+          attachments: pending.attachments.length > 0 ? pending.attachments : undefined,
+          userBlocks: pending.userBlocks.length > 0 ? pending.userBlocks : undefined,
+          details: {
+            queueReceiptId: receiptId,
+            queueRevision: pending.receipt.revision,
+          },
+        })
+      }
+      const currentThread = keeperThreads.value[keeperName] ?? []
+      const assistantEntry = currentThread.find(entry => (
+        entry.role === 'assistant' && entry.details?.queueReceiptId === receiptId
+      ))
+      const queueDetails = {
+        ...(assistantEntry?.details ?? {}),
+        queueReceiptId: receiptId,
+        queueRevision: pending.receipt.revision,
+        queueState: 'pending' as const,
+        queueFailureKind: null,
+        queueInFlightLane: currentWork?.lane ?? null,
+        queueInFlightStartedAt: currentWork?.startedAt ?? null,
+      }
+      if (assistantEntry) {
+        updateThreadEntry(keeperName, assistantEntry.id, entry => ({
+          ...entry,
+          delivery: 'queued',
+          streamState: null,
+          details: queueDetails,
+        }))
+      } else {
+        appendThreadEntry(keeperName, {
+          id: `pending-receipt-assistant-${receiptId}`,
+          role: 'assistant',
+          source: 'direct_assistant',
+          label: keeperName,
+          text: `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다.`,
+          timestamp,
+          delivery: 'queued',
+          streamState: null,
+          streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
+            deliveryReceipt: 'server_durable_receipt',
+            reason: `pending receipt ${receiptId}`,
+          }),
+          details: queueDetails,
+        })
+      }
+    }
+    for (const entry of keeperThreads.value[keeperName] ?? []) {
+      const queueState = entry.details?.queueState
+      if (
+        entry.role !== 'assistant'
+        || !entry.details?.queueReceiptId
+        || (queueState !== 'pending' && queueState !== 'inflight')
+      ) {
+        continue
+      }
+      updateThreadEntry(keeperName, entry.id, current => ({
+        ...current,
+        details: {
+          ...(current.details ?? {}),
+          queueInFlightLane: pendingSnapshot.currentWork?.lane ?? null,
+          queueInFlightStartedAt: pendingSnapshot.currentWork?.startedAt ?? null,
+        },
+      }))
+    }
+  } catch (err) {
+    failures.push(
+      `pending inventory: ${err instanceof Error ? err.message : 'pending lookup failed'}`,
+    )
+  }
   const queuedEntries = (keeperThreads.value[keeperName] ?? []).filter(entry => (
     entry.role === 'assistant'
     && entry.delivery === 'queued'
@@ -844,12 +963,17 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
   ))
   const pendingConvergence = pendingTerminalTranscriptConvergence.get(keeperName)
   if (queuedEntries.length === 0 && (!pendingConvergence || pendingConvergence.size === 0)) {
+    if (failures.length > 0) {
+      const message = `큐 receipt 조회 실패: ${failures.join('; ')}`
+      setRecordValue(keeperActionErrors, keeperName, message)
+      console.warn(`[keeper] ${message}`)
+      return
+    }
     if (keeperActionErrors.value[keeperName]?.startsWith('큐 receipt 조회 실패:')) {
       setRecordValue(keeperActionErrors, keeperName, null)
     }
     return
   }
-  const failures: string[] = []
   await Promise.all(queuedEntries.map(async (entry) => {
     const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
     if (!receiptId) return
@@ -893,6 +1017,14 @@ export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
         queueState: receipt.state.kind,
         queueFailureKind:
           receipt.state.kind === 'failed' ? receipt.state.failureKind : null,
+        queueInFlightLane:
+          receipt.state.kind === 'pending' || receipt.state.kind === 'inflight'
+            ? entry.details?.queueInFlightLane ?? null
+            : null,
+        queueInFlightStartedAt:
+          receipt.state.kind === 'pending' || receipt.state.kind === 'inflight'
+            ? entry.details?.queueInFlightStartedAt ?? null
+            : null,
       }
       const streamContract = keeperStreamContract('queue_poll', 'queue_poll_result', {
         deliveryReceipt: 'server_durable_receipt',
@@ -1341,6 +1473,7 @@ export async function sendKeeperThreadMessage(
       reason: 'local optimistic user row before server history confirmation',
     }),
     attachments,
+    userBlocks,
     blocks,
     details: null,
   })

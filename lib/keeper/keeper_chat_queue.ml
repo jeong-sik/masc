@@ -434,6 +434,11 @@ type receipt_lookup = {
   receipt : receipt_view option;
 }
 
+type pending_snapshot = {
+  revision : int64;
+  receipts : active_receipt list;
+}
+
 type diagnostic_snapshot = {
   revision : int64;
   pending : active_receipt list;
@@ -2989,6 +2994,55 @@ let observation_allowed entry =
   | [] -> Ok ()
   | { kind = Durability_uncertain; _ } :: _ -> Ok ()
   | error :: _ -> Error (Snapshot_unavailable error)
+
+let pending_receipts ~keeper_name =
+  if not (valid_keeper_name keeper_name)
+  then Error (Invalid_input (Printf.sprintf "invalid keeper name: %s" keeper_name))
+  else
+    let* base_path = configured_base_path () in
+    let* path =
+      snapshot_path ~base_path ~keeper_name
+      |> Result.map_error (fun detail ->
+        Snapshot_unavailable (load_error Invalid_path detail))
+    in
+    match find_entry keeper_name with
+    | None ->
+      (match observe_lane_store ~ownership_root:base_path ~path with
+       | Error error -> Error (Snapshot_unavailable error)
+       | Ok Store_absent -> Ok { revision = 0L; receipts = [] }
+       | Ok Store_present ->
+         Error
+           (Snapshot_unavailable
+              (load_error Reconciliation_failed ~path
+                 "chat queue database exists without a configured in-memory lane")))
+    | Some entry ->
+      with_entry_lock keeper_name entry (fun () ->
+          let* () =
+            match entry.load_errors with
+            | [] -> Ok ()
+            | error :: _ -> Error (Snapshot_unavailable error)
+          in
+          match check_entry_store ~base_path ~path entry ~allow_absent:false with
+          | Error _ as error -> error
+          | Ok Store_absent ->
+            Error
+              (Snapshot_unavailable
+                 (load_error Read_failed ~path
+                    "chat queue database is absent during pending receipt lookup"))
+          | Ok Store_present ->
+            let rec project receipts = function
+              | [] -> Ok { revision = entry.revision; receipts = List.rev receipts }
+              | (_, row) :: rest ->
+                (match active_receipt_of_row row with
+                 | Ok ({ state = Pending; _ } as receipt) ->
+                   project (receipt :: receipts) rest
+                 | Ok _ | Error _ ->
+                   Error
+                     (Snapshot_unavailable
+                        (load_error Parse_failed ~path
+                           "pending receipt index contains a non-pending row")))
+            in
+            project [] (Sequence_map.bindings entry.pending))
 
 let receipt_lookup_of_row revision = function
   | None -> { revision; receipt = None }

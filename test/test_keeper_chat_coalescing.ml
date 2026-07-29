@@ -257,6 +257,21 @@ let test_pending_cancellation_is_state_guarded () =
   ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
   let first = enqueue_exn ~keeper_name (message "first") in
   let second = enqueue_exn ~keeper_name (message "second") in
+  (match Keeper_chat_queue.pending_receipts ~keeper_name with
+   | Ok { revision = 2L; receipts = [ first_pending; second_pending ] } ->
+     check "pending projection preserves FIFO receipt identity"
+       (Keeper_chat_queue.Receipt_id.equal
+          first.receipt_id
+          first_pending.receipt_id
+        && Keeper_chat_queue.Receipt_id.equal
+             second.receipt_id
+             second_pending.receipt_id);
+     check "pending projection preserves exact payload"
+       (String.equal first_pending.message.content "first"
+        && String.equal second_pending.message.content "second")
+   | Ok _ | Error _ ->
+     check "pending projection preserves FIFO receipt identity" false;
+     check "pending projection preserves exact payload" false);
   (match
      Keeper_chat_queue.cancel_pending
        ~keeper_name
@@ -318,6 +333,51 @@ let test_pending_cancellation_is_state_guarded () =
       | `Unknown_lease
       | `Error of Keeper_chat_queue.mutation_error
       ])
+
+let test_uncertain_pending_cancellation_converges () =
+  Printf.printf "Test: uncertain pending cancellation converges by receipt\n%!";
+  with_base "keeper-chat-pending-cancel-uncertain" @@ fun base_path ->
+  let keeper_name = "pending-cancel-uncertain" in
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let receipt = enqueue_exn ~keeper_name (message "cancel once") in
+  Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Commit_returned ];
+  (match
+     Keeper_chat_queue.cancel_pending
+       ~keeper_name
+       ~receipt_id:receipt.receipt_id
+       ~cancellation:{ cancelled_at = 3.0; detail = "cancelled once" }
+   with
+   | Error
+       (Keeper_chat_queue.Persist_failed
+          { publication =
+              Keeper_chat_queue.Pending_cancel_indeterminate
+                { receipt_id = observed; revision = 2L }
+          ; _
+          }) ->
+     check "uncertain pending cancellation exposes exact receipt"
+       (Keeper_chat_queue.Receipt_id.equal receipt.receipt_id observed)
+   | Ok _ | Error _ ->
+     check "uncertain pending cancellation exposes exact receipt" false);
+  (match Keeper_chat_queue.pending_receipts ~keeper_name with
+   | Error
+       (Keeper_chat_queue.Snapshot_unavailable
+          { kind = Durability_uncertain; _ }) ->
+     check "pending projection never guesses across uncertain durability" true
+   | Ok _ | Error _ ->
+     check "pending projection never guesses across uncertain durability" false);
+  (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
+   | Ok { outcome = Reconciled; revision = 2L } ->
+     (match
+        Keeper_chat_queue.lookup_receipt
+          ~keeper_name
+          ~receipt_id:receipt.receipt_id
+      with
+      | Ok { receipt = Some { state = Failed { kind = Cancelled; _ }; _ }; _ } ->
+        check "uncertain pending cancellation reconciles to cancelled" true
+      | Ok _ | Error _ ->
+        check "uncertain pending cancellation reconciles to cancelled" false)
+   | Ok _ | Error _ ->
+     check "uncertain pending cancellation reconciles to cancelled" false)
 
 let expect_enqueue_indeterminate label expected_receipt_id = function
   | Error
@@ -995,6 +1055,7 @@ let () =
   test_lifecycle_fifo_terminal_pk_and_restart ();
   test_preallocated_receipt_convergence ();
   test_pending_cancellation_is_state_guarded ();
+  test_uncertain_pending_cancellation_converges ();
   test_transaction_publication_boundaries ();
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();

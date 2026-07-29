@@ -196,6 +196,11 @@ type receipt_lookup = {
   receipt : receipt_view option;
 }
 
+type pending_snapshot = {
+  revision : int64;
+  receipts : active_receipt list;
+}
+
 type diagnostic_snapshot = {
   revision : int64;
   pending : active_receipt list;
@@ -314,6 +319,12 @@ val lookup_receipt :
 (** Atomically return the receipt observation with the queue revision that
     produced it. A [Durability_uncertain] lane remains observable by receipt id
     even though further mutations are rejected until reconciliation. *)
+
+val pending_receipts :
+  keeper_name:string -> (pending_snapshot, mutation_error) result
+(** Return the exact durable [Pending] payloads in FIFO order. This is a
+    read-only projection over the queue authority; callers must not persist it as
+    a second queue state. *)
 
 type pending_cancellation =
   { cancelled_at : float

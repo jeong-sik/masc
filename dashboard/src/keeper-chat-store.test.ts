@@ -182,7 +182,7 @@ describe('keeper-chat-store input queue', () => {
     expect(getQueueLength('keeper-q')).toBe(2)
   })
 
-  it('clears stale display and semantic blocks when a queued message is edited', () => {
+  it('clears stale display blocks and edits the exact semantic text block', () => {
     const msg = enqueueInput(
       'keeper-q',
       '[Voice memo 00:03 (12 KB)]\nhello',
@@ -197,7 +197,46 @@ describe('keeper-chat-store input queue', () => {
     const edited = dequeueInput('keeper-q')
     expect(edited!.content).toBe('edited text')
     expect(edited!.blocks).toBeUndefined()
-    expect(edited!.userBlocks).toBeUndefined()
+    expect(edited!.userBlocks).toEqual([{ type: 'text', text: 'edited text' }])
+  })
+
+  it('does not synthesize a text block when an attachment-only message is unchanged', () => {
+    const attachment = {
+      id: 'att-image',
+      type: 'image' as const,
+      name: 'photo.png',
+      size: 1024,
+      mimeType: 'image/png',
+      data: 'data:image/png;base64,abc123',
+    }
+    const msg = enqueueInput(
+      'keeper-q',
+      '[첨부: photo.png]',
+      [attachment],
+      'click-image',
+      undefined,
+      [{
+        type: 'image',
+        attachmentId: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+      }],
+    )
+
+    updateQueuedMessage('keeper-q', msg.id, {
+      content: '[첨부: photo.png]',
+      attachments: [attachment],
+    })
+
+    const edited = dequeueInput('keeper-q')
+    expect(edited!.userBlocks).toEqual([{
+      type: 'image',
+      attachmentId: 'att-image',
+      name: 'photo.png',
+      mimeType: 'image/png',
+      size: 1024,
+    }])
   })
 })
 

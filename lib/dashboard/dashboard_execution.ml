@@ -496,7 +496,8 @@ let model_map_of_keeper_rows keepers =
       | `Assoc _ as keeper_json ->
         (match Json_util.assoc_member_opt "name" keeper_json,
                Json_util.assoc_member_opt "active_model" keeper_json with
-         | Some (`String _), Some (`String _)
+         | Some (`String name), Some (`String model) ->
+             Hashtbl.add model_map name model
          | Some (`String _), _
          | _, Some (`String _)
          | _, _ -> ())

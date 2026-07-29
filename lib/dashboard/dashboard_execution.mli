@@ -45,6 +45,10 @@ val record_render_phase_timings : render_phase_timings_ms -> unit
     slow-render log payload so dashboard N+1 / enrichment cost is visible
     even when the render stays below the warning threshold. *)
 
+val model_map_of_keeper_rows : Yojson.Safe.t list -> (string, string) Hashtbl.t
+(** Build a name→active_model lookup from keeper JSON rows.
+    Exposed for regression testing of the agents[].model wire contract. *)
+
 val terminal_reason_requires_attention : Yojson.Safe.t -> bool
 (** Strict typed projection for a runtime-trust [latest_terminal_reason].
     Missing reason is non-attention; malformed or non-success dispositions are

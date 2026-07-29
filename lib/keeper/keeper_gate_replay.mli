@@ -93,13 +93,12 @@ val project_model_input :
   model_evidence ->
   Agent_sdk.Types.message list ->
   (Agent_sdk.Types.message list, string) result
-(** Replace the newest exact canonical replay reference with the full durable
-    payload in the provider-only projection. If the canonical reference was
-    removed by an upstream projection, append the same exact evidence instead
-    of blocking dispatch. A storage miss is logged and leaves the current input
-    unchanged, matching ordinary artifact hydration. OAS measures and dispatches
-    this same projection; no Keeper byte cap or preview substitutes for the
-    current result. *)
+(** Append the full durable payload as an explicit provider-only message.
+    Canonical history remains reference-only and no text search or replacement
+    decides where evidence is attached. Missing or invalid storage evidence
+    fails before provider dispatch so the durable reference can be retried on a
+    later turn. OAS measures and dispatches this same projection; no Keeper byte
+    cap or preview substitutes for the current result. *)
 
 val approved_resolution_message :
   approval_id:string ->

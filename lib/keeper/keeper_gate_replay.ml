@@ -557,85 +557,23 @@ let append_model_evidence_block evidence blocks =
   @ [ Agent_sdk.Types.Text (canonical_replay_evidence_fragment evidence) ]
 ;;
 
-let replace_last_substring ~needle ~replacement haystack =
-  let needle_length = String.length needle in
-  let haystack_length = String.length haystack in
-  let rec find position found =
-    match String_util.find_substring ~pos:position haystack needle with
-    | None -> found
-    | Some index -> find (index + 1) (Some index)
-  in
-  if needle_length = 0
-  then None
-  else
-    match find 0 None with
-    | None -> None
-    | Some index ->
-      Some
-        (String.sub haystack 0 index
-         ^ replacement
-         ^ String.sub
-             haystack
-             (index + needle_length)
-             (haystack_length - index - needle_length))
-;;
-
-let rec project_last_evidence_block ~canonical ~hydrated = function
-  | [] -> None
-  | block :: rest ->
-    (match project_last_evidence_block ~canonical ~hydrated rest with
-     | Some rest -> Some (block :: rest)
-     | None ->
-       (match block with
-        | Agent_sdk.Types.Text text ->
-          Option.map
-            (fun text -> Agent_sdk.Types.Text text :: rest)
-            (replace_last_substring
-               ~needle:canonical
-               ~replacement:hydrated
-               text)
-        | _ -> None))
-;;
-
-let rec project_last_evidence_message ~canonical ~hydrated = function
-  | [] -> None
-  | (message : Agent_sdk.Types.message) :: rest ->
-    (match project_last_evidence_message ~canonical ~hydrated rest with
-     | Some rest -> Some (message :: rest)
-     | None ->
-       Option.map
-         (fun content -> { message with content } :: rest)
-         (project_last_evidence_block
-            ~canonical
-            ~hydrated
-            message.Agent_sdk.Types.content))
-;;
-
 let project_model_input ~base_path evidence messages =
   let artifact_ref = evidence.artifact_ref in
   match retrieve_replay_artifact ~base_path artifact_ref with
   | Error detail ->
-    Log.Keeper.error
-      "Gate replay evidence hydration failed approval=%s sha256=%s: %s"
-      evidence.approval_id
-      artifact_ref.Tool_output.sha256
-      detail;
-    Ok messages
+    Error
+      (Printf.sprintf
+         "Gate replay evidence hydration failed approval=%s sha256=%s: %s"
+         evidence.approval_id
+         artifact_ref.Tool_output.sha256
+         detail)
   | Ok payload ->
-    let canonical = canonical_replay_evidence_fragment evidence in
     let hydrated =
       replay_evidence_fragment
         evidence
         (`Hydrated (Inference_utils.sanitize_text_utf8 payload))
     in
-    (match project_last_evidence_message ~canonical ~hydrated messages with
-     | Some projected -> Ok projected
-     | None ->
-       Log.Keeper.warn
-         "Gate replay reference absent from provider input; appending exact evidence approval=%s sha256=%s"
-         evidence.approval_id
-         artifact_ref.Tool_output.sha256;
-       Ok (messages @ [ Agent_sdk.Types.user_msg hydrated ]))
+    Ok (messages @ [ Agent_sdk.Types.user_msg hydrated ])
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =

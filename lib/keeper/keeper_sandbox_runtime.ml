@@ -95,6 +95,38 @@ let string_opt text =
   | value -> Some value
 ;;
 
+let invalid_cleanup_field ~field ~value =
+  Error
+    (Printf.sprintf
+       "invalid docker inspect cleanup field %s=%S"
+       field
+       (Exec_policy.truncate_for_log value))
+;;
+
+let required_positive_int ~field text =
+  match int_opt text with
+  | Some value when value > 0 -> Ok (Some value)
+  | None | Some _ -> invalid_cleanup_field ~field ~value:text
+;;
+
+let required_positive_float ~field text =
+  match float_opt text with
+  | Some value when Float.is_finite value && value > 0.0 -> Ok (Some value)
+  | None | Some _ -> invalid_cleanup_field ~field ~value:text
+;;
+
+let required_bool ~field text =
+  match bool_opt text with
+  | Some value -> Ok (Some value)
+  | None -> invalid_cleanup_field ~field ~value:text
+;;
+
+let optional_positive_float ~field text =
+  match string_opt text with
+  | None -> Ok None
+  | Some value -> required_positive_float ~field value
+;;
+
 let strip_leading_slash text =
   let text = String.trim text in
   if String.length text > 0 && text.[0] = '/'
@@ -102,40 +134,23 @@ let strip_leading_slash text =
   else text
 ;;
 
-(* #10488: accept both 4-field (current schema, with [ttl_sec]
-   label) and 3-field (legacy containers spawned before the
-   [sandbox_ttl_sec] label was introduced) payloads.  Without this
-   fallback, a single legacy container in the fleet produces a
-   sustained 4.6%-of-events log spam loop because the 5-minute
-   cleanup pass keeps re-attempting [parse_inspect_line] and
-   keeps failing with [Error].  Treating [ttl_sec=None] is
-   equivalent to "no TTL configured" — cleanup then falls back to
-   the running-state / owner-pid heuristics, which is the correct
-   semantics for a label-less container. *)
 let parse_inspect_line line =
   (* docker inspect --format emits a trailing empty field as either
-     ["<no value>"] (template default) or omits the trailing tab when the
-     ttl_sec label is unset on the container.  Both 4-field (ttl_sec
-     present) and 3-field (ttl_sec missing) shapes are valid; treat the
-     missing case as [ttl_sec = None] instead of failing the cleanup
-     pass with a parse error.  Without this fallback the 5-minute
-     cleanup loop emits "errors=2" on every cycle for any container
-     created without a ttl_sec label, which produced the 138 consecutive
-     parse-error cycles observed on 2026-04-26. *)
+     ["<no value>"] or an empty fourth field when the ttl_sec label is
+     unset. [nonempty_lines] preserves that trailing tab, so every current
+     cleanup payload has exactly four fields. *)
   match String.split_on_char '\t' line with
   | [ owner_pid; started_at; running; ttl_sec ] ->
+    let ( let* ) = Result.bind in
+    let* owner_pid = required_positive_int ~field:"owner_pid" owner_pid in
+    let* started_at = required_positive_float ~field:"started_at" started_at in
+    let* running = required_bool ~field:"running" running in
+    let* ttl_sec = optional_positive_float ~field:"ttl_sec" ttl_sec in
     Ok
-      { owner_pid = int_opt owner_pid
-      ; started_at = float_opt started_at
-      ; running = bool_opt running
-      ; ttl_sec = float_opt ttl_sec
-      }
-  | [ owner_pid; started_at; running ] ->
-    Ok
-      { owner_pid = int_opt owner_pid
-      ; started_at = float_opt started_at
-      ; running = bool_opt running
-      ; ttl_sec = None
+      { owner_pid
+      ; started_at
+      ; running
+      ; ttl_sec
       }
   | _ ->
     Error

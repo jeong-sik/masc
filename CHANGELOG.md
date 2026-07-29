@@ -71,6 +71,11 @@
   - `merge_keeper_profile_defaults` and `merge_string_list` are retained: they still implement the persona `profile.json` → keeper TOML overlay (`keeper_types_profile.ml:244`), which is a separate mechanism. Note `merge_string_list` is replace-if-non-empty, not union.
 
 ### Changed
+- Bumped the OAS Agent SDK pin to v0.231.4
+  (`2add6bf4a0c7a70dab3b60f82c62643a5bd8a9d6`). Compaction can now project
+  exact credential-free request-body bytes through the same provider serializer
+  and output requirement used by OAS admission, without duplicating serializer
+  or provider/model limit logic in MASC.
 - Bumped the OAS Agent SDK pin to v0.231.3
   (`e01940b14d501900b8cbfa2fbb1e0484ada5a42d`). The GLM streaming backend now
   consumes the catalog-resolved typed reasoning dialect instead of hardcoding

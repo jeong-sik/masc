@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.3"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.4"
 # v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
 # rejected; #2867), provider_config.output_schema is removed in favor of
 # response_format = JsonSchema as the single structured-output request state
@@ -41,9 +41,15 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.3"
 # provider heuristics. MASC's exact overlay declares the corresponding
 # delta:reasoning_content capability.
 # Previous pin: v0.231.2 (1ea60e7a1).
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.3"
+# v0.231.4 exposes credential-free exact request-body projection (#2887).
+# It uses the same provider serializer and output requirement as admission,
+# returning only actual bytes, the declared limit, and their comparison. MASC
+# uses this typed boundary to bound compaction input without duplicating an OAS
+# serializer or inferring byte limits from provider/model names.
+# Previous pin: v0.231.3 (e01940b14).
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.4"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="e01940b14d501900b8cbfa2fbb1e0484ada5a42d"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.231.3"
+readonly OAS_AGENT_SDK_SHA="2add6bf4a0c7a70dab3b60f82c62643a5bd8a9d6"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.4"

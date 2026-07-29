@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "e01940b14d501900b8cbfa2fbb1e0484ada5a42d",
-  "pinned_version": "v0.231.3",
+  "pinned_sha": "2add6bf4a0c7a70dab3b60f82c62643a5bd8a9d6",
+  "pinned_version": "v0.231.4",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -108,6 +108,7 @@
       "type:target_catalog_admission_error:type target_catalog_admission_error = | Target_ref_rejected of target_ref_error | Target_not_in_catalog of string",
       "type:wire_admission_error:type wire_admission_error",
       "type:admission_error:type admission_error",
+      "type:request_body_projection:type request_body_projection = private { actual_bytes : int ; limit_bytes : int option ; within_limit : bool }",
       "type:token_capacity_rejection:type token_capacity_rejection = | Capacity_evidence_not_yet_valid of { now_unix_s : int ; checked_at_unix_s : int } | Capacity_evidence_expired of { now_unix_s : int ; expires_at_unix_s : int } | Capacity_boundary_unknown of { input_tokens : int ; accepted_through_tokens : int ; rejected_from_tokens : int option } | Capacity_input_rejected of { input_tokens : int ; accepted_through_tokens : int ; rejected_from_tokens : int }",
       "type:input_capacity_disposition:type input_capacity_disposition = | Token_measurement_required of { accepted_through_tokens : int ; rejected_from_tokens : int option } | Context_window_exceeded of { input_tokens : int ; reserved_output_tokens : int ; max_context_tokens : int } | Token_capacity_rejected of token_capacity_rejection | Serialized_request_body_too_large of { actual_bytes : int ; limit_bytes : int }",
       "type:candidate_rejection_disposition:type candidate_rejection_disposition = | Runtime_slot_unavailable | Runtime_contract_rejected | Input_contract_rejected | Output_requirement_rejected | Input_capacity of input_capacity_disposition | Request_preparation_failed",
@@ -149,6 +150,7 @@
       "val:admit_target_ref:val admit_target_ref : resolver_snapshot -> string -> (admitted_target, target_catalog_admission_error) result",
       "val:resolve_target:val resolve_target : admitted_target -> (selected_target, target_selection_error) result",
       "val:make_output_requirement:val make_output_requirement : schema:Yojson.Safe.t -> minimum_guarantee:minimum_guarantee -> output_requirement",
+      "val:project_request_body:val project_request_body : target:admitted_target -> messages:Types.message list -> output_requirement -> (request_body_projection, admission_error) result",
       "val:admit:val admit : target:selected_target -> messages:Types.message list -> output_requirement -> (ready_plan, admission_error) result",
       "val:plan_provenance:val plan_provenance : ready_plan -> plan_provenance",
       "val:plan_provenance_source_schema_fingerprint:val plan_provenance_source_schema_fingerprint : plan_provenance -> schema_fingerprint",

@@ -65,13 +65,13 @@ let one_line_claim claim =
   |> String.trim
 ;;
 
-(* The judge must see every field the apply gate compares. [apply_plan]
-   rejects a group whose members differ in [claim_kind] or [valid_until]
-   (None ≠ Some included), so hiding those fields from the prompt made the
-   gate a coin flip: live sangsu carried near-duplicate claims split
-   external_state/untagged/self_observation, every natural merge group mixed
-   them, and consolidation ran for weeks with before = after. Deterministic
-   annotation only — the merge judgement stays with the LLM. *)
+(* [kind=] and [until=] are semantic context for the judge, not merge
+   preconditions: [apply_plan] combines both fields through total functions
+   ([claim_kind_for_members], [valid_until_for_members]) instead of demanding
+   that members already agree on them. They stay in the rendering because
+   "this claim expires on date X" and "this came from self-observation" change
+   whether two claims say the same thing. Deterministic annotation only — the
+   merge judgement stays with the LLM. *)
 let render_numbered_facts facts =
   facts
   |> List.mapi (fun i (f : fact) ->
@@ -93,26 +93,6 @@ let render_numbered_facts facts =
       until
       (one_line_claim f.claim))
   |> String.concat "\n"
-;;
-
-(* A merged row has one [claim_kind] slot, so members with different explicit
-   tags cannot be represented without losing information. Reject that group and
-   preserve every member. *)
-let group_preserves_claim_kind ~members =
-  match members with
-  | [] -> true
-  | (first : fact) :: rest ->
-    List.for_all (fun (m : fact) -> m.claim_kind = first.claim_kind) rest
-;;
-
-(* A merged row has only one [valid_until] slot. If members carry different
-   explicit values, choosing min/max/earliest would invent policy and discard
-   information, so the group is rejected and every member remains unchanged. *)
-let group_preserves_valid_until ~members =
-  match members with
-  | [] -> true
-  | (first : fact) :: rest ->
-    List.for_all (fun (member : fact) -> member.valid_until = first.valid_until) rest
 ;;
 
 (* ---------- JSON parsing (defensive, like the librarian) ---------- *)
@@ -235,9 +215,34 @@ let max_optional_float values =
     values
 ;;
 
-let valid_until_for_members = function
+(* Meet of the members' validity intervals. [None] is "no expiry" — the lattice
+   top and the identity element — so it never shortens a member that declared
+   one. Two [Some] values take the earlier: the merged claim must not outlive
+   the shortest-lived claim it absorbed. [max] would resurrect an expired
+   member, which is the one direction that fabricates knowledge; [min] cannot.
+   Restores RFC-0259 §P7 ("consolidated groups inherit the earliest stored
+   member horizon"), which PR #24332 replaced with an exact-equality reject. *)
+let valid_until_for_members members =
+  List.fold_left
+    (fun acc (m : fact) ->
+       match acc, m.valid_until with
+       | None, v | v, None -> v
+       | Some a, Some b -> Some (Float.min a b))
+    None
+    members
+;;
+
+(* [claim_kind] is documented as model context that creates neither a validity
+   horizon nor a promotion hierarchy (keeper_memory_os_types.mli), so there is
+   no sanctioned order to fold it by and inventing one would contradict that
+   contract. Unanimous members keep their tag; a group spanning kinds is
+   genuinely untagged, and the field is already an option that says so. *)
+let claim_kind_for_members = function
   | [] -> None
-  | (first : fact) :: _ -> first.valid_until
+  | (first : fact) :: rest ->
+    if List.for_all (fun (m : fact) -> m.claim_kind = first.claim_kind) rest
+    then first.claim_kind
+    else None
 ;;
 
 let last_verified_for_members members =
@@ -256,8 +261,10 @@ let shared_claim_id_for_members members =
 ;;
 
 (* The consolidated fact for one group: claim/category come from the LLM;
-   provenance is reconstructed structurally. The exact common [valid_until] is
-   preserved; groups with different explicit horizons never reach this function. *)
+   provenance is reconstructed structurally, and [valid_until]/[claim_kind] are
+   combined by the total functions above. Every group the judge proposes with
+   >= 2 free members reaches this function — there is no metadata precondition
+   left to fail. *)
 let consolidated_fact ~now:_ ~members (group : merge_group) =
   let earliest =
     match members with
@@ -276,11 +283,7 @@ let consolidated_fact ~now:_ ~members (group : merge_group) =
   in
   { claim = group.consolidated_claim
   ; category = group.category
-    (* Carry the earliest member's tag. The merge gate
-       ([group_preserves_claim_kind] in [apply_plan]) guarantees every member shares
-       one claim_kind, so the earliest's tag IS the group's — sound regardless of
-       which member is earliest. *)
-  ; claim_kind = earliest.claim_kind
+  ; claim_kind = claim_kind_for_members members
   ; source = earliest.source
   ; observed_by
   ; first_seen
@@ -291,24 +294,16 @@ let consolidated_fact ~now:_ ~members (group : merge_group) =
   }
 ;;
 
-(* Typed apply outcome breakdown: distinguishes "the judge proposed no
-   merges" from "every proposed merge was structurally rejected". *)
+(* Typed apply outcome breakdown. [rejected_too_few_members] is the only
+   remaining rejection: a group with fewer than two free members is not a
+   merge. The metadata-agreement counters are gone with the gates that fed
+   them — a field the judge cannot express must not decide whether its
+   judgement applies. *)
 type apply_stats =
   { merged_groups : int
-  ; rejected_kind_mismatch : int
-  ; rejected_valid_until_mismatch : int
   ; rejected_too_few_members : int
   ; dropped : int
   }
-
-(* Gate disagreements only. [rejected_too_few_members] is deliberately
-   excluded: first-group-wins legitimately shrinks a later overlapping group
-   below two free members, so a plan with contested duplicates produces
-   too-few rejections on every ordinary run — counting those as gate
-   disagreements would fire the rejection counter on normal behavior and
-   bury the real signal. *)
-let gate_rejection_count stats =
-  stats.rejected_kind_mismatch + stats.rejected_valid_until_mismatch
 
 (* Apply a plan to a keeper's facts. Returns the new fact list and typed
    apply statistics. Conservative: a fact not claimed by any valid group and
@@ -318,10 +313,9 @@ let gate_rejection_count stats =
    slot of its earliest member index, survivors keep their slot, dropped
    slots vanish.
 
-   The statistics exist because a rejected group was previously
+   The statistics exist because a rejected group is otherwise
    indistinguishable from "the judge proposed no merges": before = after
-   collapsed both causes into one silent outcome, and the claim_kind gate
-   rejected every natural group for weeks without a single signal. *)
+   collapses both causes into one silent outcome. *)
 let apply_plan ~now ~facts plan =
   let n = List.length facts in
   let facts_arr = Array.of_list facts in
@@ -331,8 +325,6 @@ let apply_plan ~now ~facts plan =
   let in_range i = i >= 0 && i < n in
   let dedup_sorted is = List.sort_uniq compare (List.filter in_range is) in
   let merged_groups = ref 0 in
-  let rejected_kind_mismatch = ref 0 in
-  let rejected_valid_until_mismatch = ref 0 in
   let rejected_too_few_members = ref 0 in
   List.iter
     (fun group ->
@@ -345,30 +337,23 @@ let apply_plan ~now ~facts plan =
        if List.length members >= 2
        then (
          let member_facts = List.map (fun i -> facts_arr.(i)) members in
-         if not (group_preserves_claim_kind ~members:member_facts)
-         then incr rejected_kind_mismatch
-         else if not (group_preserves_valid_until ~members:member_facts)
-         then incr rejected_valid_until_mismatch
-         else (
-           let anchor =
-             (* members is guaranteed non-empty by the [>= 2] guard above *)
-             match members with
-             | [] -> invalid_arg "Keeper_memory_os_consolidation.apply_plan: empty group"
-             | first :: rest ->
-               List.fold_left
-                 (fun acc i ->
-                    if facts_arr.(i).first_seen < facts_arr.(acc).first_seen
-                    then i
-                    else acc)
-                 first
-                 rest
-           in
-           List.iter (fun i -> slot.(i) <- `Consumed) members;
-           incr merged_groups;
-           Hashtbl.replace
-             consolidated
-             anchor
-             (consolidated_fact ~now ~members:member_facts group)))
+         let anchor =
+           (* members is guaranteed non-empty by the [>= 2] guard above *)
+           match members with
+           | [] -> invalid_arg "Keeper_memory_os_consolidation.apply_plan: empty group"
+           | first :: rest ->
+             List.fold_left
+               (fun acc i ->
+                  if facts_arr.(i).first_seen < facts_arr.(acc).first_seen then i else acc)
+               first
+               rest
+         in
+         List.iter (fun i -> slot.(i) <- `Consumed) members;
+         incr merged_groups;
+         Hashtbl.replace
+           consolidated
+           anchor
+           (consolidated_fact ~now ~members:member_facts group))
        else incr rejected_too_few_members)
     plan.groups;
   let dropped = ref 0 in
@@ -393,8 +378,6 @@ let apply_plan ~now ~facts plan =
   done;
   ( !out
   , { merged_groups = !merged_groups
-    ; rejected_kind_mismatch = !rejected_kind_mismatch
-    ; rejected_valid_until_mismatch = !rejected_valid_until_mismatch
     ; rejected_too_few_members = !rejected_too_few_members
     ; dropped = !dropped
     } )

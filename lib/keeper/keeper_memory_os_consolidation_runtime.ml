@@ -181,30 +181,12 @@ let consolidate_keeper
               | Ok (`Assoc _ as json) ->
                 let plan = Consolidation.plan_of_json json in
                 let survivors, stats = Consolidation.apply_plan ~now ~facts plan in
-                (* Only the gate mismatches mean the judge and the apply gate
-                   disagreed — with the gate fields rendered into the prompt
-                   that should be rare, so it is loud. The sum deliberately
-                   excludes [rejected_too_few_members]; see
-                   [Consolidation.gate_rejection_count]. *)
-                let gate_rejected_groups =
-                  Consolidation.gate_rejection_count stats
-                in
-                if gate_rejected_groups > 0
-                then (
-                  Log.Keeper.warn
-                    "memory_os_keeper_consolidation rejected %d group(s) at the merge gate keeper=%s: kind_mismatch=%d valid_until_mismatch=%d (merged=%d dropped=%d too_few_members=%d)"
-                    gate_rejected_groups
-                    keeper_id
-                    stats.rejected_kind_mismatch
-                    stats.rejected_valid_until_mismatch
-                    stats.merged_groups
-                    stats.dropped
-                    stats.rejected_too_few_members;
-                  Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string MemoryOsConsolidationGroupRejected)
-                    ~labels:[ "keeper", keeper_id ]
-                    ())
-                else if stats.rejected_too_few_members > 0
+                (* Below-two-free-members is the only rejection left, and it is
+                   expected on contested-duplicate plans (first group wins), so
+                   it stays at info. The metadata-mismatch WARN and its counter
+                   are gone with the gates: they measured the apply step
+                   discarding judgements it had no standing to overrule. *)
+                if stats.rejected_too_few_members > 0
                 then
                   Log.Keeper.info
                     "memory_os_keeper_consolidation skipped %d group(s) below two free members keeper=%s (merged=%d dropped=%d)"

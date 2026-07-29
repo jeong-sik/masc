@@ -328,7 +328,6 @@ export {
 } from './dashboard-telemetry'
 
 export type {
-  MemorySubsystemsSynapse,
   MemorySubsystemsDelegationRequest,
   MemorySubsystemsResponse,
   KeeperMemoryHealthAlert,

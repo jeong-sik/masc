@@ -7,19 +7,6 @@ import { get, type AbortableRequestOptions } from './core'
 
 // --- Memory Subsystems ---
 
-export interface MemorySubsystemsSynapse {
-  from_agent: string
-  to_agent: string
-  weight: number
-  success_count: number
-  failure_count: number
-  last_updated: number
-  created_at: number
-  /** Newest-first list of (unix ts seconds, weight) points, capped at 30.
-      Missing for graphs produced by pre-sparkline backends. */
-  weight_history?: Array<[number, number]>
-}
-
 export interface MemorySubsystemsDelegationRequest {
   id: string
   requester: string
@@ -33,10 +20,6 @@ export interface MemorySubsystemsDelegationRequest {
 
 export interface MemorySubsystemsResponse {
   generated_at: string
-  hebbian: {
-    synapses: MemorySubsystemsSynapse[]
-    last_consolidation: number
-  }
   delegation_requests?: {
     total: number
     shown: number

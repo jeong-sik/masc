@@ -3,7 +3,7 @@
     Judge 출력 계약은 **단일 tier**다. [apply_fusion_judge_output_contract]
     (fusion_judge.ml:165-166)는 capability를 읽지 않고
     [Keeper_structured_output_schema.without_response_format]를 무조건 적용한다 —
-    [response_format = Off], [output_schema = None]. 계약은 프롬프트의
+    [response_format = Off]. 계약은 프롬프트의
     {!Fusion_judge_parse.expected_json_doc} 지시로만 나가고, 응답은
     {!Fusion_judge_parse.of_string}의 strict 파싱을 통과해야 하며 위반은
     [Parse_error]로 fail-loud한다.
@@ -39,7 +39,7 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
 
     [judge_model]: runtime_id("provider.model"). [question]/[panel]로 프롬프트를
     구성해 실행하고, [apply_fusion_judge_output_contract](capability 를 읽지 않고
-    무조건 [response_format = Off] / [output_schema = None])를 적용한 응답 텍스트를
+    무조건 [response_format = Off])를 적용한 응답 텍스트를
     {!Fusion_judge_parse.of_string}으로 파싱한다.
     [web_tools=true]면 심판 에이전트에 web_search/web_fetch를 주입한다.
     [max_tokens]는 출력 토큰 예산이다. 생략하면 Runtime_agent 기본값을 보존한다.

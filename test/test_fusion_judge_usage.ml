@@ -75,10 +75,7 @@ let test_output_contract_keeps_native_schema_when_supported () =
       (match configured.response_format with
        | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal fusion_schema schema
        | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-    check bool "output_schema mirrors schema" true
-      (match configured.output_schema with
-       | Some schema -> Yojson.Safe.equal fusion_schema schema
-       | None -> false)
+    ()
 
 (* Prompt tier: 기본 카탈로그의 deepseek-v4-pro 항목은 native schema도 json_object
    response format도 선언하지 않으므로, 3-tier 선택기(#25324)에서도 schema 없이
@@ -101,8 +98,7 @@ let test_output_contract_prompt_tier_when_schema_is_not_native () =
       (match configured.response_format with
        | Agent_sdk.Types.Off -> true
        | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
-    check bool "output_schema stays empty (prompt tier)" true
-      (Option.is_none configured.output_schema)
+    ()
 
 (* JSON-mode tier (#25324): json_object response format을 선언한 provider는
    [JsonMode]를 받는다 — 문법 레벨 JSON은 와이어에서 강제되고, 스키마 준수는
@@ -127,8 +123,7 @@ let test_output_contract_json_mode_tier_when_json_object_is_declared () =
       (match configured.response_format with
        | Agent_sdk.Types.JsonMode -> true
        | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false);
-    check bool "output_schema stays empty (json_mode tier)" true
-      (Option.is_none configured.output_schema)
+    ()
 
 let test_output_contract_prompt_tier_when_no_output_contract_is_known () =
   with_empty_oas_model_catalog @@ fun () ->
@@ -145,8 +140,7 @@ let test_output_contract_prompt_tier_when_no_output_contract_is_known () =
       (match configured.response_format with
        | Agent_sdk.Types.Off -> true
        | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
-    check bool "output_schema stays empty (prompt tier)" true
-      (Option.is_none configured.output_schema)
+    ()
 
 (* 패널 계약 = free text (2026-07-01 사고 회귀 가드). prose가 그대로 답변이 된다 —
    JSON envelope 파싱이 없으므로 "provider가 schema를 무시해 prose를 반환"하는

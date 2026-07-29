@@ -1406,9 +1406,9 @@ let test_runtime_inventory_surfaces_request_config () =
       "off"
       (request |> J.member "response_format" |> J.member "kind" |> J.to_string);
     Alcotest.(check bool)
-      "no output schema body exposed"
+      "response format carries no schema"
       false
-      (request |> J.member "has_output_schema" |> J.to_bool);
+      (request |> J.member "response_format" |> J.member "has_schema" |> J.to_bool);
     Alcotest.(check bool)
       "no model capabilities override on provider_config"
       false
@@ -1421,7 +1421,7 @@ let test_runtime_inventory_surfaces_request_config () =
               ("secret key omitted: " ^ secret_key)
               false
               (List.mem_assoc secret_key fields))
-         [ "api_key"; "headers"; "system_prompt"; "output_schema"; "previous_response_id" ]
+         [ "api_key"; "headers"; "system_prompt"; "previous_response_id" ]
      | _ -> Alcotest.fail "request_config must be an object"))
 ;;
 

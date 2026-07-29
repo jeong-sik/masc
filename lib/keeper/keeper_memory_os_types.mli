@@ -7,11 +7,6 @@
 (** Current schema version written to disk. *)
 val schema_version : string
 
-(** RFC-0244 Tier 2: reserved keeper id for the shared semantic store
-    (keepers/_shared.facts.jsonl). Not a legal keeper name, so no real keeper
-    collides; the consolidator filters it out of its source keeper list. *)
-val shared_store_id : string
-
 (** Canonical JSON wire field names for Memory OS persistence and librarian
     ingestion. The schema module owns these strings so parser, retry prompt,
     persistence codec, and tests share one source. *)
@@ -24,7 +19,6 @@ val wire_field_source : string
 val wire_field_first_seen : string
 val wire_field_valid_until : string
 val wire_field_last_verified_at : string
-val wire_field_observed_by : string
 val wire_field_claim_id : string
 val wire_field_claim_kind : string
 
@@ -129,10 +123,6 @@ type fact =
         context only; it does not create a lifetime or a
         promotion hierarchy. Omitted from JSON when [None]. *)
   ; source : provenance_event
-  ; observed_by : string list
-    (** RFC-0244 Tier 2 (shared semantic store) only: the sorted set of distinct
-        keeper ids that have corroborated this claim. Empty for Tier-1 per-keeper
-        facts (omitted from their JSON). Populated by the consolidator. *)
   ; first_seen : float
   ; valid_until : float option
   ; last_verified_at : float option

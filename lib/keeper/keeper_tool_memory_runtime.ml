@@ -576,7 +576,6 @@ let append_durable_fact
         ; turn = meta.runtime.usage.total_turns
         ; tool_call_id = None
         }
-    ; observed_by = []
     ; first_seen = now
     ; valid_until =
         (* RFC-0351 S2. Recall has always dropped expired facts

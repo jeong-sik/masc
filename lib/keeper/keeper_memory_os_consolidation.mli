@@ -92,7 +92,7 @@ type apply_stats =
 (** Apply a plan to a keeper's facts, returning the new fact list and the typed
     apply statistics. Each group of >= 2 in-range, not-yet-consumed members
     collapses into one consolidated fact (claim/category from the plan;
-    provenance — earliest source/first_seen, union of [observed_by], and
+    provenance — earliest source/first_seen and
     [last_verified_at] = the members' latest — reconstructed from the members).
     Merging is not a verification, so [now] does not advance that anchor.
 

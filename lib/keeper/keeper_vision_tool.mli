@@ -55,8 +55,8 @@ val provider_for_vision
   -> Llm_provider.Provider_config.t
 (** A one-shot, non-thinking, structured-output vision config: thinking off (avoids the
     2026-06-25 gemma4 thinking-budget exhaustion that produced empty replies),
-    [response_format = JsonSchema _], [output_schema = Some _],
-    [tool_choice = None], the selected provider config's exact temperature
+    [response_format = JsonSchema _], [tool_choice = None], the selected
+    provider config's exact temperature
     (including omission), and a fallback [max_tokens] only when the selected
     runtime has not configured one. *)
 

@@ -79,10 +79,3 @@ val count_board_activity_in_dir :
     projection: each file is parsed once and reused until its mtime changes.
     Exposed for tests; the per-render board dashboard reaches this through
     {!compute_reputation}. *)
-
-val reputation_to_json : agent_reputation -> Yojson.Safe.t
-(** Alias for {!agent_reputation_to_yojson}. *)
-
-val reputation_of_json : Yojson.Safe.t -> agent_reputation option
-(** Wraps {!agent_reputation_of_yojson}. Returns None on parse failure
-    or when [agent_name] is empty. *)

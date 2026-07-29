@@ -710,7 +710,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   let reputation =
                     (try
                        let rep = Reputation.compute_reputation config ~agent_name:m.agent_name in
-                       Reputation.reputation_to_json rep
+                       Reputation.agent_reputation_to_yojson rep
                      with
                      | Eio.Cancel.Cancelled _ as e -> raise e
                      | exn ->

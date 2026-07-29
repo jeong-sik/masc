@@ -1108,7 +1108,7 @@ let add_routes ~sw ~clock router =
                   (Mcp_server.workspace_config state) ~agent_name
               in
               Http.Response.json_value
-                (Reputation.reputation_to_json rep) reqd)
+                (Reputation.agent_reputation_to_yojson rep) reqd)
        ) request reqd)
 
   (* Prompt Registry API *)

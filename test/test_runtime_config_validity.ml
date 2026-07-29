@@ -2126,7 +2126,7 @@ let test_routing_reference_domains_stay_distinct () =
     (fun path ->
       match Runtime.load_list ~config_path:path with
       | Error msg -> failf "a route may name a lane: %s" msg
-      | Ok (_, _, _, _, cross_verifier, _, _) ->
+      | Ok (_, _, _, cross_verifier, _, _) ->
         check (option string) "route keeps the lane id" (Some "safe") cross_verifier);
   (* An assignment resolves among runtimes only. runtime.mli documents the
      assignment snapshot as ids that resolve to a configured runtime, so admitting
@@ -2649,7 +2649,7 @@ let test_cross_verifier_lane_target () =
   with_temp_runtime_toml json_capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, cross_verifier, _, _) ->
+    | Ok (_, _, _, cross_verifier, _, _) ->
       check
         (option string)
         "cross_verifier keeps the lane id"
@@ -2669,7 +2669,7 @@ let test_cross_verifier_lane_target () =
   with_temp_runtime_toml json_incapable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "cross_verifier lane should resolve: %s" msg
-    | Ok (_, _, _, _, cross_verifier, _, lanes) ->
+    | Ok (_, _, _, cross_verifier, _, lanes) ->
       check (option string) "cross_verifier keeps the lane id" (Some "verifiers")
         cross_verifier;
       check bool "verifiers lane is materialized" true

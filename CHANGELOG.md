@@ -45,7 +45,7 @@
   facts; GC deletes only rows past an explicit `valid_until`. There is currently
   no semantic supersession/tombstone path, so an unexpired row is retained and
   no score, clock, or model sweep may silently retire it.
-  - Migration order is strict: before deploying this build, remove
+  - Deployment precondition: before deploying this build, remove
     `memory_os_consolidation = ...` from the live
     `<base-path>/.masc/config/runtime.toml`. Confirm the key is absent with
     `rg -n '^[[:space:]]*memory_os_consolidation[[:space:]]*=' <runtime.toml>`;

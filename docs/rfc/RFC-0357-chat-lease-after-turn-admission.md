@@ -121,6 +121,36 @@ let on_admitted = if queued_turn then Some on_queue_turn_admitted else None in
 
 `keeper_turn_admission.mli:240-243`의 caller contract — *do not call this from within an admitted turn of the same keeper* — 는 두 안 모두에서 지켜진다. `on_admitted` 안은 admission 안이지만 `run_serialized`를 다시 부르지 않는다.
 
+### 3.5 compaction 레인도 줄을 서야 한다
+
+Phase 2가 만드는 부작용이 하나 있다. chat이 대기자로 등록되면 `Eio.Mutex`의 unlock이 슬롯을 그 대기자에게 직접 넘기므로(§1.3), **`run_compaction_if_free`의 `try_lock`은 이길 수 없다.**
+
+지금은 consumer가 물러나서 대기자가 없으므로 compaction의 `try_lock`이 성공한다. Phase 2 이후에는 아니다. context-overflow 상태에서 이것이 문제가 되는 이유는 `keeper_turn_admission.mli:189-195`가 적어둔 그대로다 — 그 keeper의 chat 턴은 checkpoint가 고쳐지기 전까지 provider에서 실패한다. compaction이 계속 진다면 같은 queued turn이 계속 실패한다.
+
+`Chat_backlog`를 지워도 이 의미 차이는 사라지지 않는다. 레인 구분의 근거가 backlog yield가 아니라 **"이 레인은 건너뛰어도 되는가"**이기 때문이다.
+
+그래서 이 RFC의 규칙을 그 축으로 다시 세운다:
+
+| 레인 | 반드시 실행되어야 하는가 | 연산 |
+|---|---|---|
+| proactive (heartbeat) | 아니오 — 오래된 tick은 버려도 된다 | `try_lock` |
+| chat | 예 — 요청은 답해야 한다 | `lock` (park) |
+| **manual compaction** | **예 — 수리다. 버리면 keeper가 고장난 채 남는다** | **`lock` (park)** |
+
+compaction이 park하면 FIFO 안에 들어간다. 시각 T에 요청된 compaction은 T 이후에 도착한 어떤 chat보다 앞선다. `try_lock`으로 영원히 지는 것과 다르다.
+
+**남는 구멍 하나, 그리고 Phase 2의 선행 조건.** compaction 요청보다 **먼저** park한 chat 턴은 여전히 앞선다. 그 턴은 provider에서 context overflow로 실패하고, 그 뒤에 compaction이 돌아 checkpoint를 고친다. 이것이 허용 가능한지는 **그 실패가 재시도 가능한가**에 달려 있다.
+
+- 재시도 가능(`nack` → `Pending` → 재드레인)하면 비용은 실패한 시도 1회다. 허용.
+- 종결(`Failed`)이면 receipt가 영구히 죽는다. **허용 불가.**
+
+`keeper_chat_consumer`의 `Failed` 분기는 terminal이다. context overflow가 어느 쪽으로 매핑되는지 이 RFC는 확인하지 않았다. **Phase 2를 시작하기 전에 이것부터 확정한다.** terminal이면 Phase 2는 다음 중 하나를 함께 가져가야 한다:
+
+1. context overflow를 typed 재시도 가능 결과로 분리한다 (provider 실패 일반과 구분), 또는
+2. admitted 구역 안에서 provider 진입 전에 같은 checkpoint의 compaction 필요 여부를 확정하고 필요하면 먼저 수행한다.
+
+2번이 §7.2가 요구하는 불변식이다. 1번이 더 작다. 어느 쪽이든 Phase 2의 일부이며, 확인 없이 진행하면 안 된다.
+
 ## 4. 구현 지점
 
 ### Phase 1 — 큐 API 두 개 추가 (동작 변화 없음)
@@ -208,21 +238,63 @@ let on_queue_turn_admitted () =
 
 `lib/keeper/keeper_heartbeat_loop_cycle.ml:230-236` — `Chat_backlog` 로깅 분기 제거.
 
-`yield_to_chat_backlog`가 사라지면 `run_if_free` / `run_compaction_if_free` / `run_admin_if_free`가 동일해진다. 세 이름을 `run_if_free` 하나로 접는다. **이 접기는 `Chat_backlog`가 완전히 제거될 때만 유효하다** — peek을 남긴 채 접으면 `#24865`의 우선순위 역전이 되살아난다(`keeper_turn_admission.mli:189-195`).
+`yield_to_chat_backlog`가 사라지면 세 진입점의 **본문**이 같아진다. 그렇다고 셋을 하나로 접을 수는 없다 — §3.5가 그 이유다.
 
-진입점 8개 → 3개(`run_if_free`, `run_serialized`, `run_chat_if_free`), admission 권한 5개 → 1개(mutex).
+- `run_compaction_if_free` → **`run_compaction_serialized`로 바꾼다.** compaction은 건너뛰면 안 되는 레인이므로 `try_lock`이 아니라 park해야 한다. 이름만 바꾸는 게 아니라 연산이 바뀐다.
+- `run_admin_if_free` → **접기 전에 근거를 확인한다.** `.mli:203-209`는 이 레인이 backlog를 우회하는 이유를 적지 않았고, `0d6291253a`(#25978)에서 이미 false로 도입됐다. `run_compaction_if_free`와 달리 `#24865` 같은 근거가 없다. admin이 건너뛰어도 되는 레인이면 `run_if_free`로 접고, 아니면 compaction과 같이 park로 간다. **확인 없이 접지 않는다.**
+- `run_if_free` → 유지 (proactive 전용).
 
-## 5. 남는 미결정 하나 — lease를 consumer에게 어떻게 돌려주는가
+앞 판(`c727ede`)은 세 개를 그냥 접었다. 그것이 P1이었다.
 
-`on_admitted : unit -> (unit, string) result`는 payload를 반환하지 않는데, consumer는 finalize에 `lease_id`가 필요하다(`keeper_chat_consumer.ml settle_lease :294`).
+진입점은 8개 → 4개(`run_if_free`, `run_serialized`, `run_compaction_serialized`, `run_chat_if_free`)가 된다. admission **권한**은 5개 → 1개(mutex)로 줄고, 이쪽이 이 RFC의 실제 목표다. 진입점 수는 부산물이지 목표가 아니다 — §3.5가 보여주듯 레인마다 "건너뛰어도 되는가"가 다르면 진입점도 달라야 한다.
 
-**안 A — dispatch-local ref.** `admit` 클로저가 dispatch 스코프의 `lease option ref`를 채우고, `handle_turn` 반환 후 consumer가 읽는다. `on_admitted`는 같은 fiber에서 턴 본문보다 먼저 실행되므로 순서는 보장된다. ref는 dispatch 1건에 국한되고 전역 상태가 아니다. 4개 파일의 타입을 건드리지 않는다.
+## 5. lease 실패의 타입 계약
 
-**안 B — `on_admitted` 타입 변경.** `(unit, string) result` → `('a, string) result`로 일반화. 타입은 정직해지지만 `keeper_turn.mli:134`, `keeper_tool_surface.mli:54`, 그리고 dashboard-direct 호출 2곳(`stream:740, 769`)까지 파급된다.
+`on_admitted : unit -> (unit, string) result`로는 부족하다. `lease_exact`는 5가지로 끝나는데(`Leased | Head_moved | Empty | Recovery_required | Error`) `Error of string`으로 뭉개면 `keeper_turn.ml:993-1008`이 이를 일반 tool 실패로 바꾸고, consumer의 `Failed`/`Deferred` 분기는 **이미 `lease_id`를 쥐고 있다고 전제한다**(`keeper_chat_consumer.ml:469-510`). lease가 없는 경우가 없었기 때문이다.
 
-**추천: 안 A로 시작.** 안 B는 `on_admitted`에 다른 payload가 필요해지는 두 번째 사례가 생기면 그때 한다. 지금 일반화하면 소비자가 하나뿐인 다형성이다.
+그대로 두면 head 교체·recovery 경쟁에서 **정상 receipt를 종결하거나 stale lease로 mutate하는 구현이 가능해진다.** 이건 미결정 사항이 아니라 필수 계약이다.
 
-이 선택은 이 RFC가 확정하지 않는다. 구현자가 정하고 PR body에 근거를 남긴다.
+### 5.1 dispatch-local 결과 셀
+
+`admit` 클로저는 dispatch 1건 스코프의 셀에 typed 결과를 쓰고, `on_admitted`에는 턴을 진행할지만 알려준다.
+
+```ocaml
+type attempt =
+  | Leased of Keeper_chat_queue.lease
+  | Not_leased of not_leased
+
+and not_leased =
+  | Head_moved                                    (* 운영자 조치 등으로 head 교체 *)
+  | Empty                                         (* 대기 중 드레인됨 *)
+  | Recovery_required of Keeper_chat_queue.recovery_evidence
+  | Persistence of Keeper_chat_queue.mutation_error
+```
+
+`admit ()`는 셀을 채우고, `Leased _`면 `Ok ()`, 그 외에는 `Error` — 턴 본문은 실행되지 않고 슬롯은 즉시 반납된다.
+
+셀이 sum type을 담아야 하므로, 앞 판(§5, `c727ede`)이 "ref 대 타입 일반화" 중 무엇을 고를지 미뤄둔 것은 잘못된 문제 설정이었다. **셀은 어차피 필요하다.** `on_admitted`의 타입을 일반화해도 `(attempt, string) result`를 반환할 뿐이고, 그러면 `keeper_turn.mli:134`·`keeper_tool_surface.mli:54`·dashboard-direct 2곳(`stream:740, 769`)이 소비자 하나뿐인 다형성을 떠안는다. 셀로 간다.
+
+### 5.2 consumer의 처리
+
+`handle_turn` 반환 후 셀을 읽는다. **lease가 없으면 finalize도 nack도 하지 않는다.**
+
+| 결과 | 처리 |
+|---|---|
+| `Leased lease` | 기존 `settle_lease` 경로 (`keeper_chat_consumer.ml:294`) |
+| `Not_leased Head_moved` | dispatch 해제 후 현재 snapshot 재관측. receipt는 건드리지 않음 |
+| `Not_leased Empty` | dispatch 해제. 할 일 없음 |
+| `Not_leased (Recovery_required e)` | 기존 recovery 경로 (`:648-655`, `:669-679`) |
+| `Not_leased (Persistence e)` | 기존 `persistence_blocked` 규칙 (`:639`, `:690`) |
+
+### 5.3 attempt identity — `lease_id`가 꼭 랜덤이어야 하는가
+
+`finalize`/`nack`은 inflight의 exact `lease_id`만 매치한다(`keeper_chat_queue.ml:2669-2728`). 이 fence 자체는 필요하다 — 같은 `receipt_id`가 nack 뒤 재시도될 때 늦게 도착한 첫 시도의 finalize가 두 번째 시도를 건드리면 안 된다(`test_keeper_chat_consumer_delivery.ml:677-735`가 이 회귀를 고정한다).
+
+문제는 그 identity를 `Random_id.prefixed "lease_"`로 **새로 만든다**는 점이다(`keeper_chat_queue.ml:2528`). `(receipt_id, lease-transition이 커밋한 revision)`은 queue SSOT에서 그대로 나오는 정확한 attempt identity이고, recovery는 이미 `receipt_id`와 revision을 따로 요구하면서 opaque `lease_id`를 한 번 더 요구한다.
+
+**Phase 0으로 이 대조를 먼저 한다.** stale callback / retry / recovery 셋 중 revision 조합으로 구분되지 않는 구체적 반례를 찾지 못하면, 랜덤 `lease_id`와 그 위의 `lease` facade를 유지하지 않고 receipt-derived `delivery_attempt`로 축소한다. 반례를 찾으면 이 문서에 적는다.
+
+이 절은 Phase 1보다 앞선다. 축소가 가능하면 §5.1의 `Leased of lease`가 `Leased of delivery_attempt`가 되고, Phase 2가 옮길 대상이 줄어든다.
 
 ## 6. 무엇이 실제로 좋아지는가
 
@@ -235,7 +307,15 @@ let on_queue_turn_admitted () =
 
 `#26283`이 첫째 줄만 고치고 둘째 줄을 `Inflight`로 만들어 셋째 줄을 운영자 개입으로 바꿨다. 이 RFC는 첫째 줄만 바꾸고 나머지를 그대로 둔다.
 
-`Inflight`의 의미도 보존된다 — `keeper_chat_queue.mli:5-13`이 근거로 드는 *A crashed lease is never automatically redispatched because its external effect is unproven*가 계속 참이다. lease는 실행 직전에만 잡히므로 `Inflight`는 항상 "실행 중"을 뜻한다.
+### 6.1 `Inflight`가 뜻하는 것 — 정정
+
+앞 판(`c727ede`)은 *lease는 실행 직전에만 잡히므로 `Inflight`는 항상 "실행 중"을 뜻한다*고 적었다. **틀렸다.**
+
+`lease_exact` 다음에 `append_queued_user_row_once`가 오고, 그 사이에 크래시가 나면 provider에 닿지 않은 턴이 여전히 `Recovery_required`가 된다. 창은 `#26283`의 "동시 턴 전체 길이"에서 "슬롯 획득 후 user row write까지"로 줄어들지만 0이 아니다.
+
+정확한 표현은 **attempt-reserved**다: `Inflight`는 *이 attempt가 슬롯을 확보했다*를 뜻하고, 외부 효과 발생 여부는 별개다. `keeper_chat_queue.mli:5-13`의 근거 문장 — *its external effect is unproven* — 은 그래서 계속 참이다. 오히려 그 문장이 처음부터 "실행 중"이 아니라 "증명되지 않음"이라고 말하고 있었다.
+
+이 창은 §7.2의 크래시 테스트로 고정한다. 순서를 뒤집어 user row를 먼저 쓰는 것은 답이 아니다 — 그러면 lease 없이 transcript에 행이 남는다.
 
 ## 7. 검증
 
@@ -249,7 +329,12 @@ let on_queue_turn_admitted () =
 2. **대기 중 상태가 `Pending`**: proactive가 슬롯을 쥔 동안 consumer가 대기열에 등록되고(`chat_waiting = true`), 같은 시점에 receipt가 `Pending`.
 3. **`lease_exact` CAS**: peek 이후 head가 바뀌면 `` `Head_moved ``이고 아무 상태도 변하지 않음.
 4. **대기 중 재시작이 receipt를 stranded시키지 않음**: 대기 상태를 만들고 큐를 재구성했을 때 `Recovery_required`가 아니라 `Pending`.
-5. **크래시 주입**: 대기 중 프로세스를 죽이고 재시작해 자동 재드레인 확인. `test_keeper_chat_coalescing.ml:586,597`이 `resolve_recovery_required`를 이미 다루므로 그 주변에 둔다.
+5. **lease 없는 결과가 receipt를 종결하지 않음**: `Head_moved`/`Empty`에서 finalize·nack이 호출되지 않고 receipt state가 불변임을 §5.2 분기별로 확인.
+6. **크래시 주입 두 지점** (§6.1):
+   - 대기 중(`Pending`) 크래시 → 재시작 후 자동 재드레인
+   - lease 직후·user row write 직전 크래시 → `Recovery_required`. 이 창의 존재를 문서가 아니라 테스트로 고정한다
+   `test_keeper_chat_coalescing.ml:586,597`이 `resolve_recovery_required`를 이미 다루므로 그 주변에 둔다.
+7. **compaction이 굶지 않음** (§3.5): overflowed checkpoint + `Pending` receipt + park한 chat 대기자 + compaction 요청 상태에서, **receipt가 terminal이 되기 전에 compaction이 실행됨**을 확인. Phase 2의 선행 조건 확정(재시도 가능 대 종결)이 이 테스트로 드러난다.
 
 ### 7.3 TLA+
 
@@ -267,9 +352,11 @@ let on_queue_turn_admitted () =
 
 **진단 손실.** `Chat_backlog`는 `#24865` 진단에서 `holder info not yet published`가 오도했기 때문에 만들어졌다(`keeper_turn_admission.mli:52-56`). 제거하면 `pending_count`/`inflight_count` payload가 로그에서 사라진다. 대신 차단 사유가 `Turn_busy`가 되고 holder는 실제로 chat 턴이므로 로그가 사실과 일치한다 — `#24865`의 문제는 holder 정보의 부재였고 이 설계에서는 holder가 존재한다. 다만 `run_locked_with_token`이 `slot.info`를 설정하는 시점과 대기자가 관측하는 시점 사이의 창은 남는다.
 
-**`run_admin_if_free`의 backlog 우회 근거 부재.** `.mli:203-209`가 이 우회를 설명하지 않는다. `0d6291253a`(#25978)에서 이미 false로 도입됐고 어떤 커밋도 정당화한 적이 없다. `run_compaction_if_free`와 달리 `#24865` 같은 근거가 없다. 접기 전에 의도적인지 확인해야 한다.
+**`run_admin_if_free`의 backlog 우회 근거 부재.** `.mli:203-209`가 이 우회를 설명하지 않는다. `0d6291253a`(#25978)에서 이미 false로 도입됐고 어떤 커밋도 정당화한 적이 없다. `run_compaction_if_free`와 달리 `#24865` 같은 근거가 없다. §4 Phase 3이 이를 확인 항목으로 둔다.
 
-**측정하지 않은 것.** 단일 도메인 Eio만. provider 지연 변동 없음. 멀티 도메인 경합 미확인.
+**대기자가 늘어난다.** compaction이 park하면(§3.5) keeper당 대기자가 최대 2가 된다(chat 1 + compaction 1). RFC-0350이 문제 삼는 무제한 대기와는 여전히 자릿수가 다르지만, §9의 "항상 1개 이하"는 이제 "2개 이하"다.
+
+**측정하지 않은 것.** 단일 도메인 Eio만. provider 지연 변동 없음. 멀티 도메인 경합 미확인. context overflow가 재시도 가능한지 종결인지 미확인 — §3.5가 이를 Phase 2 선행 조건으로 둔다.
 
 ## 9. RFC-0350 과의 관계
 
@@ -283,6 +370,25 @@ RFC-0350의 라인 인용 일부는 이미 stale하다(`keeper_turn.ml:1054` →
 
 ## 10. 롤아웃
 
-Phase 1 · 2 · 3을 별도 PR로 낸다. Phase 1은 순수 추가라 단독으로 안전하다. Phase 2가 동작을 바꾸고, Phase 3은 Phase 2가 머지된 뒤에만 유효하다 — **순서를 뒤집으면 §1.2의 세 번째 줄(0/3) 상태가 된다.**
+| Phase | 내용 | 선행 조건 |
+|---|---|---|
+| **0** | attempt identity 대조 (§5.3) — `(receipt_id, revision)`이 랜덤 `lease_id`를 대체할 수 있는가 | 없음. 문서 작업 |
+| **1** | `peek_next` · `lease_exact` 추가 (§4) | Phase 0의 결론에 따라 반환 타입이 정해짐 |
+| **2** | lease를 `on_admitted`로 이동 (§4), §5의 typed 결과 계약 | **context overflow가 재시도 가능한지 종결인지 확정** (§3.5). 종결이면 그 분리도 Phase 2에 포함 |
+| **3** | 게이트 제거, compaction을 park로 전환 (§4) | Phase 2 머지 |
 
-각 PR은 `#26307`의 경합 테스트를 통과해야 한다.
+Phase 1은 순수 추가라 단독으로 안전하다. Phase 2가 동작을 바꾸고, Phase 3은 Phase 2 이후에만 유효하다 — **순서를 뒤집으면 §1.2의 세 번째 줄(0/3) 상태가 된다.**
+
+각 PR은 `test/test_keeper_chat_admission_contention.ml`(`#26307`, `#26317`로 강화됨)을 통과해야 한다. Phase 2·3은 §7.2의 6·7번을 추가로 요구한다.
+
+## 11. 앞 판(`c727ede`)에서 바뀐 것
+
+리뷰에서 나온 지적을 반영한 결과다.
+
+| | 앞 판 | 이 판 |
+|---|---|---|
+| compaction | Phase 3에서 `run_if_free`로 접음 | §3.5 — park로 전환. 접기가 P1이었다 |
+| lease 실패 | §5 "미결정" (ref 대 타입 일반화) | §5 — typed 결과 계약. 미결정이 아니라 필수였다 |
+| `Inflight`의 의미 | *항상 실행 중* | §6.1 — **attempt-reserved.** 앞 판의 서술은 틀렸다 |
+| `lease_id` | 다루지 않음 | §5.3 — Phase 0에서 축소 가능성 대조 |
+| 진입점 목표 | 8 → 3 | 8 → 4. 진입점 수는 목표가 아니라 부산물 |

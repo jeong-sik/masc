@@ -260,6 +260,9 @@ run_migration() {
                 ;;
         esac
     done
+    if [[ "${#V8_SNAPSHOTS[@]}" -gt 0 && "$v12_count" -gt 0 ]]; then
+        die "mixed v8/v12 fleet detected; restore one complete prior backup before retrying"
+    fi
 
     local pending_count=0
     if [[ "${#V8_SNAPSHOTS[@]}" -gt 0 ]]; then
@@ -401,6 +404,17 @@ self_test() {
         die "self-test: injected post-replacement failure did not fail"
     fi
     validate_v8_snapshot "$snapshot"
+
+    mkdir -p "$fixture/.masc/keepers/beta"
+    printf '%s\n' \
+        '{"schema":"keeper.event_queue.state.v12","revision":1,"pending":{"schema":"keeper.event_queue.v2","length":0,"items":[]},"last_transition":null,"projected_dispositions":[],"transition_outbox":[],"accepted_transfer_projections":[]}' \
+        > "$fixture/.masc/keepers/beta/event-queue.json"
+    if MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
+        "$0" --base-path "$fixture" >/dev/null 2>&1
+    then
+        die "self-test: mixed v8/v12 fleet was accepted"
+    fi
+    rm -rf "$fixture/.masc/keepers/beta"
 
     jq '.transition_outbox = [{"sentinel":"unprojected"}]' "$snapshot" > "${snapshot}.tmp"
     mv "${snapshot}.tmp" "$snapshot"

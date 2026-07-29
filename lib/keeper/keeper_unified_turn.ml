@@ -49,9 +49,7 @@ let source_disposition_after_no_compaction
     Escalate_after_exact_output_terminal
       (Exact_execution_terminal { source; terminal })
   | ( Keeper_event_queue_state.No_eligible_history
-    | Keeper_event_queue_state.Invalid_structural_source
-    | Keeper_event_queue_state.Structurally_unchanged
-    | Keeper_event_queue_state.Checkpoint_not_reduced ) as reason ->
+    | Keeper_event_queue_state.Invalid_structural_source ) as reason ->
     Follow_failure_route_after_no_compaction { reason }
 ;;
 

@@ -342,6 +342,37 @@ let test_retired_snapshot_and_wal_paths_are_not_read () =
       (In_channel.with_open_bin retired_wal_path In_channel.input_all))
 ;;
 
+(* The exact-output hard cut (#25596, 2026-07-23) removed every site that could
+   build [Structurally_unchanged] or [Checkpoint_not_reduced]; the variants then
+   sat orphaned across twelve files for a week. Deleting them means a record
+   persisted before that cut no longer decodes, so pin that the decoder reports
+   it as a typed error rather than crashing or silently substituting a reason.
+   Live check at removal time: zero such records existed under ~/.masc, and the
+   retired workspace carried the strings only in logs and transition-audit,
+   neither of which has a decode path. *)
+let test_retired_no_compaction_reasons_do_not_decode () =
+  List.iter
+    (fun label ->
+      match State.no_compaction_reason_of_label label with
+      | Ok _ ->
+        Alcotest.failf "retired no-compaction reason %s still decodes" label
+      | Error detail ->
+        Alcotest.(check string)
+          ("retired reason " ^ label ^ " is reported as unknown")
+          ("unknown no-compaction reason: " ^ label)
+          detail)
+    [ "structurally_unchanged"; "checkpoint_not_reduced" ];
+  (* The reasons that survived the cut still decode. *)
+  List.iter
+    (fun label ->
+      match State.no_compaction_reason_of_label label with
+      | Ok _ -> ()
+      | Error detail ->
+        Alcotest.failf "live no-compaction reason %s stopped decoding: %s" label detail)
+    [ "no_eligible_history"; "invalid_structural_source"; "exact_lane_unconfigured" ]
+;;
+
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
@@ -376,6 +407,10 @@ let () =
             "retired snapshot and WAL paths are not read"
             `Quick
             test_retired_snapshot_and_wal_paths_are_not_read
+        ; Alcotest.test_case
+            "retired no-compaction reasons do not decode"
+            `Quick
+            test_retired_no_compaction_reasons_do_not_decode
         ] )
     ]
 ;;

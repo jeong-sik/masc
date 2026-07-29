@@ -76,8 +76,6 @@ type escalation_reason =
 type no_compaction_reason =
   | No_eligible_history
   | Invalid_structural_source
-  | Structurally_unchanged
-  | Checkpoint_not_reduced
   | Exact_lane_unconfigured
   | Exact_execution_terminal of exact_execution_terminal
 
@@ -928,8 +926,6 @@ let validate_transition = function
       { reason =
           ( No_eligible_history
           | Invalid_structural_source
-          | Structurally_unchanged
-          | Checkpoint_not_reduced
           | Exact_lane_unconfigured )
       ; _
       } ->
@@ -1467,8 +1463,6 @@ let int64_json value = `Intlit (Int64.to_string value)
 let no_compaction_reason_label = function
   | No_eligible_history -> "no_eligible_history"
   | Invalid_structural_source -> "invalid_structural_source"
-  | Structurally_unchanged -> "structurally_unchanged"
-  | Checkpoint_not_reduced -> "checkpoint_not_reduced"
   | Exact_lane_unconfigured -> "exact_lane_unconfigured"
   | Exact_execution_terminal terminal ->
     exact_execution_terminal_cause_label terminal.cause
@@ -1482,8 +1476,6 @@ let no_compaction_reason_to_string = function
 let no_compaction_reason_of_label = function
   | "no_eligible_history" -> Ok No_eligible_history
   | "invalid_structural_source" -> Ok Invalid_structural_source
-  | "structurally_unchanged" -> Ok Structurally_unchanged
-  | "checkpoint_not_reduced" -> Ok Checkpoint_not_reduced
   | "exact_lane_unconfigured" -> Ok Exact_lane_unconfigured
   | reason ->
     (match exact_execution_terminal_cause_of_label reason with
@@ -1838,8 +1830,6 @@ let transition_to_yojson = function
         fields @ [ "exact_execution", exact_execution_terminal_to_yojson terminal ]
       | No_eligible_history
       | Invalid_structural_source
-      | Structurally_unchanged
-      | Checkpoint_not_reduced
       | Exact_lane_unconfigured ->
         fields
     in

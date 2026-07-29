@@ -502,8 +502,6 @@ let rejection_disposition = function
   | Keeper_compact_policy.No_eligible_history ->
     Terminal_no_compaction Keeper_event_queue_state.No_eligible_history
   | Invalid_structure _ -> Terminal_no_compaction Invalid_structural_source
-  | Structurally_unchanged -> Terminal_no_compaction Structurally_unchanged
-  | Checkpoint_not_reduced -> Terminal_no_compaction Checkpoint_not_reduced
   | Exact_execution_terminal terminal ->
     Terminal_no_compaction
       (Keeper_event_queue_state.Exact_execution_terminal terminal)

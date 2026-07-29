@@ -4,7 +4,6 @@
     model-authored prose state is not a checkpoint authority. *)
 
 module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
-module Receipt = Masc.Keeper_execution_receipt
 module Replay_prefix = Masc.Keeper_replay_prefix
 
 let message role content =
@@ -137,8 +136,6 @@ let test_contract_observation_preserves_current_turn_suffix () =
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
-      ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
-      ~completion_contract_result:Receipt.Completion_no_visible_output
       ~session_id:"new-session"
       ~response_text:"visible result"
       (checkpoint (history @ current_turn))
@@ -167,8 +164,6 @@ let test_contract_observation_rejects_mismatched_history_prefix () =
   match
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:expected_history
-      ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Completion_no_visible_output
       ~session_id:"new-session"
       ~response_text:"suppressed"
       (checkpoint (actual_history @ [ message Assistant [ Text "" ] ]))
@@ -208,8 +203,6 @@ let test_success_preserves_typed_replay_suffix () =
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
-      ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:"visible answer"
       (checkpoint (history @ current_turn))
@@ -240,8 +233,6 @@ let test_success_appends_missing_final_assistant () =
   let patched, _reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
-      ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:"visible answer"
       (checkpoint (history @ [ message User [ Text "current user" ] ]))
@@ -261,8 +252,6 @@ let test_empty_success_preserves_recorded_user_turn () =
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
-      ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
-      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:""
       (checkpoint (history @ [ message User [ Text "current user" ] ]))
@@ -303,8 +292,6 @@ let test_empty_success_preserves_tool_execution_suffix () =
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
-      ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
-      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:""
       (checkpoint (history @ current_turn))
@@ -354,8 +341,6 @@ let test_input_required_preserves_exact_tool_failure_suffix () =
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
-      ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Completion_observation_unknown
       ~session_id:"new-session"
       ~response_text:request.question
       ~stop_reason:(Runtime_agent.InputRequired { turns_used = 2; request })
@@ -399,8 +384,6 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
   let checkpoint_for_save, _reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:canonical_history
-      ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"media-projection-session"
       ~response_text:"completed"
       restored_checkpoint
@@ -429,15 +412,13 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
         (persisted.messages = canonical_history @ [ current_assistant ]))
 ;;
 
-(* RFC-0351 S1 / #25462: a completed bare-wake turn must not persist the
-   autonomous wake marker the OAS run received as its goal — that was the
-   last accumulation path after #25515 (343 byte-identical markers measured
-   in one checkpoint). The typed [Skip_uninformative_wake] record gates the
-   drop; an identical-looking user message under [Record_user_turn] must
-   survive. *)
+(* RFC-0351 S1 / #25462: a completed bare-wake turn with no tool or external
+   delivery must leave the replay transcript unchanged. The provider still
+   receives the wake marker and may answer with idle prose, but neither is a
+   durable effect. *)
 let wake_marker_text = Masc.Keeper_unified_prompt.autonomous_wake_marker
 
-let wake_persistence ~user_turn_record ~response_text messages =
+let wake_persistence ~user_turn_record ~turn_effect_record ~response_text messages =
   Finalize.checkpoint_for_replay_persistence
     ~history_messages:
       Agent_sdk.Types.
@@ -448,17 +429,33 @@ let wake_persistence ~user_turn_record ~response_text messages =
           ; metadata = []
           }
         ]
-    ~pre_turn_working_context:None
-    ~completion_contract_result:Receipt.Completion_no_visible_output
     ~session_id:"new-session"
     ~response_text
     ~user_turn_record
+    ~turn_effect_record
     (checkpoint messages)
 ;;
 
 let history_seed = [ message Agent_sdk.Types.User [ Agent_sdk.Types.Text "seed" ] ]
 
-let test_skipped_wake_marker_is_not_persisted () =
+let test_inert_wake_does_not_persist_internal_assistant () =
+  Alcotest.(check (option string))
+    "idle prose has no replay authority"
+    None
+    (Finalize.replay_response_text_for_persistence
+       ~turn_effect_record:Masc.Keeper_run_prompt.Inert_autonomous_turn
+       ~suppress_visible_response:false
+       ~response_text:"observed, nothing to do");
+  Alcotest.(check (option string))
+    "meaningful turn keeps replay text"
+    (Some "delivered reply")
+    (Finalize.replay_response_text_for_persistence
+       ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
+       ~suppress_visible_response:false
+       ~response_text:"delivered reply")
+;;
+
+let test_inert_wake_does_not_grow_replay () =
   let open Agent_sdk.Types in
   let suffix =
     [ message User [ Text wake_marker_text ]
@@ -468,13 +465,14 @@ let test_skipped_wake_marker_is_not_persisted () =
   let patched, _ =
     wake_persistence
       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~turn_effect_record:Masc.Keeper_run_prompt.Inert_autonomous_turn
       ~response_text:"observed, nothing to do"
       (history_seed @ suffix)
     |> expect_ok
   in
   Alcotest.(check int)
-    "marker dropped, assistant reply retained"
-    2
+    "inert wake leaves only the pre-turn history"
+    1
     (List.length patched.messages);
   Alcotest.(check bool)
     "no message carries the wake marker"
@@ -494,6 +492,7 @@ let test_recorded_turn_keeps_identical_marker_text () =
   let patched, _ =
     wake_persistence
       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
+      ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
       ~response_text:"reply"
       (history_seed @ suffix)
     |> expect_ok
@@ -514,6 +513,7 @@ let test_skipped_wake_leaves_non_marker_suffix_untouched () =
   let patched, _ =
     wake_persistence
       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~turn_effect_record:Masc.Keeper_run_prompt.Meaningful_turn
       ~response_text:"reply"
       (history_seed @ suffix)
     |> expect_ok
@@ -532,6 +532,7 @@ let test_skipped_wake_blank_response_drops_only_inert_suffix () =
   let patched, _ =
     wake_persistence
       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~turn_effect_record:Masc.Keeper_run_prompt.Inert_autonomous_turn
       ~response_text:""
       (history_seed @ suffix)
     |> expect_ok
@@ -583,9 +584,13 @@ let () =
             `Quick
             test_media_degraded_projection_persists_canonical_checkpoint
         ; Alcotest.test_case
-            "skipped wake marker is not persisted"
+            "inert wake does not persist internal assistant"
             `Quick
-            test_skipped_wake_marker_is_not_persisted
+            test_inert_wake_does_not_persist_internal_assistant
+        ; Alcotest.test_case
+            "inert wake does not grow replay"
+            `Quick
+            test_inert_wake_does_not_grow_replay
         ; Alcotest.test_case
             "recorded turn keeps identical marker text"
             `Quick

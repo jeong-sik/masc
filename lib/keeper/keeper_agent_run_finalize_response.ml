@@ -22,6 +22,17 @@ let replay_response_text_for_capture ~suppress_visible_response ~response_text =
   else Some response_text
 ;;
 
+let replay_response_text_for_persistence
+      ~(turn_effect_record : Keeper_run_prompt.turn_effect_record)
+      ~suppress_visible_response
+      ~response_text
+  =
+  match turn_effect_record with
+  | Keeper_run_prompt.Inert_autonomous_turn -> None
+  | Keeper_run_prompt.Meaningful_turn ->
+    replay_response_text_for_capture ~suppress_visible_response ~response_text
+;;
+
 type wire_capture_response_suppression_reason =
   | Control_checkpoint
 
@@ -65,9 +76,10 @@ let drop_leading_wake_marker ~user_turn_record current_suffix =
        ; _
        }
        :: rest) )
-    when String.equal text Keeper_unified_prompt.autonomous_wake_marker -> rest
+    when String.equal text Keeper_unified_prompt.autonomous_wake_marker ->
+    rest, true
   | (Keeper_run_prompt.Skip_uninformative_wake | Keeper_run_prompt.Record_user_turn), _
-    -> current_suffix
+    -> current_suffix, false
 ;;
 
 let is_trailing_blank_assistant (message : Agent_sdk.Types.message) =
@@ -83,11 +95,11 @@ let is_trailing_blank_assistant (message : Agent_sdk.Types.message) =
 ;;
 
 let drop_trailing_blank_assistants messages =
-  let rec drop = function
-    | message :: rest when is_trailing_blank_assistant message -> drop rest
-    | reversed -> List.rev reversed
+  let rec drop dropped = function
+    | message :: rest when is_trailing_blank_assistant message -> drop true rest
+    | reversed -> List.rev reversed, dropped
   in
-  drop (List.rev messages)
+  drop false (List.rev messages)
 ;;
 
 let canonical_success_replay_checkpoint
@@ -95,6 +107,7 @@ let canonical_success_replay_checkpoint
       ~(session_id : string)
       ~(response_text : string)
       ~(user_turn_record : Keeper_run_prompt.user_turn_record)
+      ~(turn_effect_record : Keeper_run_prompt.turn_effect_record)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match
@@ -103,57 +116,74 @@ let canonical_success_replay_checkpoint
       checkpoint.Agent_sdk.Checkpoint.messages
   with
   | Ok original_current_suffix ->
-    let current_suffix =
-      drop_leading_wake_marker ~user_turn_record original_current_suffix
-    in
-    (* A blank visible response is not authority to erase typed replay. The
-       suffix may contain an actual user input, ToolUse/ToolResult pair,
-       thinking, or media whose effect has already happened. Remove only an
-       inert trailing Assistant shell; the typed skipped-wake rule above owns
-       the autonomous marker independently. *)
-    let current_suffix =
-      if String.trim response_text = ""
-      then drop_trailing_blank_assistants current_suffix
-      else current_suffix
-    in
-    let replay_suffix_pruned =
-      if current_suffix <> original_current_suffix
-      then Some Canonical_success_replay
-      else None
-    in
-    let checkpoint =
-      if String.trim response_text = ""
-      then
-        { checkpoint with
-          Agent_sdk.Checkpoint.session_id
-        ; messages = history_messages @ current_suffix
-        ; working_context = None
-        }
-      else
-        let base_messages = history_messages @ current_suffix in
-        let messages =
-          if
-            List.exists
-              (fun (msg : Agent_sdk.Types.message) ->
-                 msg.role = Agent_sdk.Types.Assistant)
-              current_suffix
-          then base_messages
-          else
-            base_messages
-            @
-            [ Agent_sdk.Types.make_message
-                ~role:Agent_sdk.Types.Assistant
-                [ Agent_sdk.Types.Text response_text ]
-            ]
-        in
-        Keeper_context_core.patch_checkpoint_last_assistant
-          { checkpoint with Agent_sdk.Checkpoint.messages }
-          ~session_id
-          ~response_text
-    in
-    Ok
-      ( checkpoint
-      , replay_suffix_pruned )
+    (match turn_effect_record with
+     | Keeper_run_prompt.Inert_autonomous_turn ->
+       (* The provider may have produced thinking and idle prose, but this turn
+          had no durable input, Keeper tool effect, or external delivery. Keep
+          the canonical pre-turn history byte-for-byte and discard the whole
+          provider-only suffix. The prefix split above remains the safety gate:
+          an unrelated checkpoint can never be rewritten as this history. *)
+       Ok
+         ( { checkpoint with
+             Agent_sdk.Checkpoint.session_id
+           ; messages = history_messages
+           ; working_context = None
+           }
+         , (match original_current_suffix with
+            | [] -> None
+            | _ :: _ -> Some Canonical_success_replay) )
+     | Keeper_run_prompt.Meaningful_turn ->
+       let current_suffix, wake_marker_dropped =
+         drop_leading_wake_marker ~user_turn_record original_current_suffix
+       in
+       (* A blank visible response is not authority to erase typed replay. The
+          suffix may contain an actual user input, ToolUse/ToolResult pair,
+          thinking, or media whose effect has already happened. Remove only an
+          inert trailing Assistant shell; the typed skipped-wake rule above owns
+          the autonomous marker independently. *)
+       let current_suffix, blank_assistant_dropped =
+         if String.trim response_text = ""
+         then drop_trailing_blank_assistants current_suffix
+         else current_suffix, false
+       in
+       let replay_suffix_pruned =
+         if wake_marker_dropped || blank_assistant_dropped
+         then Some Canonical_success_replay
+         else None
+       in
+       let checkpoint =
+         if String.trim response_text = ""
+         then
+           { checkpoint with
+             Agent_sdk.Checkpoint.session_id
+           ; messages = history_messages @ current_suffix
+           ; working_context = None
+           }
+         else
+           let base_messages = history_messages @ current_suffix in
+           let messages =
+             if
+               List.exists
+                 (fun (msg : Agent_sdk.Types.message) ->
+                    msg.role = Agent_sdk.Types.Assistant)
+                 current_suffix
+             then base_messages
+             else
+               base_messages
+               @
+               [ Agent_sdk.Types.make_message
+                   ~role:Agent_sdk.Types.Assistant
+                   [ Agent_sdk.Types.Text response_text ]
+               ]
+           in
+           Keeper_context_core.patch_checkpoint_last_assistant
+             { checkpoint with Agent_sdk.Checkpoint.messages }
+             ~session_id
+             ~response_text
+       in
+       Ok
+         ( checkpoint
+         , replay_suffix_pruned ))
   | Error _ ->
     Error
       "refusing to save checkpoint: canonical replay persistence requires \
@@ -183,12 +213,11 @@ let observation_replay_checkpoint
 
 let checkpoint_for_replay_persistence
       ~(history_messages : Agent_sdk.Types.message list)
-      ~pre_turn_working_context:_
-      ~completion_contract_result:_
       ~(session_id : string)
       ~(response_text : string)
       ?(stop_reason = Runtime_agent.Completed)
       ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
+      ?(turn_effect_record = Keeper_run_prompt.Meaningful_turn)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match stop_reason with
@@ -228,6 +257,7 @@ let checkpoint_for_replay_persistence
       ~session_id
       ~response_text
       ~user_turn_record
+      ~turn_effect_record
       checkpoint
 ;;
 
@@ -237,6 +267,7 @@ module For_testing = struct
 
   let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
   let replay_response_text_for_capture = replay_response_text_for_capture
+  let replay_response_text_for_persistence = replay_response_text_for_persistence
 
   let wire_capture_response_suppression_reasons =
     wire_capture_response_suppression_reasons
@@ -265,7 +296,6 @@ let finalize
     ~post_turn_t0
     ~runtime_id_string
     ~history_messages
-    ~pre_turn_working_context
     ~prompt_metrics
     ~ctx_composition
     ~usage
@@ -273,9 +303,15 @@ let finalize
     ~history_assistant_source
     ~raw_response_text
     ~capture_replay_response
-    ?continuation_delivery_channel:_
+    ?continuation_delivery_channel
     () =
   let completion_contract_result = acc.receipt_completion_contract_result in
+  let turn_effect_record =
+    Keeper_run_prompt.turn_effect_record_of_turn
+      ~user_turn_record
+      ~tool_calls_made:(actual_keeper_tool_names <> [])
+      ~external_delivery_routed:(Option.is_some continuation_delivery_channel)
+  in
   let control_checkpoint =
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
       result.stop_reason
@@ -292,7 +328,6 @@ let finalize
     suppression_reasons;
   let { Keeper_agent_run_response_text.response_text } =
     Keeper_agent_run_response_text.finalize
-      ~completion_contract_result
       ~stop_reason:result.stop_reason
       ~raw_response_text
       ~suppress_response_text:suppress_visible_response
@@ -300,7 +335,10 @@ let finalize
   in
   receipt_response_text_present_ref := raw_response_text_present;
   let replay_response_text =
-    replay_response_text_for_capture ~suppress_visible_response ~response_text
+    replay_response_text_for_persistence
+      ~turn_effect_record
+      ~suppress_visible_response
+      ~response_text
   in
   let assistant_msg =
     Option.map
@@ -324,13 +362,12 @@ let finalize
       let checkpoint_for_save_result =
         checkpoint_for_replay_persistence
           ~history_messages
-          ~pre_turn_working_context
-          ~completion_contract_result
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
           ~stop_reason:result.stop_reason
           ~user_turn_record
+          ~turn_effect_record
           checkpoint
       in
       (match checkpoint_for_save_result with
@@ -429,10 +466,7 @@ let finalize
       ~oas_turn_count:result.turns
       ~actual_tools:actual_keeper_tool_names
       ~librarian_messages
-      ~memory_extraction_record:
-        (Keeper_run_prompt.memory_extraction_record_of_turn
-           ~user_turn_record
-           ~tool_calls_made:(actual_keeper_tool_names <> []))
+      ~turn_effect_record
       ~post_turn_t0
       ~inference_telemetry:result.response.telemetry
       ();

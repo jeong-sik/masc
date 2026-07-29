@@ -2014,6 +2014,25 @@ let test_lifecycle_event_display_values () =
         (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name))
     cases
 
+(* The [paused] lifecycle event patches with [keepalive_running = true], so the
+   row goes through the keepalive branch of the status patcher. That branch used
+   to classify against the surface vocabulary alone, where "paused" is not a
+   member, and fell through to "idle" — producing a row that said [status =
+   "idle"] and [paused = true] at the same time. [rebuild_continuity_briefs]
+   then read the row as live. *)
+let test_paused_lifecycle_event_keeps_paused_status () =
+  let patched =
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name:"pause-target"
+      ~event:"paused"
+      ~keepalive_running:true
+      (`Assoc [ ("name", `String "pause-target"); ("status", `String "paused") ])
+  in
+  check string "status survives the patch" "paused"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "paused flag is set" true
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
 let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
   let dir = test_dir () in
   let config = Workspace.default_config dir in
@@ -2489,6 +2508,8 @@ let () =
             test_lifecycle_event_cache_patcher_coverage;
           test_case "cache patchers pin byte-identical values" `Quick
             test_lifecycle_event_display_values;
+          test_case "paused lifecycle event keeps the paused status" `Quick
+            test_paused_lifecycle_event_keeps_paused_status;
           test_case "running keeper reconciliation rebuilds continuity brief" `Quick
             test_running_keeper_reconciliation_rebuilds_continuity_brief;
         ] );

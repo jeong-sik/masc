@@ -18,6 +18,14 @@ let keeper_lifecycle_to_string = function
   | Lc_active -> "active"
   | Lc_idle -> "idle"
 
+(** What the published keeper status says about progress. Kept separate from
+    {!keeper_lifecycle} because a paused keeper is an operator decision, not a
+    liveness reading, and reporting it as either offline or running is wrong. *)
+type continuity_liveness =
+  | Cl_offline
+  | Cl_paused
+  | Cl_live
+
 (** Keeper execution state — derived from lifecycle and turn metrics.
     Maps 1:1 with [tone] but serialized separately for dashboard consumers. *)
 type keeper_execution_state = Exec_critical | Exec_warning | Exec_healthy
@@ -207,7 +215,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | `Int value -> Some (float_of_int value)
     | _ -> None
   in
-  let paused = Json_util.assoc_bool_opt "paused" keeper in
   let last_action_at =
     String_util.trim_to_option (string_field "last_autonomous_action_at" keeper)
   in
@@ -238,24 +245,36 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let turn_count = int_field_default "turn_count" keeper in
   let generation = int_field_default "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
-  let continuity_offline =
-    match Keeper_status_runtime.surface_status_of_string_opt status with
+  (* The control plane publishes a pause override in the same [status] field as
+     the surface status, so this classifies the published vocabulary rather than
+     the surface subset. A paused keeper is neither offline nor running: it is
+     not failing, and it is also not going to make progress, so it carries its
+     own liveness rather than borrowing either verdict. *)
+  let liveness =
+    match Keeper_status_runtime.control_plane_status_of_string_opt status with
     | Some
-        ( Keeper_status_runtime.Surface_offline
-        | Keeper_status_runtime.Surface_inactive ) ->
-      true
+        (Keeper_status_runtime.Cp_surface
+           ( Keeper_status_runtime.Surface_offline
+           | Keeper_status_runtime.Surface_inactive )) ->
+      Cl_offline
     | Some
-        ( Keeper_status_runtime.Surface_active
-        | Keeper_status_runtime.Surface_busy
-        | Keeper_status_runtime.Surface_listening
-        | Keeper_status_runtime.Surface_idle ) ->
-      false
-    | None when paused = Some true -> false
+        (Keeper_status_runtime.Cp_surface
+           ( Keeper_status_runtime.Surface_active
+           | Keeper_status_runtime.Surface_busy
+           | Keeper_status_runtime.Surface_listening
+           | Keeper_status_runtime.Surface_idle )) ->
+      Cl_live
+    | Some Keeper_status_runtime.Cp_paused -> Cl_paused
     | None ->
       invalid_arg
         (Printf.sprintf
-           "dashboard continuity: unknown current keeper surface status %S"
+           "dashboard continuity: unknown current keeper status %S"
            status)
+  in
+  let continuity_offline =
+    match liveness with
+    | Cl_offline -> true
+    | Cl_paused | Cl_live -> false
   in
   let lifecycle =
     if continuity_offline then Lc_offline
@@ -267,9 +286,10 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else Lc_idle
   in
   let (state, tone, note) =
-    if continuity_offline then
-      (Exec_critical, Tone_bad, "keeper 오프라인")
-    else
+    match liveness with
+    | Cl_offline -> (Exec_critical, Tone_bad, "keeper 오프라인")
+    | Cl_paused -> (Exec_warning, Tone_warn, "운영자 일시정지")
+    | Cl_live ->
       match lifecycle with
       | Lc_handoff_imminent ->
           (Exec_critical, Tone_bad, "핸드오프 임박")

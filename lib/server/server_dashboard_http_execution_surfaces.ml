@@ -608,16 +608,25 @@ let patched_keeper_status row ~keepalive_running =
   if not keepalive_running
   then `String "offline"
   else (
-    (* RFC-0089: classify the row's display status via the typed surface_status
+    (* RFC-0089: classify the row's display status via the typed control-plane
        SSOT. busy/active/listening/idle pass through; inactive/offline collapse
-       to "offline"; anything outside the domain defaults to "idle". *)
+       to "offline"; a control-plane pause survives the patch, because a running
+       keepalive fiber does not un-pause a keeper — collapsing it here made
+       [rebuild_continuity_briefs] read the row as live. Values outside the
+       published vocabulary still default to "idle". *)
     match
       Option.bind (keeper_agent_status_opt row)
-        Keeper_status_runtime.surface_status_of_string_opt
+        Keeper_status_runtime.control_plane_status_of_string_opt
     with
-    | Some ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s) ->
+    | Some
+        (Cp_surface
+           ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s)) ->
       `String (Keeper_status_runtime.surface_status_to_string s)
-    | Some (Surface_offline | Surface_inactive) -> `String "offline"
+    | Some (Cp_surface (Surface_offline | Surface_inactive)) -> `String "offline"
+    | Some Cp_paused ->
+      `String
+        (Keeper_status_runtime.control_plane_status_to_string
+           Keeper_status_runtime.Cp_paused)
     | None -> `String "idle")
 ;;
 

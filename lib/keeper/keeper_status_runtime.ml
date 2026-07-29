@@ -502,6 +502,19 @@ let surface_status_of_string_opt s =
   | "idle" -> Some Surface_idle
   | _ -> None
 
+type control_plane_status =
+  | Cp_surface of surface_status
+  | Cp_paused
+
+let control_plane_status_to_string = function
+  | Cp_surface surface -> surface_status_to_string surface
+  | Cp_paused -> "paused"
+
+let control_plane_status_of_string_opt s =
+  match String.lowercase_ascii (String.trim s) with
+  | "paused" -> Some Cp_paused
+  | _ -> Option.map (fun surface -> Cp_surface surface) (surface_status_of_string_opt s)
+
 let keeper_surface_status
     ~(agent_status : Yojson.Safe.t)
     ~(diagnostic : Yojson.Safe.t) =

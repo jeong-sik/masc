@@ -226,7 +226,10 @@ let keepers_json
                            ; "phase", phase_str
                            ; "name", `String meta.name
                            ; "agent_name", `String meta.agent_name
-                           ; "status", `String "paused"
+                           ; ( "status"
+                             , `String
+                                 (Keeper_status_runtime.control_plane_status_to_string
+                                    Keeper_status_runtime.Cp_paused) )
                            ; "paused", `Bool true
                            ; "turn_count", `Int meta.runtime.usage.total_turns
                            ; "updated_at", `String meta.updated_at
@@ -327,7 +330,9 @@ let keepers_json
                     in
                     let aligned_status =
                       if meta.paused
-                      then "paused"
+                      then
+                        Keeper_status_runtime.control_plane_status_to_string
+                          Keeper_status_runtime.Cp_paused
                       else
                         align_keeper_runtime_status
                           ~surface_status

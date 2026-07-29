@@ -41,6 +41,9 @@ let lifecycle_of row =
 let status_of row =
   Yojson.Safe.Util.(row.json |> member "status" |> to_string)
 
+let note_of row =
+  Yojson.Safe.Util.(row.json |> member "note" |> to_string)
+
 let build_one k =
   List.hd (build_continuity_briefs ~now_ts:1_000_000_000.0 [ k ] [])
 
@@ -98,11 +101,42 @@ let test_running_but_inactive_stays_critical () =
   check string "lifecycle" "offline" (lifecycle_of row);
   check string "state" "critical" (state_of row)
 
-let test_control_plane_paused_status_is_not_rejected () =
-  let row = build_one (keeper ~status:"paused" ~paused:true ()) in
+(* The operator pauses a keeper that was running a moment ago. Every activity
+   signal still looks fresh, so the healthy branch is the one this row falls
+   into unless the pause is classified on its own. Reporting a stopped keeper as
+   "정상 동작 중" is a worse signal than the offline misread this PR removed. *)
+let test_paused_keeper_with_fresh_activity_is_not_healthy () =
+  let row =
+    build_one
+      (keeper
+         ~status:"paused"
+         ~paused:true
+         ~last_autonomous_action_at:"2001-09-09T01:46:40Z"
+         ~updated_at:"2001-09-09T01:46:40Z"
+         ~turn_count:4
+         ~autonomous_turn_count:4
+         ())
+  in
   check string "status" "paused" (status_of row);
-  check string "lifecycle" "idle" (lifecycle_of row);
-  check string "state" "warning" (state_of row)
+  check string "state" "warning" (state_of row);
+  check string "note" "운영자 일시정지" (note_of row)
+
+(* A pause is not a liveness failure, so it must not inherit the offline
+   verdict either. *)
+let test_paused_keeper_is_not_critical () =
+  let row = build_one (keeper ~status:"paused" ~paused:true ()) in
+  check string "state" "warning" (state_of row);
+  check string "note" "운영자 일시정지" (note_of row)
+
+(* [paused] is a duplicate of what [status] already carries. Letting it rescue
+   an unparsed status would reopen the permissive fallback one field over: any
+   producer drift would be accepted for free on every paused keeper. *)
+let test_unknown_status_is_rejected_even_when_paused () =
+  check_raises
+    "unknown status stays a rejected parse"
+    (Invalid_argument
+       "dashboard continuity: unknown current keeper status \"suspended\"")
+    (fun () -> ignore (build_one (keeper ~status:"suspended" ~paused:true ())))
 
 let () =
   run "dashboard_continuity_briefs"
@@ -119,7 +153,11 @@ let () =
             test_reconciled_active_status_is_healthy_active;
           test_case "running + inactive -> critical" `Quick
             test_running_but_inactive_stays_critical;
-          test_case "control-plane paused status -> warning" `Quick
-            test_control_plane_paused_status_is_not_rejected;
+          test_case "paused keeper with fresh activity is not healthy" `Quick
+            test_paused_keeper_with_fresh_activity_is_not_healthy;
+          test_case "paused keeper is not critical" `Quick
+            test_paused_keeper_is_not_critical;
+          test_case "unknown status is rejected even when paused" `Quick
+            test_unknown_status_is_rejected_even_when_paused;
         ] );
     ]

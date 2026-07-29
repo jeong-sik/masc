@@ -17,29 +17,19 @@
     2026-07-17 board_attention_candidate boot-hang incident.
 
     v2 rows instead carry only the fact/episode keys that changed since the
-    keeper's immediately preceding row ({!payload} = [Delta]), plus a
+    keeper's immediately preceding row ({!delta}), plus a
     [content_hash] of the full injected set so a reader can detect "did the
     injected set change" without materializing it, and plus store-size
     counters ([n_facts_in_store] / [n_episodes_in_store]) that were already
     (or are now) O(1) scalars — unrelated to the growth bug and kept as-is.
 
-    Legacy rows (schema_version absent, written before this change) still
-    decode as {!payload} = [Full_snapshot]: the full list they always carried
-    IS the exact injected set at that turn, so no replay is needed for them.
-    {!materialize} treats a [Full_snapshot] row as resetting a keeper's running
-    state to exactly that row's lists, and a [Delta] row as applying
-    added/removed to the running state — so mixed legacy/v2 history for the
-    same keeper replays correctly, and a fresh process's first v2 row for a
-    keeper (diffed against an empty prior state) is automatically a full
-    accounting even though it is tagged [Delta].
+    Current rows require exact [schema_version = 2] and carry a [delta].
+    {!materialize} applies each row to the keeper's running state. A fresh
+    process's first row for a keeper is diffed against the empty set, so it is
+    automatically a full accounting while retaining one current wire shape.
 
-    Two real (non-telemetry) readers exist and are adapted by this change:
-    {!Keeper_recall_outcome_eval} (offline, full-history scan — replay is
-    always exact) and the dashboard memory-quality summary in
-    [Server_dashboard_http_memory_subsystems] (bounded recent-lines sample —
-    replay is exact for any keeper whose sampled window include its own
-    genesis row, which the schema change makes far more likely since v2 rows
-    are only written on an actual change).
+    The read-only consumer is {!Keeper_recall_outcome_eval}, whose full-history
+    scan makes replay exact for the current store.
 
     Properties:
     - Append-only, never read on the hot path -> cannot change recall behaviour.
@@ -59,21 +49,13 @@
 val base_dir : masc_root:string -> string
 (** Directory that stores recall injection JSONL day files. *)
 
-type payload =
-  | Full_snapshot of
-      { fact_keys : string list
-      ; episode_keys : string list
-      }
-  (** The complete injected key sets at this turn. Written by legacy
-      (schema_version absent) rows, and by {!to_json} (kept for round-trip
-      tests and fixtures that need a self-contained row). *)
-  | Delta of
-      { added_fact_keys : string list
-      ; removed_fact_keys : string list
-      ; added_episode_keys : string list
-      ; removed_episode_keys : string list
-      ; content_hash : string
-      }
+type delta =
+  { added_fact_keys : string list
+  ; removed_fact_keys : string list
+  ; added_episode_keys : string list
+  ; removed_episode_keys : string list
+  ; content_hash : string
+  }
   (** Only the fact/episode keys that changed relative to the keeper's
       previous row. [content_hash] is {!content_hash_of} over the full
       injected set at this turn, so a reconstructed set can be checked for
@@ -87,11 +69,11 @@ type record =
   ; failure_reason : string option
   ; n_facts_in_store : int option
   ; n_episodes_in_store : int option
-  ; payload : payload
+  ; delta : delta
   }
-(** Typed subset of the append schema consumed by read-only dashboard/eval
-    surfaces. Field ownership stays here so consumers do not duplicate ledger
-    JSON field names. *)
+(** Typed subset of the append schema consumed by the read-only outcome
+    evaluator. Field ownership stays here so the consumer does not duplicate
+    ledger JSON field names. *)
 
 type decode_error =
   [ `Expected_object
@@ -103,9 +85,6 @@ type decode_error =
     drift instead of silently dropping malformed rows. *)
 
 val record_of_json_result : Yojson.Safe.t -> (record, decode_error) result
-val record_of_json : Yojson.Safe.t -> record option
-(** Compatibility wrapper over {!record_of_json_result}. New read paths that need
-    observability should use the result-returning decoder. *)
 
 val failure_reason_unknown_label : string
 val bounded_failure_reason_label : string -> string
@@ -134,37 +113,18 @@ type materialized =
   ; episode_keys : string list
   }
 (** [record] paired with the full fact/episode key set actually in effect at
-    that row, after replaying {!payload} against the keeper's prior rows. *)
+    that row, after replaying {!delta} against the keeper's prior rows. *)
 
 val materialize : record list -> materialized list
 (** Reconstruct the full injected key set at each record by replaying
-    [payload] per [keeper_id]. Precondition: [records] is already in
-    chronological (oldest-first) order — both {!Keeper_recall_outcome_eval}'s
-    full-tree scan and {!Dated_jsonl.read_recent_lines} already provide this,
-    so no re-sort happens here (a re-sort by [ts] would be *unsound*: [ts] is
-    optional and legacy rows may omit it; true chronology is append order,
-    which the callers already preserve). A [Full_snapshot] row resets the
-    keeper's running state to exactly its own lists; a [Delta] row applies
-    added/removed to the running state (starting from the empty set for a
-    keeper's first appearance in [records], which is exact when [records]
-    covers that keeper's full history, and a documented under-approximation —
-    never an over-approximation — otherwise). Cross-keeper relative order in
-    the output is unspecified; per-keeper relative order matches the input. *)
-
-val to_json
-  :  ?failure_reason:string
-  -> keeper_id:string
-  -> trace_id:string
-  -> turn:int
-  -> injected_fact_keys:string list
-  -> injected_episode_keys:string list
-  -> n_facts_in_store:int
-  -> now:float
-  -> unit
-  -> Yojson.Safe.t
-(** Legacy (schema v1, [Full_snapshot]) pure record serialiser. Exposed for
-    round-trip tests and fixtures that need a self-contained row independent of
-    any keeper's prior state. Not used by {!append} since schema v2. *)
+    [delta] per [keeper_id]. Precondition: [records] is already in
+    chronological (oldest-first) order — {!Keeper_recall_outcome_eval}'s
+    full-tree scan already provides this, so no re-sort happens here (a
+    re-sort by [ts] would be *unsound*: true
+    chronology is append order, which the caller already preserves). Each
+    delta applies added/removed keys to the keeper's state, starting from the
+    empty set for its first appearance. Cross-keeper relative order in the
+    output is unspecified; per-keeper relative order matches the input. *)
 
 val append
   :  ?failure_reason:string
@@ -181,7 +141,7 @@ val append
 (** Append one injection record. Computes the delta against [keeper_id]'s
     previous [injected_fact_keys]/[injected_episode_keys] (in-memory,
     process-local, scoped by [(masc_root, keeper_id)]) and writes a v2
-    [Delta] row: this is the fix for the O(store_size) per-turn growth
+    delta row: this is the fix for the O(store_size) per-turn growth
     ([injected_fact_keys]/[injected_episode_keys] here are still the caller's
     full current sets — computing that live snapshot is not itself the growth
     bug; persisting a full copy of it every turn was). A keeper's first
@@ -201,8 +161,6 @@ type prune_error =
 (** Bounded failure label for recall-ledger prune setup failures. *)
 
 val string_of_prune_error : prune_error -> string
-val error_label_of_exn : exn -> string
-(** Bounded read-side error label for read-only dashboard consumers. *)
 
 val prune_older_than
   :  masc_root:string

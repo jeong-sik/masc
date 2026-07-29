@@ -35,6 +35,45 @@ let with_temp_masc_root name f =
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 
+let current_row_json
+      ?failure_reason
+      ~keeper_id
+      ~trace_id
+      ~turn
+      ~added_fact_keys
+      ~removed_fact_keys
+      ~added_episode_keys
+      ~removed_episode_keys
+      ~n_facts_in_store
+      ~now
+      ()
+  =
+  let fields =
+    [ "schema_version", `Int 2
+    ; "keeper_id", `String keeper_id
+    ; "trace_id", `String trace_id
+    ; "turn", `Int turn
+    ; "added_fact_keys", `List (List.map (fun key -> `String key) added_fact_keys)
+    ; "removed_fact_keys", `List (List.map (fun key -> `String key) removed_fact_keys)
+    ; "added_episode_keys", `List (List.map (fun key -> `String key) added_episode_keys)
+    ; ( "removed_episode_keys"
+      , `List (List.map (fun key -> `String key) removed_episode_keys) )
+    ; ( "content_hash"
+      , `String
+          (Ledger.content_hash_of
+             ~fact_keys:added_fact_keys
+             ~episode_keys:added_episode_keys) )
+    ; "n_facts_in_store", `Int n_facts_in_store
+    ; "n_episodes_in_store", `Int (List.length added_episode_keys)
+    ; "ts", `Float now
+    ]
+  in
+  `Assoc
+    (match failure_reason with
+     | None -> fields
+     | Some reason -> fields @ [ "failure_reason", `String reason ])
+;;
+
 let old_recall_file_path ~masc_root ~retention_days =
   let old_ts =
     Unix.gettimeofday ()
@@ -52,12 +91,14 @@ let old_recall_file_path ~masc_root ~retention_days =
 let write_old_recall_file ~masc_root ~retention_days =
   let old_file = old_recall_file_path ~masc_root ~retention_days in
   let old_row =
-    Ledger.to_json
+    current_row_json
       ~keeper_id:"old-keeper"
       ~trace_id:"old-trace"
       ~turn:1
-      ~injected_fact_keys:[ "old-fact" ]
-      ~injected_episode_keys:[]
+      ~added_fact_keys:[ "old-fact" ]
+      ~removed_fact_keys:[]
+      ~added_episode_keys:[]
+      ~removed_episode_keys:[]
       ~n_facts_in_store:1
       ~now:0.0
       ()
@@ -150,25 +191,26 @@ let test_append_writes_delta_row_and_updates_registry () =
     ();
   match read_all_records ~masc_root with
   | [ first; second ] ->
-    (match first.payload with
-     | Ledger.Delta { added_fact_keys; removed_fact_keys; _ } ->
-       check_string_list
-         "first append (fresh registry) is a full accounting: added = [x; y]"
-         [ "x"; "y" ]
-         added_fact_keys;
-       check "first append has no removals (nothing prior)" (removed_fact_keys = [])
-     | Ledger.Full_snapshot _ ->
-       check "first append is tagged Delta, not Full_snapshot" false);
-    (match second.payload with
-     | Ledger.Delta
-         { added_fact_keys; removed_fact_keys; added_episode_keys; removed_episode_keys; _ } ->
-       check_string_list "second append adds only the new key" [ "z" ] added_fact_keys;
-       check_string_list "second append removes only the dropped key" [ "x" ] removed_fact_keys;
-       check_string_list "second append adds the new episode key" [ "trace-g:g0" ]
-         added_episode_keys;
-       check "second append removes no episode keys" (removed_episode_keys = [])
-     | Ledger.Full_snapshot _ ->
-       check "second append is tagged Delta, not Full_snapshot" false)
+    let { Ledger.added_fact_keys; removed_fact_keys; _ } = first.delta in
+    check_string_list
+      "first append (fresh registry) is a full accounting: added = [x; y]"
+      [ "x"; "y" ]
+      added_fact_keys;
+    check "first append has no removals (nothing prior)" (removed_fact_keys = []);
+    let
+      { Ledger.added_fact_keys
+      ; removed_fact_keys
+      ; added_episode_keys
+      ; removed_episode_keys
+      ; _
+      }
+      = second.delta
+    in
+    check_string_list "second append adds only the new key" [ "z" ] added_fact_keys;
+    check_string_list "second append removes only the dropped key" [ "x" ] removed_fact_keys;
+    check_string_list "second append adds the new episode key" [ "trace-g:g0" ]
+      added_episode_keys;
+    check "second append removes no episode keys" (removed_episode_keys = [])
   | rows ->
     check (Printf.sprintf "expected exactly 2 rows, got %d" (List.length rows)) false
 ;;
@@ -222,18 +264,7 @@ let test_append_no_change_produces_empty_delta_regardless_of_store_size () =
     (large_bytes < small_bytes * 3)
 ;;
 
-let test_materialize_replays_legacy_and_delta_rows () =
-  let full ~keeper_id ~trace_id ~turn ~fact_keys ~episode_keys =
-    { Ledger.keeper_id
-    ; trace_id
-    ; turn
-    ; ts = Some (float_of_int turn)
-    ; failure_reason = None
-    ; n_facts_in_store = None
-    ; n_episodes_in_store = None
-    ; payload = Ledger.Full_snapshot { fact_keys; episode_keys }
-    }
-  in
+let test_materialize_replays_current_delta_rows () =
   let delta
         ~keeper_id
         ~trace_id
@@ -250,19 +281,25 @@ let test_materialize_replays_legacy_and_delta_rows () =
     ; failure_reason = None
     ; n_facts_in_store = None
     ; n_episodes_in_store = None
-    ; payload =
-        Ledger.Delta
-          { added_fact_keys
-          ; removed_fact_keys
-          ; added_episode_keys
-          ; removed_episode_keys
-          ; content_hash =
-              Ledger.content_hash_of ~fact_keys:added_fact_keys ~episode_keys:added_episode_keys
-          }
+    ; delta =
+        { added_fact_keys
+        ; removed_fact_keys
+        ; added_episode_keys
+        ; removed_episode_keys
+        ; content_hash =
+            Ledger.content_hash_of ~fact_keys:added_fact_keys ~episode_keys:added_episode_keys
+        }
     }
   in
   let records =
-    [ full ~keeper_id:"k" ~trace_id:"t1" ~turn:1 ~fact_keys:[ "a"; "b" ] ~episode_keys:[]
+    [ delta
+        ~keeper_id:"k"
+        ~trace_id:"t1"
+        ~turn:1
+        ~added_fact_keys:[ "a"; "b" ]
+        ~removed_fact_keys:[]
+        ~added_episode_keys:[]
+        ~removed_episode_keys:[]
     ; delta
         ~keeper_id:"k"
         ~trace_id:"t1"
@@ -275,7 +312,7 @@ let test_materialize_replays_legacy_and_delta_rows () =
   in
   match Ledger.materialize records with
   | [ first; second ] ->
-    check_string_list "genesis snapshot materializes to its own list" [ "a"; "b" ]
+    check_string_list "first current delta materializes from empty" [ "a"; "b" ]
       first.fact_keys;
     check_string_list "delta row materializes to (prior + added) - removed" [ "b"; "c" ]
       second.fact_keys;
@@ -292,7 +329,13 @@ let test_materialize_keeps_keepers_independent () =
     ; failure_reason = None
     ; n_facts_in_store = None
     ; n_episodes_in_store = None
-    ; payload = Ledger.Full_snapshot { fact_keys = keys; episode_keys = [] }
+    ; delta =
+        { added_fact_keys = keys
+        ; removed_fact_keys = []
+        ; added_episode_keys = []
+        ; removed_episode_keys = []
+        ; content_hash = Ledger.content_hash_of ~fact_keys:keys ~episode_keys:[]
+        }
     }
   in
   let records = [ row "keeper-a" 1 [ "shared" ]; row "keeper-b" 1 [ "other" ] ] in
@@ -305,12 +348,14 @@ let test_materialize_keeps_keepers_independent () =
 
 let () =
   let j =
-    Ledger.to_json
+    current_row_json
       ~keeper_id:"alpha"
       ~trace_id:"trace-1"
       ~turn:3
-      ~injected_fact_keys:[ "fact one"; "fact two" ]
-      ~injected_episode_keys:[ "trace-1:g0" ]
+      ~added_fact_keys:[ "fact one"; "fact two" ]
+      ~removed_fact_keys:[]
+      ~added_episode_keys:[ "trace-1:g0" ]
+      ~removed_episode_keys:[]
       ~n_facts_in_store:42
       ~now:1234.5
       ()
@@ -321,22 +366,24 @@ let () =
   check "n_facts_in_store" (j |> member "n_facts_in_store" |> to_int = 42);
   check "ts" (j |> member "ts" |> to_number = 1234.5);
   check
-    "injected_fact_keys preserved in order"
-    (j |> member "injected_fact_keys" |> to_list |> List.map to_string
+    "added_fact_keys preserved in order"
+    (j |> member "added_fact_keys" |> to_list |> List.map to_string
      = [ "fact one"; "fact two" ]);
   check
-    "injected_episode_keys preserved"
-    (j |> member "injected_episode_keys" |> to_list |> List.map to_string
+    "added_episode_keys preserved"
+    (j |> member "added_episode_keys" |> to_list |> List.map to_string
      = [ "trace-1:g0" ]);
   check "failure_reason omitted by default" (j |> member "failure_reason" = `Null);
   let failure_json =
-    Ledger.to_json
+    current_row_json
       ~failure_reason:"prompt_render_error"
       ~keeper_id:"alpha"
       ~trace_id:"trace-1"
       ~turn:3
-      ~injected_fact_keys:[]
-      ~injected_episode_keys:[]
+      ~added_fact_keys:[]
+      ~removed_fact_keys:[]
+      ~added_episode_keys:[]
+      ~removed_episode_keys:[]
       ~n_facts_in_store:42
       ~now:1234.5
       ()
@@ -346,31 +393,41 @@ let () =
     (failure_json |> member "failure_reason" |> to_string = "prompt_render_error");
   (* Empty key lists serialise to empty JSON arrays, not null. *)
   let empty =
-    Ledger.to_json
+    current_row_json
       ~keeper_id:"k"
       ~trace_id:"t"
       ~turn:0
-      ~injected_fact_keys:[]
-      ~injected_episode_keys:[]
+      ~added_fact_keys:[]
+      ~removed_fact_keys:[]
+      ~added_episode_keys:[]
+      ~removed_episode_keys:[]
       ~n_facts_in_store:0
       ~now:0.0
       ()
   in
   check
     "empty fact keys is []"
-    (empty |> member "injected_fact_keys" |> to_list = []);
+    (empty |> member "added_fact_keys" |> to_list = []);
   (* Deterministic round-trip: serialise then re-parse is structurally equal. *)
   let round_trip = Yojson.Safe.from_string (Yojson.Safe.to_string j) in
   check "round-trip equal" (Yojson.Safe.equal j round_trip);
   (match Ledger.record_of_json_result round_trip with
-   | Ok { payload = Ledger.Full_snapshot { fact_keys; episode_keys }; keeper_id; trace_id; turn; _ } ->
+   | Ok
+       { delta = { added_fact_keys; added_episode_keys; _ }
+       ; keeper_id
+       ; trace_id
+       ; turn
+       ; _
+       } ->
      check "typed decoder preserves keeper_id" (keeper_id = "alpha");
      check "typed decoder preserves trace_id" (trace_id = "trace-1");
      check "typed decoder preserves turn" (turn = 3);
-     check "typed decoder preserves fact keys" (fact_keys = [ "fact one"; "fact two" ]);
-     check "typed decoder preserves episode keys" (episode_keys = [ "trace-1:g0" ])
-   | Ok { payload = Ledger.Delta _; _ } ->
-     check "legacy row decodes as Full_snapshot, not Delta" false
+     check
+       "typed decoder preserves added fact keys"
+       (added_fact_keys = [ "fact one"; "fact two" ]);
+     check
+       "typed decoder preserves added episode keys"
+       (added_episode_keys = [ "trace-1:g0" ])
    | Error _ -> check "typed decoder accepts own schema" false);
   (match Ledger.record_of_json_result (`Assoc []) with
    | Error (`Missing_field "keeper_id") -> check "missing keeper_id is visible" true
@@ -381,11 +438,15 @@ let () =
          [ "keeper_id", `String "alpha"
          ; "trace_id", `String "trace-1"
          ; "turn", `Int 1
-         ; "injected_fact_keys", `List [ `Int 1 ]
-         ; "injected_episode_keys", `List []
+         ; "schema_version", `Int 2
+         ; "added_fact_keys", `List [ `Int 1 ]
+         ; "removed_fact_keys", `List []
+         ; "added_episode_keys", `List []
+         ; "removed_episode_keys", `List []
+         ; "content_hash", `String "hash"
          ])
    with
-   | Error (`Invalid_field "injected_fact_keys") ->
+   | Error (`Invalid_field "added_fact_keys") ->
      check "invalid fact key list is visible" true
    | _ -> check "invalid fact key list is visible" false);
   (match
@@ -395,13 +456,41 @@ let () =
          ; "trace_id", `String "trace-1"
          ; "turn", `Int 1
          ; "schema_version", `Int 99
-         ; "injected_fact_keys", `List []
-         ; "injected_episode_keys", `List []
          ])
    with
    | Error (`Unsupported_schema_version 99) ->
      check "unknown schema_version is a typed error, not a silent fallback" true
    | _ -> check "unknown schema_version is a typed error, not a silent fallback" false);
+  (match
+     Ledger.record_of_json_result
+       (`Assoc
+         [ "keeper_id", `String "alpha"
+         ; "trace_id", `String "trace-1"
+         ; "turn", `Int 1
+         ; "added_fact_keys", `List []
+         ; "removed_fact_keys", `List []
+         ; "added_episode_keys", `List []
+         ; "removed_episode_keys", `List []
+         ; "content_hash", `String "hash"
+         ])
+   with
+   | Error (`Missing_field "schema_version") ->
+     check "missing schema_version is rejected" true
+   | _ -> check "missing schema_version is rejected" false);
+  (match
+     Ledger.record_of_json_result
+       (`Assoc
+         [ "keeper_id", `String "alpha"
+         ; "trace_id", `String "trace-1"
+         ; "turn", `Int 1
+         ; "schema_version", `Int 1
+         ; "injected_fact_keys", `List []
+         ; "injected_episode_keys", `List []
+         ])
+   with
+   | Error (`Unsupported_schema_version 1) ->
+     check "retired schema_version=1 is rejected" true
+   | _ -> check "retired schema_version=1 is rejected" false);
   check
     "known recall failure label stays stable"
     (Ledger.bounded_failure_reason_label "prompt_render_error"
@@ -430,7 +519,7 @@ let () =
     "content_hash_of distinguishes different sets"
     (Ledger.content_hash_of ~fact_keys:[ "a" ] ~episode_keys:[]
      <> Ledger.content_hash_of ~fact_keys:[ "a"; "b" ] ~episode_keys:[]);
-  test_materialize_replays_legacy_and_delta_rows ();
+  test_materialize_replays_current_delta_rows ();
   test_materialize_keeps_keepers_independent ();
   test_append_does_not_prune_old_day_file ();
   test_prune_older_than_removes_old_day_file ();

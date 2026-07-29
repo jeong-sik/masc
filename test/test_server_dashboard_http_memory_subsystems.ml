@@ -2,11 +2,8 @@ open Alcotest
 
 module Json = Yojson.Safe.Util
 module Memory_subsystems = Server_dashboard_http_memory_subsystems
-module Memory_io = Masc.Keeper_memory_os_io
-module Recall_ledger = Masc.Keeper_recall_injection_ledger
 module Delegation_request = Masc.Keeper_delegation_request
 module Delegation_store = Masc.Keeper_delegation_request_store
-module Types = Masc.Keeper_memory_os_types
 
 let request target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
@@ -28,22 +25,6 @@ let rm_rf dir =
   in
   try rm dir with
   | _ -> ()
-;;
-
-let fact ?(category = Types.Preference) ?(trace_id = "trace-memory")
-      ?(turn = 3) ?(first_seen = 10.0) ?last_verified_at claim
-  : Types.fact
-  =
-  { claim
-  ; category
-  ; claim_kind = None
-  ; source = { trace_id; turn; tool_call_id = None }
-  ; first_seen
-  ; valid_until = None
-  ; last_verified_at
-  ; schema_version = Types.schema_version
-  ; claim_id = None
-  }
 ;;
 
 let test_http_json_surfaces_delegation_requests () =
@@ -83,53 +64,6 @@ let test_http_json_surfaces_delegation_requests () =
         Json.(item |> member "requester" |> to_string);
       check string "task seed suffix" "TASK_SEED.md"
         (Filename.basename Json.(item |> member "task_seed_md_path" |> to_string)))
-;;
-
-
-let append_recall_record
-      ?failure_reason
-      ~(config : Workspace_utils.config)
-      ~keeper_id
-      ~trace_id
-      ~turn
-      ~injected_fact_keys
-      ~injected_episode_keys
-      ~n_facts_in_store
-      ()
-  =
-  let masc_root = Workspace_utils.masc_dir config in
-  let store =
-    Dated_jsonl.create
-      ~base_dir:(Recall_ledger.base_dir ~masc_root)
-      ()
-  in
-  Recall_ledger.to_json
-    ?failure_reason
-    ~keeper_id
-    ~trace_id
-    ~turn
-    ~injected_fact_keys
-    ~injected_episode_keys
-    ~n_facts_in_store
-    ~now:(float_of_int turn)
-    ()
-  |> Dated_jsonl.append store
-;;
-
-let append_malformed_recall_record ~(config : Workspace_utils.config) =
-  let masc_root = Workspace_utils.masc_dir config in
-  let store =
-    Dated_jsonl.create
-      ~base_dir:(Recall_ledger.base_dir ~masc_root)
-      ()
-  in
-  Dated_jsonl.append
-    store
-    (`Assoc
-      [ "keeper_id", `String "keeper-bad"
-      ; "injected_fact_keys", `List [ `Int 1 ]
-      ; "injected_episode_keys", `List []
-      ])
 ;;
 
 let () =

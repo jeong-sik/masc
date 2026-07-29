@@ -17,16 +17,19 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.1"
 # selecting a provider-native response format. Provider_schema remains
 # explicit. It also removes the public Llm_provider.Complete.gemini_url
 # helper; MASC has no caller.
+# The pinned post-v0.231.1 head carries the #2873 provider hard-cut:
+# Agent.options.provider_config is the single exact carrier, including resume;
+# the legacy Provider.config island and separate resume argument are removed.
 # Previous pin: v0.231.0 (2cb7d922); before that v0.230.0 (7a3f2af7).
 # MASC consumes only the public Agent SDK contract; Keeper, Gate, Board, and
 # product operation ownership remain MASC concepts.
 # The reachability guards in check-oas-pin.sh and oas-drift-check.sh track
 # main; oas-drift-check.sh also reports the public-surface delta at pin-bump
 # time.
-# Pinned to the v0.231.1 release commit.
+# Pinned to the merged #2873 commit.
 readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.1"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="40ac4c42e0fcd29bb061a874c48faa934b3b91c2"
+readonly OAS_AGENT_SDK_SHA="701ea39e5c87e7df52724795c449d89b9a815c55"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.231.1"

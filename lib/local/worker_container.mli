@@ -195,5 +195,4 @@ val build_resume_config :
     [Agent_sdk.Agent.resume].  [config] inherits
     {!Agent_sdk.Types.default_config} for the exact [model_id] and overrides
     [name] / [system_prompt] / [enable_thinking]. Provider/model sampling and output defaults remain
-    OAS-owned. The concrete provider config is passed separately through
-    [Agent_sdk.Agent.resume ~provider_config]. *)
+    OAS-owned. The caller adds the concrete provider config to [options]. *)

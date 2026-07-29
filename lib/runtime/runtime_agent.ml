@@ -999,7 +999,6 @@ let resume_from_checkpoint
       Ok
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
-           ~provider_config:config.provider_cfg
            ~context_fit_admission:prepared_resume.context_fit_admission
            ?model_input_projection:config.model_input_projection
            ~options ~config:prepared_resume.agent_config

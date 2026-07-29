@@ -1294,6 +1294,118 @@ let test_suspended_streak_refuses_reactive_prepare () =
     ]
 ;;
 
+(* Step 0 characterization — the compaction suspension gate is self-feeding.
+
+   [test_suspended_streak_refuses_reactive_prepare] above pins the first hop: at
+   [Keeper_meta_contract.compaction_retry_escalation_threshold] the reactive
+   prepare is refused before any I/O. This test pins the two hops that close the
+   loop — the refusal settles as a compaction failure, and that settlement
+   advances the very counter the gate reads.
+
+   Live evidence for the loop: keeper [kidsnote] reached
+   compaction_consecutive_failures=907 against a threshold of 3
+   (.masc/logs/system_log_2026-07-29.jsonl), so roughly 99.7% of that counter's
+   value came from refusals that never attempted a compaction. While the counter
+   is inflated this way, no statistic can say what actually drove the keeper to
+   the threshold.
+
+   The gate, the threshold, and the LLM-call bound it exists for are unchanged;
+   only the self-feeding edge is cut. The second half of this test pins that a
+   real compaction failure still advances the streak, so the ceiling that
+   #25461 added keeps working. *)
+let test_refusal_does_not_settle_as_compaction_failure () =
+  Eio_main.run @@ fun _env ->
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String "suspension-settlement"
+          ; "trace_id", `String "trace-suspension-settlement"
+          ; "compaction_consecutive_failures", `Int 3
+          ])
+    with
+    | Ok meta -> meta
+    | Error detail -> failf "suspension-settlement meta fixture: %s" detail
+  in
+  check
+    bool
+    "fixture sits at the suspension threshold"
+    true
+    (Masc.Keeper_meta_contract.compaction_retry_suspended
+       meta.runtime.compaction_rt);
+  (* A refused prepare attempted no compaction, so it settles as nothing. *)
+  let turn_failure_with source_disposition : Masc.Keeper_unified_turn.turn_failure =
+    { error = Agent_sdk.Error.Internal "suspended reactive prepare"
+    ; runtime_id = "suspension-characterization"
+    ; route =
+        Keeper_runtime_failure_route.Retry_after_observed
+          { retry_class = Keeper_runtime_failure_route.Rate_limited
+          ; retry_after = None
+          }
+    ; source_disposition
+    ; deferred_runtime_lane = None
+    }
+  in
+  let settle source_disposition =
+    Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome
+      (Some (Cycle.Failed { meta; failure = turn_failure_with source_disposition }))
+  in
+  check
+    bool
+    "a refusal that attempted no compaction settles as nothing"
+    true
+    (settle
+       (Masc.Keeper_unified_turn.Requeue_after_context_compaction
+          (Masc.Keeper_unified_turn.Compaction_refused_without_attempt
+             { consecutive_failures = 3 }))
+     = None);
+  (* The ceiling #25461 added still works: a compaction that ran and made no
+     durable progress still advances the streak. *)
+  check
+    bool
+    "an attempted compaction that made no progress still settles as a failure"
+    true
+    (settle
+       (Masc.Keeper_unified_turn.Requeue_after_context_compaction
+          (Masc.Keeper_unified_turn.Compaction_attempt_failed
+             { reason = "checkpoint candidate rejected" }))
+     = Some `Failed);
+  (* And that settlement is what advances the counter the gate reads. *)
+  let base =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-suspension-settlement-%d" (Unix.getpid ()))
+  in
+  let config = Masc.Workspace.default_config base in
+  (match Masc.Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error detail -> failf "durable meta write: %s" detail);
+  (match
+     Masc.Keeper_meta_store.persist_compaction_outcome
+       config
+       ~keeper_name:meta.name
+       ~outcome:`Failed
+   with
+   | Ok `Persisted -> ()
+   | Ok `No_durable_meta -> fail "settlement found no durable meta to advance"
+   | Error detail -> failf "settlement persist: %s" detail);
+  match Masc.Keeper_meta_store.read_meta config meta.name with
+  | Error detail -> failf "durable meta read-back: %s" detail
+  | Ok None -> fail "durable meta vanished after settlement"
+  | Ok (Some settled) ->
+    check
+      int
+      "an attempted-and-failed compaction advances the streak"
+      4
+      settled.runtime.compaction_rt.consecutive_failures;
+    check
+      bool
+      "and that is what keeps the keeper suspended"
+      true
+      (Masc.Keeper_meta_contract.compaction_retry_suspended
+         settled.runtime.compaction_rt)
+;;
+
 let () =
   run "post-turn durability" [
     "durable compaction", [
@@ -1326,6 +1438,8 @@ let () =
         `Quick test_post_dispatch_non_reducing_output_is_quarantined;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
+      test_case "refusal does not settle as a compaction failure"
+        `Quick test_refusal_does_not_settle_as_compaction_failure;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

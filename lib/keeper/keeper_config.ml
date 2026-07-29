@@ -83,13 +83,23 @@ let keeper_memory_os_recall_max_episodes () : int =
    Facts are never dropped by this budget; they render an order of magnitude
    smaller than episodes.
 
-   The 64 KiB default is roughly a tenth of a 200k-token context window once
-   rendered, and takes the measured keeper from 222,499 B to under 65,536 B.
-   0 disables enforcement (unbounded), matching the previous behaviour. *)
+   The default is sized against the provider **request body byte limit**
+   (e.g. OAS/Ollama Cloud 262144 B), not a token context window. A measured
+   keeper (analyst) carried ~116 KiB of fixed per-turn overhead (tool
+   definitions ~66 KiB + recall ~40 KiB + base prompt ~8.5 KiB) — 44% of a
+   256 KiB body limit — leaving ~142 KiB for history, just under the
+   compaction floor (~148 KiB), so it looped on request_body_too_large(413)
+   indefinitely (2026-07-29: 796 events in 40 min; compaction hit 227
+   consecutive failures). The prior 64 KiB default ("a tenth of a 200k-token
+   window") was token-derived and oversized for the byte body limit; 16 KiB
+   trims recall from ~40 KiB and reclaims headroom for the history floor.
+   Deriving the budget from provider max-request-body-bytes (rather than a
+   fixed constant) is the durable follow-up. 0 disables enforcement
+   (unbounded). *)
 let keeper_memory_os_recall_max_bytes_rp =
   _rp_int ~key:"keeper.memory_os.recall.max_bytes"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_MEMORY_OS_RECALL_MAX_BYTES"
-                          ~default:65_536 ~min_v:0 ~max_v:50_000_000)
+                          ~default:16_384 ~min_v:0 ~max_v:50_000_000)
     ~min_v:0 ~max_v:50_000_000
     ~description:"Rendered recall block byte budget; oldest episodes are dropped to fit (0 = unbounded)" ()
 let keeper_memory_os_recall_max_bytes () : int =

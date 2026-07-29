@@ -100,10 +100,9 @@ let render_numbered_facts facts =
    "producer emitted no tag", which is a different fact from "the members
    disagreed", and the read boundary omits the field entirely for [None]
    (server_dashboard_http_keeper_api.ml). Reject that group and preserve every
-   member until a lossless multi-origin representation exists.
-
-   Unlike the deleted [valid_until] equality gate this one is satisfiable:
-   over 2026-07-27..29 it admitted 3639 groups and refused 671 (5.5:1). *)
+   member until a lossless multi-origin representation exists. Unlike the
+   deleted [valid_until] equality gate, this compares semantic metadata rather
+   than independently derived write-time timestamps. *)
 let group_preserves_claim_kind ~members =
   match members with
   | [] -> true

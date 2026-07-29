@@ -9,13 +9,11 @@
     cannot fabricate a survivor; an unreferenced fact is kept unchanged; a group
     needs >= 2 in-range members to merge; out-of-range/duplicate indices skip.
 
-    [valid_until] is no longer a precondition: it is derived at write time from
-    wall-clock, so two independently written facts can never carry the same
-    value, and demanding equality rejected 3529 of 4405 proposed groups over
-    2026-07-27..29 against 196 merges. It is combined by a meet at apply time
-    instead. [claim_kind] remains gated — that check is satisfiable (3639
-    admitted vs 671 refused over the same window) and a merged row has no
-    lossless way to record that its members disagreed. *)
+    [valid_until] is no longer a precondition: it is derived from write-time
+    policy, so exact timestamp equality is not a semantic grouping contract.
+    It is combined by a meet at apply time instead. [claim_kind] remains gated
+    because a merged row has no lossless way to record that its members
+    disagreed. *)
 
 open Keeper_memory_os_types
 

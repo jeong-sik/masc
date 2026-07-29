@@ -4,7 +4,8 @@ open Dashboard_execution_builders
 let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
 let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
-    ?(updated_at = "") ?(turn_count = 0) ?(autonomous_turn_count = 0) () =
+    ?(updated_at = "") ?(keepalive_running = false) ?(turn_count = 0)
+    ?(autonomous_turn_count = 0) () =
   `Assoc
     [
       ("name", `String "executor");
@@ -12,6 +13,7 @@ let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
       ("agent_name", `String "executor");
       ("keeper_id", `String "k-executor");
       ("status", `String status);
+      ("keepalive_running", `Bool keepalive_running);
       ("generation", `Int 0);
       ("turn_count", `Int turn_count);
       ("autonomous_turn_count", `Int autonomous_turn_count);
@@ -43,19 +45,29 @@ let test_offline_without_signal_is_critical () =
   check string "lifecycle" "offline" (lifecycle_of row);
   check string "state" "critical" (state_of row)
 
-let test_offline_with_action_is_healthy_active () =
+let test_offline_with_persisted_action_stays_critical () =
   let row =
     build_one
-      (keeper ~status:"offline" ~last_autonomous_action_at:"2026-07-29T12:00:00Z"
+      (keeper ~last_autonomous_action_at:"2001-09-09T01:46:40Z"
          ~turn_count:1 ~autonomous_turn_count:1 ())
+  in
+  check string "lifecycle" "offline" (lifecycle_of row);
+  check string "state" "critical" (state_of row)
+
+let test_running_with_action_is_healthy_active () =
+  let row =
+    build_one
+      (keeper ~keepalive_running:true
+         ~last_autonomous_action_at:"2001-09-09T01:46:40Z" ~turn_count:1
+         ~autonomous_turn_count:1 ())
   in
   check string "lifecycle" "active" (lifecycle_of row);
   check string "state" "healthy" (state_of row)
 
-let test_offline_with_heartbeat_is_healthy_idle () =
+let test_running_with_heartbeat_is_healthy_idle () =
   let row =
     build_one
-      (keeper ~status:"offline" ~updated_at:"2026-07-29T12:00:00Z" ())
+      (keeper ~keepalive_running:true ~updated_at:"2001-09-09T01:46:40Z" ())
   in
   check string "lifecycle" "idle" (lifecycle_of row);
   check string "state" "healthy" (state_of row)
@@ -67,9 +79,11 @@ let () =
         [
           test_case "no signal -> critical" `Quick
             test_offline_without_signal_is_critical;
-          test_case "action signal -> healthy active" `Quick
-            test_offline_with_action_is_healthy_active;
-          test_case "heartbeat signal -> healthy idle" `Quick
-            test_offline_with_heartbeat_is_healthy_idle;
+          test_case "persisted action without runtime -> critical" `Quick
+            test_offline_with_persisted_action_stays_critical;
+          test_case "running + action -> healthy active" `Quick
+            test_running_with_action_is_healthy_active;
+          test_case "running + heartbeat -> healthy idle" `Quick
+            test_running_with_heartbeat_is_healthy_idle;
         ] );
     ]

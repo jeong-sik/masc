@@ -14,6 +14,12 @@
   no compatibility reader or migration path was added.
 
 ### Removed
+- **Breaking (workspace root state)**: removed the pre-rename
+  `.masc/state.json` fallback from the cluster-root initialization check and
+  removed its public path helper. Workspace, dashboard, keeper-directive, and
+  gRPC root gates now recognize only the current `.masc/root-state.json`
+  marker already written by init/bootstrap. No migration or repair path was
+  added.
 - **Breaking (keeper chat wire)**: removed read-time message-id synthesis for
   rows without a persisted `id` and removed the duplicate persisted `source`
   lane label. Current chat rows require a nonblank producer-assigned `id` and

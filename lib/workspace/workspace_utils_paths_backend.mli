@@ -37,10 +37,6 @@ val keepers_runtime_dir : config -> string
     one-time root setup. *)
 val root_state_path : config -> string
 
-(** Pre-rename cluster-root state path (legacy [.masc/state.json]).
-    Kept exposed for fallback existence checks during migration. *)
-val legacy_root_state_path : config -> string
-
 (** Project-scoped key prefix for backend keys (e.g.
     ["proj:default"]). Used by broadcast/pubsub channel naming. *)
 val project_prefix : config -> string

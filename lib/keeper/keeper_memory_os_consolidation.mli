@@ -9,12 +9,9 @@
     cannot fabricate a survivor; an unreferenced fact is kept unchanged; a group
     needs >= 2 in-range members to merge; out-of-range/duplicate indices skip.
 
-    [valid_until] is no longer a precondition: it is derived from write-time
-    policy, so exact timestamp equality is not a semantic grouping contract. It
-    is combined by a meet at apply time instead. [claim_kind] is no longer a
-    precondition either — the judge states the merged row's tag, and the group is
-    refused only when it states nothing while the members disagree. Every
-    remaining refusal is one the judge can clear by restating its plan. *)
+    [valid_until] and [claim_kind] are not preconditions. The former is combined
+    by a meet at apply time; the latter is an optional annotation on the new row.
+    Neither closes an otherwise structurally valid merge. *)
 
 open Keeper_memory_os_types
 
@@ -25,12 +22,9 @@ val wire_field_groups : string
 val wire_field_drop_indices : string
 val wire_field_claim_kind : string
 
-(** [claim_kind] is the origin tag the judge assigns to the row it authors, like
-    [category] — a merged row is a new claim, not a union needing lossless
-    representation. [None] is "not stated": {!apply_plan} then inherits the
-    members' one distinct tag, or refuses the group when they disagree rather
-    than writing [None], which would mean "producer emitted no tag" and is
-    omitted entirely at the read boundary. *)
+(** [claim_kind] is the optional origin tag the judge assigns to the row it
+    authors, like [category]. [None] means the judge emitted no tag and never
+    changes whether the group is applied. *)
 type merge_group =
   { member_indices : int list
   ; consolidated_claim : string
@@ -76,15 +70,11 @@ val plan_result_of_string :
     empty_plan]-equivalent. *)
 val plan_of_string : string -> consolidation_plan option
 
-(** Typed apply outcome breakdown, so "the judge proposed no merges" does not
-    collapse into the same silent before = after as "the plan was rejected".
-    [rejected_kind_mismatch] is the gate disagreement worth alerting on;
-    [rejected_too_few_members] is expected behavior, since first-group-wins
-    legitimately shrinks a later overlapping group below two free members on
-    ordinary contested-duplicate plans. *)
+(** Typed apply outcome breakdown. [rejected_too_few_members] is structural:
+    first-group-wins can legitimately shrink a later overlapping group below
+    two free members on ordinary contested-duplicate plans. *)
 type apply_stats =
   { merged_groups : int
-  ; rejected_kind_mismatch : int
   ; rejected_too_few_members : int
   ; dropped : int
   }
@@ -102,15 +92,10 @@ type apply_stats =
     That invariant holds unconditionally because expired rows never reach here —
     {!Keeper_memory_os_consolidation_runtime} partitions them out before the
     judge sees the store, so no group can mix a dead row with a live one.
-    The merged row's [claim_kind] is the judge's stated tag, taken as given like
-    [category]; parsing has already bounded it to the closed variants, and no
-    code branches on it, so no admissibility rule narrows it further. When the
-    judge states nothing, one distinct member tag is inherited and disagreement
-    is rejected and counted — the code will not invent a tag, and [None] is not
-    available as a stand-in because it means "producer emitted no tag".
-    [render_numbered_facts] shows the judge each member's tag so that refusal is
-    never hit blind. Explicitly dropped indices are removed; every other fact
-    survives unchanged. *)
+    The merged row's [claim_kind] is the judge's optional stated tag, taken as
+    given like [category]. When absent it remains [None]; no member comparison or
+    fallback decides admission. Explicitly dropped indices are removed; every
+    other fact survives unchanged. *)
 val apply_plan
   :  now:float
   -> facts:fact list

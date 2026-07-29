@@ -106,6 +106,21 @@ consumer wake
 let on_admitted = if queued_turn then Some on_queue_turn_admitted else None in
 ```
 
+### 3.4 검토했지만 택하지 않은 대안 — `already_admitted` 플래그
+
+이 저장소에는 "호출자가 이미 슬롯을 쥐고 있다"를 표현하는 선례가 있다. `Keeper_manual_compaction.run_under_admission`(`keeper_manual_compaction.mli:83-92`): *Manual compaction while the caller already owns the Keeper turn token. No nested admission or release occurs.* 구현은 `~already_admitted:true`를 호출 그래프로 흘려 내부 admission을 건너뛰는 방식이다(`keeper_manual_compaction.ml:505-543, 674-693`), 호출자는 이미 admission 안에 있는 `keeper_heartbeat_loop_cycle.ml:348`이다.
+
+이 패턴을 chat 경로에 이식하면: consumer가 admission을 직접 잡고, `handle_turn`에 `~already_admitted:true`를 넘겨 `handle_keeper_invocation`의 `run_serialized`를 건너뛴다.
+
+택하지 않는 이유:
+
+- `Keeper_turn_admission`에 already-admitted 진입점을 **새로 export**해야 한다. 현재 `run_locked` / `run_locked_with_token`은 `.mli`에 없고 private `slot` 타입을 받는다(`keeper_turn_admission.ml:238-272`). 진입점을 3개로 줄이려는 이 RFC의 목표와 반대 방향이다.
+- 불리언 플래그를 13 hop에 걸쳐 흘려야 한다. 그 자체가 §4가 없애려는 종류의 파라미터다.
+- `run_locked_with_token`은 shutdown 경로와 release 경로 양쪽에서 무조건 `Eio.Mutex.unlock`한다(`:252`, `:258`). 중첩 사용을 안전하게 만들려면 그 함수도 손봐야 한다.
+- `on_admitted`는 **이미 존재하고, 이미 임계구역 안에서 돌고, 이미 queued turn 전용**이다. 새로 만들 것이 없다.
+
+`keeper_turn_admission.mli:240-243`의 caller contract — *do not call this from within an admitted turn of the same keeper* — 는 두 안 모두에서 지켜진다. `on_admitted` 안은 admission 안이지만 `run_serialized`를 다시 부르지 않는다.
+
 ## 4. 구현 지점
 
 ### Phase 1 — 큐 API 두 개 추가 (동작 변화 없음)

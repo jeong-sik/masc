@@ -8,7 +8,6 @@ let fact_fixture ~now ~claim =
   ; category = Types.Fact
   ; claim_kind = None
   ; source = { Types.trace_id = "trace-gc-dry-run"; turn = 1; tool_call_id = None }
-  ; observed_by = []
   ; first_seen = now -. 60.0
   ; valid_until = None
   ; last_verified_at = Some now

@@ -13,7 +13,6 @@ let fact ~claim_kind ~category ?(first_seen = now -. 60.0) ?(valid_until = None)
   ; category
   ; claim_kind
   ; source = { Types.trace_id = "trace-x"; turn = 1; tool_call_id = None }
-  ; observed_by = []
   ; first_seen
   ; valid_until
   ; last_verified_at

@@ -459,7 +459,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'memory-subsystems',
       label: 'Memory OS',
-      description: 'Hebbian synapses, recall quality, and delegation requests.',
+      description: 'Recall quality and delegation requests.',
       params: { section: 'memory-subsystems' },
     },
     {

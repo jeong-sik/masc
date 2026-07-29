@@ -668,12 +668,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            episodes all carried zero claims has no [*.facts.jsonl] but still
            accumulates episode files. *)
         let keeper_ids =
-          List.filter
-            (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
-            (List.sort_uniq
-               String.compare
-               (Keeper_memory_os_io.list_fact_store_keeper_ids ()
-                @ Keeper_memory_os_io.list_episode_store_keeper_ids ()))
+          List.sort_uniq
+            String.compare
+            (Keeper_memory_os_io.list_fact_store_keeper_ids ()
+             @ Keeper_memory_os_io.list_episode_store_keeper_ids ())
         in
         Eio.Fiber.all
           (List.map
@@ -698,8 +696,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       ~sw
       ~on_error:(log_server_fiber_crash "memory_os_keeper_consolidation")
       (fun () ->
-        (* Coarser than Tier-2 consolidation (300s): this pass calls the LLM,
-           so a 10-minute cadence bounds cost while still shrinking stores. *)
+        (* This pass calls the LLM, so a 10-minute cadence bounds cost while
+           still shrinking stores. *)
         let interval = 600.0 in
         let rec loop () =
           (match Runtime.resolve_memory_os_consolidation_runtime_candidates () with

@@ -882,7 +882,6 @@ describe('fetchMemorySubsystems', () => {
   it('builds the query string from the provided limit', async () => {
     const rawResponse = {
       generated_at: '2026-05-06T00:00:00Z',
-      hebbian: { synapses: [], last_consolidation: 0 },
     }
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify(rawResponse), {

@@ -578,11 +578,6 @@ let emit_fact sink (value : Types.fact) =
    | Some last_verified_at ->
      Canonical_bytes.field sink ~first:false "last_verified_at";
      Canonical_bytes.float_value sink last_verified_at);
-  (match value.observed_by with
-   | [] -> ()
-   | observed_by ->
-     Canonical_bytes.field sink ~first:false "observed_by";
-     emit_string_list sink observed_by);
   (match value.claim_id with
    | None -> ()
    | Some claim_id ->

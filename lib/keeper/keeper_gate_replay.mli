@@ -7,10 +7,13 @@
     payloads, so approved writes were never applied (#25947).
 
     The durable delivery entry already stores the approved input, so the
-    runtime replays that stored payload directly. The canonical input is
-    re-derived at execution, which keeps the pinned resource identity
-    (device/inode) authoritative: a target replaced between approval and
-    replay no longer matches and stays unapplied. *)
+    runtime replays that stored payload directly. At execution, the producer
+    re-derives its canonical input and applies its ordinary Gate exact-match
+    semantics. Only resource identities that the producer includes are pinned:
+    filesystem atomic replace pins the root and parent capabilities, append
+    additionally pins the existing target, and patch additionally pins its
+    source. Atomic replace authorizes replacing the named directory entry and
+    does not pin the prior target inode. *)
 
 type replay_journal =
   | Replay_journal_recorded

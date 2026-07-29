@@ -104,6 +104,7 @@ type latency_bucket =
 type cost_read_diagnostics =
   { malformed_rows : int
   ; schema_violation_rows : int
+  ; identity_conflict_rows : int
   }
 
 type cost_read_result =
@@ -135,6 +136,7 @@ type provider_stats =
 type raw_entry =
   { model : string
   ; provider : string option
+  ; inference_identity : Cost_ledger.inference_identity option
   ; ts_unix : float
   ; outcome : string
   ; stop_reason : string option
@@ -172,12 +174,15 @@ type parse_error =
   | Out_of_window
   | No_telemetry_object
   | Missing_outcome
+  | Missing_usage_reported
+  | Missing_telemetry_reported
   | Missing_success_model
+  | Missing_success_inference_identity
   | Missing_error_model_attribution
-  | Missing_cost_model
-  | Missing_cost_usage_missing
+  | Invalid_current_cost_row of Cost_ledger.decode_error
 
 val parse_error_label : parse_error -> string
+val parse_error_detail : parse_error -> string
 val parse_error_is_schema_violation : parse_error -> bool
 val percentile : float array -> float -> float
 val average_opt : float array -> float option

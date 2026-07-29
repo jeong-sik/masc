@@ -16,6 +16,7 @@
  (public_name masc.model_inference_metrics)
  (wrapped false)
  (libraries
+  masc.cost_ledger
   dated_jsonl
   digestif
   eio

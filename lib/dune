@@ -101,6 +101,7 @@
   masc.keeper_types
   masc.keeper_types_profile_sandbox
   masc.keeper_usage_trust
+  masc.cost_ledger
   masc.event_bus_slots
   masc.keeper_compaction_evidence
   masc.keeper_chat_delivery_identity

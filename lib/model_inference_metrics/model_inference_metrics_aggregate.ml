@@ -388,9 +388,8 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min =
 ;;
 
 (* ── Runtime-lane rollup ────────────────────────────────────
-   Legacy provider strings are not reconstructed here.  Public dashboard
-   projections keep aggregate throughput/latency evidence while model/provider
-   identity is represented by neutral runtime lanes.
+   Public dashboard projections keep aggregate throughput/latency evidence
+   while model/provider identity is represented by neutral runtime lanes.
 
    All means are [entry_count]-weighted. Latency percentiles are
    approximations — averaging per-model p50/p95 does not produce a

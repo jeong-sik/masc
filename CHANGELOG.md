@@ -2,13 +2,15 @@
 
 ## Unreleased
 
-- **Breaking (cost ledger storage/schema)**: `masc-cost` now writes and reports
-  only the current date-split `.masc/costs/YYYY-MM/DD.jsonl` store, matching the
-  Keeper producer and inference-metrics consumer. The retired
-  `.masc/costs.jsonl` reader and writer were removed, and current cost rows
-  require an explicit `usage_missing` boolean. Invalid current-store rows are
-  surfaced and excluded instead of receiving default tokens, cost, model, or
-  timestamp values. No migration or repair path was added.
+- **Breaking (cost ledger storage/schema)**: the Keeper producer, `masc-cost`,
+  and inference metrics now share one current row codec and the date-split
+  `.masc/costs/YYYY-MM/DD.jsonl` store. Automatic rows carry the runtime-owned
+  `(trace_id, keeper_turn_id, oas_turn_ordinal)` identity, so decision/cost
+  observations merge only on exact identity; nearby timestamps and equal token
+  counts no longer act as a deduplication rule. Windowed readers open only the
+  requested day range, and malformed rows, schema violations, or duplicate
+  identities remain explicit diagnostics. No alternate store, field-name
+  decoder, migration, or repair path is present.
 - **Breaking (approval snapshot wire)**: `summary_status.failed.retryable`
   is no longer accepted and discarded while loading pending approvals. Current
   snapshots contain only `status` and `reason`; snapshots carrying the retired

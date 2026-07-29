@@ -820,6 +820,7 @@ let () =
     ; ctx_composition
     ; runtime_observation = None
     ; turn_count = 1
+    ; final_oas_turn_ordinal = 0
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; tool_calls = []

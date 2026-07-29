@@ -42,6 +42,10 @@ type non_regular_file_kind =
 
 type read_error =
   | Invalid_offset of { offset : int }
+  | Invalid_date_range of
+      { since : string
+      ; until : string
+      }
   | Not_a_directory of { path : string }
   | Invalid_layout_entry of
       { parent : string
@@ -90,6 +94,11 @@ let non_regular_file_kind_to_string = function
 let read_error_to_string = function
   | Invalid_offset { offset } ->
     Printf.sprintf "dated JSONL recent-read offset must be non-negative: %d" offset
+  | Invalid_date_range { since; until } ->
+    Printf.sprintf
+      "dated JSONL range must be valid and ordered: since=%S until=%S"
+      since
+      until
   | Not_a_directory { path } -> "dated JSONL path is not a directory: " ^ path
   | Invalid_layout_entry { parent; entry; expected } ->
     Printf.sprintf
@@ -166,12 +175,49 @@ let base_dir t = t.base_dir
 
 (** Parse ["YYYY-MM-DD"] into [("YYYY-MM", "DD")].
     Returns [None] for malformed strings. *)
+let year_is_leap year =
+  year mod 4 = 0 && (year mod 100 <> 0 || year mod 400 = 0)
+;;
+
+let days_in_month ~year = function
+  | 1 | 3 | 5 | 7 | 8 | 10 | 12 -> Some 31
+  | 4 | 6 | 9 | 11 -> Some 30
+  | 2 -> Some (if year_is_leap year then 29 else 28)
+  | _ -> None
+;;
+
+let substring_is_ascii_digits value ~position ~length =
+  let rec loop index =
+    if index >= position + length
+    then true
+    else
+      match value.[index] with
+      | '0' .. '9' -> loop (index + 1)
+      | _ -> false
+  in
+  loop position
+;;
+
 let parse_date s =
-  if String.length s < 10 then None
+  if String.length s <> 10
+     || s.[4] <> '-'
+     || s.[7] <> '-'
+     || not (substring_is_ascii_digits s ~position:0 ~length:4)
+     || not (substring_is_ascii_digits s ~position:5 ~length:2)
+     || not (substring_is_ascii_digits s ~position:8 ~length:2)
+  then None
   else
-    let month = String.sub s 0 7 in
-    let day = String.sub s 8 2 in
-    Some (month, day)
+    match
+      int_of_string_opt (String.sub s 0 4),
+      int_of_string_opt (String.sub s 5 2),
+      int_of_string_opt (String.sub s 8 2)
+    with
+    | Some year, Some month, Some day ->
+      (match days_in_month ~year month with
+       | Some maximum when day >= 1 && day <= maximum ->
+         Some (String.sub s 0 7, String.sub s 8 2)
+       | Some _ | None -> None)
+    | _ -> None
 
 (* ── Directory listing (sorted descending) ────────────── *)
 
@@ -247,18 +293,6 @@ let list_directory_result ~missing_is_empty path =
        Error (Io_error { operation = List_directory; path; detail }))
 ;;
 
-let substring_is_ascii_digits value ~position ~length =
-  let rec loop index =
-    if index >= position + length
-    then true
-    else
-      match value.[index] with
-      | '0' .. '9' -> loop (index + 1)
-      | _ -> false
-  in
-  loop position
-;;
-
 let year_and_month_of_directory_name name =
   if String.length name = 7
      && name.[4] = '-'
@@ -276,17 +310,6 @@ let year_and_month_of_directory_name name =
 
 let month_directory_name_is_valid name =
   Option.is_some (year_and_month_of_directory_name name)
-;;
-
-let year_is_leap year =
-  year mod 4 = 0 && (year mod 100 <> 0 || year mod 400 = 0)
-;;
-
-let days_in_month ~year = function
-  | 1 | 3 | 5 | 7 | 8 | 10 | 12 -> Some 31
-  | 4 | 6 | 9 | 11 -> Some 30
-  | 2 -> Some (if year_is_leap year then 29 else 28)
-  | _ -> None
 ;;
 
 let day_file_name_is_valid ~year ~month name =
@@ -875,6 +898,68 @@ let iter_all_entries_result t f =
   in
   let* months = list_month_dirs_result t.base_dir in
   iter_months (List.rev months)
+;;
+
+let iter_range_entries_result t ~since ~until f =
+  let ( let* ) = Result.bind in
+  match parse_date since, parse_date until with
+  | None, _ | _, None -> Error (Invalid_date_range { since; until })
+  | Some (since_month, since_day), Some (until_month, until_day)
+    when String.compare (since_month ^ since_day) (until_month ^ until_day) > 0 ->
+    Error (Invalid_date_range { since; until })
+  | Some (since_month, since_day), Some (until_month, until_day) ->
+    let month_in_range month =
+      String.compare month since_month >= 0
+      && String.compare month until_month <= 0
+    in
+    let day_in_range month day =
+      let day_number = Filename.remove_extension day in
+      not
+        ((String.equal month since_month
+          && String.compare day_number since_day < 0)
+         || (String.equal month until_month
+             && String.compare day_number until_day > 0))
+    in
+    let rec iter_days month month_path = function
+      | [] -> Ok ()
+      | day :: rest ->
+        let* () =
+          if day_in_range month day
+          then
+            iter_json_file_entries_result
+              (Filename.concat month_path day)
+              f
+          else Ok ()
+        in
+        iter_days month month_path rest
+    in
+    let rec iter_months = function
+      | [] -> Ok ()
+      | (month, year, month_number) :: rest ->
+        let month_path = Filename.concat t.base_dir month in
+        let* days =
+          list_directory_result ~missing_is_empty:false month_path
+        in
+        let selected_days =
+          days
+          |> List.filter (day_file_name_is_valid ~year ~month:month_number)
+          |> List.filter (day_in_range month)
+          |> List.rev
+        in
+        let* () = iter_days month month_path selected_days in
+        iter_months rest
+    in
+    let* entries =
+      list_directory_result ~missing_is_empty:true t.base_dir
+    in
+    entries
+    |> List.filter_map (fun month ->
+      match year_and_month_of_directory_name month with
+      | Some (year, month_number) when month_in_range month ->
+        Some (month, year, month_number)
+      | Some _ | None -> None)
+    |> List.rev
+    |> iter_months
 ;;
 
 let iter_range t ~since ~until f =

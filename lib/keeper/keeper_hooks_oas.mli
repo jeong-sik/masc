@@ -116,6 +116,10 @@ val cache_miss_input_tokens :
 val cost_event_payload :
   agent_name:string ->
   task_id:string option ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  oas_turn_ordinal:int ->
+  model:string ->
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
@@ -123,13 +127,17 @@ val cost_event_payload :
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> ?model:string -> unit -> Yojson.Safe.t
+  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> Yojson.Safe.t
 (** Assemble the structured cost-ledger event without writing it. *)
 
 val emit_cost_event :
   masc_root:string ->
   agent_name:string ->
   task_id:string option ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  oas_turn_ordinal:int ->
+  model:string ->
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
@@ -137,8 +145,7 @@ val emit_cost_event :
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry ->
-  ?model:string -> unit -> unit
+  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> unit
 (** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
 
 (** PR-review / PR-work metric event types live in Keeper_hooks_oas_types
@@ -151,6 +158,9 @@ val make_hooks :
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   generation:int ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  on_after_turn_ordinal:(int -> unit) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
                      output_text:string ->

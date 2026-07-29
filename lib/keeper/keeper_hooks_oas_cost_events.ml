@@ -52,6 +52,10 @@ type assembled_cost_event_payload = {
 let assemble_cost_event_payload
     ~(agent_name : string)
     ~(task_id : string option)
+    ~(trace_id : string)
+    ~(keeper_turn_id : int)
+    ~(oas_turn_ordinal : int)
+    ~(model : string)
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
@@ -60,7 +64,6 @@ let assemble_cost_event_payload
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
-    ?(model : string option)
     () : assembled_cost_event_payload =
   let int_field name = function
     | Some n -> [ (name, `Int n) ]
@@ -112,7 +115,7 @@ let assemble_cost_event_payload
   let key_model_value =
     match canonical_model_id_of_telemetry telemetry with
     | Some canonical_id -> canonical_id
-    | None -> runtime_lane_label
+    | None -> model
   in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in
@@ -153,32 +156,43 @@ let assemble_cost_event_payload
   let cost_usd_source =
     classify_cost_usd_source ~usage_missing ~runtime_unmetered ~cost_usd
   in
-  let source_auto_trajectory = "auto_trajectory" in
-  let entry = `Assoc ([
-    (key_agent, `String agent_name);
-    ("task_id", Json_util.string_opt_to_json task_id);
-    (key_provider, `String runtime_lane_label);
-    (key_model, `String key_model_value);
-    (key_input_tokens, if usage_missing then `Null else `Int input_tokens);
-    (key_output_tokens, if usage_missing then `Null else `Int output_tokens);
-    (key_cost_usd, if usage_missing then `Null else `Float cost_usd);
-    (* Pricing-observation firewall: a usage_missing turn (no token
-       evidence — includes cost-only usage where only cost_usd was
-       reported) writes `Null`, not `Float x`.  This intentionally
-       changes the ledger for cost-only turns in this PR (not deferred
-       to #25558): a cost observation without token evidence must not
-       enter the ledger as a concrete number. *)
-    (key_cost_status, `String cost_status_label);
-    (key_cost_status_reason, `String cost_status_reason_label);
-    (* #10318: self-describing reason for [cost_usd]'s value. *)
-    (key_cost_usd_source, `String cost_usd_source);
-    (key_usage_missing, `Bool usage_missing);
-    (key_timestamp, `String (Masc_domain.now_iso ()));
-    (key_source, `String source_auto_trajectory);
-  ]
-  @ Keeper_usage_trust.json_fields usage_trust
-  @ cache_token_fields
-  @ wall_tok_s_fields @ telemetry_fields) in
+  let now = Time_compat.now () in
+  let usage =
+    if usage_missing
+    then Cost_ledger.Usage_missing
+    else Cost_ledger.Usage_reported { input_tokens; output_tokens; cost_usd }
+  in
+  let row : Cost_ledger.t =
+    { agent = agent_name
+    ; task_id
+    ; model = key_model_value
+    ; usage
+    ; timestamp = Masc_domain.iso8601_of_unix_seconds now
+    ; ts_unix = now
+    ; source =
+        Cost_ledger.Auto_trajectory
+          { trace_id
+          ; keeper_turn_id
+          ; oas_turn_ordinal
+          }
+    }
+  in
+  let entry =
+    Cost_ledger.to_json
+      ~extra_fields:
+        ([ (key_provider, `String runtime_lane_label)
+         ; (key_cost_status, `String cost_status_label)
+         ; (key_cost_status_reason, `String cost_status_reason_label)
+         ; (key_cost_usd_source, `String cost_usd_source)
+         (* Pricing-observation firewall: a usage-missing turn has no
+            token or cost observation in the current row. *)
+         ]
+         @ Keeper_usage_trust.json_fields usage_trust
+         @ cache_token_fields
+         @ wall_tok_s_fields
+         @ telemetry_fields)
+      row
+  in
   {
     payload = entry;
     provider;
@@ -190,6 +204,10 @@ let assemble_cost_event_payload
 let cost_event_payload
     ~(agent_name : string)
     ~(task_id : string option)
+    ~(trace_id : string)
+    ~(keeper_turn_id : int)
+    ~(oas_turn_ordinal : int)
+    ~(model : string)
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
@@ -198,11 +216,14 @@ let cost_event_payload
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
-    ?(model : string option)
     () : Yojson.Safe.t =
   (assemble_cost_event_payload
      ~agent_name
      ~task_id
+     ~trace_id
+     ~keeper_turn_id
+     ~oas_turn_ordinal
+     ~model
      ~input_tokens
      ~output_tokens
      ~cost_usd
@@ -211,17 +232,16 @@ let cost_event_payload
      ~usage_missing
      ?usage_trust
      ?telemetry
-     ?model
      ()).payload
-
-(** Date-split cost ledger root inside [masc_root].  See
-    [Dated_jsonl] for the [costs/YYYY-MM/DD.jsonl] layout. *)
-let costs_dated_dir masc_root = Filename.concat masc_root "costs"
 
 let emit_cost_event
     ~(masc_root : string)
     ~(agent_name : string)
     ~(task_id : string option)
+    ~(trace_id : string)
+    ~(keeper_turn_id : int)
+    ~(oas_turn_ordinal : int)
+    ~(model : string)
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
@@ -230,23 +250,16 @@ let emit_cost_event
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
-    ?(model : string option)
     () : unit =
-  (* Tier-A perf change: previously appended to a single unbounded
-     [masc_root/costs.jsonl] (14k lines, 7.5MB observed in [<base-path>/.masc]),
-     so every emit grew a hot single-writer file and the reader scanned
-     the entire blob.  Migrated to [Dated_jsonl] under
-     [masc_root/costs/YYYY-MM/DD.jsonl] — same per-day mutex registry
-     used by tracing / coverage_gap / audit appenders, so concurrent
-     keepers serialise on a per-day file rather than a single global
-     one. *)
-  let store =
-    Dated_jsonl.create ~base_dir:(costs_dated_dir masc_root) ()
-  in
+  let store = Cost_ledger.store_of_masc_root masc_root in
   let assembled =
     assemble_cost_event_payload
       ~agent_name
       ~task_id
+      ~trace_id
+      ~keeper_turn_id
+      ~oas_turn_ordinal
+      ~model
       ~input_tokens
       ~output_tokens
       ~cost_usd
@@ -255,7 +268,6 @@ let emit_cost_event
       ~usage_missing
       ?usage_trust
       ?telemetry
-      ?model
       ()
   in
   Otel_metric_store.inc_counter

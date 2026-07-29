@@ -27,6 +27,10 @@ type non_regular_file_kind =
 
 type read_error =
   | Invalid_offset of { offset : int }
+  | Invalid_date_range of
+      { since : string
+      ; until : string
+      }
   | Not_a_directory of { path : string }
   | Invalid_layout_entry of
       { parent : string
@@ -139,6 +143,19 @@ val iter_all_entries_result :
     iteration. The same closed layout and regular-file boundary as
     {!read_recent_result} applies; storage failures are returned explicitly.
     Missing stores are empty. *)
+
+val iter_range_entries_result :
+  t ->
+  since:string ->
+  until:string ->
+  (recent_entry -> unit) ->
+  (unit, read_error) result
+(** Strict chronological iteration over day files in the inclusive
+    [[since, until]] range. JSON syntax failures are delivered as
+    {!Malformed_json}; invalid ranges and selected-path storage failures are
+    returned explicitly. Entries that are not valid dated paths are outside
+    the requested range and do not gate the read. Files outside the requested
+    day range are not opened. *)
 
 val iter_range : t -> since:string -> until:string -> (Yojson.Safe.t -> unit) -> unit
 (** Streaming variant of {!read_range}. Invalid dates iterate zero rows. *)

@@ -133,6 +133,9 @@ let make_hooks
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(generation : int)
+    ~(trace_id : string)
+    ~(keeper_turn_id : int)
+    ~(on_after_turn_ordinal : int -> unit)
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
         success:bool -> duration_ms:float -> provider:string ->
@@ -172,6 +175,7 @@ let make_hooks
     after_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.AfterTurn { turn; response } ->
+        on_after_turn_ordinal turn;
         record_progress "sdk_after_turn";
         let meta = !meta_ref in
         let model = resolve_after_turn_model ~keeper_name:meta.name ~response in
@@ -345,13 +349,14 @@ let make_hooks
            Trajectory.set_turn acc turn;
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
+             ~trace_id ~keeper_turn_id ~oas_turn_ordinal:turn ~model:response.model
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~cache_creation_input_tokens:raw_cache_creation_input_tokens
              ~cache_read_input_tokens:raw_cache_read_input_tokens
              ~usage_trust
              ?telemetry:response.telemetry
-             ~model:response.model ();
+             ();
            (* 남김없이: persist THIS turn's reasoning (full, untruncated) every
               turn. The prior single post-run capture (Keeper_agent_run) saved
               only the final turn's thinking; turns 1..N-1 were merely counted

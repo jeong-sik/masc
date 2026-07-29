@@ -27,6 +27,10 @@ val cache_miss_input_tokens
 val assemble_cost_event_payload
   :  agent_name:string
   -> task_id:string option
+  -> trace_id:string
+  -> keeper_turn_id:int
+  -> oas_turn_ordinal:int
+  -> model:string
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
@@ -35,13 +39,16 @@ val assemble_cost_event_payload
   -> ?usage_missing:bool
   -> ?usage_trust:Keeper_usage_trust.t
   -> ?telemetry:Agent_sdk.Types.inference_telemetry
-  -> ?model:string
   -> unit
   -> assembled_cost_event_payload
 
 val cost_event_payload
   :  agent_name:string
   -> task_id:string option
+  -> trace_id:string
+  -> keeper_turn_id:int
+  -> oas_turn_ordinal:int
+  -> model:string
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
@@ -50,16 +57,17 @@ val cost_event_payload
   -> ?usage_missing:bool
   -> ?usage_trust:Keeper_usage_trust.t
   -> ?telemetry:Agent_sdk.Types.inference_telemetry
-  -> ?model:string
   -> unit
   -> Yojson.Safe.t
-
-val costs_dated_dir : string -> string
 
 val emit_cost_event
   :  masc_root:string
   -> agent_name:string
   -> task_id:string option
+  -> trace_id:string
+  -> keeper_turn_id:int
+  -> oas_turn_ordinal:int
+  -> model:string
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
@@ -68,6 +76,5 @@ val emit_cost_event
   -> ?usage_missing:bool
   -> ?usage_trust:Keeper_usage_trust.t
   -> ?telemetry:Agent_sdk.Types.inference_telemetry
-  -> ?model:string
   -> unit
   -> unit

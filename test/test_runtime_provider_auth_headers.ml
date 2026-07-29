@@ -358,6 +358,57 @@ max-concurrent = 2
         | None -> fail "expected provider capabilities")
      | _ -> fail "expected one provider")
 
+let test_runtime_adapter_uses_canonical_anthropic_headers () =
+  let content =
+    {|
+[runtime]
+default = "anthropic.claude-opus-4"
+
+[providers.anthropic]
+display-name = "Anthropic"
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+
+[models.claude-opus-4]
+api-name = "claude-opus-4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[anthropic.claude-opus-4]
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    fail
+      (errors
+       |> List.map (fun (err : Runtime_toml.parse_error) ->
+         err.path ^ ": " ^ err.message)
+       |> String.concat "; ")
+  | Ok config ->
+    let expected =
+      [ "anthropic-version", "2023-06-01"
+      ; "Content-Type", "application/json"
+      ]
+    in
+    check
+      (list (pair string string))
+      "canonical Anthropic defaults"
+      expected
+      (Runtime_provider_binding.default_headers_for_kind
+         Llm_provider.Provider_config.Anthropic);
+    (match config.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config config binding with
+        | Error message -> fail message
+        | Ok provider_config ->
+          check
+            (list (pair string string))
+            "adapter uses canonical non-auth header defaults"
+            expected
+            provider_config.headers)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
 let kimi_runtime_toml =
   {|
 [runtime]
@@ -1742,6 +1793,10 @@ let () =
             "runtime adapter filters TOML auth headers"
             `Quick
             test_runtime_adapter_filters_toml_auth_headers
+        ; test_case
+            "runtime adapter uses canonical Anthropic headers"
+            `Quick
+            test_runtime_adapter_uses_canonical_anthropic_headers
         ; test_case
             "runtime TOML rejects blank env credential key"
             `Quick

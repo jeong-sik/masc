@@ -11,14 +11,13 @@
     Runtime is one pre-selected binding. Errors are surfaced as
     [(_, string) result] so the caller fails fast (no silent fallback).
 
-    The identity helpers ([normalize_provider_id], [default_headers_for_kind],
-    [normalize_openai_compat_request_path]) lived only in the deleted
-    [Runtime_config_provider_binding] and are inlined here so this module has
-    no [Runtime_*] dependency.
+    Provider header defaults are owned by {!Runtime_provider_binding}; this
+    adapter owns only binding materialization and custom-header filtering.
 
     @stability Internal *)
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Provider_binding = Runtime_provider_binding
 
 (* --- Inlined from the deleted [Runtime_config_provider_binding] --- *)
 
@@ -28,23 +27,6 @@ let normalize_provider_id provider_id =
   String.trim provider_id
   |> String.lowercase_ascii
   |> String.map (fun c -> if c = '-' then '_' else c)
-;;
-
-(* Returns the non-credential request headers only. The auth credential
-   (Authorization / x-api-key) is intentionally NOT emitted here: the OAS
-   transport derives it from [~api_key] at request time, and its contract is
-   that the header list "never carries sensitive tokens" (oas api.ml auth_hdrs).
-   Emitting the credential here too produced a DUPLICATE Authorization header
-   that RunPod's cloudflare edge rejected with an opaque 400 before the origin
-   (diagnosed 2026-06-01 via the http_client_4xx_request_header_profile log:
-   2 x Authorization, 74 B each). The token still travels to OAS via [~api_key];
-   only Content-Type (OAS does not set it) and the non-credential Anthropic
-   version header belong here. *)
-let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind) =
-  let base = [ ("Content-Type", "application/json") ] in
-  match kind with
-  | Anthropic -> ("anthropic-version", "2023-06-01") :: base
-  | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base
 ;;
 
 let normalize_header_key key = String.lowercase_ascii (String.trim key)
@@ -362,7 +344,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
          request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
        in
        let api_key = api_key_of_credential ?registry_entry provider.credentials in
-       let default_headers = default_headers_for_kind kind in
+       let default_headers = Provider_binding.default_headers_for_kind kind in
        let custom_headers =
          match provider.headers with
          | None -> []

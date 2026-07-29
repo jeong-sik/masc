@@ -880,6 +880,33 @@ let handle_keeper_msg_stream
            error. *)
         run raw_name
 
+let handle_keeper_msg_stream_admitted
+      ~admission_token
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ?on_admitted
+      ctx
+      args
+  : tool_result
+  =
+  match resolve_keeper_name ctx args with
+  | Error err -> tool_result_error err
+  | Ok name ->
+    let resolved_args = with_keeper_name args name in
+    let event_bus = Event_bus_slots.get_keeper () in
+    Turn.handle_keeper_msg_admitted
+      ~admission_token
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ?on_admitted
+      ctx
+      resolved_args
+    |> complete_keeper_msg_stream_result
+;;
+
 let handle_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event

@@ -18,7 +18,6 @@ val notify_transition : keeper_name:string -> unit
 type persistence_blocked_operation =
   | Claim_next_blocked
   | Complete_blocked
-  | Requeue_blocked
 
 type persistence_blocked_status =
   { operation : persistence_blocked_operation
@@ -46,7 +45,6 @@ type turn_outcome =
       ; detail : string
       ; outcome_ref : string option
       }
-  | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 (** [run ~sw ~clock ~base_path ~handle_turn] runs the queue consumer control
     loop and does not return before cancellation. The runtime supervisor owns
@@ -58,10 +56,11 @@ type turn_outcome =
     release, and persistence reconciliation; it performs no fleet-wide
     timer polling.
 
-    Per Keeper wake: when a turn is in flight
-    ([Keeper_turn_admission.in_flight]), queued messages are left to
-    accumulate; once the slot is free, the exact FIFO head receipt is claimed
-    ([Keeper_chat_queue.claim_next]) into one typed turn. User-message identity,
+    Per Keeper wake, the consumer first acquires the sole serialized chat
+    authority and claims the exact FIFO head receipt
+    ([Keeper_chat_queue.claim_next]) inside that admitted closure. Cancellation
+    while waiting for admission therefore leaves the receipt [Pending].
+    User-message identity,
     multimodal blocks, transcript provenance, and receipt correlation are never
     flattened into a delimiter string. The turn then runs in a Keeper-scoped child fiber, so a slow queued turn for one
     keeper does not block wake processing or delivery for other keepers.  A
@@ -69,14 +68,13 @@ type turn_outcome =
     for messages sent during an existing queued turn.
 
     [handle_turn]'s typed terminal outcome is durably completed as [Delivered]
-    or [Failed]. [Deferred] returns the unchanged receipt to [Pending] and is
-    reserved for a typed admission rejection such as an active shutdown fence,
-    so the same accepted receipt is retried after the lane reopens. A claim
-    cancelled while its external effect is unproven, including process restart,
-    is terminal [Failed { kind = Interrupted }], never automatically dispatched,
-    and cannot block a later receipt. An
-    unexpected handler exception becomes a durable [Internal_error] failure
-    instead of a poison-message retry loop. There is deliberately no second
+    or [Failed]. Admission rejection occurs before [claim_next], so it is not a
+    turn outcome and leaves the receipt [Pending]. A claim cancelled while its
+    external effect is unproven, including process restart, is terminal
+    [Failed { kind = Interrupted }], never automatically dispatched, and cannot
+    block a later receipt. An
+    unexpected handler exception becomes a durable [Interrupted] failure
+    because external effect is unknown. There is deliberately no second
     wall-clock watchdog: the turn runtime owns timeout/cancellation and must
     return the typed outcome.
 
@@ -89,14 +87,15 @@ type turn_outcome =
 
     The call runs until [sw] is released.
 
-    [handle_turn] is responsible for creating an event stream,
-    spawning the appropriate delivery adapter, and calling
-    [process_single_turn].  See RFC-0217 §Phase 3. *)
+    [handle_turn] receives the active admission token and is responsible for
+    creating an event stream, spawning the appropriate delivery adapter, and
+    calling the admitted [process_single_turn] path without acquiring another
+    gate. See RFC-0217 §Phase 3. *)
 val run :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   base_path:string ->
-  handle_turn:(sw:Eio.Switch.t -> keeper_name:string -> delivery_key:Keeper_chat_delivery_identity.delivery_key -> queued_message:Keeper_chat_queue.queued_message -> turn_outcome) ->
+  handle_turn:(sw:Eio.Switch.t -> keeper_name:string -> admission_token:Keeper_turn_admission.token -> delivery_key:Keeper_chat_delivery_identity.delivery_key -> queued_message:Keeper_chat_queue.queued_message -> turn_outcome) ->
   unit
 
 module For_testing : sig

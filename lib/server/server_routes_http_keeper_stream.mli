@@ -175,12 +175,18 @@ type queued_turn_outcome =
       }
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
+type turn_admission =
+  | Acquire_turn_slot
+  | Already_admitted of Keeper_turn_admission.token
+
 val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
 
 val process_single_turn :
   user_row_origin:Keeper_chat_store.user_row_origin ->
   queued_turn:bool ->
+  admission:turn_admission ->
   delivery_key:Keeper_chat_delivery_identity.delivery_key option ->
+  turn_sw:Eio.Switch.t ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   auth_token:string option ->
@@ -196,8 +202,10 @@ val process_single_turn :
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   queued_turn_outcome option
 (** Execute a single keeper turn, publishing events to the provided
-    event stream. The async keeper_msg worker is always forked under the
-    server root switch and owns a separate per-request cancellation switch.
+    event stream. A queued worker and its children are owned by [turn_sw],
+    which is the claim-scoped switch held inside the admitted turn. A direct
+    request is submitted through the async request authority and uses its
+    per-request cancellation switch.
     [closed] is a mutable flag that suppresses worker event pushes when
     set to [true] (used by the SSE adapter when the HTTP stream is
     closed). [client_disconnects] carries the HTTP stream switch and

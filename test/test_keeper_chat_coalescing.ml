@@ -679,33 +679,6 @@ let test_restart_terminalizes_interrupted_claim_without_replay () =
    | `Empty | `Already_claimed _ | `Error _ ->
      check "next FIFO receipt proceeds without replaying the interrupted one" false)
 
-let test_legacy_json_is_not_a_queue_authority () =
-  Printf.printf "Test: removed legacy JSON is never inspected as queue state\n%!";
-  with_base "keeper-chat-legacy-hard-cut" @@ fun base_path ->
-  let legacy_keeper = "legacy" in
-  let healthy_keeper = "healthy" in
-  let legacy =
-    Filename.concat
-      (Filename.dirname
-         (database_path ~base_path ~keeper_name:legacy_keeper))
-      "chat-queue.json"
-  in
-  let original = "{\"schema\":\"keeper_chat_queue.v3\"}" in
-  save_text legacy original;
-  let report = configure base_path in
-  check "legacy JSON creates no configured queue lane"
-    (report.load_errors = [] && report.restored_keeper_count = 0);
-  (match Keeper_chat_queue.enqueue ~keeper_name:legacy_keeper (message "blocked") with
-   | Ok _ -> check "new SQLite queue ignores removed legacy format" true
-   | Error _ -> check "new SQLite queue ignores removed legacy format" false);
-  check "legacy file is retained byte-for-byte"
-    (String.equal (Fs_compat.load_file legacy) original);
-  check "new acceptance creates only the SQLite SSOT"
-    (Sys.file_exists (database_path ~base_path ~keeper_name:legacy_keeper));
-  check "unrelated Keeper lane remains writable"
-    (Result.is_ok
-       (Keeper_chat_queue.enqueue ~keeper_name:healthy_keeper (message "works")))
-
 let test_runtime_files_are_not_queue_lane_directories () =
   Printf.printf
     "Test: Keeper runtime files are not interpreted as queue lane directories\n%!";
@@ -971,7 +944,6 @@ let () =
   test_uncertain_claim_compensates_and_other_transitions_reconcile ();
   test_stale_attempt_cannot_mutate_reclaimed_receipt ();
   test_restart_terminalizes_interrupted_claim_without_replay ();
-  test_legacy_json_is_not_a_queue_authority ();
   test_runtime_root_typed_filename_authority ();
   test_corrupt_dotted_metadata_authority_does_not_disappear ();
   test_runtime_files_are_not_queue_lane_directories ();

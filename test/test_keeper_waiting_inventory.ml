@@ -615,7 +615,7 @@ let test_corrupt_chat_queue_snapshot_is_read_error () =
       (Filename.concat
          (Common.keepers_runtime_dir_of_base ~base_path)
          keeper_name)
-      "chat-queue.sqlite3"
+      "chat-queue-v3.sqlite3"
   in
   save_text path "{not-json";
   Keeper_chat_queue.For_testing.reset ();

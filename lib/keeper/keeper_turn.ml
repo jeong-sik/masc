@@ -980,6 +980,45 @@ let run_keeper_invocation_turn_admitted
 
 ))))))))
 
+let run_admitted_invocation
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ?on_admitted
+      ~surface
+      ~request
+      ctx
+      args
+  =
+  match on_admitted with
+  | Some notify ->
+    (match notify () with
+     | Ok () ->
+       run_keeper_invocation_turn_admitted
+         ?on_text_delta
+         ?on_event
+         ?event_bus
+         ?continuation_channel
+         ~surface
+         ~request
+         ctx
+         args
+     | Error detail ->
+       tool_result_error
+         ("keeper turn admission persistence failed: " ^ detail))
+  | None ->
+    run_keeper_invocation_turn_admitted
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ~surface
+      ~request
+      ctx
+      args
+;;
+
 let handle_keeper_invocation
       ?on_text_delta
       ?on_event
@@ -1004,32 +1043,16 @@ let handle_keeper_invocation
       ~base_path:ctx.config.base_path
       ~keeper_name:name
       (fun () ->
-        match on_admitted with
-        | Some notify ->
-          (match notify () with
-           | Ok () ->
-             run_keeper_invocation_turn_admitted
-               ?on_text_delta
-               ?on_event
-               ?event_bus
-               ?continuation_channel
-               ~surface
-               ~request
-               ctx
-               args
-           | Error detail ->
-             tool_result_error
-               ("keeper turn admission persistence failed: " ^ detail))
-        | None ->
-          run_keeper_invocation_turn_admitted
-            ?on_text_delta
-            ?on_event
-            ?event_bus
-            ?continuation_channel
-            ~surface
-            ~request
-            ctx
-            args)
+        run_admitted_invocation
+          ?on_text_delta
+          ?on_event
+          ?event_bus
+          ?continuation_channel
+          ?on_admitted
+          ~surface
+          ~request
+          ctx
+          args)
     with
     | `Ran result -> result
     | `Rejected
@@ -1089,6 +1112,45 @@ let handle_keeper_msg
       ~request
       ctx
       args
+;;
+
+let handle_keeper_msg_admitted
+      ~admission_token
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ?on_admitted
+      ctx
+      args
+  =
+  let event_bus =
+    match event_bus with
+    | Some _ -> event_bus
+    | None -> Event_bus_slots.get_keeper ()
+  in
+  match direct_invocation_request args with
+  | Error error -> tool_result_error error
+  | Ok request ->
+    let name = Keeper_invocation_contract.target_name request in
+    (match
+       Keeper_turn_admission.validate_chat_owner
+         admission_token
+         ~base_path:ctx.config.base_path
+         ~keeper_name:name
+     with
+     | Error detail -> tool_result_error detail
+     | Ok () ->
+       run_admitted_invocation
+         ?on_text_delta
+         ?on_event
+         ?event_bus
+         ?continuation_channel
+         ?on_admitted
+         ~surface:Direct_message
+         ~request
+         ctx
+         args)
 ;;
 
 let handle_keeper_delegate ?event_bus ctx request =

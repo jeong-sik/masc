@@ -137,6 +137,11 @@ val validate_before_dispatch : token -> (unit, string) result
 (** Revalidate that the admission is still active and invoke its installed
     authority immediately before a provider dispatch. *)
 
+val validate_chat_owner :
+  token -> base_path:string -> keeper_name:string -> (unit, string) result
+(** Prove that [token] is active and owns the exact chat lane requested by the
+    admitted caller. *)
+
 val run_if_free
   :  base_path:string
   -> keeper_name:string
@@ -225,6 +230,15 @@ val chat_waiting_since : base_path:string -> keeper_name:string -> float option
     keeper's slot, or [None] when no chat request is waiting or the keeper slot
     is unknown. *)
 
+val run_serialized_with_token
+  :  base_path:string
+  -> keeper_name:string
+  -> (token -> 'a)
+  -> [ `Ran of 'a | `Rejected of rejection ]
+(** [run_serialized], additionally exposing the active chat authority token to
+    the admitted closure. Durable claim and turn dispatch must both occur
+    inside this closure. *)
+
 val run_serialized
   :  base_path:string
   -> keeper_name:string
@@ -258,7 +272,7 @@ val run_chat_if_free
 
     After acquiring the turn slot it rechecks both parked waiters and active
     durable receipts. This post-lock check is the direct-admission
-    linearization point: a receipt committed or leased after an outer route
+    linearization point: a receipt committed or claimed after an outer route
     peek cannot be overtaken, and queue read errors fail closed as [`Busy]. *)
 
 val in_flight

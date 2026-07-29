@@ -150,9 +150,25 @@ type slot =
 
 type token =
   { slot : slot
+  ; lane : lane
   ; mutable active : bool
   ; mutable before_dispatch_authority : (unit -> (unit, string) result) option
   }
+
+let validate_chat_owner token ~base_path ~keeper_name =
+  let base_path = Keeper_registry_types.canonical_base_path_exn base_path in
+  if not token.active
+  then Error "keeper turn admission token is no longer active"
+  else
+    match token.lane with
+    | Autonomous -> Error "keeper turn admission token is not owned by the chat lane"
+    | Chat ->
+      if
+        String.equal token.slot.base_path base_path
+        && String.equal token.slot.keeper_name keeper_name
+      then Ok ()
+      else Error "keeper turn admission token owner does not match the requested Keeper"
+;;
 
 let install_before_dispatch_authority token authority =
   if not token.active
@@ -236,7 +252,7 @@ let peek_shutdown slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.shut
    cancellation cannot leak the slot; the exception arm releases on every
    raise out of [f], including [Eio.Cancel.Cancelled]. *)
 let run_locked_with_token slot ~lane f =
-  let token = { slot; active = true; before_dispatch_authority = None } in
+  let token = { slot; lane; active = true; before_dispatch_authority = None } in
   let admission =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
       match slot.shutdown_operation_id with
@@ -317,7 +333,7 @@ let admit_autonomous_with_token ~yield_to_chat_backlog ~base_path ~keeper_name f
      gap: the autonomous lane cooperates on the same backlog the consumer
      drains, so the consumer's [in_flight = None] window opens
      deterministically instead of racing the next autonomous cycle. Once a
-     receipt is leased, the actual per-Keeper turn mutex is the authority for
+     receipt is claimed, the actual per-Keeper turn mutex is the authority for
      whether its chat turn is still executing. An inflight receipt with a free
      mutex may be between delivery and finalization or stranded after failure;
      it must not become a second, durable global turn lock.
@@ -385,7 +401,7 @@ let run_admin_if_free ~base_path ~keeper_name f =
   admit_autonomous ~yield_to_chat_backlog:false ~base_path ~keeper_name f
 ;;
 
-let run_serialized ~base_path ~keeper_name f =
+let run_serialized_with_token ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   let waiter_id =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
@@ -417,10 +433,14 @@ let run_serialized ~base_path ~keeper_name f =
                (fun (entry_waiter_id, _since) -> entry_waiter_id <> waiter_id)
                slot.waiting_entries))
       (fun () -> Eio.Mutex.lock slot.turn_mu);
-    (match run_locked slot ~lane:Chat f with
+    (match run_locked_with_token slot ~lane:Chat f with
      | `Ran value -> `Ran value
      | `Shutdown_requested operation_id ->
        `Rejected (shutdown_rejection_snapshot slot operation_id))
+;;
+
+let run_serialized ~base_path ~keeper_name f =
+  run_serialized_with_token ~base_path ~keeper_name (fun _token -> f ())
 ;;
 
 let run_chat_if_free ~base_path ~keeper_name f =
@@ -437,7 +457,7 @@ let run_chat_if_free ~base_path ~keeper_name f =
         raise exn
     in
     (* The outer route's queue peek is only a fast path. Recheck after the
-       turn slot is acquired so a receipt committed or leased between that
+       turn slot is acquired so a receipt committed or claimed between that
        peek and admission cannot be overtaken. The queue entry lock makes a
        commit already in progress finish before this read returns; a commit
        that starts after the read is ordered after this admitted turn. The

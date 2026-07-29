@@ -422,7 +422,7 @@ let database_schema = "keeper_chat_queue.sqlite.v3"
 let database_user_version = 3L
 let database_application_id = 0x4d435151L
 let max_revision = Int64.max_int
-let database_file = "chat-queue.sqlite3"
+let database_file = "chat-queue-v3.sqlite3"
 
 let persistence_configuration = Atomic.make Unconfigured
 let global_load_errors : snapshot_load_error list Atomic.t = Atomic.make []

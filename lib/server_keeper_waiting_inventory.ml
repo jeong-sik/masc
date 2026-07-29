@@ -337,7 +337,6 @@ let chat_queue_persistence_blocked_rows ~base_path keeper_name =
       match status.Keeper_chat_consumer.operation with
       | Keeper_chat_consumer.Claim_next_blocked -> "claim_next"
       | Keeper_chat_consumer.Complete_blocked -> "complete"
-      | Keeper_chat_consumer.Requeue_blocked -> "requeue"
     in
     [ { keeper_name = Some keeper_name
       ; source = Chat_queue_persistence_blocked

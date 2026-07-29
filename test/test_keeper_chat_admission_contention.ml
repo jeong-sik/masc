@@ -124,16 +124,20 @@ let run_contention ~base ~clock ~gap_seconds =
     max_active_turns := max !max_active_turns !active_turns;
     Fun.protect ~finally:(fun () -> decr active_turns) body
   in
-  let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key ~queued_message =
+  let handle_turn ~sw:_ ~keeper_name:dispatched_keeper ~admission_token
+      ~delivery_key ~queued_message =
     match
-      Keeper_turn_admission.run_serialized ~base_path:base ~keeper_name
-        (fun () ->
-           with_active_turn (fun () ->
-             admitted := (delivery_key, queued_message) :: !admitted;
-             Eio.Time.sleep clock (turn_seconds /. 2.)))
+      Keeper_turn_admission.validate_chat_owner
+        admission_token
+        ~base_path:base
+        ~keeper_name:dispatched_keeper
     with
-    | `Ran () -> Keeper_chat_consumer.Delivered { outcome_ref = "contention-turn" }
-    | `Rejected rejection -> Keeper_chat_consumer.Deferred { rejection }
+    | Error detail -> failwith detail
+    | Ok () ->
+      with_active_turn (fun () ->
+        admitted := (delivery_key, queued_message) :: !admitted;
+        Eio.Time.sleep clock (turn_seconds /. 2.));
+      Keeper_chat_consumer.Delivered { outcome_ref = "contention-turn" }
   in
   (try
      Eio.Switch.run (fun sw ->

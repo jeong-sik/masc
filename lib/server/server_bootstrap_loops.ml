@@ -1667,7 +1667,8 @@ let start_keeper_loops_owned
      | Error exn -> raise exn);
     Keeper_chat_consumer.run ~sw ~clock
            ~base_path
-           ~handle_turn:(fun ~sw ~keeper_name ~delivery_key ~queued_message ->
+           ~handle_turn:(fun ~sw ~keeper_name ~admission_token ~delivery_key
+                              ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
              let run_id =
@@ -1824,6 +1825,7 @@ let start_keeper_loops_owned
                  process_single_turn
                    ~user_row_origin:queued_message.user_row_origin
                    ~queued_turn:true
+                   ~admission:(Already_admitted admission_token)
                    ~delivery_key:(Some delivery_key)
                    ~turn_sw:sw ~state ~clock ~auth_token:None
                    ~thread_id ~continuation_channel ~closed
@@ -1843,8 +1845,9 @@ let start_keeper_loops_owned
              in
              let delivery_outcome = Eio.Promise.await delivery in
              match turn_outcome, delivery_outcome with
-             | Some (Deferred { rejection }), _ ->
-                 Keeper_chat_consumer.Deferred { rejection }
+             | Some (Deferred _), _ ->
+                 invalid_arg
+                   "already-admitted queued turn returned an admission deferral"
              | Some (Delivered { outcome_ref }), Ok () ->
                  Keeper_chat_consumer.Delivered
                    { outcome_ref }

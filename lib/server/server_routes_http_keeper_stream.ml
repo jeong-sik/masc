@@ -712,12 +712,17 @@ let keeper_stream_send_event ?on_closed writer mutex closed event =
     Projects the typed keeper result into the local HTTP stream response pair.
     No external timeout — keeper internal limits control duration
     (aligned with MCP path, see mcp_server_eio_call_tool.ml:139-143). *)
+type turn_admission =
+  | Acquire_turn_slot
+  | Already_admitted of Keeper_turn_admission.token
+
 let execute_keeper_stream_tool_streaming
       ~sw
       ~clock
       ?auth_token:_
       ?on_event
       ?on_admitted
+      ~admission
       state
       ~agent_name
       ~arguments
@@ -742,15 +747,30 @@ let execute_keeper_stream_tool_streaming
             Mcp_server.publication_recovery_availability_provider state;
         }
       in
-      match
-        Keeper_tool_surface.dispatch_keeper_msg_stream ~on_text_delta ?on_event
-          ~on_admission_rejected:(fun rejection ->
-            admission_rejection := Some rejection)
-          ?on_admitted
-          keeper_ctx
-          ~continuation_channel
-          ~args:arguments
-      with
+      let dispatched =
+        match admission with
+        | Acquire_turn_slot ->
+          Keeper_tool_surface.dispatch_keeper_msg_stream
+            ~on_text_delta
+            ?on_event
+            ~on_admission_rejected:(fun rejection ->
+              admission_rejection := Some rejection)
+            ?on_admitted
+            keeper_ctx
+            ~continuation_channel
+            ~args:arguments
+        | Already_admitted admission_token ->
+          Some
+            (Keeper_tool_surface_ops.handle_keeper_msg_stream_admitted
+               ~admission_token
+               ~on_text_delta
+               ?on_event
+               ?on_admitted
+               keeper_ctx
+               ~continuation_channel
+               arguments)
+      in
+      match dispatched with
       | Some result ->
           let body = Tool_result.message result in
           body, keeper_stream_disposition_of_result result
@@ -1358,7 +1378,7 @@ let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
    caller presents the typed transcript provenance selected at its persistence
    boundary; this function never infers ownership from a connector label or
    message content. *)
-let process_single_turn ~user_row_origin ~queued_turn
+let process_single_turn ~user_row_origin ~queued_turn ~admission
     ~delivery_key
     ~turn_sw ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
@@ -1956,6 +1976,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                    ~sw:request_sw
                    ~clock
                    ?auth_token
+                   ~admission
                    state ~agent_name ~arguments:args ~on_event
                    ~continuation_channel ~on_text_delta:(fun _ -> ())
                    ?on_admitted
@@ -3042,7 +3063,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              ignore
                (process_single_turn
                   ~user_row_origin:Keeper_chat_store.Needs_append
-                  ~queued_turn:false ~delivery_key:None
+                  ~queued_turn:false
+                  ~admission:Acquire_turn_slot
+                  ~delivery_key:None
                   ~turn_sw:stream_sw ~state ~clock
                   ~auth_token:(auth_token_from_request request)
                   ~thread_id ~continuation_channel ~closed

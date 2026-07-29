@@ -122,8 +122,9 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
              | _ -> acc)
         | Some Keeper_metrics_record.Turn ->
             let parsed_channel =
-              Safe_ops.json_string_opt "channel" json
-              |> Option.bind Keeper_world_observation.channel_of_string
+              Option.bind
+                (Safe_ops.json_string_opt "channel" json)
+                Keeper_world_observation.channel_of_string
             in
             (match
                Safe_ops.json_float_opt "ts_unix" json,

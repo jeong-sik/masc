@@ -4,6 +4,7 @@ module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper
 module Keeper_types = Keeper_types
 module Keeper_types_support = Masc.Keeper_types_support
+module Keeper_metrics_record = Masc.Keeper_metrics_record
 
 let test_counter = ref 0
 

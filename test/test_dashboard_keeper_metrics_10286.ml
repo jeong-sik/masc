@@ -2,6 +2,7 @@ open Alcotest
 
 module Metrics = Dashboard_http_keeper_metrics
 module Detail = Dashboard_http_keeper_detail
+module Keeper_metrics_record = Masc.Keeper_metrics_record
 
 let metric ?(channel = "turn") tools =
   let kind =

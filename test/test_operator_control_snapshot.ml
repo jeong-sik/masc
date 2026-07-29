@@ -198,16 +198,16 @@ let test_usage_does_not_create_context_snapshot () =
     (meta.runtime.usage.last_input_tokens > model_budget);
   Alcotest.(check bool)
     "usage is not context ratio" true
-    Yojson.Safe.Util.(json |> member "context_ratio" |> equal `Null);
+    Yojson.Safe.Util.(json |> member "context_ratio" = `Null);
   Alcotest.(check bool)
     "usage is not context tokens" true
-    Yojson.Safe.Util.(json |> member "context_tokens" |> equal `Null);
+    Yojson.Safe.Util.(json |> member "context_tokens" = `Null);
   Alcotest.(check bool)
     "model budget is not an observed context max" true
-    Yojson.Safe.Util.(json |> member "context_max" |> equal `Null);
+    Yojson.Safe.Util.(json |> member "context_max" = `Null);
   Alcotest.(check bool)
     "fallback source is not fabricated" true
-    Yojson.Safe.Util.(json |> member "context_source" |> equal `Null);
+    Yojson.Safe.Util.(json |> member "context_source" = `Null);
   Alcotest.(check string)
     "missing measurement kind" "not_observed"
     Yojson.Safe.Util.(

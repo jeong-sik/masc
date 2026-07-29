@@ -442,7 +442,7 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | Memory projection | Removed | MASC memory is not projected into OAS; runtime memory storage remains MASC-owned |
 | Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
 | Runtime config | Complete | runtime_id -> MASC runtime config/profile -> OAS Provider_registry -> Provider_config.t |
-| Verifier | Complete | configured structured-judge call; no local tool/effect classifier |
+| Verifier | Complete | configured OAS exact-output call; no local tool/effect classifier |
 | Model resolution | Complete | oas_model_resolve.ml이 Provider_Registry SSOT 사용 |
 | Tool bridge | Complete | MASC tool_schema -> OAS Tool.t 변환 |
 

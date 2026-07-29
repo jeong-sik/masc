@@ -78,7 +78,7 @@ interface RuntimeEnvironmentEditorProps {
   draftDirty?: boolean
   saving?: boolean
   onRoutingChange: (
-    lane: 'default' | 'structured_judge' | 'cross_verifier',
+    lane: 'default' | 'cross_verifier',
     runtimeId: string | null,
   ) => void
   onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
@@ -271,14 +271,6 @@ function keeperDotTone(status: string): string {
   return 'bg-[var(--color-status-err)]'
 }
 
-type RuntimeLaneCapabilityState = 'supported' | 'unsupported' | 'unknown' | 'unconfigured'
-
-interface RuntimeLaneCapabilityBadge {
-  readonly state: RuntimeLaneCapabilityState
-  readonly className: 'rt-ok' | 'rt-warn' | 'rt-unknown'
-  readonly label: string
-}
-
 export function RuntimeEnvironmentEditor({
   sourceText,
   section,
@@ -335,7 +327,7 @@ export function RuntimeEnvironmentEditor({
     if (runtimeId !== '') onRoutingChange('default', runtimeId)
   }
 
-  function updateRoutingLane(lane: 'structured_judge' | 'cross_verifier', runtimeId: string) {
+  function updateRoutingLane(lane: 'cross_verifier', runtimeId: string) {
     onRoutingChange(lane, runtimeId === '' ? null : runtimeId)
   }
 
@@ -497,70 +489,16 @@ export function RuntimeEnvironmentEditor({
   }
 
   // Layout is handled by keeper-v2/runtime.css (.rt-lane/.rt-lane-c/.rt-select)
-  // so the narrow Settings embed can wrap labels, controls, and capability badges.
+  // so the narrow Settings embed can wrap labels and controls.
 
   function laneRow(
-    lane: 'default' | 'structured_judge' | 'cross_verifier',
+    lane: 'default' | 'cross_verifier',
     label: string,
     hint: string,
     value: string,
     onChange: (runtimeId: string) => void,
-    requirement: 'none' | 'json' | 'structured',
   ) {
     const canUnset = lane !== 'default'
-    const binding = environment.bindings.find(b => b.id === value)
-    const model = binding ? environment.models.find(m => m.id === binding.modelId) : null
-    // structured_judge requires provider-native structured output, not just JSON
-    // mode: the server rejects a structured_judge runtime whose model does not
-    // declare supports-structured-output (lib/runtime/runtime.ml:142-151, "must
-    // declare structured output, not just JSON mode"). cross_verifier needs JSON
-    // mode (grounding.md). Both read the already-parsed capability off
-    // the model — no /api/v1/providers projection needed.
-    const capValue =
-      !model || requirement === 'none'
-        ? null
-        : requirement === 'structured'
-          ? (typeof model.structuredOutput === 'boolean' ? model.structuredOutput : null)
-          : (typeof model.jsonSupport === 'boolean' ? model.jsonSupport : null)
-    const capLabel = requirement === 'structured' ? 'structured output 필요' : 'JSON 모드 필요'
-    const capBadge: RuntimeLaneCapabilityBadge | null =
-      requirement === 'none'
-        ? null
-        : value === ''
-          ? {
-              state: 'unconfigured',
-              className: 'rt-unknown',
-              label: `${capLabel} · lane 미설정`,
-            }
-          : !binding
-            ? {
-                state: 'unknown',
-                className: 'rt-unknown',
-                label: `${capLabel} · runtime binding 없음: ${value}`,
-              }
-            : !model
-              ? {
-                  state: 'unknown',
-                  className: 'rt-unknown',
-                  label: `${capLabel} · model 정의 없음: ${binding.modelId}`,
-                }
-              : capValue === true
-                ? {
-                    state: 'supported',
-                    className: 'rt-ok',
-                    label: `${capLabel} · ${model.apiName} 지원`,
-                  }
-                : capValue === false
-                  ? {
-                      state: 'unsupported',
-                      className: 'rt-warn',
-                      label: `${capLabel} · ${model.apiName} 미지원`,
-                    }
-                  : {
-                      state: 'unknown',
-                      className: 'rt-unknown',
-                      label: `${capLabel} · ${model.apiName} capability 미확인`,
-                    }
 
     return html`
       <div class="rt-lane">
@@ -579,14 +517,6 @@ export function RuntimeEnvironmentEditor({
             ${canUnset ? html`<option value="">미설정</option>` : null}
             ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
           </select>
-          ${capBadge ? html`
-            <span
-              class=${capBadge.className}
-              data-testid=${`runtime-lane-${lane}-capability`}
-              data-runtime-lane=${lane}
-              data-runtime-lane-capability=${capBadge.state}
-            >${capBadge.label}</span>
-          ` : null}
         </div>
       </div>
     `
@@ -674,9 +604,8 @@ export function RuntimeEnvironmentEditor({
         </div>
       ` : null}
 
-      <!-- routing — runtime-editor.jsx:135-141. default lane is live;
-           structured_judge / cross_verifier are read from
-           [runtime] and written back. -->
+      <!-- routing — runtime-editor.jsx:135-141. default and cross_verifier are
+           read from [runtime] and written back. -->
       <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
         <div class="rt-note">
           런타임 id = <span class="mono">provider.model</span> (binding key). 레인은 등록된 바인딩 중에서 고릅니다.
@@ -687,23 +616,13 @@ export function RuntimeEnvironmentEditor({
           '[runtime].default — 배정 없는 keeper가 사용',
           environment.defaultRuntimeId || firstId(environment.bindings),
           updateDefault,
-          'none',
-        )}
-        ${laneRow(
-          'structured_judge',
-          'structured judge',
-          '[runtime].structured_judge — provider-native schema 심판 호출',
-          environment.structuredJudgeRuntimeId,
-          runtimeId => updateRoutingLane('structured_judge', runtimeId),
-          'structured',
         )}
         ${laneRow(
           'cross_verifier',
           'cross-verifier',
-          '[runtime].cross_verifier — 반-합리화 평가, JSON 모드 필요',
+          '[runtime].cross_verifier — 반-합리화 평가자',
           crossVerifierLane,
           runtimeId => updateRoutingLane('cross_verifier', runtimeId),
-          'json',
         )}
       </div>
 

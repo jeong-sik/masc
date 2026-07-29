@@ -15,8 +15,7 @@ default = "ollama_cloud.deepseek-v4-flash"
 # post-turn Librarian extraction. Model/provider selection belongs only here.
 memory_os_consolidation = "ollama_cloud_native.minimax-m3-native-structured"
 # Structured domain judgment does not inherit the fleet chat default.
-structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
-# Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
+# Anti-rationalization/cross-verifier work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
 cross_verifier = "deepseek.deepseek-v4-pro"

@@ -152,7 +152,6 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
 
 function makeModelRouting(
   overrides: {
-    structured_judge_runtime_id?: string | null
     cross_verifier_runtime_id?: string | null
     media_failover?: string[]
   } = {},
@@ -162,7 +161,6 @@ function makeModelRouting(
     memory_os_consolidation_effective_runtime_id: 'rt-a',
     memory_os_consolidation_status: 'resolved',
     memory_os_consolidation_error: null,
-    structured_judge_runtime_id: null,
     cross_verifier_runtime_id: null,
     media_failover: [],
     ...overrides,
@@ -1292,7 +1290,6 @@ describe('SettingsSurface', () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          structured_judge_runtime_id: 'rt-c',
           cross_verifier_runtime_id: 'rt-a',
           media_failover: [],
         }),
@@ -1304,7 +1301,6 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Structured judge')
       expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
         .toContain('PATCH /api/v1/runtime/routing')
       expect(container.querySelector('[data-control-id="runtime-routing-lanes"]')?.getAttribute('data-control-kind'))
@@ -1313,8 +1309,6 @@ describe('SettingsSurface', () => {
         .toContain('수동 reroute')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
         .toContain('provider 실패 자동 전환이 아니라')
-      expect((container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement | null)?.value)
-        .toBe('rt-c')
       expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
     })
@@ -1326,8 +1320,7 @@ describe('SettingsSurface', () => {
       .mockResolvedValueOnce(makeRuntimeDefaults())
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          structured_judge_runtime_id: 'rt-b',
-          cross_verifier_runtime_id: null,
+          cross_verifier_runtime_id: 'rt-b',
           media_failover: [],
         }),
       }))
@@ -1335,19 +1328,19 @@ describe('SettingsSurface', () => {
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
     await waitFor(() => {
-      const select = container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement | null
+      const select = container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement | null
       expect(select).not.toBeNull()
       expect(select?.disabled).toBe(false)
       expect(select?.options.length).toBeGreaterThan(1)
     })
 
-    const structuredJudge = container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement
-    await fireEvent.input(structuredJudge, { target: { value: 'rt-b' } })
+    const crossVerifier = container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement
+    await fireEvent.input(crossVerifier, { target: { value: 'rt-b' } })
 
     await waitFor(() => {
-      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('structured_judge', 'rt-b')
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('cross_verifier', 'rt-b')
       expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
-      expect((container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement).value)
+      expect((container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement).value)
         .toBe('rt-b')
     })
     expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent).toContain('저장됨')
@@ -1413,14 +1406,12 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b'],
         }),
       }))
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b', 'rt-c'],
         }),

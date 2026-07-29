@@ -2788,7 +2788,7 @@ describe('runtime.toml raw config API', () => {
   })
 
   it('posts runtime routing patches without client-side TOML text', async () => {
-    const sourceText = '[runtime]\ndefault = "openai.gpt"\nstructured_judge = "openai.gpt"\n'
+    const sourceText = '[runtime]\ndefault = "openai.gpt"\ncross_verifier = "openai.gpt"\n'
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         ok: true,
@@ -2803,14 +2803,14 @@ describe('runtime.toml raw config API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchRuntimeRouting('structured_judge', 'openai.gpt')
+    const result = await patchRuntimeRouting('cross_verifier', 'openai.gpt')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/routing')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
-      lane: 'structured_judge',
+      lane: 'cross_verifier',
       runtime_id: 'openai.gpt',
     })
     expect(result.source_text).toBe(sourceText)
@@ -3150,7 +3150,7 @@ describe('fetchRuntimeProviders', () => {
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_routes: [
-            { route_name: 'runtime.structured_judge', runtime_id: 'mimo.mimo-v2.5-pro' },
+            { route_name: 'runtime.cross_verifier', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_media_failover: ['mimo.mimo-v2.5-pro'],
           dropped_lane_candidates: [
@@ -3255,7 +3255,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
-    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.structured_judge')
+    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.cross_verifier')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 
@@ -3676,7 +3676,6 @@ describe('fetchRuntimeDefaults', () => {
         memory_os_consolidation_effective_runtime_id: 'openai.gpt-4o',
         memory_os_consolidation_status: 'inherited',
         memory_os_consolidation_error: null,
-        structured_judge_runtime_id: null,
         cross_verifier_runtime_id: null,
         media_failover: [],
       },

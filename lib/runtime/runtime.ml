@@ -558,7 +558,7 @@ let validate_request_body_cap ~runtime_id
 
 (* Keeper provider attempts originate at the configured default, an explicit
    keeper assignment, an explicit media-failover runtime, the periodic Memory
-   OS consolidation runtime, structured judge, or cross verifier. A lane is
+   OS consolidation runtime, or cross verifier. A lane is
    reachable only when its id shadows one of the configured routes; a merely
    declared lane is dormant until a routed root names it.
    Expand each lane-capable route with the same lane-over-runtime precedence as
@@ -571,7 +571,6 @@ let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
     ~(memory_os_consolidation_runtime_id : string option)
-    ~(structured_judge_runtime_id : string option)
     ~(cross_verifier_runtime_id : string option)
     ~(media_failover : string list)
     ~(lanes : Runtime_lane.t list)
@@ -601,7 +600,6 @@ let keeper_dispatch_runtime_ids
       @ (memory_os_consolidation_runtime_id
          |> Option.to_list
          |> List.concat_map expand)
-      @ (structured_judge_runtime_id |> Option.to_list |> List.concat_map expand)
       @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand) )
 ;;
 
@@ -612,7 +610,6 @@ let validate_keeper_dispatch_request_caps
     , (default_runtime : t)
     , assignments
     , memory_os_consolidation_runtime_id
-    , structured_judge_runtime_id
     , cross_verifier_runtime_id
     , media_failover
     , lanes )
@@ -622,7 +619,6 @@ let validate_keeper_dispatch_request_caps
       ~default_runtime_id:default_runtime.id
       ~assignments
       ~memory_os_consolidation_runtime_id
-      ~structured_judge_runtime_id
       ~cross_verifier_runtime_id
       ~media_failover
       ~lanes
@@ -780,11 +776,10 @@ let missing_reference_error
 
 let degrade_loaded_for_missing_catalog
     ( (runtimes, configured_default, assignments, memory_os_consolidation_id,
-       structured_judge_id, cross_verifier_id, media_failover, lanes) :
+       cross_verifier_id, media_failover, lanes) :
       t list
       * t
       * (string * string) list
-      * string option
       * string option
       * string option
       * string list
@@ -793,7 +788,6 @@ let degrade_loaded_for_missing_catalog
   : ( ( t list
         * t
         * (string * string) list
-        * string option
         * string option
         * string option
         * string list
@@ -886,16 +880,12 @@ let degrade_loaded_for_missing_catalog
       "[runtime].memory_os_consolidation"
       memory_os_consolidation_id
   in
-  let structured_judge_id, structured_judge_drop =
-    drop_route "[runtime].structured_judge" structured_judge_id
-  in
   let cross_verifier_id, cross_verifier_drop =
     drop_route "[runtime].cross_verifier" cross_verifier_id
   in
   let dropped_routes =
     [ default_drop
     ; memory_os_consolidation_drop
-    ; structured_judge_drop
     ; cross_verifier_drop
     ]
     |> List.filter_map Fun.id
@@ -952,7 +942,6 @@ let degrade_loaded_for_missing_catalog
         , configured_default
         , kept_assignments
         , memory_os_consolidation_id
-        , structured_judge_id
         , cross_verifier_id
         , kept_media_failover
         , kept_lanes )
@@ -966,7 +955,6 @@ let materialize_config
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string option
        * string option
        * string list
@@ -1014,13 +1002,12 @@ let materialize_config
   let* lanes =
     lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
   in
-  (* One list in the order the errors used to surface: the three routes, then the
+  (* One list in the order the errors surface: the two routes, then the
      media_failover entries. *)
   let* () =
     validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
       (route_references
          [ "memory_os_consolidation", cfg.memory_os_consolidation_runtime_id
-         ; "structured_judge", cfg.structured_judge_runtime_id
          ; "cross_verifier", cfg.cross_verifier_runtime_id
          ]
       @ media_failover_references cfg.media_failover)
@@ -1039,7 +1026,6 @@ let materialize_config
     , rt
     , assignments
     , cfg.memory_os_consolidation_runtime_id
-    , cfg.structured_judge_runtime_id
     , cfg.cross_verifier_runtime_id
     , cfg.media_failover
     , lanes )
@@ -1051,7 +1037,6 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string option
        * string option
        * string list
@@ -1094,7 +1079,6 @@ type loaded_state =
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
   ; memory_os_consolidation_runtime_id : string option
-  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; lanes : Runtime_lane.t list
@@ -1107,7 +1091,6 @@ let empty_loaded_state =
   ; runtimes = []
   ; keeper_assignments = []
   ; memory_os_consolidation_runtime_id = None
-  ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   ; lanes = []
@@ -1126,7 +1109,6 @@ let set_loaded
     , rt
     , assignments
     , memory_os_consolidation_id
-    , structured_judge_id
     , cross_verifier_id
     , media_failover
     , lanes ) =
@@ -1135,7 +1117,6 @@ let set_loaded
     ; runtimes
     ; keeper_assignments = assignments
     ; memory_os_consolidation_runtime_id = memory_os_consolidation_id
-    ; structured_judge_runtime_id = structured_judge_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
     ; lanes
@@ -1165,7 +1146,7 @@ let publish_exact_output_registry ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1182,7 +1163,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
@@ -1197,7 +1178,7 @@ let init_default_degraded_report ~config_path =
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok
-            (((active_runtimes, _, _, _, _, _, _, _) as degraded_loaded), degradation)
+            (((active_runtimes, _, _, _, _, _, _) as degraded_loaded), degradation)
           ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
@@ -1263,7 +1244,6 @@ type dashboard_runtime_defaults_snapshot =
   ; runtimes : t list
   ; memory_os_consolidation_runtime_id : string option
   ; memory_os_consolidation : (effective_memory_os_consolidation, string) result
-  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
@@ -1337,21 +1317,10 @@ let dashboard_runtime_defaults_snapshot () =
       state.memory_os_consolidation_runtime_id
   ; memory_os_consolidation =
       resolve_memory_os_consolidation_from_state state
-  ; structured_judge_runtime_id = state.structured_judge_runtime_id
   ; cross_verifier_runtime_id = state.cross_verifier_runtime_id
   ; media_failover = state.media_failover
   ; config_path = state.config_path
   }
-;;
-
-(* [runtime].structured_judge is the explicit runtime.toml SSOT for
-   provider-native schema requests. *)
-let structured_judge_runtime_id () = (runtime_state ()).structured_judge_runtime_id
-
-let runtime_id_for_structured_judge () =
-  match (runtime_state ()).structured_judge_runtime_id with
-  | Some id -> id
-  | None -> default_runtime_id_or_fail ()
 ;;
 
 (* [runtime].cross_verifier routing for the anti-rationalization evaluator.
@@ -2023,10 +1992,6 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
-;;
-
-let set_runtime_structured_judge ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"structured_judge" ~runtime_id ()
 ;;
 
 let set_runtime_cross_verifier ?runtime_config_path ~runtime_id () =

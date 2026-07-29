@@ -24,7 +24,6 @@ type resolved =
   ; runtimes : runtime_entry list
   ; memory_os_consolidation_runtime_id : string option
   ; memory_os_consolidation : memory_os_consolidation_resolution
-  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option

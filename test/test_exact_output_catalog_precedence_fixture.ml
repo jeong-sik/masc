@@ -38,7 +38,7 @@ let with_temp_dir prefix f =
 
 let overlay_target = "overlay-only-target"
 let replacement_target = "replacement-only-target"
-let replacement_structured_judge_target = "replacement_provider.replacement"
+let replacement_runtime_target = "replacement_provider.replacement"
 let replacement_secondary_runtime_target = "replacement_provider.secondary"
 let replacement_secondary_target = "replacement-secondary-target"
 
@@ -110,7 +110,7 @@ let overlay_catalog =
 let replacement_catalog =
   catalog_toml
     ~additional_target_ids:
-      [ replacement_structured_judge_target
+      [ replacement_runtime_target
       ; replacement_secondary_runtime_target
       ; replacement_secondary_target
       ]
@@ -122,18 +122,18 @@ let replacement_catalog =
 
 let runtime_toml
       ?hitl_slots
-      ?structured_judge_candidates
+      ?runtime_lane_candidates
       ?(include_board_attention = true)
       ?(include_hitl_auto_judge = true)
       lane_target
   =
-  let structured_judge_route, structured_judge_lane =
-    match structured_judge_candidates with
+  let runtime_route, runtime_lane =
+    match runtime_lane_candidates with
     | None -> "", ""
     | Some candidates ->
-      ( "structured_judge = \"judges\"\n"
+      ( "cross_verifier = \"verifiers\"\n"
       , Printf.sprintf
-          "\n[runtime.lanes.judges]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
+          "\n[runtime.lanes.verifiers]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
           (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ") )
   in
   let board_attention_lane =
@@ -188,10 +188,10 @@ default = "replacement_provider.replacement"
 [runtime.exact_output_lanes.compaction_exact]
 slots = [%S]
 |}
-       structured_judge_route
+       runtime_route
        lane_target)
     ^ board_attention_lane
-    ^ structured_judge_lane
+    ^ runtime_lane
     ^ hitl_auto_judge_lane
   in
   base

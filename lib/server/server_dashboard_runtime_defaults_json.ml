@@ -37,7 +37,6 @@ type resolved =
   ; runtimes : runtime_entry list
   ; memory_os_consolidation_runtime_id : string option
   ; memory_os_consolidation : memory_os_consolidation_resolution
-  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
@@ -102,9 +101,7 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
           (memory_os_consolidation_fields
              ~configured_runtime_id:r.memory_os_consolidation_runtime_id
              r.memory_os_consolidation
-           @ [ ( "structured_judge_runtime_id"
-               , string_opt_json r.structured_judge_runtime_id )
-             ; "cross_verifier_runtime_id", string_opt_json r.cross_verifier_runtime_id
+           @ [ "cross_verifier_runtime_id", string_opt_json r.cross_verifier_runtime_id
              ; "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
              ]) )
     ]
@@ -143,7 +140,6 @@ let resolved_of_snapshot
   ; memory_os_consolidation_runtime_id =
       snapshot.memory_os_consolidation_runtime_id
   ; memory_os_consolidation
-  ; structured_judge_runtime_id = snapshot.structured_judge_runtime_id
   ; cross_verifier_runtime_id = snapshot.cross_verifier_runtime_id
   ; media_failover = snapshot.media_failover
   ; config_path = snapshot.config_path

@@ -490,19 +490,19 @@ require_lane_slots
     ~lane_id:"hitl_auto_judge"
 ~expected:[ replacement_target ]
 default_registry;
-  let structured_judge_candidates =
-    [ replacement_structured_judge_target
+  let runtime_lane_candidates =
+    [ replacement_runtime_target
     ; replacement_secondary_runtime_target
     ]
   in
   write_file
     runtime_path
     (runtime_toml
-       ~structured_judge_candidates
+       ~runtime_lane_candidates
        replacement_target);
   create_server_state ();
 require_lane_slots
-  "structured-judge runtime lane does not rewrite the explicit exact lane"
+  "runtime lane does not rewrite the explicit exact lane"
     ~lane_id:"hitl_auto_judge"
 ~expected:[ replacement_target ]
     (current_registry "runtime-lane HITL bootstrap");
@@ -511,7 +511,7 @@ require_lane_slots
     runtime_path
     (runtime_toml
        ~hitl_slots:explicit_slots
-       ~structured_judge_candidates
+       ~runtime_lane_candidates
        replacement_target);
   create_server_state ();
   require_lane_slots

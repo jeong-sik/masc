@@ -161,7 +161,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     label: 'Model routing lanes',
     kind: 'live-write',
     source: 'GET /api/v1/dashboard/runtime-defaults',
-    action: 'PATCH /api/v1/runtime/routing for default/structured_judge/cross_verifier',
+    action: 'PATCH /api/v1/runtime/routing for default/cross_verifier',
   },
   {
     id: 'runtime-media-failover',
@@ -1355,7 +1355,6 @@ export function SettingsSurface() {
   const runtimeConfigPath = runtimeResolved?.config_path ?? null
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
-  const structuredJudgeRuntime = runtimeDefaults?.model_routing.structured_judge_runtime_id ?? null
   const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
@@ -1603,16 +1602,6 @@ export function SettingsSurface() {
                       onChange=${(runtimeId: string | null) => {
                         if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
                       }}
-                    />
-                    <${RuntimeRoutingSelect}
-                      label="Structured judge"
-                      hint="[runtime].structured_judge"
-                      value=${structuredJudgeRuntime}
-                      fallbackLabel="default runtime"
-                      options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingDisabled}
-                      testId="runtime-routing-structured-judge"
-                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('structured_judge', runtimeId)}
                     />
                     <${RuntimeRoutingSelect}
                       label="Cross verifier"

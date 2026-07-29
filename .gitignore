@@ -35,9 +35,6 @@ Thumbs.db
 # Tool metrics JSONL persistence (runtime data)
 data/tool-metrics/
 
-# Local heartbeat model-pool override
-config/llm_runtime.json
-
 # Database files
 *.db
 *.sqlite3

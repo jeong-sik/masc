@@ -23,7 +23,6 @@ let test_build_resolved_serializes_defaults_and_routing () =
         ]
     ; memory_os_consolidation_runtime_id = Some "anthropic.sonnet"
     ; memory_os_consolidation = J.Consolidation_resolved "anthropic.sonnet"
-    ; structured_judge_runtime_id = Some "openai.gpt-4o"
     ; cross_verifier_runtime_id = None
     ; media_failover = [ "openai.gpt-4o" ]
     ; config_path = Some "/cfg/runtime.toml"
@@ -65,9 +64,8 @@ let test_build_resolved_serializes_defaults_and_routing () =
   Alcotest.(check bool)
     "Memory OS consolidation error is null"
     true
-    (member "memory_os_consolidation_error" routing = `Null);
-  Alcotest.(check string) "structured judge routing" "openai.gpt-4o"
-    (member "structured_judge_runtime_id" routing |> Yojson.Safe.Util.to_string)
+    (member "memory_os_consolidation_error" routing = `Null)
+
 let test_build_uninitialized_emits_null_not_fabricated_default () =
   (* No fabrication: an unresolved runtime config surfaces null/empty, never a
      fake default model or runtime. *)
@@ -79,7 +77,6 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
     ; memory_os_consolidation_runtime_id = None
     ; memory_os_consolidation =
         J.Consolidation_error "runtime state is not initialized"
-    ; structured_judge_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; media_failover = []
     ; config_path = None
@@ -107,9 +104,7 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
     (member "memory_os_consolidation_error" routing
      |> Yojson.Safe.Util.to_string);
   Alcotest.(check bool) "cross_verifier null" true
-    (member "cross_verifier_runtime_id" routing = `Null);
-  Alcotest.(check bool) "structured_judge null" true
-    (member "structured_judge_runtime_id" routing = `Null)
+    (member "cross_verifier_runtime_id" routing = `Null)
 
 let test_build_inherited_consolidation_route () =
   let resolved : J.resolved =
@@ -119,7 +114,6 @@ let test_build_inherited_consolidation_route () =
     ; runtimes = []
     ; memory_os_consolidation_runtime_id = None
     ; memory_os_consolidation = J.Consolidation_inherited "local.chat"
-    ; structured_judge_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; media_failover = []
     ; config_path = Some "/cfg/runtime.toml"
@@ -157,7 +151,6 @@ let test_build_missing_configured_consolidation_route () =
     ; runtimes = []
     ; memory_os_consolidation_runtime_id = Some "local.missing"
     ; memory_os_consolidation = J.Consolidation_error error
-    ; structured_judge_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; media_failover = []
     ; config_path = Some "/cfg/runtime.toml"

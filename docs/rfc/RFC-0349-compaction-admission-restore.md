@@ -80,7 +80,6 @@ If a future provider does emit typed overflow, `Provider_overflow` remains the p
 - **Do not resurrect** `Ratio_threshold` / `Message_count` / `Token_count`. #24906 removed them on purpose; this RFC keeps admission caller-owned and explicit, and thresholds a measured value against a provider-declared limit rather than a proxy (§1.5).
 - **Do not string-match provider prose** on 400 bodies to synthesize `ContextOverflow`. The SDK forbids it with a drift-guard test, and it is a CLAUDE.md signature-2 workaround.
 - Do not change how compaction *plans* or *summarizes*; only how it is *requested*.
-- Not in scope: the live-config `structured_judge` drift (a separate operational fix, see §6).
 
 ## 3. Design
 
@@ -150,13 +149,7 @@ A green unit test alone is not sufficient for §3.3: the starvation only manifes
 - Every exhaustive `match` on `Compaction_trigger.t` — the compiler enumerates these; there are two construction sites today (`keeper_unified_turn.ml`, `keeper_manual_compaction.ml`).
 - Durable: adds one `kind` value to the persisted trigger detail (additive).
 
-## 6. Interaction with the live `structured_judge` drift
-
-Independently of this RFC, the live config had lost `[runtime].structured_judge`, so the compaction summarizer ultimately resolved to `glm-coding.glm-5-turbo`, which declares `supports-structured-output = false`. At the time this happened through an intermediate migration route that has since been retired; current code falls back directly to `[runtime].default`. Compaction would therefore have been **rejected with `Summarizer_unavailable` even when requested** — the outcome `keeper_compact_policy.ml` already documents ("could never compact, so their history only grew", #25051).
-
-That drift is an operational fix (restore `structured_judge = "ollama_cloud_native.minimax-m3-native-structured"`, the only lane declaring `supports-structured-output = true`), not a code change, and it must be in place for this RFC's acceptance to be observable. It is recorded here so the two are not confused: **restoring the summarizer lane does not restore admission, and restoring admission does not restore the summarizer lane.** Both are required.
-
-## 7. Workaround-rejection self-check (CLAUDE.md)
+## 6. Workaround-rejection self-check (CLAUDE.md)
 
 - This RFC does not add a counter in place of a fix (signature #1): the counter in §3.3 is an escalation signal *alongside* the bounded-wait fix, not instead of it.
 - It does not add a string/prose classifier (signature #2): §2 explicitly forbids synthesizing `ContextOverflow` from 400 bodies.

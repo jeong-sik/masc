@@ -82,12 +82,11 @@ if not (plan_schema_supported provider_cfg) then ( warn "...does not support the
 compaction plan schema"; None ) else Some { runtime_id; provider_cfg }
 ```
 
-`compaction_runtime_ids` offers `[Structured_judge lane; keeper's own Keeper_chat
-lane]`, but the keeper's chat runtime (e.g. `glm-*`, `deepseek-*`) fails the
-schema gate, so in practice the only eligible candidate is the structured-judge
-model (`minimax-*-native-structured`). One model, with a weekly quota, is the
-sole guarantor of a liveness-critical operation. This is the
-single-dependency-stop → total-stop shape.
+The compaction exact-output path resolves the configured `compaction_exact`
+target slots and admits only schema-capable providers. A narrow slot set can
+therefore make one quota-constrained model the sole guarantor of a
+liveness-critical operation. This is the single-dependency-stop → total-stop
+shape.
 
 The coupling is the deeper issue: deciding **which** units to keep is a purely
 structural operation (keep recent, drop old, never split a `Closed_tool_cycle`),
@@ -286,7 +285,7 @@ outcome field just makes the floor's behavior legible.
 
 With §2.1 in place, a schema-capable model is no longer required for liveness.
 The remaining work on candidate breadth (RFC-0042 / #25051: let operators
-configure additional schema-capable structured-judge lanes, and reconsider the
+configure additional schema-capable `compaction_exact` target slots, and reconsider the
 hard native-`json_schema` gate vs the unused `apply_schema_or_prompt_tier`
 prompt-tier path) improves *summary quality and frequency of the good path*, but
 no longer gates whether the keeper can survive an overflow. This RFC does not
@@ -345,7 +344,7 @@ decided on quality grounds, not liveness pressure.
    protection, protected-suffix preservation, no-op without a middle span, and
    tool-cycle/System preservation. The `Applied_floor` typed outcome was folded
    into the sentinel `selected_runtime_id`; a live acceptance test (a keeper with
-   the structured-judge lane forced unavailable no longer loops on
+   the `compaction_exact` lane forced unavailable no longer loops on
    `compaction_started`) is the remaining validation once deployed.
 3. **PR-3 (candidate breadth, coordinate with #25051)**: only if #25051 has not
    already covered it — operator-configurable schema-capable lanes. Quality, not

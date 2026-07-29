@@ -8,6 +8,7 @@ open Alcotest
 module Compact_policy = Masc.Keeper_compact_policy
 module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
+module Keeper_compaction_outcome = Masc.Keeper_compaction_outcome
 
 let exact_flow_base_path = "/tmp/masc-compaction-clockless"
 

@@ -12,6 +12,7 @@ module WO = Masc.Keeper_world_observation
 module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
+module Keeper_compaction_outcome = Masc.Keeper_compaction_outcome
 
 let ensure_registered_keeper
       ~base_path

@@ -9,19 +9,18 @@ val librarian_episode_output_schema : Yojson.Safe.t
 val consolidation_plan_output_schema : Yojson.Safe.t
 (** JSON object the per-keeper consolidation provider must return. *)
 
-(** Wire field names and action tokens for {!compaction_plan_output_schema};
-    shared with the compaction-plan codec as the single source of truth. *)
-val compaction_plan_field_decisions : string
+(** Wire field names for {!compaction_plan_output_schema}; shared with the
+    compaction-plan codec as the single source of truth. *)
 val compaction_plan_field_unit_index : string
-val compaction_plan_field_action : string
+(** Identity field used only in the typed planning input. *)
+
 val compaction_plan_field_summary : string
-val compaction_plan_action_keep : string
-val compaction_plan_action_drop : string
-val compaction_plan_action_summarize : string
+val compaction_plan_field_keep_from_unit_index : string
 
 val compaction_plan_output_schema : Yojson.Safe.t
-(** JSON object the LLM compaction summarizer must return: exactly one typed
-    decision for every eligible source unit. *)
+(** Constant-size boundary plan: the contiguous supplied prefix below
+    [keep_from_unit_index] becomes one [summary]. The exact suffix and all
+    source units outside the supplied window remain unchanged. *)
 
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)

@@ -4,23 +4,18 @@
 
 module Schema = Keeper_structured_output_schema
 module Exact_output = Agent_sdk.Exact_output
-module Int_set = Set.Make (Int)
-module Int_map = Map.Make (Int)
 module String_set = Set.Make (String)
 
-type assistant_text_source =
-  { normalized_message : Agent_sdk.Types.message
+type message_text_source =
+  { role : Agent_sdk.Types.role
   ; text_blocks : string list
-  ; reasoning_discarded : bool
   }
 
 type closed_tool_cycle_source =
-  { source_messages : Agent_sdk.Types.message list
-  ; semantic_json : Yojson.Safe.t
-  }
+  { semantic_json : Yojson.Safe.t }
 
 type eligible_payload =
-  | Assistant_text of assistant_text_source
+  | Message_text of message_text_source
   | Closed_tool_cycle of closed_tool_cycle_source
 
 type eligible_source =
@@ -28,19 +23,16 @@ type eligible_source =
   ; payload : eligible_payload
   }
 
-type action =
-  | Keep
-  | Drop
-  | Summarize of string
-
-type decision =
-  { source : eligible_source
-  ; action : action
+type planning_window =
+  { first_source : eligible_source
+  ; remaining_sources : eligible_source list
+  ; source_units : Keeper_compaction_unit.closed_unit list
   }
 
 type compaction_plan =
-  { decisions : decision list
-  ; source_units : Keeper_compaction_unit.closed_unit list
+  { window : planning_window
+  ; summary : string
+  ; keep_from_unit_index : int
   }
 
 type exact_execution_evidence =
@@ -284,28 +276,20 @@ let semantic_messages_json messages =
   in
   loop [] messages
 
-let assistant_text_source message blocks =
-  let rec loop text_blocks_rev reasoning_discarded = function
+let message_text_source role blocks =
+  let rec loop text_blocks_rev = function
     | [] ->
       let text_blocks = List.rev text_blocks_rev in
       if List.exists (fun text -> String.trim text <> "") text_blocks
-      then
-        Some
-          { normalized_message =
-              { message with
-                content = List.map (fun text -> Agent_sdk.Types.Text text) text_blocks
-              }
-          ; text_blocks
-          ; reasoning_discarded
-          }
+      then Some { role; text_blocks }
       else None
     | Agent_sdk.Types.Text text :: rest ->
-      loop (text :: text_blocks_rev) reasoning_discarded rest
+      loop (text :: text_blocks_rev) rest
     | ( Agent_sdk.Types.Thinking _
       | Agent_sdk.Types.ReasoningDetails _
       | Agent_sdk.Types.RedactedThinking _ )
       :: rest ->
-      loop text_blocks_rev true rest
+      loop text_blocks_rev rest
     | ( Agent_sdk.Types.ToolUse _
       | Agent_sdk.Types.ToolResult _
       | Agent_sdk.Types.Image _
@@ -314,7 +298,7 @@ let assistant_text_source message blocks =
       :: _ ->
       None
   in
-  loop [] false blocks
+  loop [] blocks
 
 let cycle_has_tool_protocol messages =
   let has_tool_use =
@@ -335,16 +319,17 @@ let cycle_has_tool_protocol messages =
   in
   has_tool_use && has_tool_result
 
-let eligible_source source_index = function
+let eligible_source ~first_user_seen source_index = function
   | Keeper_compaction_unit.Ordinary_message
-      ({ role = Agent_sdk.Types.Assistant
+      ({ role = (Agent_sdk.Types.User | Agent_sdk.Types.Assistant)
        ; content
        ; name = None
        ; tool_call_id = None
        ; metadata = []
-       } as message) ->
-    (match assistant_text_source message content with
-     | Some source -> Some { source_index; payload = Assistant_text source }
+       } as message)
+    when message.role <> Agent_sdk.Types.User || first_user_seen ->
+    (match message_text_source message.role content with
+     | Some source -> Some { source_index; payload = Message_text source }
      | None -> None)
   | Keeper_compaction_unit.Closed_tool_cycle messages
     when cycle_has_tool_protocol messages ->
@@ -352,7 +337,7 @@ let eligible_source source_index = function
      | Ok (), Ok semantic_json ->
        Some
          { source_index
-         ; payload = Closed_tool_cycle { source_messages = messages; semantic_json }
+         ; payload = Closed_tool_cycle { semantic_json }
          }
      | Error _, _ | _, Error _ -> None)
   | Keeper_compaction_unit.Ordinary_message _
@@ -360,22 +345,72 @@ let eligible_source source_index = function
     None
 
 let eligible_sources units =
-  units
-  |> List.mapi eligible_source
-  |> List.filter_map Fun.id
+  (* The first User message is the exact goal anchor. Later plain User messages
+     are part of the typed conversation state: protecting every one would split
+     a real Keeper history into one tiny window per turn and defeat boundary
+     compaction. *)
+  let rec loop source_index first_user_seen sources_rev = function
+    | [] -> List.rev sources_rev
+    | unit_ :: rest ->
+      let source = eligible_source ~first_user_seen source_index unit_ in
+      let first_user_seen =
+        first_user_seen
+        ||
+        match unit_ with
+        | Keeper_compaction_unit.Ordinary_message
+            { role = Agent_sdk.Types.User; _ } -> true
+        | Keeper_compaction_unit.Ordinary_message _
+        | Keeper_compaction_unit.Closed_tool_cycle _ ->
+          false
+      in
+      let sources_rev =
+        match source with
+        | None -> sources_rev
+        | Some source -> source :: sources_rev
+      in
+      loop (source_index + 1) first_user_seen sources_rev rest
+  in
+  loop 0 false [] units
 
 let has_eligible_units units = eligible_sources units <> []
+
+let oldest_contiguous_run = function
+  | [] -> []
+  | first :: rest ->
+    let rec loop previous_index sources_rev = function
+      | source :: remaining when source.source_index = previous_index + 1 ->
+        loop source.source_index (source :: sources_rev) remaining
+      | _ -> List.rev sources_rev
+    in
+    loop first.source_index [ first ] rest
+
+let planning_window_for_units source_units =
+  match eligible_sources source_units |> oldest_contiguous_run with
+  | [] -> Error "source contains no eligible contiguous compaction window"
+  | first_source :: remaining_sources ->
+    Ok { first_source; remaining_sources; source_units }
+
+let planning_window_sources window =
+  window.first_source :: window.remaining_sources
+
+let planning_window_last_index window =
+  List.fold_left
+    (fun _ source -> source.source_index)
+    window.first_source.source_index
+    window.remaining_sources
 
 let eligible_units_json sources =
   `List
     (List.map
        (fun source ->
          match source.payload with
-         | Assistant_text { text_blocks; _ } ->
+         | Message_text { role; text_blocks } ->
            `Assoc
              [ Schema.compaction_plan_field_unit_index, `Int source.source_index
-             ; "kind", `String "assistant_text"
-             ; "role", `String "assistant"
+             ; "kind", `String "message_text"
+             ; ( "role"
+               , `String
+                   (Agent_sdk.Types.role_to_string role) )
              ; "text_blocks", `List (List.map (fun text -> `String text) text_blocks)
              ]
          | Closed_tool_cycle { semantic_json; _ } ->
@@ -386,34 +421,37 @@ let eligible_units_json sources =
              ])
        sources)
 
-let messages_for_plan ~units =
-  let sources = eligible_sources units in
+let messages_for_plan ~window =
+  let sources = planning_window_sources window in
+  let first_index = window.first_source.source_index in
+  let last_index = planning_window_last_index window in
   let system =
-    "You compact only the explicitly supplied atomic eligible units. \
-     Return exactly one decision for every supplied unit_index and do not \
-     invent indices. Each closed_tool_cycle contains a complete ordered tool \
-     request/result protocol and must be decided as one indivisible unit. keep \
-     preserves the source unit. summarize replaces that whole unit in place \
-     with one faithful Assistant memory. drop is valid only when the whole \
-     unit contributes no state, decision, evidence, constraint, unresolved \
-     work, or outcome. For keep and drop, summary must be null. For summarize, \
-     summary must be a non-empty string. Do not split tool cycles, infer \
-     recency policy, merge units, relocate facts, invent facts, or include \
-     markdown fences. Respond with a single JSON object and no other text."
+    "You compact only the supplied contiguous window of atomic eligible units. \
+     Choose one keep_from_unit_index. Every supplied unit below that boundary \
+     is replaced in place by one faithful Assistant memory; the boundary and \
+     later supplied units remain exact. Units outside this window remain exact \
+     by construction. Each closed_tool_cycle is one indivisible unit. The \
+     summary must preserve goals, constraints, decisions, evidence, tool \
+     outcomes, unresolved work, corrections, and state needed by future turns. \
+     Choose the latest boundary you can summarize faithfully; keep exact only \
+     the minimal recent suffix whose details must remain verbatim. Do not \
+     invent facts, reference unseen units, split tool cycles, emit markdown \
+     fences, or enumerate per-unit decisions. Respond with one JSON object and \
+     no other text."
   in
   let user =
     Printf.sprintf
-      "eligible_units=%s\nReturn {\"%s\":[{\"%s\":integer,\"%s\":\
-       \"%s|%s|%s\",\"%s\":string|null}]} with exactly one decision per \
-       supplied unit_index."
+      "window_first_unit_index=%d\nwindow_last_unit_index=%d\nwindow_units=%s\n\
+       Return {\"%s\":string,\"%s\":integer}. The summary must be non-empty. \
+       keep_from_unit_index must be in [%d,%d], so at least the oldest unit is \
+       summarized."
+      first_index
+      last_index
       (eligible_units_json sources |> Yojson.Safe.to_string)
-      Schema.compaction_plan_field_decisions
-      Schema.compaction_plan_field_unit_index
-      Schema.compaction_plan_field_action
-      Schema.compaction_plan_action_keep
-      Schema.compaction_plan_action_drop
-      Schema.compaction_plan_action_summarize
       Schema.compaction_plan_field_summary
+      Schema.compaction_plan_field_keep_from_unit_index
+      (first_index + 1)
+      (last_index + 1)
   in
   [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
 
@@ -451,176 +489,73 @@ let string_value ~field = function
   | `String value -> Ok value
   | _ -> Error (field ^ " must be a string")
 
-let summary_value ~field = function
-  | `Null -> Ok None
-  | `String value -> Ok (Some value)
-  | _ -> Error (field ^ " must be a string or null")
-
-let parse_action ~action_token ~summary =
-  if String.equal action_token Schema.compaction_plan_action_keep
-  then
-    (match summary with
-     | None -> Ok Keep
-     | Some _ -> Error "keep decision summary must be null")
-  else if String.equal action_token Schema.compaction_plan_action_drop
-  then
-    (match summary with
-     | None -> Ok Drop
-     | Some _ -> Error "drop decision summary must be null")
-  else if String.equal action_token Schema.compaction_plan_action_summarize
-  then
-    (match summary with
-     | Some summary when String.trim summary <> "" -> Ok (Summarize summary)
-     | Some _ -> Error "summarize decision summary must be non-empty"
-     | None -> Error "summarize decision summary must be a string")
-  else Error ("unknown compaction action " ^ action_token)
-
-let decision_of_json sources_by_index json =
-  let expected_fields =
-    [ Schema.compaction_plan_field_unit_index
-    ; Schema.compaction_plan_field_action
-    ; Schema.compaction_plan_field_summary
+let plan_of_json ~window json =
+  let expected =
+    [ Schema.compaction_plan_field_summary
+    ; Schema.compaction_plan_field_keep_from_unit_index
     ]
   in
-  let* fields = object_fields ~context:"decision" ~expected:expected_fields json in
-  let* index_json = required_field Schema.compaction_plan_field_unit_index fields in
-  let* source_index =
-    int_value ~field:Schema.compaction_plan_field_unit_index index_json
-  in
-  let* source =
-    match Int_map.find_opt source_index sources_by_index with
-    | Some source -> Ok source
-    | None -> Error (Printf.sprintf "unit_index %d is not eligible" source_index)
-  in
-  let* action_json = required_field Schema.compaction_plan_field_action fields in
-  let* action_token =
-    string_value ~field:Schema.compaction_plan_field_action action_json
-  in
-  let* summary_json = required_field Schema.compaction_plan_field_summary fields in
-  let* summary = summary_value ~field:Schema.compaction_plan_field_summary summary_json in
-  let* action = parse_action ~action_token ~summary in
-  Ok { source; action }
-
-let decisions_value json =
-  let expected = [ Schema.compaction_plan_field_decisions ] in
   let* fields = object_fields ~context:"plan" ~expected json in
-  let* decisions = required_field Schema.compaction_plan_field_decisions fields in
-  match decisions with
-  | `List decisions -> Ok decisions
-  | _ -> Error (Schema.compaction_plan_field_decisions ^ " must be an array")
-
-let parse_decisions ~sources decisions_json =
-  let sources_by_index =
-    List.fold_left
-      (fun sources source -> Int_map.add source.source_index source sources)
-      Int_map.empty
-      sources
-  in
-  let rec parse seen decisions = function
-    | [] -> Ok (List.rev decisions, seen)
-    | json :: rest ->
-      let* decision = decision_of_json sources_by_index json in
-      let source_index = decision.source.source_index in
-      if Int_set.mem source_index seen
-      then Error (Printf.sprintf "unit_index %d appears more than once" source_index)
-      else parse (Int_set.add source_index seen) (decision :: decisions) rest
-  in
-  parse Int_set.empty [] decisions_json
-
-let source_normalizes = function
-  | { payload = Assistant_text { reasoning_discarded = true; _ }; _ } -> true
-  | { payload = Assistant_text { reasoning_discarded = false; _ }; _ }
-  | { payload = Closed_tool_cycle _; _ } ->
-    false
-
-let plan_of_json ~units json =
-  let sources = eligible_sources units in
-  if sources = []
-  then Error "source contains no eligible compaction units"
-  else
-  let expected_indices =
-    List.fold_left
-      (fun indices source -> Int_set.add source.source_index indices)
-      Int_set.empty
-      sources
-  in
-  let* decisions_json = decisions_value json in
-  let* decisions, seen = parse_decisions ~sources decisions_json in
-  let missing = Int_set.diff expected_indices seen |> Int_set.elements in
-  let* () =
-    if missing = []
-    then Ok ()
-    else
-      Error
-        (Printf.sprintf
-           "eligible unit indices not covered: %s"
-           (String.concat "," (List.map string_of_int missing)))
+  let* summary_json = required_field Schema.compaction_plan_field_summary fields in
+  let* summary =
+    string_value ~field:Schema.compaction_plan_field_summary summary_json
   in
   let* () =
-    if List.exists
-         (fun decision ->
-           match decision.action with
-           | Drop | Summarize _ -> true
-           | Keep -> source_normalizes decision.source)
-         decisions
-    then Ok ()
-    else Error "plan keeps every eligible unit without changing any"
+    if String.trim summary = ""
+    then Error "summary must be non-empty"
+    else Ok ()
   in
-  let* () =
-    if List.exists
-         (fun decision ->
-           match decision.action with
-           | Keep | Summarize _ -> true
-           | Drop -> false)
-         decisions
-    then Ok ()
-    else Error "plan would remove every eligible unit"
+  let* keep_from_json =
+    required_field Schema.compaction_plan_field_keep_from_unit_index fields
   in
-  let decisions =
-    List.sort
-      (fun left right -> Int.compare left.source.source_index right.source.source_index)
-      decisions
+  let* keep_from_unit_index =
+    int_value
+      ~field:Schema.compaction_plan_field_keep_from_unit_index
+      keep_from_json
   in
-  Ok { decisions; source_units = units }
+  let first_index = window.first_source.source_index in
+  let last_index = planning_window_last_index window in
+  if keep_from_unit_index <= first_index || keep_from_unit_index > last_index + 1
+  then
+    Error
+      (Printf.sprintf
+         "keep_from_unit_index %d is outside [%d,%d]"
+         keep_from_unit_index
+         (first_index + 1)
+         (last_index + 1))
+  else Ok { window; summary; keep_from_unit_index }
+
+let compaction_summary_metadata_key = "masc.compaction.bounded_summary"
+
+let summary_message summary =
+  (* Current-format derived state, not a compatibility marker. Eligibility
+     already protects metadata-bearing messages, so this single field prevents
+     the next pass from repeatedly compacting the same summary and advances the
+     oldest-window scan. Its blast radius ends at [eligible_source]. *)
+  { (message Agent_sdk.Types.Assistant summary) with
+    metadata = [ compaction_summary_metadata_key, `Bool true ]
+  }
+
+let summarized_indices plan =
+  planning_window_sources plan.window
+  |> List.filter_map (fun source ->
+    if source.source_index < plan.keep_from_unit_index
+    then Some source.source_index
+    else None)
+
+let dropped_indices _ = []
+let has_changes plan = summarized_indices plan <> []
 
 let apply (plan : compaction_plan) =
-  let decisions =
-    List.fold_left
-      (fun decisions decision ->
-        Int_map.add decision.source.source_index decision decisions)
-      Int_map.empty
-      plan.decisions
-  in
-  plan.source_units
-  |> List.mapi (fun idx unit_ -> idx, unit_)
-  |> List.concat_map (fun (idx, unit_) ->
-    match Int_map.find_opt idx decisions with
-    | None -> messages_of_unit unit_
-    | Some { source = { payload = Assistant_text source; _ }; action = Keep } ->
-      [ source.normalized_message ]
-    | Some { source = { payload = Closed_tool_cycle source; _ }; action = Keep } ->
-      source.source_messages
-    | Some { action = Drop; _ } -> []
-    | Some { action = Summarize summary; _ } ->
-      [ message Agent_sdk.Types.Assistant summary ])
-
-let indices_for_action predicate plan =
-  plan.decisions
-  |> List.filter_map (fun decision ->
-    if predicate decision.action then Some decision.source.source_index else None)
-
-let summarized_indices = indices_for_action (function Summarize _ -> true | Keep | Drop -> false)
-let dropped_indices = indices_for_action (function Drop -> true | Keep | Summarize _ -> false)
-
-let has_changes plan =
-  summarized_indices plan <> []
-  || dropped_indices plan <> []
-  || List.exists
-       (fun decision ->
-         match decision.action with
-         | Keep -> source_normalizes decision.source
-         | Drop | Summarize _ -> false)
-       plan.decisions
+  let first_index = plan.window.first_source.source_index in
+  plan.window.source_units
+  |> List.mapi (fun index unit_ -> index, unit_)
+  |> List.concat_map (fun (index, unit_) ->
+    if index = first_index
+    then [ summary_message plan.summary ]
+    else if index > first_index && index < plan.keep_from_unit_index
+    then []
+    else messages_of_unit unit_)
 
 let exact_output_requirement =
   Exact_output.make_output_requirement
@@ -629,7 +564,7 @@ let exact_output_requirement =
 ;;
 
 type prepared_lane =
-  { units : Keeper_compaction_unit.closed_unit list
+  { window : planning_window
   ; registry_generation : int64
   ; ordered_slot_ids : string list
   ; flow_attempt : Exact_output.flow_attempt
@@ -1042,12 +977,12 @@ let prepare_lane
       ~lane_id
       ~units
   =
-  if not (has_eligible_units units)
-  then Error Invalid_plan
-  else
-    let registry_generation = Runtime_exact_output_registry.generation registry in
-    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-    | Error
+  let* window =
+    planning_window_for_units units |> Result.map_error (fun _ -> Invalid_plan)
+  in
+  let registry_generation = Runtime_exact_output_registry.generation registry in
+  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+  | Error
         (Runtime_exact_output_registry.Exact_lane_unconfigured
            { lane_id = missing_lane_id }) ->
       Log.Keeper.warn
@@ -1056,7 +991,7 @@ let prepare_lane
         registry_generation
         missing_lane_id;
       Error Exact_lane_unconfigured
-    | Error
+  | Error
         (Runtime_exact_output_registry.No_admitted_lane_slots
            { lane_id = empty_lane_id }) ->
       Log.Keeper.warn
@@ -1065,47 +1000,47 @@ let prepare_lane
         registry_generation
         empty_lane_id;
       Error Exact_target_selection_failed
-    | Ok { selected_slots } ->
-      let messages = messages_for_plan ~units in
-      let* candidates = make_flow_candidates ~keeper_name selected_slots in
-      (match candidates with
-       | [] -> Error Exact_target_selection_failed
-       | first :: rest ->
-         (match
-            Exact_output.snapshot_flow
-              ~first
-              ~rest
-              ~messages
-              exact_output_requirement
-          with
-          | Error _ ->
-            Log.Keeper.warn
-              ~keeper_name
-              "compaction exact flow admission rejected generation=%Ld lane_id=%s candidate_count=%d"
-              registry_generation
-              lane_id
-              (List.length candidates);
-            Error Exact_admission_failed
-          | Ok flow_snapshot ->
-            (match Exact_output.start_flow flow_snapshot with
-             | Error _ ->
-               Log.Keeper.error
-                 ~keeper_name
-                 "compaction exact flow identity allocation failed generation=%Ld lane_id=%s"
-                 registry_generation
-                 lane_id;
-               Error Exact_attempt_start_failed
-             | Ok flow_attempt ->
-               Ok
-                 { units
-                 ; registry_generation
-                 ; ordered_slot_ids =
-                     List.map
-                       (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-                          slot.slot_id)
-                       selected_slots
-                 ; flow_attempt
-                 })))
+  | Ok { selected_slots } ->
+    let messages = messages_for_plan ~window in
+    let* candidates = make_flow_candidates ~keeper_name selected_slots in
+    (match candidates with
+     | [] -> Error Exact_target_selection_failed
+     | first :: rest ->
+       (match
+          Exact_output.snapshot_flow
+            ~first
+            ~rest
+            ~messages
+            exact_output_requirement
+        with
+        | Error _ ->
+          Log.Keeper.warn
+            ~keeper_name
+            "compaction exact flow admission rejected generation=%Ld lane_id=%s candidate_count=%d"
+            registry_generation
+            lane_id
+            (List.length candidates);
+          Error Exact_admission_failed
+        | Ok flow_snapshot ->
+          (match Exact_output.start_flow flow_snapshot with
+           | Error _ ->
+             Log.Keeper.error
+               ~keeper_name
+               "compaction exact flow identity allocation failed generation=%Ld lane_id=%s"
+               registry_generation
+               lane_id;
+             Error Exact_attempt_start_failed
+           | Ok flow_attempt ->
+             Ok
+               { window
+               ; registry_generation
+               ; ordered_slot_ids =
+                   List.map
+                     (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+                        slot.slot_id)
+                     selected_slots
+               ; flow_attempt
+               })))
 ;;
 
 type exact_flow_callback_failure =
@@ -1264,7 +1199,7 @@ let execute_prepared_lane_current
   in
   let validate flow_success =
     let success = Exact_output.flow_success_output flow_success in
-    match plan_of_json ~units:prepared_lane.units success.output with
+    match plan_of_json ~window:prepared_lane.window success.output with
     | Ok plan -> Exact_output.Accept plan
     | Error detail ->
       let observation =
@@ -1575,6 +1510,12 @@ let exact_execution_evidence_receipt_request_body_sha256
 
 module For_testing = struct
   let messages_for_plan = messages_for_plan
+  let planning_window_for_units = planning_window_for_units
+  let planning_window_source_indices window =
+    List.map
+      (fun source -> source.source_index)
+      (planning_window_sources window)
+  ;;
 
   let flow_slot_ids prepared_lane = prepared_lane.ordered_slot_ids
   let registry_generation prepared_lane = prepared_lane.registry_generation

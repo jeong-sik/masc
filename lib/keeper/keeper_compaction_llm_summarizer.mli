@@ -3,6 +3,7 @@
     dispatch receipts remain OAS-owned. *)
 
 type compaction_plan
+type planning_window
 
 type exact_execution_evidence
 
@@ -152,7 +153,7 @@ val make
 val has_eligible_units : Keeper_compaction_unit.closed_unit list -> bool
 
 val plan_of_json
-  :  units:Keeper_compaction_unit.closed_unit list
+  :  window:planning_window
   -> Yojson.Safe.t
   -> (compaction_plan, string) result
 
@@ -219,8 +220,13 @@ val has_changes : compaction_plan -> bool
 
 module For_testing : sig
   val messages_for_plan
-    :  units:Keeper_compaction_unit.closed_unit list
-    -> Agent_sdk.Types.message list
+    :  window:planning_window -> Agent_sdk.Types.message list
+
+  val planning_window_for_units
+    :  Keeper_compaction_unit.closed_unit list
+    -> (planning_window, string) result
+
+  val planning_window_source_indices : planning_window -> int list
 
   val flow_slot_ids : prepared_lane -> string list
   val registry_generation : prepared_lane -> int64

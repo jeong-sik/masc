@@ -116,31 +116,19 @@ let units =
   ]
 ;;
 
-let decision ?summary unit_index action : Yojson.Safe.t =
+let plan_json ~summary ~keep_from_unit_index : Yojson.Safe.t =
   `Assoc
-    [ S.compaction_plan_field_unit_index, `Int unit_index
-    ; S.compaction_plan_field_action, `String action
-    ; ( S.compaction_plan_field_summary
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) summary )
+    [ S.compaction_plan_field_summary, `String summary
+    ; S.compaction_plan_field_keep_from_unit_index, `Int keep_from_unit_index
     ]
-;;
-
-let plan_json decisions : Yojson.Safe.t =
-  `Assoc [ S.compaction_plan_field_decisions, `List decisions ]
 ;;
 
 let valid_plan_json =
-  plan_json
-    [ decision ~summary:"first summary" 0 S.compaction_plan_action_summarize
-    ; decision 1 S.compaction_plan_action_keep
-    ]
+  plan_json ~summary:"first summary" ~keep_from_unit_index:1
 ;;
 
 let domain_invalid_plan_json =
-  plan_json
-    [ decision 0 S.compaction_plan_action_keep
-    ; decision 1 S.compaction_plan_action_keep
-    ]
+  plan_json ~summary:"invalid boundary" ~keep_from_unit_index:0
 ;;
 
 let valid_response = F.openai_response valid_plan_json

@@ -21,7 +21,6 @@ let iso8601_of_float ts = Masc_domain.iso8601_of_unix_seconds ts
 
 let key_wall_time = "session:wall_time"
 let key_session_start = "session:session_start"
-let key_elapsed_seconds = "session:elapsed_seconds"
 let key_tool_call_count = "session:tool_call_count"
 let key_last_tool_name = "session:last_tool_name"
 let key_last_tool_outcome = "session:last_tool_outcome"
@@ -47,7 +46,6 @@ let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
     if is_ok then ignore (Atomic.fetch_and_add success_count 1)
     else ignore (Atomic.fetch_and_add error_count 1);
     let outcome_str = if is_ok then "ok" else "error" in
-    let elapsed = now -. config.start_time in
     Some Agent_sdk.Hooks.{
       context_updates = [
         (key_wall_time, `String (Masc_domain.iso8601_of_unix_seconds now));
@@ -55,7 +53,6 @@ let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
            fresh elapsed at turn start instead of freezing it at the
            last tool call. Constant across a session (= injector start). *)
         (key_session_start, `Float config.start_time);
-        (key_elapsed_seconds, `Float elapsed);
         (key_tool_call_count, `Int (Atomic.get call_count));
         (key_last_tool_name, `String tool_name);
         (key_last_tool_outcome, `String outcome_str);
@@ -84,15 +81,6 @@ let get_int ctx key =
   match Agent_sdk.Context.get ctx key with
   | Some (`Int i) -> Some i
   | _ -> None
-
-let legacy_elapsed_seconds ctx =
-  match get_float ctx key_elapsed_seconds with
-  | Some elapsed -> Some elapsed
-  | None ->
-    Log.Keeper.warn
-      "Temporal summary skipped: missing %s and legacy %s"
-      key_session_start key_elapsed_seconds;
-    None
 
 let tool_summary_fields ctx =
   match
@@ -124,9 +112,8 @@ let render_temporal_summary ?now (ctx : Agent_sdk.Context.t) : string option =
       match get_float ctx key_session_start with
       | Some session_start -> Some (now -. session_start)
       | None ->
-        (* Backward compat: contexts written before [key_session_start]
-           existed fall back to the stored (possibly stale) elapsed. *)
-        legacy_elapsed_seconds ctx
+        Log.Keeper.warn "Temporal summary skipped: missing %s" key_session_start;
+        None
     in
     match elapsed, tool_summary_fields ctx with
     | Some elapsed, Some (tool_count, last_tool, outcome) ->

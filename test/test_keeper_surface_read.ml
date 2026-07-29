@@ -10,7 +10,12 @@ open Alcotest
 module Store = Masc.Keeper_chat_store
 module SR = Masc.Keeper_surface_read
 
-let msg ?ts ?source ?speaker ~role content : Store.chat_message =
+let msg ?ts ?lane ?speaker ~role content : Store.chat_message =
+  let surface =
+    Option.map
+      (fun label -> Masc.Surface_ref.Gate { label; address = [] })
+      lane
+  in
   {
     id = "test-msg";
     role;
@@ -19,8 +24,7 @@ let msg ?ts ?source ?speaker ~role content : Store.chat_message =
     attachments = None;
     tool_call_id = None;
     tool_call_name = None;
-    source;
-    surface = None;
+    surface;
     conversation_id = None;
     external_message_id = None;
     workspace_id = None;
@@ -49,21 +53,21 @@ let to_string_j json = Yojson.Safe.Util.to_string json
 
 let discord_fixture : Store.chat_message list =
   [
-    msg ~ts:1.0 ~source:"dashboard" ~role:Store.Role.User "hello from owner";
-    msg ~ts:2.0 ~source:"discord"
+    msg ~ts:1.0 ~lane:"dashboard" ~role:Store.Role.User "hello from owner";
+    msg ~ts:2.0 ~lane:"discord"
       ~speaker:(external_speaker ~name:"minsu_old" "98791450001")
       ~role:Store.Role.User "first discord message";
-    msg ~ts:2.5 ~source:"discord" ~role:Store.Role.Assistant "keeper reply";
-    msg ~ts:3.0 ~source:"discord"
+    msg ~ts:2.5 ~lane:"discord" ~role:Store.Role.Assistant "keeper reply";
+    msg ~ts:3.0 ~lane:"discord"
       ~speaker:(external_speaker ~name:"Minsu" "98791450001")
       ~role:Store.Role.User "second discord message";
-    msg ~ts:4.0 ~source:"discord"
+    msg ~ts:4.0 ~lane:"discord"
       ~speaker:(external_speaker "55500001111")
       ~role:Store.Role.User "drive-by, no display name";
-    msg ~role:Store.Role.User "legacy row without source";
+    msg ~role:Store.Role.User "unscoped row";
   ]
 
-let test_lane_filter_excludes_other_sources_and_legacy () =
+let test_lane_filter_excludes_other_surfaces_and_unscoped () =
   let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes:[] discord_fixture) in
   check int "lane rows" 4 (to_int (member "lane_row_count" json));
   check int "returned" 4 (to_int (member "returned" json));
@@ -178,7 +182,7 @@ let test_oldest_ts_absent_when_page_unstamped () =
   let json =
     parse
       (SR.respond ~surface:"discord" ~limit:10 ~has_more:false ~notes:[]
-         [ msg ~source:"discord" ~role:Store.Role.User "no ts row" ])
+         [ msg ~lane:"discord" ~role:Store.Role.User "no ts row" ])
   in
   check bool "oldest_ts omitted" true (member "oldest_ts" json = `Null)
 
@@ -196,8 +200,8 @@ let () =
         ] );
       ( "lane filter",
         [
-          test_case "excludes other sources and legacy rows" `Quick
-            test_lane_filter_excludes_other_sources_and_legacy;
+          test_case "excludes other surfaces and unscoped rows" `Quick
+            test_lane_filter_excludes_other_surfaces_and_unscoped;
           test_case "limit truncates messages, not roster" `Quick
             test_limit_truncates_messages_not_roster;
           test_case "blank surface is an error" `Quick

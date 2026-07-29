@@ -28,7 +28,8 @@ let lines_for ~base_dir ~keeper_name : Tool_agent_timeline.chat_line list =
                  Tool_agent_timeline.cl_role = Keeper_chat_store.Role.to_label role;
                  cl_content = m.content;
                  cl_ts = ts;
-                 cl_connector = m.source;
+                 cl_connector =
+                   Option.map Surface_ref.lane_label m.surface;
                  cl_conversation_id = m.conversation_id;
                })
 

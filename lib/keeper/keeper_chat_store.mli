@@ -4,13 +4,13 @@
     Each keeper owns an append-only file at
     [<base_dir>/.masc/keeper_chat/<sanitized-name>.jsonl]. Lines are
     JSON objects of the form
-    {v {"role":"user","content":"hello","ts":1774000000.0} v}
+    {v {"id":"msg-...","role":"user","content":"hello","ts":1774000000.0} v}
 
     Tool-call lines persisted between a turn's user and assistant lines
     additionally carry [tool_call_id] / [tool_call_name]; every line of
-    a turn may carry the originating connector in [source]
-    (e.g. "dashboard", "discord", "slack", "agent"). Connector rows may
-    also carry [conversation_id] / [external_message_id], opaque route
+    a turn may carry the originating connector as a typed [surface].
+    Connector rows may also carry [conversation_id] /
+    [external_message_id], opaque route
     coordinates used by dashboards to group platform channels/threads
     without giving this store platform-specific knowledge.
 
@@ -142,19 +142,14 @@ type chat_message = {
       (** R3: producer-assigned stable message id, minted once at append by
           the sole writer ({!encode_line}) and read back verbatim, so the
           dashboard keys off a server identity rather than synthesising an
-          index-derived id at render.  Rows written before R3 carry no
-          persisted id and are given a deterministic one at the read
-          boundary, so the field is total. *)
+          index-derived id at render. Rows without a nonblank persisted id
+          are rejected at the read boundary. *)
   role : Role.t;
   content : string;
   ts : float option;
   attachments : attachment list option;
   tool_call_id : string option;
   tool_call_name : string option;
-  source : string option;
-      (** Legacy lane label.  Since RFC-0232 P5 it is derived from
-          [surface] at write ({!Surface_ref.lane_label}); pre-P5 rows
-          carry their original label verbatim. *)
   surface : Surface_ref.t option;
       (** The typed surface (RFC-0232 §3.6).  [None] on rows written
           before P5 and on rows whose persisted surface payload fails
@@ -219,7 +214,7 @@ type chat_message = {
 (** {1 I/O} *)
 
 (** [append_turn ~base_dir ~keeper_name ~user_content ~user_attachments
-    ?tool_calls ?source ?conversation_id ?external_message_id ?speaker
+    ?tool_calls ?surface ?conversation_id ?external_message_id ?speaker
     ~assistant_content ()] appends one
     completed turn as consecutive lines — user, one line per tool call,
     assistant — sharing a single timestamp, in one write. [speaker]
@@ -351,7 +346,7 @@ val append_tool_calls_once :
   unit ->
   (append_once_result, string) result
 
-(** [append_assistant_message ~base_dir ~keeper_name ~content ?source
+(** [append_assistant_message ~base_dir ~keeper_name ~content ?surface
     ?conversation_id ()]
     appends one keeper-initiated assistant line with no paired user
     turn (RFC-0223 P4 [keeper_surface_post]). Same failure policy as
@@ -441,10 +436,12 @@ val load_page :
 (** {1 Serialisation} *)
 
 (** JSON array of messages. Entries without a timestamp omit the
-    [ts] field; [tool_call_id] / [tool_call_name] / [source] /
+    [ts] field; [tool_call_id] / [tool_call_name] /
     [conversation_id] / [external_message_id] / [workspace_id] /
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
-    when present. [delivery_key] appears only on rows persisted by the
+    when present. [source] is a response-only label derived from the typed
+    [surface], never a second persisted identity. [delivery_key] appears only
+    on rows persisted by the
     idempotent append-once paths, verbatim as the typed delivery
     identity object. When [base_dir] is supplied, the history endpoint
     marks audio clips as [expired] when the underlying MP3 file is

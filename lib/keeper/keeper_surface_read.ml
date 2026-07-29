@@ -47,7 +47,7 @@ let message_json (m : Store.chat_message) : Yojson.Safe.t =
        ("content", `String m.content) ]
     @ kind_fields
     @ opt_float_field "ts" m.ts
-    @ opt_string_field "source" m.source
+    @ opt_string_field "source" (Option.map Surface_ref.lane_label m.surface)
     @ opt_string_field "conversation_id" m.conversation_id
     @ opt_string_field "external_message_id" m.external_message_id
     @ opt_string_field "tool_call_name" m.tool_call_name
@@ -187,8 +187,11 @@ let respond ~surface ~limit ~has_more ~notes
     let lane =
       List.filter
         (fun (m : Store.chat_message) ->
-          match m.source with
-          | Some s -> String.equal (String.trim s) surface
+          match m.surface with
+          | Some typed_surface ->
+              String.equal
+                (Surface_ref.lane_label typed_surface |> String.trim)
+                surface
           | None -> false)
         messages
     in

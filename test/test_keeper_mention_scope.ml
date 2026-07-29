@@ -43,7 +43,7 @@ let test_empty_targets () =
        (Lane.mention_ids_of_content "@alice"))
 ;;
 
-let msg ~role ?(id = "test-msg") ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
+let msg ~role ?(id = "test-msg") ?(ts = Some 1.0) ?(surface = None) ?(speaker = None)
     ?(audio = None)
     ?(kind = Store.Row_kind.Utterance) ?(turn_ref = None) content
   : Store.chat_message
@@ -55,8 +55,7 @@ let msg ~role ?(id = "test-msg") ?(ts = Some 1.0) ?(source = None) ?(speaker = N
   ; attachments = None
   ; tool_call_id = None
   ; tool_call_name = None
-  ; source
-  ; surface = None
+  ; surface
   ; conversation_id = None
   ; external_message_id = None
   ; workspace_id = None
@@ -206,7 +205,6 @@ let tool_line : Store.chat_message =
   ; attachments = None
   ; tool_call_id = Some "tc-0"
   ; tool_call_name = Some "Read"
-  ; source = None
   ; surface = None
   ; conversation_id = None
   ; external_message_id = None

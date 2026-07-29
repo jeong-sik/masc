@@ -3,14 +3,11 @@
    Pinned here:
    1. Codec totality — every variant round-trips through JSON; unknown
       kinds are an Error, never a default.
-   2. lane_label goldens — the single derivation that replaced
-      writer-invented [source] strings, byte-identical to the legacy
-      labels ("dashboard" / "discord" / "agent" / gate channel).
-   3. Lane roundtrip — a typed write persists both the structured
-      [surface] field and the derived [source] label; legacy label-only
-      rows read back as [surface = None] with their label intact;
-      an invalid persisted surface payload is reported and dropped
-      without losing the row. *)
+   2. lane_label goldens — the single response-label derivation.
+   3. Lane roundtrip — a typed write persists only the structured
+      [surface] identity; a retired label-only field never restores it;
+      an invalid persisted surface payload is reported without losing
+      the row. *)
 
 open Alcotest
 
@@ -98,25 +95,23 @@ let test_typed_write_round_trips () =
       match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ m ] ->
           check (option surface) "typed surface read back" (Some ref_)
-            m.surface;
-          check (option string) "label derived from the typed surface"
-            (Some "discord") m.source
+            m.surface
       | other -> failf "expected 1 line, got %d" (List.length other))
 
-let test_legacy_label_row_reads_back () =
-  with_base "surface-ref-legacy" (fun base ->
+let test_source_only_row_does_not_restore_surface () =
+  with_base "surface-ref-source-hard-cut" (fun base ->
       Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"seed" ();
       let oc = open_out_gen [ Open_append ] 0o644 (lane_path base) in
       output_string oc
-        "{\"role\":\"user\",\"content\":\"old row\",\"ts\":2.0,\"source\":\"discord\"}\n";
+        "{\"id\":\"source-only\",\"role\":\"user\",\"content\":\"old row\",\"ts\":2.0,\"source\":\"discord\"}\n";
       close_out oc;
       match Store.load ~base_dir:base ~keeper_name:"alice" with
-      | [ _seed; legacy ] ->
-          check (option surface) "no typed surface on pre-P5 row" None
-            legacy.surface;
-          check (option string) "legacy label kept verbatim"
-            (Some "discord") legacy.source
+      | [ _seed; source_only ] ->
+          check (option surface)
+            "retired source label does not restore a typed surface"
+            None
+            source_only.surface
       | other -> failf "expected 2 lines, got %d" (List.length other))
 
 let test_invalid_surface_payload_keeps_row () =
@@ -125,7 +120,7 @@ let test_invalid_surface_payload_keeps_row () =
         ~content:"seed" ();
       let oc = open_out_gen [ Open_append ] 0o644 (lane_path base) in
       output_string oc
-        "{\"role\":\"user\",\"content\":\"bad surface\",\"ts\":2.0,\"surface\":{\"kind\":\"telepathy\"}}\n";
+        "{\"id\":\"bad-surface\",\"role\":\"user\",\"content\":\"bad surface\",\"ts\":2.0,\"surface\":{\"kind\":\"telepathy\"}}\n";
       close_out oc;
       match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ _seed; bad ] ->
@@ -148,7 +143,8 @@ let () =
         [
           test_case "typed write round trips" `Quick
             test_typed_write_round_trips;
-          test_case "legacy label row" `Quick test_legacy_label_row_reads_back;
+          test_case "source-only row does not restore surface" `Quick
+            test_source_only_row_does_not_restore_surface;
           test_case "invalid payload keeps row" `Quick
             test_invalid_surface_payload_keeps_row;
         ] );

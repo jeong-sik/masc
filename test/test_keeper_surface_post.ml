@@ -156,7 +156,7 @@ let with_temp_base_dir f =
         (try Sys.readdir keeper_chat with Sys_error _ -> [||]))
     (fun () -> f dir)
 
-let test_assistant_message_persists_with_source () =
+let test_assistant_message_persists_with_typed_surface () =
   with_temp_base_dir (fun base_dir ->
       Store.append_assistant_message ~base_dir ~keeper_name:"post-keeper"
         ~content:"keeper-initiated hello"
@@ -174,7 +174,10 @@ let test_assistant_message_persists_with_source () =
       let m = List.hd messages in
       check string "role" "assistant" (Store.Role.to_label m.Store.role);
       check string "content" "keeper-initiated hello" m.Store.content;
-      check (option string) "source" (Some "discord") m.Store.source;
+      check (option string)
+        "surface-derived label"
+        (Some "discord")
+        (Option.map Masc.Surface_ref.lane_label m.Store.surface);
       check bool "no speaker on keeper output" true (m.Store.speaker = None))
 
 let () =
@@ -212,7 +215,7 @@ let () =
         ] );
       ( "assistant append",
         [
-          test_case "persists assistant line with source" `Quick
-            test_assistant_message_persists_with_source;
+          test_case "persists assistant line with typed surface" `Quick
+            test_assistant_message_persists_with_typed_surface;
         ] );
     ]

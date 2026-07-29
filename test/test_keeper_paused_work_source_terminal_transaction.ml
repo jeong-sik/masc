@@ -226,6 +226,25 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       "source ACK writes its canonical event identity"
       canonical_event_id
       (required_string_field "source ACK receipt" "event_id" receipt_fields);
+    let v9_state =
+      state_fields
+      |> remove_field "last_settlement"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v9")
+      |> fun fields -> `Assoc fields
+    in
+    let recovered_v9 = State.of_yojson v9_state |> require_ok "recover v9 source ACK outbox" in
+    (match State.last_settlement recovered_v9 with
+     | None -> ()
+     | Some _ -> Alcotest.fail "v9 snapshot invented a projected receipt");
+    let recovered_v9_fields, _, _, _ =
+      State.to_yojson recovered_v9 |> source_ack_wire_fields
+    in
+    Alcotest.(check (option string))
+      "recovery rewrites v9 as v10"
+      (Some State.schema)
+      (match List.assoc_opt "schema" recovered_v9_fields with
+       | Some (`String schema) -> Some schema
+       | Some _ | None -> None);
     let legacy_transition_id =
       match List.assoc_opt "lease_id" receipt_fields with
       | Some (`String lease_id) -> lease_id ^ ":settle_from_source_terminal"

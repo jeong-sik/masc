@@ -38,8 +38,8 @@ type save_result =
   | Created
   | Existing of t
 
+
 let ( let* ) = Result.bind
-let schema = "masc.keeper.paused-work-disposition.v5"
 
 let equal left right =
   String.equal left.keeper_name right.keeper_name
@@ -161,7 +161,7 @@ let source_terminal_operation_to_yojson operation =
 ;;
 
 let to_yojson receipt =
-  let common operation extra =
+  let common operation schema extra =
     `Assoc
       ([ "schema", `String schema
        ; "operation", `String operation
@@ -175,14 +175,17 @@ let to_yojson receipt =
        @ extra)
   in
   match receipt.operation with
-  | Resume_owner -> common "resume_owner" []
+  | Resume_owner ->
+    common "resume_owner" "masc.keeper.paused-work-disposition.v1" []
   | Transfer_owner transfer ->
     common
       "transfer_owner"
+      "masc.keeper.paused-work-disposition.v4"
       [ "transfer", transfer_owner_to_yojson transfer ]
   | Ack_source_terminal operation ->
     common
       "ack_source_terminal"
+      "masc.keeper.paused-work-disposition.v4"
       [ "source_terminal", source_terminal_operation_to_yojson operation ]
 ;;
 
@@ -250,6 +253,43 @@ let transfer_owner_of_yojson = function
   | _ -> Error "paused-work transfer must be an object"
 ;;
 
+let legacy_transfer_owner_of_yojson = function
+  | `Assoc fields ->
+    (match sorted fields with
+     | [ ("continuation_binding", continuation_binding_json)
+       ; ("from_keeper", `String from_keeper)
+       ; ("settled_at", settled_at_json)
+       ; ("source", source_json)
+       ; ("source_revision", source_revision_json)
+       ; ("target_generation", `Int target_generation)
+       ; ("target_trace_id", `String target_trace_id)
+       ; ("to_keeper", `String to_keeper)
+       ] ->
+       let* target_trace_id = Keeper_id.Trace_id.of_string target_trace_id in
+       let* source = Keeper_event_queue.stimulus_of_yojson source_json in
+       let* source_revision = source_revision_of_yojson source_revision_json in
+       let* settled_at = requested_at_of_yojson settled_at_json in
+       let* () =
+         if Float.is_finite settled_at
+         then Ok ()
+         else Error "legacy paused-work transfer settlement time must be finite"
+       in
+       let* continuation_binding =
+         continuation_binding_of_yojson continuation_binding_json
+       in
+       Ok
+         { from_keeper
+         ; to_keeper
+         ; target_trace_id
+         ; target_generation
+         ; source
+         ; source_revision
+         ; continuation_binding
+         }
+     | _ -> Error "legacy paused-work transfer fields are not exact")
+  | _ -> Error "legacy paused-work transfer must be an object"
+;;
+
 let source_terminal_operation_of_yojson = function
   | `Assoc fields ->
     (match sorted fields with
@@ -270,6 +310,35 @@ let source_terminal_operation_of_yojson = function
        Ok { source; source_revision; source_receipt }
      | _ -> Error "paused-work source-terminal fields are not exact")
   | _ -> Error "paused-work source-terminal operation must be an object"
+;;
+
+let legacy_source_terminal_operation_of_yojson = function
+  | `Assoc fields ->
+    (match sorted fields with
+     | [ ("settled_at", settled_at_json)
+       ; ("source", source_json)
+       ; ("source_receipt_kind", `String source_receipt_kind)
+       ; ("source_revision", source_revision_json)
+       ] ->
+       let* source = Keeper_event_queue.stimulus_of_yojson source_json in
+       let* source_revision = source_revision_of_yojson source_revision_json in
+       let* settled_at = requested_at_of_yojson settled_at_json in
+       let* () =
+         if Float.is_finite settled_at
+         then Ok ()
+         else Error "legacy paused-work source-terminal settlement time must be finite"
+       in
+       let* source_receipt =
+         Keeper_event_queue_state.source_terminal_receipt_of_stimulus source
+       in
+       let* () =
+         if String.equal source_receipt_kind (source_terminal_receipt_kind source_receipt)
+         then Ok ()
+         else Error "paused-work source-terminal receipt kind does not match source"
+       in
+       Ok { source; source_revision; source_receipt }
+     | _ -> Error "legacy paused-work source-terminal fields are not exact")
+  | _ -> Error "legacy paused-work source-terminal operation must be an object"
 ;;
 
 let receipt_of_common
@@ -295,7 +364,7 @@ let receipt_of_common
   Ok receipt
 ;;
 
-let of_yojson = function
+let of_yojson_with_legacy_durable ~allow_legacy_durable = function
   | `Assoc fields ->
     (match sorted fields with
      | [ ("expected_generation", `Int expected_generation)
@@ -304,62 +373,93 @@ let of_yojson = function
        ; ("operation", `String "resume_owner")
        ; ("operator_operation_id", `String operator_operation_id)
        ; ("requested_at", requested_at_json)
-       ; ("schema", `String receipt_schema)
+       ; ("schema", `String "masc.keeper.paused-work-disposition.v1")
        ] ->
-       if not (String.equal receipt_schema schema)
-       then Error "unsupported paused-work disposition receipt schema"
-       else
-         receipt_of_common
-           ~keeper_name
-           ~expected_trace_id
-           ~expected_generation
-           ~operator_operation_id
-           ~requested_at_json
-           ~operation:Resume_owner
+       receipt_of_common
+         ~keeper_name
+         ~expected_trace_id
+         ~expected_generation
+         ~operator_operation_id
+         ~requested_at_json
+         ~operation:Resume_owner
      | [ ("expected_generation", `Int expected_generation)
        ; ("expected_trace_id", `String expected_trace_id)
        ; ("keeper_name", `String keeper_name)
        ; ("operation", `String "transfer_owner")
        ; ("operator_operation_id", `String operator_operation_id)
        ; ("requested_at", requested_at_json)
-       ; ("schema", `String receipt_schema)
+       ; ("schema", `String "masc.keeper.paused-work-disposition.v4")
        ; ("transfer", transfer_json)
        ] ->
-       if not (String.equal receipt_schema schema)
-       then Error "unsupported paused-work disposition receipt schema"
-       else
-         let* transfer = transfer_owner_of_yojson transfer_json in
-         receipt_of_common
-           ~keeper_name
-           ~expected_trace_id
-           ~expected_generation
-           ~operator_operation_id
-           ~requested_at_json
-           ~operation:(Transfer_owner transfer)
+       let* transfer = transfer_owner_of_yojson transfer_json in
+       receipt_of_common
+         ~keeper_name
+         ~expected_trace_id
+         ~expected_generation
+         ~operator_operation_id
+         ~requested_at_json
+         ~operation:(Transfer_owner transfer)
      | [ ("expected_generation", `Int expected_generation)
        ; ("expected_trace_id", `String expected_trace_id)
        ; ("keeper_name", `String keeper_name)
        ; ("operation", `String "ack_source_terminal")
        ; ("operator_operation_id", `String operator_operation_id)
        ; ("requested_at", requested_at_json)
-       ; ("schema", `String receipt_schema)
+       ; ("schema", `String "masc.keeper.paused-work-disposition.v4")
        ; ("source_terminal", source_terminal_json)
        ] ->
-       if not (String.equal receipt_schema schema)
-       then Error "unsupported paused-work disposition receipt schema"
-       else
-         let* operation =
-           source_terminal_operation_of_yojson source_terminal_json
-         in
-         receipt_of_common
-           ~keeper_name
-           ~expected_trace_id
-           ~expected_generation
-           ~operator_operation_id
-           ~requested_at_json
-           ~operation:(Ack_source_terminal operation)
+       let* operation = source_terminal_operation_of_yojson source_terminal_json in
+       receipt_of_common
+         ~keeper_name
+         ~expected_trace_id
+         ~expected_generation
+         ~operator_operation_id
+         ~requested_at_json
+         ~operation:(Ack_source_terminal operation)
+     | [ ("expected_generation", `Int expected_generation)
+       ; ("expected_trace_id", `String expected_trace_id)
+       ; ("keeper_name", `String keeper_name)
+       ; ("operation", `String "transfer_owner")
+       ; ("operator_operation_id", `String operator_operation_id)
+       ; ("requested_at", requested_at_json)
+       ; ("schema", `String "masc.keeper.paused-work-disposition.v2")
+       ; ("transfer", transfer_json)
+       ]
+       when allow_legacy_durable ->
+       let* transfer = legacy_transfer_owner_of_yojson transfer_json in
+       receipt_of_common
+         ~keeper_name
+         ~expected_trace_id
+         ~expected_generation
+         ~operator_operation_id
+         ~requested_at_json
+         ~operation:(Transfer_owner transfer)
+     | [ ("expected_generation", `Int expected_generation)
+       ; ("expected_trace_id", `String expected_trace_id)
+       ; ("keeper_name", `String keeper_name)
+       ; ("operation", `String "settle_from_source_terminal")
+       ; ("operator_operation_id", `String operator_operation_id)
+       ; ("requested_at", requested_at_json)
+       ; ("schema", `String "masc.keeper.paused-work-disposition.v3")
+       ; ("source_terminal", source_terminal_json)
+       ]
+       when allow_legacy_durable ->
+       let* operation =
+         legacy_source_terminal_operation_of_yojson source_terminal_json
+       in
+       receipt_of_common
+         ~keeper_name
+         ~expected_trace_id
+         ~expected_generation
+         ~operator_operation_id
+         ~requested_at_json
+         ~operation:(Ack_source_terminal operation)
      | _ -> Error "paused-work disposition receipt fields are not exact")
   | _ -> Error "paused-work disposition receipt must be a JSON object"
+;;
+
+let of_yojson json =
+  of_yojson_with_legacy_durable ~allow_legacy_durable:false json
 ;;
 
 let load config ~keeper_name ~operator_operation_id =
@@ -373,7 +473,9 @@ let load config ~keeper_name ~operator_operation_id =
     then Ok None
     else
       let* json = Safe_ops.read_json_file_safe path in
-      let* receipt = of_yojson json in
+      let* receipt =
+        of_yojson_with_legacy_durable ~allow_legacy_durable:true json
+      in
       if
         String.equal receipt.keeper_name keeper_name
         && String.equal receipt.operator_operation_id operator_operation_id

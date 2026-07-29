@@ -9,7 +9,7 @@
 
 type pending_selection = Keeper_event_queue_persistence.pending_selection =
   { source_revision : int64
-  ; kind : Keeper_event_queue_persistence.selection_kind
+  ; kind : Keeper_event_queue_persistence.lease_kind
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -30,29 +30,9 @@ let publish_pending ~base_path name pending =
   | Some entry -> Atomic.set entry.event_queue pending
 ;;
 
-type exact_execution_terminal_cause =
-  Keeper_event_queue_persistence.exact_execution_terminal_cause =
-  | Exact_execution_failed
-  | Exact_execution_cancelled
-  | Domain_invalid_output
-  | Compaction_produced_no_reduction
-  | Compaction_increased_checkpoint
-  | Invalid_structural_evidence
-  | Invalid_structural_source_after_dispatch
-  | Commit_admission_unavailable
-  | Lifecycle_transition_failed_after_dispatch
-  | Checkpoint_source_changed
-  | Checkpoint_persistence_failed
-  | Terminal_persistence_failed
-
-type exact_execution_terminal =
-  Keeper_event_queue_persistence.exact_execution_terminal =
-  { cause : exact_execution_terminal_cause
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  }
+include Keeper_registry_event_queue_exact_execution.Make (struct
+    let publish_pending = publish_pending
+  end)
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
@@ -123,6 +103,7 @@ type transition = Keeper_event_queue_persistence.transition =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -425,6 +406,10 @@ let ack_pending_result ~base_path name ~selection =
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;
+(* claim_when_result / claim_board_result / cancel_accepted_result
+   took or produced a lease and became unreachable when #25969 moved production
+   to peek/ack. *)
+
 
 let cancel_pending_accepted_result
       ~base_path

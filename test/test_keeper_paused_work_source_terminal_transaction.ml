@@ -144,6 +144,9 @@ let replace_field name value fields =
   List.map (fun (field, current) -> if String.equal field name then field, value else field, current) fields
 ;;
 
+let remove_field name fields = List.filter (fun (field, _) -> not (String.equal field name)) fields
+;;
+
 let source_ack_wire_fields json =
   match json with
   | `Assoc state_fields ->
@@ -184,7 +187,7 @@ let required_string_field label field fields =
   | Some _ | None -> Alcotest.failf "%s omitted %s" label field
 ;;
 
-let test_source_ack_wire_is_current_only () =
+let test_source_ack_wire_is_canonical_and_recovers_v8 () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
     let original =
       Persistence.load_state_result ~base_path:config.Workspace.base_path ~keeper_name
@@ -195,7 +198,7 @@ let test_source_ack_wire_is_current_only () =
      | State.Transition_applied _ -> ()
      | State.Transition_already_applied _ -> Alcotest.fail "first source ACK was a replay");
     let canonical_json = State.to_yojson acknowledged in
-    let state_fields, _outbox_fields, receipt_fields, action_fields =
+    let state_fields, outbox_fields, receipt_fields, action_fields =
       source_ack_wire_fields canonical_json
     in
     Alcotest.(check (option string))
@@ -230,20 +233,205 @@ let test_source_ack_wire_is_current_only () =
       "source ACK writes its canonical event identity"
       canonical_event_id
       (required_string_field "source ACK receipt" "event_id" receipt_fields);
-    let retired_state =
+    let legacy_lease_id = "lease:1" in
+    let legacy_transition_id = legacy_lease_id ^ ":settle_from_source_terminal" in
+    let legacy_event_id = "keeper-event-queue-transition:" ^ legacy_transition_id in
+    let v9_transition_id = legacy_lease_id ^ ":ack_source_terminal" in
+    let v9_event_id = "keeper-event-queue-transition:" ^ v9_transition_id in
+    let v9_receipt =
+      receipt_fields
+      |> List.map (fun (field, value) ->
+        match field with
+        | "transition_id" -> field, `String v9_transition_id
+        | "event_id" -> field, `String v9_event_id
+        | _ -> field, value)
+      |> fun fields ->
+      [ "lease_id", `String legacy_lease_id
+      ; "lease_sequence", `Int 1
+      ]
+      @ fields
+    in
+    let v9_outbox = replace_field "receipt" (`Assoc v9_receipt) outbox_fields in
+    let v9_state =
       state_fields
-      |> replace_field "schema" (`String "keeper.event_queue.state.v11")
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v9")
+      |> replace_field "transition_outbox" (`List [ `Assoc v9_outbox ])
       |> fun fields -> `Assoc fields
     in
-    (match State.of_yojson retired_state with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "retired event queue state schema was accepted");
-    let retired_receipt =
-      `Assoc (("lease_id", `String "lease:1") :: receipt_fields)
+    let recovered_v9 = State.of_yojson v9_state |> require_ok "recover v9 source ACK outbox" in
+    (match State.last_transition recovered_v9 with
+     | None -> ()
+     | Some _ -> Alcotest.fail "v9 snapshot invented a projected receipt");
+    let recovered_v9_fields, _, _, _ =
+      State.to_yojson recovered_v9 |> source_ack_wire_fields
     in
-    (match State.transition_receipt_of_yojson retired_receipt with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "retired lease receipt was accepted"))
+    Alcotest.(check (option string))
+      "recovery rewrites v9 as v12"
+      (Some State.schema)
+      (match List.assoc_opt "schema" recovered_v9_fields with
+       | Some (`String schema) -> Some schema
+       | Some _ | None -> None);
+    let legacy_action =
+      replace_field "kind" (`String "settle_from_source_terminal") action_fields
+    in
+    let legacy_receipt =
+      receipt_fields
+      |> List.map (fun (field, value) ->
+        match field with
+        | "transition_id" -> field, `String legacy_transition_id
+        | "event_id" -> field, `String legacy_event_id
+        | "transition" -> "settlement", `Assoc legacy_action
+        | "applied_at_unix" -> "settled_at_unix", value
+        | _ -> field, value)
+      |> fun fields ->
+      [ "lease_id", `String legacy_lease_id
+      ; "lease_sequence", `Int 1
+      ]
+      @ fields
+    in
+    let legacy_outbox = replace_field "receipt" (`Assoc legacy_receipt) outbox_fields in
+    let v10_unprojected_state =
+      state_fields
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v10")
+      |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
+      |> fun fields -> `Assoc (("last_settlement", `Null) :: fields)
+    in
+    let recovered_v10_unprojected =
+      State.of_yojson v10_unprojected_state
+      |> require_ok "recover v10 source ACK outbox"
+    in
+    (match State.transition_outbox recovered_v10_unprojected with
+     | [ { receipt = { transition = State.Ack_source_terminal _; _ }; _ } ] -> ()
+     | _ -> Alcotest.fail "v10 source ACK outbox did not recover");
+    let v10_projected_state =
+      state_fields
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v10")
+      |> replace_field "transition_outbox" (`List [])
+      |> fun fields -> `Assoc (("last_settlement", `Assoc legacy_receipt) :: fields)
+    in
+    let recovered_v10 =
+      State.of_yojson v10_projected_state
+      |> require_ok "recover v10 projected source ACK witness"
+    in
+    (match State.last_transition recovered_v10 with
+     | Some { transition = State.Ack_source_terminal _; transition_id; _ } ->
+       Alcotest.(check string)
+         "v10 projected witness preserves transition identity"
+         legacy_transition_id
+         transition_id
+     | Some _ | None -> Alcotest.fail "v10 projected source ACK lost its replay witness");
+    let legacy_ack_transition_id = legacy_lease_id ^ ":ack" in
+    let legacy_ack_receipt =
+      `Assoc
+        [ "transition_id", `String legacy_ack_transition_id
+        ; "event_id", `String ("keeper-event-queue-transition:" ^ legacy_ack_transition_id)
+        ; "lease_id", `String legacy_lease_id
+        ; "lease_sequence", `Int 1
+        ; "settled_at_unix", `Float 2.0
+        ; "settlement", `Assoc [ "kind", `String "ack" ]
+        ]
+    in
+    let v10_generic_projected_state =
+      state_fields
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v10")
+      |> replace_field "transition_outbox" (`List [])
+      |> fun fields -> `Assoc (("last_settlement", legacy_ack_receipt) :: fields)
+    in
+    let recovered_generic_v12 =
+      v10_generic_projected_state
+      |> State.of_yojson
+      |> require_ok "recover v10 generic projected witness"
+      |> State.to_yojson
+      |> State.of_yojson
+      |> require_ok "reload v10 generic witness after v12 checkpoint"
+    in
+    (match State.last_transition recovered_generic_v12 with
+     | Some { transition = State.Ack; transition_id; _ } ->
+       Alcotest.(check string)
+         "v12 checkpoint preserves legacy generic transition identity"
+         legacy_ack_transition_id
+         transition_id
+     | Some _ | None ->
+       Alcotest.fail "v12 checkpoint made the recovered generic witness unreadable");
+    let legacy_state =
+      state_fields
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v8")
+      |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
+      |> fun fields -> `Assoc fields
+    in
+    let recovered = State.of_yojson legacy_state |> require_ok "recover v8 source ACK outbox" in
+    let recovered_json = State.to_yojson recovered in
+    let recovered_fields, _, recovered_receipt, recovered_action =
+      source_ack_wire_fields recovered_json
+    in
+    Alcotest.(check (option string))
+      "recovery rewrites v8 as v12"
+      (Some State.schema)
+      (match List.assoc_opt "schema" recovered_fields with
+       | Some (`String schema) -> Some schema
+       | Some _ | None -> None);
+    Alcotest.(check (option string))
+      "recovery removes legacy source-terminal label"
+      (Some "ack_source_terminal")
+      (match List.assoc_opt "kind" recovered_action with
+       | Some (`String kind) -> Some kind
+       | Some _ | None -> None);
+    Alcotest.(check string)
+      "v8 recovery preserves transition identity"
+      legacy_transition_id
+      (required_string_field "recovered source ACK receipt" "transition_id" recovered_receipt);
+    Alcotest.(check string)
+      "v8 recovery preserves event identity"
+      legacy_event_id
+      (required_string_field "recovered source ACK receipt" "event_id" recovered_receipt);
+    let legacy_wal_row =
+      `Assoc
+        [ "schema", `String "masc.keeper_event_queue.settlement.v2"
+        ; "base_path", `String config.Workspace.base_path
+        ; "keeper_name", `String keeper_name
+        ; "outbox_entry", `Assoc legacy_outbox
+        ]
+    in
+    let wal_path =
+      Filename.concat
+        (Filename.concat
+           (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
+           keeper_name)
+        "event-queue-settlements.jsonl"
+    in
+    write_text wal_path (Yojson.Safe.to_string legacy_wal_row ^ "\n");
+    let recovered_wal =
+      Persistence.load_state_result ~base_path:config.Workspace.base_path ~keeper_name
+      |> require_ok "recover v2 source ACK WAL"
+    in
+    Alcotest.(check int) "v2 WAL replay removes source" 0 (Queue.length (State.pending recovered_wal));
+    let _, _, recovered_wal_receipt, recovered_wal_action =
+      State.to_yojson recovered_wal |> source_ack_wire_fields
+    in
+    Alcotest.(check (option string))
+      "v2 WAL replay canonicalizes to ACK"
+      (Some "ack_source_terminal")
+      (match List.assoc_opt "kind" recovered_wal_action with
+       | Some (`String kind) -> Some kind
+       | Some _ | None -> None);
+    Alcotest.(check string)
+      "v2 WAL replay preserves transition identity"
+      legacy_transition_id
+      (required_string_field "recovered v2 WAL receipt" "transition_id" recovered_wal_receipt);
+    Alcotest.(check string)
+      "v2 WAL replay preserves event identity"
+      legacy_event_id
+      (required_string_field "recovered v2 WAL receipt" "event_id" recovered_wal_receipt))
 ;;
 
 let test_source_ack_identity_survives_checkpoint_reload () =
@@ -626,7 +814,7 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       (List.length (State.projected_dispositions replayed)))
 ;;
 
-let test_retired_v3_receipt_file_is_rejected () =
+let test_legacy_v3_receipt_file_resumes_ack () =
   with_source_terminal_lane (fun config keeper_name meta request ->
     let operation : Receipt.source_terminal_operation =
       { source = request.source
@@ -673,14 +861,39 @@ let test_retired_v3_receipt_file_is_rejected () =
          ~keeper_name
          ~operator_operation_id:request.operator_operation_id)
       legacy;
-    (match
-       Receipt.load
-         config
-         ~keeper_name
-         ~operator_operation_id:request.operator_operation_id
-     with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "durable load accepted retired v3 receipt"))
+    let recovered =
+      Receipt.load
+        config
+        ~keeper_name
+        ~operator_operation_id:request.operator_operation_id
+      |> require_ok "load recovery-only v3 receipt"
+      |> require_some "recovered v3 receipt"
+    in
+    (match recovered.operation with
+     | Receipt.Ack_source_terminal _ -> ()
+     | Receipt.Resume_owner
+     | Receipt.Transfer_owner _ ->
+       Alcotest.fail "v3 receipt did not recover as typed source ACK");
+    let replay =
+      Transaction.ack_pending config ~keeper_name request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "resume ACK from durable v3 receipt"
+    in
+    (match replay.commit_status with
+     | Transaction.Already_committed -> ()
+     | Transaction.Committed ->
+       Alcotest.fail "durable v3 receipt was replaced instead of replayed");
+    check_applied replay.projection;
+    let state =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load source ACK resumed from v3 receipt"
+    in
+    Alcotest.(check int)
+      "recovery-only v3 receipt resumes pending source ACK"
+      0
+      (Queue.length (State.pending state)))
 ;;
 
 let test_source_terminal_busy_has_zero_mutation () =
@@ -761,9 +974,9 @@ let () =
     "keeper paused-work source-terminal transaction"
     [ ( "Ack_source_terminal"
       , [ Alcotest.test_case
-            "writes current-only ACK wire"
+            "writes ACK wire and recovers v8 outbox"
             `Quick
-            test_source_ack_wire_is_current_only
+            test_source_ack_wire_is_canonical_and_recovers_v8
         ; Alcotest.test_case
             "exact receipt ACKs pending"
             `Quick
@@ -781,9 +994,9 @@ let () =
             `Quick
             test_source_ack_identity_survives_checkpoint_reload
         ; Alcotest.test_case
-            "retired v3 receipt is rejected"
+            "recovery-only v3 receipt resumes ACK"
             `Quick
-            test_retired_v3_receipt_file_is_rejected
+            test_legacy_v3_receipt_file_resumes_ack
         ; Alcotest.test_case
             "admission busy has zero mutation"
             `Quick

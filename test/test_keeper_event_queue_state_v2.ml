@@ -189,7 +189,7 @@ let test_projected_disposition_ledger_replays_older_operation () =
      Alcotest.fail "older cancellation was applied twice")
 ;;
 
-let test_current_schema_round_trip_and_retired_schemas_rejected () =
+let test_current_schema_round_trip_and_legacy_v10_recovery () =
   let state = State.with_pending (queue [ stimulus "fresh" 1.0 ]) State.empty in
   let json = State.to_yojson state in
   let decoded = State.of_yojson json |> require_ok "current schema round trip" in
@@ -211,26 +211,111 @@ let test_current_schema_round_trip_and_retired_schemas_rejected () =
     "fresh pending survives"
     [ "fresh" ]
     (post_ids (State.pending decoded));
-  List.iter
-    (fun retired_schema ->
-       let stale =
-         match json with
-         | `Assoc fields ->
-           `Assoc
-             ( ("schema", `String retired_schema)
-             :: List.remove_assoc "schema" fields )
-         | _ -> Alcotest.fail "state codec did not emit an object"
-       in
-       match State.of_yojson stale with
-       | Error _ -> ()
-       | Ok _ ->
-         Alcotest.failf "retired event queue schema was accepted: %s" retired_schema)
-    [ "keeper.event_queue.state.v11"
-    ; "keeper.event_queue.state.v10"
-    ; "keeper.event_queue.state.v9"
-    ; "keeper.event_queue.state.v8"
-    ; "keeper.event_queue.state.v7"
-    ]
+  let legacy_v10 =
+    match json with
+    | `Assoc fields ->
+      let last_settlement =
+        List.assoc_opt "last_transition" fields
+        |> require_some "current transition witness"
+      in
+      `Assoc
+        ( ("schema", `String "keeper.event_queue.state.v10")
+        :: ("last_settlement", last_settlement)
+        :: (fields
+            |> List.remove_assoc "schema"
+            |> List.remove_assoc "last_transition"
+            |> List.remove_assoc "projected_dispositions"
+            |> List.remove_assoc "accepted_transfer_projections") )
+    | _ -> Alcotest.fail "state codec did not emit an object"
+  in
+  let recovered_v10 =
+    State.of_yojson legacy_v10 |> require_ok "legacy v10 snapshot recovers"
+  in
+  Alcotest.(check (list string))
+    "legacy v10 pending survives"
+    [ "fresh" ]
+    (post_ids (State.pending recovered_v10));
+  (match State.to_yojson recovered_v10 with
+   | `Assoc fields ->
+     Alcotest.(check (option string))
+       "legacy v10 recovery checkpoints as current schema"
+       (Some State.schema)
+       (match List.assoc_opt "schema" fields with
+        | Some (`String schema) -> Some schema
+        | Some _ | None -> None)
+   | _ -> Alcotest.fail "recovered state codec did not emit an object");
+  let transfer : State.accepted_transfer =
+    { source = stimulus "transferred-v11" 2.0
+    ; source_revision = 0L
+    ; owner_nonce = 0
+    ; operator_operation_id = "transfer-v11"
+    ; from_keeper = "from-v11"
+    ; to_keeper = "to-v11"
+    }
+  in
+  let transfer_state, _ =
+    State.project_accepted_transfer transfer State.empty
+    |> require_ok "seed accepted transfer projection"
+  in
+  let legacy_v11 =
+    match State.to_yojson transfer_state with
+    | `Assoc fields ->
+      let last_transition =
+        List.assoc_opt "last_transition" fields
+        |> require_some "current state carries last transition field"
+      in
+      `Assoc
+        ( ("schema", `String "keeper.event_queue.state.v11")
+        :: ("last_settlement", last_transition)
+        :: (fields
+            |> List.remove_assoc "schema"
+            |> List.remove_assoc "last_transition"
+            |> List.remove_assoc "projected_dispositions") )
+    | _ -> Alcotest.fail "transfer state codec did not emit an object"
+  in
+  let recovered_v11 =
+    State.of_yojson legacy_v11 |> require_ok "legacy v11 snapshot recovers"
+  in
+  Alcotest.(check int)
+    "legacy v11 preserves accepted transfer projection"
+    1
+    (List.length (State.accepted_transfer_projections recovered_v11));
+  let legacy_v8 =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        ( ("schema", `String "keeper.event_queue.state.v8")
+        :: (fields
+            |> List.remove_assoc "schema"
+            |> List.remove_assoc "last_transition"
+            |> List.remove_assoc "projected_dispositions"
+            |> List.remove_assoc "accepted_transfer_projections") )
+    | _ -> Alcotest.fail "state codec did not emit an object"
+  in
+  let recovered_v8 =
+    State.of_yojson legacy_v8 |> require_ok "legacy v8 snapshot recovers"
+  in
+  Alcotest.(check (list string))
+    "legacy v8 pending survives"
+    [ "fresh" ]
+    (post_ids (State.pending recovered_v8));
+  (match State.to_yojson recovered_v8 with
+   | `Assoc fields ->
+     Alcotest.(check (option string))
+       "legacy v8 recovery checkpoints as current schema"
+       (Some State.schema)
+       (match List.assoc_opt "schema" fields with
+        | Some (`String schema) -> Some schema
+        | Some _ | None -> None)
+   | _ -> Alcotest.fail "recovered state codec did not emit an object");
+  let stale =
+    match json with
+    | `Assoc fields -> `Assoc (("schema", `String "keeper.event_queue.state.v5") :: List.remove_assoc "schema" fields)
+    | _ -> Alcotest.fail "state codec did not emit an object"
+  in
+  match State.of_yojson stale with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "old lease schema was accepted"
 ;;
 
 let with_temp_dir prefix f =
@@ -268,37 +353,9 @@ let test_durable_peek_ack_restart () =
     Alcotest.(check (list string)) "restart sees only unacked source" [ "two" ] (post_ids restarted))
 ;;
 
-let test_retired_inflight_sidecar_is_not_read () =
-  with_temp_dir "keeper-retired-inflight-sidecar" (fun base_path ->
-    let keeper_name = "sidecar-ignored" in
-    let keeper_dir =
-      Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
-    in
-    Fs_compat.mkdir_p keeper_dir;
-    let sidecar_path = Filename.concat keeper_dir "event-queue-inflight.json" in
-    let retired_bytes = "retired wire must remain opaque: not-json\000lease_id" in
-    Out_channel.with_open_bin sidecar_path (fun channel ->
-      output_string channel retired_bytes);
-    let state =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "retired sidecar must not affect current state load"
-    in
-    Alcotest.(check (list string))
-      "retired sidecar creates no pending authority"
-      []
-      (post_ids (State.pending state));
-    let bytes_after =
-      In_channel.with_open_bin sidecar_path In_channel.input_all
-    in
-    Alcotest.(check string)
-      "retired sidecar is not consumed or rewritten"
-      retired_bytes
-      bytes_after)
-;;
-
 let () =
   Alcotest.run
-    "keeper pending queue current schema"
+    "keeper pending queue v7"
     [ ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
@@ -316,16 +373,11 @@ let () =
             `Quick
             test_projected_disposition_ledger_replays_older_operation
         ; Alcotest.test_case
-            "current schema only"
+             "current schema and legacy v10 recovery"
             `Quick
-            test_current_schema_round_trip_and_retired_schemas_rejected
+            test_current_schema_round_trip_and_legacy_v10_recovery
         ] )
     ; ( "persistence"
-      , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
-        ; Alcotest.test_case
-            "retired inflight sidecar is not read"
-            `Quick
-            test_retired_inflight_sidecar_is_not_read
-        ] )
+      , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart ] )
     ]
 ;;

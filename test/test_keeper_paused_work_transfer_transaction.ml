@@ -221,7 +221,7 @@ let test_transfer_commits_exact_pending_move () =
     assert_converged config ~from_keeper ~to_keeper request.source)
 ;;
 
-let test_retired_v2_receipt_file_is_rejected () =
+let test_legacy_v2_receipt_file_resumes_transfer () =
   with_transfer_lane
   @@ fun config from_keeper to_keeper source_meta target_meta request ->
   let transfer : Receipt.transfer_owner =
@@ -271,14 +271,30 @@ let test_retired_v2_receipt_file_is_rejected () =
        ~keeper_name:from_keeper
        ~operator_operation_id:request.operator_operation_id)
     legacy;
-  match
+  let recovered =
     Receipt.load
       config
       ~keeper_name:from_keeper
       ~operator_operation_id:request.operator_operation_id
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "durable load accepted retired v2 transfer receipt"
+    |> require_ok "load recovery-only v2 transfer receipt"
+    |> require_some "recovered v2 transfer receipt"
+  in
+  (match recovered.operation with
+   | Receipt.Transfer_owner _ -> ()
+   | Receipt.Resume_owner
+   | Receipt.Ack_source_terminal _ ->
+     Alcotest.fail "v2 receipt did not recover as typed transfer");
+  let replay =
+    Transaction.transfer_pending config ~from_keeper ~to_keeper request
+    |> Result.map_error Transaction.error_to_string
+    |> require_ok "resume transfer from durable v2 receipt"
+  in
+  (match replay.commit_status with
+   | Transaction.Already_committed -> ()
+   | Transaction.Committed ->
+     Alcotest.fail "durable v2 receipt was replaced instead of replayed");
+  check_applied ~expected_target:Transaction.Enqueued replay.projection;
+  assert_converged config ~from_keeper ~to_keeper request.source
 ;;
 
 let test_transfer_busy_has_zero_mutation () =
@@ -463,9 +479,9 @@ let () =
             `Quick
             test_transfer_commits_exact_pending_move
         ; Alcotest.test_case
-            "retired v2 receipt is rejected"
+            "recovery-only v2 receipt resumes transfer"
             `Quick
-            test_retired_v2_receipt_file_is_rejected
+            test_legacy_v2_receipt_file_resumes_transfer
         ; Alcotest.test_case
             "admission busy has zero mutation"
             `Quick

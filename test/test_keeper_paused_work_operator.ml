@@ -370,6 +370,11 @@ let test_inventory_exposes_exact_durable_fences () =
          |> member "queue"
          |> member "accepted_transfer_projection_count"
          |> to_int))
+      (* The tail claimed a lease so the inventory would expose
+         queue.active_lease, then decoded a cancel_accepted request with
+         source_state="active_lease". Both are gone: no caller can claim a
+         lease since #25969, the inventory no longer reports the field, and the
+         request arm is rejected at parse time. *)
 ;;
 
 let admission_error_json block =

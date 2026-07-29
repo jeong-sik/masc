@@ -175,10 +175,82 @@ PY
 atomic_copy() {
     local source="$1"
     local target="$2"
-    local temporary
-    temporary="$(mktemp "${target}.migration.XXXXXX")"
-    cp -p "$source" "$temporary"
-    mv "$temporary" "$target"
+    python3 - "$source" "$target" <<'PY'
+import os
+import shutil
+import stat
+import sys
+import tempfile
+
+source, target = sys.argv[1:]
+target_directory = os.path.dirname(target)
+source_mode = stat.S_IMODE(os.stat(source, follow_symlinks=False).st_mode)
+temporary_fd, temporary = tempfile.mkstemp(
+    prefix=f"{os.path.basename(target)}.migration.",
+    dir=target_directory,
+)
+try:
+    with open(source, "rb") as source_file, os.fdopen(
+        temporary_fd, "wb"
+    ) as temporary_file:
+        temporary_fd = -1
+        shutil.copyfileobj(source_file, temporary_file)
+        os.fchmod(temporary_file.fileno(), source_mode)
+        temporary_file.flush()
+        os.fsync(temporary_file.fileno())
+    os.replace(temporary, target)
+    temporary = ""
+    directory_fd = os.open(
+        target_directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+finally:
+    if temporary_fd >= 0:
+        os.close(temporary_fd)
+    if temporary:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+PY
+}
+
+sync_backup_tree() {
+    local backup_dir="$1"
+    python3 - "$backup_dir" <<'PY'
+import os
+import sys
+
+backup_dir = sys.argv[1]
+directories = []
+for root, _, files in os.walk(backup_dir):
+    directories.append(root)
+    for filename in files:
+        path = os.path.join(root, filename)
+        file_fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(file_fd)
+        finally:
+            os.close(file_fd)
+
+directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+for directory in reversed(directories):
+    directory_fd = os.open(directory, directory_flags)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+parent_fd = os.open(os.path.dirname(backup_dir), directory_flags)
+try:
+    os.fsync(parent_fd)
+finally:
+    os.close(parent_fd)
+PY
 }
 
 ALL_FILES=()
@@ -393,6 +465,7 @@ run_migration() {
         rendered_file="${backup_dir}/rendered/${basename}"
         render_current_credential "$file" "$rendered_file"
     done
+    sync_backup_tree "$backup_dir"
 
     local migration_active=true
     rollback_and_exit() {

@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.230.0"
-# v0.230.0 makes pre-tool approval a typed, fail-closed boundary:
-# ElicitToolApproval is distinct from generic ElicitInput, and only an exact
-# Approved invocation may execute. The public Exact_output.execute_once
-# shortcut is removed; callers freeze candidates with snapshot_flow, create an
-# affine flow with start_flow, and consume it through execute_flow_once.
-# Previous pin: v0.229.0 (6bf1751a).
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.0"
+# v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
+# rejected; #2867), provider_config.output_schema is removed in favor of
+# response_format = JsonSchema as the single structured-output request state
+# (#2858), legacy tool/checkpoint shapes and the typed-compat runtime are
+# removed (#2851/#2853), and eval requires explicit metric policies with
+# incomplete comparisons rejected (#2854/#2866). masc-side output_schema
+# migration lands in the same PR as this bump. Deploy note: live v8
+# checkpoints are rejected after this pin — keeper contexts rebuild from
+# Memory OS facts + board (facts/episodes stores are unaffected).
+# Previous pin: v0.230.0 (7a3f2af7).
 # MASC consumes only the public Agent SDK contract; Keeper, Gate, Board, and
 # product operation ownership remain MASC concepts.
 # The reachability guards in check-oas-pin.sh and oas-drift-check.sh track
 # main; oas-drift-check.sh also reports the public-surface delta at pin-bump
 # time.
-# Pinned to the v0.230.0 release commit.
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.230.0"
+# Pinned to the v0.231.0 release commit.
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.0"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="7a3f2af7aed6fdd19968de3e1637dccb4f867461"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.230.0"
+readonly OAS_AGENT_SDK_SHA="2cb7d9226a7ba797071cd45733d5b15789f13ff5"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.0"

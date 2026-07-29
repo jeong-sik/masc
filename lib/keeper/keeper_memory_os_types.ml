@@ -327,12 +327,24 @@ let claim_identity (f : fact) =
   match f.claim_id with
   | Some id when claim_id_is_valid id -> "id:" ^ id
   | Some _ | None ->
+    (* [source.turn] is deliberately excluded: the librarian's turn numbers
+       are indices into the sliding prompt window ([List.mapi] in
+       [Keeper_librarian.format_messages_for_prompt]), so the same event
+       re-extracted after the window moves carries a different number.
+       Including it made write-time dedupe structurally impossible — every
+       re-extraction minted a fresh identity. The stable observation
+       coordinates are the trace, the producing tool call (when any), and
+       the exact claim bytes; [turn] stays on the fact as display
+       provenance only. *)
     "observation:"
     ^ Yojson.Safe.to_string
         (`Assoc
-           [ wire_field_source, provenance_event_to_json f.source
-           ; wire_field_claim, `String f.claim
-           ])
+           ([ wire_field_trace_id, `String f.source.trace_id ]
+            @ (match f.source.tool_call_id with
+               | Some tool_call_id ->
+                 [ wire_field_source_tool_call_id, `String tool_call_id ]
+               | None -> [])
+            @ [ wire_field_claim, `String f.claim ]))
 ;;
 
 let optional_float_field key = function

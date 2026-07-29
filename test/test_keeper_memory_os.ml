@@ -4359,12 +4359,54 @@ let test_gc_default_on () =
   Alcotest.(check bool) "gc default is true" true Env_config.KeeperMemoryOs.gc_enabled_default
 ;;
 
+(* Regression for the duplicate-creation root: the librarian's turn numbers
+   are sliding-window indices, so the same observation re-extracted after the
+   window moves used to mint a fresh identity and write-time dedupe never
+   fired. Identity now keys on trace + tool call + exact claim bytes only. *)
+let test_claim_identity_ignores_window_turn () =
+  let now = 1_000_000.0 in
+  let base = fact_fixture ~now () in
+  let early = { base with Types.source = { base.Types.source with Types.turn = 5 } } in
+  let late = { base with Types.source = { base.Types.source with Types.turn = 99 } } in
+  Alcotest.(check string)
+    "same trace + claim across window positions share one identity"
+    (Types.claim_identity early)
+    (Types.claim_identity late);
+  let other_trace =
+    { base with
+      Types.source = { base.Types.source with Types.trace_id = "trace-999" }
+    }
+  in
+  Alcotest.(check bool)
+    "a different trace is a different observation"
+    false
+    (String.equal (Types.claim_identity base) (Types.claim_identity other_trace));
+  let other_claim = { base with Types.claim = "User prefers verbose responses" } in
+  Alcotest.(check bool)
+    "different claim bytes are a different observation"
+    false
+    (String.equal (Types.claim_identity base) (Types.claim_identity other_claim));
+  let tool_call =
+    { base with
+      Types.source = { base.Types.source with Types.tool_call_id = Some "call-1" }
+    }
+  in
+  Alcotest.(check bool)
+    "a tool-produced observation is distinct from a prose one"
+    false
+    (String.equal (Types.claim_identity base) (Types.claim_identity tool_call))
+;;
+
 let () =
   maybe_run_lock_holder_child ();
   Alcotest.run
     "keeper_memory_os"
     [ ( "json"
       , [ Alcotest.test_case "fact and episode round-trip" `Quick test_json_roundtrip
+        ; Alcotest.test_case
+            "claim identity ignores the window turn"
+            `Quick
+            test_claim_identity_ignores_window_turn
         ; Alcotest.test_case
             "fact decoder rejects unsupported schema version"
             `Quick

@@ -30,9 +30,40 @@ let publish_pending ~base_path name pending =
   | Some entry -> Atomic.set entry.event_queue pending
 ;;
 
-include Keeper_registry_event_queue_exact_execution.Make (struct
-    let publish_pending = publish_pending
-  end)
+type exact_execution_terminal_cause = Keeper_event_queue_persistence.exact_execution_terminal_cause =
+  | Exact_execution_failed
+  | Exact_execution_cancelled
+  | Domain_invalid_output
+  | Compaction_produced_no_reduction
+  | Compaction_increased_checkpoint
+  | Invalid_structural_evidence
+  | Invalid_structural_source_after_dispatch
+  | Commit_admission_unavailable
+  | Lifecycle_transition_failed_after_dispatch
+  | Checkpoint_source_changed
+  | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
+
+type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_terminal =
+  { cause : exact_execution_terminal_cause
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  }
+
+type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
+  | Consume_source
+
+type exact_settlement_semantic =
+  Keeper_event_queue_persistence.exact_settlement_semantic =
+  | Exact_no_compaction
+  | Exact_escalate
+
+type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+
+type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }

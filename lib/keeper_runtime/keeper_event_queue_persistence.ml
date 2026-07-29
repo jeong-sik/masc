@@ -646,11 +646,6 @@ let load_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
-
-let exact_execution_binding_result ~base_path ~keeper_name =
-  load_state_result ~base_path ~keeper_name |> Result.map State.exact_execution_binding
-;;
-
 let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
 ;;

@@ -211,9 +211,6 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-val exact_execution_binding_result :
-  base_path:string -> keeper_name:string -> (exact_execution_binding option, string) result
-
 val load_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
 (** Strict pending projection after durable transition-WAL replay. Durable read

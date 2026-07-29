@@ -57,25 +57,6 @@ type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome 
 
 type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
 
-type exact_execution_lease_status = Keeper_event_queue_persistence.exact_execution_lease_status =
-  | Dispatch_uncertain
-  | Terminal_quarantined of exact_execution_terminal_cause
-  | Disposition_prepared of exact_source_disposition
-
-type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
-  { lease_id : string
-  ; lease_sequence : int64
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  ; status : exact_execution_lease_status
-  }
-
-type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
-  | Fsync_completed
-  | Visible_sync_unconfirmed of string
-
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
   | Compaction_exact_output_terminal of
@@ -191,9 +172,6 @@ val ack_pending_result :
   string ->
   selection:pending_selection ->
   (unit, string) result
-
-val exact_execution_binding_result :
-  base_path:string -> string -> (exact_execution_binding option, string) result
 
 (* claim_when_result / claim_board_result / transition_result and the lease-taking
    exact-execution fence lived here, together with cancel_accepted_result.

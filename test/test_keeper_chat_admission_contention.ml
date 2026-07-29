@@ -15,10 +15,10 @@
    -> server_bootstrap_loops.ml handle_turn -> ... -> keeper_turn.ml
    handle_keeper_invocation -> run_serialized).
 
-   Assertions are one-sided on purpose: they pin that a queued receipt is
-   admitted, not which admission rule admitted it. That keeps the tests valid
-   across changes to the admission predicates while still failing if either
-   lane starves the other. *)
+   The starvation cases pin that every queued receipt is admitted. The FIFO
+   case additionally compares the exact receipt delivery keys and contents in
+   enqueue order, while both lanes yield inside an instrumented slot body so
+   overlap is observable instead of assumed. *)
 
 open Masc
 
@@ -99,20 +99,38 @@ let install_observers ~base =
 
 exception Budget_reached
 
+type contention_result =
+  { enqueued : (Keeper_chat_queue.enqueue_receipt * Keeper_chat_queue.queued_message) list
+  ; admitted :
+      ( Keeper_chat_delivery_identity.delivery_key
+        * Keeper_chat_queue.queued_message )
+        list
+  ; autonomous_turns : int
+  ; max_active_turns : int
+  }
+
 (* [gap_seconds = 0.] is the back-to-back shape the autonomous lane can reach:
    Keeper_keepalive_signal.interruptible_sleep consumes a pre-armed wakeup
    before sleeping, so the heartbeat cadence is not a floor. *)
-let run_contention ~base ~clock ~gap_seconds ~on_admitted =
+let run_contention ~base ~clock ~gap_seconds =
   install_observers ~base;
-  let admitted = ref 0 in
-  let enqueued = ref 0 in
+  let admitted = ref [] in
+  let enqueued = ref [] in
   let autonomous_turns = ref 0 in
-  let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key:_ ~queued_message:_ =
+  let active_turns = ref 0 in
+  let max_active_turns = ref 0 in
+  let with_active_turn body =
+    incr active_turns;
+    max_active_turns := max !max_active_turns !active_turns;
+    Fun.protect ~finally:(fun () -> decr active_turns) body
+  in
+  let handle_turn ~sw:_ ~keeper_name:_ ~delivery_key ~queued_message =
     match
       Keeper_turn_admission.run_serialized ~base_path:base ~keeper_name
         (fun () ->
-           incr admitted;
-           on_admitted !admitted)
+           with_active_turn (fun () ->
+             admitted := (delivery_key, queued_message) :: !admitted;
+             Eio.Time.sleep clock (turn_seconds /. 2.)))
     with
     | `Ran () -> Keeper_chat_consumer.Delivered { outcome_ref = "contention-turn" }
     | `Rejected rejection -> Keeper_chat_consumer.Deferred { rejection }
@@ -126,7 +144,9 @@ let run_contention ~base ~clock ~gap_seconds ~on_admitted =
          let rec drive () =
            (match
               Keeper_turn_admission.run_if_free ~base_path:base ~keeper_name
-                (fun () -> Eio.Time.sleep clock turn_seconds)
+                (fun () ->
+                   with_active_turn (fun () ->
+                     Eio.Time.sleep clock turn_seconds))
             with
             | `Ran () -> incr autonomous_turns
             | `Busy _ -> ());
@@ -140,10 +160,10 @@ let run_contention ~base ~clock ~gap_seconds ~on_admitted =
          for i = 1 to receipt_count do
            Eio.Time.sleep clock (turn_seconds *. 1.5);
            match
-             Keeper_chat_queue.enqueue ~keeper_name
-               (message (Printf.sprintf "contention-%d" i))
+             let queued_message = message (Printf.sprintf "contention-%d" i) in
+             Keeper_chat_queue.enqueue ~keeper_name queued_message
            with
-           | Ok _ -> incr enqueued
+           | Ok receipt -> enqueued := (receipt, queued_message) :: !enqueued
            | Error error ->
              Printf.printf "  enqueue failed: %s\n%!"
                (Keeper_chat_queue.mutation_error_to_string error)
@@ -152,7 +172,7 @@ let run_contention ~base ~clock ~gap_seconds ~on_admitted =
           out — whichever comes first. *)
        Eio.Fiber.fork ~sw (fun () ->
          let rec wait elapsed =
-           if !admitted >= receipt_count || elapsed > budget_seconds
+           if List.length !admitted >= receipt_count || elapsed > budget_seconds
            then ()
            else (
              Eio.Time.sleep clock 0.05;
@@ -161,57 +181,93 @@ let run_contention ~base ~clock ~gap_seconds ~on_admitted =
          wait 0.0;
          Eio.Switch.fail sw Budget_reached))
    with
-   | Budget_reached -> ()
-   | Eio.Cancel.Cancelled _ -> ());
-  !enqueued, !admitted, !autonomous_turns
+   | Budget_reached -> ());
+  { enqueued = List.rev !enqueued
+  ; admitted = List.rev !admitted
+  ; autonomous_turns = !autonomous_turns
+  ; max_active_turns = !max_active_turns
+  }
 
 let test_back_to_back_autonomous_does_not_starve_chat () =
   Printf.printf
     "Test: back-to-back autonomous turns do not starve the queue consumer\n%!";
   with_env (fun ~base ~clock ->
-    let enqueued, admitted, autonomous_turns =
-      run_contention ~base ~clock ~gap_seconds:0. ~on_admitted:(fun _ -> ())
-    in
-    check "every receipt was enqueued" (enqueued = receipt_count);
+    let result = run_contention ~base ~clock ~gap_seconds:0. in
+    check "every receipt was enqueued" (List.length result.enqueued = receipt_count);
     check
-      (Printf.sprintf "every receipt was admitted (%d/%d)" admitted receipt_count)
-      (admitted = receipt_count);
+      (Printf.sprintf
+         "every receipt was admitted (%d/%d)"
+         (List.length result.admitted)
+         receipt_count)
+      (List.length result.admitted = receipt_count);
     (* The driver must actually have contended, otherwise the test proves
        nothing about contention. *)
     check
-      (Printf.sprintf "autonomous lane ran during the test (%d turns)" autonomous_turns)
-      (autonomous_turns > 0))
+      (Printf.sprintf
+         "autonomous lane ran during the test (%d turns)"
+         result.autonomous_turns)
+      (result.autonomous_turns > 0))
 
 let test_heartbeat_shaped_autonomous_does_not_starve_chat () =
   Printf.printf
     "Test: heartbeat-shaped autonomous cycles do not starve the queue consumer\n%!";
   with_env (fun ~base ~clock ->
-    let enqueued, admitted, autonomous_turns =
+    let result =
       run_contention ~base ~clock ~gap_seconds:(turn_seconds *. 1.5)
-        ~on_admitted:(fun _ -> ())
     in
-    check "every receipt was enqueued" (enqueued = receipt_count);
+    check "every receipt was enqueued" (List.length result.enqueued = receipt_count);
     check
-      (Printf.sprintf "every receipt was admitted (%d/%d)" admitted receipt_count)
-      (admitted = receipt_count);
+      (Printf.sprintf
+         "every receipt was admitted (%d/%d)"
+         (List.length result.admitted)
+         receipt_count)
+      (List.length result.admitted = receipt_count);
     check
-      (Printf.sprintf "autonomous lane ran during the test (%d turns)" autonomous_turns)
-      (autonomous_turns > 0))
+      (Printf.sprintf
+         "autonomous lane ran during the test (%d turns)"
+         result.autonomous_turns)
+      (result.autonomous_turns > 0))
 
 let test_receipts_are_admitted_in_fifo_order () =
   Printf.printf "Test: queued receipts are admitted one at a time, in order\n%!";
   with_env (fun ~base ~clock ->
-    let concurrent = ref false in
-    let in_turn = ref false in
-    let _, admitted, _ =
-      run_contention ~base ~clock ~gap_seconds:0.
-        ~on_admitted:(fun _ ->
-          if !in_turn then concurrent := true;
-          in_turn := true;
-          in_turn := false)
+    let result = run_contention ~base ~clock ~gap_seconds:0. in
+    let expected_contents =
+      List.map
+        (fun (_, queued_message) -> queued_message.Keeper_chat_queue.content)
+        result.enqueued
     in
-    check "receipts were admitted" (admitted > 0);
-    check "no two chat turns held the slot at once" (not !concurrent))
+    let admitted_contents =
+      List.map
+        (fun (_, queued_message) -> queued_message.Keeper_chat_queue.content)
+        result.admitted
+    in
+    let expected_delivery_keys =
+      List.map
+        (fun (receipt, _) ->
+           match
+             Keeper_chat_delivery_identity.Receipt_ids.of_list
+               [ receipt.Keeper_chat_queue.receipt_id ]
+           with
+           | Ok receipt_ids ->
+             Keeper_chat_delivery_identity.Queue_receipts receipt_ids
+           | Error Keeper_chat_delivery_identity.Receipt_ids.Empty ->
+             failwith "singleton receipt id list cannot be empty")
+        result.enqueued
+    in
+    let admitted_delivery_keys = List.map fst result.admitted in
+    let keys_match =
+      List.length expected_delivery_keys = List.length admitted_delivery_keys
+      && List.for_all2
+           Keeper_chat_delivery_identity.delivery_key_equal
+           expected_delivery_keys
+           admitted_delivery_keys
+    in
+    check "every receipt content is admitted in FIFO order"
+      (expected_contents = admitted_contents);
+    check "every exact receipt delivery key is admitted in FIFO order" keys_match;
+    check "chat and autonomous turns never overlap in the slot"
+      (result.max_active_turns = 1))
 
 let () =
   Printf.printf "=== keeper chat/autonomous admission contention ===\n%!";

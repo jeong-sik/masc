@@ -898,13 +898,23 @@ let commit_prepared_compaction_with
         | Ok () ->
           after_checkpoint_installed ();
           (match
-             complete_post_success_commit post_success_terminalizer
+           complete_post_success_commit post_success_terminalizer
            with
            | Error detail ->
+             let terminal_detail =
+               match
+                 Keeper_compaction_llm_summarizer
+                 .finish_post_success_commit_failure
+                   post_success_terminalizer
+                   detail
+               with
+               | Ok () -> detail
+               | Error terminal_detail -> terminal_detail
+             in
              publish_owner
                (commit_failure
                   ~committed:recovery
-                  (Checkpoint_candidate_failed detail))
+                  (Checkpoint_candidate_failed terminal_detail))
            | Ok () ->
              (try
                 Otel_metric_store.inc_counter

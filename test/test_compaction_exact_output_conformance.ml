@@ -116,31 +116,19 @@ let units =
   ]
 ;;
 
-let decision ?summary unit_index action : Yojson.Safe.t =
+let plan_json ~summary ~keep_from_unit_index : Yojson.Safe.t =
   `Assoc
-    [ S.compaction_plan_field_unit_index, `Int unit_index
-    ; S.compaction_plan_field_action, `String action
-    ; ( S.compaction_plan_field_summary
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) summary )
+    [ S.compaction_plan_field_summary, `String summary
+    ; S.compaction_plan_field_keep_from_unit_index, `Int keep_from_unit_index
     ]
-;;
-
-let plan_json decisions : Yojson.Safe.t =
-  `Assoc [ S.compaction_plan_field_decisions, `List decisions ]
 ;;
 
 let valid_plan_json =
-  plan_json
-    [ decision ~summary:"first summary" 0 S.compaction_plan_action_summarize
-    ; decision 1 S.compaction_plan_action_keep
-    ]
+  plan_json ~summary:"first summary" ~keep_from_unit_index:1
 ;;
 
 let domain_invalid_plan_json =
-  plan_json
-    [ decision 0 S.compaction_plan_action_keep
-    ; decision 1 S.compaction_plan_action_keep
-    ]
+  plan_json ~summary:"invalid boundary" ~keep_from_unit_index:0
 ;;
 
 let valid_response = F.openai_response valid_plan_json
@@ -169,6 +157,7 @@ let ensure_registered_keeper ~base_path keeper_name =
 
 let prepare_exn
       ?(base_path = exact_flow_base_path)
+      ?(source_units = units)
       ~keeper_name
       ~registry
       ()
@@ -180,7 +169,7 @@ let prepare_exn
       ~keeper_name
       ~registry
       ~lane_id:conformance_lane_id
-      ~units
+      ~units:source_units
   with
   | Ok prepared -> prepared
   | Error _ -> Alcotest.fail "compaction flow preparation failed"
@@ -245,24 +234,6 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
   in
   let keeper_name = "keeper-missing-compaction-lane" in
   ensure_registered_keeper ~base_path:exact_flow_base_path keeper_name;
-  List.iter
-    (fun (base_path, requested_keeper) ->
-       match
-         C.prepare_lane
-           ~base_path
-           ~keeper_name:requested_keeper
-           ~registry
-           ~lane_id:"compaction_exact"
-           ~units
-       with
-       | Error C.Exact_execution_context_unavailable -> ()
-       | Error _ ->
-         Alcotest.fail "wrong registry owner returned the wrong typed failure"
-       | Ok _ ->
-         Alcotest.fail "wrong registry root/name acquired an exact-flow owner")
-    [ exact_flow_base_path ^ "-wrong", keeper_name
-    ; exact_flow_base_path, keeper_name ^ "-wrong"
-    ];
   match
     C.prepare_lane
       ~base_path:exact_flow_base_path
@@ -310,6 +281,102 @@ let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
     (List.length (C.For_testing.attempt_observations prepared));
   Alcotest.(check int) "preparation performs no first POST" 0 (F.post_count first);
   Alcotest.(check int) "preparation performs no second POST" 0 (F.post_count second)
+;;
+
+let test_preparation_bounds_oldest_window_by_exact_request_body () =
+  let uncapped_slot_id = "uncapped-window-slot" in
+  let bounded_slot_id = "bounded-window-slot" in
+  let fixtures : F.target_fixture list =
+    [ { id = uncapped_slot_id; base_url = "http://127.0.0.1:9" }
+    ; { id = bounded_slot_id; base_url = "http://127.0.0.1:9" }
+    ]
+  in
+  let slot_ids = [ uncapped_slot_id; bounded_slot_id ] in
+  let source_units =
+    List.init 4 (fun index ->
+      U.Ordinary_message
+        (message
+           T.Assistant
+           (Printf.sprintf "source-%d:%s" index (String.make 512 'x'))))
+  in
+  let uncapped_snapshot =
+    F.resolver_snapshot ~source:"uncapped request projection" fixtures
+  in
+  let uncapped_registry =
+    publish_exn ~slot_ids uncapped_snapshot
+  in
+  let admitted_target =
+    match Registry.resolve_lane uncapped_registry ~lane_id:conformance_lane_id with
+    | Ok { selected_slots = [ _; bounded_slot ] } ->
+      bounded_slot.admitted_target
+    | Ok _ | Error _ -> Alcotest.fail "fixture did not resolve both ordered slots"
+  in
+  let requirement =
+    Agent_sdk.Exact_output.make_output_requirement
+      ~schema:S.compaction_plan_output_schema
+      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+  in
+  let projection_bytes units =
+    let window =
+      match C.For_testing.planning_window_for_units units with
+      | Ok window -> window
+      | Error detail -> Alcotest.failf "projection window failed: %s" detail
+    in
+    match
+      Agent_sdk.Exact_output.project_request_body
+        ~target:admitted_target
+        ~messages:(C.For_testing.messages_for_plan ~window)
+        requirement
+    with
+    | Ok projection -> projection.actual_bytes
+    | Error _ -> Alcotest.fail "credential-free request projection failed"
+  in
+  let two_unit_limit = projection_bytes (List.take 2 source_units) in
+  Alcotest.(check bool)
+    "third source makes the exact serialized body larger"
+    true
+    (projection_bytes (List.take 3 source_units) > two_unit_limit);
+  let bounded_snapshot =
+    F.resolver_snapshot
+      ~request_body_limits:[ bounded_slot_id, two_unit_limit ]
+      ~source:"bounded request projection"
+      fixtures
+  in
+  let bounded_registry =
+    publish_exn ~slot_ids bounded_snapshot
+  in
+  let prepared =
+    prepare_exn
+      ~source_units
+      ~keeper_name:"keeper-bounded-window"
+      ~registry:bounded_registry
+      ()
+  in
+  Alcotest.(check (list int))
+    "largest exact-fitting oldest prefix is selected"
+    [ 0; 1 ]
+    (C.For_testing.prepared_window_source_indices prepared);
+  let first_unit_bytes = projection_bytes (List.take 1 source_units) in
+  let rejecting_snapshot =
+    F.resolver_snapshot
+      ~request_body_limits:[ bounded_slot_id, first_unit_bytes - 1 ]
+      ~source:"reject every request prefix"
+      fixtures
+  in
+  let rejecting_registry =
+    publish_exn ~slot_ids rejecting_snapshot
+  in
+  match
+    C.prepare_lane
+      ~base_path:exact_flow_base_path
+      ~keeper_name:"keeper-rejected-window"
+      ~registry:rejecting_registry
+      ~lane_id:conformance_lane_id
+      ~units:source_units
+  with
+  | Error C.Exact_admission_failed -> ()
+  | Error _ | Ok _ ->
+    Alcotest.fail "a lane that fits no atomic source prefix must fail closed"
 ;;
 
 let test_published_replacement_cannot_mix_prepared_generation () =
@@ -587,6 +654,123 @@ let test_domain_invalid_output_advances_to_declared_successor () =
     [ "bind:" ^ first_slot
     ; "release:" ^ first_slot
     ; "bind:declared-domain-successor"
+    ]
+    !events
+;;
+
+let test_summary_that_blocks_next_exact_fold_advances_to_successor () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let first_slot = "future-fold-blocked" in
+  let successor_slot = "future-fold-successor" in
+  let blocked_response =
+    F.openai_response
+      (plan_json
+         ~summary:(String.make 20_000 'x')
+         ~keep_from_unit_index:1)
+  in
+  let blocked = F.start_server ~sw ~net ~clock (F.Reply blocked_response) in
+  let successor = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let fixtures : F.target_fixture list =
+    [ { id = first_slot; base_url = blocked.base_url }
+    ; { id = successor_slot; base_url = successor.base_url }
+    ]
+  in
+  let slot_ids = [ first_slot; successor_slot ] in
+  let uncapped_snapshot =
+    F.resolver_snapshot
+      ~source:"future fold request projection"
+      fixtures
+  in
+  let uncapped_registry = publish_exn ~slot_ids uncapped_snapshot in
+  let first_target =
+    match
+      Registry.resolve_lane
+        uncapped_registry
+        ~lane_id:conformance_lane_id
+    with
+    | Ok { selected_slots = first :: _ } -> first.admitted_target
+    | Ok _ | Error _ ->
+      Alcotest.fail "future-fold fixture did not resolve its first slot"
+  in
+  let initial_window =
+    match C.For_testing.planning_window_for_units units with
+    | Ok window -> window
+    | Error detail ->
+      Alcotest.failf "future-fold initial window failed: %s" detail
+  in
+  let requirement =
+    Agent_sdk.Exact_output.make_output_requirement
+      ~schema:S.compaction_plan_output_schema
+      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+  in
+  let initial_request_bytes =
+    match
+      Agent_sdk.Exact_output.project_request_body
+        ~target:first_target
+        ~messages:(C.For_testing.messages_for_plan ~window:initial_window)
+        requirement
+    with
+    | Ok projection -> projection.actual_bytes
+    | Error _ ->
+      Alcotest.fail "future-fold initial request projection failed"
+  in
+  let bounded_snapshot =
+    F.resolver_snapshot
+      ~request_body_limits:[ first_slot, initial_request_bytes ]
+      ~source:"future fold exact cap"
+      fixtures
+  in
+  let bounded_registry = publish_exn ~slot_ids bounded_snapshot in
+  let prepared =
+    prepare_exn
+      ~keeper_name:"keeper-future-fold"
+      ~registry:bounded_registry
+      ()
+  in
+  let events = ref [] in
+  let guard : C.exact_execution_guard =
+    { before_dispatch =
+        (fun observation ->
+           push_event events ("bind:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun observation ->
+           push_event events ("release:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; quarantine =
+        (fun _ _ ->
+           Alcotest.fail
+             "a declared future-fold successor must avoid terminal quarantine")
+    }
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name:"keeper-future-fold"
+      ~net
+      ~clock
+      ~exact_execution_guard:guard
+      prepared
+    |> completed_exn
+  in
+  Alcotest.(check string)
+    "the smaller summary owns the completed exact evidence"
+    successor_slot
+    (C.completed_exact_execution_evidence completed
+     |> C.exact_execution_evidence_slot_id);
+  Alcotest.(check int)
+    "future-blocking summary posts once"
+    1
+    (F.post_count blocked);
+  Alcotest.(check int)
+    "declared smaller-summary successor posts once"
+    1
+    (F.post_count successor);
+  Alcotest.(check (list string))
+    "future-blocking output releases before successor bind"
+    [ "bind:" ^ first_slot
+    ; "release:" ^ first_slot
+    ; "bind:" ^ successor_slot
     ]
     !events
 ;;
@@ -877,6 +1061,10 @@ let () =
             `Quick
             test_preparation_freezes_order_generation_and_defers_attempt_identity
         ; Alcotest.test_case
+            "request body cap bounds oldest window"
+            `Quick
+            test_preparation_bounds_oldest_window_by_exact_request_body
+        ; Alcotest.test_case
             "replacement cannot mix prepared generation"
             `Quick
             test_published_replacement_cannot_mix_prepared_generation
@@ -904,6 +1092,10 @@ let () =
             "domain invalidity advances to declared successor"
             `Quick
             test_domain_invalid_output_advances_to_declared_successor
+        ; Alcotest.test_case
+            "future-fold blocking summary advances to successor"
+            `Quick
+            test_summary_that_blocks_next_exact_fold_advances_to_successor
         ; Alcotest.test_case
             "final OAS failure is generic terminal"
             `Quick

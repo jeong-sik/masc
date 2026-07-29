@@ -37,27 +37,21 @@ let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction")
     }
 ;;
 
-let compaction_decision ?summary unit_index action =
-  `Assoc
-    [ Schema.compaction_plan_field_unit_index, `Int unit_index
-    ; Schema.compaction_plan_field_action, `String action
-    ; ( Schema.compaction_plan_field_summary
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) summary )
-    ]
-;;
-
-let exact_response decisions =
+let exact_response ~summary ~keep_from_unit_index =
   Exact_fixture.openai_response
-    (`Assoc [ Schema.compaction_plan_field_decisions, `List decisions ])
+    (`Assoc
+       [ Schema.compaction_plan_field_summary, `String summary
+       ; ( Schema.compaction_plan_field_keep_from_unit_index
+         , `Int keep_from_unit_index )
+       ])
 ;;
 
 let summarize_response summary =
-  exact_response
-    [ compaction_decision
-        ~summary
-        1
-        Schema.compaction_plan_action_summarize
-    ]
+  exact_response ~summary ~keep_from_unit_index:2
+;;
+
+let invalid_boundary_response =
+  exact_response ~summary:"invalid boundary" ~keep_from_unit_index:1
 ;;
 
 let init_runtime_fixture () =
@@ -302,8 +296,10 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
                   ; content_blocks = None
                   }
               ]
+          ; block_message Agent_sdk.Types.Assistant
+              [ Agent_sdk.Types.Text "raw suffix" ]
           ]
-        (exact_response [ compaction_decision ~summary:"done" 1 Schema.compaction_plan_action_summarize ]);
+        (summarize_response "done");
       run_case
         ~name:"reasoning-normalization-evidence"
         ~messages:
@@ -313,8 +309,10 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
                   { content = String.make 4096 'p'; signature = None }
               ; Agent_sdk.Types.Text "visible"
               ]
+          ; block_message Agent_sdk.Types.User
+              [ Agent_sdk.Types.Text "follow-up" ]
           ]
-        (exact_response [ compaction_decision 1 Schema.compaction_plan_action_keep ]))
+        (summarize_response "visible"))
 ;;
 
 let test_regular_post_turn_does_not_auto_compact () =
@@ -1131,10 +1129,9 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
          terminal and quarantined and keep slot and call provenance; they no longer read
          as the same failure. *)
       run_case
-        ~name:"unchanged-plan"
+        ~name:"invalid-boundary-plan"
         ~expected_cause:Keeper_event_queue_state.Domain_invalid_output
-        (exact_response
-           [ compaction_decision 1 Schema.compaction_plan_action_keep ]);
+        invalid_boundary_response;
       run_case
         ~name:"larger-checkpoint"
         ~expected_cause:Keeper_event_queue_state.Compaction_increased_checkpoint

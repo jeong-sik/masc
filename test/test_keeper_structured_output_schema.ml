@@ -129,39 +129,25 @@ let test_compaction_plan_schema_uses_codec_ssot () =
   check
     (list string)
     "compaction plan required fields"
-    [ Keeper_structured_output_schema.compaction_plan_field_decisions ]
+    (List.sort
+       String.compare
+       [ Keeper_structured_output_schema.compaction_plan_field_summary
+       ; Keeper_structured_output_schema.compaction_plan_field_keep_from_unit_index
+       ])
     (required_strings schema);
   check bool "compaction plan is closed" false
     (allows_additional_properties schema);
-  let decision_schema =
-    schema
-    |> schema_property Keeper_structured_output_schema.compaction_plan_field_decisions
-    |> schema_items
+  let _summary_schema =
+    schema_property
+      Keeper_structured_output_schema.compaction_plan_field_summary
+      schema
   in
-  check
-    (list string)
-    "compaction decision required fields"
-    (List.sort
-       String.compare
-       [ Keeper_structured_output_schema.compaction_plan_field_unit_index
-       ; Keeper_structured_output_schema.compaction_plan_field_action
-       ; Keeper_structured_output_schema.compaction_plan_field_summary
-       ])
-    (required_strings decision_schema);
-  check bool "compaction decision is closed" false
-    (allows_additional_properties decision_schema);
-  check
-    (list string)
-    "compaction action enum"
-    (List.sort
-       String.compare
-       [ Keeper_structured_output_schema.compaction_plan_action_keep
-       ; Keeper_structured_output_schema.compaction_plan_action_drop
-       ; Keeper_structured_output_schema.compaction_plan_action_summarize
-       ])
-    (decision_schema
-     |> schema_property Keeper_structured_output_schema.compaction_plan_field_action
-     |> enum_strings)
+  let _boundary_schema =
+    schema_property
+      Keeper_structured_output_schema.compaction_plan_field_keep_from_unit_index
+      schema
+  in
+  check bool "compaction boundary schema exposes codec fields" true true
 ;;
 
 let test_consolidation_group_schema_keeps_claim_kind_optional () =

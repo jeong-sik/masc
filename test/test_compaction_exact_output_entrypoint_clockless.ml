@@ -11,31 +11,21 @@ module Schema = Masc.Keeper_structured_output_schema
 
 let exact_flow_base_path = "/tmp/masc-compaction-clockless"
 
-let compaction_decision ?summary unit_index action =
-  `Assoc
-    [ Schema.compaction_plan_field_unit_index, `Int unit_index
-    ; Schema.compaction_plan_field_action, `String action
-    ; ( Schema.compaction_plan_field_summary
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) summary )
-    ]
-;;
-
-let exact_response decisions =
+let exact_response ~summary ~keep_from_unit_index =
   Exact_fixture.openai_response
-    (`Assoc [ Schema.compaction_plan_field_decisions, `List decisions ])
+    (`Assoc
+       [ Schema.compaction_plan_field_summary, `String summary
+       ; ( Schema.compaction_plan_field_keep_from_unit_index
+         , `Int keep_from_unit_index )
+       ])
 ;;
 
 let summarize_response summary =
-  exact_response
-    [ compaction_decision
-        ~summary
-        1
-        Schema.compaction_plan_action_summarize
-    ]
+  exact_response ~summary ~keep_from_unit_index:2
 ;;
 
 let invalid_keep_response =
-  exact_response [ compaction_decision 1 Schema.compaction_plan_action_keep ]
+  exact_response ~summary:"invalid boundary" ~keep_from_unit_index:1
 ;;
 
 let init_runtime_fixture () =

@@ -107,36 +107,18 @@ let consolidation_plan_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-(* Compaction plan codec. Only eligible source units cross the provider
-   boundary. Each source-bound decision carries its own optional replacement
-   summary, so application preserves source order and never relocates facts
-   through one global prose block. Field names and action tokens are exported
-   so schema, prompt, and parser share one wire SSOT. *)
-let compaction_plan_field_decisions = "decisions"
+(* Constant-size compaction boundary. The provider sees one contiguous run of
+   typed eligible units and returns one faithful summary plus the first unit
+   that remains exact. *)
 let compaction_plan_field_unit_index = "unit_index"
-let compaction_plan_field_action = "action"
 let compaction_plan_field_summary = "summary"
-let compaction_plan_action_keep = "keep"
-let compaction_plan_action_drop = "drop"
-let compaction_plan_action_summarize = "summarize"
+let compaction_plan_field_keep_from_unit_index = "keep_from_unit_index"
 
 let compaction_plan_output_schema =
-  let decision_fields =
-    [ compaction_plan_field_unit_index, integer_schema
-    ; ( compaction_plan_field_action
-      , enum_schema
-          [ compaction_plan_action_keep
-          ; compaction_plan_action_drop
-          ; compaction_plan_action_summarize
-          ] )
-    ; compaction_plan_field_summary, nullable_string_schema
-    ]
-  in
-  let decision_schema =
-    object_schema ~required:(List.map fst decision_fields) decision_fields
-  in
   let fields =
-    [ compaction_plan_field_decisions, array_schema decision_schema ]
+    [ compaction_plan_field_summary, string_schema
+    ; compaction_plan_field_keep_from_unit_index, integer_schema
+    ]
   in
   object_schema ~required:(List.map fst fields) fields
 ;;

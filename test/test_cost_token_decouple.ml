@@ -59,6 +59,13 @@ let check_null_field payload key =
      | None -> Alcotest.failf "%s absent from payload" key)
   | _ -> Alcotest.fail "payload not an object"
 
+let check_absent_field payload key =
+  match payload with
+  | `Assoc fields ->
+    check bool (key ^ " absent") true (Option.is_none (List.assoc_opt key fields))
+  | _ -> Alcotest.fail "payload not an object"
+;;
+
 (* Objective invalid-token signal used to prove cost remains independent. *)
 let invalid_tokens : Trust.t =
   Trust.Usage_untrusted [ "negative_input_tokens" ]
@@ -194,6 +201,51 @@ let test_missing_usage_is_explicit_null () =
   check_null_field missing "cache_creation_tokens";
   check_null_field missing "cache_read_tokens"
 
+let test_native_decode_rate_uses_current_field_only () =
+  let timings : Agent_sdk.Types.inference_timings =
+    { prompt_n = None
+    ; prompt_ms = None
+    ; prompt_per_second = None
+    ; predicted_n = Some 5
+    ; predicted_ms = Some 100.0
+    ; predicted_per_second = Some 50.0
+    ; cache_n = None
+    }
+  in
+  let telemetry : Agent_sdk.Types.inference_telemetry =
+    { system_fingerprint = None
+    ; timings = Some timings
+    ; reasoning_tokens = None
+    ; request_latency_ms = None
+    ; peak_memory_gb = None
+    ; provider_kind = None
+    ; reasoning_effort = None
+    ; canonical_model_id = None
+    ; reasoning_source = None
+    ; effective_context_window = None
+    ; provider_internal_action_count = None
+    ; ttfrc_ms = None
+    ; prefill_ms = None
+    }
+  in
+  let payload =
+    H.cost_event_payload
+      ~agent_name:"test_agent"
+      ~task_id:None
+      ~input_tokens:10
+      ~output_tokens:5
+      ~cost_usd:0.0
+      ~telemetry
+      ()
+  in
+  check
+    (float 1e-9)
+    "current hardware decode field"
+    50.0
+    (float_field payload "hw_decode_tokens_per_second");
+  check_absent_field payload "provider_tokens_per_second"
+;;
+
 let () =
   run "cost_token_decouple"
     [
@@ -221,5 +273,7 @@ let () =
             test_zero_and_large_counts_are_retained;
           test_case "missing usage is explicit null" `Quick
             test_missing_usage_is_explicit_null;
+          test_case "native decode rate uses current field only" `Quick
+            test_native_decode_rate_uses_current_field_only;
         ] );
     ]

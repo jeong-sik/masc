@@ -50,3 +50,7 @@ streaming = true
 [ollama_cloud.deepseek-v4-flash]
 is-default = true
 max-concurrent = 1
+# This binding reaches the Keeper dispatch boundary even though the smoke
+# disables autonomous bootstrap. Startup admission therefore requires an
+# explicit positive serialized-request ceiling.
+max-request-body-bytes = 65536

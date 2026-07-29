@@ -1160,10 +1160,21 @@ let test_resolution_is_durable_and_origin_scoped () =
          | None -> Alcotest.fail "retry lost its replay evidence projection"
          | Some evidence ->
            (match
+              let prepared =
+                match
+                  Agent_sdk.Agent.caller_projected_message
+                    ~source:"test_keeper_approval_queue"
+                    (Agent_sdk.Types.user_msg retry_text)
+                with
+                | Ok prepared -> prepared
+                | Error detail -> Alcotest.fail detail
+              in
               Masc.Keeper_gate_replay.project_model_input
                 ~base_path
                 evidence
-                [ Agent_sdk.Types.user_msg retry_text ]
+                [ prepared ]
+              |> Result.map
+                   (List.map Agent_sdk.Agent.prepared_message_value)
             with
             | Ok [ _canonical; projected ] ->
               Agent_sdk.Types.text_of_content projected.content

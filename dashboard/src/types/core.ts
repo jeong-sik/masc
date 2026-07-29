@@ -361,8 +361,13 @@ export interface PromptTelemetry {
 
 export interface CtxCompositionTelemetry {
   actual_input_tokens: number | null
-  attributed_bytes: number
-  segments: Record<string, PromptSegmentTelemetry>
+  sdk_turn: number
+  prepared_component_bytes: number
+  request_body_bytes: number | null
+  request_body_sha256: string | null
+  origin_segments: Record<string, PromptSegmentTelemetry>
+  content_segments: Record<string, PromptSegmentTelemetry>
+  context_block_segments: Record<string, PromptSegmentTelemetry>
 }
 
 export interface KeeperMetricPoint {

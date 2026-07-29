@@ -17,6 +17,10 @@ type agent_setup =
   ; user_message : string
   ; hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; pre_dispatch_serialization_observer :
+      Agent_sdk.Agent.pre_dispatch_serialization_observer
+  ; prepared_input_snapshot_ref : prepared_input_snapshot option ref
+  ; request_wire_snapshot_ref : request_wire_snapshot option ref
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
@@ -526,9 +530,11 @@ let assemble_hooks
                                ]))
                         ())
                  | _ -> ());
-                (* Phase O observability: capture the effective OAS request
-                   boundary after keeper-owned context injection has finalized
-                   [extra_system_context]. *)
+                (* Redacted diagnostic content capture before OAS prepares and
+                   projects provider messages. Exact prepared origins and the
+                   provider serialization boundary are observed separately by
+                   [model_input_projection] and
+                   [pre_dispatch_serialization_observer] below. *)
                 Option.iter
                   (fun turn_id ->
                      Keeper_wire_capture.capture_request
@@ -561,15 +567,34 @@ let assemble_hooks
         ~store
         ~keep_recent:(Keeper_artifact_hydrator.keep_recent_from_env ())
     in
+    let prepared_input_snapshot_ref = ref None in
+    let request_wire_snapshot_ref = ref None in
     let model_input_projection messages =
       let messages = hydrate_model_input messages in
-      match gate_replay_evidence with
-      | None -> Ok messages
-      | Some evidence ->
-        Keeper_gate_replay.project_model_input
-          ~base_path:ctx.config.base_path
-          evidence
-          messages
+      let projected =
+        match gate_replay_evidence with
+        | None -> Ok messages
+        | Some evidence ->
+          Keeper_gate_replay.project_model_input
+            ~base_path:ctx.config.base_path
+            evidence
+            messages
+      in
+      Result.map
+        (fun messages ->
+           prepared_input_snapshot_ref :=
+             Some
+               { sdk_turn = acc.current_turn
+               ; messages
+               ; context_blocks = acc.prompt_blocks
+               };
+           messages)
+        projected
+    in
+    let pre_dispatch_serialization_observer observation =
+      request_wire_snapshot_ref :=
+        Some { sdk_turn = acc.current_turn; observation };
+      Ok ()
     in
     Ok
       { tools
@@ -578,6 +603,9 @@ let assemble_hooks
       ; user_message
       ; hooks
       ; model_input_projection
+      ; pre_dispatch_serialization_observer
+      ; prepared_input_snapshot_ref
+      ; request_wire_snapshot_ref
       ; gate_replay_evidence
       ; acc
       ; all_tool_names

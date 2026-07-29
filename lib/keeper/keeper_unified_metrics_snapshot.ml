@@ -100,7 +100,11 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("resolved_model_id", `Null);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
-        ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
+        ( "ctx_composition"
+        , match result.ctx_composition with
+          | Some composition ->
+            Keeper_agent_run.ctx_composition_to_json composition
+          | None -> `Null );
         ("usage", usage_json);
         ("usage_trust", `String (usage_trust_to_string usage_trust));
         ( "usage_anomaly_reasons",

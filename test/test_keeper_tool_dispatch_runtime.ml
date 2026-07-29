@@ -77,10 +77,21 @@ let project_replay_message_exn ~base_path
   | None -> fail "model message has no replay evidence"
   | Some evidence ->
     (match
+       let prepared =
+         match
+           Agent_sdk.Agent.caller_projected_message
+             ~source:"test_keeper_tool_dispatch_runtime"
+             (Agent_sdk.Types.user_msg message.text)
+         with
+         | Ok prepared -> prepared
+         | Error detail -> fail detail
+       in
        Masc.Keeper_gate_replay.project_model_input
          ~base_path
          evidence
-         [ Agent_sdk.Types.user_msg message.text ]
+         [ prepared ]
+       |> Result.map
+            (List.map Agent_sdk.Agent.prepared_message_value)
      with
      | Ok [ _canonical; projected ] ->
        Agent_sdk.Types.text_of_content projected.content

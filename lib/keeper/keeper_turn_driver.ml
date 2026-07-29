@@ -345,6 +345,7 @@ let run_named
     ?(tools = [])
     ?(initial_messages = [])
     ?model_input_projection
+    ?pre_dispatch_serialization_observer
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
@@ -689,6 +690,7 @@ let run_named
             ; tools
             ; initial_messages
             ; model_input_projection
+            ; pre_dispatch_serialization_observer
             ; stream_idle_timeout_s
             ; body_timeout_s
             ; temperature

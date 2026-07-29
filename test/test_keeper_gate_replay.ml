@@ -8,6 +8,24 @@ let result_json =
   Alcotest.result json (Alcotest.testable Fmt.string String.equal)
 ;;
 
+let project_model_input ~base_path evidence messages =
+  let prepared =
+    List.map
+      (fun message ->
+         match
+           Agent_sdk.Agent.caller_projected_message
+             ~source:"test_keeper_gate_replay"
+             message
+         with
+         | Ok prepared -> prepared
+         | Error detail -> Alcotest.fail detail)
+      messages
+  in
+  Masc.Keeper_gate_replay.project_model_input ~base_path evidence prepared
+  |> Result.map
+       (List.map Agent_sdk.Agent.prepared_message_value)
+;;
+
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_gate_replay_" "" in
   Unix.unlink dir;
@@ -35,7 +53,7 @@ let projected_model_text ~base_path
   | None -> Alcotest.fail "model message has no replay evidence"
   | Some evidence ->
     (match
-       Masc.Keeper_gate_replay.project_model_input
+       project_model_input
          ~base_path
          evidence
          [ Agent_sdk.Types.user_msg message.text ]
@@ -526,7 +544,7 @@ let test_multimodal_goal_projects_exact_replay_evidence () =
             (Agent_sdk.Types.text_of_content canonical_message.content)
             raw_output);
        match
-         Masc.Keeper_gate_replay.project_model_input
+         project_model_input
            ~base_path
            evidence
            [ canonical_message ]
@@ -577,7 +595,7 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
          | None -> Alcotest.fail "replay evidence is absent"
        in
        match
-         Masc.Keeper_gate_replay.project_model_input
+         project_model_input
            ~base_path
            evidence
            [ Agent_sdk.Types.user_msg "reference was dropped" ]

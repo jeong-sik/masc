@@ -91,6 +91,8 @@ val run_named :
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->
   ?model_input_projection:Agent_sdk.Agent.model_input_projection ->
+  ?pre_dispatch_serialization_observer:
+    Agent_sdk.Agent.pre_dispatch_serialization_observer ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->

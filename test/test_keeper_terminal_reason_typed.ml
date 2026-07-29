@@ -802,12 +802,6 @@ let () =
         ~dynamic_context:""
         ~user_message:""
     in
-    let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
-      { actual_input_tokens = None
-      ; attributed_bytes = 0
-      ; segments = []
-      }
-    in
     let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =
       { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
       ; config_root = ""
@@ -817,7 +811,7 @@ let () =
     { response_text = "completed"
     ; model_used = "test-model"
     ; prompt_metrics
-    ; ctx_composition
+    ; ctx_composition = None
     ; runtime_observation = None
     ; turn_count = 1
     ; usage = Masc.Inference_utils.zero_usage

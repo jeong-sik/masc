@@ -30,6 +30,8 @@ type try_provider_ctx =
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
   ; model_input_projection : Agent_sdk.Agent.model_input_projection option
+  ; pre_dispatch_serialization_observer :
+      Agent_sdk.Agent.pre_dispatch_serialization_observer option
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float option
@@ -246,6 +248,8 @@ let run_try_provider
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
           ; model_input_projection = ctx.model_input_projection
+          ; pre_dispatch_serialization_observer =
+              ctx.pre_dispatch_serialization_observer
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool

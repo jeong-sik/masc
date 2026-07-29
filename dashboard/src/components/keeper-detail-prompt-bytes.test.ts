@@ -78,10 +78,19 @@ describe('keeper prompt byte telemetry', () => {
       metrics_series: [metricPoint({
         ctx_composition: {
           actual_input_tokens: 1000,
-          attributed_bytes: 1160,
-          segments: {
+          sdk_turn: 4,
+          prepared_component_bytes: 1160,
+          request_body_bytes: 1320,
+          request_body_sha256: 'abc123',
+          origin_segments: {
             system_prompt: { bytes: 320, fingerprint: null },
-            history_tool_result: { bytes: 840, fingerprint: null },
+            canonical_history: { bytes: 840, fingerprint: null },
+          },
+          content_segments: {
+            'canonical_history.tool_result': { bytes: 780, fingerprint: null },
+          },
+          context_block_segments: {
+            memory_os_recall: { bytes: 500, fingerprint: null },
           },
         },
       })],
@@ -89,10 +98,13 @@ describe('keeper prompt byte telemetry', () => {
 
     render(html`<${CtxCompositionPanel} keeper=${keeper} />`, container)
 
-    expect(container.textContent).toContain('attributed content bytes')
+    expect(container.textContent).toContain('prepared components')
     expect(container.textContent).toContain('1,160 bytes')
+    expect(container.textContent).toContain('1,320 bytes')
+    expect(container.textContent).toContain('sha256 abc123')
     expect(container.textContent).toContain('provider input')
-    expect(container.textContent).toContain('reported separately; not byte-attributed')
+    expect(container.textContent).toContain('provider-reported; not estimated')
+    expect(container.textContent).toContain('Memory OS recall')
     expect(container.textContent).not.toContain('residual')
   })
 })

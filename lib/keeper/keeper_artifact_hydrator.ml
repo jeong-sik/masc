@@ -59,7 +59,8 @@ let hydrate_block ~store ~remaining
   | _ -> block
 
 let hydrate_messages ~store ~keep_recent
-    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+    (messages : Agent_sdk.Agent.prepared_message list)
+  : Agent_sdk.Agent.prepared_message list =
   let remaining = ref keep_recent in
   (* "Recent" = tail of the message list. Reverse first so iteration
      visits the LAST message first; the counter then ticks down on the
@@ -72,11 +73,12 @@ let hydrate_messages ~store ~keep_recent
   let reversed = List.rev messages in
   let mapped =
     List.map
-      (fun (msg : Agent_sdk.Types.message) ->
-        let new_content =
-          List.map (hydrate_block ~store ~remaining) msg.content
-        in
-        { msg with content = new_content })
+      (Agent_sdk.Agent.map_prepared_message
+         (fun (msg : Agent_sdk.Types.message) ->
+            let new_content =
+              List.map (hydrate_block ~store ~remaining) msg.content
+            in
+            { msg with content = new_content }))
       reversed
   in
   List.rev mapped

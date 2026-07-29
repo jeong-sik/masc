@@ -18,37 +18,50 @@ export function autonomyHint(count: number | undefined, proactiveEnabled: boolea
 
 export const CTX_SEGMENT_LABELS: Record<string, string> = {
   system_prompt: '시스템 프롬프트',
-  dynamic_context: '턴 컨텍스트',
-  memory_context: '메모리',
-  temporal_context: '시간',
-  user_message: '현재 입력',
-  history_user: '히스토리 · user',
-  history_assistant_text: '히스토리 · assistant',
-  history_tool_use: '히스토리 · tool use',
-  history_tool_result: '히스토리 · tool result',
-  history_other: '히스토리 · 기타',
-  unattributed: '미할당',
+  tool_schemas: '도구 스키마',
+  canonical_history: '정식 히스토리',
+  current_user: '현재 사용자 입력',
+  extra_system_context: '추가 시스템 컨텍스트',
+  'context_block.dynamic_context': '주입 블록 · 턴 컨텍스트',
+  'context_block.temporal_summary': '주입 블록 · 시간 요약',
+  'context_block.memory_os_recall': '주입 블록 · Memory OS recall',
 }
 
 export const CTX_SEGMENT_COLORS: Record<string, string> = {
   system_prompt: 'var(--amber-bright)',
-  dynamic_context: 'var(--purple)',
-  memory_context: 'var(--rose-light)',
-  temporal_context: 'var(--cyan)',
-  user_message: 'var(--sky-400)',
-  history_user: 'var(--purple)',
-  history_assistant_text: 'var(--blue-400)',
-  history_tool_use: 'var(--color-status-ok)',
-  history_tool_result: 'var(--bad-light)',
-  history_other: 'var(--color-fg-muted)',
-  unattributed: 'var(--color-border-default)',
+  tool_schemas: 'var(--color-status-ok)',
+  canonical_history: 'var(--blue-400)',
+  current_user: 'var(--sky-400)',
+  extra_system_context: 'var(--rose-light)',
+  'context_block.dynamic_context': 'var(--purple)',
+  'context_block.temporal_summary': 'var(--cyan)',
+  'context_block.memory_os_recall': 'var(--rose-light)',
 }
 
 export function ctxSegmentLabel(key: string): string {
+  if (key.startsWith('caller_projection.')) {
+    return `호출자 projection · ${key.slice('caller_projection.'.length)}`
+  }
+  if (key.startsWith('context_block.')) {
+    return CTX_SEGMENT_LABELS[key] ?? `주입 블록 · ${key.slice('context_block.'.length).replace(/[_-]+/g, ' ')}`
+  }
+  const parts = key.split('.')
+  if (parts.length > 1) {
+    const origin = ctxSegmentLabel(parts.slice(0, -1).join('.'))
+    return `${origin} · ${parts[parts.length - 1]?.replace(/[_-]+/g, ' ')}`
+  }
   return CTX_SEGMENT_LABELS[key] ?? key.replace(/[_-]+/g, ' ')
 }
 
 export function ctxSegmentColor(key: string): string {
+  if (key.startsWith('canonical_history.')) {
+    if (key.endsWith('.tool_result')) return 'var(--bad-light)'
+    if (key.endsWith('.tool_use')) return 'var(--color-status-ok)'
+    if (key.endsWith('.thinking') || key.endsWith('.reasoning_details')) return 'var(--purple)'
+    return CTX_SEGMENT_COLORS.canonical_history ?? 'var(--blue-400)'
+  }
+  if (key.startsWith('context_block.memory_os_recall')) return 'var(--rose-light)'
+  if (key.startsWith('caller_projection.')) return 'var(--cyan)'
   return CTX_SEGMENT_COLORS[key] ?? 'var(--color-fg-muted)'
 }
 

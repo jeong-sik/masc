@@ -453,16 +453,41 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
             }
           : null
       const rawCtxComposition = isRecord(item.ctx_composition) ? item.ctx_composition : null
-      const rawCtxSegments =
-        rawCtxComposition && isRecord(rawCtxComposition.segments) ? rawCtxComposition.segments : null
-      const ctxSegments =
-        normalizePromptSegments(rawCtxSegments, new Set())
+      const originSegments = normalizePromptSegments(
+        rawCtxComposition && isRecord(rawCtxComposition.origin_segments)
+          ? rawCtxComposition.origin_segments
+          : null,
+        new Set(),
+      )
+      const contentSegments = normalizePromptSegments(
+        rawCtxComposition && isRecord(rawCtxComposition.content_segments)
+          ? rawCtxComposition.content_segments
+          : null,
+        new Set(),
+      )
+      const contextBlockSegments = normalizePromptSegments(
+        rawCtxComposition && isRecord(rawCtxComposition.context_block_segments)
+          ? rawCtxComposition.context_block_segments
+          : null,
+        new Set(),
+      )
       const ctx_composition: CtxCompositionTelemetry | null =
-        rawCtxComposition != null || Object.keys(ctxSegments).length > 0
+        rawCtxComposition != null
           ? {
               actual_input_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.actual_input_tokens) ?? null) : null,
-              attributed_bytes: rawCtxComposition ? (asNumber(rawCtxComposition.attributed_bytes) ?? 0) : 0,
-              segments: ctxSegments,
+              sdk_turn: rawCtxComposition ? (asNumber(rawCtxComposition.sdk_turn) ?? 0) : 0,
+              prepared_component_bytes: rawCtxComposition
+                ? (asNumber(rawCtxComposition.prepared_component_bytes) ?? 0)
+                : 0,
+              request_body_bytes: rawCtxComposition
+                ? (asNumber(rawCtxComposition.request_body_bytes) ?? null)
+                : null,
+              request_body_sha256: rawCtxComposition && typeof rawCtxComposition.request_body_sha256 === 'string'
+                ? rawCtxComposition.request_body_sha256
+                : null,
+              origin_segments: originSegments,
+              content_segments: contentSegments,
+              context_block_segments: contextBlockSegments,
             }
           : null
       const rawTel = isRecord(item.inference_telemetry) ? item.inference_telemetry : null

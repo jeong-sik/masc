@@ -32,8 +32,24 @@ type prompt_metrics =
 
 type ctx_composition_metrics =
   { actual_input_tokens : int option
-  ; attributed_bytes : int
-  ; segments : (string * prompt_segment_metrics) list
+  ; sdk_turn : int
+  ; prepared_component_bytes : int
+  ; request_body_bytes : int option
+  ; request_body_sha256 : string option
+  ; origin_segments : (string * prompt_segment_metrics) list
+  ; content_segments : (string * prompt_segment_metrics) list
+  ; context_block_segments : (string * prompt_segment_metrics) list
+  }
+
+type prepared_input_snapshot =
+  { sdk_turn : int
+  ; messages : Agent_sdk.Agent.prepared_message list
+  ; context_blocks : Turn_record.prompt_block list
+  }
+
+type request_wire_snapshot =
+  { sdk_turn : int
+  ; observation : Agent_sdk.Llm_provider.Request_wire_observer.observation
   }
 
 let empty_prompt_segment_metrics =
@@ -171,42 +187,104 @@ let history_bucket_of_block
   | Agent_sdk.Types.Document _ -> "history_document"
   | Agent_sdk.Types.Audio _ -> "history_audio"
 
+let prepared_origin_name = function
+  | Agent_sdk.Agent.Canonical_history -> "canonical_history"
+  | Agent_sdk.Agent.Current_user -> "current_user"
+  | Agent_sdk.Agent.Extra_system_context -> "extra_system_context"
+  | Agent_sdk.Agent.Caller_projection { source } ->
+    "caller_projection." ^ source
+;;
+
+let content_kind = function
+  | Agent_sdk.Types.Text _ -> "text"
+  | Agent_sdk.Types.Thinking _ -> "thinking"
+  | Agent_sdk.Types.ReasoningDetails _ -> "reasoning_details"
+  | Agent_sdk.Types.RedactedThinking _ -> "redacted_thinking"
+  | Agent_sdk.Types.ToolUse _ -> "tool_use"
+  | Agent_sdk.Types.ToolResult _ -> "tool_result"
+  | Agent_sdk.Types.Image _ -> "image"
+  | Agent_sdk.Types.Document _ -> "document"
+  | Agent_sdk.Types.Audio _ -> "audio"
+;;
+
+let serialized_json_metric json =
+  prompt_segment_metrics_of_text (Yojson.Safe.to_string json)
+;;
+
+let sorted_segments totals =
+  Hashtbl.to_seq totals
+  |> List.of_seq
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+;;
+
+let sum_segments segments =
+  List.fold_left (fun acc (_, metric) -> acc + metric.bytes) 0 segments
+;;
+
 let build_ctx_composition_metrics
+    ~(sdk_turn : int)
     ~(system_prompt : string)
-    ~(dynamic_context : string)
-    ~(memory_context : string)
-    ~(temporal_context : string)
-    ~(user_message : string)
-    ~(history_messages : Agent_sdk.Types.message list)
+    ~(tools : Agent_sdk.Tool.t list)
+    ~(prepared_messages : Agent_sdk.Agent.prepared_message list)
+    ~(context_blocks : Turn_record.prompt_block list)
+    ~(request_wire :
+        Agent_sdk.Llm_provider.Request_wire_observer.observation option)
     ~(actual_input_tokens : int option) : ctx_composition_metrics =
-  let totals : (string, prompt_segment_metrics) Hashtbl.t = Hashtbl.create 16 in
-  let add_text_segment bucket text =
-    let metric = prompt_segment_metrics_of_text text in
-    if metric.bytes > 0 then add_segment_metric totals ~bucket metric
+  let origin_totals : (string, prompt_segment_metrics) Hashtbl.t =
+    Hashtbl.create 8
   in
-  add_text_segment "system_prompt" system_prompt;
-  add_text_segment "dynamic_context" dynamic_context;
-  add_text_segment "memory_context" memory_context;
-  add_text_segment "temporal_context" temporal_context;
-  add_text_segment "user_message" user_message;
+  let content_totals : (string, prompt_segment_metrics) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  let system_prompt_metric = prompt_segment_metrics_of_text system_prompt in
+  if system_prompt_metric.bytes > 0
+  then add_segment_metric origin_totals ~bucket:"system_prompt" system_prompt_metric;
+  let tools_metric =
+    tools
+    |> List.map Agent_sdk.Tool.schema_to_json
+    |> fun schemas -> serialized_json_metric (`List schemas)
+  in
+  if tools_metric.bytes > 0
+  then add_segment_metric origin_totals ~bucket:"tool_schemas" tools_metric;
   List.iter
-    (fun (message : Agent_sdk.Types.message) ->
-      List.iter
-        (fun block ->
-          let bucket = history_bucket_of_block ~role:message.role block in
-          let metric = metric_of_block ~role:message.role block in
-          if metric.bytes > 0 then add_segment_metric totals ~bucket metric)
-        message.content)
-    history_messages;
-  let segments =
-    Hashtbl.to_seq totals
-    |> List.of_seq
-    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    (fun prepared ->
+       let origin =
+         Agent_sdk.Agent.prepared_message_origin prepared
+         |> prepared_origin_name
+       in
+       let message = Agent_sdk.Agent.prepared_message_value prepared in
+       let message_metric =
+         Agent_sdk.Llm_provider.Api_common.message_to_json message
+         |> serialized_json_metric
+       in
+       add_segment_metric origin_totals ~bucket:origin message_metric;
+       List.iter
+         (fun block ->
+            let bucket = origin ^ "." ^ content_kind block in
+            let metric =
+              Agent_sdk.Llm_provider.Api_common.content_block_to_json block
+              |> serialized_json_metric
+            in
+            add_segment_metric content_totals ~bucket metric)
+         message.content)
+    prepared_messages;
+  let origin_segments = sorted_segments origin_totals in
+  let content_segments = sorted_segments content_totals in
+  let context_block_segments =
+    context_blocks
+    |> List.filter_map (fun (block : Turn_record.prompt_block) ->
+      if Prompt_block_id.equal block.block Prompt_block_id.Persona
+      then None
+      else
+        Some
+          ( Prompt_block_id.to_string block.block
+          , { bytes = block.bytes; fingerprint = Some block.digest } ))
   in
-  let attributed_bytes =
-    List.fold_left
-      (fun acc (_, metric) -> acc + metric.bytes)
-      0 segments
+  let request_body_bytes, request_body_sha256 =
+    match request_wire with
+    | Some observation ->
+      Some observation.body_bytes, Some observation.body_sha256
+    | None -> None, None
   in
   let actual_input_tokens =
     match actual_input_tokens with
@@ -215,18 +293,36 @@ let build_ctx_composition_metrics
   in
   {
     actual_input_tokens;
-    attributed_bytes;
-    segments;
+    sdk_turn;
+    prepared_component_bytes = sum_segments origin_segments;
+    request_body_bytes;
+    request_body_sha256;
+    origin_segments;
+    content_segments;
+    context_block_segments;
   }
 
 let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t =
   `Assoc
     [
       ("actual_input_tokens", Json_util.int_opt_to_json metrics.actual_input_tokens);
-      ("attributed_bytes", `Int metrics.attributed_bytes);
-      ( "segments",
+      ("sdk_turn", `Int metrics.sdk_turn);
+      ("prepared_component_bytes", `Int metrics.prepared_component_bytes);
+      ("request_body_bytes", Json_util.int_opt_to_json metrics.request_body_bytes);
+      ("request_body_sha256", Json_util.string_opt_to_json metrics.request_body_sha256);
+      ( "origin_segments",
         `Assoc
           (List.map
              (fun (key, value) -> (key, prompt_segment_metrics_to_json value))
-             metrics.segments) );
+             metrics.origin_segments) );
+      ( "content_segments",
+        `Assoc
+          (List.map
+             (fun (key, value) -> (key, prompt_segment_metrics_to_json value))
+             metrics.content_segments) );
+      ( "context_block_segments",
+        `Assoc
+          (List.map
+             (fun (key, value) -> (key, prompt_segment_metrics_to_json value))
+             metrics.context_block_segments) );
     ]

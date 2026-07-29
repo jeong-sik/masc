@@ -18,8 +18,8 @@ val keep_recent_from_env : unit -> int
 val hydrate_recent :
   store:Tool_blob_store.t ->
   keep_recent:int ->
-  Agent_sdk.Types.message list ->
-  Agent_sdk.Types.message list
+  Agent_sdk.Agent.prepared_message list ->
+  Agent_sdk.Agent.prepared_message list
 (** Walk the message list right-to-left
     and hydrates the last [keep_recent] [Stored] markers it encounters.
 

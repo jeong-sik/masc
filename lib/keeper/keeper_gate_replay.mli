@@ -94,8 +94,8 @@ val append_model_evidence_block :
 val project_model_input :
   base_path:string ->
   model_evidence ->
-  Agent_sdk.Types.message list ->
-  (Agent_sdk.Types.message list, string) result
+  Agent_sdk.Agent.prepared_message list ->
+  (Agent_sdk.Agent.prepared_message list, string) result
 (** Append the full durable payload as an explicit provider-only message.
     Canonical history remains reference-only and no text search or replacement
     decides where evidence is attached. A storage miss is logged and leaves the

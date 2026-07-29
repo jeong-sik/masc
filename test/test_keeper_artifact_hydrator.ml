@@ -68,6 +68,23 @@ let extract_tool_content (msg : T.message) : string =
   | [ T.ToolResult { content; _ } ] -> content
   | _ -> failwith "expected single ToolResult block"
 
+let hydrate_messages ~store ~keep_recent messages =
+  let prepared =
+    List.map
+      (fun message ->
+         match
+           Agent_sdk.Agent.caller_projected_message
+             ~source:"test_keeper_artifact_hydrator"
+             message
+         with
+         | Ok prepared -> prepared
+         | Error detail -> Alcotest.fail detail)
+      messages
+  in
+  H.hydrate_recent ~store ~keep_recent prepared
+  |> List.map Agent_sdk.Agent.prepared_message_value
+;;
+
 (* --- Basic hydration --- *)
 
 let test_hydrates_recent_marker () =
@@ -76,7 +93,7 @@ let test_hydrates_recent_marker () =
       let payload = String.make 5000 'x' in
       let _sha, marker = store_a_blob store payload in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:marker in
-      let r = H.hydrate_recent ~store ~keep_recent:3 in
+      let r = hydrate_messages ~store ~keep_recent:3 in
       let result = r [ msg ] in
       Alcotest.(check int) "single message back" 1 (List.length result);
       Alcotest.(check string) "hydrated" payload
@@ -112,7 +129,7 @@ let test_hydration_preserves_tool_failure_provenance () =
         }
       in
       let result =
-        H.hydrate_recent ~store ~keep_recent:1 [ msg ]
+        hydrate_messages ~store ~keep_recent:1 [ msg ]
       in
       match (List.hd result).content with
       | [ T.ToolResult { content; outcome; _ } ] ->
@@ -131,7 +148,7 @@ let test_keep_recent_zero_no_hydration () =
       let store = B.create ~base_path:dir in
       let _sha, marker = store_a_blob store "hello payload" in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:marker in
-      let r = H.hydrate_recent ~store ~keep_recent:0 in
+      let r = hydrate_messages ~store ~keep_recent:0 in
       let result = r [ msg ] in
       Alcotest.(check string) "marker unchanged" marker
         (extract_tool_content (List.hd result)))
@@ -151,7 +168,7 @@ let test_only_last_k_hydrated () =
           make_tool_message ~tool_use_id:"t4" ~content:m4;
         ]
       in
-      let r = H.hydrate_recent ~store ~keep_recent:2 in
+      let r = hydrate_messages ~store ~keep_recent:2 in
       let result = r msgs in
       Alcotest.(check int) "msg count preserved" 4 (List.length result);
       let contents = List.map extract_tool_content result in
@@ -173,7 +190,7 @@ let test_inline_unchanged () =
       let store = B.create ~base_path:dir in
       let inline_payload = "small inline payload" in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:inline_payload in
-      let r = H.hydrate_recent ~store ~keep_recent:3 in
+      let r = hydrate_messages ~store ~keep_recent:3 in
       let result = r [ msg ] in
       Alcotest.(check string) "inline preserved" inline_payload
         (extract_tool_content (List.hd result)))
@@ -190,7 +207,7 @@ let test_non_tool_result_unchanged () =
       metadata = [];
         }
       in
-      let r = H.hydrate_recent ~store ~keep_recent:3 in
+      let r = hydrate_messages ~store ~keep_recent:3 in
       let result = r [ msg ] in
       Alcotest.(check int) "still one block" 1
         (List.length (List.hd result).content);
@@ -214,7 +231,7 @@ let test_hydration_miss_keeps_marker () =
                 ~mime:"text/plain"))
       in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:phantom in
-      let r = H.hydrate_recent ~store ~keep_recent:3 in
+      let r = hydrate_messages ~store ~keep_recent:3 in
       let result = r [ msg ] in
       Alcotest.(check string) "marker untouched" phantom
         (extract_tool_content (List.hd result)))

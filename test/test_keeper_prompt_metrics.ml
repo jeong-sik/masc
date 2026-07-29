@@ -303,7 +303,7 @@ let test_user_message_sanitizer_preserves_semantic_content () =
     (has_in sanitized "Please inspect the current board status.")
 
 let test_ctx_composition_splits_history_bytes () =
-  let history_messages =
+  let messages =
     [
       {
         Agent_sdk.Types.role = Agent_sdk.Types.User;
@@ -347,38 +347,80 @@ let test_ctx_composition_splits_history_bytes () =
       };
     ]
   in
+  let prepared_messages =
+    List.map
+      (fun message ->
+         match
+           Agent_sdk.Agent.caller_projected_message
+             ~source:"test_history"
+             message
+         with
+         | Ok prepared -> prepared
+         | Error detail -> fail detail)
+      messages
+  in
+  let request_wire =
+    Agent_sdk.Llm_provider.Request_wire_observer.observation
+      ~capture_id:None
+      ~provider:"test"
+      ~model:"test"
+      ~http_codec:"test"
+      ~stream:false
+      ~body:"{\"request\":\"body\"}"
+  in
   let metrics =
     KAR.build_ctx_composition_metrics
+      ~sdk_turn:7
       ~system_prompt:"System prompt"
-      ~dynamic_context:"Dynamic context"
-      ~memory_context:"Memory context"
-      ~temporal_context:"Temporal context"
-      ~user_message:"Current user message"
-      ~history_messages
+      ~tools:[]
+      ~prepared_messages
+      ~context_blocks:
+        [ { Turn_record.block = Prompt_block_id.Memory_os_recall
+          ; bytes = 55_055
+          ; digest = String.make 64 'a'
+          }
+        ]
+      ~request_wire:(Some request_wire)
       ~actual_input_tokens:(Some 1000)
   in
-  let segment_bytes key =
-    metrics.segments
+  let segment_bytes segments key =
+    segments
     |> List.assoc_opt key
-    |> Option.map (fun segment -> segment.KAR.bytes)
-    |> Option.value ~default:0
+    |> function
+    | Some segment -> segment.KAR.bytes
+    | None -> 0
   in
   check bool "system prompt bucket present" true
-    (segment_bytes "system_prompt" > 0);
-  check bool "history user bucket present" true
-    (segment_bytes "history_user" > 0);
-  check bool "history assistant text bucket present" true
-    (segment_bytes "history_assistant_text" > 0);
-  check bool "history tool use bucket present" true
-    (segment_bytes "history_tool_use" > 0);
-  check bool "history tool result bucket present" true
-    (segment_bytes "history_tool_result" > 0);
+    (segment_bytes metrics.origin_segments "system_prompt" > 0);
+  check bool "typed caller origin present" true
+    (segment_bytes metrics.origin_segments "caller_projection.test_history" > 0);
+  check bool "history text content present" true
+    (segment_bytes
+       metrics.content_segments
+       "caller_projection.test_history.text"
+     > 0);
+  check bool "history tool use content present" true
+    (segment_bytes
+       metrics.content_segments
+       "caller_projection.test_history.tool_use"
+     > 0);
+  check bool "history tool result content present" true
+    (segment_bytes
+       metrics.content_segments
+       "caller_projection.test_history.tool_result"
+     > 0);
+  check int "sdk turn preserved" 7 metrics.sdk_turn;
+  check (option int) "exact body byte observation"
+    (Some (String.length "{\"request\":\"body\"}"))
+    metrics.request_body_bytes;
+  check int "memory drill-down is not lost" 55_055
+    (segment_bytes metrics.context_block_segments "memory_os_recall");
   check (option int) "provider token observation remains separate" (Some 1000)
     metrics.actual_input_tokens;
-  check int "total bytes equal segment sum"
+  check int "component bytes equal origin sum"
     (List.fold_left (fun total (_, segment) -> total + segment.KAR.bytes) 0
-       metrics.segments)
-    metrics.attributed_bytes
+       metrics.origin_segments)
+    metrics.prepared_component_bytes
 
 (* ── Suite ────────────────────────────────────────────── *)
 

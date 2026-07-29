@@ -1623,14 +1623,16 @@ let projection_messages marker messages =
     | block -> block
   in
   List.map
-    (fun (message : Agent_sdk.Types.message) ->
-      { message with content = List.map project_block message.content })
+    (Agent_sdk.Agent.map_prepared_message
+       (fun (message : Agent_sdk.Types.message) ->
+          { message with content = List.map project_block message.content }))
     messages
 
 let run_projection_case ~resume =
   let canonical_marker = "canonical-unprojected-message" in
   let projected_marker = "projected-provider-message" in
   let projection_calls = ref 0 in
+  let wire_observations = ref [] in
   let (), requests =
     with_native_projection_server
     @@ fun ~sw ~net ~base_url ->
@@ -1641,6 +1643,11 @@ let run_projection_case ~resume =
             (fun messages ->
                incr projection_calls;
                Ok (projection_messages projected_marker messages))
+      ; pre_dispatch_serialization_observer =
+          Some
+            (fun observation ->
+               wire_observations := observation :: !wire_observations;
+               Ok ())
       }
     in
     let agent =
@@ -1678,6 +1685,23 @@ let run_projection_case ~resume =
        check bool (path ^ " excludes canonical input") false
          (String_util.contains_substring body canonical_marker))
     requests
+  ;
+  let completion_body =
+    match List.assoc_opt "/v1/messages" requests with
+    | Some body -> body
+    | None -> fail "completion request body is absent"
+  in
+  (match !wire_observations with
+   | [ observation ] ->
+     check int "observer sees exact completion bytes"
+       (String.length completion_body)
+       observation.body_bytes;
+     check string "observer sees exact completion digest"
+       Digestif.SHA256.(digest_string completion_body |> to_hex)
+       observation.body_sha256
+   | observations ->
+     failf "expected one pre-dispatch observation, got %d"
+       (List.length observations))
 
 let test_runtime_agent_fresh_projection_precedes_measurement () =
   run_projection_case ~resume:false

@@ -582,7 +582,11 @@ let project_model_input ~base_path evidence messages =
         evidence
         (`Hydrated (Inference_utils.sanitize_text_utf8 payload))
     in
-    Ok (messages @ [ Agent_sdk.Types.user_msg hydrated ])
+    Result.map
+      (fun message -> messages @ [ message ])
+      (Agent_sdk.Agent.caller_projected_message
+         ~source:"keeper_gate_replay"
+         (Agent_sdk.Types.user_msg hydrated))
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =

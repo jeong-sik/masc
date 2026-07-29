@@ -19,7 +19,7 @@ export const ctxCompositionSearch = signal('')
 export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   const points = series.filter(
-    (p: KeeperMetricPoint) => (p.ctx_composition?.attributed_bytes ?? 0) > 0,
+    (p: KeeperMetricPoint) => (p.ctx_composition?.prepared_component_bytes ?? 0) > 0,
   )
   if (points.length === 0) return null
 
@@ -27,22 +27,29 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   const latestComposition = latest?.ctx_composition ?? null
   if (!latestComposition) return null
 
-  const latestTotalBytes = latestComposition.attributed_bytes
+  const latestTotalBytes = latestComposition.prepared_component_bytes
   const latestActual = latestComposition.actual_input_tokens
-  const latestEntries = Object.entries(latestComposition.segments)
+  const latestEntries = Object.entries(latestComposition.origin_segments)
     .filter(([, segment]) => (segment?.bytes ?? 0) > 0)
     .sort(([, left], [, right]) => (right.bytes ?? 0) - (left.bytes ?? 0))
   if (latestEntries.length === 0 || latestTotalBytes <= 0) return null
-  const visibleCtxEntries = filterCtxCompositionEntries(latestEntries, ctxCompositionSearch.value)
+  const detailEntries = [
+    ...Object.entries(latestComposition.content_segments),
+    ...Object.entries(latestComposition.context_block_segments)
+      .map(([key, segment]) => [`context_block.${key}`, segment] as const),
+  ]
+    .filter(([, segment]) => (segment?.bytes ?? 0) > 0)
+    .sort(([, left], [, right]) => (right.bytes ?? 0) - (left.bytes ?? 0))
+  const visibleCtxEntries = filterCtxCompositionEntries(detailEntries, ctxCompositionSearch.value)
 
   const allKeys = Array.from(
-    new Set(points.flatMap((point: KeeperMetricPoint) => Object.keys(point.ctx_composition?.segments ?? {}))),
+    new Set(points.flatMap((point: KeeperMetricPoint) => Object.keys(point.ctx_composition?.origin_segments ?? {}))),
   )
   const sortedKeys = allKeys
-    .filter((key) => points.some((point: KeeperMetricPoint) => (point.ctx_composition?.segments?.[key]?.bytes ?? 0) > 0))
+    .filter((key) => points.some((point: KeeperMetricPoint) => (point.ctx_composition?.origin_segments?.[key]?.bytes ?? 0) > 0))
     .sort((left, right) => {
-      const rightLatest = latestComposition.segments[right]?.bytes ?? 0
-      const leftLatest = latestComposition.segments[left]?.bytes ?? 0
+      const rightLatest = latestComposition.origin_segments[right]?.bytes ?? 0
+      const leftLatest = latestComposition.origin_segments[left]?.bytes ?? 0
       if (rightLatest !== leftLatest) return rightLatest - leftLatest
       return left.localeCompare(right)
     })
@@ -61,10 +68,10 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">CTX Composition</span>
         <${MutedSpan}>${points.length} snapshots</${MutedSpan}>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 v2-monitoring-row">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3 v2-monitoring-row">
         <${DetailCard} class="md:col-span-2">
           <div class="flex items-center justify-between mb-2 gap-3">
-            <${Eyebrow}>attributed content bytes</${Eyebrow}>
+            <${Eyebrow}>prepared components</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotalBytes.toLocaleString()} bytes</span>
           </div>
           <div class="h-3 rounded-[var(--r-0)] overflow-hidden border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] flex">
@@ -77,7 +84,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             })}
           </div>
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-disabled)]">
-            <span>${latestTotalBytes.toLocaleString()} exact bytes represented</span>
+            <span>typed origins · SDK turn ${latestComposition.sdk_turn}</span>
           </div>
         <//>
 
@@ -90,9 +97,17 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         <//>
 
         <${DetailCard} class="flex flex-col justify-between">
+          <${Eyebrow}>wire body</${Eyebrow}>
+          <span class="text-lg font-mono tabular-nums text-[var(--color-accent-fg)]">${latestComposition.request_body_bytes != null ? `${latestComposition.request_body_bytes.toLocaleString()} bytes` : '-'}</span>
+          <${MutedSpan}>${latestComposition.request_body_sha256
+            ? `sha256 ${latestComposition.request_body_sha256.slice(0, 12)}…`
+            : 'exact pre-dispatch serialization'}</${MutedSpan}>
+        <//>
+
+        <${DetailCard} class="flex flex-col justify-between">
           <${Eyebrow}>provider input</${Eyebrow}>
           <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${latestActual != null ? `${formatTokens(latestActual)} tokens` : '-'}</span>
-          <${MutedSpan}>reported separately; not byte-attributed</${MutedSpan}>
+          <${MutedSpan}>provider-reported; not estimated</${MutedSpan}>
         <//>
       </div>
 
@@ -105,13 +120,13 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="컨텍스트 구성 스택 히스토리" style="background:var(--bg-deepest);">
             ${points.map((point: KeeperMetricPoint, index: number) => {
               const comp = point.ctx_composition
-              if (!comp || comp.attributed_bytes <= 0) return null
+              if (!comp || comp.prepared_component_bytes <= 0) return null
               const x = pad + (index * barStep) + Math.max(0, (barStep - barWidth) / 2)
               let yCursor = H - pad
               return sortedKeys.map((key) => {
-                const bytes = comp.segments[key]?.bytes ?? 0
+                const bytes = comp.origin_segments[key]?.bytes ?? 0
                 if (bytes <= 0) return null
-                const height = (bytes / comp.attributed_bytes) * innerH
+                const height = (bytes / comp.prepared_component_bytes) * innerH
                 yCursor -= height
                 return html`<rect
                   x="${x.toFixed(1)}"
@@ -129,19 +144,19 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         <${DetailCard}>
           <div class="flex items-center justify-between gap-2 mb-2">
             <${Eyebrow}>latest breakdown</${Eyebrow}>
-            <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">${visibleCtxEntries.length}/${latestEntries.length}</span>
+            <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">${visibleCtxEntries.length}/${detailEntries.length}</span>
           </div>
           <${TextInput}
             type="search"
             class="mb-2 !px-2 !py-1 !text-2xs"
             value=${ctxCompositionSearch.value}
-            placeholder="세그먼트 필터 (예: history, memory)"
+            placeholder="세그먼트 필터 (예: tool result, memory)"
             ariaLabel="context composition 세그먼트 필터"
             onInput=${(e: Event) => { ctxCompositionSearch.value = (e.target as HTMLInputElement).value }}
           />
           ${visibleCtxEntries.length === 0 ? html`
             <div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
-              필터 결과 없음 (${latestEntries.length} items)
+              필터 결과 없음 (${detailEntries.length} items)
             </div>
           ` : null}
           <div class="flex flex-col gap-1.5 v2-monitoring-row">
@@ -159,6 +174,9 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
                 </div>
               `
             })}
+          </div>
+          <div class="mt-2 text-3xs text-[var(--color-fg-disabled)]">
+            content와 주입 블록은 origin 구성의 하위 drill-down이며 합계에 다시 더하지 않습니다.
           </div>
         <//>
       </div>

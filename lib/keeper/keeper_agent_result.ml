@@ -73,7 +73,7 @@ type run_result =
   { response_text : string
   ; model_used : string
   ; prompt_metrics : prompt_metrics
-  ; ctx_composition : ctx_composition_metrics
+  ; ctx_composition : ctx_composition_metrics option
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
   ; usage : Agent_sdk.Types.api_usage

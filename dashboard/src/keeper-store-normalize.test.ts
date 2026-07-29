@@ -683,12 +683,20 @@ describe('normalizeKeepers lifecycle metrics', () => {
             compacted: false,
             ctx_composition: {
               actual_input_tokens: 1000,
-              attributed_bytes: 1160,
-              segments: {
+              sdk_turn: 4,
+              prepared_component_bytes: 1160,
+              request_body_bytes: 1320,
+              request_body_sha256: 'abc123',
+              origin_segments: {
                 system_prompt: { bytes: 320, fingerprint: null },
-                history_user: { bytes: 210, fingerprint: null },
-                history_tool_use: { bytes: 90, fingerprint: null },
-                history_tool_result: { bytes: 540, fingerprint: null },
+                canonical_history: { bytes: 840, fingerprint: null },
+              },
+              content_segments: {
+                'canonical_history.tool_use': { bytes: 90, fingerprint: null },
+                'canonical_history.tool_result': { bytes: 540, fingerprint: null },
+              },
+              context_block_segments: {
+                memory_os_recall: { bytes: 210, fingerprint: null },
               },
             },
           },
@@ -700,12 +708,20 @@ describe('normalizeKeepers lifecycle metrics', () => {
     const metric = keeper?.metrics_series?.[0]
     expect(metric?.ctx_composition).toEqual({
       actual_input_tokens: 1000,
-      attributed_bytes: 1160,
-      segments: {
+      sdk_turn: 4,
+      prepared_component_bytes: 1160,
+      request_body_bytes: 1320,
+      request_body_sha256: 'abc123',
+      origin_segments: {
         system_prompt: { bytes: 320, fingerprint: null },
-        history_user: { bytes: 210, fingerprint: null },
-        history_tool_use: { bytes: 90, fingerprint: null },
-        history_tool_result: { bytes: 540, fingerprint: null },
+        canonical_history: { bytes: 840, fingerprint: null },
+      },
+      content_segments: {
+        'canonical_history.tool_use': { bytes: 90, fingerprint: null },
+        'canonical_history.tool_result': { bytes: 540, fingerprint: null },
+      },
+      context_block_segments: {
+        memory_os_recall: { bytes: 210, fingerprint: null },
       },
     })
   })

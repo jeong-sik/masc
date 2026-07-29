@@ -28,8 +28,24 @@ type prompt_metrics =
 (** Per-bucket attribution of an Agent.run input window. *)
 type ctx_composition_metrics =
   { actual_input_tokens : int option
-  ; attributed_bytes : int
-  ; segments : (string * prompt_segment_metrics) list
+  ; sdk_turn : int
+  ; prepared_component_bytes : int
+  ; request_body_bytes : int option
+  ; request_body_sha256 : string option
+  ; origin_segments : (string * prompt_segment_metrics) list
+  ; content_segments : (string * prompt_segment_metrics) list
+  ; context_block_segments : (string * prompt_segment_metrics) list
+  }
+
+type prepared_input_snapshot =
+  { sdk_turn : int
+  ; messages : Agent_sdk.Agent.prepared_message list
+  ; context_blocks : Turn_record.prompt_block list
+  }
+
+type request_wire_snapshot =
+  { sdk_turn : int
+  ; observation : Agent_sdk.Llm_provider.Request_wire_observer.observation
   }
 
 val empty_prompt_segment_metrics : prompt_segment_metrics
@@ -66,16 +82,20 @@ val metric_of_block :
 val history_bucket_of_block :
   role:Agent_sdk.Types.role -> Agent_sdk.Types.content_block -> string
 
-(** [actual_input_tokens] is provider-reported and only known after a response.
-    It is not attributed to byte segments. [attributed_bytes] sums only the
-    exact textual/JSON components represented by [segments]. *)
+(** Build the last SDK turn's prepared-input composition from OAS typed
+    origins. [prepared_component_bytes] is the sum of the system prompt, the
+    canonical tool-schema array, and canonical serialized prepared messages.
+    It is not the provider wire size. [request_wire], when present, is the
+    independently observed exact provider serialization prepared before
+    dispatch. [context_blocks] is a drill-down of the extra-system assembly
+    and is intentionally not added again to [prepared_component_bytes]. *)
 val build_ctx_composition_metrics :
+  sdk_turn:int ->
   system_prompt:string ->
-  dynamic_context:string ->
-  memory_context:string ->
-  temporal_context:string ->
-  user_message:string ->
-  history_messages:Agent_sdk.Types.message list ->
+  tools:Agent_sdk.Tool.t list ->
+  prepared_messages:Agent_sdk.Agent.prepared_message list ->
+  context_blocks:Turn_record.prompt_block list ->
+  request_wire:Agent_sdk.Llm_provider.Request_wire_observer.observation option ->
   actual_input_tokens:int option ->
   ctx_composition_metrics
 

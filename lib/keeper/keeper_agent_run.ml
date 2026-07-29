@@ -646,6 +646,15 @@ let run_turn
     let model_input_projection =
       s.Keeper_run_tools.model_input_projection
     in
+    let pre_dispatch_serialization_observer =
+      s.Keeper_run_tools.pre_dispatch_serialization_observer
+    in
+    let prepared_input_snapshot_ref =
+      s.Keeper_run_tools.prepared_input_snapshot_ref
+    in
+    let request_wire_snapshot_ref =
+      s.Keeper_run_tools.request_wire_snapshot_ref
+    in
     let acc = s.Keeper_run_tools.acc in
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
@@ -799,6 +808,7 @@ let run_turn
                       ~checkpoint_sink
                       ~initial_messages
                       ~model_input_projection
+                      ~pre_dispatch_serialization_observer
                       ~hooks
                       ~runtime_manifest_context
                       ~runtime_manifest_append:
@@ -876,14 +886,24 @@ let run_turn
                  in
                  let usage = Keeper_context_runtime.usage_of_response result.response in
                  let ctx_composition =
-                   build_ctx_composition_metrics
-                     ~system_prompt:turn_system_prompt
-                     ~dynamic_context
-                     ~memory_context
-                     ~temporal_context
-                     ~user_message
-                     ~history_messages
-                     ~actual_input_tokens:(Some usage.input_tokens)
+                   match !prepared_input_snapshot_ref with
+                   | None -> None
+                   | Some snapshot ->
+                     let request_wire =
+                       match !request_wire_snapshot_ref with
+                       | Some wire when wire.sdk_turn = snapshot.sdk_turn ->
+                         Some wire.observation
+                       | Some _ | None -> None
+                     in
+                     Some
+                       (build_ctx_composition_metrics
+                          ~sdk_turn:snapshot.sdk_turn
+                          ~system_prompt:turn_system_prompt
+                          ~tools
+                          ~prepared_messages:snapshot.messages
+                          ~context_blocks:snapshot.context_blocks
+                          ~request_wire
+                          ~actual_input_tokens:(Some usage.input_tokens))
                  in
                  let completion_observation ()
                      : Keeper_execution_receipt.completion_contract_result =

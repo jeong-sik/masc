@@ -57,6 +57,23 @@ let extract_tool_content (msg : T.message) : string =
   | [ T.ToolResult { content; _ } ] -> content
   | _ -> Alcotest.fail "expected single ToolResult block"
 
+let hydrate_messages ~store ~keep_recent messages =
+  let prepared =
+    List.map
+      (fun message ->
+         match
+           Agent_sdk.Agent.caller_projected_message
+             ~source:"test_tool_output_washing_e2e"
+             message
+         with
+         | Ok prepared -> prepared
+         | Error detail -> Alcotest.fail detail)
+      messages
+  in
+  H.hydrate_recent ~store ~keep_recent prepared
+  |> List.map Agent_sdk.Agent.prepared_message_value
+;;
+
 (* --- The full data flow in one test --- *)
 
 let test_full_flow_externalize_hydrate_serve () =
@@ -117,7 +134,7 @@ let test_full_flow_externalize_hydrate_serve () =
         }
       in
       let hydrated_msgs =
-        H.hydrate_recent ~store ~keep_recent:3 [ msg ]
+        hydrate_messages ~store ~keep_recent:3 [ msg ]
       in
       Alcotest.(check string) "hydrated content matches original payload"
         payload
@@ -183,7 +200,7 @@ let test_recency_budget_holds_across_modules () =
           make_msg ~id:"t4" m4;
         ]
       in
-      let result = H.hydrate_recent ~store ~keep_recent:2 msgs in
+      let result = hydrate_messages ~store ~keep_recent:2 msgs in
       let contents = List.map extract_tool_content result in
       match contents with
       | [ c1; c2; c3; c4 ] ->

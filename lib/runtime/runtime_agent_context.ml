@@ -67,6 +67,10 @@ type config =
   ; model_input_projection : Agent_sdk.Agent.model_input_projection option
     (** Caller-owned projection applied only to provider-bound messages.
         Agent state and checkpoints retain their canonical persisted form. *)
+  ; pre_dispatch_serialization_observer :
+      Agent_sdk.Agent.pre_dispatch_serialization_observer option
+    (** Metadata-only evidence for the exact provider body prepared before
+        dispatch. This is observation, not transport completion evidence. *)
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; enable_thinking : bool option
@@ -123,6 +127,7 @@ let default_config
   ; description = None
   ; initial_messages = []
   ; model_input_projection = None
+  ; pre_dispatch_serialization_observer = None
   ; raw_trace = None
   ; trace_link = None
   ; enable_thinking = None
@@ -269,6 +274,12 @@ let builder
   let builder =
     match config.model_input_projection with
     | Some project -> Agent_sdk.Builder.with_model_input_projection project builder
+    | None -> builder
+  in
+  let builder =
+    match config.pre_dispatch_serialization_observer with
+    | Some observer ->
+      Agent_sdk.Builder.with_pre_dispatch_serialization_observer observer builder
     | None -> builder
   in
   let builder =

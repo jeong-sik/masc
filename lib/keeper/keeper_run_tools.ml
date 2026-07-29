@@ -61,6 +61,10 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; user_message : string
   ; hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; pre_dispatch_serialization_observer :
+      Agent_sdk.Agent.pre_dispatch_serialization_observer
+  ; prepared_input_snapshot_ref : prepared_input_snapshot option ref
+  ; request_wire_snapshot_ref : request_wire_snapshot option ref
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list

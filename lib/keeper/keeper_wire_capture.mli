@@ -1,10 +1,12 @@
-(** Env-gated capture of the MASC->OAS request boundary (redacted).
+(** Env-gated capture of MASC's pre-projection request material (redacted).
 
-    Records the effective request parameters MASC hands to OAS per SDK turn —
+    Records the canonical request parameters MASC hands to OAS per SDK turn —
     system prompt, extra system context, tool schemas, user message, and the
-    replayed conversation history ([initial_messages]) — so
+    replayed conversation history ([initial_messages]) before OAS marks typed
+    origins, applies the caller projection, or serializes a provider body — so
     degenerate-repetition feedback loops can be diagnosed from the actual
-    input rather than from digests/sizes. Tool schemas use the same
+    source material rather than from digests/sizes. This is not provider-wire
+    evidence. Tool schemas use the same
     {!Agent_sdk.Tool.schema_to_json} projection OAS prepares for the provider.
     String content is passed through {!Llm_provider.Secret_redactor} and the exact
     {!Keeper_secret_redaction} projection snapshot before it is written.

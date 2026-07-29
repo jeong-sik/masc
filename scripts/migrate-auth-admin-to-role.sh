@@ -431,6 +431,7 @@ run_migration() {
     echo "Migrated $replaced credential(s) to the role-only schema."
     echo "Backup: $backup_dir"
     echo "Rollback: $0 --base-path \"$BASE_PATH\" --restore \"$backup_dir\" --confirm-stopped"
+    echo "Next: start only a runtime whose credential writer no longer emits admin (#26220+)."
 }
 
 self_test() {

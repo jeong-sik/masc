@@ -22,9 +22,11 @@ This runbook prepares durable credentials for the current-only decoder in
      --confirm-stopped
    ```
 
-5. Keep the reported backup path. Start the old runtime and verify credential
-   authentication. The old decoder accepts the role-only files.
-6. Only then deploy #26220.
+5. Keep the reported backup path. Do **not** restart a binary whose credential
+   writer still emits `admin`: startup admin-token sync rewrites the admin
+   credential and would reintroduce the legacy field.
+6. Start the new binary that contains #26220, then verify credential
+   authentication.
 
 The script never prints credential values. It rejects malformed fields,
 duplicate JSON keys, `role`/`admin` disagreement, and a mixed legacy/current
@@ -43,3 +45,6 @@ scripts/migrate-auth-admin-to-role.sh \
 
 Restore verifies the manifest, checksums, and the complete filename inventory
 before replacing any credential.
+
+After restore, restart the pre-#26220 binary. A rollback must restore both the
+durable credential bytes and the matching reader/writer version.

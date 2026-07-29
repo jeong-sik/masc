@@ -7,10 +7,10 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.0"
 # response_format = JsonSchema as the single structured-output request state
 # (#2858), legacy tool/checkpoint shapes and the typed-compat runtime are
 # removed (#2851/#2853), and eval requires explicit metric policies with
-# incomplete comparisons rejected (#2854/#2866). masc-side output_schema
-# migration lands in the same PR as this bump. Deploy note: live v8
-# checkpoints are rejected after this pin — keeper contexts rebuild from
-# Memory OS facts + board (facts/episodes stores are unaffected).
+# incomplete comparisons rejected (#2854/#2866). MASC already consumes the
+# current response_format-only contract; no compatibility or migration code is
+# retained. Upgrade blast radius: OAS checkpoint artifacts below v9 are
+# rejected and must be reset.
 # Previous pin: v0.230.0 (7a3f2af7).
 # MASC consumes only the public Agent SDK contract; Keeper, Gate, Board, and
 # product operation ownership remain MASC concepts.

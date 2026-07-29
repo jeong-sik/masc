@@ -78,10 +78,6 @@ let message_to_text ~turn (m : Agent_sdk.Types.message) : string =
   else Printf.sprintf "[%s] %s" header body
 ;;
 
-let truncate_text max_len s =
-  if String.length s <= max_len then s else String.sub s 0 max_len ^ "\n...[truncated]"
-;;
-
 let truncate_for_log max_len s =
   if String.length s <= max_len then s else String.sub s 0 max_len ^ "..."
 ;;
@@ -92,7 +88,6 @@ let format_messages_for_prompt messages =
   | _ ->
     messages
     |> List.mapi (fun turn message -> message_to_text ~turn message)
-    |> List.map (truncate_text 4000)
     |> String.concat "\n\n---\n\n"
 ;;
 

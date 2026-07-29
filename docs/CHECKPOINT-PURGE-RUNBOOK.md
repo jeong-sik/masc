@@ -69,6 +69,28 @@ checkpoints under strict validation and need the #25443 fix, not a purge.
 | 2026-07-21 | hitl-verifier | −4.1% | 〃 |
 | 2026-07-21 | executor, idealist, garnet, rondo, albini | **refused** — `Overlapping_tool_cycle` (recorded in #25443) | untouched |
 | 2026-07-21 | mad-improver (−48% available), issue_king, hitl-switch-verifier | skipped — keeper active at rollout time | — |
+| 2026-07-29 | verifier | 510→341 msgs, 178133→154158 B (−13.5%); unstick from `request_body_too_large(262507>262144)` wedge | `backups-checkpoint-purge-trace-1785189111950-00007-20260729T161155Z` |
+
+### Live resume after a purge (observed 2026-07-29)
+
+`masc_keeper_down` marks the keeper operator-paused, so `…/boot` afterwards is
+refused with "commit Resume_owner through the directive endpoint". The working
+sequence against a local server:
+
+```sh
+TOKEN=$(curl -s http://127.0.0.1:8935/api/v1/dashboard/dev-token | jq -r .token)
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"resume","owner_nonce":N,"operator_operation_id":"<unique-op-id>"}' \
+  http://127.0.0.1:8935/api/v1/keepers/<name>/directive
+```
+
+The nonce is the lane's durable owner generation and fences concurrent
+operators. A wrong guess fails closed and reports the current value in the
+error (`expected 0, actual 1`) — read it from the error, retry once, do not
+brute-force. A `committed` response with `projection=committed_followup_failed`
+still lifts the pause; the follow-up failure is a separate projection concern
+and was observed to leave the lane cycling normally.
 
 Known open item: user-block base64 images are outside R1–R3 (garnet carries
 2.46MB of PNG payload, 77% of its checkpoint — #25542); an image rule needs

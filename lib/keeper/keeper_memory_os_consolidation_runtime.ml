@@ -223,18 +223,22 @@ let consolidate_keeper
                     stats.merged_groups
                     stats.dropped;
                 let after = List.length survivors in
-                (* [live] is non-empty by the [Skipped_too_few] guard above, so
-                   [after = 0] here means the plan asked to erase every live row
-                   (and there were no expired rows to rejoin). A
-                   plan that keeps nothing is treated as a malformed response, not
-                   as judgement: the store is the keeper's only durable memory and
+                (* [live] is non-empty by the [Skipped_too_few] guard above. A
+                   plan that retains no live survivor has erased every fact the
+                   judge was allowed to act on. Expired rows rejoined above must
+                   not mask that loss: they are ineligible for recall and the
+                   next GC tick can remove them, leaving no usable memory. A
+                   plan that keeps no live fact is treated as a malformed
+                   response, not as judgement: the store is the keeper's only
+                   durable memory and
                    [rewrite_facts_atomically] renames over the sole copy, so the
                    rows are unrecoverable. A truncated response that loses its
                    [groups] array while retaining [drop_indices] produces exactly
-                   this shape. Only total erasure is refused — a large deletion
-                   over a mostly redundant store is a legitimate outcome, so no
-                   ratio or floor is imposed on [after > 0]. *)
-                if after = 0
+                   this shape. Only total live erasure is refused — a large
+                   deletion over a mostly redundant store remains legitimate
+                   when at least one live fact survives, so no ratio or numeric
+                   floor is imposed. *)
+                if live_survivors = []
                 then Plan_rejected_total_deletion { before }
                 else if dry_run
                 then Consolidated { before; after }

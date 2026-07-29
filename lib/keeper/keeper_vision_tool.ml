@@ -260,9 +260,7 @@ let vision_text_of_json = function
 
 let vision_text_of_response (response : Agent_sdk.Types.api_response) =
   match
-    Agent_sdk_response.structured_json_of_response
-      ~schema_name:"keeper_vision_analyze"
-      response
+    Agent_sdk_response.structured_json_of_response response
   with
   | Ok json -> vision_text_of_json json
   | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)

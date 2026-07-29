@@ -10,8 +10,7 @@ val text_of_response : api_response -> string
     ToolUse, ToolResult, and media blocks are intentionally excluded. *)
 
 val structured_json_of_response
-  :  ?schema_name:string
-  -> api_response
+  :  api_response
   -> (Yojson.Safe.t, string) result
 (** Extract provider-native structured JSON from an API response through the
     OAS structured-output extractor. Callers remain responsible for domain

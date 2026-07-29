@@ -205,9 +205,7 @@ let consolidate_keeper
            then Empty_response
            else
              (match
-                Agent_sdk_response.structured_json_of_response
-                  ~schema_name:"keeper_memory_consolidation_plan"
-                  response
+                Agent_sdk_response.structured_json_of_response response
               with
               | Error detail -> invalid_structured_response_detail detail
               | Ok (`Assoc _ as json) ->

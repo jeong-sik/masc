@@ -108,6 +108,65 @@ let save_text path content =
   | Ok () -> ()
   | Error detail -> failwith detail
 
+let test_predecessor_store_requires_explicit_reset () =
+  Printf.printf
+    "Test: predecessor store with active rows blocks v3 startup until reset\n%!";
+  with_base "keeper-chat-predecessor-reset" @@ fun base_path ->
+  let keeper_name = "predecessor-active" in
+  let keeper_dir =
+    Filename.concat
+      (Common.keepers_runtime_dir_of_base ~base_path)
+      keeper_name
+  in
+  Fs_compat.mkdir_p keeper_dir;
+  let predecessor_path = Filename.concat keeper_dir "chat-queue.sqlite3" in
+  let db = Sqlite3.db_open predecessor_path in
+  let exec sql =
+    match Sqlite3.exec db sql with
+    | Sqlite3.Rc.OK -> ()
+    | rc ->
+      failwith
+        (Printf.sprintf
+           "predecessor fixture SQL failed rc=%s detail=%s"
+           (Sqlite3.Rc.to_string rc)
+           (Sqlite3.errmsg db))
+  in
+  exec "CREATE TABLE receipts(state_kind TEXT NOT NULL)";
+  exec "INSERT INTO receipts(state_kind) VALUES ('pending'), ('inflight')";
+  check "predecessor fixture closes cleanly" (Sqlite3.db_close db);
+  let report = configure base_path in
+  check "predecessor store yields one typed reset requirement"
+    (match report.load_errors with
+     | [ Some observed_keeper, error ] ->
+       String.equal observed_keeper keeper_name
+       && error.kind = Keeper_chat_queue.Predecessor_store_reset_required
+       && error.path = Some predecessor_path
+     | _ -> false);
+  let current_path = database_path ~base_path ~keeper_name in
+  check "v3 store is not created before explicit reset"
+    (not (Sys.file_exists current_path));
+  Keeper_chat_queue.For_testing.reset ();
+  Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
+  Fun.protect
+    ~finally:(fun () ->
+      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ())
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       match
+         Server_bootstrap_loops.prepare_keeper_persistence ~config ()
+       with
+       | Error (Queue_reset_required [ Some observed_keeper, error ]) ->
+         check "startup returns typed reset-required error"
+           (String.equal observed_keeper keeper_name
+            && error.kind
+               = Keeper_chat_queue.Predecessor_store_reset_required)
+       | Error error ->
+         fail "startup returns typed reset-required error"
+           (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
+              error)
+       | Ok _ ->
+         check "startup returns typed reset-required error" false)
+
 let test_first_enqueue_with_runtime_eio_guard () =
   Printf.printf "Test: first SQLite enqueue preserves the live Eio boundary\n%!";
   with_base "keeper-chat-first-enqueue-eio" @@ fun base_path ->
@@ -900,6 +959,7 @@ let test_finalize_statement_gc_pressure () =
 
 let () =
   Eio_main.run @@ fun _environment ->
+  test_predecessor_store_requires_explicit_reset ();
   test_first_enqueue_with_runtime_eio_guard ();
   test_lifecycle_fifo_terminal_pk_and_restart ();
   test_preallocated_receipt_convergence ();

@@ -64,6 +64,7 @@ type snapshot_load_error_kind =
   | Read_failed
   | Parse_failed
   | Startup_transition_failed
+  | Predecessor_store_reset_required
   | Durability_uncertain
   | Reconciliation_failed
   | Configuration_conflict
@@ -130,6 +131,7 @@ let snapshot_load_error_kind_to_string = function
   | Read_failed -> "read_failed"
   | Parse_failed -> "parse_failed"
   | Startup_transition_failed -> "startup_transition_failed"
+  | Predecessor_store_reset_required -> "predecessor_store_reset_required"
   | Durability_uncertain -> "durability_uncertain"
   | Reconciliation_failed -> "reconciliation_failed"
   | Configuration_conflict -> "configuration_conflict"
@@ -423,6 +425,7 @@ let database_user_version = 3L
 let database_application_id = 0x4d435151L
 let max_revision = Int64.max_int
 let database_file = "chat-queue-v3.sqlite3"
+let predecessor_database_file = "chat-queue.sqlite3"
 
 let persistence_configuration = Atomic.make Unconfigured
 let global_load_errors : snapshot_load_error list Atomic.t = Atomic.make []
@@ -489,6 +492,9 @@ let path_for_file ~base_path ~keeper_name file =
 
 let snapshot_path ~base_path ~keeper_name =
   path_for_file ~base_path ~keeper_name database_file
+
+let predecessor_snapshot_path ~base_path ~keeper_name =
+  path_for_file ~base_path ~keeper_name predecessor_database_file
 
 let load_error kind ?path message = { kind; path; message }
 
@@ -3477,54 +3483,86 @@ let configure_persistence ~base_path =
           Atomic.set global_load_errors [ error ];
           []
       in
-      List.iter
-        (fun keeper_name ->
-           if not (valid_keeper_name keeper_name)
-           then
-             reported_errors :=
-               ( None
-               , load_error Invalid_path
-                   ~path:(Filename.concat keepers_dir keeper_name)
-                   (Printf.sprintf
-                      "invalid Keeper name in chat queue inventory: %s"
-                      keeper_name) )
-               :: !reported_errors
-           else
-             match snapshot_path ~base_path ~keeper_name with
+      let predecessor_errors =
+        List.filter_map
+          (fun keeper_name ->
+             match predecessor_snapshot_path ~base_path ~keeper_name with
              | Error detail ->
-               quarantine keeper_name (load_error Invalid_path detail)
+               Some (keeper_name, load_error Invalid_path detail)
              | Ok path ->
-               (match
-                  observe_lane_store ~ownership_root:base_path ~path
-                with
-                | Error error -> quarantine keeper_name error
-                | Ok Store_absent -> ()
+               (match observe_lane_store ~ownership_root:base_path ~path with
+                | Error error -> Some (keeper_name, error)
+                | Ok Store_absent -> None
                 | Ok Store_present ->
-                  (match
-                     load_keeper_lane ~base_path ~path
-                   with
-                   | Error error -> quarantine keeper_name error
-                   | Ok loaded ->
-                     incr restored_keeper_count;
-                     interrupted_receipt_count :=
-                       !interrupted_receipt_count + loaded.interrupted_count;
-                     List.iter
-                       (fun error ->
-                          reported_errors :=
-                            (Some keeper_name, error) :: !reported_errors)
-                       loaded.entry.load_errors;
-                     with_registry_rw (fun () ->
-                         Hashtbl.replace registry keeper_name loaded.entry);
-                     Option.iter
-                       (fun revision ->
-                          interrupted_mutations :=
-                            (keeper_name, revision) :: !interrupted_mutations)
-                       loaded.interrupted_revision)))
-        keeper_names;
-      Atomic.set persistence_configuration (Configured base_path);
-      List.rev !interrupted_mutations
-      |> List.iter (fun (keeper_name, revision) ->
-        notify_transition ~keeper_name ~revision);
+                  Some
+                    ( keeper_name
+                    , load_error
+                        Predecessor_store_reset_required
+                        ~path
+                        "predecessor chat queue store requires explicit operator reset before v3 startup" )))
+          keeper_names
+      in
+      (match predecessor_errors with
+       | (_, first_error) :: _ ->
+        List.iter
+          (fun (keeper_name, error) ->
+             reported_errors :=
+               (Some keeper_name, error) :: !reported_errors)
+          predecessor_errors;
+        let errors = List.map snd predecessor_errors in
+        Atomic.set global_load_errors errors;
+        Atomic.set
+          persistence_configuration
+          (Configuration_failed first_error)
+       | [] ->
+        List.iter
+          (fun keeper_name ->
+             if not (valid_keeper_name keeper_name)
+             then
+               reported_errors :=
+                 ( None
+                 , load_error Invalid_path
+                     ~path:(Filename.concat keepers_dir keeper_name)
+                     (Printf.sprintf
+                        "invalid Keeper name in chat queue inventory: %s"
+                        keeper_name) )
+                 :: !reported_errors
+             else
+               match snapshot_path ~base_path ~keeper_name with
+               | Error detail ->
+                 quarantine keeper_name (load_error Invalid_path detail)
+               | Ok path ->
+                 (match
+                    observe_lane_store ~ownership_root:base_path ~path
+                  with
+                  | Error error -> quarantine keeper_name error
+                  | Ok Store_absent -> ()
+                  | Ok Store_present ->
+                    (match
+                       load_keeper_lane ~base_path ~path
+                     with
+                     | Error error -> quarantine keeper_name error
+                     | Ok loaded ->
+                       incr restored_keeper_count;
+                       interrupted_receipt_count :=
+                         !interrupted_receipt_count + loaded.interrupted_count;
+                       List.iter
+                         (fun error ->
+                            reported_errors :=
+                              (Some keeper_name, error) :: !reported_errors)
+                         loaded.entry.load_errors;
+                       with_registry_rw (fun () ->
+                           Hashtbl.replace registry keeper_name loaded.entry);
+                       Option.iter
+                         (fun revision ->
+                            interrupted_mutations :=
+                              (keeper_name, revision) :: !interrupted_mutations)
+                         loaded.interrupted_revision)))
+          keeper_names;
+        Atomic.set persistence_configuration (Configured base_path);
+        List.rev !interrupted_mutations
+        |> List.iter (fun (keeper_name, revision) ->
+          notify_transition ~keeper_name ~revision));
       { restored_keeper_count = !restored_keeper_count
       ; interrupted_receipt_count = !interrupted_receipt_count
       ; load_errors = List.rev !reported_errors

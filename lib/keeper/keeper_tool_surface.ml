@@ -699,6 +699,10 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~args : tool_res
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx args)
 ;;
 
+type keeper_msg_stream_admission =
+  | Acquire_turn_slot
+  | Already_admitted of Keeper_turn_admission.token
+
 (** Private direct-delivery stream used by connector and dashboard adapters. *)
 let dispatch_keeper_msg_stream
       ?on_text_delta
@@ -706,6 +710,7 @@ let dispatch_keeper_msg_stream
       ?continuation_channel
       ?on_admission_rejected
       ?on_admitted
+      ?(admission = Acquire_turn_slot)
       ctx
       ~args
   : tool_result option
@@ -716,14 +721,25 @@ let dispatch_keeper_msg_stream
   Some
     (tool_result_with_tool_name
        ~tool_name:name
-       (handle_keeper_msg_stream
-          ?on_text_delta
-          ?on_event
-          ?continuation_channel
-          ?on_admission_rejected
-          ?on_admitted
-          ctx
-          args))
+       (match admission with
+        | Acquire_turn_slot ->
+          handle_keeper_msg_stream
+            ?on_text_delta
+            ?on_event
+            ?continuation_channel
+            ?on_admission_rejected
+            ?on_admitted
+            ctx
+            args
+        | Already_admitted admission_token ->
+          handle_keeper_msg_stream_admitted
+            ~admission_token
+            ?on_text_delta
+            ?on_event
+            ?continuation_channel
+            ?on_admitted
+            ctx
+            args))
 
 let dispatch_keeper_msg_stream_if_free
       ?on_text_delta

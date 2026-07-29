@@ -39,6 +39,8 @@ type keeper_persistence_failure_cause =
       }
   | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable_cause of string
+  | Queue_reset_required_cause of
+      (string option * Keeper_chat_queue.snapshot_load_error) list
   | Unexpected_exception_cause of keeper_persistence_raised_cause
   | Lifecycle_invariant_cause of string
 
@@ -51,6 +53,8 @@ type keeper_persistence_failure =
 type keeper_persistence_prepare_error =
   | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable of string
+  | Queue_reset_required of
+      (string option * Keeper_chat_queue.snapshot_load_error) list
   | Preparation_base_path_identity_unavailable of keeper_persistence_failure
   | Preparation_config_not_canonical of keeper_persistence_failure
   | Preparation_in_progress
@@ -93,7 +97,10 @@ val prepare_keeper_persistence :
     Direct chat checkpoints are request-local and deliberately excluded from a
     global startup inventory. Only an idle process lifecycle may prepare; ready
     state cannot be replaced by a second preparation. Per-record failures remain
-    typed in the report and do not stop unrelated Keeper lanes.
+    typed in the report and do not stop unrelated Keeper lanes. A predecessor
+    chat queue store is a deployment-wide [Queue_reset_required] error because
+    starting any v3 lane before explicit operator reset could redispatch work
+    whose prior external effect is unknown.
     [requested_base_path] is diagnostic identity only; every persistence and
     backend operation uses the canonical [config]. *)
 

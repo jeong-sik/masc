@@ -41,6 +41,10 @@ module For_testing : sig
     key:string -> ttl_s:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 end
 
+type keeper_msg_stream_admission =
+  | Acquire_turn_slot
+  | Already_admitted of Keeper_turn_admission.token
+
 (** Private direct-delivery stream with real-time text delta callback.
     The [on_text_delta] callback receives each text fragment from the MODEL
     as it arrives. This is not a registered tool-name dispatch surface.
@@ -52,6 +56,7 @@ val dispatch_keeper_msg_stream :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
   ?on_admitted:(unit -> (unit, string) result) ->
+  ?admission:keeper_msg_stream_admission ->
   _ context -> args:Yojson.Safe.t -> tool_result option
 
 (** Non-blocking streaming dispatch for direct chat admission. The Keeper turn

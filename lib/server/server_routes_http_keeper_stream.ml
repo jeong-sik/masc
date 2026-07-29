@@ -712,7 +712,7 @@ let keeper_stream_send_event ?on_closed writer mutex closed event =
     Projects the typed keeper result into the local HTTP stream response pair.
     No external timeout — keeper internal limits control duration
     (aligned with MCP path, see mcp_server_eio_call_tool.ml:139-143). *)
-type turn_admission =
+type turn_admission = Keeper_tool_surface.keeper_msg_stream_admission =
   | Acquire_turn_slot
   | Already_admitted of Keeper_turn_admission.token
 
@@ -748,27 +748,16 @@ let execute_keeper_stream_tool_streaming
         }
       in
       let dispatched =
-        match admission with
-        | Acquire_turn_slot ->
-          Keeper_tool_surface.dispatch_keeper_msg_stream
-            ~on_text_delta
-            ?on_event
-            ~on_admission_rejected:(fun rejection ->
-              admission_rejection := Some rejection)
-            ?on_admitted
-            keeper_ctx
-            ~continuation_channel
-            ~args:arguments
-        | Already_admitted admission_token ->
-          Some
-            (Keeper_tool_surface_ops.handle_keeper_msg_stream_admitted
-               ~admission_token
-               ~on_text_delta
-               ?on_event
-               ?on_admitted
-               keeper_ctx
-               ~continuation_channel
-               arguments)
+        Keeper_tool_surface.dispatch_keeper_msg_stream
+          ~on_text_delta
+          ?on_event
+          ~on_admission_rejected:(fun rejection ->
+            admission_rejection := Some rejection)
+          ?on_admitted
+          ~admission
+          keeper_ctx
+          ~continuation_channel
+          ~args:arguments
       in
       match dispatched with
       | Some result ->

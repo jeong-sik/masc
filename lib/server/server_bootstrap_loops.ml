@@ -297,6 +297,8 @@ type keeper_persistence_failure_cause =
       }
   | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable_cause of string
+  | Queue_reset_required_cause of
+      (string option * Keeper_chat_queue.snapshot_load_error) list
   | Unexpected_exception_cause of keeper_persistence_raised_cause
   | Lifecycle_invariant_cause of string
 
@@ -309,6 +311,8 @@ type keeper_persistence_failure =
 type keeper_persistence_prepare_error =
   | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable of string
+  | Queue_reset_required of
+      (string option * Keeper_chat_queue.snapshot_load_error) list
   | Preparation_base_path_identity_unavailable of keeper_persistence_failure
   | Preparation_config_not_canonical of keeper_persistence_failure
   | Preparation_in_progress
@@ -435,6 +439,22 @@ let keeper_persistence_failure_cause_to_string = function
   | Shutdown_inventory_unavailable_cause error ->
     Keeper_shutdown_store.error_to_string error
   | Shutdown_admission_unavailable_cause detail -> detail
+  | Queue_reset_required_cause errors ->
+    errors
+    |> List.map (fun (keeper_name, error) ->
+      let keeper_name =
+        match keeper_name with
+        | Some keeper_name -> keeper_name
+        | None -> "<registry>"
+      in
+      Printf.sprintf
+        "keeper=%s path=%s detail=%s"
+        keeper_name
+        (match error.path with
+         | Some path -> path
+         | None -> "<unknown>")
+        error.message)
+    |> String.concat "; "
   | Lifecycle_invariant_cause detail -> detail
 ;;
 
@@ -451,6 +471,10 @@ let keeper_persistence_prepare_error_to_string = function
     "shutdown inventory unavailable: " ^ Keeper_shutdown_store.error_to_string error
   | Shutdown_admission_unavailable detail ->
     "shutdown admission restore unavailable: " ^ detail
+  | Queue_reset_required errors ->
+    "chat queue predecessor store reset required: "
+    ^ keeper_persistence_failure_cause_to_string
+        (Queue_reset_required_cause errors)
   | Preparation_base_path_identity_unavailable failure ->
     keeper_persistence_failure_to_string failure
   | Preparation_config_not_canonical failure ->
@@ -473,6 +497,7 @@ let failure_cause_of_prepare_error = function
     Shutdown_inventory_unavailable_cause error
   | Shutdown_admission_unavailable detail ->
     Shutdown_admission_unavailable_cause detail
+  | Queue_reset_required errors -> Queue_reset_required_cause errors
   | Preparation_base_path_identity_unavailable failure
   | Preparation_config_not_canonical failure ->
     failure.cause
@@ -549,6 +574,15 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       queue_recovery.restored_keeper_count
       queue_recovery.interrupted_receipt_count
       (List.length queue_recovery.load_errors);
+  let queue_reset_required =
+    List.filter
+      (fun (_, (error : Keeper_chat_queue.snapshot_load_error)) ->
+         error.kind = Keeper_chat_queue.Predecessor_store_reset_required)
+      queue_recovery.load_errors
+  in
+  match queue_reset_required with
+  | _ :: _ -> Error (Queue_reset_required queue_reset_required)
+  | [] ->
   (* Request status is recovered only after queue receipts converge: a poller
      must never observe a final Lost status while its durable terminal row is
      still absent. Direct transcript checkpoints are exact request-local state,

@@ -43,7 +43,6 @@ type t =
   | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
   | HeartbeatFailures
-  | CleanupTrackingFailures
   | DispatchEventFailures
   | DirectiveFailures
   | ToolCallDuration

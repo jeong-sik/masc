@@ -380,7 +380,12 @@ let launch_supervised_fiber_body
            everything and log — cleanup is advisory, state-machine events
            already fired on the body's happy/error paths. *)
           match run_cleanup_best_effort (fun () ->
-            Keeper_registry.cleanup_tracking ~base_path meta.name;
+            (* The exact registry entry is removed after the lane joins.
+               Clearing its observation fields here used to reacquire the
+               lifecycle key lock after [done_p] was resolved, which could
+               strand the lane forever between terminal completion and exit.
+               Turn-attempt observation is a separate process-local table and
+               remains the only necessary cleanup. *)
             Keeper_turn_attempt_observer.reset_keeper ~base_path ~keeper:meta.name;
             if not (Atomic.get resolved)
             then

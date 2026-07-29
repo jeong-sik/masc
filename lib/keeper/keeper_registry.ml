@@ -524,40 +524,6 @@ let board_wakeup_allowed ~base_path name ~dedup_key ~debounce_sec =
        true)
 ;;
 
-let cleanup_tracking ~base_path name =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key (Atomic.get registry) with
-  | Some entry ->
-    (match
-       put_entry
-         ~base_path
-         name
-         { entry with
-           board_wakeups = StringMap.empty
-         ; tool_usage = StringMap.empty
-         ; board_cursor_ts = 0.0
-         ; board_cursor_post_id = None
-         }
-     with
-     | Ok () -> ()
-     | Error err ->
-       Log.Keeper.warn
-         "%s: failed to cleanup registry tracking: %s"
-         name
-         (registry_entry_validation_error_to_string err))
-  | None -> ()
-;;
-
-let cleanup_tracking_exact (entry : registry_entry) =
-  update_entry_exact entry (fun current ->
-    { current with
-      board_wakeups = StringMap.empty
-    ; tool_usage = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
-    })
-;;
-
 let clear () =
   Atomic.set registry StringMap.empty;
   Atomic.set running_count_atomic 0

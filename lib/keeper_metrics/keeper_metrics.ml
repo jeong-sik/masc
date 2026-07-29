@@ -52,7 +52,6 @@ type t =
   | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
   | HeartbeatFailures
-  | CleanupTrackingFailures
   | DispatchEventFailures
   | DirectiveFailures
   | ToolCallDuration
@@ -265,7 +264,6 @@ let to_string = function
   | KeeperMetaOverlayDrift -> "masc_keeper_meta_overlay_drift_total"
   | HeartbeatSuccesses -> "masc_keeper_heartbeat_successes_total"
   | HeartbeatFailures -> "masc_keeper_heartbeat_failures_total"
-  | CleanupTrackingFailures -> "masc_keeper_cleanup_tracking_failures_total"
   | DispatchEventFailures -> "masc_keeper_dispatch_event_failures_total"
   | DirectiveFailures -> "masc_keeper_directive_failures_total"
   | ToolCallDuration -> "masc_keeper_tool_call_duration_seconds"

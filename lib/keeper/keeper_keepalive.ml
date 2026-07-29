@@ -1092,62 +1092,19 @@ let start_keepalive
             then record_stopped "manual stop"
             else record_lane_exception exn
         in
-        (* Lane cleanup is declared outside [run] because [Keeper_lane.fork]
-           invokes it only after the child-owning switch and all children
-           finish. *)
-        let cleanup_tracking outcome =
-          let terminal_result =
-            try
-              terminalize_lane outcome;
-              Ok ()
-            with
-            | exn -> Error (Printexc.to_string exn)
-          in
-          let tracking_result =
+        (* [Keeper_lane] invokes this only after the child-owning switch has
+           joined. The registry entry is discarded when this exact lane is
+           reclaimed, so mutating its observation fields here is both
+           redundant and unsafe: registry mutation reacquires the lifecycle
+           key lock after [done_p] is resolved, leaving a terminal Keeper whose
+           lane never reaches [Exited] when a lifecycle writer owns that lock.
+           Terminalization is the only required cleanup at the join boundary. *)
+        let terminalize_joined_lane outcome =
           try
-            (match Keeper_registry.cleanup_tracking_exact reg with
-             | Keeper_registry.Exact_updated
-             | Keeper_registry.Exact_update_missing -> Ok ()
-             | Keeper_registry.Exact_update_replaced ->
-               Log.Keeper.info
-                 "%s: lane cleanup retained newer same-name registry entry"
-                 live_meta.name;
-               Ok ()
-             | Keeper_registry.Exact_update_invalid validation_error ->
-               Error
-                 (Keeper_registry.registry_entry_validation_error_to_string
-                    validation_error))
+            terminalize_lane outcome;
+            Ok ()
           with
-          | Eio.Cancel.Cancelled _ as exn -> Error (Printexc.to_string exn)
-          | e ->
-            let detail = Printexc.to_string e in
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string CleanupTrackingFailures)
-              ~labels:[ "keeper", live_meta.name; "site", "heartbeat_finally" ]
-              ();
-            Log.Keeper.emit
-              Log.Warn
-              ~category:Log.Heartbeat
-              ~details:
-                (`Assoc
-                  [ "keeper", `String live_meta.name
-                  ; "error", `String detail
-                  ])
-              (Printf.sprintf
-                 "%s: cleanup_tracking in heartbeat finally raised: %s"
-                 live_meta.name
-                 detail);
-            Error detail
-          in
-          match terminal_result, tracking_result with
-          | Ok (), Ok () -> Ok ()
-          | Error detail, Ok () | Ok (), Error detail -> Error detail
-          | Error terminal_detail, Error tracking_detail ->
-            Error
-              (Printf.sprintf
-                 "terminal cleanup failed: %s; tracking cleanup failed: %s"
-                 terminal_detail
-                 tracking_detail)
+          | exn -> Error (Printexc.to_string exn)
         in
         publish_keeper_started ~live_meta;
         (match
@@ -1164,7 +1121,7 @@ let start_keepalive
            Atomic.set reg.grpc_close grpc_close
          | None -> ());
         run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
-             ~cleanup:cleanup_tracking
+             ~cleanup:terminalize_joined_lane
          with
          | Ok () -> Keepalive_started reg
          | Error error ->

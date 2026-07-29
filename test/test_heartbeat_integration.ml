@@ -734,6 +734,11 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
         (Masc.Keeper_keepalive.start_keepalive ctx meta
           : Masc.Keeper_keepalive.start_keepalive_outcome);
       Eio.Time.sleep ctx.clock 0.05;
+      R.set_board_cursor
+        ~base_path:config.base_path
+        keeper_name
+        42.0
+        (Some "terminal-entry-cursor");
       (match
          Masc.Keeper_keepalive.stop_keepalive_and_await
            ~base_path:config.base_path
@@ -744,7 +749,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
        | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
        | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
          fail ("joined stop resolved as crashed: " ^ reason));
-      match R.get ~base_path:config.base_path keeper_name with
+      (match R.get ~base_path:config.base_path keeper_name with
       | None -> fail "expected direct-lifecycle registry entry"
       | Some entry ->
         check string "state stopped" "stopped" (KSM.phase_to_string entry.phase);
@@ -753,7 +758,49 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
          | Some `Stopped -> ()
          | Some (`Crashed reason) ->
            fail ("expected stopped promise, got crashed: " ^ reason)
-         | None -> fail "expected done_p to resolve on stop"))
+         | None -> fail "expected done_p to resolve on stop"));
+      let cursor_ts, cursor_post_id =
+        R.get_board_cursor ~base_path:config.base_path keeper_name
+      in
+      check
+        (float 1e-9)
+        "terminal entry keeps observations until exact reclaim"
+        42.0
+        cursor_ts;
+      check
+        (option string)
+        "terminal entry keeps cursor identity until exact reclaim"
+        (Some "terminal-entry-cursor")
+        cursor_post_id;
+      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+       | Masc.Keeper_keepalive.Keepalive_started _ -> ()
+       | outcome ->
+         fail
+           ("joined terminal entry was not reclaimed: "
+            ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      let fresh_cursor_ts, fresh_cursor_post_id =
+        R.get_board_cursor ~base_path:config.base_path keeper_name
+      in
+      check
+        (float 1e-9)
+        "fresh lane starts with a clean cursor"
+        0.0
+        fresh_cursor_ts;
+      check
+        (option string)
+        "fresh lane starts without the prior cursor identity"
+        None
+        fresh_cursor_post_id;
+      match
+        Masc.Keeper_keepalive.stop_keepalive_and_await
+          ~base_path:config.base_path
+          keeper_name
+      with
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+        fail ("restarted lane resolved as crashed: " ^ reason)
+      | Masc.Keeper_keepalive.Keeper_not_registered ->
+        fail "restarted lane disappeared before joined stop")
 
 let test_keeper_lane_join_waits_for_children_and_cleanup () =
   Eio_main.run @@ fun _env ->

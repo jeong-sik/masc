@@ -502,12 +502,6 @@ val restore_supervisor_state :
   restart_count:int -> last_restart_ts:float ->
   crash_log:(float * string) list -> unit
 
-(** Reset tracking state (agent count + board wakeups) for a keeper. *)
-val cleanup_tracking : base_path:string -> string -> unit
-
-(** Reset tracking only if [entry]'s lane still owns its registry key. *)
-val cleanup_tracking_exact : registry_entry -> exact_update_result
-
 (** Get board event cursor token. Returns [(0.0, None)] if not found. *)
 val get_board_cursor : base_path:string -> string -> float * string option
 

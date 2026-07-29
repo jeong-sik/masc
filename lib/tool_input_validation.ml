@@ -393,7 +393,7 @@ let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
   }
 ;;
 
-let reject_validation ?schema ~name ~reason ~message =
+let reject_validation ?schema ~name ~reason ~message () =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
   Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
   let schema_shape_data =
@@ -462,6 +462,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
           (Printf.sprintf
              "Tool '%s' has no registered input schema; refusing schema-less dispatch"
              name)
+        ()
     | Some schema when not (schema_has_properties schema) ->
       let required = required_names schema in
       if required <> []
@@ -474,6 +475,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
             (Printf.sprintf
                "Tool '%s' schema declares required fields without input properties"
                name)
+          ()
       else if empty_tool_args prepared_args
       then (
         emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"empty_schema";
@@ -489,6 +491,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
             (Printf.sprintf
                "Tool '%s' declares no input fields but received arguments"
                name)
+          ()
     | Some schema ->
       (match retired_transition_alias_names ~name prepared_args with
        | alias :: aliases ->
@@ -503,6 +506,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                  action and notes"
                 name
                 aliases)
+           ()
        | [] ->
       (match schema_shape_error schema prepared_args with
        | Some message ->
@@ -511,6 +515,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            ~name
            ~reason:"invalid_args"
            ~message:(Printf.sprintf "Tool '%s' %s" name message)
+           ()
        | None ->
          let lookup lookup_name =
            let schema_opt =

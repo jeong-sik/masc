@@ -725,7 +725,7 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
            (Filename.concat
               (Common.keepers_runtime_dir_of_base ~base_path:config.base_path)
               meta.name)
-           "event-queue.json"
+           "event-queue-v12.json"
        in
        Fs_compat.mkdir_p queue_path;
        let failed =

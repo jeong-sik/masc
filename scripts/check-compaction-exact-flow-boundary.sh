@@ -131,7 +131,7 @@ check_boundary() {
   local retired_event_queue_pattern
   local event_queue_candidate
   local event_queue_candidates=()
-  retired_event_queue_pattern='\b(lease_id|lease_sequence|settlement_id|settle_exact|Settle_exact|settle_exact_terminal_after_cancellation|retain_unacked_pending|source_lease_disposition|exact_execution_binding|exact_source_disposition|allow_legacy_durable)\b|lease:|keeper\.event_queue\.state\.v([1-9]|10|11)\b|masc\.keeper_event_queue\.transition\.v1\b|masc\.keeper\.paused-work-disposition\.v[1-4]\b|masc\.keeper_event_queue\.settlement|event-queue-settlements|event-queue-inflight'
+  retired_event_queue_pattern='\b(lease_id|lease_sequence|settlement_id|settle_exact|Settle_exact|settle_exact_terminal_after_cancellation|retain_unacked_pending|source_lease_disposition|exact_execution_binding|exact_source_disposition|allow_legacy_durable)\b|lease:|keeper\.event_queue\.state\.v([1-9]|10|11)\b|masc\.keeper_event_queue\.transition\.v1\b|masc\.keeper\.paused-work-disposition\.v[1-4]\b|masc\.keeper_event_queue\.settlement|event-queue-settlements|event-queue-inflight|"event-queue\.json"|"event-queue-transitions\.jsonl"|"paused-work-dispositions"'
   for event_queue_candidate in \
     "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.ml" \
     "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.mli" \
@@ -200,6 +200,18 @@ EOF
     fail "self-test retired Event Layer authority unexpectedly passed"
   fi
   rm -f "${event_state}"
+
+  printf '%s\n' \
+    'let snapshot_filename = "event-queue.json"' \
+    >"${fixture}/lib/keeper_runtime/keeper_event_queue_persistence.ml"
+  if
+    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
+  then
+    fail "self-test retired Event Layer path unexpectedly passed"
+  fi
+  rm -f "${fixture}/lib/keeper_runtime/keeper_event_queue_persistence.ml"
 
   retired_module="${fixture}/lib/keeper/keeper_exact_disposition_recovery.ml"
   printf '%s\n' 'let _ = ()' >"${retired_module}"

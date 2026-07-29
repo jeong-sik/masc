@@ -1,6 +1,6 @@
 (** Pure durable state machine for one Keeper event queue owner.
 
-    [event-queue.json] is the sole authority for pending stimuli and
+    [event-queue-v12.json] is the sole authority for pending stimuli and
     source-bearing transition projection work. This module performs no I/O;
     persistence supplies the atomic file boundary and publishes [pending] into
     the live registry only after a durable commit. *)

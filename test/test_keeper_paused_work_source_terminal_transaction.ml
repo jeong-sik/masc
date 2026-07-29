@@ -53,7 +53,7 @@ let receipt_path config ~keeper_name ~operator_operation_id =
     (Filename.concat
        (Filename.concat
           (Workspace.masc_root_dir config)
-          "paused-work-dispositions")
+          "paused-work-dispositions-v5")
        ("keeper-" ^ sha256 keeper_name))
     ("operation-" ^ sha256 operator_operation_id ^ ".json")
 ;;
@@ -418,7 +418,7 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
            keeper_name)
-        "event-queue-transitions.jsonl"
+        "event-queue-transitions-v2.jsonl"
     in
     let residual_wal_row =
       `Assoc
@@ -523,7 +523,7 @@ let test_projected_wal_recovery_allows_next_source_ack () =
         (Filename.concat
            (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
            keeper_name)
-        "event-queue-transitions.jsonl"
+        "event-queue-transitions-v2.jsonl"
     in
     let residual_wal_row =
       `Assoc

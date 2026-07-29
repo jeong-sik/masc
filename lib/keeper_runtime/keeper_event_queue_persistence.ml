@@ -159,8 +159,8 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue.json"
-let transition_wal_filename = "event-queue-transitions.jsonl"
+let snapshot_filename = "event-queue-v12.json"
+let transition_wal_filename = "event-queue-transitions-v2.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 

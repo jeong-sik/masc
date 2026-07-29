@@ -114,7 +114,7 @@ let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
 let keeper_dir config keeper_name =
   let root = Workspace.masc_root_dir config in
   Filename.concat
-    (Filename.concat root "paused-work-dispositions")
+    (Filename.concat root "paused-work-dispositions-v5")
     ("keeper-" ^ sha256 keeper_name)
 ;;
 

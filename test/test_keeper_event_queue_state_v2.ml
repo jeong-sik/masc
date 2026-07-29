@@ -243,7 +243,7 @@ let with_temp_dir prefix f =
 ;;
 
 let test_durable_peek_ack_restart () =
-  with_temp_dir "keeper-pending-v7" (fun base_path ->
+  with_temp_dir "keeper-pending-v12" (fun base_path ->
     let keeper_name = "fresh-keeper" in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
       let pending = Queue.enqueue pending (stimulus "one" 1.0) in
@@ -296,6 +296,52 @@ let test_retired_inflight_sidecar_is_not_read () =
       bytes_after)
 ;;
 
+let test_retired_snapshot_and_wal_paths_are_not_read () =
+  with_temp_dir "keeper-retired-event-layer-paths" (fun base_path ->
+    let keeper_name = "retired-paths-ignored" in
+    let keeper_dir =
+      Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
+    in
+    Fs_compat.mkdir_p keeper_dir;
+    let retired_snapshot_path = Filename.concat keeper_dir "event-queue.json" in
+    let retired_wal_path =
+      Filename.concat keeper_dir "event-queue-transitions.jsonl"
+    in
+    let retired_snapshot_bytes =
+      "retired snapshot must remain opaque: not-json\000lease_id"
+    in
+    let retired_wal_bytes =
+      "retired WAL must remain opaque: not-json\000settlement_id"
+    in
+    Out_channel.with_open_bin retired_snapshot_path (fun channel ->
+      output_string channel retired_snapshot_bytes);
+    Out_channel.with_open_bin retired_wal_path (fun channel ->
+      output_string channel retired_wal_bytes);
+    let state =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "retired snapshot and WAL paths must not affect current load"
+    in
+    Alcotest.(check (list string))
+      "retired paths create no current pending authority"
+      []
+      (post_ids (State.pending state));
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "current-only" 3.0))
+    |> require_ok "persist current-only state beside retired paths";
+    Alcotest.(check bool)
+      "current snapshot uses a disjoint path"
+      true
+      (Sys.file_exists (Filename.concat keeper_dir "event-queue-v12.json"));
+    Alcotest.(check string)
+      "retired snapshot is not consumed or rewritten"
+      retired_snapshot_bytes
+      (In_channel.with_open_bin retired_snapshot_path In_channel.input_all);
+    Alcotest.(check string)
+      "retired WAL is not consumed or rewritten"
+      retired_wal_bytes
+      (In_channel.with_open_bin retired_wal_path In_channel.input_all))
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
@@ -326,6 +372,10 @@ let () =
             "retired inflight sidecar is not read"
             `Quick
             test_retired_inflight_sidecar_is_not_read
+        ; Alcotest.test_case
+            "retired snapshot and WAL paths are not read"
+            `Quick
+            test_retired_snapshot_and_wal_paths_are_not_read
         ] )
     ]
 ;;

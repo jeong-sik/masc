@@ -48,7 +48,7 @@ let receipt_path config ~keeper_name ~operator_operation_id =
     (Filename.concat
        (Filename.concat
           (Workspace.masc_root_dir config)
-          "paused-work-dispositions")
+          "paused-work-dispositions-v5")
        ("keeper-" ^ sha256 keeper_name))
     ("operation-" ^ sha256 operator_operation_id ^ ".json")
 ;;
@@ -281,6 +281,51 @@ let test_retired_v2_receipt_file_is_rejected () =
   | Ok _ -> Alcotest.fail "durable load accepted retired v2 transfer receipt"
 ;;
 
+let test_retired_receipt_directory_is_not_read () =
+  with_transfer_lane
+  @@ fun config from_keeper to_keeper _source_meta _target_meta request ->
+  let retired_path =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat
+            (Workspace.masc_root_dir config)
+            "paused-work-dispositions")
+         ("keeper-" ^ sha256 from_keeper))
+      ("operation-" ^ sha256 request.operator_operation_id ^ ".json")
+  in
+  let retired_bytes =
+    "retired paused-work receipt must remain opaque: not-json\000settlement_id"
+  in
+  mkdir_p (Filename.dirname retired_path);
+  Out_channel.with_open_bin retired_path (fun channel ->
+    output_string channel retired_bytes);
+  (match
+     Receipt.load
+       config
+       ~keeper_name:from_keeper
+       ~operator_operation_id:request.operator_operation_id
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "retired receipt directory was read"
+   | Error detail -> Alcotest.fail detail);
+  Transaction.transfer_pending config ~from_keeper ~to_keeper request
+  |> Result.map_error Transaction.error_to_string
+  |> require_ok "commit beside retired receipt directory"
+  |> fun result -> check_applied ~expected_target:Transaction.Enqueued result.projection;
+  Alcotest.(check bool)
+    "current receipt uses a disjoint path"
+    true
+    (Sys.file_exists
+       (receipt_path
+          config
+          ~keeper_name:from_keeper
+          ~operator_operation_id:request.operator_operation_id));
+  Alcotest.(check string)
+    "retired receipt is not consumed or rewritten"
+    retired_bytes
+    (In_channel.with_open_bin retired_path In_channel.input_all)
+;;
+
 let test_transfer_busy_has_zero_mutation () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let base_path = config.Workspace.base_path in
@@ -316,10 +361,9 @@ let test_replay_after_target_consumption_has_no_second_effect () =
       |> require_ok "commit Transfer_owner before target consumption"
     in
     check_applied ~expected_target:Transaction.Enqueued first.projection;
-    (* Consume the transferred source the way production does. This used to
-       claim a lease and settle it with Ack; #25969 replaced that with
-       peek/ack. The property under test is unchanged: once the target has
-       consumed the source, replaying the transfer must not enqueue it again. *)
+    (* Consume the transferred source the way production does. Once the target
+       has consumed the source, replaying the transfer must not enqueue it
+       again. *)
     let selection =
       Persistence.peek_when_result
         ~base_path
@@ -466,6 +510,10 @@ let () =
             "retired v2 receipt is rejected"
             `Quick
             test_retired_v2_receipt_file_is_rejected
+        ; Alcotest.test_case
+            "retired receipt directory is not read"
+            `Quick
+            test_retired_receipt_directory_is_not_read
         ; Alcotest.test_case
             "admission busy has zero mutation"
             `Quick

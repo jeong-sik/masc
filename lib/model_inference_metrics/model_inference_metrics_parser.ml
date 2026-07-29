@@ -201,19 +201,11 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              | Some (`Int n) when n > 0 -> Some (Float.of_int n)
              | _ -> None
            in
-           (* hw_decode_tokens_per_second — preferred field; fall back to
-              provider_tokens_per_second for backward compat. Treat explicit
-              null as absent so backfill for older rows is clean. *)
            let hw_decode_tok_per_sec =
-             let read key =
-               match List.assoc_opt key tfields with
-               | Some (`Float f) when f > 0.0 -> Some f
-               | Some (`Int n) when n > 0 -> Some (Float.of_int n)
-               | _ -> None
-             in
-             match read "hw_decode_tokens_per_second" with
-             | Some _ as v -> v
-             | None -> read "provider_tokens_per_second"
+             match List.assoc_opt "hw_decode_tokens_per_second" tfields with
+             | Some (`Float f) when f > 0.0 -> Some f
+             | Some (`Int n) when n > 0 -> Some (Float.of_int n)
+             | _ -> None
            in
            let peak_memory_gb =
              let read key =
@@ -329,15 +321,10 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
 (* ── costs.jsonl parser ─────────────────────────────────── *)
 
 let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
-  let read key =
-    match List.assoc_opt key fields with
-    | Some (`Float f) when f > 0.0 -> Some f
-    | Some (`Int n) when n > 0 -> Some (Float.of_int n)
-    | _ -> None
-  in
-  match read "hw_decode_tokens_per_second" with
-  | Some _ as v -> v
-  | None -> read "provider_tokens_per_second"
+  match List.assoc_opt "hw_decode_tokens_per_second" fields with
+  | Some (`Float f) when f > 0.0 -> Some f
+  | Some (`Int n) when n > 0 -> Some (Float.of_int n)
+  | _ -> None
 ;;
 
 let canonical_cost_model_id ~(provider : string option) model =

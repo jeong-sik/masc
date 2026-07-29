@@ -118,11 +118,9 @@ let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
     [masc_root/costs.jsonl] and the date-split
     [masc_root/costs/YYYY-MM/DD.jsonl] tree, merging the two streams.
 
-    The migration to [Dated_jsonl] (Tier A T4) keeps the legacy file
-    readable so historic 14k+ entries are not dropped from
-    cost-summary reports.  Operators may archive the legacy file at
-    any time once they are satisfied that all queries that mattered to
-    them only touch dates after the cut-over. *)
+    The public [masc-cost] CLI still owns the single-file writer and reporter.
+    Removing this reader before that documented executable is migrated would
+    split one live cost flow into two mutually invisible stores. *)
 let read_cost_entries ~base_path ~since_unix : raw_entry list =
   let legacy = read_cost_entries_legacy ~base_path ~since_unix in
   let dated = read_cost_entries_dated ~base_path ~since_unix in

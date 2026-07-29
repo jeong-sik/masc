@@ -34,7 +34,7 @@ let cache_miss_input_tokens ~input_tokens ~cache_creation_input_tokens
     ~cache_read_input_tokens =
   input_tokens - cache_creation_input_tokens - cache_read_input_tokens
 
-(** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
+(** Append a cost event to the dated cost ledger for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
     distinguish automatic entries from manual CLI entries.  #10318 adds
     a [cost_usd_source] field so each row is self-describing about
@@ -137,7 +137,6 @@ let assemble_cost_event_payload
          | Some tm ->
            int_field "cache_n" tm.cache_n
            @ float_field "prompt_per_second" tm.prompt_per_second
-           @ float_field "provider_tokens_per_second" tm.predicted_per_second
            @ float_field "hw_decode_tokens_per_second" tm.predicted_per_second
          | None -> [])
       @ float_field "peak_memory_gb" t.peak_memory_gb
@@ -240,9 +239,7 @@ let emit_cost_event
      [masc_root/costs/YYYY-MM/DD.jsonl] — same per-day mutex registry
      used by tracing / coverage_gap / audit appenders, so concurrent
      keepers serialise on a per-day file rather than a single global
-     one.  Legacy [costs.jsonl] is left in place for read compatibility
-     ([Model_inference_metrics.read_cost_entries] reads both sources
-     until operators archive the legacy file). *)
+     one. *)
   let store =
     Dated_jsonl.create ~base_dir:(costs_dated_dir masc_root) ()
   in

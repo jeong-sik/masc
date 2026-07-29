@@ -273,6 +273,61 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
       ] );
   ]
 
+let check_hw_decode_field ~name json expected =
+  match
+    Model_inference_metrics_parser.parse_telemetry_entry json ~since_unix:0.0
+  with
+  | Ok entry ->
+    check (option (float 0.001)) name expected entry.hw_decode_tok_per_sec
+  | Error _ -> fail (name ^ ": telemetry row did not parse")
+;;
+
+let test_hw_decode_parser_uses_current_field_only () =
+  let ts = now_unix () in
+  let row key =
+    `Assoc
+      [ "ts_unix", `Float ts
+      ; "tool_call_count", `Int 0
+      ; "tools_used", `List []
+      ; ( "telemetry"
+        , `Assoc
+            [ "model_used", `String "model"
+            ; "outcome", `String "success"
+            ; "fallback_applied", `Bool false
+            ; key, `Float 42.0
+            ] )
+      ]
+  in
+  check_hw_decode_field
+    ~name:"current field"
+    (row "hw_decode_tokens_per_second")
+    (Some 42.0);
+  check_hw_decode_field
+    ~name:"retired alias ignored"
+    (row "provider_tokens_per_second")
+    None
+;;
+
+let test_cost_parser_uses_current_hw_decode_field_only () =
+  let ts = now_unix () in
+  let row key =
+    match cost_entry ~model:"model" ~ts () with
+    | `Assoc fields -> `Assoc ((key, `Float 42.0) :: fields)
+    | _ -> fail "cost entry must be an object"
+  in
+  let parse name json expected =
+    match Model_inference_metrics_parser.parse_cost_entry json ~since_unix:0.0 with
+    | Ok entry ->
+      check (option (float 0.001)) name expected entry.hw_decode_tok_per_sec
+    | Error _ -> fail (name ^ ": cost row did not parse")
+  in
+  parse
+    "current cost field"
+    (row "hw_decode_tokens_per_second")
+    (Some 42.0);
+  parse "retired cost alias ignored" (row "provider_tokens_per_second") None
+;;
+
 (* ── Tests ───────────────────────────────────────── *)
 
 let test_empty_dir () =
@@ -1462,6 +1517,10 @@ let () =
         test_success_without_model_uses_runtime_attribution;
       test_case "provider_context attribution survives sparse telemetry" `Quick
         test_provider_context_attribution_survives_sparse_telemetry;
+      test_case "decision parser uses current hw-decode field only" `Quick
+        test_hw_decode_parser_uses_current_field_only;
+      test_case "cost parser uses current hw-decode field only" `Quick
+        test_cost_parser_uses_current_hw_decode_field_only;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
       test_case "costs.jsonl disambiguates matching model names by provider" `Quick
         test_costs_jsonl_disambiguates_matching_model_names_by_provider;

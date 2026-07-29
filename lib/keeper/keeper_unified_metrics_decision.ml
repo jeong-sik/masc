@@ -280,16 +280,12 @@ let append_decision_record
                     let timings_fields =
                       match t.timings with
                       | Some ti ->
-                          (* hw_decode_tokens_per_second: unambiguous alias of
-                             provider_tokens_per_second. Both read ti.predicted_per_second
-                             (eval_count / eval_duration from Ollama), which is the true
-                             hardware decode rate — distinct from the wall-clock
-                             tokens_per_second (output_tokens / latency_ms) below. Dashboards
-                             should prefer hw_decode_* name; legacy name kept for backward compat. *)
+                          (* Provider-native predicted throughput is the hardware
+                             decode rate, distinct from wall-clock
+                             [tokens_per_second] below. *)
                           [
                             ("prompt_ms", Json_util.float_opt_to_json ti.prompt_ms);
                             ("predicted_ms", Json_util.float_opt_to_json ti.predicted_ms);
-                            ("provider_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
                             ("hw_decode_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
                             ("prompt_per_second", Json_util.float_opt_to_json ti.prompt_per_second);
                             ("cache_n", Json_util.int_opt_to_json ti.cache_n);

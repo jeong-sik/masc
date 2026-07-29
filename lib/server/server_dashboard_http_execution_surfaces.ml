@@ -728,25 +728,31 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
       match List.assoc_opt "keepers" fields with
       | Some (`List rows) ->
         let keeper_rows = patch_rows rows in
-        `Assoc
-          (replace_keeper_rows_and_rebuild_briefs
-             ~now_ts:(Time_compat.now ())
-             ~keeper_rows
-             ~keepers_json:(`List keeper_rows)
-             fields)
+        if keeper_rows = rows
+        then json
+        else
+          `Assoc
+            (replace_keeper_rows_and_rebuild_briefs
+               ~now_ts:(Time_compat.now ())
+               ~keeper_rows
+               ~keepers_json:(`List keeper_rows)
+               fields)
       | Some (`Assoc keeper_fields) ->
         (match List.assoc_opt "items" keeper_fields with
          | Some (`List rows) ->
            let keeper_rows = patch_rows rows in
-           let keeper_fields =
-             upsert_assoc_field "items" (`List keeper_rows) keeper_fields
-           in
-           `Assoc
-             (replace_keeper_rows_and_rebuild_briefs
-                ~now_ts:(Time_compat.now ())
-                ~keeper_rows
-                ~keepers_json:(`Assoc keeper_fields)
-                fields)
+           if keeper_rows = rows
+           then json
+           else (
+             let keeper_fields =
+               upsert_assoc_field "items" (`List keeper_rows) keeper_fields
+             in
+             `Assoc
+               (replace_keeper_rows_and_rebuild_briefs
+                  ~now_ts:(Time_compat.now ())
+                  ~keeper_rows
+                  ~keepers_json:(`Assoc keeper_fields)
+                  fields))
          | _ -> json)
       | _ -> json)
   | other -> other

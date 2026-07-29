@@ -2112,7 +2112,27 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
        check string
          "brief keeps exact related session"
          "session-exact"
-         (patched_brief |> member "related_session_id" |> to_string))
+         (patched_brief |> member "related_session_id" |> to_string);
+       let unrelated_surface =
+         `Assoc
+           [ ( "keepers"
+             , `List
+                 [ `Assoc
+                     [ "name", `String "fixture-only-keeper"
+                     ; "status", `String "offline"
+                     ] ] )
+           ; "continuity_briefs", `List [ stale_brief ]
+           ]
+       in
+       check
+         bool
+         "unrelated running keeper leaves fixture surface byte-stable"
+         true
+         (unrelated_surface
+          =
+          Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+            config
+            unrelated_surface))
 
 let test_composite_blocked_uses_terminal_contract_not_observational_metadata () =
   let execution ~terminal_reason_code ~operator_disposition_reason =

@@ -411,7 +411,8 @@ let append_worker_completion_log ~base_path ~worker_name
 
 (** Build (config, options) for Agent.resume — the continue_worker path.
     New workers use Worker_oas.build_agent (Builder pattern) instead.
-    The exact provider config is passed directly to [Agent.resume]. *)
+    The caller adds the exact provider config to [options] before
+    [Agent.resume]. *)
 let build_resume_config ~worker_name ~model_id ~system_prompt
     ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
     () =

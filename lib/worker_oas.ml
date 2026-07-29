@@ -382,16 +382,6 @@ and resume_worker_via_oas
     make_tool_tracking_hooks ~context:shared_context ()
   in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
-  let* () =
-    if String.equal resume_model_id provider_config.model_id
-    then Ok ()
-    else
-      Error
-        (Printf.sprintf
-           "checkpoint model %S does not match requested provider model %S"
-           resume_model_id
-           provider_config.model_id)
-  in
   let system_prompt =
     Worker_container_types.default_system_prompt
       ~worker_name
@@ -415,6 +405,7 @@ and resume_worker_via_oas
   let options =
     { options with
       Agent_sdk.Agent_types.context_injector = Some context_injector
+    ; provider_config = Some provider_config
     }
   in
   let agent =
@@ -423,7 +414,6 @@ and resume_worker_via_oas
       ~checkpoint
       ~tools
       ~options
-      ~provider_config
       ~config
       ~context:shared_context
       ()

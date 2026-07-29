@@ -168,15 +168,13 @@ let test_persist_connector_assistant_reply_records_lane_reply () =
         ~surface
         ~conversation_id:"discord:guild-1:channel:chan-9" ();
       Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord" ~surface
+        ~keeper_name ~surface
         ~conversation_id:"discord:guild-1:channel:chan-9"
         ~reply:"already answered" ();
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
           check string "user line first" "user" (K.Role.to_label user.K.role);
           check string "assistant reply persisted" "assistant" (K.Role.to_label assistant.K.role);
-          check string "assistant lane" "discord"
-            (Option.value assistant.K.source ~default:"");
           check string "assistant conversation id"
             "discord:guild-1:channel:chan-9"
             (Option.value assistant.K.conversation_id ~default:"");
@@ -194,8 +192,11 @@ let test_persist_connector_assistant_reply_ignores_empty_reply () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "discord-empty-reply-keeper" in
+      let surface =
+        Surface_ref.Gate { label = "discord"; address = [] }
+      in
       Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~source:"discord" ~reply:"   " ();
+        ~keeper_name ~surface ~reply:"   " ();
       check int "empty reply does not create chat file" 0
         (List.length (K.load ~base_dir ~keeper_name)))
 

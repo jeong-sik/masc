@@ -1919,11 +1919,6 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                      [ ("kind", `String (Row_kind.to_label m.kind)) ])
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
-              @ opt_string_field
-                  "source"
-                  (Option.map Surface_ref.lane_label m.surface)
-              (* Re-emit the typed surface for connector deep-links. [source]
-                 above is only its response projection for compact labels. *)
               @ (match m.surface with
                  | None -> []
                  | Some s -> [ ("surface", Surface_ref.to_json s) ])

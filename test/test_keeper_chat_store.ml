@@ -259,30 +259,6 @@ let test_message_id_minted_unique_and_stable () =
         (List.length (List.sort_uniq String.compare ids));
       Alcotest.(check (list string)) "ids stable across reloads" ids (ids_of ()))
 
-let test_source_field_is_not_a_surface_fallback () =
-  let base_dir = temp_base_path "keeper-chat-store-source-hard-cut" in
-  Fun.protect
-    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
-    (fun () ->
-      let keeper_name = "keeper-chat-source-hard-cut" in
-      let path = chat_path ~base_dir ~keeper_name in
-      write_file path
-        ({|{"id":"row-current","role":"user","content":"hello","ts":1.0,"source":"discord"}|}
-        ^ "\n");
-      match K.load ~base_dir ~keeper_name with
-      | [ row ] ->
-          Alcotest.(check (option string))
-            "retired source does not synthesize typed surface"
-            None
-            (Option.map Masc.Surface_ref.lane_label row.surface);
-          let json = K.to_json_array [ row ] in
-          Alcotest.(check bool)
-            "retired source is not re-emitted"
-            true
-            Yojson.Safe.Util.(json |> index 0 |> member "source" = `Null)
-      | rows ->
-          Alcotest.failf "expected one current-id row, got %d" (List.length rows))
-
 (* R3: the /chat/history payload surfaces the id so the dashboard keys off
    it instead of synthesising one. *)
 let test_to_json_array_exposes_id () =
@@ -624,6 +600,8 @@ let test_append_user_message_roundtrip () =
               (* The typed surface must survive the read-serve emitter so the
                  dashboard rebuilds the connector deep-link on reload. *)
               let user_surface = Yojson.Safe.Util.member "surface" user_json in
+              Alcotest.(check bool) "json omits duplicate source label" true
+                Yojson.Safe.Util.(user_json |> member "source" = `Null);
               Alcotest.(check bool) "json user row carries structured surface"
                 true (user_surface <> `Null);
               (match Masc.Surface_ref.of_json user_surface with
@@ -2170,8 +2148,6 @@ let () =
             test_missing_id_rows_are_rejected;
           Alcotest.test_case "message id minted unique and stable (R3)" `Quick
             test_message_id_minted_unique_and_stable;
-          Alcotest.test_case "source field is not a surface fallback" `Quick
-            test_source_field_is_not_a_surface_fallback;
           Alcotest.test_case "chat_path size grows on append (cache key)" `Quick
             test_chat_path_size_grows_on_append;
           Alcotest.test_case "to_json_array exposes id (R3)" `Quick

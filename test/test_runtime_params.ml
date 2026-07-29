@@ -99,7 +99,7 @@ let () =
          | Ok () -> ()
          | Error msg -> Alcotest.fail msg);
         Alcotest.(check int)
-          "request-body-sized fallback"
+          "incident fallback default"
           16_384
           (Keeper_config.keeper_memory_os_recall_max_bytes ()))
   in

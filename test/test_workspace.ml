@@ -219,7 +219,7 @@ let test_broadcast_message () =
 
   (* Broadcast *)
   let result = Workspace.broadcast config ~from_agent:"claude" ~content:"Hello @gemini!" in
-  Alcotest.(check bool) "broadcast success" true (String.contains result '[');
+  Alcotest.(check bool) "broadcast success" true (String.contains result.rendered '[');
 
   (* Get messages *)
   let msgs = Workspace.get_messages config ~since_seq:0 ~limit:10 in
@@ -288,7 +288,15 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   Alcotest.(check bool)
     "broadcast reports invalidation"
     true
-    (str_contains result "[cache_invalidated]");
+    (str_contains result.rendered "[cache_invalidated]");
+  Alcotest.(check bool)
+    "delivery exposes the canonical replacement"
+    true
+    (str_contains result.content "[cache_invalidated]");
+  Alcotest.(check (option string))
+    "delivery preserves the original mention"
+    (Some "nick0cave")
+    result.mention;
   let messages = Workspace.get_all_messages_raw config ~since_seq in
   (match messages with
    | [ msg ] ->
@@ -316,14 +324,14 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   Alcotest.(check bool)
     "normal task mention is not invalidated"
     false
-    (str_contains normal_result "[cache_invalidated]");
+    (str_contains normal_result.rendered "[cache_invalidated]");
   let operator_result =
     Workspace.broadcast config ~from_agent:"operator" ~content:stale_message
   in
   Alcotest.(check bool)
     "non-taskmaster stale-looking prose is not invalidated"
     false
-    (str_contains operator_result "[cache_invalidated]");
+    (str_contains operator_result.rendered "[cache_invalidated]");
 
   let _ = Workspace.reset config in
   Unix.rmdir tmp_dir
@@ -342,8 +350,8 @@ let test_event_log () =
   let result = Workspace.broadcast config ~from_agent:"claude" ~content:"Test event" in
 
   (* Verify broadcast returned a valid response (contains timestamp marker) *)
-  Alcotest.(check bool) "broadcast returns response" true (String.length result > 0);
-  Alcotest.(check bool) "broadcast has timestamp" true (String.contains result '[');
+  Alcotest.(check bool) "broadcast returns response" true (String.length result.rendered > 0);
+  Alcotest.(check bool) "broadcast has timestamp" true (String.contains result.rendered '[');
 
   (* Cleanup *)
   let _ = Workspace.reset config in
@@ -551,7 +559,7 @@ let test_special_chars_in_message () =
     (* Test special characters, unicode, JSON-unsafe chars *)
     let msg = "Hello \"world\" with 'quotes' and\nnewlines\tand\t한글!" in
     let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
-    Alcotest.(check bool) "special chars handled" true (String.length result > 0)
+    Alcotest.(check bool) "special chars handled" true (String.length result.rendered > 0)
   )
 
 let test_agent_name_with_special_chars () =
@@ -895,7 +903,7 @@ let test_emoji_in_message () =
     (* Emoji characters should be preserved *)
     let msg = "🚀 Launching feature! 🎉" in
     let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
-    Alcotest.(check bool) "emoji preserved" true (str_contains result "🚀")
+    Alcotest.(check bool) "emoji preserved" true (str_contains result.rendered "🚀")
   )
 
 let test_unicode_task_title () =
@@ -953,7 +961,7 @@ let test_very_long_message () =
   with_test_env (fun config ->
     let long_msg = String.make 10000 'x' in
     let result = Workspace.broadcast config ~from_agent:"claude" ~content:long_msg in
-    Alcotest.(check bool) "long message handled" true (String.length result > 0)
+    Alcotest.(check bool) "long message handled" true (String.length result.rendered > 0)
   )
 
 let test_message_with_json_chars () =
@@ -961,7 +969,7 @@ let test_message_with_json_chars () =
     (* JSON special characters should be escaped properly *)
     let msg = "{\"key\": \"value\", \"array\": [1,2,3]}" in
     let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
-    Alcotest.(check bool) "json chars handled" true (String.length result > 0)
+    Alcotest.(check bool) "json chars handled" true (String.length result.rendered > 0)
   )
 
 let test_message_sequence () =
@@ -1021,7 +1029,10 @@ let test_xss_in_message () =
     let xss_payload = "<script>alert('xss')</script>" in
     let result = Workspace.broadcast config ~from_agent:"tester" ~content:xss_payload in
     (* Check that raw script tags are not in the result *)
-    let has_raw_script = str_contains result "<script>" || str_contains result "</script>" in
+    let has_raw_script =
+      str_contains result.rendered "<script>"
+      || str_contains result.rendered "</script>"
+    in
     Alcotest.(check bool) "xss sanitized" false has_raw_script
   )
 

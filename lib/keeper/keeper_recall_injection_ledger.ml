@@ -353,10 +353,10 @@ let append
       ()
   =
   let store = make_store ~masc_root () in
-  let previous = Delta_state.peek ~masc_root ~keeper_id in
-  let reset = Option.is_none previous in
-  let prev_facts, prev_episodes =
-    Option.value previous ~default:(SS.empty, SS.empty)
+  let reset, (prev_facts, prev_episodes) =
+    match Delta_state.peek ~masc_root ~keeper_id with
+    | Some state -> false, state
+    | None -> true, (SS.empty, SS.empty)
   in
   let curr_facts = SS.of_list injected_fact_keys in
   let curr_episodes = SS.of_list injected_episode_keys in

@@ -2699,6 +2699,22 @@ let () =
 ;;
 
 let () =
+  test "workflow rejection rejects removed block_scope policy" (fun () ->
+    match
+      Task.Payloads.workflow_rejection_payload
+        ~scope_policy:"block_scope"
+        "removed policy"
+    with
+    | _ -> failwith "expected removed block_scope policy to be rejected"
+    | exception Invalid_argument message ->
+      assert
+        (String.equal
+           message
+           "Workflow_rejection_payload.payload: unsupported scope_policy \
+            \"block_scope\"; expected \"observe\""))
+;;
+
+let () =
   ensure_test_runtime ();
   Alcotest.run "Task.Tool"
     [

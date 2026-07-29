@@ -1,4 +1,7 @@
-(** Tool-neutral workflow rejection payload builder. *)
+(** Tool-neutral workflow rejection payload builder.
+
+    When supplied, [scope_policy] must be the current diagnostic value
+    ["observe"]; removed or unknown values are rejected. *)
 
 val payload
   :  ?rule_id:string

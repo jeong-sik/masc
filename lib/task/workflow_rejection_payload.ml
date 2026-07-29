@@ -1,21 +1,14 @@
 (** Tool-neutral workflow rejection payload builder. *)
 
-type scope_policy =
-  | Observe_scope
-  (* Legacy diagnostic value accepted for compatibility with older
-     payloads. Runtime scope blocking is not driven by this field. *)
-  | Block_scope
-
-let scope_policy_to_string = function
-  | Observe_scope -> "observe"
-  | Block_scope -> "block_scope"
-;;
-
-let scope_policy_of_string value =
+let scope_policy_field value =
   match String.trim value with
-  | "observe" -> Some Observe_scope
-  | "block_scope" -> Some Block_scope
-  | _ -> None
+  | "observe" -> "scope_policy", `String "observe"
+  | removed_or_unknown ->
+    invalid_arg
+      (Printf.sprintf
+         "Workflow_rejection_payload.payload: unsupported scope_policy %S; expected \
+          \"observe\""
+         removed_or_unknown)
 ;;
 
 let optional_string_field key value =
@@ -33,13 +26,11 @@ let payload
       ?(extra_fields = [])
       message
   =
-  let scope_policy = Option.bind scope_policy scope_policy_of_string in
   let diagnosis =
     optional_string_field "rule_id" rule_id
     @
     match scope_policy with
-    | Some scope_policy ->
-      [ "scope_policy", `String (scope_policy_to_string scope_policy) ]
+    | Some scope_policy -> [ scope_policy_field scope_policy ]
     | None -> []
   in
   let fields =

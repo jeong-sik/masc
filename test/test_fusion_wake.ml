@@ -540,8 +540,8 @@ let test_emit_success_projects_board_chat_and_registry () =
       | Some json -> assoc_fields "board.meta" json
       | None -> fail "fusion board post should carry meta_json"
     in
-    check string "meta.source" "fusion" (string_field "board.meta" meta "source");
-    check string "meta.run_id" run_id (string_field "board.meta" meta "run_id");
+    check bool "meta.source is not duplicated" false (List.mem_assoc "source" meta);
+    check bool "meta.run_id is not duplicated" false (List.mem_assoc "run_id" meta);
     check string "meta.question" question (string_field "board.meta" meta "question");
     (match list_field "board.meta" meta "panel" with
      | [ panel_json ] ->
@@ -586,8 +586,10 @@ let test_emit_success_projects_board_chat_and_registry () =
     let dashboard_meta =
       assoc_fields "dashboard.post.meta" (field "dashboard.post" dashboard_json "meta")
     in
-    check string "dashboard meta run id" run_id
-      (string_field "dashboard.post.meta" dashboard_meta "run_id");
+    check bool "dashboard meta has no duplicate source" false
+      (List.mem_assoc "source" dashboard_meta);
+    check bool "dashboard meta has no duplicate run id" false
+      (List.mem_assoc "run_id" dashboard_meta);
     let messages = Keeper_chat_store.load ~base_dir ~keeper_name:keeper in
     let fusion_block =
       List.find_map

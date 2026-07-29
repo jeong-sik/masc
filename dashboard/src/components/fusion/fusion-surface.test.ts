@@ -109,9 +109,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-1',
         title: 'Fusion deliberation (run fus-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-1',
           question: 'Which deploy path should we take?',
           panel: [
             {
@@ -137,10 +136,6 @@ describe('FusionSurface', () => {
             input_tokens: 1300,
             output_tokens: 360,
           },
-        },
-        origin: {
-          source: 'fusion',
-          fusion_run_id: 'fus-1',
         },
       }),
     ]
@@ -177,24 +172,22 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('panel ×2')
     expect(container.textContent).toContain('board evidence')
     expect(container.querySelector('[data-testid="fusion-sink-linkage"]')?.getAttribute('data-linkage-status')).toBe('verified')
-    expect(container.querySelector('[data-testid="fusion-sink-correlation"]')?.getAttribute('data-meta-run-id')).toBe('fus-1')
+    expect(container.querySelector('[data-testid="fusion-sink-correlation"]')?.hasAttribute('data-meta-run-id')).toBe(false)
     expect(container.querySelector('[data-testid="fusion-sink-correlation"]')?.getAttribute('data-origin-run-id')).toBe('fus-1')
-    expect(container.textContent).toContain('origin verified')
-    expect(container.textContent).toContain('typed origin으로 run linkage 검증')
+    expect(container.textContent).toContain('typed origin')
+    expect(container.textContent).toContain('typed origin이 run identity를 소유')
     expect(container.textContent).not.toContain('chat · board')
   })
 
-  it('warns when a successful fusion board post lacks typed origin linkage', () => {
+  it('rejects a Fusion board post without typed origin', () => {
     fusionBoardPosts.value = [
       boardPost({
-        id: 'post-fus-legacy',
-        title: 'Fusion deliberation (run fus-legacy): answer',
+        id: 'post-fus-unowned',
+        title: 'Unowned deliberation',
         meta: {
-          source: 'fusion',
-          run_id: 'fus-legacy',
-          question: 'Legacy sink?',
-          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Use meta only.' }],
-          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Legacy answer.' },
+          question: 'Missing origin?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'No.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Reject.' },
         },
         origin: null,
       }),
@@ -202,26 +195,19 @@ describe('FusionSurface', () => {
 
     render(html`<${FusionSurface} />`, container)
 
-    const linkage = container.querySelector('[data-testid="fusion-sink-linkage"]')
-    const correlation = container.querySelector('[data-testid="fusion-sink-correlation"]')
-    expect(linkage?.getAttribute('data-linkage-status')).toBe('missing')
-    expect(linkage?.textContent).toContain('origin unverified')
-    expect(linkage?.textContent).toContain('typed board origin is absent')
-    expect(correlation?.getAttribute('data-origin-run-id')).toBe('')
-    expect(correlation?.textContent).toContain('origin unverified')
+    expect(container.querySelector('[data-testid="fusion-detail"]')).toBeNull()
+    expect(container.textContent).not.toContain('Missing origin?')
   })
 
-  it('flags a meta/origin run-id mismatch instead of treating sink projection as verified', () => {
+  it('uses origin.fusion_run_id as the only run identity', () => {
     fusionBoardPosts.value = [
       boardPost({
         id: 'post-fus-drift',
-        title: 'Fusion deliberation (run fus-meta): answer',
+        title: 'Fusion deliberation',
         meta: {
-          source: 'fusion',
-          run_id: 'fus-meta',
-          question: 'Drifted sink?',
-          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Mismatch.' }],
-          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Mismatch answer.' },
+          question: 'Origin-owned sink?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Exact.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Exact answer.' },
         },
         origin: {
           source: 'fusion',
@@ -232,13 +218,10 @@ describe('FusionSurface', () => {
 
     render(html`<${FusionSurface} />`, container)
 
-    const linkage = container.querySelector('[data-testid="fusion-sink-linkage"]')
     const correlation = container.querySelector('[data-testid="fusion-sink-correlation"]')
-    expect(linkage?.getAttribute('data-linkage-status')).toBe('mismatch')
-    expect(linkage?.textContent).toContain('origin mismatch')
-    expect(linkage?.textContent).toContain('origin.fusion_run_id=fus-origin')
-    expect(correlation?.getAttribute('data-meta-run-id')).toBe('fus-meta')
     expect(correlation?.getAttribute('data-origin-run-id')).toBe('fus-origin')
+    expect(container.textContent).toContain('fus-origin')
+    expect(container.textContent).toContain('Origin-owned sink?')
   })
 
   it('renders the RFC-0284 judge-node strip for a judge-of-judges run', () => {
@@ -250,9 +233,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-joj',
         title: 'Fusion deliberation (run joj-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'joj-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'joj-1',
           question: 'Which judge topology?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'reconciled answer' },
@@ -291,9 +273,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-joj-iso',
         title: 'Fusion deliberation (run joj-iso): answer',
+        origin: { source: 'fusion', fusion_run_id: 'joj-iso' },
         meta: {
-          source: 'fusion',
-          run_id: 'joj-iso',
           question: 'Which redesign?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'reconciled answer' },
@@ -336,9 +317,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-joj-cards',
         title: 'Fusion deliberation (run joj-cards): answer',
+        origin: { source: 'fusion', fusion_run_id: 'joj-cards' },
         meta: {
-          source: 'fusion',
-          run_id: 'joj-cards',
           question: 'round.ml redesign?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
           judge: {
@@ -417,9 +397,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-simple-nocards',
         title: 'Fusion deliberation (run simple-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'simple-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'simple-1',
           question: 'simple?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'simple answer' },
@@ -438,9 +417,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-refine',
         title: 'Fusion deliberation (run refine-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'refine-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'refine-1',
           question: 'Refine path?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'refined answer' },
@@ -467,9 +445,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-legacy',
         title: 'Fusion deliberation (run legacy-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'legacy-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'legacy-1',
           question: 'Legacy?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'legacy answer' },
@@ -495,9 +472,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-long',
         title: 'Fusion deliberation (run long-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'long-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'long-1',
           question: 'Which path?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: longAnswer },
@@ -524,9 +500,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-short',
         title: 'Fusion deliberation (run short-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'short-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'short-1',
           question: 'Which path?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary first.' },
@@ -545,9 +520,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-structured',
         title: 'Fusion deliberation (run fus-structured): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-structured' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-structured',
           question: 'Which model result should drive the operator note?',
           panel: [
             { model: 'gpt-5', status: 'answered', answer: 'Prefer the canary-backed note.' },
@@ -614,9 +588,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-1',
         title: 'Fusion deliberation (run fus-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-1',
           question: 'Which deploy path should we take?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'Use the canary path.' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary first.' },
@@ -640,30 +613,26 @@ describe('FusionSurface', () => {
     expect(row?.className).not.toContain('opts')
   })
 
-  it('supports older nested fusion_deliberation metadata and route selection', () => {
+  it('selects a current typed-origin run from the route', () => {
     fusionBoardPosts.value = [
       boardPost({
         id: 'post-fus-1',
         updated_at: '2026-06-19T01:00:00Z',
+        origin: { source: 'fusion', fusion_run_id: 'fus-1' },
         meta: {
-          fusion_deliberation: {
-            run_id: 'fus-1',
-            question: 'older run',
-            panel: [],
-            judge: { status: 'synthesized', resolved_answer: 'older answer' },
-          },
+          question: 'first run',
+          panel: [],
+          judge: { status: 'synthesized', resolved_answer: 'first answer' },
         },
       }),
       boardPost({
         id: 'post-fus-2',
         updated_at: '2026-06-19T02:00:00Z',
+        origin: { source: 'fusion', fusion_run_id: 'fus-2' },
         meta: {
-          fusion_deliberation: {
-            run_id: 'fus-2',
-            question: 'newer run',
-            panel: [],
-            judge: { status: 'synthesized', resolved_answer: 'newer answer' },
-          },
+          question: 'second run',
+          panel: [],
+          judge: { status: 'synthesized', resolved_answer: 'second answer' },
         },
       }),
     ]
@@ -671,7 +640,7 @@ describe('FusionSurface', () => {
 
     render(html`<${FusionSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="fusion-detail"]')?.textContent).toContain('older answer')
+    expect(container.querySelector('[data-testid="fusion-detail"]')?.textContent).toContain('first answer')
 
     const secondRow = Array.from(container.querySelectorAll<HTMLButtonElement>('.fus-run-row'))
       .find(button => button.textContent?.includes('fus-2'))
@@ -715,9 +684,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-cached',
         title: 'Fusion deliberation (run fus-cached): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-cached' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-cached',
           question: 'Cached run?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'Use cached evidence.' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Cached answer.' },
@@ -774,9 +742,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-evidence',
         created_at: '2026-01-01T00:00:00Z',
+        origin: { source: 'fusion', fusion_run_id: 'fus-evidence' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-evidence',
           question: 'Which evidence is actionable?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'Board-backed detail.' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Use the evidence pane.' },
@@ -803,9 +770,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-evidence',
         created_at: '2026-01-01T00:00:00Z',
+        origin: { source: 'fusion', fusion_run_id: 'fus-evidence' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-evidence',
           question: 'Which evidence is actionable?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'Board-backed detail.' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Use the evidence pane.' },
@@ -834,9 +800,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-1',
         title: 'Fusion deliberation (run fus-1): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-1' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-1',
           question: 'Which path?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary.' },
@@ -875,9 +840,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-statuses',
         title: 'Fusion deliberation (run fus-statuses): mixed',
+        origin: { source: 'fusion', fusion_run_id: 'fus-statuses' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-statuses',
           question: 'Status edge cases?',
           panel: [
             { model: 'm1', status: 'failover', answer: 'Not a failure.' },
@@ -908,9 +872,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-judge-status-substring',
         title: 'Fusion deliberation (run fus-judge-status-substring): pending',
+        origin: { source: 'fusion', fusion_run_id: 'fus-judge-status-substring' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-judge-status-substring',
           question: 'Judge status edge cases?',
           panel: [{ model: 'm1', status: 'answered', answer: 'Panel answer.' }],
           judge: { status: 'failover' },
@@ -931,9 +894,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-fus-reason-code',
         title: 'Fusion deliberation (run fus-reason-code): mixed',
+        origin: { source: 'fusion', fusion_run_id: 'fus-reason-code' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-reason-code',
           question: 'Reason code?',
           panel: [
             { model: 'gpt-5', status: 'answered', answer: 'ok' },
@@ -965,9 +927,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-params',
         title: 'Fusion deliberation (run fus-params): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-params' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-params',
           question: 'Which path?',
           temperature: 0.7,
           top_p: 0.95,
@@ -997,9 +958,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-no-params',
         title: 'Fusion deliberation (run fus-no-params): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-no-params' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-no-params',
           question: 'Which path?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary.' },
@@ -1018,9 +978,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-rich-prompt',
         title: 'Fusion deliberation (run fus-rich-prompt): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-rich-prompt' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-rich-prompt',
           question: 'Check **this** [link](https://example.com).',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'OK.' }],
           judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Done.' },
@@ -1041,9 +1000,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-rich-panel',
         title: 'Fusion deliberation (run fus-rich-panel): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-rich-panel' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-rich-panel',
           question: 'Which path?',
           panel: [
             {
@@ -1069,9 +1027,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-rich-judge',
         title: 'Fusion deliberation (run fus-rich-judge): answer',
+        origin: { source: 'fusion', fusion_run_id: 'fus-rich-judge' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-rich-judge',
           question: 'Which path?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
           judge: {
@@ -1096,9 +1053,8 @@ describe('FusionSurface', () => {
       boardPost({
         id: 'post-rich-resolved',
         title: 'Fusion deliberation (run fus-rich-resolved): recommend',
+        origin: { source: 'fusion', fusion_run_id: 'fus-rich-resolved' },
         meta: {
-          source: 'fusion',
-          run_id: 'fus-rich-resolved',
           question: 'Which path?',
           panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
           judge: {
@@ -1131,9 +1087,8 @@ describe('FusionSurface', () => {
       title: `Fusion deliberation (run ${runId})`,
       created_at: createdAt,
       updated_at: updatedAt,
+      origin: { source: 'fusion', fusion_run_id: runId },
       meta: {
-        source: 'fusion',
-        run_id: runId,
         question: `Question for ${runId}?`,
         panel: [],
         judge: { status: 'synthesized', decision: 'answer', synthesis: 's', resolved_answer: 'r' },

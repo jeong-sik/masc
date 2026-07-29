@@ -6,18 +6,17 @@ import { FusionBoardEvidence } from './fusion-evidence'
 
 afterEach(() => cleanup())
 
-// Build a fusion board post whose meta carries the RFC-0284 `judges` observation
-// array. `judges === undefined` models an older post that predates the array.
+// Build a current Fusion board post whose typed origin owns run identity and
+// whose meta carries the RFC-0284 `judges` observation array.
 function fusionPost(judges: unknown) {
   return {
     meta: {
-      source: 'fusion',
-      run_id: 'fus-1',
       question: 'q?',
       panel: [{ model: 'gpt-5', status: 'answered', answer: 'panel answer' }],
       judge: { status: 'synthesized', synthesis: '최종 종합' },
       judges,
     },
+    origin: { source: 'fusion', fusion_run_id: 'fus-1' },
   } as Parameters<typeof FusionBoardEvidence>[0]['post']
 }
 
@@ -98,7 +97,12 @@ describe('FusionBoardEvidence judge topology strip (RFC-0284 PR 2)', () => {
 
   it('returns null for non-fusion meta', () => {
     const { container } = render(
-      h(FusionBoardEvidence, { post: { meta: { foo: 'bar' } } as Parameters<typeof FusionBoardEvidence>[0]['post'] }),
+      h(FusionBoardEvidence, {
+        post: {
+          meta: { foo: 'bar' },
+          origin: null,
+        } as Parameters<typeof FusionBoardEvidence>[0]['post'],
+      }),
     )
     expect(container.querySelector('[data-testid="fusion-board-evidence"]')).toBeNull()
   })
@@ -129,8 +133,6 @@ describe('FusionBoardEvidence failure attribution', () => {
   it('renders the panel reason_code chip on a failed panel', () => {
     const post = {
       meta: {
-        source: 'fusion',
-        run_id: 'fus-1',
         question: 'q?',
         panel: [
           { model: 'gpt-5', status: 'answered', answer: 'panel answer' },
@@ -143,6 +145,7 @@ describe('FusionBoardEvidence failure attribution', () => {
         ],
         judge: { status: 'synthesized', synthesis: '최종 종합' },
       },
+      origin: { source: 'fusion', fusion_run_id: 'fus-1' },
     } as Parameters<typeof FusionBoardEvidence>[0]['post']
     render(h(FusionBoardEvidence, { post }))
     const codes = screen.getAllByText('provider_error', { selector: '[data-fusion-panel-code]' })

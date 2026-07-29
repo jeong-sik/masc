@@ -423,9 +423,7 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
     let meta_json =
       Some
         (`Assoc
-           [ ("source", `String "fusion")
-           ; ("run_id", `String run_id)
-           ; ("question", `String question)
+           [ ("question", `String question)
            ; ("panel", `List (List.map panel_meta panel))
            ; ("judge", judge_meta judge)
              (* RFC-0284: 실행된 심판 노드 관측 배열 (panel과 동형). 기존 단일 [judge]
@@ -441,14 +439,10 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
     in
     (* board post를 *먼저* 만들어 post id를 확보한다 — 이 id가 키퍼 chat의 fusion block
        lazy-fetch 키이기 때문이다(대시보드가 board meta_json에서 패널/심판을 펼친다). *)
-    (* RFC-0233 §7: typed origin. [fusion_run_id] is in scope here ([run_id]),
-       so a real index ([posts_by_run_id]) can key on it instead of the legacy
-       meta_json substring. [turn_ref = None]: fusion is an out-of-band
+    (* RFC-0233 §7: typed origin. [fusion_run_id] is the sole run identity and
+       indexes [posts_by_run_id]. [turn_ref = None]: fusion is an out-of-band
        server-root-switch fork, so the triggering keeper's turn_ref is not in
-       this scope; threading it through [fusion_request] is a separate change.
-       The legacy meta_json [run_id] (above) is kept ADDITIVELY this release —
-       existing dashboard / on-disk readers depend on it; its removal is a
-       later migration, not this PR. *)
+       this scope; threading it through [fusion_request] is a separate change. *)
     let origin : Board.post_origin =
       { turn_ref = None; source = Some "fusion"; fusion_run_id = Some run_id }
     in

@@ -8,6 +8,11 @@
   fallback reader, and the producer-less `Handoff_triggered` event plus its
   derived `handoff_rate`. Telemetry now reads only the current date-split
   `.masc/telemetry/YYYY-MM/DD.jsonl` store and rejects retired event variants.
+- **Breaking (Fusion board metadata)**: removed duplicate `source` and `run_id`
+  keys from Fusion `meta_json`. Board `origin.source` and
+  `origin.fusion_run_id` are now the sole typed identity consumed by the Board
+  evidence and Fusion dashboard features; posts without that current origin
+  are not admitted to those surfaces.
 - **Breaking (keeper failure wire)**: removed the bare
   `fiber_unresolved` failure-reason projection retained for historical log and
   dashboard matching. Unexpected unresolved fibers now serialize as

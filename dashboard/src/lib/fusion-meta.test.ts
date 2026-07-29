@@ -181,18 +181,17 @@ describe('normalizeFusionUsage', () => {
 
 describe('extractFusionEvidence', () => {
   it('returns null for non-record meta', () => {
-    expect(extractFusionEvidence(null)).toBeNull()
-    expect(extractFusionEvidence('fusion')).toBeNull()
+    const origin = { source: 'fusion', fusion_run_id: 'fus-1' }
+    expect(extractFusionEvidence(null, origin)).toBeNull()
+    expect(extractFusionEvidence('fusion', origin)).toBeNull()
   })
 
-  it('extracts evidence from explicit source tag', () => {
+  it('extracts evidence using typed Board origin as the run identity', () => {
     const evidence = extractFusionEvidence({
-      source: 'fusion',
-      run_id: 'fus-1',
       question: 'q?',
       panel: [{ model: 'gpt-5', status: 'answered' }],
       judge: { status: 'synthesized' },
-    })
+    }, { source: 'fusion', fusion_run_id: 'fus-1' })
     expect(evidence).toMatchObject({
       source: 'fusion',
       runId: 'fus-1',
@@ -202,31 +201,35 @@ describe('extractFusionEvidence', () => {
     })
   })
 
-  it('unwraps nested fusion_deliberation', () => {
-    const evidence = extractFusionEvidence({
+  it('rejects evidence without the current typed Fusion origin', () => {
+    const meta = {
+      question: 'q?',
+      panel: [{ model: 'gpt-5', status: 'answered' }],
+      judge: { status: 'synthesized' },
+    }
+    expect(extractFusionEvidence(meta, null)).toBeNull()
+    expect(extractFusionEvidence(meta, { source: 'other', fusion_run_id: 'fus-1' }))
+      .toBeNull()
+    expect(extractFusionEvidence(meta, { source: 'fusion' })).toBeNull()
+  })
+
+  it('does not repair nested or identity-bearing metadata', () => {
+    expect(extractFusionEvidence({
       fusion_deliberation: {
-        run_id: 'fus-legacy',
         panel: [{ model: 'gpt-5', status: 'answered' }],
         judge: { status: 'synthesized' },
       },
-    })
-    expect(evidence?.runId).toBe('fus-legacy')
-    expect(evidence?.panel).toHaveLength(1)
-  })
-
-  it('falls back to panel + judge heuristic when source is missing', () => {
-    const evidence = extractFusionEvidence({
+    }, null)).toBeNull()
+    expect(extractFusionEvidence({
+      source: 'fusion',
+      run_id: 'meta-only',
       panel: [{ model: 'gpt-5', status: 'answered' }],
       judge: { status: 'synthesized' },
-    })
-    expect(evidence).not.toBeNull()
-    expect(evidence?.source).toBe('fusion')
+    }, null)).toBeNull()
   })
 
   it('carries the RFC-0284 judges observation array (judge-of-judges)', () => {
     const evidence = extractFusionEvidence({
-      source: 'fusion',
-      run_id: 'fus-joj',
       panel: [{ model: 'gpt-5', status: 'answered' }],
       judge: { status: 'synthesized' },
       judges: [
@@ -234,7 +237,7 @@ describe('extractFusionEvidence', () => {
         { role: 'first', identity: 'claude', status: 'failed', error: 'timeout' },
         { role: 'meta', identity: 'meta' },
       ],
-    })
+    }, { source: 'fusion', fusion_run_id: 'fus-joj' })
     expect(evidence?.judges).toHaveLength(3)
     expect(evidence?.judges[0]).toMatchObject({ role: 'first', identity: 'gpt-5', failed: false })
     // toMatchObject ignores extra keys, so pin that a success node carries no error
@@ -243,12 +246,11 @@ describe('extractFusionEvidence', () => {
     expect(evidence?.judges[2]?.role).toBe('meta')
   })
 
-  it('defaults judges to [] when the meta predates the array', () => {
+  it('defaults judges to [] when the current metadata omits the array', () => {
     const evidence = extractFusionEvidence({
-      source: 'fusion',
       panel: [{ model: 'gpt-5', status: 'answered' }],
       judge: { status: 'synthesized' },
-    })
+    }, { source: 'fusion', fusion_run_id: 'fus-simple' })
     expect(evidence?.judges).toEqual([])
   })
 })

@@ -194,15 +194,16 @@ module For_testing : sig
     default_runtime_id:string ->
     assignments:(string * string) list ->
     memory_os_consolidation_runtime_id:string option ->
+    structured_judge_runtime_id:string option ->
     cross_verifier_runtime_id:string option ->
     media_failover:string list ->
     lanes:Runtime_lane.t list ->
     string list
   (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment
       roots (including a same-named lane's candidates), the explicit
-      Memory OS consolidation and cross-verifier runtimes, and explicit
-      runtime-only media failover routing. Dormant declared lanes are
-      excluded. *)
+      Memory OS consolidation, structured-judge, and cross-verifier runtimes,
+      and explicit runtime-only media failover routing. Dormant declared lanes
+      are excluded. *)
 
   val save_config_text_with_sync_parent :
     ?runtime_config_path:string ->

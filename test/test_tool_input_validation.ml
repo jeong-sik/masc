@@ -1980,19 +1980,44 @@ let test_rejection_attaches_schema_shape_feedback () =
   match Tool_input_validation.validate_args ~schema ~name:"test_feedback_tool" ~args () with
   | Error result ->
     let data = Tool_result.data result in
-    let has_schema_shape =
-      match Yojson.Safe.Util.member "schema_shape" data with
-      | `Assoc fields -> List.mem_assoc "required" fields && List.mem_assoc "properties" fields
-      | _ -> false
-    in
-    Alcotest.(check bool) "attaches schema_shape feedback" true has_schema_shape
+    let shape = Yojson.Safe.Util.member "schema_shape" data in
+    Alcotest.(check bool)
+      "exact schema shape"
+      true
+      (Yojson.Safe.equal
+         shape
+         (`Assoc
+            [ "properties", `List [ `String "task_id" ]
+            ; "required", `List [ `String "task_id" ]
+            ]))
   | Ok _ -> Alcotest.fail "expected rejection with schema_shape feedback"
+
+let test_local_shape_rejection_attaches_same_feedback () =
+  let schema =
+    `Assoc
+      [ ("type", `String "object")
+      ; ( "properties"
+        , `Assoc [ ("task_id", `Assoc [ ("type", `String "string") ]) ] )
+      ; ("required", `List [ `String "task_id" ])
+      ]
+  in
+  let args = `Assoc [ "task_id", `String "task-1"; "unexpected", `Bool true ] in
+  match Tool_input_validation.validate_args ~schema ~name:"test_feedback_tool" ~args () with
+  | Error result ->
+    let shape = Tool_result.data result |> Yojson.Safe.Util.member "schema_shape" in
+    Alcotest.(check bool)
+      "same SSOT projection"
+      true
+      (Yojson.Safe.equal shape (Tool_input_validation.schema_shape_json schema))
+  | Ok _ -> Alcotest.fail "expected local schema-shape rejection"
 
 let () =
   Alcotest.run "Tool_input_validation (OAS delegation)" [
     ("self_correction_feedback", [
       Alcotest.test_case "rejection attaches schema_shape feedback" `Quick
         test_rejection_attaches_schema_shape_feedback;
+      Alcotest.test_case "local rejection uses same feedback SSOT" `Quick
+        test_local_shape_rejection_attaches_same_feedback;
     ]);
     ("required", [
       Alcotest.test_case "present" `Quick test_required_present;

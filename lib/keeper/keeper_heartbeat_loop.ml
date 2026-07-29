@@ -526,27 +526,24 @@ let run_keepalive_unified_turn
     let selection_acked = ref false in
     let event_queue_failed = ref false in
     let record_event_queue_failure message =
+      let first_failure = not !event_queue_failed in
       event_queue_failed := true;
-      match !cycle_outcome_ref with
-      | Some (Cycle.Failed _) ->
-        (* The failed turn already recorded its failure counter. The queue
-           error remains explicit in the log and durable pending state. *)
-        ()
-      | Some
-          ( Cycle.Completed _
-          | Cycle.Checkpointed _
-          | Cycle.Input_required _
-          | Cycle.Cancelled _
-          | Cycle.Skipped _
-          | Cycle.Busy _
-          | Cycle.Manual_compaction_failed _
-          | Cycle.Manual_compaction_not_applied _
-          | Cycle.Manual_compaction_applied _ )
-      | None ->
+      if first_failure
+      then
+        (* Queue/meta durability is a separate infrastructure failure even
+           when the provider cycle already failed. Capacity failures may be
+           exempt from crash accounting, so borrowing that observation could
+           otherwise publish a false [Turn_succeeded]. *)
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name
           (Event_queue_cycle_failed message)
+    in
+    let wait_before_durable_retry () =
+      if not (Atomic.get stop)
+      then (
+        emit_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage;
+        Eio.Time.sleep ctx.clock (in_turn_liveness_pulse_interval_sec ()))
     in
     try
       (match
@@ -635,20 +632,31 @@ let run_keepalive_unified_turn
          stuck behind sticky blockers. Failed turns record evidence via
          Keeper_registry; recovery is autonomous (next turn's observation)
          or operator-driven (board/keeper_chat), not blocker-driven. *)
+      let compaction_retry_suspended =
+        Keeper_meta_contract.compaction_retry_suspended
+          meta_after_triage.runtime.compaction_rt
+      in
+      let compaction_suspension_blocks_turn =
+        compaction_retry_suspended
+        && not manual_compaction_requested
+      in
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
-          ~compaction_retry_suspended:
-            (Keeper_meta_contract.compaction_retry_suspended
-               meta_after_triage.runtime.compaction_rt)
+          ~compaction_retry_suspended
           ~event_intake
       in
       let verdict_strs =
-        match event_intake.event_queue_intake_error with
-        | None -> scheduling.verdict_reasons
-        | Some error ->
-          Stimulus_intake.event_queue_intake_error_reason_label error
-          :: scheduling.verdict_reasons
+        let reasons =
+          match event_intake.event_queue_intake_error with
+          | None -> scheduling.verdict_reasons
+          | Some error ->
+            Stimulus_intake.event_queue_intake_error_reason_label error
+            :: scheduling.verdict_reasons
+        in
+        if compaction_suspension_blocks_turn
+        then "compaction_retry_suspended" :: reasons
+        else reasons
       in
       let channel_str = scheduling.channel in
       if not should_run_turn
@@ -881,20 +889,55 @@ let run_keepalive_unified_turn
          match !pending_selection with
          | None -> ()
          | Some selection ->
-           let remove_completed_selection () =
+           let mark_selection_acked () =
+             selection_acked := true;
+             mark_connector_attention_ignored_after_turn
+               ~base_path:ctx.config.base_path
+               ~keeper_name:meta_after_triage.name
+               (connector_attention_event_ids_of_stimuli !consumed_stimuli)
+           in
+           let rec retry_ack_followup () =
+             match
+               Keeper_registry_event_queue.retry_pending_ack_followup_result
+                 ~base_path:ctx.config.base_path
+                 meta_after_triage.name
+             with
+             | Ok () -> mark_selection_acked ()
+             | Error message ->
+               record_event_queue_failure message;
+               Log.Keeper.error
+                 ~keeper_name:meta_after_triage.name
+                 "terminal source ACK is durable but cleanup is incomplete; retrying cleanup only: %s"
+                 message;
+               wait_before_durable_retry ();
+               if not (Atomic.get stop) then retry_ack_followup ()
+           in
+           let rec remove_completed_selection () =
              match
                Keeper_registry_event_queue.ack_pending_result
                  ~base_path:ctx.config.base_path
                  meta_after_triage.name
                  ~selection
              with
-             | Ok () ->
-               selection_acked := true;
-               mark_connector_attention_ignored_after_turn
-                 ~base_path:ctx.config.base_path
+             | Ok Keeper_registry_event_queue.Ack_applied ->
+               mark_selection_acked ()
+             | Ok
+                 (Keeper_registry_event_queue.Ack_applied_followup_failed
+                    message) ->
+               record_event_queue_failure message;
+               Log.Keeper.error
                  ~keeper_name:meta_after_triage.name
-                 (connector_attention_event_ids_of_stimuli !consumed_stimuli)
-             | Error message -> record_event_queue_failure message
+                 "terminal source ACK committed but cleanup failed; the source will not be replayed: %s"
+                 message;
+               retry_ack_followup ()
+             | Error message ->
+               record_event_queue_failure message;
+               Log.Keeper.error
+                 ~keeper_name:meta_after_triage.name
+                 "terminal source ACK not persisted; retrying the exact ACK without replaying the turn: %s"
+                 message;
+               wait_before_durable_retry ();
+               if not (Atomic.get stop) then remove_completed_selection ()
            in
            match pending_selection_outcome_of_cycle_outcome !cycle_outcome_ref with
            | Selection_completed ->
@@ -919,45 +962,43 @@ let run_keepalive_unified_turn
          intake and by the prepare defense. This update is intentionally
          independent of Event Queue source selection: every failed compaction
          must consume retry budget, including cycles with no selected source.
-         A failed write stops this Keeper lane; otherwise neither reader could
-         prove the retry ceiling and the next heartbeat would fail open into
-         another provider/compactor call. *)
+         A failed write keeps this turn open and retries only the exact durable
+         batch; otherwise neither reader could prove the retry ceiling and the
+         next heartbeat would fail open into another provider/compactor call. *)
       (let compaction_outcomes =
          compaction_outcomes_of_cycle_outcome !cycle_outcome_ref
        in
-       let stop_after_persistence_failure message =
-         Atomic.set stop true;
-         event_queue_failed := true;
+       let record_persistence_failure message =
+         record_event_queue_failure message;
          Health.record_failure
            ~agent_name:meta_after_triage.name
            ~reason:(Keeper_types_profile.short_preview message);
          Log.Keeper.error
            ~keeper_name:meta_after_triage.name
-           "compaction outcome not persisted; stopping Keeper lane before another provider dispatch: %s"
+           "compaction outcome not persisted; retrying the exact write before another provider dispatch: %s"
            message
        in
-       let rec persist = function
-         | [] -> ()
-         | `Recovered :: rest
-           when meta_after_triage.runtime.compaction_rt.consecutive_failures = 0 ->
-           (* Streak already clear: skip the read-modify-write that every
-              healthy completed turn would otherwise pay. *)
-           persist rest
-         | outcome :: rest ->
-           (match
-              Keeper_meta_store.persist_compaction_outcome
-                ctx.config
-                ~keeper_name:meta_after_triage.name
-                ~outcome
-            with
-            | Ok `Persisted -> persist rest
-            | Ok `No_durable_meta ->
-              stop_after_persistence_failure
-                "durable Keeper metadata is missing for the compaction outcome"
-            | Error message ->
-              stop_after_persistence_failure message)
+       let rec persist () =
+         match
+           Keeper_meta_store.persist_compaction_outcomes
+             ctx.config
+             ~keeper_name:meta_after_triage.name
+             ~outcomes:compaction_outcomes
+         with
+         | Ok `Persisted -> ()
+         | Ok `No_durable_meta ->
+           record_persistence_failure
+             "durable Keeper metadata is missing for the compaction outcome";
+           wait_before_durable_retry ();
+           if not (Atomic.get stop) then persist ()
+         | Error message ->
+           record_persistence_failure message;
+           wait_before_durable_retry ();
+           if not (Atomic.get stop) then persist ()
        in
-       persist compaction_outcomes);
+       match compaction_outcomes with
+       | [] -> ()
+       | _ :: _ -> persist ());
       { meta = meta_after_cycle
       ; cycle_status =
           if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed

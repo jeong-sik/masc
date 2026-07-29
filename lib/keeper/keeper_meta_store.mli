@@ -230,14 +230,15 @@ val persist_compaction_decision :
   decision:Keeper_meta_contract.compaction_runtime_decision ->
   ([ `Persisted | `No_durable_meta ], string) result
 
-val persist_compaction_outcome :
+val persist_compaction_outcomes :
   Workspace.config ->
   keeper_name:string ->
-  outcome:
-    [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] ->
+  outcomes:
+    [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] list ->
   ([ `Persisted | `No_durable_meta ], string) result
-(** Advance the compaction outcome counters on [compaction_rt] using the same
-    read/stamp/merge shape as {!persist_compaction_decision}.
+(** Atomically fold the ordered compaction outcome facts into [compaction_rt]
+    using one read/stamp/merge operation. This prevents a manual commit followed
+    by an immediate reactive overflow from persisting only the reset half.
 
     [`Overflow_episode_committed] (an in-lane reactive commit) increments
     [count] AND the streak — committed savings under an incompressible floor
@@ -252,8 +253,8 @@ val persist_compaction_outcome :
     #25461); [count] had no writer before this despite being serialized and
     rendered. Heartbeat intake reads the durable streak before ordinary
     provider dispatch; compaction prepare repeats the check only as a race
-    defense. A persistence failure must therefore stop the Keeper lane rather
-    than fail open. *)
+    defense. The owning turn retries the whole batch before another provider
+    dispatch rather than fail open. *)
 
 val persist_transcript_corruption_pause :
   Workspace.config ->

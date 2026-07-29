@@ -204,11 +204,34 @@ let compact_wal_unlocked ~surface ~path owner =
          detail)
 ;;
 
+let forced_transition_wal_compaction_failures_for_test : int Atomic.t =
+  Atomic.make 0
+
+let consume_forced_transition_wal_compaction_failure () =
+  let rec loop () =
+    let remaining =
+      Atomic.get forced_transition_wal_compaction_failures_for_test
+    in
+    if remaining <= 0
+    then false
+    else
+      Atomic.compare_and_set
+        forced_transition_wal_compaction_failures_for_test
+        remaining
+        (remaining - 1)
+      || loop ()
+  in
+  loop ()
+;;
+
 let compact_transition_wals_unlocked owner =
-  compact_wal_unlocked
-    ~surface:"transition WAL"
-    ~path:(transition_wal_path_of_owner owner)
-    owner
+  if consume_forced_transition_wal_compaction_failure ()
+  then Error "forced transition WAL compaction failure"
+  else
+    compact_wal_unlocked
+      ~surface:"transition WAL"
+      ~path:(transition_wal_path_of_owner owner)
+      owner
 ;;
 
 let save_json_atomic_with ~strict_parent_sync path json =
@@ -681,6 +704,7 @@ let discover_keeper_names_with_snapshots ~base_path =
 
 let commit_transform_unlocked
       ?(strict_snapshot_durability = false)
+      ?(on_followup_failure = fun _value detail -> Error detail)
       owner
       ~after_commit
       transform
@@ -713,14 +737,23 @@ let commit_transform_unlocked
                 [source_revision], and no runtime path can clear it because the
                 projector itself starts with [load_state_unlocked] (#26074). *)
              (match compact_transition_wals_unlocked owner with
-              | Error _ as error -> error
+              | Error detail -> on_followup_failure value detail
               | Ok () ->
-                after_commit (State.pending next);
-                Ok value))))
+                (try
+                   after_commit (State.pending next);
+                   Ok value
+                 with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn ->
+                   on_followup_failure
+                     value
+                     ("post-commit pending publication raised: "
+                      ^ Printexc.to_string exn))))))
 ;;
 
 let commit_transform
       ?(strict_snapshot_durability = false)
+      ?on_followup_failure
       ~base_path
       ~keeper_name
       ~after_commit
@@ -733,6 +766,7 @@ let commit_transform
        Owner_lock.with_durable_lock owner (fun () ->
          commit_transform_unlocked
            ~strict_snapshot_durability
+           ?on_followup_failure
            owner
            ~after_commit
            transform)
@@ -883,6 +917,10 @@ let validate_pending_selection_result ~base_path ~keeper_name ~selection =
   | Ok state -> State.validate_pending_selection ~selection state
 ;;
 
+type pending_ack_result =
+  | Ack_applied
+  | Ack_applied_followup_failed of string
+
 let ack_pending_result
       ?(after_commit = fun _ -> ())
       ~base_path
@@ -890,10 +928,45 @@ let ack_pending_result
       ~selection
       ()
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.ack_pending ~selection state with
-    | Error _ as error -> error
-    | Ok state -> Ok (state, ()))
+  commit_transform
+    ~on_followup_failure:(fun _value detail ->
+      Ok (Ack_applied_followup_failed detail))
+    ~base_path
+    ~keeper_name
+    ~after_commit
+    (fun state ->
+       match State.ack_pending ~selection state with
+       | Error _ as error -> error
+       | Ok state -> Ok (state, Ack_applied))
+;;
+
+let retry_pending_ack_followup_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match compact_transition_wals_unlocked owner with
+         | Error _ as error -> error
+         | Ok () ->
+           (match load_state_unlocked owner with
+            | Error _ as error -> error
+            | Ok state ->
+              after_commit (State.pending state);
+              Ok ()))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending ACK follow-up raised keeper=%s: %s"
+            keeper_name
+            (Printexc.to_string exn)))
 ;;
 
 let commit_transition_unlocked_with
@@ -1179,6 +1252,14 @@ let drop_by_post_id
        let removed, state = State.remove_by_post_id post_id state in
        Ok (state, removed))
 ;;
+
+module For_testing = struct
+  let force_transition_wal_compaction_failures count =
+    Atomic.set
+      forced_transition_wal_compaction_failures_for_test
+      (Int.max 0 count)
+  ;;
+end
 
 let queue_oldest_arrived_at queue =
   queue

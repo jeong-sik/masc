@@ -510,26 +510,35 @@ let persist_compaction_decision config ~keeper_name ~decision
    pipeline was committing normally still reported compaction_count=0 — one
    keeper carried 88 committed [context_compacted] runtime-manifest records
    against a meta reading 0. *)
-let persist_compaction_outcome config ~keeper_name ~outcome
+let persist_compaction_outcomes config ~keeper_name ~outcomes
   : ([ `Persisted | `No_durable_meta ], string) result
   =
+  let stamp_outcome rt = function
+    | `Committed -> { rt with count = rt.count + 1; consecutive_failures = 0 }
+    | `Overflow_episode_committed ->
+      { rt with
+        count = rt.count + 1
+      ; consecutive_failures = rt.consecutive_failures + 1
+      }
+    | `Failed -> { rt with consecutive_failures = rt.consecutive_failures + 1 }
+    | `Recovered -> { rt with consecutive_failures = 0 }
+  in
   let stamp (m : Keeper_meta_contract.keeper_meta) =
     Keeper_meta_contract.map_compaction_rt
-      (fun rt ->
-        match outcome with
-        | `Committed -> { rt with count = rt.count + 1; consecutive_failures = 0 }
-        | `Overflow_episode_committed ->
-          { rt with
-            count = rt.count + 1
-          ; consecutive_failures = rt.consecutive_failures + 1
-          }
-        | `Failed -> { rt with consecutive_failures = rt.consecutive_failures + 1 }
-        | `Recovered -> { rt with consecutive_failures = 0 })
+      (fun rt -> List.fold_left stamp_outcome rt outcomes)
       m
   in
   match read_meta config keeper_name with
   | Error msg -> Error msg
   | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta)
+    when
+      outcomes = [ `Recovered ]
+      && disk_meta.runtime.compaction_rt.consecutive_failures = 0 ->
+    (* Use the current durable row, not the heartbeat's earlier snapshot, to
+       avoid a meta CAS/write on every healthy turn. The compaction streak has
+       one owner lane, so no recovery fact can race this no-op read. *)
+    Ok `Persisted
   | Ok (Some disk_meta) ->
     write_meta_with_merge
       ~merge:(fun ~latest ~caller:_ -> stamp latest)

@@ -13,11 +13,13 @@ module BE = Masc.Keeper_heartbeat_loop_board_events
 let gate
       ~warm
       ~paused
+      ?(compaction_retry_suspended = false)
       ()
   =
   BE.should_collect_board_events
     ~proactive_warmup_elapsed:warm
     ~paused
+    ~compaction_retry_suspended
 
 let test_warm_unpaused_collects () =
   check bool "warmed + unpaused keeper collects board events" true
@@ -36,6 +38,18 @@ let test_cold_unpaused_skips () =
 let test_cold_paused_skips () =
   check bool "not-yet-warmed + paused keeper does not collect" false
     (gate ~warm:false ~paused:true ())
+
+let test_compaction_suspension_skips () =
+  check
+    bool
+    "suspended keeper must not advance the Board cursor"
+    false
+    (gate
+       ~warm:true
+       ~paused:false
+       ~compaction_retry_suspended:true
+       ())
+;;
 
 let test_collection_failure_health_degrades_and_clears () =
   let base_path = "/tmp/masc-board-collection-health-test" in
@@ -87,6 +101,8 @@ let () =
           test_case "warm + paused -> skip" `Quick test_warm_paused_skips;
           test_case "cold + unpaused -> skip" `Quick test_cold_unpaused_skips;
           test_case "cold + paused -> skip" `Quick test_cold_paused_skips;
+          test_case "compaction suspended -> skip" `Quick
+            test_compaction_suspension_skips;
           test_case "collection failure health degrades and clears" `Quick
             test_collection_failure_health_degrades_and_clears;
         ] );

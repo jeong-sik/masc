@@ -259,13 +259,125 @@ let test_durable_peek_ack_restart () =
       |> require_ok "load before ack"
     in
     Alcotest.(check (list string)) "peek persisted no mutation" [ "one"; "two" ] (post_ids before);
-    Persistence.ack_pending_result ~base_path ~keeper_name ~selection:selected ()
-    |> require_ok "durable exact ack";
+    (match
+       Persistence.ack_pending_result
+         ~base_path
+         ~keeper_name
+         ~selection:selected
+         ()
+       |> require_ok "durable exact ack"
+     with
+     | Persistence.Ack_applied -> ()
+     | Persistence.Ack_applied_followup_failed detail ->
+       Alcotest.failf "durable exact ACK cleanup failed: %s" detail);
     let restarted =
       Persistence.load_pending_result ~base_path ~keeper_name
       |> require_ok "restart load"
     in
     Alcotest.(check (list string)) "restart sees only unacked source" [ "two" ] (post_ids restarted))
+;;
+
+let test_ack_followup_failure_retries_cleanup_without_reapplying_ack () =
+  with_temp_dir "keeper-ack-followup" (fun base_path ->
+    let keeper_name = "ack-followup-keeper" in
+    Fun.protect
+      ~finally:(fun () ->
+        Persistence.For_testing.force_transition_wal_compaction_failures 0)
+    @@ fun () ->
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "one-shot" 1.0))
+    |> require_ok "seed one-shot pending";
+    let selected =
+      Persistence.peek_when_result
+        ~base_path
+        ~keeper_name
+        ~ready:(fun _ -> true)
+      |> require_ok "peek one-shot"
+      |> require_some "one-shot selection"
+    in
+    Persistence.For_testing.force_transition_wal_compaction_failures 1;
+    (match
+       Persistence.ack_pending_result
+         ~base_path
+         ~keeper_name
+         ~selection:selected
+         ()
+       |> require_ok "commit ACK with forced cleanup failure"
+     with
+     | Persistence.Ack_applied ->
+       Alcotest.fail "forced post-commit cleanup failure was not surfaced"
+     | Persistence.Ack_applied_followup_failed _ -> ());
+    Persistence.retry_pending_ack_followup_result
+      ~base_path
+      ~keeper_name
+      ()
+    |> require_ok "retry only ACK cleanup";
+    let pending =
+      Persistence.load_pending_result ~base_path ~keeper_name
+      |> require_ok "load after cleanup retry"
+    in
+    Alcotest.(check (list string))
+      "committed source remains removed"
+      []
+      (post_ids pending);
+    (match
+       Persistence.ack_pending_result
+         ~base_path
+         ~keeper_name
+         ~selection:selected
+         ()
+     with
+     | Error _ -> ()
+     | Ok Persistence.Ack_applied
+     | Ok (Persistence.Ack_applied_followup_failed _) ->
+       Alcotest.fail "already-committed ACK was applied a second time"))
+;;
+
+let test_ack_publication_exception_is_post_commit () =
+  with_temp_dir "keeper-ack-publication" (fun base_path ->
+    let keeper_name = "ack-publication-keeper" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "one-shot-publication" 1.0))
+    |> require_ok "seed publication pending";
+    let selected =
+      Persistence.peek_when_result
+        ~base_path
+        ~keeper_name
+        ~ready:(fun _ -> true)
+      |> require_ok "peek publication source"
+      |> require_some "publication selection"
+    in
+    (match
+       Persistence.ack_pending_result
+         ~after_commit:(fun _ -> failwith "forced publication failure")
+         ~base_path
+         ~keeper_name
+         ~selection:selected
+         ()
+       |> require_ok "commit ACK with publication failure"
+     with
+     | Persistence.Ack_applied ->
+       Alcotest.fail "publication exception was not surfaced"
+     | Persistence.Ack_applied_followup_failed detail ->
+       Alcotest.(check bool)
+         "typed detail identifies publication"
+         true
+         (String.starts_with
+            ~prefix:"post-commit pending publication raised:"
+            detail));
+    Persistence.retry_pending_ack_followup_result
+      ~base_path
+      ~keeper_name
+      ()
+    |> require_ok "publish committed pending after callback failure";
+    let pending =
+      Persistence.load_pending_result ~base_path ~keeper_name
+      |> require_ok "load after publication recovery"
+    in
+    Alcotest.(check (list string))
+      "publication failure does not restore source"
+      []
+      (post_ids pending))
 ;;
 
 let test_retired_inflight_sidecar_is_not_read () =
@@ -368,6 +480,14 @@ let () =
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart
+        ; Alcotest.test_case
+            "ACK cleanup retry does not reapply committed ACK"
+            `Quick
+            test_ack_followup_failure_retries_cleanup_without_reapplying_ack
+        ; Alcotest.test_case
+            "ACK publication exception remains post-commit"
+            `Quick
+            test_ack_publication_exception_is_post_commit
         ; Alcotest.test_case
             "retired inflight sidecar is not read"
             `Quick

@@ -106,7 +106,7 @@ let test_current_schema_round_trip_and_legacy_v10_recovery () =
      Alcotest.(check (list string))
        "pending-only durable fields"
        [ "accepted_transfer_projections"
-       ; "last_settlement"
+       ; "last_transition"
        ; "pending"
        ; "revision"
        ; "schema"
@@ -121,10 +121,16 @@ let test_current_schema_round_trip_and_legacy_v10_recovery () =
   let legacy_v10 =
     match json with
     | `Assoc fields ->
+      let last_settlement =
+        List.assoc_opt "last_transition" fields
+        |> require_some "current transition witness"
+      in
       `Assoc
         ( ("schema", `String "keeper.event_queue.state.v10")
+        :: ("last_settlement", last_settlement)
         :: (fields
             |> List.remove_assoc "schema"
+            |> List.remove_assoc "last_transition"
             |> List.remove_assoc "accepted_transfer_projections") )
     | _ -> Alcotest.fail "state codec did not emit an object"
   in

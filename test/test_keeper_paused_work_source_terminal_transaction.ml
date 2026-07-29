@@ -202,7 +202,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       source_ack_wire_fields canonical_json
     in
     Alcotest.(check (option string))
-      "source ACK writes v11 state"
+      "source ACK writes v12 state"
       (Some State.schema)
       (match List.assoc_opt "schema" state_fields with
        | Some (`String schema) -> Some schema
@@ -255,6 +255,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let v9_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v9")
       |> replace_field "transition_outbox" (`List [ `Assoc v9_outbox ])
       |> fun fields -> `Assoc fields
@@ -267,7 +268,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       State.to_yojson recovered_v9 |> source_ack_wire_fields
     in
     Alcotest.(check (option string))
-      "recovery rewrites v9 as v11"
+      "recovery rewrites v9 as v12"
       (Some State.schema)
       (match List.assoc_opt "schema" recovered_v9_fields with
        | Some (`String schema) -> Some schema
@@ -294,6 +295,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let v10_unprojected_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v10")
       |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
       |> fun fields -> `Assoc (("last_settlement", `Null) :: fields)
@@ -308,6 +310,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let v10_projected_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v10")
       |> replace_field "transition_outbox" (`List [])
       |> fun fields -> `Assoc (("last_settlement", `Assoc legacy_receipt) :: fields)
@@ -337,29 +340,31 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let v10_generic_projected_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v10")
       |> replace_field "transition_outbox" (`List [])
       |> fun fields -> `Assoc (("last_settlement", legacy_ack_receipt) :: fields)
     in
-    let recovered_generic_v11 =
+    let recovered_generic_v12 =
       v10_generic_projected_state
       |> State.of_yojson
       |> require_ok "recover v10 generic projected witness"
       |> State.to_yojson
       |> State.of_yojson
-      |> require_ok "reload v10 generic witness after v11 checkpoint"
+      |> require_ok "reload v10 generic witness after v12 checkpoint"
     in
-    (match State.last_transition recovered_generic_v11 with
+    (match State.last_transition recovered_generic_v12 with
      | Some { transition = State.Ack; transition_id; _ } ->
        Alcotest.(check string)
-         "v11 checkpoint preserves legacy generic transition identity"
+         "v12 checkpoint preserves legacy generic transition identity"
          legacy_ack_transition_id
          transition_id
      | Some _ | None ->
-       Alcotest.fail "v11 checkpoint made the recovered generic witness unreadable");
+       Alcotest.fail "v12 checkpoint made the recovered generic witness unreadable");
     let legacy_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v8")
       |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
       |> fun fields -> `Assoc fields
@@ -370,7 +375,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       source_ack_wire_fields recovered_json
     in
     Alcotest.(check (option string))
-      "recovery rewrites v8 as v11"
+      "recovery rewrites v8 as v12"
       (Some State.schema)
       (match List.assoc_opt "schema" recovered_fields with
        | Some (`String schema) -> Some schema

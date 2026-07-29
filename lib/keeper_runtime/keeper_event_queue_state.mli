@@ -378,8 +378,9 @@ val replay_transition_receipt : transition_receipt -> t -> (t, string) result
 
 val mark_transition_projected : transition_id:string -> t -> (t, string) result
 (** Atomically retire a durable outbox entry after an external projector has
-    materialized its stable [event_id], retaining only the last receipt for an
-    immediate idempotent retry. Unknown transition ids fail closed. *)
+    materialized its stable [event_id], retaining the last receipt as the
+    durable witness for an idempotent retry. Unknown transition ids fail
+    closed. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
@@ -403,6 +404,6 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v9"] is the current write schema. Historical
-    v7/v8 snapshots are accepted only at the durable recovery boundary;
+(** ["keeper.event_queue.state.v10"] is the current write schema. Historical
+    v7/v8/v9 snapshots are accepted only at the durable recovery boundary;
     unknown schemas fail closed and require a runtime reset. *)

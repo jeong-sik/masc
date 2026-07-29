@@ -4,6 +4,7 @@
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Consolidation = Masc.Keeper_memory_os_consolidation
+module Runtime_config = Runtime
 module Runtime = Masc.Keeper_memory_os_consolidation_runtime
 module Structured_schema = Masc.Keeper_structured_output_schema
 module Agent_sdk_response = Masc.Agent_sdk_response
@@ -525,7 +526,7 @@ let test_consolidate_rejects_uncapped_provider_before_call () =
             true
             (contains
                "serialized-request ceiling"
-               (Masc.Runtime.request_body_cap_error_to_string error))
+               (Runtime_config.request_body_cap_error_to_string error))
         | _ ->
           Alcotest.fail
             "uncapped consolidation config must fail before provider dispatch"))))

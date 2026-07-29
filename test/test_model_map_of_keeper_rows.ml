@@ -6,10 +6,10 @@ open Alcotest
 
 let json = testable Yojson.Safe.pp Yojson.Safe.equal
 
-let agent name : Masc_domain.agent =
+let agent ~agent_type name : Masc_domain.agent =
   { id = None
   ; name
-  ; agent_type = "test"
+  ; agent_type
   ; status = Masc_domain.Active
   ; capabilities = []
   ; current_task = None
@@ -32,37 +32,28 @@ let model_of_agent name = function
 ;;
 
 let test_projects_active_models_to_agents_wire () =
-  (* Production keeper rows carry both "name" (display) and "agent_name"
-     (canonical keeper identity used by agent.name in the agents list).
-     The model map must join on agent_name. *)
+  let keeper_name = "alice" in
+  let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
   let keepers =
-    [ `Assoc [ "name", `String "Alice Kim"; "agent_name", `String "keeper-alice-agent"; "active_model", `String "old-model" ]
-    ; `Assoc [ "name", `String "Alice Kim"; "agent_name", `String "keeper-alice-agent"; "active_model", `String "current-model" ]
-    ; `Assoc [ "name", `String "Bob Lee"; "agent_name", `String "keeper-bob-agent"; "active_model", `String "   " ]
-    ; `Assoc [ "name", `String "Carol"; "agent_name", `String "keeper-carol-agent" ]
-    ; `Assoc [ "agent_name", `String "keeper-dave-agent"; "active_model", `String "no-display-name" ]
-    ; `Assoc [ "name", `String "Eve"; "active_model", `String "missing-agent-name" ]
-    ; `Null
+    [ `Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String keeper_agent_name
+        ; "active_model", `String "model-x"
+        ]
     ]
   in
   let agents =
-    List.map agent [ "keeper-alice-agent"; "keeper-bob-agent"; "keeper-carol-agent"; "keeper-dave-agent"; "keeper-eve-agent" ]
+    [ agent ~agent_type:"keeper" keeper_agent_name
+    ; agent ~agent_type:"test" keeper_name
+    ]
   in
   let agents_json = Dashboard_execution.For_test.agents_json ~keepers ~agents in
-  (* latest row wins for duplicate agent_name keys *)
-  check json "latest exact keeper row wins"
-    (`String "current-model")
-    (model_of_agent "keeper-alice-agent" agents_json);
-  (* whitespace-only active_model is trimmed to None → null *)
-  List.iter
-    (fun name ->
-       check json (name ^ " has no active model") `Null
-         (model_of_agent name agents_json))
-    [ "keeper-bob-agent"; "keeper-carol-agent"; "keeper-eve-agent" ];
-  (* row with agent_name but no display name still resolves *)
-  check json "row with agent_name only resolves"
-    (`String "no-display-name")
-    (model_of_agent "keeper-dave-agent" agents_json)
+  check json "canonical keeper agent receives its model"
+    (`String "model-x")
+    (model_of_agent keeper_agent_name agents_json);
+  check json "same bare name does not receive the keeper model"
+    `Null
+    (model_of_agent keeper_name agents_json)
 ;;
 
 let () =

@@ -2,7 +2,7 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
-module Agent_name_map = Map.Make (String)
+module Agent_name_map = Set_util.StringMap
 
 let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
   let workspace_state_opt =
@@ -497,12 +497,8 @@ let model_map_of_keeper_rows keepers =
       | `Assoc _ as keeper_json ->
         (match Json_util.assoc_member_opt "agent_name" keeper_json,
                Json_util.assoc_member_opt "active_model" keeper_json with
-         | Some (`String agent_name), Some (`String raw_model) ->
-           (match String_util.trim_to_option agent_name,
-                 String_util.trim_to_option raw_model with
-            | Some agent_name, Some model ->
-              Agent_name_map.add agent_name model model_map
-            | None, _ | _, None -> model_map)
+         | Some (`String agent_name), Some (`String model) ->
+           Agent_name_map.add agent_name model model_map
          | Some (`String _), _
          | _, Some (`String _)
          | _, _ -> model_map)

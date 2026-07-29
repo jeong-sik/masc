@@ -132,7 +132,7 @@ synchronous reply path (`lib/server/server_discord_in_process_gateway.ml:310`).
 The first implementation slices have since landed:
 
 - #22818 added the dormant `Connector_attention` stimulus, `Connector_attention_pending`
-  turn reason, intake mapping, and turn-start `claim_for_turn`
+  turn reason and intake mapping
   (`lib/keeper/keeper_heartbeat_stimulus_intake.ml:79`,
   `lib/keeper/keeper_heartbeat_stimulus_intake.ml:146-183`).
 - #22825 added the gated `handle_ambient` producer, wakeup hint, prompt content
@@ -141,23 +141,12 @@ The first implementation slices have since landed:
   (`lib/server/server_discord_in_process_gateway.ml:617-643`,
   `lib/keeper/keeper_heartbeat_loop.ml:140-170`).
 
-The lifecycle contract for every implementation slice remains:
-
-- **Turn start**: `claim_for_turn` the surfaced event_ids, so concurrent cycles
-  and the digest stop re-projecting them as pending for `claim_stale_after`
-  (`default_claim_stale_after_s`, currently 900s).
-- **Turn end**: `mark_resolved` (the keeper replied) or `mark_ignored` (the keeper
-  woke, read, and decided no reply — `mark_ignored` is the existing primitive for
-  exactly this, `lib/keeper/keeper_external_attention.mli:162`).
-- A **claimed-but-never-resolved** item re-surfaces after the stale-claim window
-  and can re-wake forever, so turn execution MUST terminalize via a finally-style
-  guard (`Fun.protect`, `Eio.Switch.on_release`, or the supervisor turn-end hook).
-  Prose intent is not sufficient; cancellation/exception paths must reach
-  `Resolved`/`Ignored` or explicitly requeue/release.
-
-This is shared with the dispatched path's resolution model and must not race the
-gateway fiber writing to the same per-keeper JSONL (`project_pending` is already
-order-robust: `Terminal` is sticky, §3 of the lifecycle).
+The event queue owns delivery completion: intake reads the recorded attention,
+the Keeper runs the exact selected queue entry, and the entry is removed only
+after that turn has completed. Checkpoints, input requests, and non-terminal
+failures leave the queue entry in place. The attention log has no in-progress
+claim or timeout state. `mark_resolved` remains the direct-reply record, while
+`mark_ignored` records a completed no-reply decision for the attention views.
 
 ### 3.5 Outbound: the reply reaches the channel
 
@@ -241,7 +230,7 @@ remaining policy/readiness gaps.
 | Phase | Scope | Independently mergeable? |
 |---|---|---|
 | P1 | `Connector_attention` stimulus + `Connector_attention_pending` turn_reason + intake mapping + affordance gate (§3.1–3.2). | landed in #22818; no producer on its own |
-| P2 | Resolution lifecycle: `claim_for_turn` at turn-start and terminal `mark_resolved`/`mark_ignored` at turn-end (§3.4). | turn-start landed in #22818; turn-end ignore path landed in #22825 |
+| P2 | Exact queue selection remains until its turn completes; direct reply/no-reply history is written after completion (§3.4). | landed |
 | P3 | `handle_ambient` enqueues the stimulus + flips wakeup; prompt content layer; outbound via `Keeper_chat_queue` (§3.1, §3.3, §3.5). | landed behind feature flag in #22825 |
 | P4 | Spurious-wake gating (urgency throttle + debounce, §3.6), then enable. | gating landed in #22825; enabling remains an operator rollout decision |
 

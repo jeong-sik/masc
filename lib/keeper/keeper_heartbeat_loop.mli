@@ -245,9 +245,4 @@ module For_testing : sig
     unit ->
     transcript_corruption_commit
 
-  val cycle_outcome_acks_source :
-    Keeper_heartbeat_loop_cycle.cycle_outcome -> bool
-  (** [true] only when the cycle terminally handled its durable source.
-      Checkpoint and input-required outcomes remain replayable. *)
-
 end

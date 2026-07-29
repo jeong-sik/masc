@@ -188,7 +188,6 @@ let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
          when String.equal item.Keeper_external_attention.event_id event_id ->
          Some item
        | Keeper_external_attention.Recorded _
-       | Keeper_external_attention.Claimed_for_turn _
        | Keeper_external_attention.Resolved _
        | Keeper_external_attention.Ignored _ ->
          None)
@@ -317,22 +316,6 @@ let consume_single_heartbeat_stimulus
             meta_after_triage.name;
           []
       in
-      (match
-         Keeper_external_attention.claim_for_turn
-           ~base_path:ctx.config.base_path
-           ~keeper_name:meta_after_triage.name
-           ~event_ids:[ ca.event_id ]
-           ~claim_id:(Printf.sprintf "heartbeat-wake:%s" stim.post_id)
-           ~turn_id:None
-           ()
-       with
-       | Ok () -> ()
-       | Error err ->
-         Log.Keeper.warn
-           "connector attention claim_for_turn failed event_id=%s (keeper=%s): %s"
-           ca.event_id
-           meta_after_triage.name
-           err);
       Log.Keeper.info
         "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
         ca.event_id

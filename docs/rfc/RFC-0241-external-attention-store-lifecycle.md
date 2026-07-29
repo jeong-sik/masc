@@ -1,9 +1,9 @@
 ---
 rfc: "0241"
 title: "external-attention store lifecycle: read-side bound, retention, and typed tail-dedup"
-status: Draft
+status: Retired
 created: 2026-06-15
-updated: 2026-06-15
+updated: 2026-07-29
 author: vincent
 supersedes: []
 superseded_by: null
@@ -12,6 +12,10 @@ implementation_prs: []
 ---
 
 # RFC-0241 — external-attention store lifecycle
+
+> Retired 2026-07-29. The proposed in-progress claim and stale-timeout model
+> was removed rather than carried forward; exact event-queue selection is the
+> only delivery-completion state.
 
 ## §1 Problem (evidence-grounded, measured)
 

@@ -688,17 +688,11 @@ let summary_status_of_yojson_with_error json =
        let* () =
          reject_unknown_fields
            ~surface:"summary_status"
-           ~allowed:[ "status"; "reason"; "retryable" ]
+           ~allowed:[ "status"; "reason" ]
            fields
        in
        let* reason = required_string ~surface:"summary_status" "reason" fields in
-       (* Legacy field: pre-#26094 stores persisted a write-only [retryable]
-          bool that no OCaml or dashboard reader consumed, and whose [true]
-          value blanked the dashboard approval queue. Accepted and discarded
-          on load so existing stores keep parsing; never written back. *)
-       (match List.assoc_opt "retryable" fields with
-        | None | Some (`Bool _) -> Ok (Summary_failed { reason })
-        | Some _ -> Error "summary_status.retryable must be a boolean when present")
+       Ok (Summary_failed { reason })
      | other -> Error (Printf.sprintf "summary_status.status %S is unknown" other))
   | _ -> Error "summary_status must be a known string or JSON object"
 ;;

@@ -148,10 +148,6 @@ let test_rule_parser_rejects_duplicate_fields () =
       reason
 ;;
 
-(* #26094: [retryable] was a write-only bool — OCaml only ever wrote [false],
-   no reader consumed it, and the dashboard blanked the whole approval queue on
-   any other value. The field left the wire contract; stores written before the
-   removal still parse, and the serializer never emits it again. *)
 let test_summary_failed_has_no_retryable () =
   let failed = Q.Summary_failed { reason = "provider down" } in
   (match Q.summary_status_to_yojson failed with
@@ -168,26 +164,24 @@ let test_summary_failed_has_no_retryable () =
    with
    | Ok status -> check bool "modern decode" true (status = failed)
    | Error e -> fail e);
-  (match
-     decode
-       (`Assoc
-           [ "status", `String "failed"
-           ; "reason", `String "provider down"
-           ; "retryable", `Bool true
-           ])
-   with
-   | Ok status -> check bool "legacy retryable discarded" true (status = failed)
-   | Error e -> fail e);
-  match
-    decode
-      (`Assoc
-          [ "status", `String "failed"
-          ; "reason", `String "provider down"
-          ; "retryable", `String "yes"
-          ])
-  with
-  | Ok _ -> fail "non-boolean legacy retryable must reject"
-  | Error _ -> ()
+  List.iter
+    (fun retryable ->
+       match
+         decode
+           (`Assoc
+               [ "status", `String "failed"
+               ; "reason", `String "provider down"
+               ; "retryable", retryable
+               ])
+       with
+       | Ok _ -> fail "removed retryable field must reject"
+       | Error reason ->
+         check
+           string
+           "removed field is explicit"
+           "summary_status contains unsupported field retryable"
+           reason)
+    [ `Bool true; `String "yes" ]
 ;;
 
 let () =
@@ -199,7 +193,7 @@ let () =
         ] )
     ; ( "summary status"
       , [ test_case
-            "retryable is out of the contract, legacy stores still parse"
+            "retryable is rejected by the current contract"
             `Quick
             test_summary_failed_has_no_retryable
         ] )

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking (approval snapshot wire)**: `summary_status.failed.retryable`
+  is no longer accepted and discarded while loading pending approvals. Current
+  snapshots contain only `status` and `reason`; snapshots carrying the retired
+  field fail closed through the existing unavailable-store path. No migration
+  or repair path was added.
 - **Breaking (recall injection ledger)**: schema v3 adds a required typed
   `reset` marker. The first row for each keeper process now resets replay state
   before applying its exact current baseline, so keys deleted across a process

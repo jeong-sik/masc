@@ -75,7 +75,6 @@ let agent_credential_to_yojson (c : agent_credential) =
     ("agent_name", `String c.agent_name);
     ("token", `String c.token);
     ("role", `String (agent_role_to_string c.role));
-    ("admin", `Bool (c.role = Admin));
     ("created_at", `String c.created_at);
     ("expires_at", Json_util.string_opt_to_json c.expires_at);
   ]
@@ -87,9 +86,7 @@ let agent_credential_of_yojson json =
     let role =
       match Json_util.get_string json "role" with
       | Some s -> agent_role_of_string s
-      | None ->
-        let is_admin = Json_util.get_bool json "admin" |> Option.value ~default:false in
-        Ok (if is_admin then Admin else Worker)
+      | None -> Error "agent_credential_of_yojson: missing required string field \"role\""
     in
     (match role with
      | Error e -> Error e

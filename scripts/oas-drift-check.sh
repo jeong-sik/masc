@@ -17,7 +17,8 @@
 #
 # Source resolution (first hit wins):
 #   1. $AGENT_SDK_LOCAL_REPO if a git checkout at the pinned SHA
-#   2. git fetch into temp bare clone (reuses check-oas-pin.sh pattern)
+#   2. fetch the full tracking ref into a temp bare clone and prove the pin
+#      remains reachable from it
 
 set -euo pipefail
 
@@ -91,7 +92,7 @@ resolve_source_dir() {
   if ! GIT_DIR="${scratch}/bare" git init -q --bare; then
     echo "git init bare failed" >&2; return 1
   fi
-  if ! GIT_DIR="${scratch}/bare" git fetch -q --no-tags --depth=128 \
+  if ! GIT_DIR="${scratch}/bare" git fetch -q --no-tags \
          "${OAS_AGENT_SDK_URL}" \
          "+refs/heads/${OAS_AGENT_SDK_TRACK_REF}:refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
          2>/dev/null; then
@@ -100,7 +101,13 @@ resolve_source_dir() {
   fi
   if ! GIT_DIR="${scratch}/bare" git cat-file -e "${OAS_AGENT_SDK_SHA}^{commit}" \
         2>/dev/null; then
-    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not present in fetched ${OAS_AGENT_SDK_TRACK_REF}" >&2
+    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_TRACK_REF} on ${OAS_AGENT_SDK_URL}" >&2
+    return 1
+  fi
+  if ! GIT_DIR="${scratch}/bare" git merge-base --is-ancestor \
+        "${OAS_AGENT_SDK_SHA}" \
+        "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" 2>/dev/null; then
+    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_TRACK_REF} on ${OAS_AGENT_SDK_URL}" >&2
     return 1
   fi
   mkdir -p "${scratch}/tree"

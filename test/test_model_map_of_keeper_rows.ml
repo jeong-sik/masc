@@ -55,6 +55,8 @@ let test_projects_active_models_to_agents_wire () =
 
 let () =
   run "dashboard agent model projection"
-    [ test_case "projects active models to agents wire" `Quick
-        test_projects_active_models_to_agents_wire
+    [ ( "agents wire",
+        [ test_case "projects active models to agents wire" `Quick
+            test_projects_active_models_to_agents_wire
+        ] )
     ]

@@ -356,7 +356,7 @@ let test_preview_does_not_invent_wake_reason () =
           ()));
   check bool "preview does not emit instruction hash" true
     (Option.is_none
-       (Otel_metric_store.get_metric_value
+       (Otel_metric_store_core.get_metric_value
           instruction_hash_metric
           ~labels:[ "keeper", preview_meta.name ]
           ()))

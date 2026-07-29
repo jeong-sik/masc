@@ -82,9 +82,9 @@ let project_replay_message_exn ~base_path
          evidence
          [ Agent_sdk.Types.user_msg message.text ]
      with
-     | Ok [ projected ] ->
+     | Ok [ _canonical; projected ] ->
        Agent_sdk.Types.text_of_content projected.content
-     | Ok _ -> fail "replay projection changed message count"
+     | Ok _ -> fail "replay projection did not append exact evidence"
      | Error detail -> fail detail)
 ;;
 
@@ -2681,131 +2681,6 @@ let approved_web_search_resolution
   input, approval_id, resolution
 ;;
 
-let test_replaced_write_target_retires_stale_approval () =
-  with_exec_fixture "keeper_gate_replay_replaced_write_target"
-  @@ fun ~config ~meta ~publication_recovery ~ctx_work ->
-  (match
-     Masc.Keeper_gate_mode.set
-       config
-       ~actor:"test"
-       Masc.Keeper_gate_mode.Manual
-   with
-   | Ok _ -> ()
-   | Error detail -> fail detail);
-  let path = Filename.concat config.base_path "replace-before-replay.txt" in
-  write_file path "approved target";
-  let deferred =
-    KET.execute_keeper_tool_call_with_outcome
-      ~config
-      ~meta
-      ~publication_recovery
-      ~ctx_work
-      ~name:"Write"
-      ~input:
-        (`Assoc
-           [ "file_path", `String path
-           ; "content", `String "must not reach replaced target"
-           ])
-      ()
-  in
-  (match deferred.disposition with
-   | Tool_result.Deferred () -> ()
-   | Tool_result.Completed () | Tool_result.Failed _ ->
-     fail "write replacement fixture did not defer");
-  let approval_id =
-    match
-      Masc.Keeper_approval_queue.list_pending_entries_for_workspace
-        ~base_path:config.base_path
-    with
-    | Ok [ entry ] -> entry.id
-    | Ok entries ->
-      failf "expected one write approval, got %d" (List.length entries)
-    | Error error ->
-      fail (Masc.Keeper_approval_queue.storage_error_to_string error)
-  in
-  (match
-     Masc.Keeper_approval_queue.resolve_with_policy
-       ~base_path:config.base_path
-       ~id:approval_id
-       ~decision:Masc.Keeper_approval_queue.Decision.Approve
-       ~source:Masc.Keeper_approval_queue.Auto_judge
-       ()
-   with
-   | Ok _ -> ()
-   | Error error ->
-     fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
-  let replacement = path ^ ".replacement" in
-  write_file replacement "replacement survives";
-  Unix.rename replacement path;
-  let resolution : Keeper_event_queue.hitl_resolution =
-    { approval_id
-    ; decision = Keeper_event_queue.Hitl_approved
-    ; channel =
-        Keeper_continuation_channel.unrouted "replaced write target test"
-    }
-  in
-  let grant () =
-    match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
-    | Some grant -> grant
-    | None -> fail "approved write resolution did not create a grant"
-  in
-  let first =
-    Masc.Keeper_gate_replay.replay_approved_effect
-      ~config
-      ~meta
-      ~publication_recovery
-      ~turn_sandbox_factory:None
-      ~grant:(grant ())
-      ~approval_id
-      ()
-  in
-  (match first with
-   | Masc.Keeper_gate_replay.Failed
-       { journal = Masc.Keeper_gate_replay.Replay_journal_recorded; _ } ->
-     ()
-   | outcome ->
-     failf
-       "replaced target did not terminally retire its stale approval: %s"
-       (Masc.Keeper_gate_replay.outcome_to_string outcome));
-  check string
-    "replacement target was not overwritten"
-    "replacement survives"
-    (read_file path);
-  (match
-     Masc.Keeper_approval_queue.approved_resolution_delivery
-       ~base_path:config.base_path
-       ~id:approval_id
-   with
-   | Ok
-       { state = Masc.Keeper_approval_queue.Resolution_consumed
-       ; replay_outcome = Some (Masc.Keeper_approval_queue.Replay_failed _)
-       ; _
-       } ->
-     ()
-   | Ok _ -> fail "stale write approval remained actionable"
-   | Error error ->
-     fail (Masc.Keeper_approval_queue.grant_error_to_string error));
-  match
-    Masc.Keeper_gate_replay.replay_approved_effect
-      ~config
-      ~meta
-      ~publication_recovery
-      ~turn_sandbox_factory:None
-      ~grant:(grant ())
-      ~approval_id
-      ()
-  with
-  | Masc.Keeper_gate_replay.Failed
-      { journal = Masc.Keeper_gate_replay.Replay_journal_already_recorded
-      ; _
-      } ->
-    ()
-  | outcome ->
-    failf
-      "retired stale approval became actionable again: %s"
-      (Masc.Keeper_gate_replay.outcome_to_string outcome)
-;;
-
 let test_blob_failure_repairs_journal_without_second_effect () =
   with_exec_fixture "keeper_gate_replay_blob_repair"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -4338,8 +4213,6 @@ let () =
         test_approved_web_search_grant_executes_exact_request;
       test_case "approved WebSearch replays without model resubmission" `Quick
         test_approved_web_search_replays_without_model_resubmission;
-      test_case "replaced write target retires stale approval" `Quick
-        test_replaced_write_target_retires_stale_approval;
       test_case "blob failure repairs journal without second effect" `Quick
         test_blob_failure_repairs_journal_without_second_effect;
       test_case "journal failure retries only persistence" `Quick

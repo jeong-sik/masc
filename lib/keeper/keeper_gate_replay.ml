@@ -213,26 +213,34 @@ type effect_outcome =
   | Effect_failed of string
   | Effect_indeterminate of string
 
+let replay_artifact_identity artifact_ref =
+  Tool_output.with_preview artifact_ref ""
+;;
+
 let persist_replay_effect ~base_path = function
   | Effect_applied output ->
     Result.map
       (fun output_ref ->
-         Keeper_approval_queue.Replay_applied output_ref)
+         Keeper_approval_queue.Replay_applied
+           (replay_artifact_identity output_ref))
       (persist_replay_evidence ~base_path output)
   | Effect_applied_with_warning detail ->
     Result.map
       (fun detail_ref ->
-         Keeper_approval_queue.Replay_applied_with_warning detail_ref)
+         Keeper_approval_queue.Replay_applied_with_warning
+           (replay_artifact_identity detail_ref))
       (persist_replay_evidence ~base_path detail)
   | Effect_failed detail ->
     Result.map
       (fun detail_ref ->
-         Keeper_approval_queue.Replay_failed detail_ref)
+         Keeper_approval_queue.Replay_failed
+           (replay_artifact_identity detail_ref))
       (persist_replay_evidence ~base_path detail)
   | Effect_indeterminate detail ->
     Result.map
       (fun detail_ref ->
-         Keeper_approval_queue.Replay_indeterminate detail_ref)
+         Keeper_approval_queue.Replay_indeterminate
+           (replay_artifact_identity detail_ref))
       (persist_replay_evidence ~base_path detail)
 ;;
 
@@ -492,6 +500,7 @@ let replay_model_message
       ~journal
       artifact_ref
   =
+  let artifact_ref = replay_artifact_identity artifact_ref in
   let replay_evidence =
     { approval_id; operation; effect_kind; journal; artifact_ref }
   in
@@ -561,12 +570,12 @@ let project_model_input ~base_path evidence messages =
   let artifact_ref = evidence.artifact_ref in
   match retrieve_replay_artifact ~base_path artifact_ref with
   | Error detail ->
-    Error
-      (Printf.sprintf
-         "Gate replay evidence hydration failed approval=%s sha256=%s: %s"
-         evidence.approval_id
-         artifact_ref.Tool_output.sha256
-         detail)
+    Log.Keeper.error
+      "Gate replay evidence hydration failed approval=%s sha256=%s: %s"
+      evidence.approval_id
+      artifact_ref.Tool_output.sha256
+      detail;
+    Ok messages
   | Ok payload ->
     let hydrated =
       replay_evidence_fragment

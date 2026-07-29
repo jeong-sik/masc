@@ -925,7 +925,6 @@ let () = test "handle_transition_release_by_nonowner_stays_tool-neutral"
     | Some diagnosis ->
       Json_util.get_string diagnosis "rule_id"
       = Some "task_release_requires_current_owner"
-      && Json_util.get_string diagnosis "scope_policy" = Some "observe"
     | None -> false)
 )
 
@@ -2043,7 +2042,6 @@ let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
     match Json_util.assoc_member_opt "diagnosis" data with
     | Some diagnosis ->
       Json_util.get_string diagnosis "rule_id" = Some "stale_task_id_not_found"
-      && Json_util.get_string diagnosis "scope_policy" = Some "observe"
     | None -> false);
   assert (str_contains (Tool_result.message result) "absent from the live backlog")
 )
@@ -2382,7 +2380,6 @@ let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
     | Some diagnosis ->
       Json_util.get_string diagnosis "rule_id"
       = Some "task_done_requires_claimed_or_started"
-      && Json_util.get_string diagnosis "scope_policy" = Some "observe"
     | None -> false);
   assert (Json_util.assoc_member_opt "alternatives" data = None)
 )
@@ -2696,22 +2693,6 @@ let () =
     assert
       (List.mem ("producer", true, [ "verifier" ]) !metric_events);
     assert (List.mem ("producer", true) !thompson_events))
-;;
-
-let () =
-  test "workflow rejection rejects removed block_scope policy" (fun () ->
-    match
-      Task.Payloads.workflow_rejection_payload
-        ~scope_policy:"block_scope"
-        "removed policy"
-    with
-    | _ -> failwith "expected removed block_scope policy to be rejected"
-    | exception Invalid_argument message ->
-      assert
-        (String.equal
-           message
-           "Workflow_rejection_payload.payload: unsupported scope_policy \
-            \"block_scope\"; expected \"observe\""))
 ;;
 
 let () =

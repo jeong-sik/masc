@@ -27,28 +27,24 @@ let terminal_verdict_noop_message ~task_id ~action ~status =
 
 let workflow_rejection_payload
       ?rule_id
-      ?scope_policy
       ?recoverable
       ?extra_fields
       message
   =
   Workflow_rejection_payload.payload
     ?rule_id
-    ?scope_policy
     ?recoverable
     ?extra_fields
     message
 
 let workflow_rejection_payload_json
       ?rule_id
-      ?scope_policy
       ?recoverable
       ?extra_fields
       message
   =
   workflow_rejection_payload
     ?rule_id
-    ?scope_policy
     ?recoverable
     ?extra_fields
     message

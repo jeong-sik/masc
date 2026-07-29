@@ -7,7 +7,6 @@ val terminal_verdict_noop_message :
 
 val workflow_rejection_payload :
   ?rule_id:string ->
-  ?scope_policy:string ->
   ?recoverable:bool ->
   ?extra_fields:(string * Yojson.Safe.t) list ->
   string ->
@@ -15,7 +14,6 @@ val workflow_rejection_payload :
 
 val workflow_rejection_payload_json :
   ?rule_id:string ->
-  ?scope_policy:string ->
   ?recoverable:bool ->
   ?extra_fields:(string * Yojson.Safe.t) list ->
   string ->

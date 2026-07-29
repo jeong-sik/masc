@@ -39,7 +39,6 @@ let workflow_rejection_error_json
   in
   Task.Payloads.workflow_rejection_payload_json
     ~rule_id
-    ~scope_policy:"observe"
     ~extra_fields
     message
 ;;

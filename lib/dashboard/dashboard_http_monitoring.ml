@@ -218,7 +218,7 @@ let executor_outcomes_json (config : Workspace.config) : Yojson.Safe.t =
         if success then incr successes
       | Telemetry_eio.Tool_called _ -> ()
       | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
-      | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
+      | Error_occurred _ | Tool_assigned _ -> ()
     ) events;
     `Assoc [
       ("total_24h", `Int !total);

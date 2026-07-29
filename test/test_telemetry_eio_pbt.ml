@@ -32,7 +32,7 @@ let opt_int =
     avoids control characters to keep counterexamples readable. *)
 let gen_event : Telemetry_eio.event QCheck.Gen.t =
   let open QCheck.Gen in
-  let* tag = int_range 0 7 in
+  let* tag = int_range 0 6 in
   match tag with
   | 0 ->
       let* agent_id = string_small in
@@ -52,17 +52,11 @@ let gen_event : Telemetry_eio.event QCheck.Gen.t =
       let* success = bool in
       return (Telemetry_eio.Task_completed { task_id; duration_ms; success })
   | 4 ->
-      let* from_agent = string_small in
-      let* to_agent = string_small in
-      let* reason = string_small in
-      return
-        (Telemetry_eio.Handoff_triggered { from_agent; to_agent; reason })
-  | 5 ->
       let* code = string_small in
       let* message = string_small in
       let* context = string_small in
       return (Telemetry_eio.Error_occurred { code; message; context })
-  | 6 ->
+  | 5 ->
       let* tool_name = string_small in
       let* success = bool in
       let* duration_ms = nat_small in

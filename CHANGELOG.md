@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Removed
+- **Breaking (telemetry wire/storage)**: removed the retired
+  `Agent_joined`/`Agent_left` decoder aliases, the `.masc/telemetry.jsonl`
+  fallback reader, and the producer-less `Handoff_triggered` event plus its
+  derived `handoff_rate`. Telemetry now reads only the current date-split
+  `.masc/telemetry/YYYY-MM/DD.jsonl` store and rejects retired event variants.
 - **Breaking (keeper failure wire)**: removed the bare
   `fiber_unresolved` failure-reason projection retained for historical log and
   dashboard matching. Unexpected unresolved fibers now serialize as

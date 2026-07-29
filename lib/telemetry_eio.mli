@@ -9,11 +9,11 @@
     calculators, plus the [rotate] maintenance entry point.
 
     Internal helpers ([empty_tool_usage_stats], [update_tool_usage],
-    [telemetry_file], the [telemetry_store_cache] Hashtbl + mutex,
+    the [telemetry_store_cache] Hashtbl + mutex,
     [get_telemetry_store], [telemetry_eio_surface] /
     [observe_telemetry_drop] / [report_telemetry_drop],
-    [read_all_events_from_path], [event_to_json], [track], and the
-    [nonempty_opt] string utility) are hidden — callers consume the
+    [event_to_json], [track], and the [nonempty_opt] string utility) are hidden
+    — callers consume the
     typed event ADT and the convenience emitters / readers only.
 
     The date-split telemetry store applies bounded retention by default:
@@ -41,11 +41,6 @@ type event =
       task_id : string;
       duration_ms : int;
       success : bool;
-    }
-  | Handoff_triggered of {
-      from_agent : string;
-      to_agent : string;
-      reason : string;
     }
   | Error_occurred of {
       code : string;
@@ -87,7 +82,6 @@ type metrics = {
   tasks_in_progress : int;
   tasks_completed_24h : int;
   avg_task_duration_ms : float;
-  handoff_rate : float;
   error_rate : float;
 } [@@deriving yojson, show]
 
@@ -148,7 +142,6 @@ val count_active_agents : event_record list -> int
 val count_tasks_in_progress : event_record list -> int
 val count_completed_tasks : event_record list -> int
 val avg_duration : event_record list -> float
-val calculate_handoff_rate : event_record list -> float
 val calculate_error_rate : event_record list -> float
 
 (** {1 Convenience emitters} *)
@@ -174,12 +167,6 @@ val track_task_completed :
   duration_ms:int ->
   success:bool ->
   unit
-
-(* track_handoff intentionally not exposed: 0 production callers as
-   of #10358 (c2) audit. The Handoff_triggered variant remains in
-   [event] above for wire-schema compatibility but no public emitter
-   exists. Add a new emitter only when masc introduces a real
-   runtime-routing handoff concept. *)
 
 val track_error :
   ?fs:'a ->

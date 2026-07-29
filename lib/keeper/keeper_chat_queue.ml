@@ -2182,9 +2182,12 @@ let observe_lane_store ~ownership_root ~path =
       | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
       | exn -> Error (load_error Read_failed ~path (Printexc.to_string exn)))
 
-let quarantine_entry entry error =
+let quarantine_error entry error =
   entry.load_errors <- [ error ];
-  Error (Snapshot_unavailable error)
+  Snapshot_unavailable error
+
+let quarantine_entry entry error =
+  Error (quarantine_error entry error)
 
 let check_entry_store ~base_path ~path entry ~allow_absent =
   match first_blocking_error entry with
@@ -2566,11 +2569,12 @@ let complete_claim ~keeper_name ~receipt_id ~outcome =
                         | Error error -> `Error error))
                 | None | Some _ ->
                   (match
-                     observe_receipt_in_store ~base_path ~path receipt_id
+                   observe_receipt_in_store ~base_path ~path receipt_id
                    with
                    | Error detail ->
-                     quarantine_entry entry
-                       (load_error Read_failed ~path detail)
+                     `Error
+                       (quarantine_error entry
+                          (load_error Read_failed ~path detail))
                    | Ok (revision, next_sequence, terminal_count, observed_row) ->
                      if not
                           (cache_matches_meta
@@ -2579,9 +2583,10 @@ let complete_claim ~keeper_name ~receipt_id ~outcome =
                              next_sequence
                              terminal_count)
                      then
-                       quarantine_entry entry
-                         (load_error Reconciliation_failed ~path
-                            "chat queue database metadata diverged during claim completion")
+                       `Error
+                         (quarantine_error entry
+                            (load_error Reconciliation_failed ~path
+                               "chat queue database metadata diverged during claim completion"))
                      else
                        (match observed_row with
                         | Some

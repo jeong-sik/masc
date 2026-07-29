@@ -28,6 +28,14 @@ module For_testing : sig
     :  Keeper_meta_contract.keeper_meta
     -> Keeper_world_observation.world_observation
     -> Keeper_meta_contract.keeper_meta
+
+  type cycle_post_action =
+    | Assign_task
+    | Empty_queue_sleep
+
+  val post_action_of_channel
+    :  Keeper_world_observation.keeper_cycle_channel
+    -> cycle_post_action
 end
 
 type handle_result =
@@ -39,6 +47,7 @@ val handle
   -> meta:Keeper_meta_contract.keeper_meta
   -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> observation:Keeper_world_observation.world_observation
+  -> channel:Keeper_world_observation.keeper_cycle_channel
   -> latency_ms:int
   -> degraded_retry_applied:bool
   -> degraded_retry_runtime:string option

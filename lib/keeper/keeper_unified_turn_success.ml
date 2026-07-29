@@ -42,6 +42,15 @@ type terminal_outcome =
 type handle_result =
   | Completed of Keeper_meta_contract.keeper_meta
 
+type cycle_post_action =
+  | Assign_task
+  | Empty_queue_sleep
+
+let post_action_of_channel = function
+  | Keeper_world_observation.Reactive -> Assign_task
+  | Keeper_world_observation.Scheduled_autonomous -> Empty_queue_sleep
+;;
+
 let acknowledge_pending_messages
       (meta : Keeper_meta_contract.keeper_meta)
       (observation : Keeper_world_observation.world_observation)
@@ -88,29 +97,23 @@ let append_metrics_snapshot
       ~meta
       ~updated_meta
       ~observation
+      ~channel
       ~result
       ~latency_ms
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~terminal_outcome
   =
-  let any_pending =
-    observation.Keeper_world_observation.pending_messages <> []
-    || observation.pending_board_events <> []
-  in
   (* Single typed channel for the whole cycle: post helpers + the metrics
      snapshot + the failure-path label all derive from one value, so the
      reactive/autonomous decision can no longer drift between sites. *)
-  let channel =
-    if any_pending
-    then Keeper_world_observation.Reactive
-    else Keeper_world_observation.Scheduled_autonomous
-  in
   let channel_tag = Keeper_world_observation.channel_to_string channel in
   try
-    if any_pending
-    then Keeper_turn_helpers.post_assign_task ~any_pending ~channel:channel_tag
-    else Keeper_turn_helpers.post_empty_queue_sleep ~any_pending ~channel:channel_tag;
+    (match post_action_of_channel channel with
+     | Assign_task ->
+       Keeper_turn_helpers.post_assign_task ~channel:channel_tag
+     | Empty_queue_sleep ->
+       Keeper_turn_helpers.post_empty_queue_sleep ~channel:channel_tag);
     KUM.append_metrics_snapshot
       ~config
       ~meta:updated_meta
@@ -522,6 +525,12 @@ module For_testing = struct
 
   let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
   let acknowledge_pending_messages = acknowledge_pending_messages
+
+  type nonrec cycle_post_action = cycle_post_action =
+    | Assign_task
+    | Empty_queue_sleep
+
+  let post_action_of_channel = post_action_of_channel
 end
 
 let emit_terminal_fsm
@@ -550,6 +559,7 @@ let handle
       ~meta
       ~turn_ctx_cell
       ~observation
+      ~channel
       ~latency_ms
       ~degraded_retry_applied
       ~degraded_retry_runtime
@@ -581,6 +591,7 @@ let handle
     ~meta
     ~updated_meta
     ~observation
+    ~channel
     ~result
     ~latency_ms
     ~turn_cost

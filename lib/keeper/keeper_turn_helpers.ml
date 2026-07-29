@@ -153,22 +153,17 @@ let record_execution_receipt_gap
    This pattern follows PR #11696 (Cycle 43, KeeperHeartbeat closeout)
    which introduced [Keeper_fsm_guard_runtime]. *)
 
-(* AssignTask: the channel decision picks "turn" when at least one of
-   [pending_mentions], [pending_board_events], or
-   [pending_scope_messages] is non-empty. The post-action guard pins
-   the structural invariant that drove the decision. *)
-let post_assign_task ~(any_pending : bool) ~(channel : string) =
-  ignore any_pending;
+(* AssignTask: the typed channel decision is the authority. Reactive stimuli
+   include event-queue triggers that need not appear in the observation. *)
+let post_assign_task ~(channel : string) =
   ignore channel
-[@@fsm_guard "any_pending = true && channel = \"turn\""]
+[@@fsm_guard "channel = \"turn\""]
 ;;
 
-(* EmptyQueueSleep: complementary branch -- every pending list is empty
-   and the cycle exits without claiming. *)
-let post_empty_queue_sleep ~(any_pending : bool) ~(channel : string) =
-  ignore any_pending;
+(* EmptyQueueSleep: complementary typed scheduled-autonomous branch. *)
+let post_empty_queue_sleep ~(channel : string) =
   ignore channel
-[@@fsm_guard "any_pending = false && channel = \"scheduled_autonomous\""]
+[@@fsm_guard "channel = \"scheduled_autonomous\""]
 ;;
 
 (* TurnComplete (KeeperTaskAcquisition.tla, Cycle 45 follow-up to

@@ -413,6 +413,38 @@ let test_consolidation_tick_retries_next_lane_candidate_on_transport_failure () 
           (List.rev !calls)))))
 ;;
 
+let test_consolidation_tick_stops_on_non_retryable_provider_failure () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        Io.append_fact ~keeper_id (fact "only fact");
+        let calls = ref [] in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+          let model_id = config.Llm_provider.Provider_config.model_id in
+          calls := model_id :: !calls;
+          Error
+            (Llm_provider.Http_client.AcceptRejected
+               { reason = "local request admission rejected" })
+        in
+        let cfg model_id =
+          { (provider_cfg ()) with Llm_provider.Provider_config.model_id }
+        in
+        Server_bootstrap_maintenance.run_memory_os_consolidation_tick_with_candidates
+          ~complete
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~runtime_candidates:[ "local.first", cfg "first"; "local.second", cfg "second" ]
+          ~now
+          ();
+        Alcotest.(check (list string))
+          "non-retryable failure does not advance candidate authority"
+          [ "first" ]
+          (List.rev !calls)))))
+;;
+
 let () =
   Alcotest.run
     "server_bootstrap_maintenance_memory_os"
@@ -445,6 +477,10 @@ let () =
             "transport failure retries the next lane candidate"
             `Quick
             test_consolidation_tick_retries_next_lane_candidate_on_transport_failure
+        ; Alcotest.test_case
+            "non-retryable provider failure stops candidate traversal"
+            `Quick
+            test_consolidation_tick_stops_on_non_retryable_provider_failure
         ] )
     ]
 ;;

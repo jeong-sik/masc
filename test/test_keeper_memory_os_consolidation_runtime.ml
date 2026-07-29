@@ -446,7 +446,7 @@ let test_consolidate_classifies_invalid_structured_response () =
             "expected Invalid_structured_response for malformed provider output"))))
 ;;
 
-let test_consolidate_requires_clock_before_provider_call () =
+let test_consolidate_keeps_non_retryable_provider_admission_terminal () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
@@ -459,7 +459,9 @@ let test_consolidate_requires_clock_before_provider_call () =
         let complete : Runtime.complete_fn =
           fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
           called := true;
-          Ok (fake_response {|{"groups":[],"drop_indices":[]}|})
+          Error
+            (Llm_provider.Http_client.AcceptRejected
+               { reason = "local request admission rejected" })
         in
         let outcome =
           Runtime.consolidate_keeper
@@ -472,18 +474,15 @@ let test_consolidate_requires_clock_before_provider_call () =
             ~keeper_id
             ()
         in
-        Alcotest.(check bool) "provider was not called" false !called;
+        Alcotest.(check bool) "provider boundary was called" true !called;
         match outcome with
         | Runtime.Transport_failed msg ->
           Alcotest.(check bool)
-            "message names unavailable clock"
+            "message preserves local admission reason"
             true
-            (contains "clock unavailable" msg);
-          Alcotest.(check bool)
-            "message names timeout"
-            true
-            (contains "timeout_sec=1.0" msg)
-        | _ -> Alcotest.fail "expected Transport_failed for missing clock"))))
+            (contains "local request admission rejected" msg)
+        | _ ->
+          Alcotest.fail "non-retryable admission failure must remain terminal"))))
 ;;
 
 let test_consolidate_rejects_uncapped_provider_before_call () =
@@ -705,9 +704,9 @@ let () =
             `Quick
             test_consolidate_classifies_invalid_structured_response
         ; Alcotest.test_case
-            "requires clock before provider call"
+            "keeps non-retryable provider admission terminal"
             `Quick
-            test_consolidate_requires_clock_before_provider_call
+            test_consolidate_keeps_non_retryable_provider_admission_terminal
         ; Alcotest.test_case
             "rejects uncapped provider before call"
             `Quick

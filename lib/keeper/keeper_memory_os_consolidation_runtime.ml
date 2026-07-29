@@ -163,7 +163,11 @@ let consolidate_keeper
            Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
              ~config:provider_cfg ~messages ()
          with
-         | Error _ -> Provider_transport_failed "consolidation provider transport error"
+         | Error error ->
+           let detail = Provider_http_error.to_message error in
+           if Runtime_attempt_fsm.should_try_next error
+           then Provider_transport_failed detail
+           else Transport_failed detail
          | Ok response ->
            if String.trim (Agent_sdk_response.text_of_response response) = ""
            then Empty_response

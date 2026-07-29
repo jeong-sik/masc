@@ -1329,6 +1329,7 @@ let apply_pending_transition ~applied_at ~transition ~source ~pending state =
     Ok
       ( { state with
           pending
+        ; last_transition = None
         ; transition_outbox = [ { receipt; stimuli = [ source ] } ]
         }
       , Transition_applied receipt )
@@ -2103,12 +2104,7 @@ let replay_transition_outbox_entry entry state =
   | [] ->
     (match state.last_transition with
      | Some receipt when transition_receipt_equal receipt entry.receipt -> Ok state
-     | Some receipt ->
-       Error
-         (Printf.sprintf
-            "event queue WAL conflicts with checkpointed projected transition: %s"
-            receipt.transition_id)
-     | None ->
+     | Some _ | None ->
        (match entry.receipt.transition, entry.stimuli with
      | Cancel_accepted cancellation, [ source ] when source = cancellation.source ->
        restore_pending_transition entry state (fun state ->

@@ -540,12 +540,20 @@ let replay_wal_unlocked ~path ~surface owner state =
                ~surface
                detail)
         | Ok replayed ->
-          (* [load_state_unlocked] has not checkpointed [replayed]. Compacting
-             here would therefore erase the only durable copy of the transition
-             before its reaction-ledger projector can observe and retire it.
-             Keep the source-bearing WAL authoritative until
-             [project_transition_outbox_result] appends and retires it. *)
-          Ok replayed)
+          if
+            replayed == state
+            && State.transition_outbox state = []
+            && Option.is_some (State.last_transition state)
+          then
+            (* A projection checkpoint was durable before its WAL retirement.
+               The exact row now proves only the same already-projected
+               transition, so leaving it in place would block the next append
+               (which rightly requires an empty WAL). This is the sole safe
+               read-time compaction: any replay that reconstructs an outbox is
+               still authoritative until [project_transition_outbox_result]
+               records the reaction and retires it. *)
+            compact_wal_unlocked ~surface ~path owner |> Result.map (fun () -> replayed)
+          else Ok replayed)
   in
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
   | Private_file_failed error ->

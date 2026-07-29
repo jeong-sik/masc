@@ -269,9 +269,10 @@ val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Strict state read used by tests and operator projection. A malformed
     current envelope or stale/unknown schema is an [Error], never an empty
-    queue. Committed current-schema WAL rows are replayed idempotently,
-    checkpointed, and then compacted to the exact empty suffix before the state
-    is returned. *)
+    queue. Committed current-schema WAL rows are replayed idempotently. A row
+    already represented by the durable projected witness is compacted; an
+    unprojected source-bearing row remains authoritative until the reaction
+    projector records and retires it. *)
 
 (* The claim/settle lease surface lived here: claim_when_result,
    claim_board_result, transition_result, the lease-taking exact-execution

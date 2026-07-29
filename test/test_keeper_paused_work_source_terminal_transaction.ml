@@ -648,6 +648,121 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
       (Queue.length (State.pending replayed)))
 ;;
 
+let test_projected_wal_recovery_allows_next_source_ack () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
+    let second_resolution =
+      match request.source_receipt with
+      | State.Hitl_terminal resolution ->
+        { resolution with approval_id = "approval-terminal-after-projection" }
+      | State.Fusion_terminal _ | State.Background_job_terminal _ ->
+        Alcotest.fail "fixture must carry a HITL terminal receipt"
+    in
+    let second_source : Queue.stimulus =
+      { post_id = Queue.hitl_resolution_post_id second_resolution
+      ; urgency = Queue.Immediate
+      ; arrived_at = 3.0
+      ; payload = Queue.Hitl_resolved second_resolution
+      }
+    in
+    Persistence.update_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+      (fun pending -> Queue.enqueue pending second_source)
+    |> require_ok "seed second source-terminal event";
+    let first_request =
+      { request with
+        source_revision =
+          (Persistence.load_state_result
+             ~base_path:config.Workspace.base_path
+             ~keeper_name
+           |> require_ok "load first source-terminal revision"
+           |> State.revision)
+      }
+    in
+    let first =
+      Transaction.ack_pending config ~keeper_name first_request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "commit first source-terminal ACK"
+    in
+    check_applied first.projection;
+    let staged =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load first source-terminal ACK outbox"
+    in
+    let first_outbox =
+      match State.transition_outbox staged with
+      | [ entry ] -> entry
+      | [] | _ :: _ :: _ -> Alcotest.fail "first ACK must retain one transition outbox entry"
+    in
+    Persistence.project_transition_outbox_result
+      ~append_before_retire:(fun _entry -> Ok ())
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+    |> require_ok "project first source-terminal ACK";
+    let transition_wal_path =
+      Filename.concat
+        (Filename.concat
+           (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
+           keeper_name)
+        "event-queue-transitions.jsonl"
+    in
+    let residual_wal_row =
+      `Assoc
+        [ "schema", `String "masc.keeper_event_queue.transition.v2"
+        ; "base_path", `String config.Workspace.base_path
+        ; "keeper_name", `String keeper_name
+        ; "outbox_entry", State.outbox_entry_to_yojson first_outbox
+        ]
+    in
+    write_text transition_wal_path (Yojson.Safe.to_string residual_wal_row ^ "\n");
+    let recovered =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "recover projected first ACK WAL"
+    in
+    let residual_wal = In_channel.with_open_bin transition_wal_path In_channel.input_all in
+    Alcotest.(check string) "projected WAL is retired during recovery" "" residual_wal;
+    let second_request : Transaction.request =
+      { source = second_source
+      ; source_revision = State.revision recovered
+      ; owner_nonce = first_request.owner_nonce
+      ; source_receipt = State.Hitl_terminal second_resolution
+      ; operator_operation_id = "operator-source-terminal-after-projection"
+      }
+    in
+    let second =
+      Transaction.ack_pending config ~keeper_name second_request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "commit second source-terminal ACK"
+    in
+    check_applied second.projection;
+    Persistence.project_transition_outbox_result
+      ~append_before_retire:(fun _entry -> Ok ())
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+    |> require_ok "project second source-terminal ACK after recovery";
+    let final =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load second projected source-terminal ACK"
+    in
+    (match State.last_transition final with
+     | Some { transition = State.Ack_source_terminal _; transition_id; _ } ->
+       Alcotest.(check string)
+         "second projected transition has its own operation identity"
+         "pending-source-terminal-ack:operator-source-terminal-after-projection"
+         transition_id
+     | Some _ | None -> Alcotest.fail "second source-terminal ACK was not projected");
+    Alcotest.(check int)
+      "second source-terminal ACK removes its already-pending source"
+      0
+      (Queue.length (State.pending final)))
+;;
+
 let test_legacy_v3_receipt_file_resumes_ack () =
   with_source_terminal_lane (fun config keeper_name meta request ->
     let operation : Receipt.source_terminal_operation =
@@ -819,6 +934,10 @@ let () =
             "replays after outbox projection and snapshot reload"
             `Quick
             test_terminal_ack_replays_after_projection_and_snapshot_reload
+        ; Alcotest.test_case
+            "projected WAL recovery permits a different next ACK"
+            `Quick
+            test_projected_wal_recovery_allows_next_source_ack
         ; Alcotest.test_case
             "source ACK identity survives checkpoint reload"
             `Quick

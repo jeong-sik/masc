@@ -46,13 +46,12 @@ type failure = {
 
 type receipt_state =
   | Pending
-  | Inflight of { attempt_id : string; started_at : float }
+  | Inflight of { started_at : float }
   | Delivered of completion
   | Failed of failure
 
 type claim = {
   receipt_id : Receipt_id.t;
-  attempt_id : string;
   message : queued_message;
 }
 
@@ -88,22 +87,18 @@ type persistence_publication =
   | Claim_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
-      ; attempt_id : string
       }
   | Complete_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
-      ; attempt_id : string
       }
-  | Requeue_indeterminate of
+  | Claim_compensation_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
-      ; attempt_id : string
       }
   | Startup_interrupted_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
-      ; attempt_id : string
       }
 
 type persistence_failure =
@@ -123,6 +118,10 @@ type mutation_error =
       { receipt_id : Receipt_id.t
       ; observed_state : receipt_state option
       }
+  | Receipt_not_inflight of
+      { receipt_id : Receipt_id.t
+      ; observed_state : receipt_state option
+      }
   | Revision_exhausted
   | Persist_failed of persistence_failure
 
@@ -137,56 +136,46 @@ let snapshot_load_error_kind_to_string = function
 
 type persistence_transition =
   | Enqueue_transition of { receipt_id : Receipt_id.t }
-  | Claim_transition of { receipt_id : Receipt_id.t; attempt_id : string }
-  | Complete_transition of { receipt_id : Receipt_id.t; attempt_id : string }
-  | Requeue_transition of { receipt_id : Receipt_id.t; attempt_id : string }
+  | Claim_transition of { receipt_id : Receipt_id.t }
+  | Complete_transition of { receipt_id : Receipt_id.t }
+  | Claim_compensation_transition of { receipt_id : Receipt_id.t }
   | Pending_cancel_transition of { receipt_id : Receipt_id.t }
-  | Startup_interrupted_transition of
-      { receipt_id : Receipt_id.t
-      ; attempt_id : string
-      }
+  | Startup_interrupted_transition of { receipt_id : Receipt_id.t }
 
 let persistence_transition_to_string = function
   | Enqueue_transition _ -> "enqueue"
   | Claim_transition _ -> "claim"
   | Complete_transition _ -> "complete"
-  | Requeue_transition _ -> "requeue"
+  | Claim_compensation_transition _ -> "claim_compensation"
   | Pending_cancel_transition _ -> "pending_cancel"
   | Startup_interrupted_transition _ -> "startup_interrupted"
 
 let transition_receipt_id = function
   | Enqueue_transition { receipt_id }
-  | Claim_transition { receipt_id; _ }
-  | Complete_transition { receipt_id; _ }
-  | Requeue_transition { receipt_id; _ }
+  | Claim_transition { receipt_id }
+  | Complete_transition { receipt_id }
+  | Claim_compensation_transition { receipt_id }
   | Pending_cancel_transition { receipt_id }
-  | Startup_interrupted_transition { receipt_id; _ } -> receipt_id
+  | Startup_interrupted_transition { receipt_id } -> receipt_id
 
 let publication_transition = function
   | Not_published -> None
   | Enqueue_indeterminate _ -> Some "enqueue"
   | Claim_indeterminate _ -> Some "claim"
   | Complete_indeterminate _ -> Some "complete"
-  | Requeue_indeterminate _ -> Some "requeue"
+  | Claim_compensation_indeterminate _ -> Some "claim_compensation"
   | Pending_cancel_indeterminate _ -> Some "pending_cancel"
   | Startup_interrupted_indeterminate _ -> Some "startup_interrupted"
 
 let publication_evidence = function
   | Not_published -> None
   | Enqueue_indeterminate { revision; receipt_id }
-  | Claim_indeterminate { revision; receipt_id; _ }
-  | Complete_indeterminate { revision; receipt_id; _ }
-  | Requeue_indeterminate { revision; receipt_id; _ }
+  | Claim_indeterminate { revision; receipt_id }
+  | Complete_indeterminate { revision; receipt_id }
+  | Claim_compensation_indeterminate { revision; receipt_id }
   | Pending_cancel_indeterminate { revision; receipt_id }
-  | Startup_interrupted_indeterminate { revision; receipt_id; _ } ->
+  | Startup_interrupted_indeterminate { revision; receipt_id } ->
     Some (revision, receipt_id)
-
-let publication_attempt_id = function
-  | Claim_indeterminate { attempt_id; _ }
-  | Complete_indeterminate { attempt_id; _ }
-  | Requeue_indeterminate { attempt_id; _ }
-  | Startup_interrupted_indeterminate { attempt_id; _ } -> Some attempt_id
-  | Not_published | Enqueue_indeterminate _ | Pending_cancel_indeterminate _ -> None
 
 let receipt_state_kind_to_string = function
   | Pending -> "pending"
@@ -221,6 +210,13 @@ let mutation_error_to_string = function
   | Receipt_not_pending { receipt_id; observed_state } ->
     Printf.sprintf
       "chat queue receipt %s is not pending (observed=%s)"
+      (Receipt_id.to_string receipt_id)
+      (match observed_state with
+       | None -> "absent"
+       | Some state -> receipt_state_kind_to_string state)
+  | Receipt_not_inflight { receipt_id; observed_state } ->
+    Printf.sprintf
+      "chat queue receipt %s is not inflight (observed=%s)"
       (Receipt_id.to_string receipt_id)
       (match observed_state with
        | None -> "absent"
@@ -262,6 +258,16 @@ let mutation_error_to_json = function
           | Some state -> `String (receipt_state_kind_to_string state) )
       ; "message", `String "chat queue receipt is not pending"
       ]
+  | Receipt_not_inflight { receipt_id; observed_state } ->
+    `Assoc
+      [ "error", `String "chat_queue_receipt_not_inflight"
+      ; "receipt_id", `String (Receipt_id.to_string receipt_id)
+      ; ( "observed_state"
+        , match observed_state with
+          | None -> `Null
+          | Some state -> `String (receipt_state_kind_to_string state) )
+      ; "message", `String "chat queue receipt is not inflight"
+      ]
   | Revision_exhausted ->
     `Assoc
       [ "error", `String "chat_queue_revision_exhausted"
@@ -294,11 +300,6 @@ let mutation_error_to_json = function
          ; "receipt_id", `String (Receipt_id.to_string receipt_id)
          ; "message", `String detail
          ]
-       in
-       let fields =
-         match publication_attempt_id publication with
-         | None -> fields
-         | Some attempt_id -> ("attempt_id", `String attempt_id) :: fields
        in
        `Assoc fields
      | None, None ->
@@ -356,8 +357,7 @@ type transition_observer = keeper_name:string -> revision:int64 -> unit
 type stored_state =
   | Stored_pending of queued_message
   | Stored_inflight of
-      { attempt_id : string
-      ; started_at : float
+      { started_at : float
       ; message : queued_message
       }
   | Stored_delivered of completion
@@ -795,10 +795,9 @@ let completion_fields (completion : completion) =
 
 let state_to_yojson = function
   | Stored_pending _ -> `Assoc [ "kind", `String "pending" ]
-  | Stored_inflight { attempt_id; started_at; _ } ->
+  | Stored_inflight { started_at; _ } ->
     `Assoc
       [ "kind", `String "inflight"
-      ; "attempt_id", `String attempt_id
       ; "started_at", `Float started_at
       ]
   | Stored_delivered completion ->
@@ -855,21 +854,17 @@ let stored_receipt_of_yojson json =
                (queued_message_of_yojson message_json))
         | Ok "inflight" ->
           (match
-             required_string state_json "attempt_id",
              required_float state_json "started_at",
              required_member json "message"
            with
-           | Ok attempt_id, Ok started_at, Ok message_json
-             when not (String.equal (String.trim attempt_id) "") ->
+           | Ok started_at, Ok message_json ->
              Result.map
                (fun message ->
                   { receipt_id
-                  ; state = Stored_inflight { attempt_id; started_at; message }
+                  ; state = Stored_inflight { started_at; message }
                   })
                (queued_message_of_yojson message_json)
-           | Ok _, Ok _, Ok _ ->
-             Error "chat queue inflight attempt_id must be non-empty"
-           | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error)
+           | Error error, _ | _, Error error -> Error error)
         | Ok "delivered" ->
           (match
              required_float state_json "completed_at",
@@ -916,15 +911,15 @@ let strict_stored_receipt_of_wire wire =
             else Error "chat queue receipt JSON is not canonical or has unknown fields"))
   with exn -> Error ("chat queue receipt JSON decode failed: " ^ Printexc.to_string exn)
 
-let state_kind_and_attempt = function
-  | Stored_pending _ -> "pending", None
-  | Stored_inflight { attempt_id; _ } -> "inflight", Some attempt_id
-  | Stored_delivered _ -> "delivered", None
-  | Stored_failed _ -> "failed", None
+let state_kind = function
+  | Stored_pending _ -> "pending"
+  | Stored_inflight _ -> "inflight"
+  | Stored_delivered _ -> "delivered"
+  | Stored_failed _ -> "failed"
 
 let receipt_state_of_stored = function
   | Stored_pending _ -> Pending
-  | Stored_inflight { attempt_id; started_at; _ } -> Inflight { attempt_id; started_at }
+  | Stored_inflight { started_at; _ } -> Inflight { started_at }
   | Stored_delivered completion -> Delivered completion
   | Stored_failed failure -> Failed failure
 
@@ -1204,7 +1199,7 @@ let queue_meta_table_sql =
   "CREATE TABLE queue_meta (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema_version TEXT NOT NULL, revision INTEGER NOT NULL CHECK (revision >= 0), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0), terminal_count INTEGER NOT NULL CHECK (terminal_count >= 0)) STRICT"
 
 let receipts_table_sql =
-  "CREATE TABLE receipts (receipt_id TEXT PRIMARY KEY NOT NULL, fifo_sequence INTEGER NOT NULL CHECK (fifo_sequence >= 0), state_kind TEXT NOT NULL CHECK (state_kind IN ('pending', 'inflight', 'delivered', 'failed')), attempt_id TEXT, receipt_json TEXT NOT NULL CHECK (length(receipt_json) > 0), CHECK ((state_kind = 'inflight' AND attempt_id IS NOT NULL AND length(attempt_id) > 0) OR (state_kind != 'inflight' AND attempt_id IS NULL))) STRICT, WITHOUT ROWID"
+  "CREATE TABLE receipts (receipt_id TEXT PRIMARY KEY NOT NULL, fifo_sequence INTEGER NOT NULL CHECK (fifo_sequence >= 0), state_kind TEXT NOT NULL CHECK (state_kind IN ('pending', 'inflight', 'delivered', 'failed')), receipt_json TEXT NOT NULL CHECK (length(receipt_json) > 0)) STRICT, WITHOUT ROWID"
 
 let fifo_index_sql =
   "CREATE UNIQUE INDEX receipts_fifo_sequence ON receipts (fifo_sequence)"
@@ -1524,32 +1519,24 @@ let read_meta db =
          | rc -> Error (sqlite_error ~operation:"read queue metadata" db rc))
       | rc -> Error (sqlite_error ~operation:"read queue metadata" db rc))
 
-let decode_stored_row ~fifo_sequence ~state_kind ~attempt_id ~receipt_wire =
+let decode_stored_row ~fifo_sequence ~indexed_state_kind ~receipt_wire =
   if Int64.compare fifo_sequence 0L < 0
   then Error "chat queue FIFO sequence must be non-negative"
   else
     let* receipt = strict_stored_receipt_of_wire receipt_wire in
-    let expected_kind, expected_attempt = state_kind_and_attempt receipt.state in
-    if not (String.equal state_kind expected_kind)
+    if not (String.equal indexed_state_kind (state_kind receipt.state))
     then Error "chat queue indexed state does not match its canonical receipt"
-    else if attempt_id <> expected_attempt
-    then Error "chat queue indexed attempt does not match its canonical receipt"
     else Ok { fifo_sequence; receipt }
 
 let decode_row_columns stmt =
   let fifo_sequence = Sqlite3.column_int64 stmt 0 in
-  let state_kind = Sqlite3.column_text stmt 1 in
-  let attempt_id =
-    if Sqlite3.column_is_null stmt 2
-    then None
-    else Some (Sqlite3.column_text stmt 2)
-  in
-  let receipt_wire = Sqlite3.column_text stmt 3 in
-  decode_stored_row ~fifo_sequence ~state_kind ~attempt_id ~receipt_wire
+  let indexed_state_kind = Sqlite3.column_text stmt 1 in
+  let receipt_wire = Sqlite3.column_text stmt 2 in
+  decode_stored_row ~fifo_sequence ~indexed_state_kind ~receipt_wire
 
 let read_row_by_receipt_id db receipt_id =
   with_statement db
-    "SELECT fifo_sequence, state_kind, attempt_id, receipt_json FROM receipts WHERE receipt_id = ?"
+    "SELECT fifo_sequence, state_kind, receipt_json FROM receipts WHERE receipt_id = ?"
     (fun stmt ->
       let* () =
         sqlite_bind_text db stmt ~operation:"bind receipt lookup" 1
@@ -1577,7 +1564,7 @@ type loaded_database = {
 
 let read_active_rows db =
   with_statement db
-    "SELECT fifo_sequence, state_kind, attempt_id, receipt_json FROM receipts INDEXED BY receipts_active_fifo WHERE state_kind IN ('pending', 'inflight') ORDER BY fifo_sequence"
+    "SELECT fifo_sequence, state_kind, receipt_json FROM receipts INDEXED BY receipts_active_fifo WHERE state_kind IN ('pending', 'inflight') ORDER BY fifo_sequence"
     (fun stmt ->
       let rec loop pending inflight =
         match Sqlite3.step stmt with
@@ -1689,27 +1676,22 @@ let require_sqlite = function
   | Error detail -> raise (Sqlite_operation_failed detail)
 
 let bind_row db stmt row =
-  let state_kind, attempt_id = state_kind_and_attempt row.receipt.state in
+  let indexed_state_kind = state_kind row.receipt.state in
   require_sqlite
     (sqlite_bind_text db stmt ~operation:"bind receipt id" 1
        (Receipt_id.to_string row.receipt.receipt_id));
   require_sqlite
     (sqlite_bind_int64 db stmt ~operation:"bind FIFO sequence" 2 row.fifo_sequence);
   require_sqlite
-    (sqlite_bind_text db stmt ~operation:"bind receipt state" 3 state_kind);
+    (sqlite_bind_text db stmt ~operation:"bind receipt state" 3 indexed_state_kind);
   require_sqlite
-    (sqlite_bind db stmt ~operation:"bind receipt attempt" 4
-       (match attempt_id with
-        | None -> Sqlite3.Data.NULL
-        | Some attempt_id -> Sqlite3.Data.TEXT attempt_id));
-  require_sqlite
-    (sqlite_bind_text db stmt ~operation:"bind canonical receipt" 5
+    (sqlite_bind_text db stmt ~operation:"bind canonical receipt" 4
        (stored_receipt_wire row.receipt))
 
 let insert_row db row =
   require_sqlite
     (with_statement db
-       "INSERT INTO receipts(receipt_id, fifo_sequence, state_kind, attempt_id, receipt_json) VALUES (?, ?, ?, ?, ?)"
+       "INSERT INTO receipts(receipt_id, fifo_sequence, state_kind, receipt_json) VALUES (?, ?, ?, ?)"
        (fun stmt ->
          bind_row db stmt row;
          sqlite_expect_done db stmt ~operation:"insert receipt"))
@@ -1717,29 +1699,24 @@ let insert_row db row =
 let update_row db row =
   require_sqlite
     (with_statement db
-       "UPDATE receipts SET fifo_sequence = ?, state_kind = ?, attempt_id = ?, receipt_json = ? WHERE receipt_id = ?"
+       "UPDATE receipts SET fifo_sequence = ?, state_kind = ?, receipt_json = ? WHERE receipt_id = ?"
        (fun stmt ->
-         let state_kind, attempt_id = state_kind_and_attempt row.receipt.state in
+         let indexed_state_kind = state_kind row.receipt.state in
          let receipt_id = Receipt_id.to_string row.receipt.receipt_id in
          let* () =
            sqlite_bind_int64 db stmt ~operation:"bind updated FIFO sequence" 1
              row.fifo_sequence
          in
          let* () =
-           sqlite_bind_text db stmt ~operation:"bind updated receipt state" 2 state_kind
+           sqlite_bind_text db stmt ~operation:"bind updated receipt state" 2
+             indexed_state_kind
          in
          let* () =
-           sqlite_bind db stmt ~operation:"bind updated receipt attempt" 3
-             (match attempt_id with
-              | None -> Sqlite3.Data.NULL
-              | Some attempt_id -> Sqlite3.Data.TEXT attempt_id)
-         in
-         let* () =
-           sqlite_bind_text db stmt ~operation:"bind updated canonical receipt" 4
+           sqlite_bind_text db stmt ~operation:"bind updated canonical receipt" 3
              (stored_receipt_wire row.receipt)
          in
          let* () =
-           sqlite_bind_text db stmt ~operation:"bind updated receipt id" 5 receipt_id
+           sqlite_bind_text db stmt ~operation:"bind updated receipt id" 4 receipt_id
          in
          let* () = sqlite_expect_done db stmt ~operation:"update receipt" in
          if Sqlite3.changes db = 1
@@ -1882,16 +1859,16 @@ let not_published_failure detail =
 let indeterminate_publication revision = function
   | Enqueue_transition { receipt_id } ->
     Enqueue_indeterminate { revision; receipt_id }
-  | Claim_transition { receipt_id; attempt_id } ->
-    Claim_indeterminate { revision; receipt_id; attempt_id }
-  | Complete_transition { receipt_id; attempt_id } ->
-    Complete_indeterminate { revision; receipt_id; attempt_id }
-  | Requeue_transition { receipt_id; attempt_id } ->
-    Requeue_indeterminate { revision; receipt_id; attempt_id }
+  | Claim_transition { receipt_id } ->
+    Claim_indeterminate { revision; receipt_id }
+  | Complete_transition { receipt_id } ->
+    Complete_indeterminate { revision; receipt_id }
+  | Claim_compensation_transition { receipt_id } ->
+    Claim_compensation_indeterminate { revision; receipt_id }
   | Pending_cancel_transition { receipt_id } ->
     Pending_cancel_indeterminate { revision; receipt_id }
-  | Startup_interrupted_transition { receipt_id; attempt_id } ->
-    Startup_interrupted_indeterminate { revision; receipt_id; attempt_id }
+  | Startup_interrupted_transition { receipt_id } ->
+    Startup_interrupted_indeterminate { revision; receipt_id }
 
 let published_indeterminate_failure plan detail =
   { publication =
@@ -2389,8 +2366,6 @@ let enqueue ~keeper_name message =
     ~receipt_id:(Receipt_id.generate ())
     message
 
-let attempt_id () = Random_id.prefixed ~prefix:"attempt_" ~bytes:16
-
 let claim_next ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
   | Error error -> `Error error
@@ -2410,8 +2385,8 @@ let claim_next ~keeper_name =
                     "chat queue database is absent during claim"))
           | Ok Store_present ->
             (match entry.inflight with
-             | Some { receipt = { state = Stored_inflight { attempt_id; _ }; _ }; _ } ->
-               `Already_claimed attempt_id
+             | Some { receipt = { receipt_id; state = Stored_inflight _ }; _ } ->
+               `Already_claimed receipt_id
              | Some _ ->
                `Error
                  (Snapshot_unavailable
@@ -2423,15 +2398,13 @@ let claim_next ~keeper_name =
                 | Some (_, row) ->
                   (match row.receipt.state with
                    | Stored_pending message ->
-                     let attempt_id = attempt_id () in
                      let target_row =
                        { row with
                          receipt =
                            { row.receipt with
                              state =
                                Stored_inflight
-                                 { attempt_id
-                                 ; started_at = Time_compat.now ()
+                                 { started_at = Time_compat.now ()
                                  ; message
                                  }
                            }
@@ -2445,7 +2418,7 @@ let claim_next ~keeper_name =
                           ~target_terminal_count:entry.terminal_count
                           ~transition:
                             (Claim_transition
-                               { receipt_id = row.receipt.receipt_id; attempt_id })
+                               { receipt_id = row.receipt.receipt_id })
                       with
                       | Error error -> `Error error
                       | Ok plan ->
@@ -2461,7 +2434,6 @@ let claim_next ~keeper_name =
                          | Ok revision ->
                            `Claimed
                              ( { receipt_id = row.receipt.receipt_id
-                               ; attempt_id
                                ; message
                                }
                              , revision )))
@@ -2481,7 +2453,7 @@ let claim_next ~keeper_name =
        notify_indeterminate ~keeper_name (Error error);
        `Error error
      | `Empty -> `Empty
-     | `Already_claimed attempt_id -> `Already_claimed attempt_id)
+     | `Already_claimed receipt_id -> `Already_claimed receipt_id)
 
 let canonical_optional_ref = function
   | None -> Ok None
@@ -2511,13 +2483,35 @@ let canonical_terminal_state = function
         (fun outcome_ref -> Stored_failed { failure with detail; outcome_ref })
         (canonical_optional_ref failure.outcome_ref)
 
-let complete_claim ~keeper_name ~attempt_id ~outcome =
+let completion_equal (left : completion) (right : completion) =
+  Float.equal left.completed_at right.completed_at
+  && Option.equal String.equal left.outcome_ref right.outcome_ref
+
+let failure_equal (left : failure) (right : failure) =
+  Float.equal left.completed_at right.completed_at
+  && left.kind = right.kind
+  && String.equal left.detail right.detail
+  && Option.equal String.equal left.outcome_ref right.outcome_ref
+
+let terminal_state_equal left right =
+  match left, right with
+  | Stored_delivered left, Stored_delivered right ->
+    completion_equal left right
+  | Stored_failed left, Stored_failed right -> failure_equal left right
+  | ( Stored_pending _
+    | Stored_inflight _
+    | Stored_delivered _
+    | Stored_failed _ ), _ ->
+    false
+
+let complete_claim ~keeper_name ~receipt_id ~outcome =
   match canonical_terminal_state outcome with
   | Error detail -> `Error (Invalid_input detail)
   | Ok terminal_state ->
     (match mutation_context ~keeper_name ~create:false with
      | Error error -> `Error error
-     | Ok (_, _, None) -> `Unknown_claim
+     | Ok (_, _, None) ->
+       `Error (Receipt_not_inflight { receipt_id; observed_state = None })
      | Ok (base_path, path, Some entry) ->
        let result =
          with_entry_lock keeper_name entry (fun () ->
@@ -2535,18 +2529,18 @@ let complete_claim ~keeper_name ~attempt_id ~outcome =
                (match entry.inflight with
                 | Some
                     ({ receipt =
-                         { receipt_id
-                         ; state = Stored_inflight current
+                         { receipt_id = current_receipt_id
+                         ; state = Stored_inflight _
                          }
                      ; _
                      } as row)
-                  when String.equal current.attempt_id attempt_id ->
+                  when Receipt_id.equal current_receipt_id receipt_id ->
                   if Int64.equal entry.terminal_count Int64.max_int
                   then `Error Revision_exhausted
                   else
                     let target_row =
                       { row with
-                        receipt = { receipt_id; state = terminal_state }
+                        receipt = { receipt_id = current_receipt_id; state = terminal_state }
                       }
                     in
                     (match
@@ -2556,7 +2550,7 @@ let complete_claim ~keeper_name ~attempt_id ~outcome =
                          ~target_next_sequence:entry.next_sequence
                          ~target_terminal_count:(Int64.succ entry.terminal_count)
                          ~transition:
-                           (Complete_transition { receipt_id; attempt_id })
+                           (Complete_transition { receipt_id = current_receipt_id })
                      with
                      | Error error -> `Error error
                      | Ok plan ->
@@ -2568,82 +2562,74 @@ let complete_claim ~keeper_name ~attempt_id ~outcome =
                            plan
                        in
                        (match apply_transaction_result ~path entry plan execution with
-                        | Ok revision -> `Completed (receipt_id, revision)
+                        | Ok revision -> `Completed (current_receipt_id, revision)
                         | Error error -> `Error error))
-                | None | Some _ -> `Unknown_claim))
+                | None | Some _ ->
+                  (match
+                     observe_receipt_in_store ~base_path ~path receipt_id
+                   with
+                   | Error detail ->
+                     quarantine_entry entry
+                       (load_error Read_failed ~path detail)
+                   | Ok (revision, next_sequence, terminal_count, observed_row) ->
+                     if not
+                          (cache_matches_meta
+                             entry
+                             revision
+                             next_sequence
+                             terminal_count)
+                     then
+                       quarantine_entry entry
+                         (load_error Reconciliation_failed ~path
+                            "chat queue database metadata diverged during claim completion")
+                     else
+                       (match observed_row with
+                        | Some
+                            { receipt =
+                                { state =
+                                    ((Stored_delivered _ | Stored_failed _) as
+                                      observed_state)
+                                ; _
+                                }
+                            ; _
+                            }
+                          when terminal_state_equal observed_state terminal_state ->
+                          `Already_completed receipt_id
+                        | Some
+                            { receipt =
+                                { state =
+                                    ((Stored_delivered _ | Stored_failed _) as
+                                      observed_state)
+                                ; _
+                                }
+                            ; _
+                            } ->
+                          `Error
+                            (Receipt_already_terminal
+                               { receipt_id
+                               ; state = receipt_state_of_stored observed_state
+                               })
+                        | None ->
+                          `Error
+                            (Receipt_not_inflight
+                               { receipt_id; observed_state = None })
+                        | Some { receipt = { state = observed_state; _ }; _ } ->
+                          `Error
+                            (Receipt_not_inflight
+                               { receipt_id
+                               ; observed_state =
+                                   Some
+                                     (receipt_state_of_stored observed_state)
+                               })))))
        in
        (match result with
         | `Completed (receipt_id, revision) ->
           notify_transition ~keeper_name ~revision;
           `Completed receipt_id
+        | `Already_completed receipt_id -> `Completed receipt_id
         | `Error error ->
           notify_indeterminate ~keeper_name (Error error);
-          `Error error
-        | `Unknown_claim -> `Unknown_claim))
-
-let requeue_claim ~keeper_name ~attempt_id =
-  match mutation_context ~keeper_name ~create:false with
-  | Error error -> `Error error
-  | Ok (_, _, None) -> `Unknown_claim
-  | Ok (base_path, path, Some entry) ->
-    let result =
-      with_entry_lock keeper_name entry (fun () ->
-          match
-            check_entry_store ~base_path ~path entry
-              ~allow_absent:false
-          with
-          | Error error -> `Error error
-          | Ok Store_absent ->
-            `Error
-              (Snapshot_unavailable
-                 (load_error Read_failed ~path
-                    "chat queue database is absent during claim requeue"))
-          | Ok Store_present ->
-            (match entry.inflight with
-             | Some
-                 ({ receipt =
-                      { receipt_id
-                      ; state = Stored_inflight current
-                      }
-                  ; _
-                  } as row)
-               when String.equal current.attempt_id attempt_id ->
-               let target_row =
-                 { row with
-                   receipt =
-                     { receipt_id; state = Stored_pending current.message }
-                 }
-               in
-               (match
-                  make_plan entry
-                    ~before_row:(Some row)
-                    ~target_row:(Some target_row)
-                    ~target_next_sequence:entry.next_sequence
-                    ~target_terminal_count:entry.terminal_count
-                    ~transition:(Requeue_transition { receipt_id; attempt_id })
-                with
-                | Error error -> `Error error
-                | Ok plan ->
-                  let execution =
-                    run_transaction
-                      ~ownership_root:base_path
-                      ~path
-                      ~create_if_missing:false
-                      plan
-                  in
-                  (match apply_transaction_result ~path entry plan execution with
-                   | Ok revision -> `Requeued (receipt_id, revision)
-                   | Error error -> `Error error))
-             | None | Some _ -> `Unknown_claim))
-    in
-    (match result with
-     | `Requeued (receipt_id, revision) ->
-       notify_transition ~keeper_name ~revision;
-       `Requeued receipt_id
-     | `Error error ->
-       notify_indeterminate ~keeper_name (Error error);
-       `Error error
-     | `Unknown_claim -> `Unknown_claim)
+          `Error error))
 
 let has_active_receipts ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
@@ -3008,9 +2994,7 @@ let compensate_uncertain_claim entry plan =
       ; target_terminal_count = plan.target_terminal_count
       ; before_row = plan.target_row
       ; target_row = Some target_row
-      ; transition =
-          Requeue_transition
-            { receipt_id; attempt_id = inflight.attempt_id }
+      ; transition = Claim_compensation_transition { receipt_id }
       }
   | None
   | Some
@@ -3108,7 +3092,7 @@ let reconcile_persistence ~keeper_name =
                            | Error _ as error -> error))
                      | ( Enqueue_transition _
                        | Complete_transition _
-                       | Requeue_transition _
+                       | Claim_compensation_transition _
                        | Pending_cancel_transition _
                        | Startup_interrupted_transition _ ), false, true ->
                        set_entry_to_plan_target entry plan;
@@ -3117,7 +3101,7 @@ let reconcile_persistence ~keeper_name =
                        Ok { outcome = Reconciled; revision = plan.target_revision }
                      | ( Enqueue_transition _
                        | Complete_transition _
-                       | Requeue_transition _
+                       | Claim_compensation_transition _
                        | Pending_cancel_transition _
                        | Startup_interrupted_transition _ ), true, false ->
                        let execution =
@@ -3187,7 +3171,7 @@ let load_keeper_lane ~base_path ~path =
          }
      | Some before_row ->
        (match before_row.receipt.state with
-        | Stored_inflight { attempt_id; _ } ->
+        | Stored_inflight _ ->
           if Int64.equal entry.revision Int64.max_int
              || Int64.equal entry.terminal_count Int64.max_int
           then
@@ -3225,7 +3209,7 @@ let load_keeper_lane ~base_path ~path =
               ; target_row = Some target_row
               ; transition =
                   Startup_interrupted_transition
-                    { receipt_id = before_row.receipt.receipt_id; attempt_id }
+                    { receipt_id = before_row.receipt.receipt_id }
               }
             in
             let execution =

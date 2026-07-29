@@ -62,13 +62,12 @@ type failure = {
 
 type receipt_state =
   | Pending
-  | Inflight of { attempt_id : string; started_at : float }
+  | Inflight of { started_at : float }
   | Delivered of completion
   | Failed of failure
 
 type claim = {
   receipt_id : Receipt_id.t;
-  attempt_id : string;
   message : queued_message;
 }
 
@@ -104,22 +103,18 @@ type persistence_publication =
   | Claim_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
-      ; attempt_id : string
       }
   | Complete_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
-      ; attempt_id : string
       }
-  | Requeue_indeterminate of
+  | Claim_compensation_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
-      ; attempt_id : string
       }
   | Startup_interrupted_indeterminate of
       { revision : int64
       ; receipt_id : Receipt_id.t
-      ; attempt_id : string
       }
 
 type persistence_failure =
@@ -136,6 +131,10 @@ type mutation_error =
       ; state : receipt_state
       }
   | Receipt_not_pending of
+      { receipt_id : Receipt_id.t
+      ; observed_state : receipt_state option
+      }
+  | Receipt_not_inflight of
       { receipt_id : Receipt_id.t
       ; observed_state : receipt_state option
       }
@@ -221,7 +220,7 @@ val claim_next :
   keeper_name:string ->
   [ `Claimed of claim
   | `Empty
-  | `Already_claimed of string
+  | `Already_claimed of Receipt_id.t
   | `Error of mutation_error
   ]
 
@@ -229,20 +228,9 @@ val claim_next :
     retain correlation metadata but discard message bodies and attachments. *)
 val complete_claim :
   keeper_name:string ->
-  attempt_id:string ->
+  receipt_id:Receipt_id.t ->
   outcome:finalization ->
   [ `Completed of Receipt_id.t
-  | `Unknown_claim
-  | `Error of mutation_error
-  ]
-
-(** Return the receipt in the matching claim to [Pending], preserving its id
-    and FIFO position. *)
-val requeue_claim :
-  keeper_name:string ->
-  attempt_id:string ->
-  [ `Requeued of Receipt_id.t
-  | `Unknown_claim
   | `Error of mutation_error
   ]
 

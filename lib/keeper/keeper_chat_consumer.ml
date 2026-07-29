@@ -64,14 +64,14 @@ type persistence_blocked_operation =
 
 type persistence_blocked_status =
   { operation : persistence_blocked_operation
-  ; attempt_id : string option
+  ; receipt_id : Keeper_chat_queue.Receipt_id.t option
   ; error : Keeper_chat_queue.mutation_error
   }
 
 type blocked_retry =
   | Retry_claim_next
   | Retry_completion of
-      { attempt_id : string
+      { receipt_id : Keeper_chat_queue.Receipt_id.t
       ; outcome : Keeper_chat_queue.finalization
       }
 
@@ -111,13 +111,13 @@ module Persistence_blocked = struct
     with_lock (fun () ->
       Hashtbl.remove entries (key ~base_path ~keeper_name))
 
-  let clear_completion ~base_path ~keeper_name ~attempt_id =
+  let clear_completion ~base_path ~keeper_name ~receipt_id =
     with_lock (fun () ->
       let key = key ~base_path ~keeper_name in
       match Hashtbl.find_opt entries key with
       | Some
-          { retry = Retry_completion { attempt_id = pending_attempt_id; _ }; _ }
-        when String.equal pending_attempt_id attempt_id ->
+          { retry = Retry_completion { receipt_id = pending_receipt_id; _ }; _ }
+        when Keeper_chat_queue.Receipt_id.equal pending_receipt_id receipt_id ->
         Hashtbl.remove entries key
       | Some _ | None -> ())
 
@@ -179,26 +179,26 @@ let pending_completion state keeper_name =
       ~base_path:state.base_path
       ~keeper_name
   with
-  | Some { retry = Retry_completion { attempt_id; outcome }; _ } ->
-    Some (attempt_id, outcome)
+  | Some { retry = Retry_completion { receipt_id; outcome }; _ } ->
+    Some (receipt_id, outcome)
   | Some { retry = Retry_claim_next; _ } | None -> None
 
-let clear_pending_completion state ~keeper_name ~attempt_id =
+let clear_pending_completion state ~keeper_name ~receipt_id =
   Persistence_blocked.clear_completion
     ~base_path:state.base_path
     ~keeper_name
-    ~attempt_id
+    ~receipt_id
 
-let remember_pending_completion state ~keeper_name ~attempt_id ~outcome ~error =
+let remember_pending_completion state ~keeper_name ~receipt_id ~outcome ~error =
   Persistence_blocked.remember
     ~base_path:state.base_path
     ~keeper_name
     { status =
         { operation = Complete_blocked
-        ; attempt_id = Some attempt_id
+        ; receipt_id = Some receipt_id
         ; error
         }
-    ; retry = Retry_completion { attempt_id; outcome }
+    ; retry = Retry_completion { receipt_id; outcome }
     }
 
 let remember_blocked_claim state ~keeper_name ~error =
@@ -206,7 +206,7 @@ let remember_blocked_claim state ~keeper_name ~error =
     ~base_path:state.base_path
     ~keeper_name
     { status =
-        { operation = Claim_next_blocked; attempt_id = None; error }
+        { operation = Claim_next_blocked; receipt_id = None; error }
     ; retry = Retry_claim_next
     }
 
@@ -280,19 +280,11 @@ let reconcile_published_transition ~keeper_name error =
       (Keeper_chat_queue.mutation_error_to_string error)
       (Keeper_chat_queue.mutation_error_to_string reconciliation_error)
 
-let persist_completion state ~keeper_name ~attempt_id outcome =
+let persist_completion state ~keeper_name ~receipt_id outcome =
   let rec complete ~allow_invalid_fallback outcome =
-    match Keeper_chat_queue.complete_claim ~keeper_name ~attempt_id ~outcome with
+    match Keeper_chat_queue.complete_claim ~keeper_name ~receipt_id ~outcome with
     | `Completed _ ->
-      clear_pending_completion state ~keeper_name ~attempt_id;
-      `Persisted
-    | `Unknown_claim ->
-      clear_pending_completion state ~keeper_name ~attempt_id;
-      Log.Keeper.warn
-        "keeper_chat_consumer: completion found no matching claim=%s for \
-         keeper=%s (already completed?)"
-        attempt_id
-        keeper_name;
+      clear_pending_completion state ~keeper_name ~receipt_id;
       `Persisted
     | `Error (Keeper_chat_queue.Invalid_input message)
       when allow_invalid_fallback ->
@@ -300,43 +292,47 @@ let persist_completion state ~keeper_name ~attempt_id outcome =
        | Ok fallback ->
          Log.Keeper.error
            "keeper_chat_consumer: rejected invalid terminal outcome for \
-            keeper=%s claim=%s: %s; replacing it with a typed internal_error"
-           keeper_name attempt_id message;
+            keeper=%s receipt=%s: %s; replacing it with a typed internal_error"
+           keeper_name
+           (Keeper_chat_queue.Receipt_id.to_string receipt_id)
+           message;
          complete ~allow_invalid_fallback:false fallback
        | Error error ->
-         remember_pending_completion state ~keeper_name ~attempt_id ~outcome
+         remember_pending_completion state ~keeper_name ~receipt_id ~outcome
            ~error;
          Log.Keeper.error
            "keeper_chat_consumer: rejected invalid terminal outcome for \
-            keeper=%s claim=%s: %s; typed replacement is unavailable: %s"
-           keeper_name attempt_id message
+            keeper=%s receipt=%s: %s; typed replacement is unavailable: %s"
+           keeper_name
+           (Keeper_chat_queue.Receipt_id.to_string receipt_id)
+           message
            (Keeper_chat_queue.mutation_error_to_string error);
          `Retry_pending)
     | `Error
         (Keeper_chat_queue.Persist_failed
            { publication = Complete_indeterminate _; _ } as error) ->
-      clear_pending_completion state ~keeper_name ~attempt_id;
+      clear_pending_completion state ~keeper_name ~receipt_id;
       reconcile_published_transition ~keeper_name error;
       `Persisted
     | `Error error ->
-      remember_pending_completion state ~keeper_name ~attempt_id ~outcome ~error;
+      remember_pending_completion state ~keeper_name ~receipt_id ~outcome ~error;
       Log.Keeper.error
         "keeper_chat_consumer: completion persist failed for keeper=%s \
-         claim=%s: %s; completion will retry after the next durable \
+         receipt=%s: %s; completion will retry after the next durable \
          transition or automatic persistence reconciliation"
         keeper_name
-        attempt_id
+        (Keeper_chat_queue.Receipt_id.to_string receipt_id)
         (Keeper_chat_queue.mutation_error_to_string error);
       `Retry_pending
   in
   complete ~allow_invalid_fallback:true outcome
 
-let complete_claim_or_remember state ~keeper_name ~attempt_id outcome =
-  match persist_completion state ~keeper_name ~attempt_id outcome with
+let complete_claim_or_remember state ~keeper_name ~receipt_id outcome =
+  match persist_completion state ~keeper_name ~receipt_id outcome with
   | `Persisted | `Retry_pending -> ()
 
-let interrupt_claim_or_remember state ~keeper_name ~attempt_id =
-  complete_claim_or_remember state ~keeper_name ~attempt_id
+let interrupt_claim_or_remember state ~keeper_name ~receipt_id =
+  complete_claim_or_remember state ~keeper_name ~receipt_id
     (Keeper_chat_queue.Mark_failed
        { completed_at = Time_compat.now ()
        ; kind = Keeper_chat_queue.Interrupted
@@ -350,8 +346,8 @@ let interrupt_claim_or_remember state ~keeper_name ~attempt_id =
 let retry_pending_completion state ~keeper_name =
   match pending_completion state keeper_name with
   | None -> false
-  | Some (attempt_id, outcome) ->
-    (match persist_completion state ~keeper_name ~attempt_id outcome with
+  | Some (receipt_id, outcome) ->
+    (match persist_completion state ~keeper_name ~receipt_id outcome with
     | `Persisted | `Retry_pending -> ());
     true
 
@@ -403,7 +399,7 @@ let finalization_of_failed ~clock ~kind ~detail ~outcome_ref =
   Keeper_chat_queue.Mark_failed
     { completed_at = Eio.Time.now clock; kind; detail; outcome_ref }
 
-let run_claimed_turn state ~sw ~clock ~handle_turn ~keeper_name ~attempt_id
+let run_claimed_turn state ~sw ~clock ~handle_turn ~keeper_name ~receipt_id
     ~admission_token ~delivery_key ~queued =
   match
     handle_turn
@@ -414,10 +410,10 @@ let run_claimed_turn state ~sw ~clock ~handle_turn ~keeper_name ~attempt_id
       ~queued_message:queued
   with
   | Delivered { outcome_ref } ->
-      complete_claim_or_remember state ~keeper_name ~attempt_id
+      complete_claim_or_remember state ~keeper_name ~receipt_id
         (finalization_of_delivered ~clock ~outcome_ref)
   | Failed { kind; detail; outcome_ref } ->
-      complete_claim_or_remember state ~keeper_name ~attempt_id
+      complete_claim_or_remember state ~keeper_name ~receipt_id
         (finalization_of_failed ~clock ~kind ~detail ~outcome_ref)
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
@@ -426,7 +422,7 @@ let run_claimed_turn state ~sw ~clock ~handle_turn ~keeper_name ~attempt_id
         "keeper_chat_consumer: handle_turn raised for keeper=%s: %s; recording \
          a terminal interrupted receipt because external effect is unknown"
         keeper_name detail;
-      complete_claim_or_remember state ~keeper_name ~attempt_id
+      complete_claim_or_remember state ~keeper_name ~receipt_id
         (Keeper_chat_queue.Mark_failed
            { completed_at = Eio.Time.now clock
            ; kind = Keeper_chat_queue.Interrupted
@@ -435,18 +431,18 @@ let run_claimed_turn state ~sw ~clock ~handle_turn ~keeper_name ~attempt_id
            })
 
 let run_claimed_turn_with_interruption state ~clock ~handle_turn ~keeper_name
-    ~attempt_id ~admission_token ~delivery_key ~queued =
+    ~receipt_id ~admission_token ~delivery_key ~queued =
   try
     Eio.Switch.run (fun claim_sw ->
       run_claimed_turn state ~sw:claim_sw ~clock ~handle_turn ~keeper_name
-        ~attempt_id ~admission_token ~delivery_key ~queued)
+        ~receipt_id ~admission_token ~delivery_key ~queued)
   with
   | Eio.Cancel.Cancelled _ as exn ->
     Eio.Cancel.protect (fun () ->
-      interrupt_claim_or_remember state ~keeper_name ~attempt_id);
+      interrupt_claim_or_remember state ~keeper_name ~receipt_id);
     raise exn
   | exn ->
-    interrupt_claim_or_remember state ~keeper_name ~attempt_id;
+    interrupt_claim_or_remember state ~keeper_name ~receipt_id;
     raise exn
 
 let run ~sw ~clock ~base_path ~handle_turn =
@@ -498,7 +494,7 @@ let run ~sw ~clock ~base_path ~handle_turn =
               }))
   in
   let dispatch_claim admission_token keeper_name
-      ({ Keeper_chat_queue.receipt_id; attempt_id; message = queued } :
+      ({ Keeper_chat_queue.receipt_id; message = queued } :
         Keeper_chat_queue.claim) =
       let delivery_key =
         [ receipt_id ]
@@ -510,7 +506,7 @@ let run ~sw ~clock ~base_path ~handle_turn =
       in
       match delivery_key with
       | Error detail ->
-        complete_claim_or_remember dispatch_state ~keeper_name ~attempt_id
+        complete_claim_or_remember dispatch_state ~keeper_name ~receipt_id
           (Keeper_chat_queue.Mark_failed
              { completed_at = Eio.Time.now clock
              ; kind = Keeper_chat_queue.Internal_error
@@ -523,7 +519,7 @@ let run ~sw ~clock ~base_path ~handle_turn =
           ~clock
           ~handle_turn
           ~keeper_name
-          ~attempt_id
+          ~receipt_id
           ~admission_token
           ~delivery_key
           ~queued

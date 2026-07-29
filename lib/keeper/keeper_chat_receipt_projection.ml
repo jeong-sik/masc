@@ -1,9 +1,8 @@
 let state_json = function
   | Keeper_chat_queue.Pending -> `Assoc [ "kind", `String "pending" ]
-  | Keeper_chat_queue.Inflight { attempt_id; started_at } ->
+  | Keeper_chat_queue.Inflight { started_at } ->
     `Assoc
       [ "kind", `String "inflight"
-      ; "attempt_id", `String attempt_id
       ; "started_at", `Float started_at
       ]
   | Keeper_chat_queue.Delivered completion ->

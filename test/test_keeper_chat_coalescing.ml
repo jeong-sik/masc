@@ -78,8 +78,11 @@ let claim_exn ~keeper_name =
   | `Empty ->
     fail "claim succeeds" "queue was empty";
     failwith "empty claim"
-  | `Already_claimed attempt_id ->
-    fail "claim succeeds" ("outstanding claim " ^ attempt_id);
+  | `Already_claimed receipt_id ->
+    fail
+      "claim succeeds"
+      ( "outstanding receipt "
+      ^ Keeper_chat_queue.Receipt_id.to_string receipt_id );
     failwith "already claimed"
   | `Error error ->
     fail "claim succeeds" (Keeper_chat_queue.mutation_error_to_string error);
@@ -151,19 +154,50 @@ let test_lifecycle_fifo_terminal_pk_and_restart () =
   let first_claim = claim_exn ~keeper_name in
   check "first FIFO receipt claims alone"
     (String.equal (receipt_wire first_claim.receipt_id) first_id);
+  let first_outcome =
+    Mark_delivered { completed_at = 2.0; outcome_ref = Some "turn-1" }
+  in
   (match
      Keeper_chat_queue.complete_claim
        ~keeper_name
-       ~attempt_id:first_claim.attempt_id
-       ~outcome:
-         (Mark_delivered { completed_at = 2.0; outcome_ref = Some "turn-1" })
+       ~receipt_id:first_claim.receipt_id
+       ~outcome:first_outcome
    with
    | `Completed receipt_id ->
      check "completion returns exact receipt"
        (Keeper_chat_queue.Receipt_id.equal receipt_id first.receipt_id)
-   | `Unknown_claim | `Error _ ->
+   | `Error _ ->
      check "completion returns exact receipt" false);
   let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
+  (match
+     Keeper_chat_queue.complete_claim
+       ~keeper_name
+       ~receipt_id:first_claim.receipt_id
+       ~outcome:first_outcome
+   with
+   | `Completed receipt_id ->
+     check "exact repeated completion is idempotent"
+       (Keeper_chat_queue.Receipt_id.equal receipt_id first.receipt_id
+        && Int64.equal
+             (Keeper_chat_queue.snapshot ~keeper_name).revision
+             snapshot.revision)
+   | `Error _ -> check "exact repeated completion is idempotent" false);
+  (match
+     Keeper_chat_queue.complete_claim
+       ~keeper_name
+       ~receipt_id:first_claim.receipt_id
+       ~outcome:
+         (Mark_failed
+            { completed_at = 2.0
+            ; kind = Delivery_failed
+            ; detail = "conflicting terminal decision"
+            ; outcome_ref = None
+            })
+   with
+   | `Error (Keeper_chat_queue.Receipt_already_terminal _) ->
+     check "conflicting repeated completion is typed" true
+   | `Completed _ | `Error _ ->
+     check "conflicting repeated completion is typed" false);
   check "terminal body leaves active memory" (active_ids snapshot.pending = [ second_id ]);
   check "terminal count is retained without terminal list"
     (Int64.equal snapshot.terminal_count 1L);
@@ -218,7 +252,7 @@ let test_preallocated_receipt_convergence () =
   ignore
     (Keeper_chat_queue.complete_claim
        ~keeper_name
-       ~attempt_id:claim.attempt_id
+       ~receipt_id:claim.receipt_id
        ~outcome:
          (Mark_failed
             { completed_at = 3.0
@@ -227,7 +261,6 @@ let test_preallocated_receipt_convergence () =
             ; outcome_ref = None
             }) :
       [ `Completed of Keeper_chat_queue.Receipt_id.t
-      | `Unknown_claim
       | `Error of Keeper_chat_queue.mutation_error
       ]);
   (match
@@ -300,7 +333,7 @@ let test_pending_cancellation_is_state_guarded () =
   ignore
     (Keeper_chat_queue.complete_claim
        ~keeper_name
-       ~attempt_id:claim.attempt_id
+       ~receipt_id:claim.receipt_id
        ~outcome:
          (Mark_failed
             { completed_at = 6.0
@@ -309,7 +342,6 @@ let test_pending_cancellation_is_state_guarded () =
             ; outcome_ref = None
             }) :
       [ `Completed of Keeper_chat_queue.Receipt_id.t
-      | `Unknown_claim
       | `Error of Keeper_chat_queue.mutation_error
       ])
 
@@ -514,12 +546,12 @@ let test_transition_observer_outside_lock_exactly_once () =
     (Result.is_ok second && List.length (Keeper_chat_queue.snapshot ~keeper_name).pending = 2);
   check "failing wake observer was invoked exactly once" (!calls = 2)
 
-let test_uncertain_claim_compensates_and_other_transitions_reconcile () =
-  Printf.printf "Test: claim uncertainty compensates; complete/requeue converge exactly\n%!";
+let test_uncertain_claim_and_completion_reconcile () =
+  Printf.printf "Test: uncertain claim and completion reconcile exactly\n%!";
   let claim_case base_path =
     let keeper_name = "claim-uncertain" in
     ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
-    ignore (enqueue_exn ~keeper_name (message "claim me") : Keeper_chat_queue.enqueue_receipt);
+    let receipt = enqueue_exn ~keeper_name (message "claim me") in
     Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Commit_returned ];
     (match Keeper_chat_queue.claim_next ~keeper_name with
      | `Error
@@ -536,10 +568,14 @@ let test_uncertain_claim_compensates_and_other_transitions_reconcile () =
        check "uncertain durable claim compensates to Pending" true
      | Ok _ | Error _ ->
        check "uncertain durable claim compensates to Pending" false);
-    check "compensated receipt is claimable again"
-      (match Keeper_chat_queue.claim_next ~keeper_name with
-       | `Claimed _ -> true
-       | `Empty | `Already_claimed _ | `Error _ -> false)
+    (match Keeper_chat_queue.claim_next ~keeper_name with
+     | `Claimed claim ->
+       check "compensated receipt keeps its producer identity"
+         (Keeper_chat_queue.Receipt_id.equal
+            claim.receipt_id
+            receipt.receipt_id)
+     | `Empty | `Already_claimed _ | `Error _ ->
+       check "compensated receipt keeps its producer identity" false)
   in
   with_base "keeper-chat-claim-uncertain" claim_case;
   let complete_case base_path =
@@ -551,7 +587,7 @@ let test_uncertain_claim_compensates_and_other_transitions_reconcile () =
     (match
        Keeper_chat_queue.complete_claim
          ~keeper_name
-         ~attempt_id:claim.attempt_id
+         ~receipt_id:claim.receipt_id
          ~outcome:
            (Mark_delivered { completed_at = 4.0; outcome_ref = Some "turn" })
      with
@@ -559,7 +595,7 @@ let test_uncertain_claim_compensates_and_other_transitions_reconcile () =
          (Keeper_chat_queue.Persist_failed
             { publication = Keeper_chat_queue.Complete_indeterminate _; _ }) ->
        check "uncertain completion is typed" true
-     | `Completed _ | `Unknown_claim | `Error _ ->
+     | `Completed _ | `Error _ ->
        check "uncertain completion is typed" false);
     (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
      | Ok { outcome = Reconciled; _ } ->
@@ -571,76 +607,7 @@ let test_uncertain_claim_compensates_and_other_transitions_reconcile () =
      | Ok _ | Error _ ->
        check "completion reconciliation reapplies exact terminal target" false)
   in
-  with_base "keeper-chat-complete-uncertain" complete_case;
-  let requeue_case base_path =
-    let keeper_name = "requeue-uncertain" in
-    ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
-    ignore (enqueue_exn ~keeper_name (message "requeue me") : Keeper_chat_queue.enqueue_receipt);
-    let claim = claim_exn ~keeper_name in
-    Keeper_chat_queue.For_testing.fail_transaction_at_stages [ Commit_returned ];
-    (match Keeper_chat_queue.requeue_claim ~keeper_name ~attempt_id:claim.attempt_id with
-     | `Error
-         (Keeper_chat_queue.Persist_failed
-            { publication = Keeper_chat_queue.Requeue_indeterminate _; _ }) ->
-       check "uncertain requeue is typed" true
-     | `Requeued _ | `Unknown_claim | `Error _ -> check "uncertain requeue is typed" false);
-    (match Keeper_chat_queue.reconcile_persistence ~keeper_name with
-     | Ok { outcome = Reconciled; _ } ->
-       check "requeue reconciliation retains Pending"
-         (List.length (Keeper_chat_queue.snapshot ~keeper_name).pending = 1)
-     | Ok _ | Error _ -> check "requeue reconciliation retains Pending" false)
-  in
-  with_base "keeper-chat-requeue-uncertain" requeue_case
-
-let test_stale_attempt_cannot_mutate_reclaimed_receipt () =
-  Printf.printf "Test: stale attempt cannot mutate a later claim\n%!";
-  with_base "keeper-chat-stale-attempt" @@ fun base_path ->
-  let keeper_name = "stale-attempt" in
-  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
-  let receipt = enqueue_exn ~keeper_name (message "claim twice") in
-  let first = claim_exn ~keeper_name in
-  (match
-     Keeper_chat_queue.requeue_claim
-       ~keeper_name
-       ~attempt_id:first.attempt_id
-   with
-   | `Requeued _ -> check "first attempt returns its receipt to Pending" true
-   | `Unknown_claim | `Error _ ->
-     check "first attempt returns its receipt to Pending" false);
-  let second = claim_exn ~keeper_name in
-  check "reclaim creates a distinct attempt comparator"
-    (not (String.equal first.attempt_id second.attempt_id));
-  (match
-     Keeper_chat_queue.complete_claim
-       ~keeper_name
-       ~attempt_id:first.attempt_id
-       ~outcome:(Mark_delivered { completed_at = 2.0; outcome_ref = Some "stale" })
-   with
-   | `Unknown_claim -> check "stale completion is rejected" true
-   | `Completed _ | `Error _ -> check "stale completion is rejected" false);
-  (match
-     Keeper_chat_queue.requeue_claim
-       ~keeper_name
-       ~attempt_id:first.attempt_id
-   with
-   | `Unknown_claim -> check "stale requeue is rejected" true
-   | `Requeued _ | `Error _ -> check "stale requeue is rejected" false);
-  (match
-     Keeper_chat_queue.lookup_receipt
-       ~keeper_name
-       ~receipt_id:receipt.receipt_id
-   with
-   | Ok
-       { receipt =
-           Some
-             { state = Inflight { attempt_id; _ }
-             ; _
-             }
-       ; _
-       } ->
-     check "second attempt remains authoritative"
-       (String.equal attempt_id second.attempt_id)
-   | Ok _ | Error _ -> check "second attempt remains authoritative" false)
+  with_base "keeper-chat-complete-uncertain" complete_case
 
 let test_restart_terminalizes_interrupted_claim_without_replay () =
   Printf.printf
@@ -650,7 +617,7 @@ let test_restart_terminalizes_interrupted_claim_without_replay () =
   ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
   let receipt = enqueue_exn ~keeper_name (message "do not replay me") in
   let following = enqueue_exn ~keeper_name (message "continue after interruption") in
-  let claim = claim_exn ~keeper_name in
+  ignore (claim_exn ~keeper_name : Keeper_chat_queue.claim);
   Keeper_chat_queue.For_testing.reset ();
   let report = configure base_path in
   check "restart needs no external delivery authority" (report.load_errors = []);
@@ -674,8 +641,7 @@ let test_restart_terminalizes_interrupted_claim_without_replay () =
   (match Keeper_chat_queue.claim_next ~keeper_name with
    | `Claimed next ->
      check "next FIFO receipt proceeds without replaying the interrupted one"
-       (Keeper_chat_queue.Receipt_id.equal next.receipt_id following.receipt_id
-        && not (String.equal next.attempt_id claim.attempt_id))
+       (Keeper_chat_queue.Receipt_id.equal next.receipt_id following.receipt_id)
    | `Empty | `Already_claimed _ | `Error _ ->
      check "next FIFO receipt proceeds without replaying the interrupted one" false)
 
@@ -941,8 +907,7 @@ let () =
   test_transaction_publication_boundaries ();
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();
-  test_uncertain_claim_compensates_and_other_transitions_reconcile ();
-  test_stale_attempt_cannot_mutate_reclaimed_receipt ();
+  test_uncertain_claim_and_completion_reconcile ();
   test_restart_terminalizes_interrupted_claim_without_replay ();
   test_runtime_root_typed_filename_authority ();
   test_corrupt_dotted_metadata_authority_does_not_disappear ();

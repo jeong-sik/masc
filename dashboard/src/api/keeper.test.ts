@@ -97,7 +97,7 @@ describe('keeper API module split compatibility', () => {
 })
 
 describe('Keeper chat durable receipt API', () => {
-  it('parses an inflight receipt with its stale-completion attempt id', () => {
+  it('parses an inflight receipt with its start time', () => {
     expect(parseKeeperChatReceipt({
       schema: 'keeper_chat_queue.receipt.v3',
       keeper_name: 'echo',
@@ -105,7 +105,6 @@ describe('Keeper chat durable receipt API', () => {
       revision: '7',
       state: {
         kind: 'inflight',
-        attempt_id: 'attempt_00000000-0000-4000-8000-000000000002',
         started_at: 42,
       },
     })).toEqual({
@@ -114,7 +113,6 @@ describe('Keeper chat durable receipt API', () => {
       revision: '7',
       state: {
         kind: 'inflight',
-        attemptId: 'attempt_00000000-0000-4000-8000-000000000002',
         startedAt: 42,
       },
     })

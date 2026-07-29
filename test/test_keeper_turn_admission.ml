@@ -298,13 +298,13 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
    | `Ran () -> check "inflight receipt blocks direct admission" false);
   check "inflight receipt is not overtaken" (not !direct_ran);
   (match
-     Keeper_chat_queue.complete_claim ~keeper_name ~attempt_id:claim.attempt_id
+     Keeper_chat_queue.complete_claim ~keeper_name ~receipt_id:claim.receipt_id
        ~outcome:
          (Keeper_chat_queue.Mark_delivered
             { completed_at = Time_compat.now (); outcome_ref = Some "turn#1" })
    with
    | `Completed _ -> ()
-   | `Unknown_claim | `Error _ -> failwith "expected the claim to complete");
+   | `Error _ -> failwith "expected the claim to complete");
   (match
      Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
        direct_ran := true)
@@ -672,13 +672,13 @@ let test_autonomous_yields_to_queued_connector_message () =
    | None -> ()
    | Some claim ->
      (match
-        Keeper_chat_queue.complete_claim ~keeper_name ~attempt_id:claim.attempt_id
+        Keeper_chat_queue.complete_claim ~keeper_name ~receipt_id:claim.receipt_id
           ~outcome:
             (Keeper_chat_queue.Mark_delivered
                { completed_at = 2.0; outcome_ref = None })
       with
       | `Completed _ -> ()
-      | `Unknown_claim | `Error _ ->
+      | `Error _ ->
         check "completion commits the terminal receipt" false));
   (* With the inflight receipt gone, the still-pending chat is again the
      authoritative backlog and the autonomous lane yields to its consumer. *)
@@ -693,13 +693,13 @@ let test_autonomous_yields_to_queued_connector_message () =
      (match
         Keeper_chat_queue.complete_claim
           ~keeper_name
-          ~attempt_id:claim.attempt_id
+          ~receipt_id:claim.receipt_id
           ~outcome:
             (Keeper_chat_queue.Mark_delivered
                { completed_at = 3.0; outcome_ref = None })
       with
       | `Completed _ -> ()
-      | `Unknown_claim | `Error _ ->
+      | `Error _ ->
         check "second completion commits the terminal receipt" false)
    | `Empty | `Already_claimed _ | `Error _ ->
      check "second receipt claims for cleanup" false);

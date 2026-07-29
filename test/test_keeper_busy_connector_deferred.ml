@@ -123,12 +123,11 @@ let test_exact_source_identity_converges () =
           ignore
             (Keeper_chat_queue.complete_claim
                ~keeper_name
-               ~attempt_id:claim.attempt_id
+               ~receipt_id:claim.receipt_id
                ~outcome:
                  (Keeper_chat_queue.Mark_delivered
                     { completed_at = Time_compat.now (); outcome_ref = None })
              : [ `Completed of Keeper_chat_queue.Receipt_id.t
-               | `Unknown_claim
                | `Error of Keeper_chat_queue.mutation_error
                ])
         | `Empty | `Already_claimed _ | `Error _ ->

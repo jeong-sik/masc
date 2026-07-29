@@ -104,7 +104,6 @@ function WaitingRowReceiptDetail({ row }: { row: DashboardKeeperWaitingRow }) {
   if (!receiptId) return null
   const queueIndex = typeof detail?.queue_index === 'number' ? detail.queue_index : null
   const state = typeof lifecycle?.state === 'string' ? lifecycle.state : null
-  const attemptId = typeof lifecycle?.attempt_id === 'string' ? lifecycle.attempt_id : null
   const startedAt = typeof lifecycle?.started_at_iso === 'string'
     ? lifecycle.started_at_iso
     : null
@@ -116,7 +115,6 @@ function WaitingRowReceiptDetail({ row }: { row: DashboardKeeperWaitingRow }) {
       <span class="min-w-0 break-all font-mono">receipt ${receiptId}</span>
       ${queueIndex === null ? null : html`<span class="font-mono">queue index ${queueIndex}</span>`}
       ${state ? html`<span class="font-mono">state ${enumLabel(state)}</span>` : null}
-      ${attemptId ? html`<span class="min-w-0 break-all font-mono">attempt ${attemptId}</span>` : null}
       ${startedAt ? html`<span>started ${timeLabel(startedAt)}</span>` : null}
     </div>
   `

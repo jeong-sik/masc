@@ -346,9 +346,9 @@ let test_chat_queue_pending_rows_are_visible () =
        check string "inflight lifecycle is explicit" "inflight"
          U.(row |> member "detail" |> member "lifecycle" |> member "state"
             |> to_string);
-       check string "inflight attempt is correlated" claim.attempt_id
-         U.(row |> member "detail" |> member "lifecycle" |> member "attempt_id"
-            |> to_string)
+       check string "inflight receipt is correlated"
+         (Keeper_chat_queue.Receipt_id.to_string claim.receipt_id)
+         U.(row |> member "detail" |> member "receipt_id" |> to_string)
      | rows -> failf "expected one inflight chat row, got %d" (List.length rows))
 ;;
 

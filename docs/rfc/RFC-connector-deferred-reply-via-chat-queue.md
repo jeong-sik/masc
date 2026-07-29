@@ -3,273 +3,169 @@ rfc: "connector-deferred-reply-via-chat-queue"
 title: "Durable Keeper chat receipts and connector delivery settlement"
 status: Active
 created: 2026-06-30
-updated: 2026-07-11
+updated: 2026-07-30
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0203", "0217", "0223", "0225", "0226", "0232", "masc#23925"]
-implementation_prs: [24139]
+implementation_prs: [24139, 26367]
 ---
 
 # RFC: Durable Keeper chat receipts and connector delivery settlement
 
-## 1. Problem
+## 1. Decision
 
-A busy Keeper can accept a Dashboard, Discord, or Slack message after returning
-the acknowledgement “your message is queued”. Acceptance used to mean only that
-an in-memory or partially persisted payload existed. It did not prove that:
+Every accepted Dashboard, Discord, or Slack message has one durable
+`Receipt_id`. That receipt is the producer identity, queue identity, delivery
+correlation identity, and completion identity. The queue does not create a
+second lease, claim, attempt, or settlement ID.
 
-- the individual message had a durable identity;
-- a restart would replay the same message;
-- an active lease remained observable as work in progress;
-- the turn persisted a reply or failure marker;
-- the originating connector delivered the terminal response; or
-- the Dashboard invalidated and reread the authoritative queue projection.
-
-The old public destructive dequeue and a second consumer watchdog made the gap
-worse. A payload could disappear before its terminal outcome was known, and a
-watchdog could settle a lease while the underlying turn continued.
-
-## 2. Required invariant
-
-Every accepted message has one stable `Receipt_id` and follows this closed
-lifecycle:
+The closed lifecycle is:
 
 ```text
 Pending -> Inflight -> Delivered
                     \-> Failed
 ```
 
-`Delivered` means the complete delivery boundary succeeded:
+`Delivered` means the Keeper turn, transcript write, and connector terminal send
+all succeeded. `Failed` is terminal and carries a typed failure kind and
+operator-visible detail. A process stop, cancellation after claim, or unknown
+external effect terminates as `Failed Interrupted`; it is never replayed.
 
-1. the Keeper turn produced a visible terminal result;
-2. the transcript write committed; and
-3. for Discord or Slack, the connector's primary terminal send committed.
+## 2. Fresh durable authority
 
-`Failed` is also terminal and carries a typed failure kind plus detail. It is
-not silently converted into success. Structured process cancellation is the one
-non-terminal exit: it nacks the lease back to `Pending` with the same receipt ID.
-
-Messages from the same source may be coalesced into one Keeper turn, but the
-lease retains every constituent receipt and finalizes them atomically.
-
-## 3. Durable queue contract
-
-### 3.1 Snapshot schema
-
-The on-disk SSOT is the BasePath-owned file:
+The BasePath-owned SSOT is:
 
 ```text
-<base>/.masc/keepers/<keeper>/chat-queue.json
+<base>/.masc/keepers/<keeper>/chat-queue-v3.sqlite3
 ```
 
-Schema `keeper_chat_queue.v2` contains:
+Its schema identity is `keeper_chat_queue.sqlite.v3`. SQLite stores the
+monotonic revision, FIFO sequence, terminal count, canonical receipt state, and
+message body only while the receipt is active. Terminal rows retain correlation
+metadata but discard message bodies and attachments.
 
-- a monotonic `revision`;
-- every receipt ID;
-- `Pending` and `Inflight` message payloads;
-- lease ID and start time for `Inflight`; and
-- terminal completion/failure metadata without message bodies or attachments.
+This is a fresh-state contract. The runtime does not read, decode, import, or
+migrate an older chat-queue file or schema. An unexpected schema, noncanonical
+row, ownership change, unreadable store, or metadata divergence makes that lane
+explicitly unavailable; it is never interpreted as an empty queue.
 
-The revision domain is capped at JavaScript's exact JSON integer boundary
-(`2^53 - 1`) because the same value crosses the Dashboard JSON/SSE boundary.
-The next mutation fails explicitly with `Revision_exhausted`; it never wraps a
-signed `int64` into a corrupt negative snapshot.
+## 3. Mutation contract
 
-Every mutation is written atomically before the API reports success. A failed
-write rolls the in-memory mutation and revision back. Corrupt or unreadable
-snapshots remain untouched, make that Keeper queue unavailable, and surface an
-explicit load error. They are never interpreted as an empty queue.
+The public queue surface is intentionally small:
 
-### 3.2 Restart recovery
+- `enqueue` and `enqueue_with_receipt` durably publish one `Pending` receipt;
+- `claim_next` changes the FIFO receipt to `Inflight`;
+- `complete_claim` changes that exact receipt to `Delivered` or `Failed`;
+- `cancel_pending` terminalizes an exact receipt only before delivery starts;
+- `snapshot`, `lookup_receipt`, and `lane_status` are read-only observations;
+- `reconcile_persistence` resolves an exact retained SQLite transaction plan.
 
-An `Inflight` snapshot means the previous process did not durably settle the
-lease. Startup atomically moves those receipts back to `Pending`, preserving
-their IDs and FIFO order, and increments the revision. Delivery is therefore
-at-least-once; connector and transcript effects must remain idempotent where
-their downstream contracts permit it.
+There is no public requeue operation. Once `claim_next` returns a claim, the
+receipt cannot become `Pending` again.
 
-Reconfiguring BasePath first clears the in-memory registry and then loads the
-new workspace. Receipts from one BasePath must never appear in another.
+An exact repeated `complete_claim` is idempotent only when the stored terminal
+decision is identical. A conflicting decision returns a typed terminal-state
+error. A missing or non-inflight receipt returns a typed state error; the
+consumer never guesses that completion probably happened.
 
-### 3.3 Mutation surface
+## 4. Commit uncertainty
 
-The public queue API is intentionally narrow:
+The queue distinguishes a transition that was not published from one whose
+commit result is indeterminate. Reconciliation compares the durable database
+with the exact before/target plan:
 
-- `enqueue` returns the durable receipt, revision, pending count, and inflight
-  count only after commit;
-- `lease_batch` changes a same-source pending run to `Inflight` atomically;
-- `finalize` commits `Delivered` or `Failed` for the exact lease;
-- `nack` returns the exact lease to `Pending`; and
-- `snapshot` / `lookup_receipt` are read-only diagnostics; exact lookup returns
-  the receipt and revision from one locked observation.
+- a matching before state applies the retained target;
+- a matching published target confirms it;
+- any third state is a typed reconciliation conflict.
 
-There is no public unleased `dequeue`, `clear`, `remove_matching`, or untyped
-`ack` path.
+Claim publication has one additional internal compensation. If commit became
+indeterminate before `claim_next` returned anything to a worker, a published
+`Inflight` target is moved back to `Pending`. No external effect can exist in
+that path, so the same receipt remains authoritative without a second execution
+identity. This compensation is not a public requeue and cannot run after a
+claim was delivered to a worker.
 
-## 4. Turn and connector settlement
+## 5. Admission and execution ownership
 
-### 4.1 One timeout owner
+The queued consumer acquires the Keeper lane's serialized chat admission token
+before calling `claim_next`. Claim, turn dispatch, connector delivery, and
+terminal persistence therefore run inside one admitted lane turn.
 
-The Keeper turn runtime owns timeout and cancellation. The queue consumer does
-not race it with a second wall-clock watchdog. The turn returns a typed terminal
-outcome, and the consumer persists that exact decision before allowing another
-queued turn for the Keeper.
+The already-admitted token is passed to the direct turn operation. The queued
+path does not call a public facade that tries to acquire admission again.
+Autonomous and direct chat entrypoints observe the same lane authority, so
+there is no nested admission gate or facade-from-facade path.
 
-If finalization persistence fails, the consumer retains the decision in memory
-and retries the same finalization. It does not rerun the Keeper turn and does
-not release the Keeper dispatch gate until settlement succeeds.
+Every fiber created for a queued turn belongs to the claim-scoped Eio switch.
+If that switch is cancelled, the consumer records `Interrupted` under
+`Eio.Cancel.protect` before releasing the lane. A terminal persistence failure
+retains the exact receipt and outcome for retry; a later receipt cannot claim
+the lane first.
 
-### 4.2 Connector join
+Cancellation while merely waiting for admission does not claim or mutate the
+receipt. It remains `Pending`.
 
-For Discord and Slack, the consumer starts the outbound adapter before the turn
-and joins its terminal callback after the turn finishes. The callback reports
-exactly one result for the primary final reply or error reply.
-
-- preview edits and rich side messages do not settle the receipt;
-- an interim stream-protocol diagnostic cannot mask a later final-send failure;
-- a missing connector credential becomes `Connector_unavailable`;
-- a terminal HTTP/API failure becomes `Delivery_failed`; and
-- empty terminal connector output is a failure, not implicit success.
-
-When both the turn and connector delivery fail, the durable receipt records the
-connector delivery failure and retains the typed turn failure in its detail.
-The transcript already contains the turn-side failure marker.
-
-Dashboard-originated queued turns have no external adapter. Their event stream
-is still drained so backpressure cannot stall the turn, and transcript commit is
-their delivery boundary.
-
-### 4.3 Recording ownership
+## 6. Connector and transcript settlement
 
 The source variant fixes transcript ownership without string classification:
 
 ```ocaml
 match source with
-| Dashboard -> turn records user and assistant rows
+| Dashboard _ -> turn records user and assistant rows
 | Discord _ | Slack _ -> gate records the user row; turn records assistant only
 ```
 
-This preserves the single connector-inbound recorder defined by RFC-0226.
+Discord and Slack settlement waits for the primary terminal send. Preview
+updates and side messages cannot settle the receipt. Missing credentials,
+terminal transport failure, empty terminal output, missing visible reply, and
+transcript persistence failure remain typed failures.
 
-## 5. Admission and lane isolation
+`Delivered.outcome_ref` is the canonical `turn_ref` persisted on the assistant
+transcript row. The server never fabricates a join key or converts a missing key
+to success.
 
-The autonomous lane yields while the Keeper has either pending or inflight chat
-receipts. Leasing must not create a race window in which an autonomous turn can
-overtake the queued chat turn.
+## 7. API and dashboard projection
 
-Direct Dashboard and connector turns use non-blocking admission. Route-level
-queue observations are only fast paths: after acquiring the Keeper turn slot,
-the admission boundary rereads parked waiters and active durable receipts before
-running the turn. A receipt committed or leased before that post-lock read wins
-FIFO priority; queue read errors fail closed and route the message through the
-durable enqueue/error path.
+A successful busy acknowledgement includes the committed receipt ID, queue
+revision, and active counts. Failure to enqueue is returned explicitly.
 
-Queue state and finalization state are per Keeper. Different Keepers may drain
-concurrently. A corrupt snapshot, connector failure, or stuck finalization for
-one Keeper must not block another Keeper lane.
+`GET /api/v1/keepers/<name>/chat/receipts/<receipt_id>` returns schema
+`keeper_chat_queue.receipt.v3`. An inflight state exposes its start time and the
+same receipt ID; it has no secondary attempt identity.
 
-## 6. Dashboard and acknowledgement wiring
+Queue-change SSE is only an invalidation signal. The Dashboard rereads the
+authoritative receipt and waiting-inventory projections. Read failures remain
+visible and are never guessed as delivered.
 
-### 6.1 Busy acknowledgement
+The waiting inventory exposes separate pending, inflight, persistence-blocked,
+and read-error rows. Active rows carry the receipt ID, source, FIFO position,
+and lifecycle timestamps. A blocked completion carries the same receipt ID.
 
-A successful busy acknowledgement includes:
-
-- `receipt_id`;
-- committed `queue_revision`;
-- pending and inflight counts; and
-- a typed queued status source.
-
-If durable enqueue fails, the route returns an explicit error and must not claim
-the message is queued.
-
-The Dashboard handles `KEEPER_CHAT_QUEUED` as a server acceptance receipt. It
-keeps the chat row in `queued` state after the short acknowledgement stream ends
-and preserves the receipt ID, revision, and queue position in message details.
-Browser-local unsent drafts are labelled separately as “server not accepted”.
-
-The exact lifecycle and its atomic snapshot revision are queryable at
-`GET /api/v1/keepers/<name>/chat/receipts/<receipt_id>`. Queue-change SSE remains
-an invalidation rather than lifecycle truth: the Dashboard rereads this endpoint
-for every visible busy-ACK receipt and moves that chat row to
-`pending`, `inflight`, `delivered`, or `failed`. A receipt-query failure is
-operator-visible and never guessed as success. Revision comparison prevents an
-older concurrent GET from regressing a newer terminal row. Receipt observation,
-reconnect hydration, and a visible-panel safety poll provide catch-up when the
-queue invalidation arrives before the stream acknowledgement or is missed during
-a disconnect.
-
-A delivered receipt's `outcome_ref` is the exact `turn_ref` persisted on its
-assistant transcript row. Terminal transcript convergence is complete only when
-the bounded history read contains that identity; an older non-empty history
-window is not success. The history and receipt deadlines cover response-body
-parsing as well as response headers, and the Dashboard permits only one terminal
-convergence read per Keeper at a time. Failed, empty, stale, or timed-out reads
-remain pending for the next visible-panel poll.
-
-`Delivered.outcome_ref` is non-optional at the queued-turn boundary. If a
-successful-looking provider reply omits or malforms `turn_ref`, the transcript
-row is retained for diagnosis but the receipt terminates as typed
-`Missing_turn_ref`/`Internal_error`; the server never fabricates a join key or
-emits `Delivered` without one. If a legacy or corrupt snapshot still projects a
-`Delivered` receipt without a nonblank key, the Dashboard surfaces a correlation
-invariant error and stops terminal-convergence retries for that receipt.
-The queue consumer repeats this invariant at its final typed boundary:
-`Delivered` carries a required canonical `turn_ref` string, and an invalid value
-is finalized as `Internal_error`, never as `Delivered` with a missing key. A
-`Failed` outcome may omit correlation, but a supplied value must be the same
-canonical key; invalid values are omitted with explicit failure detail rather
-than sanitized into a different identity.
-
-### 6.2 Authoritative queue projection
-
-`Server_keeper_waiting_inventory` exposes separate
-`chat_queue_pending` and `chat_queue_inflight` rows. Each row includes receipt
-ID, source, timestamp, and lifecycle detail. Snapshot load failures appear as
-explicit `read_error` rows.
-
-Every committed mutation invokes one post-commit transition observer outside
-queue locks. The server emits `keeper_chat_queue_changed` with Keeper name and
-revision. This event is an invalidation signal: the Dashboard debounces it and
-rereads the authoritative waiting inventory instead of reconstructing state
-from deltas.
-
-The chat composer renders server pending/inflight/read-error counts independently
-from browser-local drafts and from the Keeper's active turn state. The waiting
-inventory renders each active receipt ID, lifecycle, lease ID, and inflight start
-time so a reloaded Dashboard still has a correlation path.
-
-## 7. Verification
+## 8. Required verification
 
 Focused regression coverage must prove:
 
-- `Pending -> Inflight -> Delivered|Failed` and exact receipt lookup;
-- coalescing preserves all receipt identities;
-- nack and restart preserve receipt IDs;
-- enqueue, lease, finalize, and nack persistence failures roll back;
-- v1 migration happens once and malformed snapshots fail closed;
-- BasePath reconfiguration does not leak the registry;
-- cancellation nacks, while unexpected exceptions become terminal failures;
-- failed finalization persistence retries without redelivering the turn;
-- different Keeper queues dispatch concurrently;
-- a receipt committed after a stale outer peek still blocks direct admission,
-  both while Pending and Inflight;
-- connector ACK receipt matches the durable snapshot;
-- Discord/Slack terminal callback failures remain visible;
-- Dashboard busy ACK rows remain `queued` after `RUN_FINISHED`;
-- pending/inflight/read-error rows reach the Dashboard projection; and
-- missing or malformed queued-turn `turn_ref` never reaches `Delivered`; and
-- queue-change SSE triggers an authoritative refresh.
+- the exact `Pending -> Inflight -> Delivered|Failed` lifecycle;
+- FIFO and receipt identity across enqueue, claim, completion, and lookup;
+- exact repeated completion is idempotent and conflicting completion is typed;
+- pre-admission cancellation leaves the receipt `Pending`;
+- post-claim cancellation and process restart terminalize as `Interrupted`;
+- uncertain claim publication is never returned to a worker and compensates
+  only through exact plan reconciliation;
+- completion persistence retries the same receipt and decision without
+  redispatch;
+- a receipt committed after a stale outer observation cannot be overtaken;
+- connector and transcript failures remain visible terminal failures;
+- receipt API and waiting inventory expose no secondary execution identity; and
+- unknown fields, an unexpected schema, and corrupt rows fail closed.
 
-Full Dune remains CI authority. Local validation uses focused repo wrapper
-targets plus the relevant Dashboard typecheck and Vitest suites.
+Full Dune build and tests remain CI authority. Local checks are limited to
+formatting, parsing, TypeScript typechecking, and focused non-Dune validation.
 
-## 8. Non-goals
+## 9. Non-goals
 
-- Generic sidecar connectors without an in-process outbound adapter retain the
-  async-poll path.
 - This RFC does not redesign the general Keeper event queue.
-- Connector-specific rich formatting is a separate transport contract; this
-  RFC only requires its terminal delivery result to settle truthfully.
-- Terminal receipt retention/archival policy may move to a separate append-only
-  ledger, but active receipts must never be pruned or hidden by that work.
+- Connector-specific rich formatting is outside terminal delivery settlement.
+- Terminal retention policy may move to a separate ledger, but active receipts
+  must never be pruned or hidden.

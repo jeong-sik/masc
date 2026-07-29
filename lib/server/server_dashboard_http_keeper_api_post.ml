@@ -441,7 +441,8 @@ let duplicate_assoc_keys fields =
 let keeper_chat_pending_cancel_error_status = function
   | Keeper_chat_queue.Invalid_input _ -> `Bad_request
   | Keeper_chat_queue.Receipt_already_terminal _
-  | Keeper_chat_queue.Receipt_not_pending _ ->
+  | Keeper_chat_queue.Receipt_not_pending _
+  | Keeper_chat_queue.Receipt_not_inflight _ ->
     `Conflict
   | Keeper_chat_queue.Persistence_not_configured
   | Keeper_chat_queue.Snapshot_unavailable _

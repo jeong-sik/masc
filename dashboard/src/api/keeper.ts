@@ -708,7 +708,7 @@ export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind
 
 export type KeeperChatReceiptState =
   | { kind: 'pending' }
-  | { kind: 'inflight'; attemptId: string; startedAt: number }
+  | { kind: 'inflight'; startedAt: number }
   | { kind: 'delivered'; completedAt: number; outcomeRef: string | null }
   | {
       kind: 'failed'
@@ -775,12 +775,11 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
       state = { kind }
       break
     case 'inflight': {
-      const attemptId = asString(rawState.attempt_id, '').trim()
       const startedAt = asNumber(rawState.started_at)
-      if (!attemptId || typeof startedAt !== 'number') {
-        throw new Error('Keeper chat inflight receipt is missing attempt metadata')
+      if (typeof startedAt !== 'number') {
+        throw new Error('Keeper chat inflight receipt is missing start time')
       }
-      state = { kind, attemptId, startedAt }
+      state = { kind, startedAt }
       break
     }
     case 'delivered': {

@@ -338,6 +338,12 @@ let chat_queue_persistence_blocked_rows ~base_path keeper_name =
       | Keeper_chat_consumer.Claim_next_blocked -> "claim_next"
       | Keeper_chat_consumer.Complete_blocked -> "complete"
     in
+    let receipt_id =
+      match status.Keeper_chat_consumer.receipt_id with
+      | None -> `Null
+      | Some receipt_id ->
+        `String (Keeper_chat_queue.Receipt_id.to_string receipt_id)
+    in
     [ { keeper_name = Some keeper_name
       ; source = Chat_queue_persistence_blocked
       ; waiting_on = "persistence_reconciliation"
@@ -348,7 +354,7 @@ let chat_queue_persistence_blocked_rows ~base_path keeper_name =
       ; detail =
           `Assoc
             [ "operation", `String operation
-            ; "attempt_id", Json_util.string_opt_to_json status.attempt_id
+            ; "receipt_id", receipt_id
             ; "error", Keeper_chat_queue.mutation_error_to_json status.error
             ]
       }
@@ -377,12 +383,11 @@ let chat_queue_rows ~base_path keeper_name =
     |> List.mapi (fun queue_index
                        (receipt : Keeper_chat_queue.active_receipt) ->
            match receipt.Keeper_chat_queue.state with
-           | Keeper_chat_queue.Inflight { attempt_id; started_at } ->
+           | Keeper_chat_queue.Inflight { started_at } ->
                chat_queue_active_row ~source:Chat_queue_inflight
                  ~next_action:"keeper_chat_turn_terminal_receipt"
                  ~lifecycle_fields:
                    [ "state", `String "inflight"
-                   ; "attempt_id", `String attempt_id
                    ; "started_at", `Float started_at
                    ; "started_at_iso", unix_iso_json (Some started_at)
                    ]

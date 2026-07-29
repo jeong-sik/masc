@@ -66,7 +66,6 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
               receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
               lifecycle: {
                 state: 'inflight',
-                attempt_id: 'attempt_00000000-0000-4000-8000-000000000002',
                 started_at_iso: '2026-07-04T00:02:30Z',
               },
             },

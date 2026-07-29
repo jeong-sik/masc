@@ -21,7 +21,7 @@ type persistence_blocked_operation =
 
 type persistence_blocked_status =
   { operation : persistence_blocked_operation
-  ; attempt_id : string option
+  ; receipt_id : Keeper_chat_queue.Receipt_id.t option
   ; error : Keeper_chat_queue.mutation_error
   }
 

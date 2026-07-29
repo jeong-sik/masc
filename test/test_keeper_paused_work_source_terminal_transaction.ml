@@ -255,6 +255,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let v9_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "projected_dispositions"
       |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v9")
       |> replace_field "transition_outbox" (`List [ `Assoc v9_outbox ])
@@ -295,6 +296,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let v10_unprojected_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "projected_dispositions"
       |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v10")
       |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
@@ -310,6 +312,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let v10_projected_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "projected_dispositions"
       |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v10")
       |> replace_field "transition_outbox" (`List [])
@@ -340,6 +343,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let v10_generic_projected_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "projected_dispositions"
       |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v10")
       |> replace_field "transition_outbox" (`List [])
@@ -364,6 +368,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let legacy_state =
       state_fields
       |> remove_field "last_transition"
+      |> remove_field "projected_dispositions"
       |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v8")
       |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])

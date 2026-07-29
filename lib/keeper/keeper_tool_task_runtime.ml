@@ -37,10 +37,11 @@ let workflow_rejection_error_json
     | Some outcome -> [ "typed_outcome", Keeper_tool_outcome.to_json outcome ]
     | None -> []
   in
-  Task.Payloads.workflow_rejection_payload_json
+  Workflow_rejection_payload.payload
     ~rule_id
     ~extra_fields
     message
+  |> Yojson.Safe.to_string
 ;;
 
 let keeper_tool_result_json

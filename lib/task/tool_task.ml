@@ -30,7 +30,7 @@ let workflow_rejection_result
       message
   =
   let data =
-    workflow_rejection_payload
+    Workflow_rejection_payload.payload
       ?rule_id
       ?recoverable
       ?extra_fields

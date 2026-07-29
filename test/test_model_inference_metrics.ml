@@ -58,20 +58,6 @@ let write_costs base entries =
     end
   in
   mkdir_p masc_dir;
-  let store =
-    Dated_jsonl.create ~base_dir:(Filename.concat masc_dir "costs") ()
-  in
-  List.iter (Dated_jsonl.append store) entries
-
-let write_retired_cost_file base entries =
-  let masc_dir = Filename.concat base ".masc" in
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      Unix.mkdir dir 0o755
-    end
-  in
-  mkdir_p masc_dir;
   let path = Filename.concat masc_dir "costs.jsonl" in
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
@@ -829,17 +815,6 @@ let test_costs_jsonl_backfills_wall_tok_per_sec () =
     check int "usage sample" 1 s.usage_sample_count;
     check int "telemetry sample" 1 s.telemetry_sample_count)
 
-let test_retired_cost_file_is_ignored () =
-  let base = test_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
-    let ts = now_unix () in
-    write_retired_cost_file base [
-      cost_entry ~model:"retired-model" ~ts
-        ~input_tokens:1 ~output_tokens:1 ();
-    ];
-    let agg = M.compute ~base_path:base ~window_minutes:60 in
-    check int "retired single-file rows are not loaded" 0 agg.total_entries)
-
 let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -1547,8 +1522,6 @@ let () =
       test_case "cost parser uses current hw-decode field only" `Quick
         test_cost_parser_uses_current_hw_decode_field_only;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
-      test_case "retired single-file cost ledger is ignored" `Quick
-        test_retired_cost_file_is_ignored;
       test_case "costs.jsonl disambiguates matching model names by provider" `Quick
         test_costs_jsonl_disambiguates_matching_model_names_by_provider;
       test_case "costs.jsonl zero latency stays missing" `Quick test_costs_jsonl_zero_latency_is_missing;

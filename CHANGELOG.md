@@ -36,9 +36,7 @@
   `provider_tokens_per_second` compatibility field and decoder fallback.
   Provider-native decode throughput now has one wire key,
   `hw_decode_tokens_per_second`; wall-clock throughput remains separately
-  represented by `tokens_per_second`. Model inference metrics also stop reading
-  the retired `.masc/costs.jsonl` single-file store; the dated
-  `.masc/costs/YYYY-MM/DD.jsonl` ledger is the sole cost store.
+  represented by `tokens_per_second`.
 - **Breaking (keeper config schema)**: removed the keeper TOML `base = "..."` inheritance mechanism. `keeper.base` is no longer a recognised key, `config/keepers/base.toml` and `presets/classic/keepers/base.toml` are deleted, and every keeper TOML now states its own values. Effective per-keeper profiles are unchanged: each formerly inherited value was written out explicitly (`config/keepers/{taskmaster,issue_king,verifier,adversary}.toml`, `presets/classic/keepers/{backend,frontend,qa,tech_lead}.toml`).
   - Migration order matters. A keeper TOML that still carries `base = "..."` after this build is deployed does **not** fail to boot: `keeper.base` becomes an unrecognised key, so the keeper loads while silently losing every value it used to inherit, with one `Log.Keeper.warn`, a `masc_config_unknown_keys_ignored_total` increment, and a row on the dashboard drift surface. `/health` additionally reports `keeper_config_schema: config_unknown_keys` with status `blocked` and `operator_action_required: true` for the whole server (`server_routes_http_runtime.ml:479-488`). Flatten the deployed TOMLs first, then deploy this build.
   - `merge_keeper_profile_defaults` and `merge_string_list` are retained: they still implement the persona `profile.json` → keeper TOML overlay (`keeper_types_profile.ml:244`), which is a separate mechanism. Note `merge_string_list` is replace-if-non-empty, not union.

@@ -1,7 +1,7 @@
 (** Model_inference_metrics — per-model aggregate inference statistics.
 
-    Reads keeper [decisions.jsonl] files plus the dated inference-cost
-    ledger, extracts telemetry entries within a
+    Reads keeper [decisions.jsonl] files plus inference-level
+    [costs.jsonl] samples, extracts telemetry entries within a
     configurable time window, and computes per-model aggregates:
     avg/p50/p95 tok/s, avg/p50/p95 latency, total reasoning tokens,
     cost attribution, tool usage, and success/error rates.

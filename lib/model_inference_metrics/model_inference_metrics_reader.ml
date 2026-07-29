@@ -1,9 +1,9 @@
 (** Model_inference_metrics_reader — JSONL file readers for
     {!Model_inference_metrics}.
 
-    Reads keeper [decisions.jsonl] files plus the dated inference-cost
-    ledger, merges duplicate samples between the two sources, and exposes
-    coverage helpers used
+    Reads keeper [decisions.jsonl] files plus inference-level
+    [costs.jsonl] (legacy single-file + dated subtree), merges duplicate
+    samples between the two sources, and exposes coverage helpers used
     by the aggregate stage.
 
     Stage 04 of the godfile decomposition build plan
@@ -55,6 +55,33 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       files)
 ;;
 
+let read_cost_entries_legacy ~base_path ~since_unix : raw_entry list =
+  let path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "costs.jsonl" in
+  if not (Sys.file_exists path)
+  then []
+  else (
+    try
+      Fs_compat.fold_jsonl_lines
+        ~init:[]
+        ~f:(fun acc ~line_no json ->
+          match parse_cost_entry json ~since_unix with
+          | Ok e -> e :: acc
+          | Error err ->
+            if parse_error_is_schema_violation err
+            then
+              Log.Model_inference_metrics.warn "costs.jsonl parse drop: %s:%d reason=%s"
+                path
+                line_no
+                (parse_error_label err);
+            acc)
+        path
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace exn bt
+    | _ -> [])
+;;
+
 let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
   let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "costs" in
   if not (Sys.file_exists dir)
@@ -87,7 +114,18 @@ let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
     | _ -> [])
 ;;
 
-let read_cost_entries = read_cost_entries_dated
+(** Read cost ledger entries from both the legacy single-file
+    [masc_root/costs.jsonl] and the date-split
+    [masc_root/costs/YYYY-MM/DD.jsonl] tree, merging the two streams.
+
+    The public [masc-cost] CLI still owns the single-file writer and reporter.
+    Removing this reader before that documented executable is migrated would
+    split one live cost flow into two mutually invisible stores. *)
+let read_cost_entries ~base_path ~since_unix : raw_entry list =
+  let legacy = read_cost_entries_legacy ~base_path ~since_unix in
+  let dated = read_cost_entries_dated ~base_path ~since_unix in
+  legacy @ dated
+;;
 
 let same_int_opt a b =
   match a, b with

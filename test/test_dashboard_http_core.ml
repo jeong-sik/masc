@@ -2049,10 +2049,10 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
        let keeper_row =
          `Assoc
            [ "name", `String keeper_name
-           ; "agent", `Assoc [ "status", `String "active"; "last_seen", `String now ]
+           ; "agent", `Assoc []
            ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
            ; "keeper_id", `String ("k-" ^ keeper_name)
-           ; "status", `String "offline"
+           ; "status", `String "active"
            ; "keepalive_running", `Bool false
            ; "generation", `Int 1
            ; "turn_count", `Int 1
@@ -2090,7 +2090,7 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
          patched |> member "continuity_briefs" |> to_list |> List.hd
        in
        check string
-         "keeper status uses reconciled registry state"
+         "keeper status falls back to the top-level typed status"
          "active"
          (patched_keeper |> member "status" |> to_string);
        check bool

@@ -591,15 +591,17 @@ let paused_of_lifecycle_event event =
 ;;
 
 let keeper_agent_status_opt row =
+  let top_level_status () =
+    match Json_util.assoc_member_opt "status" row with
+    | Some (`String status) -> Some status
+    | _ -> None
+  in
   match Json_util.assoc_member_opt "agent" row with
   | Some (`Assoc _ as agent) ->
     (match Json_util.assoc_member_opt "status" agent with
      | Some (`String status) -> Some status
-     | _ -> None)
-  | None | Some _ ->
-    (match Json_util.assoc_member_opt "status" row with
-     | Some (`String status) -> Some status
-     | _ -> None)
+     | _ -> top_level_status ())
+  | None | Some _ -> top_level_status ()
 ;;
 
 let patched_keeper_status row ~keepalive_running =

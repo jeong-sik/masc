@@ -360,6 +360,7 @@ let run_memory_os_consolidation_tick_with_candidates
        | Empty_response, _
        | Invalid_structured_response _, _
        | Snapshot_changed _, _
+       | Plan_rejected_total_deletion _, _
        | Consolidated _, _ ->
          Some outcome)
   in

@@ -525,7 +525,7 @@ let test_consolidate_rejects_uncapped_provider_before_call () =
             true
             (contains
                "serialized-request ceiling"
-               (Masc.Runtime.request_body_cap_error_to_string error))
+               (Runtime.request_body_cap_error_to_string error))
         | _ ->
           Alcotest.fail
             "uncapped consolidation config must fail before provider dispatch"))))

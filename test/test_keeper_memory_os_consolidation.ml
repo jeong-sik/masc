@@ -214,12 +214,14 @@ let test_apply_accepts_model_category_selection () =
 
 (* RFC-0285 §3.1: [group_preserves_category] is orthogonal to [claim_kind], so the
    LLM can group a Self_observation with a durable claim of the SAME category. The
-   merge no longer carries either member's tag: [claim_kind_for_members] returns
-   [None] when members disagree, so a durable rule absorbing a self-observation
-   cannot inherit [Durable_knowledge] and re-immortalize the echo this RFC exists
-   to stop. The old defense — refusing the merge outright — kept both rows and
-   was what made near-duplicate self-observations unmergeable in production. *)
-let test_apply_merges_mixed_claim_kind_untagged () =
+   merge must be refused (both kept) — otherwise [earliest.claim_kind] would, by
+   first_seen order, either immortalize the self-observation or expire the durable
+   claim. Earliest here is the durable claim; merging would carry [Durable_knowledge]
+   and re-immortalize the self-observation echo this RFC exists to stop. Writing
+   [None] instead is not an escape: [None] means "producer emitted no tag" and the
+   read boundary omits the field for it, so the merge would be indistinguishable
+   from a never-tagged row. *)
+let test_apply_rejects_mixed_claim_kind () =
   let facts =
     [ fact
         ~first_seen:100.0
@@ -243,19 +245,12 @@ let test_apply_merges_mixed_claim_kind_untagged () =
     ; drop_indices = []
     }
   in
-  let merged = only_fact (apply_plan_facts ~now ~facts plan) in
-  Alcotest.(check string)
-    "mixed-claim_kind group merges"
-    "retry loops need bounds"
-    merged.Types.claim;
-  Alcotest.(check bool)
-    "neither member's tag is inherited"
-    true
-    (merged.Types.claim_kind = None);
-  Alcotest.(check (option (float 0.001)))
-    "neither member declared an expiry, so the merge has none"
-    None
-    merged.Types.valid_until
+  Alcotest.(check (list string))
+    "mixed-claim_kind group is skipped; both facts survive unchanged"
+    [ "Bounded retries prevent loop starvation"
+    ; "the agent is stuck in a retry loop this turn"
+    ]
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 let test_apply_merges_different_explicit_validity () =
@@ -497,9 +492,8 @@ let test_render_numbered_facts_shows_gate_fields () =
    | other -> Alcotest.failf "expected 2 lines, got %d" (List.length other))
 ;;
 
-(* Mixed claim_kind is a merge like any other — the tag is model context, not a
-   precondition — and the merged row reports itself untagged. Only the group
-   whose members were already consumed lands in the one surviving bucket. *)
+(* Structural rejection is typed and counted: 'the judge proposed no merges'
+   and 'every merge was rejected' must not collapse into one silent outcome. *)
 let test_apply_stats_count_rejections () =
   let facts =
     [ fact ~claim_kind:(Some Types.Durable_knowledge) "durable rule"
@@ -526,27 +520,17 @@ let test_apply_stats_count_rejections () =
     ; drop_indices = []
     }
   in
-  let survivors, stats = Consolidation.apply_plan ~now ~facts plan in
+  let _survivors, stats = Consolidation.apply_plan ~now ~facts plan in
+  Alcotest.(check int) "one merged group" 1 stats.Consolidation.merged_groups;
   Alcotest.(check int)
-    "the mixed-kind group merges alongside the duplicate group"
-    2
-    stats.Consolidation.merged_groups;
+    "one kind-mismatch rejection"
+    1
+    stats.Consolidation.rejected_kind_mismatch;
   Alcotest.(check int)
     "consumed/short group counted as too few members"
     1
     stats.Consolidation.rejected_too_few_members;
-  Alcotest.(check int) "no drops" 0 stats.Consolidation.dropped;
-  Alcotest.(check (list string))
-    "four rows collapse into two consolidated claims"
-    [ "dup A"; "mixed kinds" ]
-    (claims survivors);
-  match List.find_opt (fun f -> f.Types.claim = "mixed kinds") survivors with
-  | None -> Alcotest.fail "expected the mixed-kind merge to survive"
-  | Some merged ->
-    Alcotest.(check bool)
-      "a merge spanning kinds reports itself untagged"
-      true
-      (merged.Types.claim_kind = None)
+  Alcotest.(check int) "no drops" 0 stats.Consolidation.dropped
 ;;
 
 (* The ordinary contested-duplicate plan: the first group consumes a fact a
@@ -574,7 +558,10 @@ let test_first_group_wins_lands_in_too_few_bucket () =
     "later overlapping group lands in the too-few bucket"
     1
     stats.Consolidation.rejected_too_few_members;
-  Alcotest.(check int) "the first group still merges" 1 stats.Consolidation.merged_groups
+  Alcotest.(check int)
+    "an ordinary contested plan raises no kind-gate rejection"
+    0
+    stats.Consolidation.rejected_kind_mismatch
 ;;
 
 let test_parse_plan_json () =
@@ -668,10 +655,7 @@ let () =
 	        ; Alcotest.test_case "first group wins contested fact" `Quick test_apply_first_group_wins_contested
 	        ; Alcotest.test_case "accepts model category change" `Quick test_apply_accepts_model_category_change
 	        ; Alcotest.test_case "accepts model category selection" `Quick test_apply_accepts_model_category_selection
-        ; Alcotest.test_case
-            "mixed claim_kind merges untagged"
-            `Quick
-            test_apply_merges_mixed_claim_kind_untagged
+        ; Alcotest.test_case "rejects mixed claim_kind" `Quick test_apply_rejects_mixed_claim_kind
         ; Alcotest.test_case
             "different explicit validity merges at the earliest horizon"
             `Quick

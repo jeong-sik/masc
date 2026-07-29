@@ -181,12 +181,26 @@ let consolidate_keeper
               | Ok (`Assoc _ as json) ->
                 let plan = Consolidation.plan_of_json json in
                 let survivors, stats = Consolidation.apply_plan ~now ~facts plan in
-                (* Below-two-free-members is the only rejection left, and it is
-                   expected on contested-duplicate plans (first group wins), so
-                   it stays at info. The metadata-mismatch WARN and its counter
-                   are gone with the gates: they measured the apply step
-                   discarding judgements it had no standing to overrule. *)
-                if stats.rejected_too_few_members > 0
+                (* A kind mismatch means the judge and the apply gate disagreed
+                   on a field the prompt renders, so it is loud. The
+                   valid_until arm is gone: that gate compared write instants
+                   the judge could not control, so it fired on ordinary plans
+                   and buried this signal. Below-two-free-members is expected
+                   on contested-duplicate plans and stays at info. *)
+                if stats.rejected_kind_mismatch > 0
+                then (
+                  Log.Keeper.warn
+                    "memory_os_keeper_consolidation rejected %d group(s) at the claim_kind gate keeper=%s (merged=%d dropped=%d too_few_members=%d)"
+                    stats.rejected_kind_mismatch
+                    keeper_id
+                    stats.merged_groups
+                    stats.dropped
+                    stats.rejected_too_few_members;
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string MemoryOsConsolidationGroupRejected)
+                    ~labels:[ "keeper", keeper_id ]
+                    ())
+                else if stats.rejected_too_few_members > 0
                 then
                   Log.Keeper.info
                     "memory_os_keeper_consolidation skipped %d group(s) below two free members keeper=%s (merged=%d dropped=%d)"

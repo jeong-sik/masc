@@ -194,6 +194,7 @@ type t =
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget
   | MemoryOsEpisodeRetentionPruned
+  | MemoryOsConsolidationGroupRejected
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
@@ -422,6 +423,8 @@ let to_string = function
       "masc_keeper_memory_os_recall_bytes_over_budget_total"
   | MemoryOsEpisodeRetentionPruned ->
       "masc_keeper_memory_os_episode_retention_pruned_total"
+  | MemoryOsConsolidationGroupRejected ->
+      "masc_keeper_memory_os_consolidation_group_rejected_total"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"
   | VisionAnalyze -> "masc_keeper_vision_analyze_total"

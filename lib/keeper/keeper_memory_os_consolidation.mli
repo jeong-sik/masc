@@ -9,14 +9,13 @@
     cannot fabricate a survivor; an unreferenced fact is kept unchanged; a group
     needs >= 2 in-range members to merge; out-of-range/duplicate indices skip.
 
-    That member count is the ONLY precondition. Metadata the judge cannot
-    express must not decide whether its judgement applies: [valid_until] and
-    [claim_kind] are combined by total functions at apply time, not demanded to
-    agree beforehand. The removed exact-equality gates rejected 4200 of 4405
-    proposed groups over 2026-07-27..29 — [valid_until] is derived at write time
-    from wall-clock, so two independently written facts can never carry the same
-    value, and [claim_kind] is documented in {!Keeper_memory_os_types} as model
-    context that creates neither a validity horizon nor a promotion hierarchy. *)
+    [valid_until] is no longer a precondition: it is derived at write time from
+    wall-clock, so two independently written facts can never carry the same
+    value, and demanding equality rejected 3529 of 4405 proposed groups over
+    2026-07-27..29 against 196 merges. It is combined by a meet at apply time
+    instead. [claim_kind] remains gated — that check is satisfiable (3639
+    admitted vs 671 refused over the same window) and a merged row has no
+    lossless way to record that its members disagreed. *)
 
 open Keeper_memory_os_types
 
@@ -69,12 +68,13 @@ val plan_of_string : string -> consolidation_plan option
 
 (** Typed apply outcome breakdown, so "the judge proposed no merges" does not
     collapse into the same silent before = after as "the plan was rejected".
-    [rejected_too_few_members] is the sole rejection reason that survives:
-    first-group-wins legitimately shrinks a later overlapping group below two
-    free members on ordinary contested-duplicate plans, so it is expected
-    behavior rather than a defect signal. *)
+    [rejected_kind_mismatch] is the gate disagreement worth alerting on;
+    [rejected_too_few_members] is expected behavior, since first-group-wins
+    legitimately shrinks a later overlapping group below two free members on
+    ordinary contested-duplicate plans. *)
 type apply_stats =
   { merged_groups : int
+  ; rejected_kind_mismatch : int
   ; rejected_too_few_members : int
   ; dropped : int
   }
@@ -88,10 +88,9 @@ type apply_stats =
     The merged row's [valid_until] is the meet of its members': [None] is "no
     expiry", the lattice top and identity, and two expiries take the earlier, so
     a consolidated claim never outlives the shortest-lived claim it absorbed.
-    Its [claim_kind] is the members' unanimous tag, or [None] when they differ —
-    a claim spanning kinds is genuinely untagged, and {!Keeper_memory_os_types}
-    forbids reading an order into that field. Both are total: no group is
-    rejected for its metadata. Explicitly dropped indices are removed; every
+    A merge whose members disagree on [claim_kind] is still rejected and
+    counted, and [render_numbered_facts] shows the judge that field so such
+    groups are not proposed blind. Explicitly dropped indices are removed; every
     other fact survives unchanged. *)
 val apply_plan
   :  now:float

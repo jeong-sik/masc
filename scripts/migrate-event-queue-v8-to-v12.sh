@@ -246,14 +246,21 @@ restore_backup() {
     [[ "${#backup_files[@]}" == "$manifest_snapshot_count" ]] \
         || die "backup snapshot set is incomplete: expected=$manifest_snapshot_count found=${#backup_files[@]}"
 
-    local restored=0
-    for backup_file in "${backup_files[@]}"; do
+    local restore_targets=()
+    local backup_index
+    for backup_index in "${!backup_files[@]}"; do
+        backup_file="${backup_files[$backup_index]}"
         local keeper_name target
         keeper_name="$(basename "$(dirname "$backup_file")")"
         target="${runtime_root}/keepers/${keeper_name}/event-queue.json"
         [[ -d "$(dirname "$target")" ]] \
             || die "target Keeper directory is missing: $(dirname "$target")"
-        atomic_copy "$backup_file" "$target"
+        restore_targets+=("$target")
+    done
+
+    local restored=0
+    for backup_index in "${!backup_files[@]}"; do
+        atomic_copy "${backup_files[$backup_index]}" "${restore_targets[$backup_index]}"
         restored=$((restored + 1))
     done
 
@@ -445,6 +452,21 @@ self_test() {
         die "self-test: incomplete backup was restored"
     fi
     validate_v12_snapshot "$snapshot"
+    validate_v12_snapshot "$beta_snapshot"
+
+    local beta_current_snapshot
+    beta_current_snapshot="${fixture}/beta-current-v12.json"
+    cp "$beta_snapshot" "$beta_current_snapshot"
+    rm -rf "$(dirname "$beta_snapshot")"
+    if MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
+        "$0" --base-path "$fixture" --restore "$backup_dir" --confirm-stopped \
+        >/dev/null 2>&1
+    then
+        die "self-test: restore accepted a missing target Keeper directory"
+    fi
+    validate_v12_snapshot "$snapshot"
+    mkdir -p "$(dirname "$beta_snapshot")"
+    cp "$beta_current_snapshot" "$beta_snapshot"
     validate_v12_snapshot "$beta_snapshot"
 
     MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \

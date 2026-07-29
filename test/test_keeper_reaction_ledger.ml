@@ -120,13 +120,23 @@ let reaction_ledger_dir ~base_path ~keeper_name =
           (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
           keeper_name)
        "reaction-ledger")
-    "v4"
+    "v5"
 ;;
 
 let reaction_ledger_store ~base_path ~keeper_name =
   Dated_jsonl.create
     ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
     ()
+;;
+
+let retired_reaction_ledger_dir ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+          keeper_name)
+       "reaction-ledger")
+    "v4"
 ;;
 
 let read_recent_rows ~base_path ~keeper_name ~limit =
@@ -171,6 +181,42 @@ let latest_row rows =
   | [] -> fail "expected at least one reaction ledger row"
 ;;
 
+let test_retired_generation_is_not_read () =
+  with_temp_base
+  @@ fun base_path ->
+  let keeper_name = "retired-generation-keeper" in
+  let retired_month =
+    Filename.concat
+      (retired_reaction_ledger_dir ~base_path ~keeper_name)
+      "2026-07"
+  in
+  mkdir_p retired_month;
+  let retired_path = Filename.concat retired_month "29.jsonl" in
+  let retired_bytes =
+    "retired reaction ledger must remain opaque: not-json\000keeper_event_queue_settlement\n"
+  in
+  write_file retired_path retired_bytes;
+  check
+    int
+    "retired generation contributes no current rows"
+    0
+    (List.length (read_recent_rows ~base_path ~keeper_name ~limit:10));
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ());
+  check
+    int
+    "current generation receives new rows"
+    1
+    (List.length (read_recent_rows ~base_path ~keeper_name ~limit:10));
+  check
+    string
+    "retired generation is not consumed or rewritten"
+    retired_bytes
+    (In_channel.with_open_bin retired_path In_channel.input_all)
+;;
+
 let test_event_queue_stimulus_and_turn_reaction () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "ledger-keeper" in
@@ -188,7 +234,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v4" "schema" stimulus_row;
+  check_member_string "stimulus schema" "keeper.reaction_ledger.v5" "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -712,7 +758,7 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v4"
+        [ "schema", `String "keeper.reaction_ledger.v5"
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -1046,7 +1092,7 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v4"
+        [ "schema", `String "keeper.reaction_ledger.v5"
         ; "record_kind", `String "stimulus"
         ; "event_id", `String "unattributed-event"
         ; "keeper_name", `String keeper_name
@@ -1083,6 +1129,10 @@ let () =
             "event queue stimulus and turn reaction are durable"
             `Quick
             test_event_queue_stimulus_and_turn_reaction
+        ; test_case
+            "retired generation is not read"
+            `Quick
+            test_retired_generation_is_not_read
         ; test_case
             "unexpected schema rows cannot double-count current occurrences"
             `Quick

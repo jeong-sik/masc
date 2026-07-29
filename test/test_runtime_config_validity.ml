@@ -808,7 +808,6 @@ List.iter
         ~default_runtime_id:default.id
         ~assignments
         ~memory_os_consolidation_runtime_id:memory_os_consolidation
-        ~structured_judge_runtime_id:structured_judge
         ~cross_verifier_runtime_id:cross_verifier
         ~media_failover
         ~lanes
@@ -1544,10 +1543,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
         ~strategy:Runtime_lane.Ordered
         [ "lane-c"; "lane-b" ]
     ; Runtime_lane.make
-        ~id:"structured-d"
-        ~strategy:Runtime_lane.Ordered
-        [ "structured-a"; "lane-b" ]
-    ; Runtime_lane.make
         ~id:"cross-e"
         ~strategy:Runtime_lane.Ordered
         [ "cross-a"; "lane-b" ]
@@ -1558,7 +1553,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
       ~memory_os_consolidation_runtime_id:(Some "memory-os-d")
-      ~structured_judge_runtime_id:(Some "structured-d")
       ~cross_verifier_runtime_id:(Some "cross-e")
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
@@ -1572,7 +1566,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     ; "assigned-b"
     ; "media-c"
     ; "memory-os-d"
-    ; "structured-a"
     ; "cross-a"
     ]
     actual
@@ -1670,10 +1663,9 @@ let test_runtime_config_validation_rejects_uncapped_memory_os_runtime () =
            (String_util.contains_substring detail "local.consolidation"))
 ;;
 
-let test_runtime_config_validation_rejects_uncapped_special_runtime () =
-  let content route =
-    Printf.sprintf
-      "[providers.local]\n\
+let test_runtime_config_validation_rejects_uncapped_cross_verifier_runtime () =
+  let content =
+    "[providers.local]\n\
        protocol = \"openai-compatible-http\"\n\
        endpoint = \"http://127.0.0.1:1/v1\"\n\
        \n\
@@ -1692,32 +1684,27 @@ let test_runtime_config_validation_rejects_uncapped_special_runtime () =
        \n\
        [runtime]\n\
        default = \"local.default\"\n\
-       %s = \"local.special\"\n"
-      route
+       cross_verifier = \"local.special\"\n"
   in
-  List.iter
-    (fun route ->
-       let snapshot = Runtime.For_testing.snapshot () in
-       let path = Filename.temp_file "uncapped_special_runtime_" ".toml" in
-       let config = content route in
-       let oc = open_out path in
-       output_string oc config;
-       close_out oc;
-       Fun.protect
-         ~finally:(fun () ->
-           Runtime.For_testing.restore snapshot;
-           try Sys.remove path with
-           | Sys_error _ -> ())
-         (fun () ->
-            match Runtime.save_config_text ~runtime_config_path:path config with
-            | Ok () ->
-              failf "uncapped %s runtime must fail runtime config validation" route
-            | Error detail ->
-              check bool "typed config diagnostic names the cap" true
-                (String_util.contains_substring detail "max-request-body-bytes");
-              check bool "typed config diagnostic names the special runtime" true
-                (String_util.contains_substring detail "local.special")))
-    [ "structured_judge"; "cross_verifier" ]
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "uncapped_cross_verifier_runtime_" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match Runtime.save_config_text ~runtime_config_path:path content with
+       | Ok () ->
+         fail "uncapped cross-verifier runtime must fail runtime config validation"
+       | Error detail ->
+         check bool "typed config diagnostic names the cap" true
+           (String_util.contains_substring detail "max-request-body-bytes");
+         check bool "typed config diagnostic names the cross-verifier runtime" true
+           (String_util.contains_substring detail "local.special"))
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
@@ -3542,9 +3529,9 @@ let () =
             `Quick
             test_runtime_config_validation_rejects_uncapped_memory_os_runtime;
           test_case
-            "runtime config rejects uncapped structured-judge and cross-verifier runtimes"
+            "runtime config rejects uncapped cross-verifier runtime"
             `Quick
-            test_runtime_config_validation_rejects_uncapped_special_runtime;
+            test_runtime_config_validation_rejects_uncapped_cross_verifier_runtime;
           test_case
             "runtime config allows uncapped dormant lane candidate"
             `Quick

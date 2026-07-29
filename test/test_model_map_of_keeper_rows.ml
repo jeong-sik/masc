@@ -4,6 +4,8 @@
 
 open Alcotest
 
+let json = testable Yojson.Safe.pp Yojson.Safe.equal
+
 let agent name : Masc_domain.agent =
   { id = None
   ; name
@@ -41,12 +43,12 @@ let test_projects_active_models_to_agents_wire () =
   in
   let agents = List.map agent [ "alice"; "bob"; "carol"; "dave" ] in
   let agents_json = Dashboard_execution.For_test.agents_json ~keepers ~agents in
-  check Yojson.Safe.equal "latest exact keeper row wins"
+  check json "latest exact keeper row wins"
     (`String "current-model")
     (model_of_agent "alice" agents_json);
   List.iter
     (fun name ->
-       check Yojson.Safe.equal (name ^ " has no active model") `Null
+       check json (name ^ " has no active model") `Null
          (model_of_agent name agents_json))
     [ "bob"; "carol"; "dave" ]
 ;;

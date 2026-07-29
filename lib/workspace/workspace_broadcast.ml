@@ -25,6 +25,7 @@ type msg_type_typed =
 
 type broadcast_delivery =
   { rendered : string
+  ; from_agent : string
   ; content : string
   ; mention : string option
   ; msg_type : string
@@ -215,6 +216,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
        (Printexc.to_string exn));
   observe safe_msg_type;
   { rendered = Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content
+  ; from_agent = safe_agent
   ; content = safe_content
   ; mention
   ; msg_type = safe_msg_type

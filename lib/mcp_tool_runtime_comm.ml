@@ -68,14 +68,15 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
       Workspace.broadcast ?trace_context config
         ~from_agent:agent_name ~content:message
     in
+    let from_agent = delivery.from_agent in
     let mention = delivery.mention in
     let message = delivery.content in
     let _ =
-      Session.push_message registry ~from_agent:agent_name ~content:message ~mention
+      Session.push_message registry ~from_agent ~content:message ~mention
     in
     let notification_fields =
       [ ("type", `String "masc/broadcast")
-      ; ("from", `String agent_name)
+      ; ("from", `String from_agent)
       ; ("content", `String message)
       ; ("mention", Json_util.string_opt_to_json mention)
       ; ("timestamp", `Float (Time_compat.now ()))
@@ -88,9 +89,9 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
     Subscriptions.push_event_to_sessions notification;
     (match mention with
      | Some target ->
-       Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
+       Notify.notify_mention ~from_agent ~target_agent:target ~message ()
      | None -> ());
-    Audit_log.log_broadcast config ~agent_id:agent_name ~message_preview:message ();
+    Audit_log.log_broadcast config ~agent_id:from_agent ~message_preview:message ();
     Some (Tool_result.ok ~tool_name ~start_time delivery.rendered)
 
 (** masc_messages — retrieve recent messages *)

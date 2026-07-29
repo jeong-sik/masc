@@ -20,6 +20,7 @@ type msg_type_typed =
 
 type broadcast_delivery =
   { rendered : string
+  ; from_agent : string
   ; content : string
   ; mention : string option
   ; msg_type : string

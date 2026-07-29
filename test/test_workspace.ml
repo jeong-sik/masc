@@ -297,6 +297,10 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     "delivery preserves the original mention"
     (Some "nick0cave")
     result.mention;
+  Alcotest.(check string)
+    "delivery exposes the canonical persisted sender"
+    "taskmaster-jade-heron"
+    result.from_agent;
   let messages = Workspace.get_all_messages_raw config ~since_seq in
   (match messages with
    | [ msg ] ->

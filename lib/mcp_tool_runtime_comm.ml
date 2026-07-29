@@ -62,39 +62,37 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
             ~failure_class:(Some Tool_result.Transient_error)
             ~tool_name ~start_time
             (Printf.sprintf "Rate limited. %d sec remaining." wait_secs))
-  else begin
-    let message =
-      Workspace_task_cache_invariant.rewrite_broadcast_content
-        ~config
-        ~from_agent:agent_name
-        ~module_name:"mcp_tool_runtime_comm"
-        ~content:message
-    in
+  else
     let trace_context = Otel_trace_context.from_ambient () in
-    let broadcast_result =
-      Workspace.broadcast ?trace_context ~task_cache_invariant_checked:true config
+    let delivery =
+      Workspace.broadcast ?trace_context config
         ~from_agent:agent_name ~content:message
     in
-        let mention = Mention.extract message in
-        let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
-        let notification_fields = [
-          ("type", `String "masc/broadcast");
-          ("from", `String agent_name);
-          ("content", `String message);
-          ("mention", Json_util.string_opt_to_json mention);
-          ("timestamp", `Float (Time_compat.now ()));
-        ] in
-        let notification = `Assoc (Otel_trace_context.inject_json notification_fields trace_context) in
-        Mcp_server.sse_broadcast state notification;
-        Subscriptions.push_event_to_sessions notification;
-        (match mention with
-         | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
-         | None -> ());
-        ignore (config, agent_name);
-        Audit_log.log_broadcast config ~agent_id:agent_name
-          ~message_preview:message ();
-        Some (Tool_result.ok ~tool_name ~start_time broadcast_result)
-  end
+    let from_agent = delivery.from_agent in
+    let mention = delivery.mention in
+    let message = delivery.content in
+    let _ =
+      Session.push_message registry ~from_agent ~content:message ~mention
+    in
+    let notification_fields =
+      [ ("type", `String "masc/broadcast")
+      ; ("from", `String from_agent)
+      ; ("content", `String message)
+      ; ("mention", Json_util.string_opt_to_json mention)
+      ; ("timestamp", `Float (Time_compat.now ()))
+      ]
+    in
+    let notification =
+      `Assoc (Otel_trace_context.inject_json notification_fields trace_context)
+    in
+    Mcp_server.sse_broadcast state notification;
+    Subscriptions.push_event_to_sessions notification;
+    (match mention with
+     | Some target ->
+       Notify.notify_mention ~from_agent ~target_agent:target ~message ()
+     | None -> ());
+    Audit_log.log_broadcast config ~agent_id:from_agent ~message_preview:message ();
+    Some (Tool_result.ok ~tool_name ~start_time delivery.rendered)
 
 (** masc_messages — retrieve recent messages *)
 let handle_messages ~tool_name ~start_time (ctx : context) : tool_result option =

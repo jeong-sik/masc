@@ -23,6 +23,14 @@ type msg_type_typed =
   | Broadcast
   | Cache_invalidated of { task_id : string; status : string }
 
+type broadcast_delivery =
+  { rendered : string
+  ; from_agent : string
+  ; content : string
+  ; mention : string option
+  ; msg_type : string
+  }
+
 let string_of_msg_type_typed = function
   | Broadcast -> "broadcast"
   | Cache_invalidated _ -> "cache_invalidated"
@@ -70,8 +78,7 @@ let broadcast_channel config =
 let on_broadcast_mention : (string option -> unit) ref =
   ref (fun _mention -> ())
 
-let broadcast ?trace_context ?(msg_type = "broadcast")
-    ?(task_cache_invariant_checked = false) config ~from_agent ~content =
+let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~content =
   let started_at = Time_compat.now () in
   let observe final_msg_type =
     let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
@@ -91,8 +98,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
      cache_invalidated notice and clear the stale state (issue #13397).
      Only applied to regular "broadcast" messages to avoid recursion. *)
   let content, msg_type, _rewrites =
-    if task_cache_invariant_checked then (content, msg_type, [])
-    else if String.equal msg_type "broadcast" then
+    if String.equal msg_type "broadcast" then
       let agent_file =
         Filename.concat (agents_dir config) (safe_filename from_agent ^ ".json")
       in
@@ -209,4 +215,9 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
      Log.Misc.warn "on_broadcast_mention callback failed: %s"
        (Printexc.to_string exn));
   observe safe_msg_type;
-  Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content
+  { rendered = Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content
+  ; from_agent = safe_agent
+  ; content = safe_content
+  ; mention
+  ; msg_type = safe_msg_type
+  }

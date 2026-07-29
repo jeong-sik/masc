@@ -12,9 +12,8 @@
     ([keeper_lifecycle] / [keeper_execution_state]) + their string
     converters, 7 env-cached threshold constants
     ([signal_*_sec] / [ctx_*] / [keeper_action_stale_sec]),
-    3 task / message / agent helpers, and 1 continuity-row
-    builder.  Future "expose threshold constants" PR can reopen
-    explicitly. *)
+    3 task / message / agent helpers.  Future "expose threshold
+    constants" PR can reopen explicitly. *)
 
 include module type of struct
   include Dashboard_execution_sessions
@@ -46,6 +45,16 @@ val build_worker_support_briefs :
     cross-referencing tasks, messages, and the resolved session
     membership.  Used by {!Dashboard_execution}'s worker-support
     section. *)
+
+val continuity_row_of_keeper :
+  now_ts:float ->
+  ?related_session_id:string ->
+  Yojson.Safe.t ->
+  continuity_context
+(** [continuity_row_of_keeper ~now_ts ?related_session_id keeper] is the
+    typed primitive shared by the full execution render and live keeper-row
+    reconciliation.  Callers provide the already-resolved session relation;
+    the primitive owns lifecycle, severity, and wire-field derivation. *)
 
 val build_continuity_briefs :
   now_ts:float ->

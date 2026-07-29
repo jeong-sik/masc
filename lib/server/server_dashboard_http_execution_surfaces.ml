@@ -667,23 +667,28 @@ let rebuild_continuity_briefs ~now_ts ~keeper_rows ~existing_briefs =
          | _ -> None)
       existing_briefs
   in
-  Dashboard_execution_builders.build_continuity_briefs
-    ~now_ts
-    keeper_rows
-    []
-  |> List.map (fun (row : Dashboard_execution_helpers.continuity_context) ->
-    match Json_util.assoc_string_opt "name" row.json with
+  keeper_rows
+  |> List.filter_map (fun keeper ->
+    match Json_util.assoc_string_opt "name" keeper with
     | Some name ->
-      (match List.assoc_opt name related_session_ids, row.json with
-       | Some related_session_id, `Assoc fields ->
-         `Assoc
-           (upsert_assoc_field
-              "related_session_id"
-              (`String related_session_id)
-              fields)
-       | None, _ | _, (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) ->
-         row.json)
-    | None -> row.json)
+      let related_session_id = List.assoc_opt name related_session_ids in
+      Some
+        (Dashboard_execution_builders.continuity_row_of_keeper
+           ~now_ts
+           ?related_session_id
+           keeper)
+    | None -> None)
+  |> List.sort
+       (fun
+         (left : Dashboard_execution_helpers.continuity_context)
+         (right : Dashboard_execution_helpers.continuity_context)
+       ->
+         let by_tone = Int.compare right.tone_rank left.tone_rank in
+         if by_tone <> 0
+         then by_tone
+         else Float.compare right.last_signal_ts left.last_signal_ts)
+  |> List.map
+       (fun (row : Dashboard_execution_helpers.continuity_context) -> row.json)
 ;;
 
 let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fields =

@@ -201,10 +201,23 @@ restore_backup() {
     [[ -f "$checksums" ]] || die "backup checksums not found: $checksums"
     (cd "$backup_dir" && shasum -a 256 -c checksums.sha256 >/dev/null) \
         || die "backup checksum verification failed: $backup_dir"
-    local manifest_base
+    local manifest_base manifest_source_schema manifest_target_schema manifest_snapshot_count
     manifest_base="$(jq -er '.base_path' "$manifest")"
     [[ "$manifest_base" == "$BASE_PATH" ]] \
         || die "backup base path mismatch: manifest=$manifest_base requested=$BASE_PATH"
+    manifest_source_schema="$(jq -er '.source_schema | select(type == "string")' "$manifest")" \
+        || die "backup source schema is invalid: $manifest"
+    manifest_target_schema="$(jq -er '.target_schema | select(type == "string")' "$manifest")" \
+        || die "backup target schema is invalid: $manifest"
+    [[ "$manifest_source_schema" == "$SOURCE_SCHEMA" \
+        && "$manifest_target_schema" == "$TARGET_SCHEMA" ]] \
+        || die "backup schema contract does not match this migration: $backup_dir"
+    manifest_snapshot_count="$(jq -er \
+        '.snapshot_count | select(type == "number" and floor == . and . > 0)' \
+        "$manifest")" \
+        || die "backup snapshot count is invalid: $manifest"
+    [[ "$manifest_snapshot_count" =~ ^[0-9]+$ ]] \
+        || die "backup snapshot count is invalid: $manifest"
 
     local current_file current_keeper current_backup
     for current_file in "$runtime_root"/keepers/*/event-queue.json; do
@@ -223,11 +236,18 @@ restore_backup() {
         fi
     done
 
-    local restored=0
+    local backup_files=()
     local backup_file
     for backup_file in "$backup_dir"/keepers/*/event-queue.json; do
         [[ -f "$backup_file" ]] || continue
         validate_v8_snapshot "$backup_file"
+        backup_files+=("$backup_file")
+    done
+    [[ "${#backup_files[@]}" == "$manifest_snapshot_count" ]] \
+        || die "backup snapshot set is incomplete: expected=$manifest_snapshot_count found=${#backup_files[@]}"
+
+    local restored=0
+    for backup_file in "${backup_files[@]}"; do
         local keeper_name target
         keeper_name="$(basename "$(dirname "$backup_file")")"
         target="${runtime_root}/keepers/${keeper_name}/event-queue.json"
@@ -237,7 +257,8 @@ restore_backup() {
         restored=$((restored + 1))
     done
 
-    [[ "$restored" -gt 0 ]] || die "backup contains no snapshots: $backup_dir"
+    [[ "$restored" == "$manifest_snapshot_count" ]] \
+        || die "backup restore count mismatch: expected=$manifest_snapshot_count restored=$restored"
     echo "Restored $restored Event Queue snapshot(s) from $backup_dir"
 }
 
@@ -381,12 +402,14 @@ self_test() {
     fixture="$(mktemp -d "${TMPDIR:-/tmp}/masc-event-queue-migration.XXXXXX")"
     SELF_TEST_FIXTURE="$fixture"
     trap cleanup_self_test EXIT
-    mkdir -p "$fixture/.masc/keepers/alpha"
+    mkdir -p "$fixture/.masc/keepers/alpha" "$fixture/.masc/keepers/beta"
 
     local snapshot="$fixture/.masc/keepers/alpha/event-queue.json"
     printf '%s\n' \
         '{"schema":"keeper.event_queue.state.v8","revision":9007199254740993,"pending":{"schema":"keeper.event_queue.v2","length":1,"items":[{"sentinel":"keep","exact_integer":9007199254740993}]},"transition_outbox":[]}' \
         > "$snapshot"
+    local beta_snapshot="$fixture/.masc/keepers/beta/event-queue.json"
+    cp "$snapshot" "$beta_snapshot"
 
     MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         "$0" --base-path "$fixture" >/dev/null
@@ -408,21 +431,39 @@ self_test() {
     [[ -n "$backup_dir" && -d "$backup_dir" ]] \
         || die "self-test: backup directory was not reported"
 
+    local incomplete_backup
+    incomplete_backup="${fixture}/incomplete-backup"
+    cp -R "$backup_dir" "$incomplete_backup"
+    rm -f "${incomplete_backup}/keepers/alpha/event-queue.json"
+    grep -v 'keepers/alpha/event-queue.json' "${incomplete_backup}/checksums.sha256" \
+        > "${incomplete_backup}/checksums.sha256.tmp"
+    mv "${incomplete_backup}/checksums.sha256.tmp" "${incomplete_backup}/checksums.sha256"
+    if MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
+        "$0" --base-path "$fixture" --restore "$incomplete_backup" --confirm-stopped \
+        >/dev/null 2>&1
+    then
+        die "self-test: incomplete backup was restored"
+    fi
+    validate_v12_snapshot "$snapshot"
+    validate_v12_snapshot "$beta_snapshot"
+
     MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         "$0" --base-path "$fixture" --apply --confirm-stopped >/dev/null
-    mkdir -p "$fixture/.masc/keepers/beta"
+    local gamma_snapshot="$fixture/.masc/keepers/gamma/event-queue.json"
+    mkdir -p "$fixture/.masc/keepers/gamma"
     printf '%s\n' \
         '{"schema":"keeper.event_queue.state.v12","revision":1,"pending":{"schema":"keeper.event_queue.v2","length":0,"items":[]},"last_transition":null,"projected_dispositions":[],"transition_outbox":[],"accepted_transfer_projections":[]}' \
-        > "$fixture/.masc/keepers/beta/event-queue.json"
+        > "$gamma_snapshot"
     if MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         "$0" --base-path "$fixture" --restore "$backup_dir" --confirm-stopped >/dev/null 2>&1
     then
         die "self-test: rollback accepted an unbacked v12 snapshot"
     fi
-    rm -rf "$fixture/.masc/keepers/beta"
+    rm -rf "$fixture/.masc/keepers/gamma"
     MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         "$0" --base-path "$fixture" --restore "$backup_dir" --confirm-stopped >/dev/null
     validate_v8_snapshot "$snapshot"
+    validate_v8_snapshot "$beta_snapshot"
 
     if MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         MASC_EVENT_QUEUE_MIGRATION_SELF_TEST_FAIL_AFTER_REPLACE=1 \
@@ -431,17 +472,18 @@ self_test() {
         die "self-test: injected post-replacement failure did not fail"
     fi
     validate_v8_snapshot "$snapshot"
+    validate_v8_snapshot "$beta_snapshot"
 
-    mkdir -p "$fixture/.masc/keepers/beta"
+    mkdir -p "$fixture/.masc/keepers/gamma"
     printf '%s\n' \
         '{"schema":"keeper.event_queue.state.v12","revision":1,"pending":{"schema":"keeper.event_queue.v2","length":0,"items":[]},"last_transition":null,"projected_dispositions":[],"transition_outbox":[],"accepted_transfer_projections":[]}' \
-        > "$fixture/.masc/keepers/beta/event-queue.json"
+        > "$gamma_snapshot"
     if MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         "$0" --base-path "$fixture" >/dev/null 2>&1
     then
         die "self-test: mixed v8/v12 fleet was accepted"
     fi
-    rm -rf "$fixture/.masc/keepers/beta"
+    rm -rf "$fixture/.masc/keepers/gamma"
 
     jq '.transition_outbox = [{"sentinel":"unprojected"}]' "$snapshot" > "${snapshot}.tmp"
     mv "${snapshot}.tmp" "$snapshot"

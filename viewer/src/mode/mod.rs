@@ -65,9 +65,7 @@ pub enum ViewerMode {
     Home,
 
     /// D&D 5e game session viewer (그림란드 연대기).
-    /// Data source:
-    /// - default: MASC `/api/v1/trpg/stream` JSON polling
-    /// - optional: legacy TRPG Engine `/workspaces/:id/stream` SSE
+    /// Data source: MASC `/api/v1/trpg/stream` JSON polling.
     Trpg,
 
     /// Experiment visualization — Sankey diagrams, network graphs, A/B metrics.

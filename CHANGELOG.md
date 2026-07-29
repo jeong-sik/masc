@@ -21,6 +21,11 @@
   the compact source label from that typed field. The unused
   `Gate_surface.of_source` compatibility facade was also removed. No migration,
   repair, or string-to-surface fallback was added.
+- **Breaking (viewer TRPG transport)**: removed the compiled but unreachable
+  legacy TRPG EventSource transport, event vocabulary, reconnect state, and
+  teardown branch. The TRPG viewer now has one transport: the existing MASC
+  `/api/v1/trpg/stream` JSON polling loop. Monitor, Social, and Experiment SSE
+  remain owned by the separate MASC SSE client.
 - **Breaking (telemetry wire/storage)**: removed the retired
   `Agent_joined`/`Agent_left` decoder aliases, the `.masc/telemetry.jsonl`
   fallback reader, and the producer-less `Handoff_triggered` event plus its

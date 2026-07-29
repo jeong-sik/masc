@@ -471,22 +471,25 @@ let reconcile_spent_selection ~config ~keeper_name selection =
       ; _
       }
     ] ->
-    (* An approved grant is one-shot. Once consumed, this wake authorizes
-       nothing further — [Keeper_unified_turn] renders it as "authorization
-       already consumed" — so the turn it costs can only observe that fact and
-       re-enter the queue behind the same entry. Observed 2026-07-28: one
-       consumed grant held a Keeper's queue head while 42 stimuli accumulated
-       behind it, 0 consumed all day, ~204k input tokens burned every 45s.
+    (* An approved grant is one-shot, but consumption alone is not terminal:
+       host replay consumes before running the effect, then durably records the
+       outcome. If evidence or journal persistence fails after the effect,
+       [Keeper_gate_replay] keeps the raw result in-process and needs this wake
+       to repair publication without running the effect again.
 
-       No lock: consumption is monotonic. A state read as [Resolution_consumed]
-       never returns to unconsumed, so the ACK cannot race a grant becoming
-       usable again. A read error leaves the entry actionable, which keeps a
-       transient journal failure from discarding a live grant. *)
-    (match Keeper_approval_queue.approved_resolution_state
+       Retire only [consumed + durable outcome]. The transition to that state is
+       monotonic, so the ACK cannot race a result becoming unavailable. A read
+       error, an unconsumed grant, or a consumed grant without its outcome stays
+       actionable. *)
+    (match Keeper_approval_queue.approved_resolution_delivery
              ~base_path:config.Workspace_utils.base_path
              ~id:approval_id
      with
-     | Ok Keeper_approval_queue.Resolution_consumed ->
+     | Ok
+         { state = Keeper_approval_queue.Resolution_consumed
+         ; replay_outcome = Some _
+         ; _
+         } ->
        (match
           Keeper_registry_event_queue.ack_pending_result
             ~base_path:config.Workspace_utils.base_path
@@ -494,9 +497,21 @@ let reconcile_spent_selection ~config ~keeper_name selection =
             ~selection
         with
         | Error message ->
-          Error ("spent grant replay ack failed: " ^ message)
+           Error ("spent grant replay ack failed: " ^ message)
         | Ok () -> Ok Spent_grant_replay_acknowledged)
-     | Ok Keeper_approval_queue.Resolution_unconsumed | Error _ ->
+     | Ok
+         { state =
+             ( Keeper_approval_queue.Resolution_unconsumed
+             | Keeper_approval_queue.Resolution_consumed )
+         ; replay_outcome = None
+         ; _
+         }
+     | Ok
+         { state = Keeper_approval_queue.Resolution_unconsumed
+         ; replay_outcome = Some _
+         ; _
+         }
+     | Error _ ->
        Ok Selection_actionable)
   | Keeper_event_queue_persistence.Single, _
   | Keeper_event_queue_persistence.Board_batch, _ ->

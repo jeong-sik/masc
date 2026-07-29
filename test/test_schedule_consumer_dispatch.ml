@@ -1240,11 +1240,9 @@ let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
     (List.mem "../bad" queue_discovery.keeper_names)
 ;;
 
-(* A resolved approval wakes its Keeper so it re-evaluates immediately. Once the
-   one-shot grant is consumed, that wake carries no authorization, so a turn
-   spent on it can only observe the fact — and a turn that checkpoints instead
-   of completing leaves the entry at the queue head to be delivered again.
-   Reconciliation retires the spent replay before a turn is spent on it. *)
+(* A resolved approval wakes its Keeper so it re-evaluates immediately. Host
+   replay consumes the one-shot grant before executing the effect, but that
+   transition is terminal only after the replay outcome is durable. *)
 let approved_grant_fixture ~base_path ~keeper_name ~input =
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
@@ -1282,7 +1280,19 @@ let check_single_queued_replay ~base_path ~keeper_name =
      |> Keeper_event_queue.length)
 ;;
 
-let test_spent_grant_replay_retires_without_a_turn () =
+let replay_result_ref () =
+  match
+    Tool_output.make_artifact_ref
+      ~sha256:(String.make 64 'a')
+      ~bytes:2
+      ~preview:"ok"
+      ~mime:"text/plain"
+  with
+  | Ok reference -> reference
+  | Error detail -> fail (Tool_output.make_error_to_string detail)
+;;
+
+let test_consumed_grant_without_outcome_stays_actionable () =
   with_workspace
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
@@ -1311,9 +1321,59 @@ let test_spent_grant_replay_retires_without_a_turn () =
        ~keeper_name
        selection
    with
+   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
+     fail "consumed replay was discarded before its outcome became durable"
+   | Ok Keeper_heartbeat_stimulus_intake.Spent_schedule_acknowledged ->
+     fail "grant replay was reconciled as a schedule occurrence"
+   | Error detail -> fail detail);
+  check int "repairable replay stays queued" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length)
+;;
+
+let test_consumed_grant_with_outcome_retires_without_a_turn () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "spent-grant-keeper" in
+  let input = `Assoc [ "target", `String "spent-grant" ] in
+  let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
+  (match
+     Keeper_approval_queue.consume_approved_resolution
+       ~base_path
+       ~id:approval_id
+       ~keeper_name
+       ~tool_name:"external-effect"
+       ~input
+   with
+   | Ok Keeper_approval_queue.Consumption_committed -> ()
+   | Ok Keeper_approval_queue.Consumption_already_committed ->
+     fail "grant was already consumed before the test consumed it"
+   | Ok Keeper_approval_queue.Consumption_not_matching ->
+     fail "exact grant did not match its own request"
+   | Error error -> fail (Keeper_approval_queue.grant_error_to_string error));
+  (match
+     Keeper_approval_queue.record_consumed_resolution_replay
+       ~base_path
+       ~id:approval_id
+       ~outcome:(Keeper_approval_queue.Replay_applied (replay_result_ref ()))
+   with
+   | Ok Keeper_approval_queue.Replay_recorded -> ()
+   | Ok Keeper_approval_queue.Replay_already_recorded ->
+     fail "replay outcome was already recorded before the test"
+   | Error error -> fail (Keeper_approval_queue.grant_error_to_string error));
+  check_single_queued_replay ~base_path ~keeper_name;
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  (match
+     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
+       ~config
+       ~keeper_name
+       selection
+   with
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
-     fail "spent grant replay was left for a turn to observe"
+     fail "durable replay outcome was left at the queue head"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_schedule_acknowledged ->
      fail "grant replay was reconciled as a schedule occurrence"
    | Error detail -> fail detail);
@@ -1392,8 +1452,10 @@ let () =
         ; test_case "keeper wake receipt decoder rejects noncanonical shapes"
             `Quick
             test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes
-        ; test_case "spent grant replay retires without a turn" `Quick
-            test_spent_grant_replay_retires_without_a_turn
+        ; test_case "consumed grant without outcome stays actionable" `Quick
+            test_consumed_grant_without_outcome_stays_actionable
+        ; test_case "consumed grant with outcome retires without a turn" `Quick
+            test_consumed_grant_with_outcome_retires_without_a_turn
         ; test_case "unconsumed grant replay stays actionable" `Quick
             test_unconsumed_grant_replay_stays_actionable
         ] )

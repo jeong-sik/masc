@@ -94,7 +94,9 @@ type approved_resolution_state =
 
 type resolution_replay_outcome =
   | Replay_applied of Tool_output.artifact_ref
+  | Replay_applied_with_warning of Tool_output.artifact_ref
   | Replay_failed of Tool_output.artifact_ref
+  | Replay_indeterminate of Tool_output.artifact_ref
 (** Derived replay evidence points to exact bytes in {!Tool_blob_store}. The
     Gate sidecar owns only this typed content address; provider input is
     rehydrated from it through the same inline/marker boundary as ordinary
@@ -103,7 +105,9 @@ type resolution_replay_outcome =
     [Tool_output] blob marker is delivered and the exact bytes remain
     durable in the store. The rendered request therefore stays bounded by
     the assigned Runtime's request-body cap while the evidence itself is
-    never truncated. *)
+    never truncated.
+    [Replay_indeterminate] is terminal and fail-closed: the effect may already
+    have happened, so it must never be replayed. *)
 
 type approved_resolution_delivery =
   { request : approved_resolution_request

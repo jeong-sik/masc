@@ -538,6 +538,13 @@ let replay_connector_post_with_outcome
       (Keeper_surface_post.error_json
          (Printf.sprintf "%s send failed: %s" connector detail))
   in
+  let fail_after_effect connector detail =
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_post_effect
+      (Keeper_surface_post.error_json
+         (Printf.sprintf "%s send applied: %s" connector detail))
+  in
   function
   | Replay_discord_post { input; channel_id; content } ->
     with_connector_post_gate_execution
@@ -557,24 +564,31 @@ let replay_connector_post_with_outcome
             Channel_gate_discord_state.pp_send_error
             send_error)
      | Ok message_id ->
-       Keeper_chat_store.append_assistant_message
-         ~base_dir:config.Workspace.base_path
-         ~keeper_name:meta.name
-         ~content
-         ~surface:
-           (Surface_ref.Discord
-              { guild_id = None
-              ; channel_id
-              ; parent_channel_id = None
-              ; thread_id = None
-              })
-         ();
-       Keeper_chat_broadcast.chat_appended
-         ~keeper_name:meta.name
-         ~source:Keeper_surface_post.discord_label
-         ~content
-         ();
-       succeed Keeper_surface_post.discord_label ~message_id ())
+       (match
+          Keeper_chat_store.append_assistant_message_result
+            ~base_dir:config.Workspace.base_path
+            ~keeper_name:meta.name
+            ~content
+            ~surface:
+              (Surface_ref.Discord
+                 { guild_id = None
+                 ; channel_id
+                 ; parent_channel_id = None
+                 ; thread_id = None
+                 })
+            ()
+        with
+        | Error detail ->
+          fail_after_effect
+            Keeper_surface_post.discord_label
+            ("message sent, but local chat persistence failed: " ^ detail)
+        | Ok () ->
+          Keeper_chat_broadcast.chat_appended
+            ~keeper_name:meta.name
+            ~source:Keeper_surface_post.discord_label
+            ~content
+            ();
+          succeed Keeper_surface_post.discord_label ~message_id ()))
   | Replay_slack_post { input; channel_id; content; blocks } ->
     with_connector_post_gate_execution
       ~config
@@ -604,20 +618,27 @@ let replay_connector_post_with_outcome
             Keeper_surface_post.slack_label
             (Format.asprintf "%a" Keeper_chat_slack.pp_error send_error)
         | Ok () ->
-          Keeper_chat_store.append_assistant_message
-            ~base_dir:config.Workspace.base_path
-            ~keeper_name:meta.name
-            ~content
-            ~surface:
-              (Surface_ref.Slack
-                 { team_id = None; channel_id; thread_ts = None })
-            ();
-          Keeper_chat_broadcast.chat_appended
-            ~keeper_name:meta.name
-            ~source:Keeper_surface_post.slack_label
-            ~content
-            ();
-          succeed Keeper_surface_post.slack_label ()))
+          (match
+             Keeper_chat_store.append_assistant_message_result
+               ~base_dir:config.Workspace.base_path
+               ~keeper_name:meta.name
+               ~content
+               ~surface:
+                 (Surface_ref.Slack
+                    { team_id = None; channel_id; thread_ts = None })
+               ()
+           with
+           | Error detail ->
+             fail_after_effect
+               Keeper_surface_post.slack_label
+               ("message sent, but local chat persistence failed: " ^ detail)
+           | Ok () ->
+             Keeper_chat_broadcast.chat_appended
+               ~keeper_name:meta.name
+               ~source:Keeper_surface_post.slack_label
+               ~content
+               ();
+             succeed Keeper_surface_post.slack_label ())))
 ;;
 
 let handle_surface_post_with_outcome

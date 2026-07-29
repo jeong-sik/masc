@@ -151,7 +151,7 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
        | Compact_policy.Rejected
            ( Manual
            , Exact_execution_terminal
-               { cause = Keeper_event_queue_state.Domain_invalid_output; _ } ) ->
+               { cause = Keeper_compaction_outcome.Domain_invalid_output; _ } ) ->
          ()
        | _ -> fail "invalid domain plan was not a typed source terminal");
       check int
@@ -173,7 +173,7 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
        | Compact_policy.Rejected
            ( Manual
            , Exact_execution_terminal
-               { cause = Keeper_event_queue_state.Exact_execution_failed; _ } ) ->
+               { cause = Keeper_compaction_outcome.Exact_execution_failed; _ } ) ->
          ()
        | _ -> fail "clockless OAS flow failure was not a generic source terminal");
       check int

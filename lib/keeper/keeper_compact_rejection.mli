@@ -7,13 +7,13 @@ type compaction_rejection =
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
   | Exact_flow_already_started
-  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
+  | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
   | No_eligible_history
   | Invalid_structural_evidence of
       Keeper_compaction_evidence.decode_error
-      * Keeper_event_queue_state.exact_execution_terminal
+      * Keeper_compaction_outcome.exact_execution_terminal
 
 val compaction_rejection_to_tag : compaction_rejection -> string
 val compaction_rejection_to_string : compaction_rejection -> string

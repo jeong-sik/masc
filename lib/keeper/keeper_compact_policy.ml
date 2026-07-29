@@ -324,7 +324,7 @@ let requested_messages_with_plan
               Error
                 (terminal_rejection
                    post_success_terminalizer
-                   Keeper_event_queue_state.Domain_invalid_output)
+                   Keeper_compaction_outcome.Domain_invalid_output)
             else
               Ok
                 { messages
@@ -452,9 +452,9 @@ let compact_for_request_typed_with
       reject (terminal_rejection requested.post_success_terminalizer cause)
     in
     if after_bytes = before_bytes
-    then reject_terminal Keeper_event_queue_state.Compaction_produced_no_reduction
+    then reject_terminal Keeper_compaction_outcome.Compaction_produced_no_reduction
     else if after_bytes > before_bytes
-    then reject_terminal Keeper_event_queue_state.Compaction_increased_checkpoint
+    then reject_terminal Keeper_compaction_outcome.Compaction_increased_checkpoint
     else (
       let after_messages = message_count compacted_ctx in
       let before_tool_use_count, before_tool_result_count =
@@ -519,7 +519,7 @@ let compact_for_request_typed_with
         (match
            Keeper_compaction_llm_summarizer.terminalize_post_success
              requested.post_success_terminalizer
-             Keeper_event_queue_state.Invalid_structural_evidence
+             Keeper_compaction_outcome.Invalid_structural_evidence
          with
          | Keeper_compaction_llm_summarizer.Terminalized terminal ->
            reject (Invalid_structural_evidence (error, terminal))

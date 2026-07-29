@@ -27,17 +27,17 @@ type in_lane_compaction =
 type source_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
-      { reason : Keeper_event_queue_state.no_compaction_reason }
+      { reason : Keeper_compaction_outcome.no_compaction_reason }
   | Requeue_after_context_compaction of in_lane_compaction
   | Pause_after_transcript_corruption of { detail : string }
   | Acknowledge_after_in_turn_handling
 
 let source_disposition_after_no_compaction_reason = function
-  | Keeper_event_queue_state.Exact_lane_unconfigured
-  | Keeper_event_queue_state.Exact_execution_terminal _ ->
+  | Keeper_compaction_outcome.Exact_lane_unconfigured
+  | Keeper_compaction_outcome.Exact_execution_terminal _ ->
     Acknowledge_after_in_turn_handling
-  | ( Keeper_event_queue_state.No_eligible_history
-    | Keeper_event_queue_state.Invalid_structural_source ) as reason ->
+  | ( Keeper_compaction_outcome.No_eligible_history
+    | Keeper_compaction_outcome.Invalid_structural_source ) as reason ->
     Follow_failure_route_after_no_compaction { reason }
 ;;
 
@@ -549,7 +549,7 @@ let append_provider_overflow_manifest
       (Keeper_id.Trace_id.to_string no_compaction.source.trace_id)
       no_compaction.source.generation
       no_compaction.source.turn_count
-      (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
+      (Keeper_compaction_outcome.no_compaction_reason_label no_compaction.reason);
     (* [No_compaction] is terminal evidence for an explicit manual-compaction
        operation, not successful handling of the product event whose provider
        turn overflowed. Deterministic no-progress reasons preserve the bounded

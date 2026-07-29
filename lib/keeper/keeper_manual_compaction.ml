@@ -394,10 +394,10 @@ let observe_manifest ~keeper_name = function
 ;;
 
 let preserve_no_compaction_after_final_admission_busy = function
-  | Keeper_event_queue_state.Exact_execution_terminal _ -> true
-  | Keeper_event_queue_state.Exact_lane_unconfigured
-  | Keeper_event_queue_state.No_eligible_history
-  | Keeper_event_queue_state.Invalid_structural_source -> false
+  | Keeper_compaction_outcome.Exact_execution_terminal _ -> true
+  | Keeper_compaction_outcome.Exact_lane_unconfigured
+  | Keeper_compaction_outcome.No_eligible_history
+  | Keeper_compaction_outcome.Invalid_structural_source -> false
 ;;
 
 let resolve_uncommitted = function
@@ -528,7 +528,7 @@ let run_admitted_with
           (match
              Keeper_post_turn.no_compaction_of_uncommitted_prepared
                ~cause:
-                 Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
+                 Keeper_compaction_outcome.Lifecycle_transition_failed_after_dispatch
                prepared
              |> resolve_uncommitted
            with

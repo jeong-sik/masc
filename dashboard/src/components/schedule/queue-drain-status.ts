@@ -8,9 +8,9 @@
 // (see the derivation in server_dashboard_http_runtime_info.ml):
 //
 //   · keeper_queue_evidence  — is the last execution's wake in the durable
-//     event-queue snapshot right now? matched_pending / matched_inflight mean
-//     "yes, awaiting / mid drain". not_found means "in neither queue" — but that
-//     is ALSO the normal post-completion state (a drained wake leaves the
+//     event-queue snapshot right now? matched_pending means "yes, awaiting
+//     drain". not_found means "not pending" — but that is ALSO the normal
+//     post-completion state (a drained wake leaves the
 //     queue), so not_found alone cannot mean "lost".
 //   · keeper_reaction_evidence — did the keeper actually react to the stimulus
 //     (consumed_ack / turn_started / stimulus recorded)? This disambiguates a
@@ -26,7 +26,6 @@ import type { StatusChipTone } from '../common/status-chip'
 
 export type QueueDrainState =
   | 'pending' // in the pending queue — awaiting drain
-  | 'inflight' // in the inflight queue — draining now
   | 'drained' // left the queue AND the keeper reacted — healthy completion
   | 'missed' // left the queue with no keeper reaction — dispatched then lost
   | 'read_error' // queue snapshot unreadable — drain state indeterminate (I/O)
@@ -53,11 +52,6 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
     label: '큐 대기',
     tone: 'info',
     title: 'wake가 keeper_event_queue pending에 있음 — 드레인 대기 중',
-  },
-  inflight: {
-    label: '드레인 중',
-    tone: 'info',
-    title: 'wake가 inflight — keeper가 지금 드레인 중',
   },
   drained: {
     label: '완료',
@@ -93,8 +87,6 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
   switch (queue.projection_status) {
     case 'matched_pending':
       return 'pending'
-    case 'matched_inflight':
-      return 'inflight'
     case 'read_error':
       return 'read_error'
     case 'unrecognized_receipt':
@@ -131,7 +123,6 @@ export function queueDrainStatusOf(
 // are not actionable, and a chip on every recurring row would be noise.
 const CALENDAR_VISIBLE: ReadonlySet<QueueDrainState> = new Set<QueueDrainState>([
   'pending',
-  'inflight',
   'missed',
   'read_error',
   'evidence_invalid',

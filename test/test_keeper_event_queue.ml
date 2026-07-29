@@ -972,8 +972,7 @@ let () =
             ("message", `String "conflicting message") :: fields)))
     ~expected_detail:None;
 
-  (* --- durable snapshot load collapses legacy duplicates that differ only by
-         arrival time. --- *)
+  (* --- Durable snapshot load preserves one row per exact stimulus identity. --- *)
   let base_path = temp_dir "keeper-event-queue-load-dedup" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
@@ -1004,7 +1003,7 @@ let () =
       Keeper_event_queue_persistence.persist
         ~base_path ~keeper_name (enqueue empty bootstrap_stim);
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 1);
-      (* Genuine-ack path: ack_consumed drains inflight AND pending snapshot. *)
+      (* Genuine-ack path drains the acknowledged pending source. *)
       (match
          Keeper_event_queue_persistence.ack_consumed
            ~base_path
@@ -1017,23 +1016,19 @@ let () =
          after the fix the pending snapshot is drained. *)
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
-  (* Removed with the lease model: Genuine consumed-ack handles the realistic mixed state: pending 
-     This block drove claim/settle, which #25969 replaced with peek/ack;
-     no caller can obtain a lease and the state never carries one. *)
-
-  (* --- durable fleet summary: health can see pending, in-flight, and oldest age. --- *)
+  (* --- durable fleet summary: health can see pending work and oldest age. --- *)
   let base_path = temp_dir "keeper-event-queue-fleet-summary" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
       let pending_keeper = "keeper-event-queue-pending-summary-test" in
-      let inflight_keeper = "keeper-event-queue-inflight-summary-test" in
+      let runnable_keeper = "keeper-event-queue-runnable-summary-test" in
       let old_pending = { board_stim with post_id = "old-pending"; arrived_at = 10.0 } in
       let newer_pending =
         { bootstrap_stim with post_id = "newer-pending"; arrived_at = 25.0 }
       in
-      let inflight =
-        { ghost_stim with post_id = "old-inflight"; arrived_at = 5.0 }
+      let runnable_pending =
+        { ghost_stim with post_id = "runnable-pending"; arrived_at = 5.0 }
       in
       Keeper_event_queue_persistence.persist
         ~base_path
@@ -1041,12 +1036,8 @@ let () =
         (empty |> fun q -> enqueue q old_pending |> fun q -> enqueue q newer_pending);
       Keeper_event_queue_persistence.persist
         ~base_path
-        ~keeper_name:inflight_keeper
-        (enqueue empty inflight);
-      (* The stimulus persisted above used to be claimed here so the fleet
-         summary would also report an in-flight row. No caller can claim since
-         #25969 moved production to peek/ack, and the in-flight projection is
-         always empty; the pending and oldest-age assertions are unaffected. *)
+        ~keeper_name:runnable_keeper
+        (enqueue empty runnable_pending);
       let noise_keeper_dir =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
       in
@@ -1071,11 +1062,7 @@ let () =
         "keeper_count excludes snapshotless runtime dirs"
         2
         (int_field "keeper_count" json);
-      (* The third stimulus used to be claimed, so it counted as in-flight
-         rather than pending. Nothing can claim since #25969 moved production to
-         peek/ack, so it stays pending and inflight_count is structurally 0. *)
       Alcotest.(check int) "pending_count" 3 (int_field "pending_count" json);
-      Alcotest.(check int) "inflight_count" 0 (int_field "inflight_count" json);
       Alcotest.(check int) "total_count" 3 (int_field "total_count" json);
       Alcotest.(check (float 0.001))
         "oldest_age_seconds"
@@ -1105,19 +1092,12 @@ let () =
         "paused/dead work requires explicit operator action"
         true
         (bool_field "operator_action_required" json);
-      (* Both keepers now report pending work: the stimulus that used to be
-         claimed on the second keeper stays pending, so no keeper reports
-         in-flight. *)
       Alcotest.(check int)
         "pending_by_keeper count"
         2
         (List.length (list_field "pending_by_keeper" json));
-      Alcotest.(check int)
-        "inflight_by_keeper count"
-        0
-        (List.length (list_field "inflight_by_keeper" json));
       let pending_summary = keeper_summary pending_keeper json in
-      let inflight_summary = keeper_summary inflight_keeper json in
+      let runnable_summary = keeper_summary runnable_keeper json in
       Alcotest.(check int)
         "pending keeper pending"
         2
@@ -1127,21 +1107,17 @@ let () =
         "paused_dead"
         (string_field "owner_lifecycle" pending_summary);
       Alcotest.(check int)
-        "inflight keeper inflight"
-        0
-        (int_field "inflight_count" inflight_summary);
-      Alcotest.(check int)
-        "formerly-inflight keeper reports its stimulus as pending"
+        "runnable keeper reports its stimulus as pending"
         1
-        (int_field "pending_count" inflight_summary);
+        (int_field "pending_count" runnable_summary);
       Alcotest.(check string)
-        "inflight keeper lifecycle"
+        "runnable keeper lifecycle"
         "runnable"
-        (string_field "owner_lifecycle" inflight_summary);
+        (string_field "owner_lifecycle" runnable_summary);
       Alcotest.(check (float 0.001))
-        "inflight keeper oldest age"
+        "runnable keeper oldest age"
         25.0
-        (float_field "oldest_age_seconds" inflight_summary);
+        (float_field "oldest_age_seconds" runnable_summary);
       let retained_disabled_json =
         Keeper_event_queue_persistence.fleet_summary_json
           ~now:30.0
@@ -1267,10 +1243,6 @@ let () =
     | Error msg -> Alcotest.fail ("meta parse failed: " ^ msg)
   in
 
-  (* Removed with the lease model: registry integration: CAS-successful enqueue persists and regist
-     This block drove claim/settle, which #25969 replaced with peek/ack;
-     no caller can obtain a lease and the state never carries one. *)
-
   (* --- registry identity barrier: [base] and [base/.masc] must address one
      live atomic and the same durable owner. Two registrations followed by one
      enqueue through each alias used to leave two live entries whose snapshots
@@ -1354,18 +1326,6 @@ let () =
            ~base_path
            keeper_name
          |> queue_post_ids));
-
-  (* Removed with the lease model: registry typed board lease: turn digest consumes every queued bo
-     This block drove claim/settle, which #25969 replaced with peek/ack;
-     no caller can obtain a lease and the state never carries one. *)
-
-  (* Removed with the lease model: registry unavailable window: enqueue persists before register
-     This block drove claim/settle, which #25969 replaced with peek/ack;
-     no caller can obtain a lease and the state never carries one. *)
-
-  (* Removed with the lease model: critical delivery: durable enqueue succeeds before registration 
-     This block drove claim/settle, which #25969 replaced with peek/ack;
-     no caller can obtain a lease and the state never carries one. *)
 
   (* --- critical delivery: one approval id cannot commit contradictory
      decisions across an acknowledgement retry. --- *)
@@ -1513,7 +1473,3 @@ let () =
       with
       | Error msg -> assert (String.length msg > 0)
       | Ok () -> Alcotest.fail "durable enqueue overwrote a corrupt snapshot");
-
-  (* Removed with the lease model: crash recovery: consumed stimuli can be put back for replay
-     This block drove claim/settle, which #25969 replaced with peek/ack;
-     no caller can obtain a lease and the state never carries one. *)

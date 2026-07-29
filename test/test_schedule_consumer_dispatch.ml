@@ -538,8 +538,6 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
       (queue_evidence |> member "matched_payload_digest" |> to_string);
     check int "queue evidence pending count" 1
       (queue_evidence |> member "pending_count" |> to_int);
-    check int "queue evidence inflight count" 0
-      (queue_evidence |> member "inflight_count" |> to_int);
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
 ;;
@@ -985,9 +983,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
       (Schedule_domain.payload_digest request.payload)
       (queue_evidence |> member "execution_payload_digest" |> to_string);
     check int "stale occurrence still visible as pending" 1
-      (queue_evidence |> member "pending_count" |> to_int);
-    check int "queue evidence inflight count" 0
-      (queue_evidence |> member "inflight_count" |> to_int)
+      (queue_evidence |> member "pending_count" |> to_int)
 ;;
 
 let test_dashboard_live_supported_non_terminal_evidence_matches_supported_request () =

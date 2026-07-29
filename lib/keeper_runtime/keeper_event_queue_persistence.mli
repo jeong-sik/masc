@@ -5,8 +5,7 @@
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v2.jsonl] WAL are accepted. Retired snapshot, WAL,
-    receipt, and sidecar paths are not inspected or treated as queue authority. *)
+    [event-queue-transitions-v2.jsonl] WAL are queue authority. *)
 
 type owner_identity
 type owner_identity_error
@@ -125,9 +124,8 @@ type snapshot_read_error =
   ; message : string
   }
 
-type snapshot_pair_with_errors =
+type snapshot_with_errors =
   { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
   ; read_errors : snapshot_read_error list
   }
 
@@ -138,13 +136,13 @@ type snapshot_discovery =
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
 val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
-val load_snapshot_pair_with_errors :
-  base_path:string -> keeper_name:string -> snapshot_pair_with_errors
+val load_snapshot_with_errors :
+  base_path:string -> keeper_name:string -> snapshot_with_errors
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Strict state read used by tests and operator projection. A malformed
-    current envelope or stale/unknown schema is an [Error], never an empty
+    current envelope or unknown schema is an [Error], never an empty
     queue. Committed current-schema WAL rows are replayed idempotently. A row
     already represented by the durable projected witness is compacted; an
     unprojected source-bearing row remains authoritative until the reaction

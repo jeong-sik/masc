@@ -28,7 +28,7 @@ let ensure_registered_keeper
 ;;
 
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
-  Keeper_event_queue_state.
+  Keeper_compaction_outcome.
     { cause
     ; slot_id
     ; call_id
@@ -124,7 +124,7 @@ let test_compaction_rejection_tag_is_stable () =
     Post_turn.Compaction_rejected
       (Compact_policy.Invalid_structural_evidence
          ( Keeper_compaction_evidence.No_messages_compacted
-         , exact_terminal Keeper_event_queue_state.Invalid_structural_evidence ))
+         , exact_terminal Keeper_compaction_outcome.Invalid_structural_evidence ))
   in
   check string
     "categorical tag excludes evidence detail"
@@ -148,14 +148,14 @@ let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
     bool
     "No_eligible_history remains replayable after final admission Busy"
     false
-    (preserves Keeper_event_queue_state.No_eligible_history);
+    (preserves Keeper_compaction_outcome.No_eligible_history);
   check
     bool
     "post-dispatch exact terminal remains source-bound after final admission Busy"
     true
     (preserves
-       (Keeper_event_queue_state.Exact_execution_terminal
-          (exact_terminal Keeper_event_queue_state.Exact_execution_failed)))
+       (Keeper_compaction_outcome.Exact_execution_terminal
+          (exact_terminal Keeper_compaction_outcome.Exact_execution_failed)))
 ;;
 
 let test_exact_no_compaction_acknowledges_without_persistence_facade () =
@@ -167,13 +167,13 @@ let test_exact_no_compaction_acknowledges_without_persistence_facade () =
        match disposition reason with
        | Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
        | _ -> fail "exact terminal no-compaction did not acknowledge its source")
-    [ Keeper_event_queue_state.Exact_lane_unconfigured
-    ; Keeper_event_queue_state.Exact_execution_terminal
-        (exact_terminal Keeper_event_queue_state.Exact_execution_failed)
+    [ Keeper_compaction_outcome.Exact_lane_unconfigured
+    ; Keeper_compaction_outcome.Exact_execution_terminal
+        (exact_terminal Keeper_compaction_outcome.Exact_execution_failed)
     ];
-  match disposition Keeper_event_queue_state.No_eligible_history with
+  match disposition Keeper_compaction_outcome.No_eligible_history with
   | Masc.Keeper_unified_turn.Follow_failure_route_after_no_compaction
-      { reason = Keeper_event_queue_state.No_eligible_history } ->
+      { reason = Keeper_compaction_outcome.No_eligible_history } ->
     ()
   | _ -> fail "pre-dispatch no-compaction lost its ordinary failure route"
 ;;
@@ -292,7 +292,7 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
              (match
                 Summarizer.terminalize_post_success
                   terminalizer
-                  Keeper_event_queue_state.Domain_invalid_output
+                  Keeper_compaction_outcome.Domain_invalid_output
               with
               | Summarizer.Terminalized _ -> ()
               | _ -> failf "%s could not close its exact attempt" name))
@@ -452,7 +452,7 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
        | Error
            (Post_turn.No_compaction
               { source
-              ; reason = Keeper_event_queue_state.Exact_lane_unconfigured
+              ; reason = Keeper_compaction_outcome.Exact_lane_unconfigured
               }) ->
          check string
            "terminal evidence retains checkpoint trace"
@@ -757,8 +757,8 @@ let test_prepare_commit_source_cas () =
      with
      | Post_turn.Already_rejected
          { reason =
-             Keeper_event_queue_state.Exact_execution_terminal
-               { cause = Keeper_event_queue_state.Checkpoint_source_changed
+             Keeper_compaction_outcome.Exact_execution_terminal
+               { cause = Keeper_compaction_outcome.Checkpoint_source_changed
                ; slot_id
                ; call_id
                }
@@ -1023,7 +1023,7 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
            , Invalid_structural_evidence
                ( Keeper_compaction_evidence.Invalid_transition
                    (Keeper_compaction_evidence.Messages, 0, observed_after_message_count)
-               , { cause = Keeper_event_queue_state.Invalid_structural_evidence
+               , { cause = Keeper_compaction_outcome.Invalid_structural_evidence
                  ; slot_id
                  ; call_id
                  } ) ) ->
@@ -1092,11 +1092,11 @@ let test_post_dispatch_non_reducing_output_is_terminal () =
          same failure. *)
       run_case
         ~name:"invalid-boundary-plan"
-        ~expected_cause:Keeper_event_queue_state.Domain_invalid_output
+        ~expected_cause:Keeper_compaction_outcome.Domain_invalid_output
         invalid_boundary_response;
       run_case
         ~name:"larger-checkpoint"
-        ~expected_cause:Keeper_event_queue_state.Compaction_increased_checkpoint
+        ~expected_cause:Keeper_compaction_outcome.Compaction_increased_checkpoint
         (summarize_response (String.make 20_000 'x')))
 ;;
 

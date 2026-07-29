@@ -73,9 +73,9 @@ type post_success_phase =
   | Installed_pending_valid of post_success_completion
   | Committed of (unit, string) result
   | Reject_claimed of
-      Keeper_event_queue_state.exact_execution_terminal
+      Keeper_compaction_outcome.exact_execution_terminal
       * post_success_completion
-  | Rejected of Keeper_event_queue_state.exact_execution_terminal
+  | Rejected of Keeper_compaction_outcome.exact_execution_terminal
 
 type post_success_terminalizer =
   { attempt_observation : attempt_observation
@@ -86,7 +86,7 @@ type post_success_terminalizer =
   }
 
 type post_success_terminalization =
-  | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalized of Keeper_compaction_outcome.exact_execution_terminal
   | Terminalization_commit_in_progress of unit Eio.Promise.t
   | Terminalization_already_committed
   | Terminalization_invariant_failed of string
@@ -95,14 +95,14 @@ type post_success_commit_claim =
   | Commit_claim_acquired
   | Commit_claim_in_progress of unit Eio.Promise.t
   | Commit_claim_already_committed
-  | Commit_claim_rejected of Keeper_event_queue_state.exact_execution_terminal
+  | Commit_claim_rejected of Keeper_compaction_outcome.exact_execution_terminal
 
 type 'a post_success_commit_boundary =
   | Post_success_commit_result of 'a
   | Post_success_commit_in_progress of unit Eio.Promise.t
   | Post_success_commit_already_committed
   | Post_success_commit_rejected of
-      Keeper_event_queue_state.exact_execution_terminal
+      Keeper_compaction_outcome.exact_execution_terminal
 
 type post_success_phase_snapshot =
   | Phase_open
@@ -133,7 +133,7 @@ type summarization_failure =
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
   | Exact_flow_already_started
-  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
+  | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
   | Invalid_plan
 
 type summarizer =
@@ -763,7 +763,7 @@ let observe_flow_attempt_receipt
 ;;
 
 let terminal_of_observation cause (observation : attempt_observation) =
-  Keeper_event_queue_state.
+  Keeper_compaction_outcome.
     { cause
     ; slot_id = observation.slot_id
     ; call_id = observation.call_id
@@ -785,7 +785,7 @@ let make_post_success_completion () =
 ;;
 
 let terminal_for terminalizer cause =
-  Keeper_event_queue_state.
+  Keeper_compaction_outcome.
     { cause
     ; slot_id = terminalizer.attempt_observation.slot_id
     ; call_id = terminalizer.attempt_observation.call_id
@@ -802,7 +802,7 @@ let with_disposition terminalizer callback =
 
 let finish_rejection
       terminalizer
-      (terminal : Keeper_event_queue_state.exact_execution_terminal)
+      (terminal : Keeper_compaction_outcome.exact_execution_terminal)
       completion
   =
   Eio.Cancel.protect
@@ -1259,7 +1259,7 @@ let execute_prepared_lane_current
     Error
       (Exact_execution_terminal
          (terminal_of_observation
-            Keeper_event_queue_state.Exact_execution_cancelled
+            Keeper_compaction_outcome.Exact_execution_cancelled
             observation))
   | `Flow
       (Error
@@ -1310,7 +1310,7 @@ let execute_prepared_lane_current
     Error
       (Exact_execution_terminal
          (terminal_of_observation
-            Keeper_event_queue_state.Exact_execution_failed
+            Keeper_compaction_outcome.Exact_execution_failed
             observation))
   | `Flow
       (Error
@@ -1337,7 +1337,7 @@ let execute_prepared_lane_current
     Error
       (Exact_execution_terminal
          (terminal_of_observation
-            Keeper_event_queue_state.Domain_invalid_output
+            Keeper_compaction_outcome.Domain_invalid_output
             observation))
   | `Flow (Ok validated) ->
     let flow_success = validated.transport_success in

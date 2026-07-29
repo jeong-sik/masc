@@ -94,7 +94,7 @@ val observe_manifest : keeper_name:string -> (unit, string) result -> unit
 
 module For_testing : sig
   val preserve_no_compaction_after_final_admission_busy
-    :  Keeper_event_queue_state.no_compaction_reason
+    :  Keeper_compaction_outcome.no_compaction_reason
     -> bool
 
   val checkpoint_installation_auxiliary_to_json :

@@ -306,7 +306,7 @@ let run_keeper_cycle_with
        Log.Keeper.info
          ~keeper_name:meta_after_triage.name
          "manual compaction reached typed terminal: %s"
-         (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
+         (Keeper_compaction_outcome.no_compaction_reason_label no_compaction.reason);
        Manual_compaction_not_applied { meta = meta_after_triage; no_compaction }
      | `Applied (success : Keeper_manual_compaction.success) ->
        Manual_compaction_applied

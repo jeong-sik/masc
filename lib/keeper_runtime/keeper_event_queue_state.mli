@@ -5,46 +5,6 @@
     persistence supplies the atomic file boundary and publishes [pending] into
     the live registry only after a durable commit. *)
 
-type exact_execution_terminal_cause =
-  | Exact_execution_failed
-  | Exact_execution_cancelled
-  | Domain_invalid_output
-  | Compaction_produced_no_reduction
-  | Compaction_increased_checkpoint
-  | Invalid_structural_evidence
-  | Invalid_structural_source_after_dispatch
-  | Commit_admission_unavailable
-  | Lifecycle_transition_failed_after_dispatch
-  | Checkpoint_source_changed
-  | Checkpoint_persistence_failed
-
-type exact_execution_terminal =
-  { cause : exact_execution_terminal_cause
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  }
-(** One OAS-owned affine call that crossed, or can no longer safely be assumed
-    not to have crossed, the dispatch boundary. This is in-process compaction
-    evidence; the event queue does not claim to persist it. *)
-
-type no_compaction_reason =
-  | No_eligible_history
-  | Invalid_structural_source
-  | Exact_lane_unconfigured
-      (** The configured runtime has no exact-output lane for compaction. This
-          is an operator-actionable precondition failure tied to the durable
-          checkpoint source, not a stochastic provider failure. *)
-  | Exact_execution_terminal of exact_execution_terminal
-      (** Exact-output execution is affine and terminal. The typed cause plus
-          OAS slot/call identity forbids a second attempt for this source. *)
-
-type no_compaction =
-  { source : Keeper_checkpoint_ref.t
-  ; reason : no_compaction_reason
-  }
-
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
@@ -83,11 +43,6 @@ type accepted_source_terminal =
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
-
-val no_compaction_reason_label : no_compaction_reason -> string
-val no_compaction_reason_to_string : no_compaction_reason -> string
-val exact_execution_terminal_cause_label : exact_execution_terminal_cause -> string
-val exact_execution_terminal_to_string : exact_execution_terminal -> string
 
 type transition =
   | Cancel_accepted of accepted_cancellation

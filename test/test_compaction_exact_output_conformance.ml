@@ -686,7 +686,7 @@ let test_semantic_exhaustion_terminalizes_final_bound () =
      Alcotest.(check bool)
        "semantic exhaustion is domain-invalid"
        true
-       (terminal.cause = Keeper_event_queue_state.Domain_invalid_output);
+       (terminal.cause = Keeper_compaction_outcome.Domain_invalid_output);
      Alcotest.(check string) "final bound is terminalized" final_slot terminal.slot_id
    | Error _ -> Alcotest.fail "semantic exhaustion returned the wrong typed failure"
    | Ok _ -> Alcotest.fail "semantic exhaustion unexpectedly succeeded");
@@ -732,7 +732,7 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
   Alcotest.(check bool)
     "generic terminal does not claim receipt phase"
     true
-    (terminal.cause = Keeper_event_queue_state.Exact_execution_failed);
+    (terminal.cause = Keeper_compaction_outcome.Exact_execution_failed);
   Alcotest.(check string) "generic terminal retains bound slot" first_slot terminal.slot_id;
   Alcotest.(check int) "failed request posts once" 1 (F.post_count failed);
   Alcotest.(check int) "terminal flow failure never advances" 0 (F.post_count successor)
@@ -799,7 +799,7 @@ let test_cancellation_preserves_lifecycle_authorized_identity () =
   Alcotest.(check bool)
     "cancellation terminal is phase-neutral"
     true
-    (terminal.cause = Keeper_event_queue_state.Exact_execution_cancelled);
+    (terminal.cause = Keeper_compaction_outcome.Exact_execution_cancelled);
   Alcotest.(check (list string))
     "only first identity was lifecycle-authorized"
     [ first_slot ]
@@ -868,7 +868,7 @@ let test_admission_rejection_preserves_prior_authorized_identity () =
   Alcotest.(check bool)
     "cancellation remains typed"
     true
-    (terminal.cause = Keeper_event_queue_state.Exact_execution_cancelled);
+    (terminal.cause = Keeper_compaction_outcome.Exact_execution_cancelled);
   Alcotest.(check (list string))
     "only admitted candidates reach source authority"
     [ first_slot; cancelled_slot ]
@@ -917,7 +917,7 @@ let test_post_success_commit_claim_blocks_reject () =
     match
       C.terminalize_post_success
         terminalizer
-        Keeper_event_queue_state.Commit_admission_unavailable
+        Keeper_compaction_outcome.Commit_admission_unavailable
     with
     | C.Terminalization_commit_in_progress waiter -> waiter
     | C.Terminalized _
@@ -939,7 +939,7 @@ let test_post_success_commit_claim_blocks_reject () =
   (match
      C.terminalize_post_success
        terminalizer
-       Keeper_event_queue_state.Checkpoint_persistence_failed
+       Keeper_compaction_outcome.Checkpoint_persistence_failed
    with
    | C.Terminalization_already_committed -> ()
    | C.Terminalized _

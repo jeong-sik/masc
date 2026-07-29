@@ -168,7 +168,7 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
 }
 
 export interface DashboardScheduledAutomationKeeperQueueEvidence {
-  projection_status: 'matched_pending' | 'matched_inflight' | 'not_found' | 'read_error' | 'unrecognized_receipt'
+  projection_status: 'matched_pending' | 'not_found' | 'read_error' | 'unrecognized_receipt'
   source?: string
   queue?: string
   stimulus?: string
@@ -176,7 +176,6 @@ export interface DashboardScheduledAutomationKeeperQueueEvidence {
   schedule_id?: string
   post_id?: string
   pending_count?: number
-  inflight_count?: number
   matched_bucket?: string
   matched_post_id?: string
   matched_schedule_id?: string | null
@@ -292,7 +291,6 @@ export interface DashboardScheduledAutomation {
 
 export type DashboardKeeperWaitingSource =
   | 'event_queue_pending'
-  | 'event_queue_inflight'
   | 'chat_queue_pending'
   | 'chat_queue_inflight'
   | 'chat_queue_recovery_required'
@@ -309,7 +307,6 @@ export type DashboardKeeperWaitingSource =
 
 export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'event_queue_pending',
-  'event_queue_inflight',
   'chat_queue_pending',
   'chat_queue_inflight',
   'chat_queue_recovery_required',

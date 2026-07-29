@@ -7,13 +7,13 @@ type compaction_rejection =
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
   | Exact_flow_already_started
-  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
+  | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
   | No_eligible_history
   | Invalid_structural_evidence of
       Keeper_compaction_evidence.decode_error
-      * Keeper_event_queue_state.exact_execution_terminal
+      * Keeper_compaction_outcome.exact_execution_terminal
 
 let compaction_rejection_to_tag = function
   | Exact_lane_unconfigured -> "exact_lane_unconfigured"
@@ -25,7 +25,7 @@ let compaction_rejection_to_tag = function
   | Exact_execution_authority_rejected -> "exact_execution_authority_rejected"
   | Exact_flow_already_started -> "exact_flow_already_started"
   | Exact_execution_terminal terminal ->
-    Keeper_event_queue_state.exact_execution_terminal_cause_label terminal.cause
+    Keeper_compaction_outcome.exact_execution_terminal_cause_label terminal.cause
   | Invalid_compaction_plan -> "invalid_compaction_plan"
   | Invalid_structure error ->
     "invalid_structure:" ^ Keeper_compaction_unit.show_structural_error error
@@ -39,9 +39,9 @@ let compaction_rejection_to_string = function
     ^ ":"
     ^ Keeper_compaction_evidence.decode_error_to_string error
     ^ ":"
-    ^ Keeper_event_queue_state.exact_execution_terminal_to_string terminal
+    ^ Keeper_compaction_outcome.exact_execution_terminal_to_string terminal
   | Exact_execution_terminal terminal ->
-    Keeper_event_queue_state.exact_execution_terminal_to_string terminal
+    Keeper_compaction_outcome.exact_execution_terminal_to_string terminal
   | reason -> compaction_rejection_to_tag reason
 ;;
 

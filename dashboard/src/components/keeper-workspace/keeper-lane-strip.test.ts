@@ -16,7 +16,7 @@ function keeperFixture(overrides: Partial<Keeper> = {}): Keeper {
 
 function inventoryFixture(): DashboardKeeperWaitingInventory {
   return {
-    schema: 'masc.dashboard.keeper_waiting_inventory.v2',
+    schema: 'masc.dashboard.keeper_waiting_inventory.v3',
     source: 'server_keeper_waiting_inventory',
     generated_at: '2026-07-07T09:00:00Z',
     supported_states: ['idle', 'busy', 'waiting', 'deferred'],
@@ -85,7 +85,7 @@ function truncatedInventoryFixture(): DashboardKeeperWaitingInventory {
     detail: { receipt_id: `chatq_${i}` },
   }))
   return {
-    schema: 'masc.dashboard.keeper_waiting_inventory.v2',
+    schema: 'masc.dashboard.keeper_waiting_inventory.v3',
     source: 'server_keeper_waiting_inventory',
     generated_at: '2026-07-21T07:38:06Z',
     supported_states: ['idle', 'busy', 'waiting', 'deferred'],

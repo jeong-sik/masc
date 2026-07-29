@@ -149,7 +149,7 @@ type in_lane_compaction =
 type source_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
-      { reason : Keeper_event_queue_state.no_compaction_reason }
+      { reason : Keeper_compaction_outcome.no_compaction_reason }
   | Requeue_after_context_compaction of in_lane_compaction
   | Pause_after_transcript_corruption of { detail : string }
   | Acknowledge_after_in_turn_handling
@@ -181,7 +181,7 @@ type source_disposition =
     counters, and heartbeat freshness. *)
 
 val source_disposition_after_no_compaction_reason
-  :  Keeper_event_queue_state.no_compaction_reason
+  :  Keeper_compaction_outcome.no_compaction_reason
   -> source_disposition
 (** Compiler-checked partition of no-compaction outcomes. Missing-lane,
     effect-boundary, and domain-invalid outcomes acknowledge the selected

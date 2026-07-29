@@ -36,9 +36,9 @@ type compaction_recovery =
   ; turn_generation : int
   } [@@warning "-69"]
 
-type no_compaction = Keeper_event_queue_state.no_compaction =
+type no_compaction = Keeper_compaction_outcome.no_compaction =
   { source : Keeper_checkpoint_ref.t
-  ; reason : Keeper_event_queue_state.no_compaction_reason
+  ; reason : Keeper_compaction_outcome.no_compaction_reason
   }
 
 type compaction_recovery_error =
@@ -171,7 +171,7 @@ end
     receives the canonical completion waiter/evidence and must not redispatch
     the provider. *)
 val no_compaction_of_uncommitted_prepared :
-  ?cause:Keeper_event_queue_state.exact_execution_terminal_cause ->
+  ?cause:Keeper_compaction_outcome.exact_execution_terminal_cause ->
   prepared_compaction -> uncommitted_prepared_outcome
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed

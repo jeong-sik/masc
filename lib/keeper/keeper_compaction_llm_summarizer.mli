@@ -12,7 +12,7 @@ type completed_plan
 type post_success_terminalizer
 
 type post_success_terminalization =
-  | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalized of Keeper_compaction_outcome.exact_execution_terminal
   | Terminalization_commit_in_progress of unit Eio.Promise.t
   | Terminalization_already_committed
   | Terminalization_invariant_failed of string
@@ -21,14 +21,14 @@ type post_success_commit_claim =
   | Commit_claim_acquired
   | Commit_claim_in_progress of unit Eio.Promise.t
   | Commit_claim_already_committed
-  | Commit_claim_rejected of Keeper_event_queue_state.exact_execution_terminal
+  | Commit_claim_rejected of Keeper_compaction_outcome.exact_execution_terminal
 
 type 'a post_success_commit_boundary =
   | Post_success_commit_result of 'a
   | Post_success_commit_in_progress of unit Eio.Promise.t
   | Post_success_commit_already_committed
   | Post_success_commit_rejected of
-      Keeper_event_queue_state.exact_execution_terminal
+      Keeper_compaction_outcome.exact_execution_terminal
 
 type post_success_phase_snapshot =
   | Phase_open
@@ -70,7 +70,7 @@ type summarization_failure =
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
   | Exact_flow_already_started
-  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
+  | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
   | Invalid_plan
 
 type summarizer =
@@ -148,12 +148,12 @@ val mark_post_success_checkpoint_installed :
 
 val terminalize_claimed_commit :
   post_success_terminalizer ->
-  Keeper_event_queue_state.exact_execution_terminal_cause ->
+  Keeper_compaction_outcome.exact_execution_terminal_cause ->
   post_success_terminalization
 
 val terminalize_post_success
   :  post_success_terminalizer
-  -> Keeper_event_queue_state.exact_execution_terminal_cause
+  -> Keeper_compaction_outcome.exact_execution_terminal_cause
   -> post_success_terminalization
 (** Close the process-local post-success phase with the retained OAS attempt
     identity. The first call atomically owns the canonical cause and releases

@@ -27,9 +27,8 @@ type reaction_decode_error = Unknown_reaction_kind of string
 
 module Event_id_set = Set.Make (String)
 
-(* The storage namespace and row schema advance together.  A generation hard
-   cut never scans or writes an older namespace, so retired data cannot remain
-   on the exact-evidence hot path or become a second authority. *)
+(* The storage namespace and row schema advance together. Readers inspect
+   exactly this namespace, keeping exact evidence under one authority. *)
 let storage_generation = "v5"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
@@ -1186,7 +1185,6 @@ type durable_event_queue_health =
   { keeper_name : string
   ; durable_event_queue_count : int
   ; durable_event_queue_pending_count : int
-  ; durable_event_queue_inflight_count : int
   ; immediate_count : int
   ; oldest_arrived_at : float option
   ; newest_arrived_at : float option
@@ -1216,14 +1214,9 @@ let payload_kind_count_pairs stimuli =
 
 let durable_event_queue_health ~base_path ~keeper_name =
   let snapshot =
-    Keeper_event_queue_persistence.load_snapshot_pair_with_errors ~base_path ~keeper_name
+    Keeper_event_queue_persistence.load_snapshot_with_errors ~base_path ~keeper_name
   in
-  let queue =
-    Keeper_event_queue.prepend_list
-      (Keeper_event_queue.to_list snapshot.inflight)
-      snapshot.pending
-    |> Keeper_event_queue.dedup_by_identity
-  in
+  let queue = snapshot.pending in
   let stimuli = Keeper_event_queue.to_list queue in
   let oldest_arrived_at, newest_arrived_at =
     List.fold_left
@@ -1250,7 +1243,6 @@ let durable_event_queue_health ~base_path ~keeper_name =
   { keeper_name
   ; durable_event_queue_count = Keeper_event_queue.length queue
   ; durable_event_queue_pending_count = Keeper_event_queue.length snapshot.pending
-  ; durable_event_queue_inflight_count = Keeper_event_queue.length snapshot.inflight
   ; immediate_count
   ; oldest_arrived_at
   ; newest_arrived_at
@@ -1290,8 +1282,6 @@ let durable_event_queue_health_json ~now ~stale_after_sec health =
     ; "durable_event_queue_count", `Int health.durable_event_queue_count
     ; ( "durable_event_queue_pending_count"
       , `Int health.durable_event_queue_pending_count )
-    ; ( "durable_event_queue_inflight_count"
-      , `Int health.durable_event_queue_inflight_count )
     ; "immediate_count", `Int health.immediate_count
     ; "oldest_arrived_at_unix", float_opt_to_json health.oldest_arrived_at
     ; "oldest_age_sec", age_opt_to_json health.oldest_arrived_at
@@ -1565,7 +1555,6 @@ let unavailable_fleet_summary_json () =
     ; "pending_stimulus_count", `Int 0
     ; "durable_event_queue_count", `Int 0
     ; "durable_event_queue_pending_count", `Int 0
-    ; "durable_event_queue_inflight_count", `Int 0
     ; "durable_event_queue_discovered_keeper_count", `Int 0
     ; "durable_event_queue_discovered_keeper_names", `List []
     ; "durable_event_queue_discovery_error", `Null
@@ -1620,12 +1609,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   let durable_event_queue_pending_count =
     List.fold_left
       (fun acc summary -> acc + summary.durable_event_queue_pending_count)
-      0
-      durable_event_queue_summaries
-  in
-  let durable_event_queue_inflight_count =
-    List.fold_left
-      (fun acc summary -> acc + summary.durable_event_queue_inflight_count)
       0
       durable_event_queue_summaries
   in
@@ -1826,7 +1809,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "pending_stimulus_count", `Int pending_count
     ; "durable_event_queue_count", `Int durable_event_queue_count
     ; "durable_event_queue_pending_count", `Int durable_event_queue_pending_count
-    ; "durable_event_queue_inflight_count", `Int durable_event_queue_inflight_count
     ; ( "durable_event_queue_discovered_keeper_count"
       , `Int (List.length durable_event_queue_discovery.keeper_names) )
     ; ( "durable_event_queue_discovered_keeper_names"

@@ -556,6 +556,55 @@ let test_masc_root_dir_with_cluster_nested () =
   let result = Workspace_utils.masc_root_dir cfg in
   check string "nested with cluster" "/a/b/c/.masc/clusters/prod" result
 
+let test_memory_root_initialization_requires_current_marker () =
+  let scratch = Filename.temp_dir "workspace-utils-root-state-memory" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
+      Workspace_utils.write_json cfg
+        (Workspace_utils.state_path cfg)
+        (`Assoc [ "protocol_version", `String "retired" ]);
+      check bool "scoped state is not a root marker" false
+        (Workspace_utils.root_is_initialized cfg);
+      Workspace_utils.write_json cfg
+        (Workspace_utils.root_state_path cfg)
+        (`Assoc [ "protocol_version", `String "current" ]);
+      check bool "current root marker initializes root" true
+        (Workspace_utils.root_is_initialized cfg))
+
+let test_filesystem_root_initialization_requires_current_marker () =
+  Eio_main.run @@ fun env ->
+  let scratch = Filename.temp_dir "workspace-utils-root-state-filesystem" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let root = Filename.concat scratch Common.masc_dirname in
+      Unix.mkdir root 0o700;
+      let backend_config : Backend_types.config =
+        { base_path = root
+        ; node_id = "test-node"
+        ; cluster_name = "default"
+        ; pubsub_max_messages = 1000
+        }
+      in
+      let cfg : Workspace_utils.config =
+        { base_path = scratch
+        ; workspace_path = scratch
+        ; lock_expiry_minutes = 30
+        ; backend_config
+        ; backend =
+            Workspace_utils.FileSystem
+              (Backend.FileSystem.create ~fs:(Eio.Stdenv.fs env) backend_config)
+        }
+      in
+      write_file (Workspace_utils.state_path cfg) "{}";
+      check bool "scoped state is not a root marker" false
+        (Workspace_utils.root_is_initialized cfg);
+      write_file (Workspace_utils.root_state_path cfg) "{}";
+      check bool "current root marker initializes root" true
+        (Workspace_utils.root_is_initialized cfg))
+
 let test_list_dir_prefers_backend_for_memory_keys () =
   let scratch = Filename.temp_dir "workspace-utils-list-dir-memory" "" in
   Fun.protect
@@ -777,6 +826,10 @@ let () =
       test_case "masc_root_dir empty cluster" `Quick test_masc_root_dir_empty_cluster;
       test_case "masc_root_dir custom cluster" `Quick test_masc_root_dir_custom_cluster;
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
+      test_case "memory root initialization requires current marker" `Quick
+        test_memory_root_initialization_requires_current_marker;
+      test_case "filesystem root initialization requires current marker" `Quick
+        test_filesystem_root_initialization_requires_current_marker;
       test_case "list_dir prefers backend for memory keys" `Quick
         test_list_dir_prefers_backend_for_memory_keys;
       test_case "memory commit distinguishes local mirror failure" `Quick

@@ -223,28 +223,18 @@ let list_dir config path =
 
 let root_state_path config = Filename.concat (masc_root_dir config) "root-state.json"
 
-(* Legacy root marker before root/workspace split lived at .masc/state.json. *)
-let legacy_root_state_path config = Filename.concat (masc_root_dir config) "state.json"
-
 (** Root initialization check - independent of current workspace.
     Used by workspace/cluster management features. *)
 let root_is_initialized config =
   match config.backend with
   | Memory _ ->
-      let exists_root path ~fallback_key =
-        let key =
-          match root_key_of_path config path with
-          | Some k -> k
-          | None -> fallback_key
-        in
-        backend_exists config ~key
-      in
-      exists_root (root_state_path config) ~fallback_key:"root-state.json" ||
-      exists_root (legacy_root_state_path config) ~fallback_key:"state.json"
+      (match root_key_of_path config (root_state_path config) with
+       | Some key -> backend_exists config ~key
+       | None -> false)
   | FileSystem _ ->
       Sys.file_exists (masc_root_dir config) &&
       Sys.is_directory (masc_root_dir config) &&
-      (Sys.file_exists (root_state_path config) || Sys.file_exists (legacy_root_state_path config))
+      Sys.file_exists (root_state_path config)
 
 (* Server-level cache for is_initialized — avoids 3 syscalls per request.
    Cache key is (base_path, cluster_name) to handle multi-config scenarios. *)

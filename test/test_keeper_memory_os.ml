@@ -1568,10 +1568,9 @@ let test_with_facts_lock_timeout_uses_on_timeout () =
       Alcotest.(check string) "lock reacquired after timeout" "reacquired" reacquired))
 ;;
 
-(* RFC-0247 (purge): GC is two structural passes — hard-expire past-TTL facts and
-   dedup duplicate claims keeping the most-recently-verified. There is no
-   score-threshold discard, so this asserts only the structural outcomes. The
-   duplicate winner is chosen by [last_verified_at] recency, not by confidence. *)
+(* RFC-0247 (purge): GC hard-expires past-TTL facts and preserves every other
+   row. It does not deduplicate claims or apply a score threshold; semantic
+   supersession remains outside this retention pass. *)
 let test_gc_dry_run_and_rewrite () =
   with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
   with_temp_keepers_dir (fun _keepers_dir ->

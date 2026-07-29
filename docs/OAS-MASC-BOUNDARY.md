@@ -172,7 +172,8 @@ OAS  ──does not know──→ MASC
   source, but the historical `provider` label value is the neutral `runtime`
   lane rather than a concrete provider/model identity. The dormant keeper
   memory-bank LLM summary sub-call and its provider-labelled metrics are
-  removed; memory-bank consolidation remains deterministic.
+  removed. Memory OS retention now consists only of explicit-expiry GC; no
+  LLM consolidation sub-call remains.
   The typed `Provider_error` contract itself is also runtime-lane scoped:
   variants no longer store provider/model identifiers, and legacy JSON keys
   such as `provider`, `affected`, and `model_name` emit neutral `runtime`

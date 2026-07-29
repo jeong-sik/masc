@@ -86,12 +86,11 @@ let run_gc_with_store
     (* Read strictly: a malformed JSONL row aborts the sweep rather than being
        silently dropped by the lenient decoder and then erased by the rewrite
        below. Every other destructive rewrite path already refuses to overwrite a
-       store it cannot fully parse — [merge_facts] via
-       read_facts_for_rewrite, the consolidator and consolidation runtime via
-       read_facts_all_strict. GC was the lone path that turned one corrupt line
-       into permanent deletion of the surrounding facts (it read via the lenient
-       read_facts_all). Preserve over delete: leave a corrupt store untouched and
-       let the raised error surface so an operator can repair it. *)
+       store it cannot fully parse — [merge_facts] uses
+       [read_facts_for_rewrite]. GC was the lone path that turned one corrupt
+       line into permanent deletion of the surrounding facts (it read via the
+       lenient [read_facts_all]). Preserve over delete: leave a corrupt store
+       untouched and let the raised error surface so an operator can repair it. *)
     match read_facts_all_strict () with
     | Error message ->
       raise (Fact_store_corrupt ("memory os gc fact store read failed: " ^ message))

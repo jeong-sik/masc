@@ -453,8 +453,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       ~sw
       ~on_error:(log_server_fiber_crash "memory_os_gc")
       (fun () ->
-      (* Coarser than consolidation (300s): GC rewrites stores, so a 10-minute
-         cadence is ample off the hot path. *)
+      (* GC rewrites stores, so a 10-minute cadence is ample off the hot path. *)
       let interval = 600.0 in
       let gc_one keeper_id () =
         try

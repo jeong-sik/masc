@@ -212,14 +212,10 @@ let test_apply_accepts_model_category_selection () =
     (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
-(* RFC-0285 §3.1: category is orthogonal to [claim_kind], so the LLM can group a
-   Self_observation with a durable claim of the SAME category. With no stated
-   [claim_kind] the plan does not determine the merged row's tag, and the code
-   must not pick one: inheriting by first_seen order would either immortalize the
-   self-observation or expire the durable claim, and writing [None] would mean
-   "producer emitted no tag" — a row the read boundary renders identically to a
-   never-tagged one. Refuse instead; the judge can clear this by stating a tag. *)
-let test_apply_rejects_undetermined_claim_kind () =
+(* [claim_kind] is an optional annotation, not a second merge decision. Mixed
+   member tags therefore do not reject an otherwise valid model-selected group
+   when the judge omits the annotation. *)
+let test_apply_accepts_unstated_claim_kind () =
   let facts =
     [ fact
         ~first_seen:100.0
@@ -244,12 +240,9 @@ let test_apply_rejects_undetermined_claim_kind () =
     ; drop_indices = []
     }
   in
-  Alcotest.(check (list string))
-    "undetermined-claim_kind group is skipped; both facts survive unchanged"
-    [ "Bounded retries prevent loop starvation"
-    ; "the agent is stuck in a retry loop this turn"
-    ]
-    (claims (apply_plan_facts ~now ~facts plan))
+  let merged = only_fact (apply_plan_facts ~now ~facts plan) in
+  Alcotest.(check string) "mixed member kinds still merge" "retry loops need bounds" merged.claim;
+  Alcotest.(check bool) "an omitted tag remains absent" true (merged.claim_kind = None)
 ;;
 
 (* The same mixed-kind group merges once the judge states which tag the row it is
@@ -313,10 +306,6 @@ let test_apply_accepts_claim_kind_no_member_carries () =
   in
   let _survivors, stats = Consolidation.apply_plan ~now ~facts plan in
   Alcotest.(check int) "the group merges" 1 stats.Consolidation.merged_groups;
-  Alcotest.(check int)
-    "no kind rejection: a stated tag is not narrowed to the members'"
-    0
-    stats.Consolidation.rejected_kind_mismatch;
   let merged = only_fact (apply_plan_facts ~now ~facts plan) in
   Alcotest.(check bool)
     "the merged row carries the stated tag"
@@ -572,9 +561,8 @@ let test_render_numbered_facts_keeps_one_fact_per_line () =
     (String.split_on_char '\n' rendered)
 ;;
 
-(* The judge must see every field the apply gate compares (claim_kind and
-   valid_until) — hiding them made every gate rejection a blind coin flip. *)
-let test_render_numbered_facts_shows_gate_fields () =
+(* The judge sees kind and validity as claim context, not apply gates. *)
+let test_render_numbered_facts_shows_context_fields () =
   let rendered =
     Consolidation.render_numbered_facts
       [ fact ~claim_kind:(Some Types.External_state) ~valid_until:1_800_000.0 "PR open"
@@ -601,9 +589,7 @@ let test_render_numbered_facts_shows_gate_fields () =
    | other -> Alcotest.failf "expected 2 lines, got %d" (List.length other))
 ;;
 
-(* Structural rejection is typed and counted: 'the judge proposed no merges'
-   and 'every merge was rejected' must not collapse into one silent outcome. *)
-let test_apply_stats_count_rejections () =
+let test_apply_stats_count_structural_skips () =
   let facts =
     [ fact ~claim_kind:(Some Types.Durable_knowledge) "durable rule"
     ; fact ~claim_kind:(Some Types.Self_observation) "transient state"
@@ -633,11 +619,7 @@ let test_apply_stats_count_rejections () =
     }
   in
   let _survivors, stats = Consolidation.apply_plan ~now ~facts plan in
-  Alcotest.(check int) "one merged group" 1 stats.Consolidation.merged_groups;
-  Alcotest.(check int)
-    "one kind-mismatch rejection"
-    1
-    stats.Consolidation.rejected_kind_mismatch;
+  Alcotest.(check int) "both valid groups merge" 2 stats.Consolidation.merged_groups;
   Alcotest.(check int)
     "consumed/short group counted as too few members"
     1
@@ -671,11 +653,7 @@ let test_first_group_wins_lands_in_too_few_bucket () =
   Alcotest.(check int)
     "later overlapping group lands in the too-few bucket"
     1
-    stats.Consolidation.rejected_too_few_members;
-  Alcotest.(check int)
-    "an ordinary contested plan raises no kind-gate rejection"
-    0
-    stats.Consolidation.rejected_kind_mismatch
+    stats.Consolidation.rejected_too_few_members
 ;;
 
 (* The wire path for the judge-stated tag. Without this, a key or token rename
@@ -809,9 +787,9 @@ let () =
 	        ; Alcotest.test_case "accepts model category change" `Quick test_apply_accepts_model_category_change
 	        ; Alcotest.test_case "accepts model category selection" `Quick test_apply_accepts_model_category_selection
         ; Alcotest.test_case
-            "rejects undetermined claim_kind"
+            "accepts an unstated claim_kind"
             `Quick
-            test_apply_rejects_undetermined_claim_kind
+            test_apply_accepts_unstated_claim_kind
         ; Alcotest.test_case
             "merges mixed kinds when the judge states the tag"
             `Quick
@@ -870,13 +848,13 @@ let () =
             `Quick
             test_render_numbered_facts_keeps_one_fact_per_line
         ; Alcotest.test_case
-            "shows kind and until to the judge"
+            "shows kind and until context to the judge"
             `Quick
-            test_render_numbered_facts_shows_gate_fields
+            test_render_numbered_facts_shows_context_fields
         ; Alcotest.test_case
-            "apply stats count rejections"
+            "apply stats count structural skips"
             `Quick
-            test_apply_stats_count_rejections
+            test_apply_stats_count_structural_skips
         ; Alcotest.test_case
             "first-group-wins lands in the too-few bucket"
             `Quick

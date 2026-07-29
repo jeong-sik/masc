@@ -34,12 +34,10 @@ let wire_field_claim_kind = Keeper_memory_os_types.wire_field_claim_kind
    into the numbered input list) state the same thing or supersede one another,
    and should collapse into one [consolidated_claim] under [category].
 
-   [claim_kind] is the origin tag the judge assigns to the row it is authoring.
-   A merged row is a new claim, so its tag is a judgement like [category], not a
-   union of the members' tags — there is nothing to represent losslessly. [None]
-   means the judge did not state one, which is a different case from "the judge
-   said untagged" only in that [apply_plan] then falls back to the members'
-   unanimous tag and refuses the group when they disagree. *)
+   [claim_kind] is the optional origin tag the judge assigns to the row it is
+   authoring. A merged row is a new claim, so its tag is a judgement like
+   [category], not a union of the members' tags. [None] means exactly that the
+   judge did not state a tag; it is data, not an admission decision. *)
 type merge_group =
   { member_indices : int list
   ; consolidated_claim : string
@@ -105,46 +103,6 @@ let render_numbered_facts facts =
   |> String.concat "\n"
 ;;
 
-(* The tag the merged row carries, or [Error] when the plan does not determine
-   one and the code must not invent it.
-
-   A stated tag is taken as given, like [category]: both are judgements about the
-   row the LLM is authoring. [merge_group_of_json] has already bounded it to
-   [librarian_claim_kinds] — the three provider-emittable variants, [Diagnostic]
-   excluded — so it is narrower than [category], which admits [Unknown of
-   string]. No further check restricts it to the members' tags.
-
-   An earlier draft added one, justified as RFC-0285's anti-laundering rule. That
-   rule reads "gate at the consolidator / Tier-2 promotion call site: exclude
-   claim_kind = Self_observation before promotion" (RFC-0285 §3.5). The
-   "consolidator" it names is [keeper_memory_os_consolidator], the Tier-2
-   cross-keeper promoter PR #24332 deleted — not this Tier-1 within-keeper merge,
-   which promotes nothing out of the keeper. The rule protects Tier-2 membership,
-   and Tier-2 has no writer today.
-
-   The narrowing also had no harm to prevent: nothing branches on [claim_kind]
-   (RFC-0285 §3.4's [fact_valid_until] arm was specified and never implemented).
-   If §3.4 lands, [claim_kind] starts deciding a horizon and a relabel gains a
-   mechanical effect — reinstate the narrowing then, in the same change.
-
-   The [Undetermined] refusal is not that kind of gate. With nothing stated and
-   members that disagree, there is no value to write: [None] would mean "producer
-   emitted no tag", and the read boundary omits the field for it
-   (server_dashboard_http_keeper_api.ml:236-237), so the row would be
-   indistinguishable from a never-tagged one. The judge clears it by stating a
-   tag — unlike the deleted [valid_until] equality gate, which nothing could. *)
-let claim_kind_for_group ~members (group : merge_group) =
-  match group.claim_kind with
-  | Some stated -> Ok (Some stated)
-  | None ->
-    (match
-       List.sort_uniq compare (List.map (fun (m : fact) -> m.claim_kind) members)
-     with
-     | [ single ] -> Ok single
-     | [] -> Ok None
-     | _ :: _ :: _ -> Error `Undetermined)
-;;
-
 (* ---------- JSON parsing (defensive, like the librarian) ---------- *)
 
 let int_list_of_json = function
@@ -177,14 +135,10 @@ let merge_group_of_json json =
   with
   | Some indices_json, Some claim, Some category_str
     when String.trim claim <> "" ->
-    (* An absent, null, or unparseable tag degrades to "not stated" rather than
-       dropping the group: the claim and members are the judgement that matters,
-       and [apply_plan] still refuses to guess when the members disagree.
-       Deliberately unlike [persisted_claim_kind_of_json], which rejects the
-       whole row on an invalid label — that guards stored schema integrity, while
-       this is a producer boundary where RFC-0285 §7 fixes the degrade direction:
-       "a missed tag degrades to pre-RFC status quo (safe), never to
-       wrong-volatile". Member inheritance IS that status quo. *)
+    (* An absent, null, or unparseable tag means "not stated" rather than
+       dropping the group: the claim and members are the judgement that matters.
+       Unlike persisted fact parsing, this provider boundary does not use an
+       optional annotation as a second admission contract. *)
     let claim_kind =
       match Option.bind (string_field wire_field_claim_kind json) claim_kind_of_string with
       (* [Diagnostic] is system-authored: [librarian_claim_kinds] withholds it
@@ -324,10 +278,10 @@ let shared_claim_id_for_members members =
   | [] | _ :: _ :: _ -> None
 ;;
 
-(* The consolidated fact for one group: claim/category come from the LLM;
-   provenance is reconstructed structurally, [valid_until] is combined by the
-   meet above, and [claim_kind] is whatever [claim_kind_for_group] resolved. *)
-let consolidated_fact ~now:_ ~members ~claim_kind (group : merge_group) =
+(* The consolidated fact for one group: claim/category and the optional
+   [claim_kind] annotation come from the LLM; provenance is reconstructed
+   structurally and [valid_until] is combined by the meet above. *)
+let consolidated_fact ~now:_ ~members (group : merge_group) =
   let earliest =
     match members with
     | [] -> invalid_arg "Keeper_memory_os_consolidation.consolidated_fact: empty members"
@@ -342,7 +296,7 @@ let consolidated_fact ~now:_ ~members ~claim_kind (group : merge_group) =
   in
   { claim = group.consolidated_claim
   ; category = group.category
-  ; claim_kind
+  ; claim_kind = group.claim_kind
   ; source = earliest.source
   ; first_seen
   ; valid_until = valid_until_for_members members
@@ -358,7 +312,6 @@ let consolidated_fact ~now:_ ~members ~claim_kind (group : merge_group) =
    cannot control must not decide whether its judgement applies. *)
 type apply_stats =
   { merged_groups : int
-  ; rejected_kind_mismatch : int
   ; rejected_too_few_members : int
   ; dropped : int
   }
@@ -383,7 +336,6 @@ let apply_plan ~now ~facts plan =
   let in_range i = i >= 0 && i < n in
   let dedup_sorted is = List.sort_uniq compare (List.filter in_range is) in
   let merged_groups = ref 0 in
-  let rejected_kind_mismatch = ref 0 in
   let rejected_too_few_members = ref 0 in
   List.iter
     (fun group ->
@@ -396,28 +348,25 @@ let apply_plan ~now ~facts plan =
        if List.length members >= 2
        then (
          let member_facts = List.map (fun i -> facts_arr.(i)) members in
-         match claim_kind_for_group ~members:member_facts group with
-         | Error `Undetermined -> incr rejected_kind_mismatch
-         | Ok claim_kind ->
-           let anchor =
-             (* members is guaranteed non-empty by the [>= 2] guard above *)
-             match members with
-             | [] -> invalid_arg "Keeper_memory_os_consolidation.apply_plan: empty group"
-             | first :: rest ->
-               List.fold_left
-                 (fun acc i ->
-                    if facts_arr.(i).first_seen < facts_arr.(acc).first_seen
-                    then i
-                    else acc)
-                 first
-                 rest
-           in
-           List.iter (fun i -> slot.(i) <- `Consumed) members;
-           incr merged_groups;
-           Hashtbl.replace
-             consolidated
-             anchor
-             (consolidated_fact ~now ~members:member_facts ~claim_kind group))
+         let anchor =
+           (* members is guaranteed non-empty by the [>= 2] guard above *)
+           match members with
+           | [] -> invalid_arg "Keeper_memory_os_consolidation.apply_plan: empty group"
+           | first :: rest ->
+             List.fold_left
+               (fun acc i ->
+                  if facts_arr.(i).first_seen < facts_arr.(acc).first_seen
+                  then i
+                  else acc)
+               first
+               rest
+         in
+         List.iter (fun i -> slot.(i) <- `Consumed) members;
+         incr merged_groups;
+         Hashtbl.replace
+           consolidated
+           anchor
+           (consolidated_fact ~now ~members:member_facts group))
        else incr rejected_too_few_members)
     plan.groups;
   let dropped = ref 0 in
@@ -442,7 +391,6 @@ let apply_plan ~now ~facts plan =
   done;
   ( !out
   , { merged_groups = !merged_groups
-    ; rejected_kind_mismatch = !rejected_kind_mismatch
     ; rejected_too_few_members = !rejected_too_few_members
     ; dropped = !dropped
     } )

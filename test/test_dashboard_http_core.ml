@@ -889,8 +889,12 @@ let test_dashboard_proof_http_json_surfaces_verification_index () =
   let open Yojson.Safe.Util in
   check int "verification total" 1
     (json |> member "summary" |> member "verification_total" |> to_int);
-  check int "pending total" 1
-    (json |> member "summary" |> member "verification_pending" |> to_int);
+  check bool "retired verification status counters stay absent" true
+    (match json |> member "summary" with
+     | `Assoc fields ->
+       not (List.mem_assoc "verification_pending" fields)
+       && not (List.mem_assoc "verification_rejected" fields)
+     | _ -> false);
   check bool "verification requests exposed" true
     (match json |> member "verification" |> member "requests" |> member "requests" with
      | `List [ _ ] -> true
@@ -2178,19 +2182,33 @@ let test_config_post_restarts_from_atomic_toml () =
      | None -> false);
   ignore (Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path name)
 
-let test_config_post_requires_toml () =
+let test_config_post_materializes_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-no-toml" in
   prepare_config_sync_keeper config name;
-  let raw, json =
+  let path =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path
+         ~base_path:config.Workspace.base_path)
+      (name ^ ".toml")
+  in
+  check bool "TOML starts absent" false (Sys.file_exists path);
+  let raw, _json =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
       ~name {|{"proactive_enabled":true}|}
   in
-  check bool "HTTP 409" true (String.starts_with ~prefix:"HTTP/1.1 409" raw);
-  let open Yojson.Safe.Util in
-  check bool "config not applied" false (json |> member "config_applied" |> to_bool);
-  check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool)
+  check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
+  check bool "current TOML materialized" true (Sys.file_exists path);
+  let parsed =
+    Keeper_toml_loader.parse_toml
+      (In_channel.with_open_bin path In_channel.input_all)
+  in
+  (match parsed with
+   | Error error -> fail error
+   | Ok doc ->
+     check (option bool) "proactive committed" (Some true)
+       (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"))
 
 let test_config_post_reports_runtime_sync_failure () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -2363,8 +2381,8 @@ let () =
             test_context_shrink_detection;
           test_case "config POST atomically restarts runtime" `Quick
             test_config_post_restarts_from_atomic_toml;
-          test_case "activation config requires TOML" `Quick
-            test_config_post_requires_toml;
+          test_case "activation config materializes TOML" `Quick
+            test_config_post_materializes_toml;
           test_case "runtime sync failure preserves commit" `Quick
             test_config_post_reports_runtime_sync_failure;
           test_case "mixed invalid request commits nothing" `Quick

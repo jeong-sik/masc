@@ -521,6 +521,15 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
       in
       Board.take limit filtered
 
+let list_recent_posts_matching_author ~author_matches ~limit () =
+  match backend () with
+  | Jsonl store ->
+    Board.search_posts
+      store
+      ~predicate:(fun (post : Board.post) -> author_matches post.author)
+      ~limit:(max 0 limit)
+;;
+
 let current_post_cursor () =
   match backend () with
   | Jsonl store -> Board.current_post_cursor store

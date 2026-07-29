@@ -22,6 +22,7 @@ include Keeper_unified_turn_phase_plan
 type in_lane_compaction =
   | Compaction_committed
   | Compaction_attempt_failed of { reason : string }
+  | Compaction_refused_without_attempt of { consecutive_failures : int }
 
 type exact_output_terminal_reason =
   | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
@@ -49,9 +50,7 @@ let source_disposition_after_no_compaction
     Escalate_after_exact_output_terminal
       (Exact_execution_terminal { source; terminal })
   | ( Keeper_event_queue_state.No_eligible_history
-    | Keeper_event_queue_state.Invalid_structural_source
-    | Keeper_event_queue_state.Structurally_unchanged
-    | Keeper_event_queue_state.Checkpoint_not_reduced ) as reason ->
+    | Keeper_event_queue_state.Invalid_structural_source ) as reason ->
     Follow_failure_route_after_no_compaction { reason }
 ;;
 
@@ -205,6 +204,10 @@ type provider_overflow_recovery =
       { trigger : Compaction_trigger.t
       ; reason : string
       }
+  | Provider_overflow_refused_without_attempt of
+      { trigger : Compaction_trigger.t
+      ; consecutive_failures : int
+      }
   | Provider_overflow_retry_with_checkpoint of
       { reason : string
       ; recovery : Keeper_post_turn.compaction_recovery
@@ -303,6 +306,33 @@ let recover_provider_context_overflow_in_lane
          | None -> Provider_overflow_retry_without_checkpoint { trigger; reason }
          | Some recovery -> Provider_overflow_retry_with_checkpoint { reason; recovery })
     in
+    (* The admission gate declined the trigger: no checkpoint was read, no
+       summarizer ran, no compaction was attempted. The overflow itself is real
+       and unresolved, so the observation and the lifecycle release both stand —
+       what must not happen is settling this as a compaction outcome, because
+       that made the gate's own refusal advance the streak the gate reads. *)
+    let refused_without_attempt ~consecutive_failures =
+      let reason =
+        Printf.sprintf
+          "compaction retry suspended after %d consecutive failures"
+          consecutive_failures
+      in
+      record_overflow_failure ~config ~meta ~reason;
+      match release_failed_lifecycle reason with
+      | Error cleanup_error ->
+        Provider_overflow_lifecycle_cleanup_failed
+          { trigger
+          ; reason =
+              Printf.sprintf "%s; lifecycle_cleanup=%s" reason cleanup_error
+          ; source_disposition =
+              Requeue_after_context_compaction
+                (Compaction_refused_without_attempt { consecutive_failures })
+          ; recovery = None
+          }
+      | Ok () ->
+        Provider_overflow_refused_without_attempt
+          { trigger; consecutive_failures }
+    in
     let terminal_no_compaction no_compaction =
       Eio.Cancel.protect (fun () ->
         let error = Keeper_post_turn.No_compaction no_compaction in
@@ -349,11 +379,18 @@ let recover_provider_context_overflow_in_lane
           (lifecycle_dispatch_error_to_string error)
     in
     let failed ({ error; committed } : Keeper_post_turn.prepared_commit_failure) =
-      match committed with
-      | None ->
+      match committed, error with
+      | None, Keeper_post_turn.Retry_suspended { consecutive_failures } ->
+        refused_without_attempt ~consecutive_failures
+      | ( None
+        , ( Keeper_post_turn.Checkpoint_ref_load_failed _
+          | Keeper_post_turn.Checkpoint_cas_failed _
+          | Keeper_post_turn.Checkpoint_candidate_failed _
+          | Keeper_post_turn.Compaction_rejected _
+          | Keeper_post_turn.No_compaction _ ) ) ->
         retry_after_started
           (Keeper_post_turn.compaction_recovery_error_to_string error)
-      | Some recovery ->
+      | Some recovery, _ ->
         Log.Keeper.error
           ~keeper_name:meta.name
           "provider overflow checkpoint committed with failed exact-domain finalization: %s"
@@ -578,6 +615,18 @@ let append_provider_overflow_manifest
     in
     Requeue_after_context_compaction (Compaction_attempt_failed { reason }),
     turn_state
+  | Provider_overflow_refused_without_attempt { trigger = _; consecutive_failures }
+    ->
+    (* No runtime-manifest record: every manifest kind reachable here asserts a
+       compaction ran, and none did. Emitting [Context_compacted] with
+       [compaction_outcome:Retry_without_checkpoint] — what the attempt-failed
+       arm above does — is why 12,777 [compaction_started] transitions
+       reconciled against roughly 401 prepared plans. The refusal stays visible
+       through [record_overflow_failure]'s WARN, the registry phase transition,
+       and the persisted [last_compaction_decision]. *)
+    ( Requeue_after_context_compaction
+        (Compaction_refused_without_attempt { consecutive_failures })
+    , turn_state )
   | Provider_overflow_lifecycle_cleanup_failed
       { trigger; reason; source_disposition; recovery } ->
     let turn_state =

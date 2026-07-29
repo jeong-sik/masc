@@ -96,8 +96,6 @@ type escalation_reason = Keeper_event_queue_state.escalation_reason =
 type no_compaction_reason = Keeper_event_queue_state.no_compaction_reason =
   | No_eligible_history
   | Invalid_structural_source
-  | Structurally_unchanged
-  | Checkpoint_not_reduced
   | Exact_lane_unconfigured
   | Exact_execution_terminal of exact_execution_terminal
 

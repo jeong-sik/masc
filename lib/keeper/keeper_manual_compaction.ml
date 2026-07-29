@@ -457,10 +457,7 @@ let preserve_no_compaction_after_final_admission_busy = function
   | Keeper_event_queue_state.Exact_execution_terminal _ -> true
   | Keeper_event_queue_state.Exact_lane_unconfigured
   | Keeper_event_queue_state.No_eligible_history
-  | Keeper_event_queue_state.Invalid_structural_source
-  | Keeper_event_queue_state.Structurally_unchanged
-  | Keeper_event_queue_state.Checkpoint_not_reduced ->
-    false
+  | Keeper_event_queue_state.Invalid_structural_source -> false
 ;;
 
 let resolve_uncommitted = function

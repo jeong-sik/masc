@@ -291,19 +291,6 @@ let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
         ~route:"/api/v1/dashboard/execution-trust";
     ]
   in
-  let by_status =
-    match verification_summary with
-    | `Assoc fields -> (
-        match List.assoc_opt "by_status" fields with
-        | Some (`Assoc status_fields) -> status_fields
-        | _ -> [])
-    | _ -> []
-  in
-  let status_int key =
-    match List.assoc_opt key by_status with
-    | Some (`Int n) -> n
-    | _ -> 0
-  in
   `Assoc
     [
       "generated_at", `String (Masc_domain.now_iso ());
@@ -317,8 +304,6 @@ let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
                  | Some (`Int n) -> `Int n
                  | _ -> `Int 0)
              | _ -> `Int 0);
-            "verification_pending", `Int (status_int "pending");
-            "verification_rejected", `Int (status_int "rejected");
             "proof_source_count", `Int (List.length proof_sources);
           ] );
       ( "verification",

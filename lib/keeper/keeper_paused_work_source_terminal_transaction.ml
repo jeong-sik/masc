@@ -157,6 +157,9 @@ let validate_source_queue config ~keeper_name request =
   in
   if not (Int64.equal (Keeper_event_queue_state.revision state) request.source_revision)
   then Error (Source_queue_validation_failed "source revision changed")
+  (* An "active lease" guard sat here. No caller can claim a lease since #25969
+     moved production to peek/ack, and [State.of_yojson] restores none, so the
+     condition could never hold. The outbox guard below still can. *)
   else if Keeper_event_queue_state.transition_outbox state <> []
   then Error (Source_queue_validation_failed "source lane has a pending transition outbox")
   else

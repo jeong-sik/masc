@@ -276,7 +276,8 @@ let error_class = function
             | Cancellation.Durable_owner_dead_tombstone
             | Cancellation.Durable_owner_nonce_changed _
             | Cancellation.Registry_owner_not_paused _
-            | Cancellation.Registry_owner_nonce_changed _ )
+            | Cancellation.Registry_owner_nonce_changed _
+            | Cancellation.Lease_source_invalid )
         ; _
         })
   | Transfer_rejected
@@ -399,6 +400,12 @@ let inventory_json config ~keeper_name =
             [ "revision", `Intlit (Int64.to_string (Queue_state.revision state))
             ; "pending_count", `Int (List.length pending)
             ; "pending", `List (List.map pending_item_to_yojson pending)
+              (* "active_lease" was reported here. It read
+                 [Queue_state.active_lease], which has answered [None] -- and so
+                 rendered `Null -- since #25969 moved production to peek/ack and
+                 left [State.of_yojson] restoring no leases. The field is
+                 dropped rather than pinned to null so the wire stops describing
+                 a concept the queue no longer has. *)
             ; ( "transition_outbox_count"
               , `Int (List.length (Queue_state.transition_outbox state)) )
             ; ( "accepted_transfer_projection_count"

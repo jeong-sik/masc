@@ -1,10 +1,10 @@
-type selection_kind =
+type lease_kind =
   | Single
   | Board_batch
 
 type pending_selection =
   { source_revision : int64
-  ; kind : selection_kind
+  ; kind : lease_kind
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
@@ -40,6 +40,42 @@ type exact_execution_terminal =
   ; request_body_sha256 : string
   }
 
+type exact_source_action = Consume_source
+
+type exact_settlement_semantic =
+  | Exact_no_compaction
+  | Exact_escalate
+
+type exact_source_outcome = Terminal of exact_execution_terminal_cause
+
+type exact_source_disposition =
+  { disposition_id : string
+  ; source : Keeper_checkpoint_ref.t
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; outcome : exact_source_outcome
+  ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
+  ; prepared_at : float
+  }
+
+type exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+  | Disposition_prepared of exact_source_disposition
+
+type exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
+  }
+
 type escalation_reason =
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
   | Compaction_exact_output_terminal of
@@ -71,7 +107,7 @@ type escalation_reason =
   | Transcript_corruption_requires_reset of { detail : string }
     (* Structural transcript corruption is deterministic and rejected before
        provider dispatch. The first failure pauses the Keeper and terminally
-       consumes the source event without a successor. *)
+       consumes the source lease without a successor. *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -161,11 +197,20 @@ type transition =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Ack_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
       ; successor : Keeper_event_queue.stimulus option
       }
+
+type lease =
+  { lease_id : string
+  ; sequence : int64
+  ; kind : lease_kind
+  ; claimed_at : float option
+  ; stimuli : Keeper_event_queue.stimulus list
+  }
 
 type transition_receipt =
   { transition_id : string
@@ -179,12 +224,18 @@ type outbox_entry =
   ; stimuli : Keeper_event_queue.stimulus list
   }
 
+(* [leases] are private recovery carriers only.
+   Current pending cancellation, transfer, and source-terminal ACK operations
+   never create a lease. [of_yojson] never restores a lease; the fields remain
+   solely to validate and replay historical lease-backed receipts. *)
 type t =
   { revision : int64
   ; pending : Keeper_event_queue.t
+  ; leases : lease list
   ; last_transition : transition_receipt option
   ; transition_outbox : outbox_entry list
   ; accepted_transfer_projections : accepted_transfer list
+  ; exact_execution_bindings : exact_execution_binding list
   }
 
 type transition_result =
@@ -196,13 +247,38 @@ type transfer_projection_result =
   | Transfer_already_projected
 
 let schema = "keeper.event_queue.state.v12"
+let schema_v11 = "keeper.event_queue.state.v11"
+let schema_v10 = "keeper.event_queue.state.v10"
+let schema_v9 = "keeper.event_queue.state.v9"
+let schema_v8 = "keeper.event_queue.state.v8"
+
+(* v12 writes the current pending-transition receipt and accepted target
+   transfer projections. v11 used lease-backed receipts under
+   [last_settlement] while already persisting transfer projections; v10 had the
+   same receipt shape without transfer projections. Both remain decode-only so
+   a new checkpoint records the current transition wire without losing the
+   target idempotence witnesses. v9 wrote neither witness. v8 used the
+   removed [settle_from_source_terminal] wire label; its only accepted use is
+   recovery of an already durable outbox, which is canonicalized during decode
+   before any v12 snapshot is written. v7 carried [schema; revision; pending]
+   only. The transition outbox lived
+   solely in the transition WAL, which forced that WAL to stay on disk after
+   its pending mutation had already been absorbed into a saved snapshot - and a
+   later revision bump then made the retained row unreplayable, latching the
+   owner into "reset required" with no runtime exit (#26074). v8 persists the
+   outbox so the WAL carries one obligation with one lifetime. v7 snapshots
+   decode with an empty outbox: any obligation they had is still in their WAL,
+   which replays as before. *)
+let schema_v7 = "keeper.event_queue.state.v7"
 
 let empty =
   { revision = 0L
   ; pending = Keeper_event_queue.empty
+  ; leases = []
   ; last_transition = None
   ; transition_outbox = []
   ; accepted_transfer_projections = []
+  ; exact_execution_bindings = []
   }
 ;;
 
@@ -211,9 +287,15 @@ let pending state = state.pending
 let last_transition state = state.last_transition
 let transition_outbox state = state.transition_outbox
 let accepted_transfer_projections state = state.accepted_transfer_projections
+let exact_execution_binding state =
+  match state.exact_execution_bindings with
+  | [] -> None
+  | binding :: _ -> Some binding
+;;
 
 let accounted_stimuli state =
   Keeper_event_queue.to_list state.pending
+  @ List.concat_map (fun (lease : lease) -> lease.stimuli) state.leases
   @ List.concat_map
       (fun (entry : outbox_entry) -> entry.stimuli)
       state.transition_outbox
@@ -296,7 +378,25 @@ let enqueue_if_missing queue stimulus =
   else Keeper_event_queue.enqueue queue stimulus
 ;;
 
-let transition_outbox_blocked state = state.transition_outbox <> []
+let prepend_missing stimuli queue =
+  let missing =
+    List.filter (fun stimulus -> not (queue_contains queue stimulus)) stimuli
+  in
+  Keeper_event_queue.prepend_list missing queue
+;;
+
+let append_missing stimuli queue =
+  List.fold_left
+    (fun pending stimulus -> enqueue_if_missing pending stimulus)
+    queue
+    stimuli
+;;
+
+let lease_id_of_sequence sequence = Printf.sprintf "lease:%Ld" sequence
+
+let lease_admission_blocked state =
+  state.leases <> [] || state.transition_outbox <> []
+;;
 
 let rec dequeue_first_ready ~ready skipped pending =
   match Keeper_event_queue.dequeue pending with
@@ -369,6 +469,17 @@ let ack_pending ~(selection : pending_selection) state =
         retained
     in
     Ok { state with pending }
+;;
+
+let lease_kind_label = function
+  | Single -> "single"
+  | Board_batch -> "board_batch"
+;;
+
+let lease_kind_of_label = function
+  | "single" -> Ok Single
+  | "board_batch" -> Ok Board_batch
+  | label -> Error (Printf.sprintf "unknown event queue lease kind: %s" label)
 ;;
 
 let requeue_reason_label = function
@@ -671,6 +782,41 @@ let escalation_reason_of_wire ~label ~detail_json =
     Error (Printf.sprintf "unknown event queue escalation reason: %s" unknown)
 ;;
 
+let legacy_source_terminal_kind = "settle_from_source_terminal"
+
+let transition_label = function
+  | Ack -> "ack"
+  | Manual_compaction_committed _ -> "manual_compaction_committed"
+  | No_compaction _ -> "no_compaction"
+  | Cancel_accepted _ -> "cancel_accepted"
+  | Transfer_accepted _ -> "transfer_accepted"
+  | Ack_source_terminal _ -> "ack_source_terminal"
+  | Settle_exact _ -> "settle_exact"
+  | Requeue _ -> "requeue"
+  | Escalate _ -> "escalate"
+;;
+
+let settle_exact_transition_id ~lease_id ~disposition_id =
+  Printf.sprintf "%s:settle_exact:%s" lease_id disposition_id
+;;
+
+let transition_id ~lease_id transition =
+  match transition with
+  | Settle_exact disposition ->
+    settle_exact_transition_id
+      ~lease_id
+      ~disposition_id:disposition.disposition_id
+  | Ack
+  | Manual_compaction_committed _
+  | No_compaction _
+  | Cancel_accepted _
+  | Transfer_accepted _
+  | Ack_source_terminal _
+  | Requeue _
+  | Escalate _ ->
+    Printf.sprintf "%s:%s" lease_id (transition_label transition)
+;;
+
 let pending_transition_id = function
   | Cancel_accepted cancellation ->
     Some ("pending-cancel:" ^ cancellation.operator_operation_id)
@@ -681,13 +827,93 @@ let pending_transition_id = function
   | Ack
   | Manual_compaction_committed _
   | No_compaction _
+  | Settle_exact _
   | Requeue _
   | Escalate _ ->
     None
 ;;
 
+let legacy_lease_id_prefix_of_transition_id value =
+  match String.split_on_char ':' value with
+  | "lease" :: sequence :: _ ->
+    (match Int64.of_string_opt sequence with
+     | Some sequence when Int64.compare sequence 1L >= 0 ->
+       Some (lease_id_of_sequence sequence)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let legacy_transition_id_is_valid transition value =
+  match legacy_lease_id_prefix_of_transition_id value with
+  | None -> false
+  | Some lease_id ->
+    let expected =
+      match transition with
+      | Ack_source_terminal _ ->
+        [ transition_id ~lease_id transition
+        ; Printf.sprintf "%s:%s" lease_id legacy_source_terminal_kind
+        ]
+      | Ack
+      | Manual_compaction_committed _
+      | No_compaction _
+      | Cancel_accepted _
+      | Transfer_accepted _
+      | Settle_exact _
+      | Requeue _
+      | Escalate _ ->
+        [ transition_id ~lease_id transition ]
+    in
+    List.exists (String.equal value) expected
+;;
+
 let event_id_of_transition transition_id =
   "keeper-event-queue-transition:" ^ transition_id
+;;
+
+let legacy_settlement_transition_receipt_json json =
+  let replace field value fields =
+    List.map (fun (key, current) -> if String.equal key field then key, value else key, current) fields
+  in
+  match json with
+  | `Assoc receipt_fields ->
+    let receipt_fields =
+      match List.assoc_opt "settlement" receipt_fields with
+      | Some (`Assoc action_fields) ->
+        (match List.assoc_opt "kind" action_fields with
+         | Some (`String kind) when String.equal kind legacy_source_terminal_kind ->
+           replace
+             "settlement"
+             (`Assoc (replace "kind" (`String "ack_source_terminal") action_fields))
+             receipt_fields
+         | Some _ | None -> receipt_fields)
+      | Some _ | None -> receipt_fields
+    in
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            match key with
+            | "settlement" -> "transition", value
+            | "settled_at_unix" -> "applied_at_unix", value
+            | _ -> key, value)
+         receipt_fields)
+  | _ -> json
+;;
+
+let legacy_settlement_outbox_entry_json json =
+  let replace field value fields =
+    List.map (fun (key, current) -> if String.equal key field then key, value else key, current) fields
+  in
+  match json with
+  | `Assoc entry_fields ->
+    (match List.assoc_opt "receipt" entry_fields with
+     | Some receipt ->
+       `Assoc
+         (replace
+            "receipt"
+            (legacy_settlement_transition_receipt_json receipt)
+            entry_fields)
+     | None -> json)
+  | _ -> json
 ;;
 
 let successor_equal left right =
@@ -726,6 +952,7 @@ let transition_equal left right =
   | Transfer_accepted left, Transfer_accepted right -> left = right
   | Ack_source_terminal left, Ack_source_terminal right ->
     left = right
+  | Settle_exact left, Settle_exact right -> left = right
   | Requeue left, Requeue right -> left = right
   | ( Escalate { reason = left_reason; successor = left_successor }
     , Escalate { reason = right_reason; successor = right_successor } ) ->
@@ -739,6 +966,11 @@ let transition_receipt_equal left right =
   && String.equal left.event_id right.event_id
   && Float.equal left.applied_at right.applied_at
   && left.transition = right.transition
+;;
+
+let transition_receipt_same_commit left right =
+  Float.equal left.applied_at right.applied_at
+  && transition_equal left.transition right.transition
 ;;
 
 let validate_accepted_cancellation (cancellation : accepted_cancellation) =
@@ -805,6 +1037,91 @@ let validate_accepted_source_terminal source_terminal =
     if receipt = source_terminal.source_receipt
     then Ok ()
     else Error "source-terminal ACK receipt does not match source payload"
+;;
+
+let checkpoint_ref_identity (reference : Keeper_checkpoint_ref.t) =
+  String.concat
+    "\000"
+    [ Keeper_id.Trace_id.to_string reference.trace_id
+    ; string_of_int reference.generation
+    ; string_of_int reference.turn_count
+    ; reference.sha256
+    ]
+;;
+
+let exact_source_outcome_identity = function
+  | Terminal cause ->
+    "terminal\000" ^ exact_execution_terminal_cause_label cause
+;;
+
+let exact_source_action_identity Consume_source = "consume_source"
+
+let exact_settlement_semantic_label = function
+  | Exact_no_compaction -> "no_compaction"
+  | Exact_escalate -> "escalate"
+;;
+
+let exact_source_disposition_id_of_fields
+      ~source
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ~outcome
+      ~action
+      ~semantic
+      ~prepared_at:_
+  =
+  String.concat
+    "\000"
+    [ "keeper.exact_source_disposition.v1"
+    ; checkpoint_ref_identity source
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint
+    ; request_body_sha256
+    ; exact_source_outcome_identity outcome
+    ; exact_source_action_identity action
+    ; exact_settlement_semantic_label semantic
+    ]
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
+let validate_exact_source_disposition
+      (disposition : exact_source_disposition)
+  =
+  let terminal =
+    match disposition.outcome with
+    | Terminal cause ->
+      { cause
+      ; slot_id = disposition.slot_id
+      ; call_id = disposition.call_id
+      ; plan_fingerprint = disposition.plan_fingerprint
+      ; request_body_sha256 = disposition.request_body_sha256
+      }
+  in
+  let* () = validate_exact_execution_terminal terminal in
+  let expected_id =
+    exact_source_disposition_id_of_fields
+      ~source:disposition.source
+      ~slot_id:disposition.slot_id
+      ~call_id:disposition.call_id
+      ~plan_fingerprint:disposition.plan_fingerprint
+      ~request_body_sha256:disposition.request_body_sha256
+      ~outcome:disposition.outcome
+      ~action:disposition.action
+      ~semantic:disposition.semantic
+      ~prepared_at:disposition.prepared_at
+  in
+  if not (Float.is_finite disposition.prepared_at)
+  then Error "exact source disposition preparation time must be finite"
+  else if not (String.equal disposition.disposition_id expected_id)
+  then Error "exact source disposition id does not match its immutable fields"
+  else
+    match disposition.semantic, disposition.action with
+    | (Exact_no_compaction | Exact_escalate), Consume_source ->
+      Ok ()
 ;;
 
 let manual_compaction_commit_requires_operator_action commit =
@@ -899,6 +1216,7 @@ let validate_transition = function
   | Transfer_accepted transfer -> validate_accepted_transfer transfer
   | Ack_source_terminal source_terminal ->
     validate_accepted_source_terminal source_terminal
+  | Settle_exact disposition -> validate_exact_source_disposition disposition
   | Escalate { reason = Compaction_retry_exhausted _; successor = None } -> Ok ()
   | Escalate { reason = Compaction_retry_exhausted _; successor = Some _ } ->
     Error "compaction retry exhaustion must not enqueue a successor"
@@ -935,8 +1253,10 @@ let validate_transition = function
     Error "transcript corruption reset requirement must not enqueue a successor"
 ;;
 
-(* Pure receipt-vs-stimuli invariant shared by the live pending-transition
-   path and the persist decode boundary. *)
+(* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live transition
+   path (via [validate_transition_for_lease]) and the persist decode boundary
+   (via [outbox_entry_of_yojson]) enforce the same closed transition/source
+   rules. *)
 let validate_transition_for_stimuli transition stimuli =
   match transition, stimuli with
   | Manual_compaction_committed _,
@@ -974,7 +1294,20 @@ let validate_transition_for_stimuli transition stimuli =
     Error "source-terminal receipt does not match its exact event stimulus"
   | Ack_source_terminal _, _ ->
     Error "source-terminal ACK requires exactly one accepted event stimulus"
-  | (Ack | Requeue _ | Escalate _), _ -> Ok ()
+  | (Ack | Settle_exact _ | Requeue _ | Escalate _), _ -> Ok ()
+;;
+
+let validate_transition_for_lease transition (lease : lease) =
+  validate_transition_for_stimuli transition lease.stimuli
+;;
+
+let receipt_for_lease ~applied_at ~transition (lease : lease) =
+  let transition_id = transition_id ~lease_id:lease.lease_id transition in
+  { transition_id
+  ; event_id = event_id_of_transition transition_id
+  ; applied_at
+  ; transition
+  }
 ;;
 
 let receipt_for_pending_transition ~applied_at ~transition =
@@ -1019,13 +1352,484 @@ let find_prior_receipt transition_id state =
   | _ :: _ :: _ -> None
 ;;
 
+let remove_lease lease_id leases =
+  List.filter
+    (fun (lease : lease) -> not (String.equal lease.lease_id lease_id))
+    leases
+;;
+
+let committed_lease (lease : lease) state =
+  List.find_opt
+    (fun (current : lease) -> String.equal current.lease_id lease.lease_id)
+    state.leases
+;;
+
+let lease_equal (left : lease) (right : lease) =
+  Int64.equal left.sequence right.sequence
+  && String.equal left.lease_id right.lease_id
+  && left.kind = right.kind
+  && List.length left.stimuli = List.length right.stimuli
+  && List.for_all2 Keeper_event_queue.stimulus_identity_equal left.stimuli right.stimuli
+;;
+
+let binding_for_lease (lease : lease) state =
+  List.find_opt
+    (fun (binding : exact_execution_binding) ->
+       String.equal binding.lease_id lease.lease_id
+       && Int64.equal binding.lease_sequence lease.sequence)
+    state.exact_execution_bindings
+;;
+
+let binding_call_identity_equal binding ~slot_id ~call_id =
+  String.equal binding.slot_id slot_id && String.equal binding.call_id call_id
+;;
+
+let binding_identity_equal
+      binding
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  binding_call_identity_equal binding ~slot_id ~call_id
+  && String.equal binding.plan_fingerprint plan_fingerprint
+  && String.equal binding.request_body_sha256 request_body_sha256
+;;
+
+let identity_bound_nonterminal_transition = function
+  | Ack -> true
+  | Manual_compaction_committed _ -> true
+  | Requeue Context_compaction_retry -> true
+  | Escalate { reason = Compaction_floor_exceeded _; successor = None } -> true
+  | No_compaction _
+  | Cancel_accepted _
+  | Transfer_accepted _
+  | Ack_source_terminal _
+  | Settle_exact _
+  | Requeue _
+  | Escalate _ ->
+    false
+;;
+
+let validate_bound_transition binding transition =
+  match binding.status, transition with
+  | Disposition_prepared disposition, Settle_exact requested
+    when disposition = requested -> Ok ()
+  | Disposition_prepared _, Settle_exact _ ->
+    Error "exact source disposition proof conflicts with its durable binding"
+  | Dispatch_uncertain, transition
+    when identity_bound_nonterminal_transition transition -> Ok ()
+  | Dispatch_uncertain, _ ->
+    Error
+      (Printf.sprintf
+         "exact execution lease %s call %s requires an identity-bound nonterminal transition or a prepared full source disposition"
+         binding.lease_id
+         binding.call_id)
+  | Terminal_quarantined _, _ ->
+    Error
+      (Printf.sprintf
+         "quarantined exact execution lease %s call %s requires a prepared full source disposition"
+         binding.lease_id
+         binding.call_id)
+  | Disposition_prepared _, _ ->
+    Error
+      (Printf.sprintf
+         "exact execution lease %s call %s requires Settle_exact with its full durable proof"
+         binding.lease_id
+         binding.call_id)
+;;
+
+let validate_binding_arguments
+      ~(lease : lease)
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  if String.trim slot_id = ""
+  then Error "exact execution slot id must not be empty"
+  else if String.trim call_id = ""
+  then Error "exact execution call id must not be empty"
+  else if String.trim plan_fingerprint = ""
+  then Error "exact execution plan fingerprint must not be empty"
+  else if String.trim request_body_sha256 = ""
+  then Error "exact execution request body sha256 must not be empty"
+  else if Int64.compare lease.sequence 1L < 0
+  then Error "exact execution lease sequence must be positive"
+  else if not (String.equal lease.lease_id (lease_id_of_sequence lease.sequence))
+  then Error "exact execution lease id does not match its sequence"
+  else Ok ()
+;;
+
+let bind_exact_execution
+      ~(lease : lease)
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      state
+  =
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  let* () =
+    match committed_lease lease state with
+    | Some committed when lease_equal committed lease -> Ok ()
+    | Some _ -> Error (Printf.sprintf "event queue lease payload conflict: %s" lease.lease_id)
+    | None -> Error (Printf.sprintf "event queue lease not found: %s" lease.lease_id)
+  in
+  match state.exact_execution_bindings with
+  | [] ->
+    Ok
+      { state with
+        exact_execution_bindings =
+          [ { lease_id = lease.lease_id
+            ; lease_sequence = lease.sequence
+            ; slot_id
+            ; call_id
+            ; plan_fingerprint
+            ; request_body_sha256
+            ; status = Dispatch_uncertain
+            }
+          ]
+      }
+  | [ binding ]
+    when String.equal binding.lease_id lease.lease_id
+         && Int64.equal binding.lease_sequence lease.sequence
+         && binding_identity_equal
+              binding
+              ~slot_id
+              ~call_id
+              ~plan_fingerprint
+              ~request_body_sha256 ->
+    (match binding.status with
+     | Dispatch_uncertain -> Ok state
+     | Terminal_quarantined _ ->
+       Error
+         (Printf.sprintf
+            "exact execution lease %s call %s is already terminally quarantined"
+            lease.lease_id
+            call_id)
+     | Disposition_prepared _ ->
+       Error
+         (Printf.sprintf
+            "exact execution lease %s call %s already owns a source disposition"
+            lease.lease_id
+            call_id))
+  | [ binding ] ->
+    Error
+      (Printf.sprintf
+         "exact execution binding conflict: lease %s call %s is already bound"
+         binding.lease_id
+         binding.call_id)
+  | _ :: _ :: _ -> Error "event queue state contains multiple exact execution bindings"
+;;
+
+(* TEL-OK: pure state transition; the persistence boundary and caller own
+   release telemetry. *)
+let release_exact_execution_before_dispatch
+      ~(lease : lease)
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      state
+  =
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  match binding_for_lease lease state with
+  | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id)
+  | Some binding
+    when not
+           (binding_identity_equal
+              binding
+              ~slot_id
+              ~call_id
+              ~plan_fingerprint
+              ~request_body_sha256) ->
+    Error (Printf.sprintf "exact execution binding identity conflict: %s" lease.lease_id)
+  | Some { status = Terminal_quarantined _; _ } ->
+    Error
+      (Printf.sprintf
+         "terminally quarantined exact execution lease cannot be released: %s"
+         lease.lease_id)
+  | Some
+      { status = Disposition_prepared _; _ } ->
+    Error
+      (Printf.sprintf
+         "source-disposition exact execution lease cannot be released: %s"
+         lease.lease_id)
+  | Some { status = Dispatch_uncertain; _ } ->
+    Ok { state with exact_execution_bindings = [] }
+;;
+
+let quarantine_exact_execution
+      ~(lease : lease)
+      ~(terminal : exact_execution_terminal)
+      state
+  =
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id:terminal.slot_id
+      ~call_id:terminal.call_id
+      ~plan_fingerprint:terminal.plan_fingerprint
+      ~request_body_sha256:terminal.request_body_sha256
+  in
+  let* () = validate_exact_execution_terminal terminal in
+  match binding_for_lease lease state with
+  | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id)
+  | Some binding
+    when not
+           (binding_identity_equal
+              binding
+              ~slot_id:terminal.slot_id
+              ~call_id:terminal.call_id
+              ~plan_fingerprint:terminal.plan_fingerprint
+              ~request_body_sha256:terminal.request_body_sha256) ->
+    Error (Printf.sprintf "exact execution binding identity conflict: %s" lease.lease_id)
+  | Some ({ status = Dispatch_uncertain; _ } as binding) ->
+    Ok
+      { state with
+        exact_execution_bindings =
+          [ { binding with status = Terminal_quarantined terminal.cause } ]
+      }
+  | Some { status = Terminal_quarantined cause; _ } when cause = terminal.cause -> Ok state
+  | Some { status = Terminal_quarantined _; _ } ->
+    Error (Printf.sprintf "exact execution terminal cause conflict: %s" lease.lease_id)
+  | Some
+      { status = Disposition_prepared disposition; _ } ->
+    (match disposition.outcome with
+     | Terminal cause when cause = terminal.cause -> Ok state
+     | Terminal _ ->
+       Error (Printf.sprintf "exact execution terminal cause conflict: %s" lease.lease_id))
+;;
+
+let prepare_exact_source_disposition
+      ~(lease : lease)
+      ~source
+      ~(terminal : exact_execution_terminal)
+      ~semantic
+      ~prepared_at
+      state
+  =
+  let slot_id = terminal.slot_id in
+  let call_id = terminal.call_id in
+  let plan_fingerprint = terminal.plan_fingerprint in
+  let request_body_sha256 = terminal.request_body_sha256 in
+  let outcome = Terminal terminal.cause in
+  let action = Consume_source in
+  let* () = validate_exact_execution_terminal terminal in
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  let* () =
+    if Float.is_finite prepared_at
+    then Ok ()
+    else Error "exact source disposition preparation time must be finite"
+  in
+  let* () =
+    match committed_lease lease state with
+    | Some committed when lease_equal committed lease -> Ok ()
+    | Some _ -> Error (Printf.sprintf "event queue lease payload conflict: %s" lease.lease_id)
+    | None -> Error (Printf.sprintf "event queue lease not found: %s" lease.lease_id)
+  in
+  match binding_for_lease lease state with
+  | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id)
+  | Some binding
+    when not
+           (binding_identity_equal
+              binding
+              ~slot_id
+              ~call_id
+              ~plan_fingerprint
+              ~request_body_sha256) ->
+    Error (Printf.sprintf "exact execution binding identity conflict: %s" lease.lease_id)
+  | Some binding ->
+    let disposition_id =
+      exact_source_disposition_id_of_fields
+        ~source
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+        ~outcome
+        ~action
+        ~semantic
+        ~prepared_at
+    in
+    let disposition =
+      { disposition_id
+      ; source
+      ; slot_id
+      ; call_id
+      ; plan_fingerprint
+      ; request_body_sha256
+      ; outcome
+      ; action
+      ; semantic
+      ; prepared_at
+      }
+    in
+    let* () = validate_exact_source_disposition disposition in
+    let prepared_status = Disposition_prepared disposition in
+    (match binding.status with
+     | Dispatch_uncertain ->
+       Ok
+         ( { state with
+             exact_execution_bindings =
+               [ { binding with status = prepared_status } ]
+           }
+         , disposition )
+     | Terminal_quarantined cause ->
+       (match outcome with
+        | Terminal requested when requested = cause ->
+          Ok
+            ( { state with
+                exact_execution_bindings =
+                  [ { binding with status = prepared_status } ]
+              }
+            , disposition )
+        | Terminal _ ->
+          Error
+            (Printf.sprintf
+               "exact execution terminal cause conflict: %s"
+               lease.lease_id))
+     | Disposition_prepared existing ->
+       if String.equal existing.disposition_id disposition.disposition_id
+       then Ok (state, existing)
+       else
+         Error
+           (Printf.sprintf
+              "exact source disposition conflict: %s"
+              lease.lease_id))
+;;
+
+let commit_transition ~applied_at ~lease ~transition state =
+  let* () =
+    if Float.is_finite applied_at
+    then Ok ()
+    else Error "event queue transition time must be finite"
+  in
+  let* () = validate_transition transition in
+  let* () =
+    match binding_for_lease lease state with
+    | None -> Ok ()
+    | Some binding -> validate_bound_transition binding transition
+  in
+  match committed_lease lease state with
+  | None ->
+    (match find_prior_receipt (transition_id ~lease_id:lease.lease_id transition) state with
+     | Some receipt when transition_equal receipt.transition transition ->
+       Ok (state, Transition_already_applied receipt)
+     | Some receipt ->
+       Error
+         (Printf.sprintf
+            "event queue lease %s already settled as %s; refusing %s"
+            lease.lease_id
+            (transition_label receipt.transition)
+            (transition_label transition))
+     | None -> Error (Printf.sprintf "event queue lease not found: %s" lease.lease_id))
+  | Some committed when not (lease_equal committed lease) ->
+    Error (Printf.sprintf "event queue lease payload conflict: %s" lease.lease_id)
+  | Some committed ->
+    let* () = validate_transition_for_lease transition committed in
+    let pending =
+      match transition with
+      | Ack
+      | Manual_compaction_committed { followup = Compaction_commit_ack; _ }
+      | No_compaction _ | Cancel_accepted _ | Transfer_accepted _
+      | Ack_source_terminal _ -> state.pending
+      | Settle_exact { action = Consume_source; _ } -> state.pending
+      | Requeue
+          (Retry_after_observed | Context_compaction_retry) ->
+        (* Retryable provider work and context repair handoffs retain the exact
+           leased stimuli without monopolizing the FIFO front. *)
+        append_missing committed.stimuli state.pending
+      | Requeue _ -> prepend_missing committed.stimuli state.pending
+      | Escalate { successor = None; _ } -> state.pending
+      | Escalate { successor = Some successor; _ } ->
+        enqueue_if_missing state.pending successor
+    in
+    let receipt = receipt_for_lease ~applied_at ~transition committed in
+    let outbox_entry =
+      { receipt
+      ; stimuli = committed.stimuli
+      }
+    in
+    Ok
+      ( { state with
+          pending
+        ; leases = remove_lease committed.lease_id state.leases
+        ; transition_outbox = [ outbox_entry ]
+        ; exact_execution_bindings =
+            List.filter
+              (fun (binding : exact_execution_binding) ->
+                 not (String.equal binding.lease_id committed.lease_id))
+              state.exact_execution_bindings
+        }
+      , Transition_applied receipt )
+;;
+
+let finalize_exact_source_disposition
+      ~applied_at
+      ~(lease : lease)
+      ~disposition_id
+      state
+  =
+  match binding_for_lease lease state with
+  | Some { status = Disposition_prepared disposition; _ } ->
+    if not (String.equal disposition.disposition_id disposition_id)
+    then Error (Printf.sprintf "exact source disposition identity conflict: %s" lease.lease_id)
+    else
+      commit_transition
+        ~applied_at
+        ~lease
+        ~transition:(Settle_exact disposition)
+        state
+  | Some { status = Dispatch_uncertain; _ } ->
+    Error "dispatch-uncertain exact execution has no source disposition"
+  | Some { status = Terminal_quarantined _; _ } ->
+    Error "source-less terminal quarantine has no source disposition"
+  | None ->
+    (match
+       find_prior_receipt
+         (settle_exact_transition_id
+            ~lease_id:lease.lease_id
+            ~disposition_id)
+         state
+     with
+     | Some ({ transition = Settle_exact disposition; _ } as receipt)
+       when String.equal disposition.disposition_id disposition_id ->
+       Ok (state, Transition_already_applied receipt)
+     | Some _ ->
+       Error (Printf.sprintf "exact source disposition replay conflict: %s" lease.lease_id)
+     | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id))
+;;
+
 let disposition_operation_id = function
   | Cancel_accepted cancellation -> Some cancellation.operator_operation_id
   | Transfer_accepted transfer -> Some transfer.operator_operation_id
   | Ack_source_terminal source_terminal ->
     Some source_terminal.operator_operation_id
-  | Ack | Manual_compaction_committed _ | No_compaction _ | Requeue _
-  | Escalate _ ->
+  | Ack | Manual_compaction_committed _ | No_compaction _ | Settle_exact _
+  | Requeue _ | Escalate _ ->
     None
 ;;
 
@@ -1093,8 +1897,8 @@ let cancel_pending_accepted
              state.revision)
     in
     let* () =
-      if transition_outbox_blocked state
-      then Error "event queue cannot cancel pending work while an outbox transition exists"
+      if lease_admission_blocked state
+      then Error "event queue cannot cancel pending work while a lease or outbox exists"
       else Ok ()
     in
     let matching, retained =
@@ -1168,8 +1972,8 @@ let transfer_pending_accepted
              state.revision)
     in
     let* () =
-      if transition_outbox_blocked state
-      then Error "event queue cannot transfer pending work while an outbox transition exists"
+      if lease_admission_blocked state
+      then Error "event queue cannot transfer pending work while a lease or outbox exists"
       else Ok ()
     in
     let matching, retained =
@@ -1247,8 +2051,8 @@ let ack_pending_source_terminal
              state.revision)
     in
     let* () =
-      if transition_outbox_blocked state
-      then Error "event queue cannot ACK pending source while an outbox transition exists"
+      if lease_admission_blocked state
+      then Error "event queue cannot ACK pending source while a lease or outbox exists"
       else Ok ()
     in
     let matching, retained =
@@ -1285,9 +2089,12 @@ let restore_pending_transition entry state apply =
   in
   match replayed.transition_outbox with
   | [ actual ]
-    when transition_receipt_equal entry.receipt actual_receipt
+    when transition_receipt_same_commit entry.receipt actual_receipt
          && actual.stimuli = entry.stimuli ->
-    Ok replayed
+    (* A legacy receipt keeps its old ledger identity after the current direct
+       operation has proved the same source and transition. New rows have the
+       canonical operation-derived identity and compare exactly. *)
+    Ok { replayed with transition_outbox = [ entry ] }
   | [] | [ _ ] | _ :: _ :: _ ->
     Error
       (Printf.sprintf
@@ -1346,19 +2153,41 @@ let replay_transition_outbox_entry entry state =
      | ( Ack
        | Manual_compaction_committed _
        | No_compaction _
+       | Settle_exact _
        | Requeue _
        | Escalate _ ), _ ->
        Error
          (Printf.sprintf
-            "non-pending transition cannot be replayed: %s"
+            "legacy lease-backed transition cannot be replayed: %s"
             entry.receipt.transition_id)))
 ;;
 
 let remove_by_post_id post_id state =
-  let removed, pending =
+  let removed_pending, pending =
     Keeper_event_queue.remove_by_post_id post_id state.pending
   in
-  Keeper_event_queue.uniq_stimuli removed, { state with pending }
+  let removed_leases, leases =
+    List.fold_right
+      (fun (lease : lease) (removed, kept) ->
+         match binding_for_lease lease state with
+         | Some _ -> removed, lease :: kept
+         | None ->
+           let matched, remaining =
+             List.partition
+               (fun stimulus -> String.equal stimulus.Keeper_event_queue.post_id post_id)
+               lease.stimuli
+           in
+           let kept =
+             match remaining with
+             | [] -> kept
+             | _ -> { lease with stimuli = remaining } :: kept
+           in
+           matched @ removed, kept)
+      state.leases
+      ([], [])
+  in
+  ( Keeper_event_queue.uniq_stimuli (removed_pending @ removed_leases)
+  , { state with pending; leases } )
 ;;
 
 let assoc_fields ~context = function
@@ -1433,6 +2262,55 @@ let list_field ~context name parse fields =
 ;;
 
 let int64_json value = `Intlit (Int64.to_string value)
+
+let lease_to_yojson (lease : lease) =
+  `Assoc
+    [ "lease_id", `String lease.lease_id
+    ; "sequence", int64_json lease.sequence
+    ; "kind", `String (lease_kind_label lease.kind)
+    ; ( "claimed_at_unix"
+      , match lease.claimed_at with
+        | None -> `Null
+        | Some claimed_at -> `Float claimed_at )
+    ; "stimuli", `List (List.map Keeper_event_queue.stimulus_to_yojson lease.stimuli)
+    ]
+;;
+
+let lease_of_yojson json =
+  let context = "event queue lease" in
+  let* fields = assoc_fields ~context json in
+  let* lease_id = string_field ~context "lease_id" fields in
+  let* sequence = int64_field ~context "sequence" fields in
+  let* kind_label = string_field ~context "kind" fields in
+  let* kind = lease_kind_of_label kind_label in
+  let* claimed_at =
+    match List.assoc_opt "claimed_at_unix" fields with
+    | None | Some `Null -> Ok None
+    | Some (`Float value) -> Ok (Some value)
+    | Some (`Int value) -> Ok (Some (float_of_int value))
+    | Some _ -> Error "event queue lease.claimed_at_unix must be a number or null"
+  in
+  let* stimuli =
+    list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
+  in
+  if Int64.compare sequence 1L < 0
+  then Error "event queue lease sequence must be positive"
+  else if stimuli = []
+  then Error "event queue lease must contain at least one stimulus"
+  else if kind = Single && List.length stimuli <> 1
+  then Error "single event queue lease must contain exactly one stimulus"
+  else if
+    kind = Board_batch
+    && not
+         (List.for_all
+            (fun (stimulus : Keeper_event_queue.stimulus) ->
+               Keeper_event_queue.is_board_signal stimulus.payload)
+            stimuli)
+  then Error "board event queue lease contains a non-board stimulus"
+  else if not (String.equal lease_id (lease_id_of_sequence sequence))
+  then Error (Printf.sprintf "event queue lease id/sequence mismatch: %s" lease_id)
+  else Ok { lease_id; sequence; kind; claimed_at; stimuli }
+;;
 
 let no_compaction_reason_label = function
   | No_eligible_history -> "no_eligible_history"
@@ -1536,6 +2414,104 @@ let checkpoint_source_of_yojson json =
       Printf.sprintf "no-compaction checkpoint turn count is negative: %d" value
     | Invalid_sha256 value ->
       Printf.sprintf "no-compaction checkpoint digest is invalid: %s" value)
+;;
+
+let exact_source_disposition_to_yojson disposition =
+  let terminal_cause =
+    match disposition.outcome with
+    | Terminal cause ->
+      `String (exact_execution_terminal_cause_label cause)
+  in
+  let action_kind =
+    match disposition.action with
+    | Consume_source -> "consume_source"
+  in
+  `Assoc
+    [ "disposition_id", `String disposition.disposition_id
+    ; "source", checkpoint_source_to_yojson disposition.source
+    ; "slot_id", `String disposition.slot_id
+    ; "call_id", `String disposition.call_id
+    ; "plan_fingerprint", `String disposition.plan_fingerprint
+    ; "request_body_sha256", `String disposition.request_body_sha256
+    ; "terminal_cause", terminal_cause
+    ; "action_kind", `String action_kind
+    ; ( "settlement_semantic"
+      , `String (exact_settlement_semantic_label disposition.semantic) )
+    ; "prepared_at_unix", `Float disposition.prepared_at
+    ]
+;;
+
+let exact_source_disposition_of_yojson json =
+  let context = "exact source disposition" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "disposition_id"
+        ; "source"
+        ; "slot_id"
+        ; "call_id"
+        ; "plan_fingerprint"
+        ; "request_body_sha256"
+        ; "terminal_cause"
+        ; "action_kind"
+        ; "settlement_semantic"
+        ; "prepared_at_unix"
+        ]
+      fields
+  in
+  let* disposition_id = string_field ~context "disposition_id" fields in
+  let* source_json = required_field ~context "source" fields in
+  let* source = checkpoint_source_of_yojson source_json in
+  let* slot_id = string_field ~context "slot_id" fields in
+  let* call_id = string_field ~context "call_id" fields in
+  let* plan_fingerprint = string_field ~context "plan_fingerprint" fields in
+  let* request_body_sha256 = string_field ~context "request_body_sha256" fields in
+  let* terminal_cause_json = required_field ~context "terminal_cause" fields in
+  let* outcome =
+    match terminal_cause_json with
+    | `String cause ->
+      let* cause = exact_execution_terminal_cause_of_label cause in
+      Ok (Terminal cause)
+    | _ -> Error "terminal exact source disposition requires one terminal cause"
+  in
+  let* action_kind = string_field ~context "action_kind" fields in
+  let* action =
+    match action_kind with
+    | "consume_source" -> Ok Consume_source
+    | unknown ->
+      Error (Printf.sprintf "unknown exact source disposition action: %s" unknown)
+  in
+  let* semantic_label =
+    string_field ~context "settlement_semantic" fields
+  in
+  let* semantic =
+    match semantic_label with
+    | "no_compaction" -> Ok Exact_no_compaction
+    | "escalate" -> Ok Exact_escalate
+    | unknown ->
+      Error
+        (Printf.sprintf
+           "unknown exact source disposition settlement semantic: %s"
+           unknown)
+  in
+  let* prepared_at = float_field ~context "prepared_at_unix" fields in
+  let disposition =
+    { disposition_id
+    ; source
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint
+    ; request_body_sha256
+    ; outcome
+    ; action
+    ; semantic
+    ; prepared_at
+    }
+  in
+  let* () = validate_exact_source_disposition disposition in
+  Ok disposition
 ;;
 
 let manual_compaction_auxiliary_to_yojson auxiliary =
@@ -1848,6 +2824,11 @@ let transition_to_yojson = function
       ; "operator_operation_id", `String source_terminal.operator_operation_id
        ; "source_receipt_kind", `String receipt_kind
        ]
+  | Settle_exact disposition ->
+    `Assoc
+      [ "kind", `String "settle_exact"
+      ; "disposition", exact_source_disposition_to_yojson disposition
+      ]
   | Requeue reason ->
     `Assoc
       [ "kind", `String "requeue"
@@ -2020,6 +3001,13 @@ let transition_of_yojson json =
     in
     let* () = validate_accepted_source_terminal source_terminal in
     Ok (Ack_source_terminal source_terminal)
+  | "settle_exact" ->
+    let* () =
+      exact_fields ~context ~expected:[ "kind"; "disposition" ] fields
+    in
+    let* disposition_json = required_field ~context "disposition" fields in
+    let* disposition = exact_source_disposition_of_yojson disposition_json in
+    Ok (Settle_exact disposition)
   | "requeue" ->
     let* () = exact_fields ~context ~expected:[ "kind"; "reason" ] fields in
     let* reason = string_field ~context "reason" fields in
@@ -2062,6 +3050,7 @@ let accepted_transfer_projection_of_yojson json =
   | No_compaction _
   | Cancel_accepted _
   | Ack_source_terminal _
+  | Settle_exact _
   | Requeue _
   | Escalate _ -> Error "target transfer projection must contain transfer_accepted"
 ;;
@@ -2101,7 +3090,14 @@ let transition_receipt_of_yojson json =
       (match pending_transition_id transition with
        | Some expected_transition_id ->
          String.equal receipt_transition_id expected_transition_id
-       | None -> false)
+         || legacy_transition_id_is_valid transition receipt_transition_id
+       | None ->
+         (* A v10 projected witness can contain one of the retired
+            lease-backed transitions. Once recovered and checkpointed as v11,
+            it no longer carries the lease fields, but its transition ID still
+            proves the exact historical lease identity. New v11 writers cannot
+            produce these generic transitions. *)
+         legacy_transition_id_is_valid transition receipt_transition_id)
   then Error (Printf.sprintf "event queue receipt transition id mismatch: %s" receipt_transition_id)
   else if not (String.equal event_id (event_id_of_transition receipt_transition_id))
   then Error (Printf.sprintf "event queue receipt event id mismatch: %s" event_id)
@@ -2112,6 +3108,75 @@ let transition_receipt_of_yojson json =
       ; applied_at
       ; transition
       }
+;;
+
+let legacy_transition_receipt_of_yojson json =
+  let context = "legacy event queue transition receipt" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "transition_id"
+        ; "event_id"
+        ; "lease_id"
+        ; "lease_sequence"
+        ; "applied_at_unix"
+        ; "transition"
+        ]
+      fields
+  in
+  let* receipt_transition_id = string_field ~context "transition_id" fields in
+  let* event_id = string_field ~context "event_id" fields in
+  let* lease_id = string_field ~context "lease_id" fields in
+  let* lease_sequence = int64_field ~context "lease_sequence" fields in
+  let* applied_at = float_field ~context "applied_at_unix" fields in
+  let* transition_json = required_field ~context "transition" fields in
+  let* transition = transition_of_yojson transition_json in
+  let expected_lease_id = lease_id_of_sequence lease_sequence in
+  let expected_transition_ids =
+    match transition with
+    | Ack_source_terminal _ ->
+      [ transition_id ~lease_id:expected_lease_id transition
+      ; Printf.sprintf "%s:%s" expected_lease_id legacy_source_terminal_kind
+      ]
+    | Ack
+    | Manual_compaction_committed _
+    | No_compaction _
+    | Cancel_accepted _
+    | Transfer_accepted _
+    | Settle_exact _
+    | Requeue _
+    | Escalate _ ->
+      [ transition_id ~lease_id:expected_lease_id transition ]
+  in
+  if Int64.compare lease_sequence 1L < 0
+  then Error "legacy event queue receipt lease sequence must be positive"
+  else if not (Float.is_finite applied_at)
+  then Error "legacy event queue receipt application time must be finite"
+  else if not (String.equal lease_id expected_lease_id)
+  then Error (Printf.sprintf "legacy event queue receipt lease id mismatch: %s" lease_id)
+  else if not (List.exists (String.equal receipt_transition_id) expected_transition_ids)
+  then
+    Error
+      (Printf.sprintf
+         "legacy event queue receipt transition id mismatch: %s"
+         receipt_transition_id)
+  else if not (String.equal event_id (event_id_of_transition receipt_transition_id))
+  then Error (Printf.sprintf "legacy event queue receipt event id mismatch: %s" event_id)
+  else Ok { transition_id = receipt_transition_id; event_id; applied_at; transition }
+;;
+
+let legacy_settlement_transition_receipt_of_yojson json =
+  legacy_settlement_transition_receipt_json json |> legacy_transition_receipt_of_yojson
+;;
+
+let legacy_persisted_transition_receipt_of_yojson json =
+  let context = "legacy persisted event queue transition receipt" in
+  let* fields = assoc_fields ~context json in
+  if List.mem_assoc "settlement" fields
+  then legacy_settlement_transition_receipt_of_yojson json
+  else legacy_transition_receipt_of_yojson json
 ;;
 
 let outbox_entry_to_yojson entry =
@@ -2129,10 +3194,132 @@ let outbox_entry_of_yojson json =
   let* stimuli =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
   in
-  (* Re-enforce the commit-time receipt-vs-stimuli invariant at the decode
+  (* Re-enforce the settle-time receipt-vs-stimuli invariant at the decode
      boundary; malformed typed terminal receipts are rejected as [Error]. *)
   let* () = validate_transition_for_stimuli receipt.transition stimuli in
   Ok { receipt; stimuli }
+;;
+
+let legacy_transition_outbox_entry_of_yojson json =
+  let context = "legacy event queue outbox entry" in
+  let* fields = assoc_fields ~context json in
+  let* receipt_json = required_field ~context "receipt" fields in
+  let* receipt = legacy_transition_receipt_of_yojson receipt_json in
+  let* stimuli =
+    list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
+  in
+  let* () = validate_transition_for_stimuli receipt.transition stimuli in
+  Ok { receipt; stimuli }
+;;
+
+let legacy_persisted_transition_outbox_entry_of_yojson json =
+  legacy_settlement_outbox_entry_json json |> legacy_transition_outbox_entry_of_yojson
+;;
+
+let exact_execution_binding_to_yojson binding =
+  let status, terminal_cause, disposition =
+    match binding.status with
+    | Dispatch_uncertain -> "dispatch_uncertain", `Null, `Null
+    | Terminal_quarantined cause ->
+      ( "terminal_quarantined"
+      , `String (exact_execution_terminal_cause_label cause)
+      , `Null )
+    | Disposition_prepared disposition ->
+      "disposition_prepared", `Null, exact_source_disposition_to_yojson disposition
+  in
+  `Assoc
+    [ "lease_id", `String binding.lease_id
+    ; "lease_sequence", int64_json binding.lease_sequence
+    ; "slot_id", `String binding.slot_id
+    ; "call_id", `String binding.call_id
+    ; "plan_fingerprint", `String binding.plan_fingerprint
+    ; "request_body_sha256", `String binding.request_body_sha256
+    ; "status", `String status
+    ; "terminal_cause", terminal_cause
+    ; "disposition", disposition
+    ]
+;;
+
+let exact_execution_binding_of_yojson json =
+  let context = "exact execution lease binding" in
+  let* fields = assoc_fields ~context json in
+  let has_disposition = List.mem_assoc "disposition" fields in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        ([ "lease_id"
+         ; "lease_sequence"
+         ; "slot_id"
+         ; "call_id"
+         ; "plan_fingerprint"
+         ; "request_body_sha256"
+         ; "status"
+         ; "terminal_cause"
+         ]
+         @ if has_disposition then [ "disposition" ] else [])
+      fields
+  in
+  let* lease_id = string_field ~context "lease_id" fields in
+  let* lease_sequence = int64_field ~context "lease_sequence" fields in
+  let* slot_id = string_field ~context "slot_id" fields in
+  let* call_id = string_field ~context "call_id" fields in
+  let* plan_fingerprint = string_field ~context "plan_fingerprint" fields in
+  let* request_body_sha256 = string_field ~context "request_body_sha256" fields in
+  let* status_label = string_field ~context "status" fields in
+  let* terminal_cause_json = required_field ~context "terminal_cause" fields in
+  let disposition_json = List.assoc_opt "disposition" fields in
+  let* status =
+    match status_label, terminal_cause_json, disposition_json with
+    | "dispatch_uncertain", `Null, (None | Some `Null) -> Ok Dispatch_uncertain
+    | "terminal_quarantined", `String cause, (None | Some `Null) ->
+      let* cause = exact_execution_terminal_cause_of_label cause in
+      Ok (Terminal_quarantined cause)
+    | "disposition_prepared", `Null, Some disposition_json ->
+      let* disposition = exact_source_disposition_of_yojson disposition_json in
+      (match disposition.outcome with
+       | Terminal _ -> Ok (Disposition_prepared disposition))
+    | "dispatch_uncertain", _, _ ->
+      Error "dispatch-uncertain exact execution binding must not carry a terminal cause"
+    | "terminal_quarantined", _, _ ->
+      Error "terminally quarantined exact execution binding requires a terminal cause"
+    | "disposition_prepared", _, _ ->
+      Error "v5 exact execution binding status requires one source disposition"
+    | status, _, _ ->
+      Error (Printf.sprintf "unknown exact execution binding status: %s" status)
+  in
+  if Int64.compare lease_sequence 1L < 0
+  then Error "exact execution binding lease sequence must be positive"
+  else if not (String.equal lease_id (lease_id_of_sequence lease_sequence))
+  then Error "exact execution binding lease id does not match its sequence"
+  else if String.trim slot_id = ""
+  then Error "exact execution binding slot id must not be empty"
+  else if String.trim call_id = ""
+  then Error "exact execution binding call id must not be empty"
+  else if String.trim plan_fingerprint = ""
+  then Error "exact execution binding plan fingerprint must not be empty"
+  else if String.trim request_body_sha256 = ""
+  then Error "exact execution binding request body sha256 must not be empty"
+  else if
+    match status with
+    | Dispatch_uncertain | Terminal_quarantined _ -> false
+    | Disposition_prepared disposition ->
+      not
+        (String.equal disposition.slot_id slot_id
+         && String.equal disposition.call_id call_id
+         && String.equal disposition.plan_fingerprint plan_fingerprint
+         && String.equal disposition.request_body_sha256 request_body_sha256)
+  then Error "exact source disposition does not match its full execution binding"
+  else
+    Ok
+      { lease_id
+      ; lease_sequence
+      ; slot_id
+      ; call_id
+      ; plan_fingerprint
+      ; request_body_sha256
+      ; status
+      }
 ;;
 
 let to_yojson state =
@@ -2188,8 +3375,57 @@ let duplicate_transfer_source (transfers : accepted_transfer list) =
 let validate_state state =
   if Int64.compare state.revision 0L < 0
   then Error "event queue revision must not be negative"
+  else if List.length state.leases > 1
+  then Error "event queue state must contain at most one active lease"
+  else if List.length state.exact_execution_bindings > 1
+  then Error "event queue state must contain at most one exact execution binding"
+  else if
+    List.exists
+      (fun (binding : exact_execution_binding) ->
+         Int64.compare binding.lease_sequence 1L < 0
+         || not (String.equal binding.lease_id (lease_id_of_sequence binding.lease_sequence))
+         || String.trim binding.slot_id = ""
+         || String.trim binding.call_id = ""
+         || String.trim binding.plan_fingerprint = ""
+         || String.trim binding.request_body_sha256 = "")
+      state.exact_execution_bindings
+  then Error "event queue state contains an invalid exact execution binding"
+  else if
+    List.exists
+      (fun (binding : exact_execution_binding) ->
+         match binding.status with
+         | Dispatch_uncertain | Terminal_quarantined _ -> false
+         | Disposition_prepared disposition ->
+           Result.is_error (validate_exact_source_disposition disposition)
+           || not
+                (String.equal binding.slot_id disposition.slot_id
+                 && String.equal binding.call_id disposition.call_id
+                 && String.equal
+                      binding.plan_fingerprint
+                      disposition.plan_fingerprint
+                 && String.equal
+                      binding.request_body_sha256
+                      disposition.request_body_sha256)
+           ||
+           match disposition.outcome with
+           | Terminal _ -> false)
+      state.exact_execution_bindings
+  then Error "event queue state contains an invalid exact source disposition"
+  else if
+    List.exists
+      (fun (binding : exact_execution_binding) ->
+         not
+           (List.exists
+              (fun (lease : lease) ->
+                 String.equal lease.lease_id binding.lease_id
+                 && Int64.equal lease.sequence binding.lease_sequence)
+              state.leases))
+      state.exact_execution_bindings
+  then Error "exact execution binding has no matching active lease"
   else if List.length state.transition_outbox > 1
   then Error "event queue state must contain at most one unprojected transition"
+  else if state.leases <> [] && state.transition_outbox <> []
+  then Error "event queue state cannot contain both an active lease and an outbox transition"
   else if
     match state.last_transition, state.transition_outbox with
     | Some receipt, [ entry ] ->
@@ -2197,45 +3433,41 @@ let validate_state state =
     | None, _ | Some _, ([] | _ :: _ :: _) -> false
   then Error "event queue last transition duplicates the unprojected transition"
   else
-    match
-      duplicate_by
-        (fun entry -> entry.receipt.transition_id)
-        state.transition_outbox
-    with
-    | Some transition_id ->
-      Error (Printf.sprintf "duplicate event queue transition id: %s" transition_id)
+    match duplicate_by (fun (lease : lease) -> lease.lease_id) state.leases with
+    | Some lease_id -> Error (Printf.sprintf "duplicate event queue lease id: %s" lease_id)
     | None ->
       (match
          duplicate_by
-           (fun (transfer : accepted_transfer) -> transfer.operator_operation_id)
-           state.accepted_transfer_projections
+           (fun entry -> entry.receipt.transition_id)
+           state.transition_outbox
        with
-       | Some operation_id ->
-         Error
-           (Printf.sprintf
-              "duplicate target transfer projection operation id: %s"
-              operation_id)
+       | Some transition_id ->
+         Error (Printf.sprintf "duplicate event queue transition id: %s" transition_id)
        | None ->
-         (match duplicate_transfer_source state.accepted_transfer_projections with
-          | Some _ -> Error "duplicate target transfer projection source identity"
-          | None -> Ok state))
+         (match
+            duplicate_by
+              (fun (transfer : accepted_transfer) -> transfer.operator_operation_id)
+              state.accepted_transfer_projections
+          with
+          | Some operation_id ->
+            Error
+              (Printf.sprintf
+                 "duplicate target transfer projection operation id: %s"
+                 operation_id)
+          | None ->
+            (match duplicate_transfer_source state.accepted_transfer_projections with
+             | Some _ -> Error "duplicate target transfer projection source identity"
+             | None -> Ok state)))
 ;;
 
 let of_yojson json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
   let* schema_value = string_field ~context "schema" fields in
-  let* () =
+  let* expected_fields =
     if String.equal schema_value schema
-    then Ok ()
-    else
-      Error
-        (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
-  in
-  let* () =
-    exact_fields
-      ~context
-      ~expected:
+    then
+      Ok
         [ "schema"
         ; "revision"
         ; "pending"
@@ -2243,32 +3475,92 @@ let of_yojson json =
         ; "transition_outbox"
         ; "accepted_transfer_projections"
         ]
-      fields
+    else if String.equal schema_value schema_v11
+    then
+      Ok
+        [ "schema"
+        ; "revision"
+        ; "pending"
+        ; "last_settlement"
+        ; "transition_outbox"
+        ; "accepted_transfer_projections"
+        ]
+    else if String.equal schema_value schema_v10
+    then
+      Ok
+        [ "schema"
+        ; "revision"
+        ; "pending"
+        ; "last_settlement"
+        ; "transition_outbox"
+        ]
+    else if String.equal schema_value schema_v9 || String.equal schema_value schema_v8
+    then Ok [ "schema"; "revision"; "pending"; "transition_outbox" ]
+    else if String.equal schema_value schema_v7
+    then Ok [ "schema"; "revision"; "pending" ]
+    else
+      Error
+        (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   in
+  let* () = exact_fields ~context ~expected:expected_fields fields in
   let* revision = int64_field ~context "revision" fields in
   let* pending_json = required_field ~context "pending" fields in
   let* pending = Keeper_event_queue.queue_of_yojson pending_json in
   let* transition_outbox =
-    list_field ~context "transition_outbox" outbox_entry_of_yojson fields
+    if String.equal schema_value schema
+    then list_field ~context "transition_outbox" outbox_entry_of_yojson fields
+    else if
+      String.equal schema_value schema_v11 || String.equal schema_value schema_v10
+    then
+      list_field
+        ~context
+        "transition_outbox"
+        legacy_persisted_transition_outbox_entry_of_yojson
+        fields
+    else if
+      String.equal schema_value schema_v9 || String.equal schema_value schema_v8
+    then
+      list_field
+        ~context
+        "transition_outbox"
+        legacy_persisted_transition_outbox_entry_of_yojson
+        fields
+    else Ok []
   in
   let* last_transition =
-    match List.assoc_opt "last_transition" fields with
-    | Some `Null -> Ok None
-    | Some json -> transition_receipt_of_yojson json |> Result.map Option.some
-    | None -> Error "keeper event queue state missing required field last_transition"
+    if String.equal schema_value schema
+    then
+      match List.assoc_opt "last_transition" fields with
+      | Some `Null -> Ok None
+      | Some json -> transition_receipt_of_yojson json |> Result.map Option.some
+      | None -> Error "keeper event queue state missing required field last_transition"
+    else if
+      String.equal schema_value schema_v11 || String.equal schema_value schema_v10
+    then
+      match List.assoc_opt "last_settlement" fields with
+      | Some `Null -> Ok None
+      | Some json -> legacy_persisted_transition_receipt_of_yojson json |> Result.map Option.some
+      | None -> Error "keeper event queue state missing required field last_settlement"
+    else Ok None
   in
   let* accepted_transfer_projections =
-    list_field
-      ~context
-      "accepted_transfer_projections"
-      accepted_transfer_projection_of_yojson
-      fields
+    if
+      String.equal schema_value schema || String.equal schema_value schema_v11
+    then
+      list_field
+        ~context
+        "accepted_transfer_projections"
+        accepted_transfer_projection_of_yojson
+        fields
+    else Ok []
   in
   validate_state
     { revision
     ; pending
+    ; leases = []
     ; last_transition
     ; transition_outbox
     ; accepted_transfer_projections
+    ; exact_execution_bindings = []
     }
 ;;

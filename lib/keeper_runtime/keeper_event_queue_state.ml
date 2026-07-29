@@ -3691,15 +3691,19 @@ let of_yojson json =
      here would reject the very snapshot this decoder just read. Derive it from
      what was restored; an empty state yields 1L, the pre-v8 seed. *)
   let next_lease_sequence =
-    List.fold_left
-      (fun acc (entry : outbox_entry) -> Int64.max acc entry.receipt.lease_sequence)
-      0L
-      transition_outbox
-    |> fun maximum ->
-    match last_settlement with
-    | None -> maximum
-    | Some receipt -> Int64.max maximum receipt.lease_sequence
-    |> Int64.succ
+    let outbox_maximum =
+      List.fold_left
+        (fun acc (entry : outbox_entry) ->
+           Int64.max acc entry.receipt.lease_sequence)
+        0L
+        transition_outbox
+    in
+    let maximum =
+      match last_settlement with
+      | None -> outbox_maximum
+      | Some receipt -> Int64.max outbox_maximum receipt.lease_sequence
+    in
+    Int64.succ maximum
   in
   validate_state
     { revision

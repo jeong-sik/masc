@@ -1081,6 +1081,33 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
       "release-evidence smoke runtime.toml should load: %s"
       (render_runtime_toml_errors errors)
   | Ok (config : Runtime_schema.config) ->
+    let default_runtime_id =
+      match config.default_runtime_id with
+      | Some runtime_id -> runtime_id
+      | None -> fail "release-evidence smoke runtime.toml must declare a default runtime"
+    in
+    let default_binding =
+      match
+        List.find_opt
+          (fun (binding : Runtime_schema.binding) ->
+             String.equal
+               (Runtime_schema.binding_key binding)
+               default_runtime_id)
+          config.bindings
+      with
+      | Some binding -> binding
+      | None ->
+        failf
+          "release-evidence smoke default runtime %s must resolve to a binding"
+          default_runtime_id
+    in
+    check
+      bool
+      "release-evidence smoke default runtime has a positive request-body cap"
+      true
+      (match default_binding.max_request_body_bytes with
+       | Some cap -> cap > 0
+       | None -> false);
     List.iter
       (fun lane_id ->
          match

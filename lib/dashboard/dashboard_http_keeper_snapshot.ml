@@ -157,9 +157,16 @@ let keeper_config_json (config : Workspace.config) (name : string)
           Keeper_world_observation.observe
             ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
+        (* This is a dashboard preview, not a live turn: no scheduler decision
+           exists to thread through, so the preview declares its own recompute
+           at this boundary (same shape the prompt tests use). A live turn's
+           decision still comes from the scheduler (keeper_unified_turn.ml). *)
+        let turn_decision =
+          Keeper_world_observation.keeper_cycle_decision ~meta:m observation
+        in
         let parts =
           Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
-            ~profile_defaults:defaults ~observation ()
+            ~profile_defaults:defaults ~turn_decision ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the
            per-turn dynamic context (system side), and the persisted user

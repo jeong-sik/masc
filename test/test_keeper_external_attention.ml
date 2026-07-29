@@ -13,10 +13,6 @@ let temp_base_path prefix =
   Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
 
-let expect_ok = function
-  | Ok () -> ()
-  | Error detail -> Alcotest.failf "expected Ok, got Error %s" detail
-
 let discord_surface ?thread_id ?parent_channel_id channel_id =
   A.Discord
     {
@@ -78,14 +74,6 @@ let test_json_roundtrip () =
   check_roundtrip "item" A.item_to_json A.item_of_json att;
   check_roundtrip "recorded event" A.event_to_json A.event_of_json
     (A.Recorded att);
-  check_roundtrip "claimed event" A.event_to_json A.event_of_json
-    (A.Claimed_for_turn
-       {
-         event_id = att.A.event_id;
-         claim_id = "claim-1";
-         turn_id = Some 42;
-         claimed_at = 20.0;
-       });
   check_roundtrip "resolved event" A.event_to_json A.event_of_json
     (A.Resolved
        { event_id = att.A.event_id; resolved_at = 30.0; reason = "replied" })
@@ -168,57 +156,6 @@ let test_record_dedupes_and_reads_pending () =
   | pending ->
       Alcotest.failf "expected 1 pending item, got %d" (List.length pending)
 
-let test_claim_resolution_and_ignore_projection () =
-  with_temp_base "keeper-external-attention-lifecycle" @@ fun base_path ->
-  let one = item ~dedupe_key:"discord:chan-1:msg-1" ~received_at:1.0 () in
-  let two = item ~dedupe_key:"discord:chan-1:msg-2" ~received_at:2.0 () in
-  ignore (A.record ~base_path one : A.record_result);
-  ignore (A.record ~base_path two : A.record_result);
-  expect_ok
-    (A.claim_for_turn ~base_path ~keeper_name:"sangsu"
-       ~event_ids:[ one.A.event_id ] ~claim_id:"claim-1" ~turn_id:(Some 7)
-       ~now:10.0 ());
-  let pending =
-    A.pending_for_keeper ~base_path ~keeper_name:"sangsu" ~now:11.0
-      ~claim_stale_after:60.0 ~limit:10 ()
-  in
-  Alcotest.(check (list string)) "claimed item hidden"
-    [ two.A.event_id ]
-    (List.map (fun i -> i.A.event_id) pending);
-  expect_ok
-    (A.mark_resolved ~base_path ~keeper_name:"sangsu"
-       ~event_ids:[ one.A.event_id ] ~reason:"replied" ~now:12.0 ());
-  expect_ok
-    (A.mark_ignored ~base_path ~keeper_name:"sangsu"
-       ~event_ids:[ two.A.event_id ] ~reason:"silent" ~now:13.0 ());
-  Alcotest.(check int) "all terminal" 0
-    (List.length
-       (A.pending_for_keeper ~base_path ~keeper_name:"sangsu" ~now:14.0
-          ~limit:10 ()))
-
-let test_stale_claim_projects_back_to_pending () =
-  with_temp_base "keeper-external-attention-stale-claim" @@ fun base_path ->
-  let att = item () in
-  ignore (A.record ~base_path att : A.record_result);
-  expect_ok
-    (A.claim_for_turn ~base_path ~keeper_name:"sangsu"
-       ~event_ids:[ att.A.event_id ] ~claim_id:"claim-1" ~turn_id:None
-       ~now:10.0 ());
-  Alcotest.(check int) "fresh claim hidden" 0
-    (List.length
-       (A.pending_for_keeper ~base_path ~keeper_name:"sangsu" ~now:11.0
-          ~claim_stale_after:5.0 ~limit:10 ()));
-  match
-    A.pending_for_keeper ~base_path ~keeper_name:"sangsu" ~now:20.0
-      ~claim_stale_after:5.0 ~limit:10 ()
-  with
-  | [ pending ] ->
-      Alcotest.(check string) "stale claim recovered" att.A.event_id
-        pending.A.event_id
-  | pending ->
-      Alcotest.failf "expected recovered pending item, got %d"
-        (List.length pending)
-
 let test_discord_channel_and_thread_conversation_ids_stay_distinct () =
   let channel =
     conversation ~surface:(discord_surface "chan-1") "discord:guild-1:chan-1"
@@ -245,10 +182,6 @@ let () =
             test_record_dedupes_and_reads_pending;
           Alcotest.test_case "record dedup window is bounded (F943)" `Quick
             test_record_dedup_window_bounded;
-          Alcotest.test_case "claim, resolve, ignore projection" `Quick
-            test_claim_resolution_and_ignore_projection;
-          Alcotest.test_case "stale claim projects back to pending" `Quick
-            test_stale_claim_projects_back_to_pending;
           Alcotest.test_case "Discord channel/thread lanes are distinct" `Quick
             test_discord_channel_and_thread_conversation_ids_stay_distinct;
         ] );

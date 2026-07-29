@@ -16,6 +16,7 @@ module KSM = Keeper_state_machine
 module KLH = Masc.Keeper_lifecycle_hooks
 module KA = Masc.Keeper_keepalive
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
+module KSS = Masc.Keeper_supervisor_supervise_keepalive
 module Supervisor_launch = Masc.Keeper_supervisor_launch
 module Lane = Masc.Keeper_lane
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
@@ -903,6 +904,87 @@ let test_reconcile_supervise_exception_continues () =
     (List.rev !supervised);
   check (float 0.001) "reconcile failure metric increments" (before +. 1.)
     (Masc.Otel_metric_store.metric_total metric)
+
+let test_supervise_keepalive_retains_sweep_owned_entries () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  Eio.Switch.on_release sw (fun () ->
+      Reg.For_testing.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  let ctx = keeper_runtime_context env sw config in
+  let launched = ref [] in
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let launch_supervised_fiber
+        ~proactive_warmup_sec:_
+        _ctx
+        _meta
+        (entry : Reg.registry_entry)
+    =
+    launched := (entry.name, entry.phase) :: !launched;
+    Ok ()
+  in
+  let stopped_name = "recoverable-stopped-owner" in
+  let stopped_meta = make_meta stopped_name in
+  let stopped =
+    Reg.For_testing.register ~base_path:config.base_path stopped_name stopped_meta
+  in
+  ignore
+    (Reg.dispatch_event ~base_path:config.base_path stopped_name KSM.Stop_requested);
+  (match
+     Reg.dispatch_event ~base_path:config.base_path stopped_name KSM.Drain_complete
+   with
+   | Ok transition ->
+     check
+       string
+       "stopped fixture phase"
+       "stopped"
+       (KSM.phase_to_string transition.new_phase)
+   | Error error -> fail (KSM.transition_error_to_string error));
+  ignore (Reg.resolve_done stopped ~source:"stopped_owner_fixture" `Stopped);
+  KSS.supervise_keepalive
+    ~publish_lifecycle
+    ~launch_supervised_fiber
+    ~proactive_warmup_sec:0
+    ctx
+    stopped_meta;
+  let crashed_name = "recoverable-crashed-owner" in
+  let crashed_meta = make_meta crashed_name in
+  let _crashed =
+    Reg.For_testing.register ~base_path:config.base_path crashed_name crashed_meta
+  in
+  (match
+     Reg.dispatch_event
+       ~base_path:config.base_path
+       crashed_name
+       (KSM.Fiber_terminated
+          { outcome = "fixture crash"; provider_id = None; http_status = None })
+   with
+   | Ok transition ->
+     check
+       string
+       "crashed fixture phase"
+       "crashed"
+       (KSM.phase_to_string transition.new_phase)
+   | Error error -> fail (KSM.transition_error_to_string error));
+  KSS.supervise_keepalive
+    ~publish_lifecycle
+    ~launch_supervised_fiber
+    ~proactive_warmup_sec:0
+    ctx
+    crashed_meta;
+  check
+    (list (pair string string))
+    "Stopped and Crashed owners remain assigned to the supervisor sweep"
+    []
+    (List.rev_map
+       (fun (name, phase) -> name, KSM.phase_to_string phase)
+       !launched)
 
 let registered_entries names =
   Reg.For_testing.clear ();
@@ -1998,6 +2080,8 @@ let () =
         test_reconcile_materialize_failure_continues_with_metric;
       test_case "reconcile supervise exception is isolated" `Quick
         test_reconcile_supervise_exception_continues;
+      test_case "recoverable sweep-owned entries are not relaunched" `Quick
+        test_supervise_keepalive_retains_sweep_owned_entries;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;

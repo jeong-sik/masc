@@ -1,9 +1,10 @@
 (** Keepalive supervision entry-point, extracted from
     [keeper_supervisor.ml] (godfile decomp).
 
-    [supervise_keepalive] is the gate that decides whether to spawn a
-    supervised keepalive fiber for [meta]. Idempotent on already-
-    registered keepers (no-op). On a fresh registration:
+    [supervise_keepalive] decides whether to spawn a supervised
+    keepalive fiber for [meta]. It launches fresh registrations and
+    resumes registrations still in [Offline]. Other registered phases
+    remain owned by the lifecycle sweep. On a fresh registration:
 
     1. Asks [Keeper_registry] for a spawn-slot decision. On [Error
        reason], records the denial and publishes an [Admission_denied]
@@ -165,23 +166,6 @@ let supervise_keepalive
         detail
     | Ok reg -> launch_registered reg
   in
-  let reclaim_finished_entry (entry : Keeper_registry.registry_entry) =
-    if Option.is_some (Eio.Promise.peek entry.done_p)
-       && Keeper_registry.lane_has_exited entry
-    then
-      match Keeper_registry.unregister_exact entry with
-      | Keeper_registry.Exact_unregistered
-      | Keeper_registry.Exact_entry_missing -> ()
-      | Keeper_registry.Exact_entry_replaced ->
-        Log.Keeper.info
-          "supervisor recovery retained newer lane for %s"
-          meta.name
-      | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
-        Log.Keeper.warn
-          "supervisor recovery could not reclaim %s because lifecycle transaction owns admission: %s"
-          meta.name
-          (Keeper_lifecycle_reservation.snapshot_to_string owner)
-  in
   match execution_truth with
   | Keeper_activation_readiness.Unknown detail ->
     record_recovery_retained "unknown";
@@ -215,9 +199,24 @@ let supervise_keepalive
       reason
   | Keeper_activation_readiness.Executable -> ()
   | Keeper_activation_readiness.Recoverable ->
-    Option.iter reclaim_finished_entry
-      (Keeper_registry.get ~base_path meta.name);
     (match Keeper_registry.get ~base_path meta.name with
-     | Some reg -> launch_registered reg
-     | None -> register_and_launch ())
+     | None -> register_and_launch ()
+     | Some reg ->
+       (match reg.phase with
+        | Keeper_state_machine.Offline -> launch_registered reg
+        | Keeper_state_machine.Running
+        | Keeper_state_machine.Failing
+        | Keeper_state_machine.Overflowed
+        | Keeper_state_machine.Compacting
+        | Keeper_state_machine.HandingOff
+        | Keeper_state_machine.Draining
+        | Keeper_state_machine.Paused
+        | Keeper_state_machine.Stopped
+        | Keeper_state_machine.Crashed
+        | Keeper_state_machine.Restarting
+        | Keeper_state_machine.Dead ->
+          Log.Keeper.debug
+            "%s: supervisor keepalive retained existing %s owner for lifecycle sweep"
+            meta.name
+            (Keeper_state_machine.phase_to_string reg.phase)))
 ;;

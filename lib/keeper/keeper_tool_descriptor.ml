@@ -51,10 +51,6 @@ type shape_changing_validation =
 
 type input_translation =
   | Identity of identity_validation
-  | Schema_preserving of
-      { translate : Yojson.Safe.t -> Yojson.Safe.t
-      ; validation : identity_validation
-      }
   | Shape_changing of
       { translate : Yojson.Safe.t -> Yojson.Safe.t
       ; validation : shape_changing_validation
@@ -556,27 +552,7 @@ let search_files_readonly_of_input _input = Some true
 let translate_input_for_descriptor descriptor input =
   match descriptor.input_translation with
   | Identity _ -> input
-  | Schema_preserving { translate; _ }
   | Shape_changing { translate; _ } -> translate input
-;;
-
-let requires_pre_translation_validation descriptor =
-  match descriptor.input_translation with
-  | Identity Validate_once_before_translation
-  | Schema_preserving { validation = Validate_once_before_translation; _ }
-  | Shape_changing _ -> true
-  | Identity Validate_once_after_translation
-  | Schema_preserving { validation = Validate_once_after_translation; _ } -> false
-;;
-
-let requires_post_translation_validation descriptor =
-  match descriptor.input_translation with
-  | Identity Validate_once_after_translation
-  | Schema_preserving { validation = Validate_once_after_translation; _ }
-  | Shape_changing { validation = Validate_before_and_after_translation; _ } -> true
-  | Identity Validate_once_before_translation
-  | Schema_preserving { validation = Validate_once_before_translation; _ }
-  | Shape_changing { validation = Validate_before_then_runtime_handler; _ } -> false
 ;;
 
 let descriptor_with_public_aliases

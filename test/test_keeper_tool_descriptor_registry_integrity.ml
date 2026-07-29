@@ -682,42 +682,42 @@ let test_translation_validation_policy_is_typed_for_all_descriptors () =
   let probe = `Assoc [ "probe", `String "byte-identical" ] in
   List.iter
     (fun (descriptor : Descriptor.t) ->
-       let pre =
-         Descriptor.requires_pre_translation_validation descriptor
-       in
-       let post =
-         Descriptor.requires_post_translation_validation descriptor
-       in
        match descriptor.input_translation with
        | Descriptor.Identity _ ->
-         Alcotest.(check int)
-           (descriptor.id ^ " validates an identity payload exactly once")
-           1
-           ((if pre then 1 else 0) + if post then 1 else 0);
          Alcotest.(check bool)
            (descriptor.id ^ " identity translation is byte-identical")
            true
            (Yojson.Safe.equal
               probe
               (Descriptor.translate_input_for_descriptor descriptor probe))
-       | Descriptor.Schema_preserving _ ->
-         Alcotest.(check int)
-           (descriptor.id ^ " validates a schema-preserving payload exactly once")
-           1
-           ((if pre then 1 else 0) + if post then 1 else 0)
-       | Descriptor.Shape_changing
-           { validation = Descriptor.Validate_before_and_after_translation; _ } ->
-         Alcotest.(check bool)
-           (descriptor.id ^ " validates both shape boundaries")
-           true
-           (pre && post)
-       | Descriptor.Shape_changing
-           { validation = Descriptor.Validate_before_then_runtime_handler; _ } ->
-         Alcotest.(check bool)
-           (descriptor.id ^ " validates public input before runtime-owned validation")
-           true
-           (pre && not post))
+       | Descriptor.Shape_changing _ ->
+         ignore (Descriptor.translate_input_for_descriptor descriptor probe))
     (Descriptor.all_descriptors ())
+;;
+
+let test_shape_changing_post_validation_is_executed () =
+  let descriptor = required_public_descriptor "Grep" in
+  let descriptor =
+    { descriptor with
+      input_translation =
+        Descriptor.Shape_changing
+          { translate = (fun _ -> `Assoc [])
+          ; validation = Descriptor.Validate_before_and_after_translation
+          }
+    }
+  in
+  match
+    Resolution.prepare_model_input_for_descriptor
+      ~tool_name:"Grep"
+      descriptor
+      ~input:(`Assoc [ "pattern", `String "needle" ])
+  with
+  | Error validation_result ->
+    check_contains
+      "translated payload is validated"
+      ~sub:"pattern"
+      (Tool_result.data validation_result |> Yojson.Safe.to_string)
+  | Ok _ -> Alcotest.fail "translated payload skipped descriptor validation"
 ;;
 
 let test_read_public_validation_rejects_line_fields () =
@@ -1536,6 +1536,10 @@ let () =
             "translation validation policy is typed for all descriptors"
             `Quick
             test_translation_validation_policy_is_typed_for_all_descriptors
+        ; test_case
+            "shape-changing translations validate their output"
+            `Quick
+            test_shape_changing_post_validation_is_executed
         ; test_case
             "Read validates then translates supported public fields"
             `Quick

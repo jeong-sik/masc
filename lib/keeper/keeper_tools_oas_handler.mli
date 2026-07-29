@@ -11,12 +11,9 @@
     alias tool entries. The closure dispatches via
     [execute_keeper_tool_call_with_outcome] using [~name] as the
     INTERNAL tool name (telemetry SSOT). [~input_schema] is the
-    internal tool schema used for pre-execution validation. Alias callers may
-    pass [?pre_validate_input] to validate the raw public payload before
-    [?translate_input] reshapes it to the internal payload (identity by
-    default). When [?validate_translated_input] is [false], the translated
-    payload is dispatched after public validation; runtime handlers remain
-    responsible for their legacy internal argument checks. *)
+    internal tool schema used for pre-execution validation. Descriptor-backed
+    callers pass [?prepare_input] so validation and translation follow the
+    descriptor's typed policy before dispatch. *)
 val make_keeper_tool_handler
   :  name:string
   -> input_schema:Yojson.Safe.t
@@ -38,10 +35,8 @@ val make_keeper_tool_handler
   -> ?on_deferred:(unit -> unit)
   -> ?on_external_effect_deferred:(unit -> unit)
   -> ?on_failed:(Keeper_tools_oas.terminal_effect_failure -> unit)
-  -> ?pre_validate_input:
+  -> ?prepare_input:
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
-  -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)
-  -> ?validate_translated_input:bool
   -> unit
   -> ?oas_invocation:Agent_sdk.Tool_contract.Invocation.t
   -> Yojson.Safe.t

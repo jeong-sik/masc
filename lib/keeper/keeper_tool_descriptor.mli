@@ -70,10 +70,6 @@ type shape_changing_validation =
 
 type input_translation =
   | Identity of identity_validation
-  | Schema_preserving of
-      { translate : Yojson.Safe.t -> Yojson.Safe.t
-      ; validation : identity_validation
-      }
   | Shape_changing of
       { translate : Yojson.Safe.t -> Yojson.Safe.t
       ; validation : shape_changing_validation
@@ -211,8 +207,6 @@ val descriptors_for_internal : string -> t list
 val readonly_static_hint : t -> bool option
 val readonly_for_input : t -> input:Yojson.Safe.t -> bool option
 val translate_input_for_descriptor : t -> Yojson.Safe.t -> Yojson.Safe.t
-val requires_pre_translation_validation : t -> bool
-val requires_post_translation_validation : t -> bool
 
 (** Descriptor-owned read-only projection. The returned names are internal
     handler names whose descriptor policy declares a static read-only hint. *)

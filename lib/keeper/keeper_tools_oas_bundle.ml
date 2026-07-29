@@ -231,21 +231,9 @@ let make_tool_bundle
                  ~on_deferred:mark_deferred_tool_result
                  ~on_external_effect_deferred:mark_external_effect_deferred
                  ?on_failed
-                 ~pre_validate_input:(fun input ->
-                   if
-                     Keeper_tool_descriptor.requires_pre_translation_validation
-                       descriptor
-                   then
-                     Tool_input_validation.validate_args
-                       ~schema:descriptor.input_schema
-                       ~name:model_name
-                       ~args:input
-                       ()
-                   else Ok input)
-                 ~translate_input:
-                   (Keeper_tool_descriptor.translate_input_for_descriptor descriptor)
-                 ~validate_translated_input:
-                   (Keeper_tool_descriptor.requires_post_translation_validation
+                 ~prepare_input:
+                   (Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+                      ~tool_name:model_name
                       descriptor)
                  ()
              in

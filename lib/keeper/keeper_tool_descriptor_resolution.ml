@@ -114,24 +114,55 @@ let validate_public_input_for_tool_call ~tool_name ~input =
   | None -> None
 ;;
 
+let validate_descriptor_input ~tool_name
+      (descriptor : Keeper_tool_descriptor.t) input
+  =
+  Tool_input_validation.validate_args
+    ~schema:descriptor.input_schema
+    ~name:tool_name
+    ~args:input
+    ()
+;;
+
+let prepare_model_input_for_descriptor ~tool_name
+      (descriptor : Keeper_tool_descriptor.t) ~input
+  =
+  let validate = validate_descriptor_input ~tool_name descriptor in
+  let translate =
+    Keeper_tool_descriptor.translate_input_for_descriptor descriptor
+  in
+  match descriptor.input_translation with
+  | Keeper_tool_descriptor.Identity
+      Keeper_tool_descriptor.Validate_once_before_translation ->
+    validate input
+  | Keeper_tool_descriptor.Identity
+      Keeper_tool_descriptor.Validate_once_after_translation ->
+    validate (translate input)
+  | Keeper_tool_descriptor.Shape_changing
+      { validation =
+          Keeper_tool_descriptor.Validate_before_and_after_translation
+      ; _
+      } ->
+    Result.bind (validate input) (fun validated_input ->
+      validate (translate validated_input))
+  | Keeper_tool_descriptor.Shape_changing
+      { validation =
+          Keeper_tool_descriptor.Validate_before_then_runtime_handler
+      ; _
+      } ->
+    Result.map translate (validate input)
+;;
+
 let validated_descriptor_and_input_for_tool_call ~tool_name ~input =
   match public_descriptor_and_name_for_tool_call tool_name with
   | Some (public_name, descriptor) ->
-    (match
-       Tool_input_validation.validate_args
-         ~schema:descriptor.Keeper_tool_descriptor.input_schema
-         ~name:public_name
-         ~args:input
-         ()
-     with
-     | Ok validated_input ->
-       Some
-         (Ok
-            ( descriptor
-            , Keeper_tool_descriptor.translate_input_for_descriptor
-                descriptor
-                validated_input ))
-     | Error validation_result -> Some (Error validation_result))
+    Some
+      (Result.map
+         (fun prepared_input -> descriptor, prepared_input)
+         (prepare_model_input_for_descriptor
+            ~tool_name:public_name
+            descriptor
+            ~input))
   | None ->
     Option.map
       (fun descriptor_and_input -> Ok descriptor_and_input)

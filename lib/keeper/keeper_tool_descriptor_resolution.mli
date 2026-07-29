@@ -29,6 +29,12 @@ val descriptor_and_input_for_tool_call :
 val validate_public_input_for_tool_call :
   tool_name:string -> input:Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result option
 
+val prepare_model_input_for_descriptor :
+  tool_name:string ->
+  Keeper_tool_descriptor.t ->
+  input:Yojson.Safe.t ->
+  (Yojson.Safe.t, Tool_result.result) result
+
 val validated_descriptor_and_input_for_tool_call :
   tool_name:string ->
   input:Yojson.Safe.t ->

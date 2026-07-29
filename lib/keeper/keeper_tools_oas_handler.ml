@@ -27,9 +27,12 @@ let make_keeper_tool_handler
       ?on_deferred
       ?on_external_effect_deferred
       ?on_failed
-      ?(pre_validate_input = fun input -> Ok input)
-      ?(translate_input = fun j -> j)
-      ?(validate_translated_input = true)
+      ?(prepare_input = fun input ->
+        Tool_input_validation.validate_args
+          ~schema:input_schema
+          ~name
+          ~args:input
+          ())
       ()
   : ?oas_invocation:Agent_sdk.Tool_contract.Invocation.t -> Yojson.Safe.t -> Tool_result.result
   =
@@ -134,18 +137,10 @@ let make_keeper_tool_handler
          but do not poison the request-scoped terminal-effect state. *)
       validation_result |> record_result ~input
     in
-    match pre_validate_input raw_input with
+    match prepare_input raw_input with
     | Error validation_result ->
       handle_validation_error ~input:raw_input validation_result
-    | Ok pre_validated_input ->
-      let input = translate_input pre_validated_input in
-      (match
-         if validate_translated_input
-         then Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()
-         else Ok input
-       with
-       | Error validation_result -> handle_validation_error ~input validation_result
-       | Ok input ->
+    | Ok input ->
           let current_clock =
             match clock with
             | Some clock -> Some clock
@@ -186,5 +181,5 @@ let make_keeper_tool_handler
                    execution.failure_effect_disposition
                  ~deferred_kind:execution.deferred_kind
           in
-          run_with_current_eio_context ?clock:current_clock ())
+          run_with_current_eio_context ?clock:current_clock ()
 ;;

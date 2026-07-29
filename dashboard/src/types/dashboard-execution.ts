@@ -647,64 +647,6 @@ export interface DashboardPlanningResponse {
     done?: number
     cancelled?: number
   }
-  workspace_fsm?: DashboardWorkspaceFsmSnapshot | null
-}
-
-export interface DashboardWorkspaceFsmRefs {
-  goal_id?: string | null
-  task_ids?: string[]
-  post_ids?: string[]
-  agent_name?: string | null
-}
-
-export interface DashboardWorkspaceFsmEvidence {
-  source?: string
-  kind?: string
-  id?: string | null
-  label?: string
-  detail?: string
-  timestamp?: number | null
-  refs?: DashboardWorkspaceFsmRefs
-}
-
-export interface DashboardWorkspaceFsmViolation {
-  axis?: string
-  code?: string
-  severity?: 'info' | 'warn' | 'error' | string
-  message?: string
-  refs?: DashboardWorkspaceFsmRefs
-  evidence?: DashboardWorkspaceFsmEvidence[]
-}
-
-export interface DashboardWorkspaceFsmProduct {
-  refs?: DashboardWorkspaceFsmRefs
-  goal?: string | null
-  task?: string
-  board?: string
-  reward?: string
-  evidence?: DashboardWorkspaceFsmEvidence[]
-  violations?: DashboardWorkspaceFsmViolation[]
-}
-
-export interface DashboardWorkspaceFsmSummary {
-  products?: number
-  violations?: number
-  evidence?: number
-  severity_counts?: {
-    info?: number
-    warn?: number
-    error?: number
-  }
-}
-
-export interface DashboardWorkspaceFsmSnapshot {
-  schema_version?: number
-  mode?: string
-  summary?: DashboardWorkspaceFsmSummary
-  products?: DashboardWorkspaceFsmProduct[]
-  evidence?: DashboardWorkspaceFsmEvidence[]
-  violations?: DashboardWorkspaceFsmViolation[]
-  projection_error?: string | null
 }
 
 // --- Goal Tree (hierarchical goal decomposition) ---

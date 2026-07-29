@@ -459,7 +459,7 @@ describe('Work', () => {
       expect(backlog.textContent).toContain('Backlog task 1')
     })
 
-    it('expands inline task detail for gate evidence and handoff context', () => {
+    it('expands inline task detail for handoff context', () => {
       goals.value = [
         { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
@@ -470,12 +470,6 @@ describe('Work', () => {
           goal_id: 'G-1',
           status: 'todo',
           assignee: 'dev',
-          gate: {
-            done: {
-              status: 'ready',
-              checks: [{ evidence: 'unit tests pass', outcome: 'satisfied', detail: 'ci green' }],
-            },
-          },
           handoff_context: {
             summary: 'Handoff summary text',
             next_step: 'Deploy to staging',
@@ -493,7 +487,6 @@ describe('Work', () => {
 
       const detail = screen.getByTestId('job-row').querySelector('.wk-task-detail')
       expect(detail).toBeTruthy()
-      expect(detail?.textContent).toContain('unit tests pass')
       expect(detail?.textContent).toContain('Handoff summary text')
       expect(detail?.textContent).toContain('Deploy to staging')
     })
@@ -548,36 +541,6 @@ describe('Work', () => {
       expect(ledger.textContent).toContain('sangsu')
       expect(ledger.textContent).toContain('2026-01-02T00:00:00Z')
       expect(ledger.textContent).not.toContain('활동 흐름')
-    })
-
-    it('renders all defined gate evaluations including verify_to_review', () => {
-      goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-      ]
-      tasks.value = [
-        {
-          id: 'J-1',
-          title: 'Gated job',
-          goal_id: 'G-1',
-          status: 'todo',
-          gate: {
-            done: { status: 'ready', checks: [{ evidence: 'done check', outcome: 'satisfied', detail: 'done detail' }] },
-            inspect_to_implement: { status: 'blocked', checks: [{ evidence: 'inspect check', outcome: 'failed', detail: 'inspect detail' }] },
-            verify_to_review: { status: 'inconclusive', checks: [{ evidence: 'verify check', outcome: 'missing', detail: 'verify detail' }] },
-          },
-        },
-      ]
-
-      const { container } = render(html`<${Work} />`)
-
-      fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
-      fireEvent.click(container.querySelector('[data-job-id="J-1"] .wk-task-main')!)
-
-      const detail = screen.getByTestId('job-row').querySelector('.wk-task-detail')
-      expect(detail?.textContent).toContain('done gate')
-      expect(detail?.textContent).toContain('inspect gate')
-      expect(detail?.textContent).toContain('verify gate')
-      expect(detail?.textContent).toContain('verify check')
     })
 
     it('maps known goal phase IDs to Korean labels', () => {
@@ -770,7 +733,7 @@ describe('Work', () => {
         expect(aside.querySelector('[data-testid="wka-flagged-calm"]')).toBeNull()
       })
 
-      it('surfaces verify tasks (awaiting_verification status) with unsatisfied gate count', () => {
+      it('surfaces verify tasks (awaiting_verification status)', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
@@ -780,10 +743,6 @@ describe('Work', () => {
             title: 'Verify Me',
             goal_id: 'G-1',
             status: 'awaiting_verification',
-            gate: {
-              done: { status: 'blocked', checks: [], reasons: ['ci failing'] },
-              inspect_to_implement: { status: 'ready', checks: [], reasons: [] },
-            },
           },
         ]
 
@@ -794,8 +753,7 @@ describe('Work', () => {
         expect(verifyItems.length).toBe(1)
         expect(verifyItems[0]?.classList.contains('verify')).toBe(true)
         expect(verifyItems[0]?.textContent).toContain('Verify Me')
-        // 1 unsatisfied gate (done=blocked, inspect=ready → 1 open)
-        expect(verifyItems[0]?.textContent).toContain('1 미충족')
+        expect(verifyItems[0]?.textContent).toContain('검증 대기')
       })
 
       it('surfaces tasks with a blocker note (cancelled with handoff_context.reason)', () => {

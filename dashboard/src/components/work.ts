@@ -116,28 +116,6 @@ function blockerNoteForTask(task: Task): string | null {
   return task.handoff_context?.failure_mode ?? null
 }
 
-function taskGateRows(task: Task): Array<{ label: string; outcome: 'satisfied' | 'missing' | 'failed'; detail: string }> {
-  const rows: Array<{ label: string; outcome: 'satisfied' | 'missing' | 'failed'; detail: string }> = []
-  const addEvaluation = (label: string, evaluation: NonNullable<Task['gate']>['done'] | null | undefined) => {
-    if (!evaluation) return
-    const outcome = evaluation.status === 'ready'
-      ? 'satisfied'
-      : evaluation.status === 'blocked'
-        ? 'failed'
-        : 'missing'
-    const check = evaluation.checks?.[0]
-    const detail = check?.evidence
-      ?? evaluation.reasons?.[0]
-      ?? check?.detail
-      ?? evaluation.status
-    rows.push({ label, outcome, detail })
-  }
-  addEvaluation('done gate', task.gate?.done)
-  addEvaluation('inspect gate', task.gate?.inspect_to_implement)
-  addEvaluation('verify gate', task.gate?.verify_to_review)
-  return rows
-}
-
 // Keyed by Goal_phase values — the only lifecycle representation after
 // RFC-0352 slice 1 (the legacy status duplicate is gone).
 // Labels come from the goalPhaseLabel SSOT (goals/goal-helpers.ts).
@@ -155,15 +133,6 @@ const GOAL_PHASE_CLASS: Record<string, 'neutral' | 'ok' | 'warn' | 'bad'> = {
 
 function goalPhaseClass(phase: string): 'neutral' | 'ok' | 'warn' | 'bad' {
   return GOAL_PHASE_CLASS[phase] ?? 'neutral'
-}
-
-// Gate evidence outcome → Korean outcome word for the right-aligned
-// .wk-gate-out column. Mirrors the prototype GATE_OUTCOME map
-// (data.jsx:369): satisfied 충족 / missing 누락 / failed 실패.
-const GATE_OUTCOME_LABEL: Record<'satisfied' | 'missing' | 'failed', string> = {
-  satisfied: '충족',
-  missing: '누락',
-  failed: '실패',
 }
 
 // ── Keeper lookup ───────────────────────────────────────────────────────────
@@ -339,7 +308,6 @@ function mergeTaskRecord(goalStoreTask: Task, executionTask: Task): Task {
     completed_at: executionTask.completed_at || goalStoreTask.completed_at,
     contract: executionTask.contract ?? goalStoreTask.contract,
     handoff_context: executionTask.handoff_context ?? goalStoreTask.handoff_context,
-    gate: executionTask.gate ?? goalStoreTask.gate,
     execution_links: executionTask.execution_links ?? goalStoreTask.execution_links,
   }
 }
@@ -365,29 +333,6 @@ function GoalProgressBar({ counts }: { counts: GoalProgressCounts }) {
       ${counts.verify > 0 ? html`<span class="wk-seg verify" style=${{ width: `${pct(counts.verify)}%` }}></span>` : null}
       ${counts.wip > 0 ? html`<span class="wk-seg wip" style=${{ width: `${pct(counts.wip)}%` }}></span>` : null}
       ${counts.blocked > 0 ? html`<span class="wk-seg blocked" style=${{ width: `${pct(counts.blocked)}%` }}></span>` : null}
-    </div>
-  `
-}
-
-function TaskGate({ rows }: { rows: ReturnType<typeof taskGateRows> }) {
-  const open = rows.filter(g => g.outcome !== 'satisfied').length
-  return html`
-    <div class="wk-gate">
-      <div class="wk-gate-h">
-        완료 계약 · 게이트 증거
-        ${open > 0
-          ? html`<span class="wk-gate-open">${open} 미충족</span>`
-          : html`<span class="wk-gate-ok">전부 충족</span>`}
-      </div>
-      ${rows.map((g, i) => html`
-        <div key=${i} class=${`wk-gate-row ${g.outcome}`}>
-          <span class="wk-gate-mark">
-            ${g.outcome === 'satisfied' ? '✓' : g.outcome === 'failed' ? '✕' : '○'}
-          </span>
-          <span class="wk-gate-ev"><span class="mono">${g.label}</span> · ${g.detail}</span>
-          <span class="wk-gate-out">${GATE_OUTCOME_LABEL[g.outcome]}</span>
-        </div>
-      `)}
     </div>
   `
 }
@@ -539,12 +484,10 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
   const state = jobStateForTask(task)
   const keeper = keeperByName(task.assignee)
   const blocker = blockerNoteForTask(task)
-  const gateRows = taskGateRows(task)
   const handoff = task.handoff_context
   const evidenceRows = taskEvidenceLedgerRows(task)
   const hasDetail =
-    gateRows.length > 0
-    || evidenceRows.length > 0
+    evidenceRows.length > 0
     || !!handoff?.summary
     || !!handoff?.next_step
     || !!handoff?.failure_mode
@@ -595,7 +538,6 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
       </div>
       ${open && hasDetail ? html`
         <div class="wk-task-detail">
-          ${gateRows.length > 0 ? html`<${TaskGate} rows=${gateRows} />` : null}
           ${evidenceRows.length > 0 ? html`<${TaskEvidenceLedger} rows=${evidenceRows} />` : null}
           ${handoff ? html`
             <div class="wk-handoff">
@@ -680,7 +622,6 @@ function GoalCard({
 //     `completed` | `dropped` = terminal — excluded (already closed out).
 //
 //   • "verifyTasks" (게이트): tasks with status=awaiting_verification.
-//     open-gate count from taskGateRows().
 //
 //   • "blockers": tasks where handoff_context.failure_mode or handoff_context.reason
 //     indicates blockage (status=cancelled OR explicit blocker via blockerNoteForTask).
@@ -743,7 +684,6 @@ interface WkaVerifyTask {
   readonly id: string
   readonly title: string
   readonly goalId: string
-  readonly open: number // unsatisfied gates
 }
 
 interface WkaBlockerTask {
@@ -1147,7 +1087,7 @@ function WorkAside({
               >
                 <span class="wka-todo-k">게이트</span>
                 <span class="wka-todo-t">${t.title}</span>
-                <span class="wka-todo-m mono">${t.open > 0 ? `${t.open} 미충족` : '검증 대기'}</span>
+                <span class="wka-todo-m mono">검증 대기</span>
               </button>
             `)}
             ${blockers.map(t => html`
@@ -1390,7 +1330,6 @@ function WorkSurfaceV2() {
         id: t.id,
         title: t.title,
         goalId: t.goal_id ?? '',
-        open: taskGateRows(t).filter(r => r.outcome !== 'satisfied').length,
       })),
   [claimedTasks])
 

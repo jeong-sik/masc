@@ -2,6 +2,8 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
+module Agent_name_map = Map.Make (String)
+
 let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
   let workspace_state_opt =
     if Workspace.is_initialized config then Some (Workspace.read_state config) else None
@@ -490,20 +492,22 @@ let merge_execution_queue left right =
 ;;
 
 let model_map_of_keeper_rows keepers =
-  let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
-  List.iter
-    (function
+  List.fold_left
+    (fun model_map -> function
       | `Assoc _ as keeper_json ->
         (match Json_util.assoc_member_opt "name" keeper_json,
                Json_util.assoc_member_opt "active_model" keeper_json with
          | Some (`String name), Some (`String model) ->
-             Hashtbl.add model_map name model
+           (match String_util.trim_to_option name, String_util.trim_to_option model with
+            | Some _, Some model -> Agent_name_map.add name model model_map
+            | None, _ | _, None -> model_map)
          | Some (`String _), _
          | _, Some (`String _)
-         | _, _ -> ())
-      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ())
-    keepers;
-  model_map
+         | _, _ -> model_map)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        model_map)
+    Agent_name_map.empty
+    keepers
 ;;
 
 let task_updated_at (task : Masc_domain.task) =
@@ -577,12 +581,12 @@ let task_json ~goal_task_index (task : Masc_domain.task) =
   `Assoc fields
 ;;
 
-let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.agent) =
+let agent_json ~model_map (agent : Masc_domain.agent) =
   let profile = get_agent_profile agent.name in
   let model_value =
-    match Hashtbl.find_opt model_map agent.name with
-    | Some m when m <> "" -> `String m
-    | _ -> `Null
+    match Agent_name_map.find_opt agent.name model_map with
+    | Some model -> `String model
+    | None -> `Null
   in
   `Assoc
     [ "name", `String agent.name
@@ -596,6 +600,11 @@ let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.ag
     ; "koreanName", `String profile.korean_name
     ; "model", model_value
     ]
+;;
+
+let agents_json ~keepers ~agents =
+  let model_map = model_map_of_keeper_rows keepers in
+  `List (List.map (agent_json ~model_map) agents)
 ;;
 
 let message_json (message : Masc_domain.message) =
@@ -807,9 +816,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       ; ( "offline_worker_briefs"
         , `List (List.map (fun (row : worker_context) -> row.json) offline_worker_briefs)
         )
-      ; ( "agents"
-        , let model_map = model_map_of_keeper_rows keepers in
-          `List (List.map (agent_json ~model_map) agents) )
+      ; "agents", agents_json ~keepers ~agents
       ; (* pipeline_stage is now included in the snapshot keepers_json,
              so no redundant read_meta + parse_agent_status needed here. *)
         "keepers", `List keepers
@@ -896,3 +903,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
          ; "status", workspace_status_json config
          ])
 ;;
+
+module For_test = struct
+  let agents_json = agents_json
+end

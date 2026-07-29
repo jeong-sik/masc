@@ -1,39 +1,58 @@
-(** Regression test: model_map_of_keeper_rows must insert into the Hashtbl.
-    Bug: all four match arms ended in () (no Hashtbl.add), so agents[].model
-    was permanently null in the dashboard execution JSON. *)
+(** Regression test for the execution-dashboard ["agents"] wire projection.
+    Bug: the keeper-name to active-model index stayed empty, so every
+    ["agents"][].["model"] was null. *)
 
 open Alcotest
 
-let check_equal ~label actual expected =
-  check (option string) label actual expected
+let agent name : Masc_domain.agent =
+  { id = None
+  ; name
+  ; agent_type = "test"
+  ; status = Masc_domain.Active
+  ; capabilities = []
+  ; current_task = None
+  ; session_bound_at = "2026-07-29T00:00:00Z"
+  ; last_seen = "2026-07-29T00:00:00Z"
+  ; meta = None
+  }
+;;
 
-let test_inserts_name_and_model () =
+let model_of_agent name = function
+  | `List agents ->
+    (match
+       List.find_opt
+         (fun agent -> Yojson.Safe.Util.(agent |> member "name" |> to_string) = name)
+         agents
+     with
+     | Some agent -> Yojson.Safe.Util.member "model" agent
+     | None -> failf "missing agent %s" name)
+  | json -> failf "agents field is not a list: %s" (Yojson.Safe.to_string json)
+;;
+
+let test_projects_active_models_to_agents_wire () =
   let keepers =
-    [ `Assoc [ ("name", `String "alice"); ("active_model", `String "gpt-4o") ]
-    ; `Assoc [ ("name", `String "bob"); ("active_model", `String "claude-3.5") ]
-    ; `Assoc [ ("name", `String "carol"); ("active_model", `String "") ]
-    ; `Assoc [ ("name", `String "dave") ]
-    ; `Assoc [("active_model", `String "no-name")]
+    [ `Assoc [ "name", `String "alice"; "active_model", `String "old-model" ]
+    ; `Assoc [ "name", `String "alice"; "active_model", `String "current-model" ]
+    ; `Assoc [ "name", `String "bob"; "active_model", `String "   " ]
+    ; `Assoc [ "name", `String "carol" ]
+    ; `Assoc [ "active_model", `String "no-name" ]
     ; `Null
     ]
   in
-  let map = Dashboard_execution.model_map_of_keeper_rows keepers in
-  check_equal ~label:"alice model"
-    (Hashtbl.find_opt map "alice") (Some "gpt-4o");
-  check_equal ~label:"bob model"
-    (Hashtbl.find_opt map "bob") (Some "claude-3.5");
-  check_equal ~label:"carol empty model"
-    (Hashtbl.find_opt map "carol") None;
-  check_equal ~label:"dave no model"
-    (Hashtbl.find_opt map "dave") None;
-  check_equal ~label:"no-name row"
-    (Hashtbl.find_opt map "") None;
-  let n = ref 0 in
-  Hashtbl.iter (fun _ _ -> incr n) map;
-  check int "hashtbl length" !n 2
+  let agents = List.map agent [ "alice"; "bob"; "carol"; "dave" ] in
+  let agents_json = Dashboard_execution.For_test.agents_json ~keepers ~agents in
+  check Yojson.Safe.equal "latest exact keeper row wins"
+    (`String "current-model")
+    (model_of_agent "alice" agents_json);
+  List.iter
+    (fun name ->
+       check Yojson.Safe.equal (name ^ " has no active model") `Null
+         (model_of_agent name agents_json))
+    [ "bob"; "carol"; "dave" ]
+;;
 
 let () =
-  run "model_map_of_keeper_rows"
-    [ test_case "inserts name and active_model into hashtbl" `Quick
-        test_inserts_name_and_model
+  run "dashboard agent model projection"
+    [ test_case "projects active models to agents wire" `Quick
+        test_projects_active_models_to_agents_wire
     ]

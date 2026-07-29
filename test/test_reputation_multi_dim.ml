@@ -19,15 +19,15 @@ let test_default_reputation_v2_fields () =
 let test_reputation_json_roundtrip_v2_fields () =
   let rep = { (Reputation.default_reputation ~agent_name:"json-test") with
               evidence_state = "measured" } in
-  let json = Reputation.reputation_to_json rep in
-  match Reputation.reputation_of_json json with
-  | Some r ->
+  let json = Reputation.agent_reputation_to_yojson rep in
+  match Reputation.agent_reputation_of_yojson json with
+  | Ok r ->
     check (float 0.0001) "execution_reliability preserved" 1.0
       r.execution_reliability;
     check string "evidence_state preserved" "measured"
       r.evidence_state
-  | None ->
-    fail "reputation_of_json returned None"
+  | Error msg ->
+    failf "agent_reputation_of_yojson returned Error: %s" msg
 
 let () =
   run "Reputation_multi_dim"

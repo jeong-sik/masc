@@ -154,6 +154,7 @@ supports-tool-choice = true
 [deepseek.smoke]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 EOF
     seeded_runtime=1
   fi

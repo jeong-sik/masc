@@ -344,6 +344,7 @@ streaming = true
 [deepseek.smoke]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 |}
 
 let catalog_overlay_seed =

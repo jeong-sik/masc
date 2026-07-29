@@ -326,34 +326,36 @@ let ack_source config receipt transfer =
     in
     (* The receipt is the durable transfer-acceptance boundary, so its stored
        request time is the sole timestamp for the source ACK. *)
-    Keeper_registry_event_queue.transfer_pending_accepted_result
-      ~base_path
-      transfer.from_keeper
-      ~current_owner_nonce:current.runtime.nonce
-      ~settled_at:receipt.requested_at
-      ~transfer:causal
-    |> Result.map_error (fun detail ->
-      Committed_projection_failed { stage = Source_ack; detail })
-    |> Result.bind (function
-      | Keeper_registry_event_queue.Settled _
-      | Keeper_registry_event_queue.Already_settled _ -> Ok ()
-      | Keeper_registry_event_queue.Committed_followup_failed
-          { stage; detail; _ } ->
-        let stage =
-          match stage with
-          | `Checkpoint -> "checkpoint"
-          | `Wal_compaction -> "wal_compaction"
-          | `Projection -> "projection"
-        in
-        Error
-          (Committed_projection_failed
-             { stage = Source_ack
-             ; detail =
-                 Printf.sprintf
-                   "source ACK committed but %s follow-up failed: %s"
-                   stage
-                   detail
-             }))
+    let* outcome =
+      Keeper_registry_event_queue.transfer_pending_accepted_result
+        ~base_path
+        transfer.from_keeper
+        ~current_owner_nonce:current.runtime.nonce
+        ~settled_at:receipt.requested_at
+        ~transfer:causal
+      |> Result.map_error (fun detail ->
+        Committed_projection_failed { stage = Source_ack; detail })
+    in
+    (match outcome with
+     | Keeper_registry_event_queue.Settled _
+     | Keeper_registry_event_queue.Already_settled _ -> Ok ()
+     | Keeper_registry_event_queue.Committed_followup_failed
+         { stage; detail; _ } ->
+       let stage =
+         match stage with
+         | `Checkpoint -> "checkpoint"
+         | `Wal_compaction -> "wal_compaction"
+         | `Projection -> "projection"
+       in
+       Error
+         (Committed_projection_failed
+            { stage = Source_ack
+            ; detail =
+                Printf.sprintf
+                  "source ACK committed but %s follow-up failed: %s"
+                  stage
+                  detail
+            }))
 ;;
 
 let validate_committed_target config transfer =

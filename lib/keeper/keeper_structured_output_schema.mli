@@ -6,8 +6,6 @@
 val librarian_episode_output_schema : Yojson.Safe.t
 (** JSON object the librarian extraction provider must return. *)
 
-(** JSON object the per-keeper consolidation provider must return. *)
-
 (** Wire field names for {!compaction_plan_output_schema}; shared with the
     compaction-plan codec as the single source of truth. *)
 val compaction_plan_field_unit_index : string
@@ -57,24 +55,20 @@ val for_deterministic_subcall
   :  max_tokens:int option
   -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Provider shape shared by MASC's deterministic LLM subcalls (librarian
-    extraction, memory-OS consolidation): no tool choice, no parallel tool
-    use, and thinking fully suppressed.
+(** Provider shape shared by MASC's deterministic LLM subcalls: no tool choice,
+    no parallel tool use, and thinking fully suppressed.
 
     Thinking suppression is the load-bearing part. Reasoning-capable
     providers otherwise spend the whole output budget on thinking and return
-    an empty visible text; consolidation observed 256 consecutive empty
-    responses that way on 2026-07-20, and the tuning removed them.
+    an empty visible text; production deterministic subcalls observed that
+    failure mode before this shared tuning removed it.
 
-    Each call site previously spelled the same six fields by hand, with the
-    second site's comment reading "Mirror the librarian tuning" — the
-    N-of-M shape RFC-0000 §9 rejects. Deriving from here means a new
-    subcall inherits the shape instead of re-deriving it, and dropping the
-    suppression becomes a visible override rather than an omission.
+    Deriving from this function means a new subcall inherits the shape instead
+    of re-deriving it, and dropping the suppression becomes a visible override
+    rather than an omission.
 
     [max_tokens] is passed through because the budget is genuinely
-    site-specific (a consolidation plan over hundreds of rows needs more
-    room than a per-turn summary); everything else is not.
+    site-specific to each bounded input contract; everything else is not.
 
     This does NOT clear [response_format] — callers compose
     {!without_response_format} themselves. *)

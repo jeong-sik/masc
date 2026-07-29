@@ -6,6 +6,11 @@
 - Related: issue #22823 (tracking), RFC-0243/0259/0272 (keeper memory store), 2026-06-19 keeper stall (mutex poison via Eio-in-systhread)
 - 근거 메모리: `reference-masc-compaction-not-hol-cause-measured-7ms-20260630.md`
 
+**2026-07-29 current-state amendment**: periodic full-store Memory OS
+consolidation and its runtime were removed by PR #26324. Remaining scope is
+bounded Librarian write/cap I/O and recall/store I/O only; the deleted runtime
+is not a current caller or a future offload target.
+
 ## 0. 정정 (v2) — #22824 선행 + 메커니즘 교정
 
 초안(v1)은 stale memory("사용자 scope 대기")를 근거로 `Eio_guard.run_in_systhread`를 추천했으나, **현재 main SSOT 재확인 결과 교정**한다:
@@ -42,7 +47,8 @@ Eio는 **단일 도메인 cooperative 스케줄러**다. main 도메인에서 �
 
 - `Sys.readdir` 스캔 4곳: `list_fact_store_keeper_ids_for_keepers_dir`(:64), `max_generation_from_files`(:190), `read_episode_files_tail`(:709), `cap_episode_files`(:763)
 - `Sys.file_exists`/`Sys.is_directory`/`open_in_bin`+`really_input_string`+`close_in` 다수(:13,:202,:361,:408,:433,:680 …)
-- 이 함수들이 `Keeper_memory_recall`/`Keeper_memory_os_consolidation_runtime` 등에서 **main 도메인 fiber 경로**로 turn마다 호출.
+- 이 함수들이 `Keeper_memory_recall`과 bounded Librarian write/cap 경로 등
+  **main 도메인 fiber 경로**에서 호출된다.
 
 ## 4. 접근
 

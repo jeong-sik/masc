@@ -1,19 +1,27 @@
 ---
 rfc: "keeper-memory-bank-write-reduction"
 title: "Keeper memory-bank near-dup accumulation — write reduction, not write-boundary dedup"
-status: Draft
+status: Superseded
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-29
 author: vincent (drafted with Claude)
 supersedes: []
-superseded_by: null
+superseded_by: "RFC-0000 §3.9 current-state contract and PR #26324"
 related: ["keeper-memory-consolidation", "0332", "0247", "0285", "0257"]
 implementation_prs: []
 ---
 
 # RFC: Keeper memory-bank near-dup accumulation — write reduction, not write-boundary dedup
 
-Status: Draft · slug-only (README §정책) · 2026-07-20
+Status: Superseded · slug-only (README §정책) · 2026-07-29
+
+PR #26324 removed the periodic full-store keep/rewrite/forget judge, its
+maintenance runtime, prompt/schema, route, and configuration. The current
+Memory OS contract is bounded Librarian extraction with producer-declared
+`valid_until`, followed by expiry-only GC and otherwise retain-only storage.
+Typed exact-claim supersession/tombstone remains separate work (#26331). The
+body below is retained as historical incident analysis; instructions to enable
+or shadow the deleted consolidation runtime are not current guidance.
 
 Companion to [`RFC-keeper-memory-consolidation`](./RFC-keeper-memory-consolidation.md).
 That RFC decides the *destination* (deprecate memory_bank into Memory OS). This

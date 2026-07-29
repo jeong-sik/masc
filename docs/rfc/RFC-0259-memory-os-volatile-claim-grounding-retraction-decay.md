@@ -1,7 +1,15 @@
 # RFC-0259: Memory OS — Volatile Claim Grounding, Retraction & Decay
 
-**Status**: Draft
+**Status**: Superseded
 **Date**: 2026-06-19
+**Superseded by**: [RFC-0000 §3.9](./RFC-0000-MASTER-ROADMAP.md) current-state
+contract and PR #26324.
+**Current contract (2026-07-29)**: the bounded Librarian may emit a stable
+`claim_id` and producer-declared `valid_until`; GC applies that expiry. The
+runtime otherwise retains claims. There is no periodic full-store
+keep/rewrite/forget judge, deterministic grounding reconciler, or current
+typed supersession/tombstone path. The body below is historical evidence and
+must not be used as implementation or deployment guidance.
 **Supersession note (2026-06-25)**: The deterministic external-ref parser,
 GitHub grounding fiber, retention/ranking effects, and recall suppression/prefix
 described here are no longer active policy. Memory OS now treats PR/issue/task

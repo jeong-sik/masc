@@ -37,7 +37,6 @@ type exact_execution_terminal_cause =
   | Lifecycle_transition_failed_after_dispatch
   | Checkpoint_source_changed
   | Checkpoint_persistence_failed
-  | Terminal_persistence_failed
 
 type exact_execution_terminal =
   { cause : exact_execution_terminal_cause

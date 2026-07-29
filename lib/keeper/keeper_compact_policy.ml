@@ -227,7 +227,6 @@ let terminal_rejection terminalizer cause =
     Exact_execution_terminal terminal
   | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
   | Keeper_compaction_llm_summarizer.Terminalization_already_committed
-  | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed _
   | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
     summarization_rejection
       Keeper_compaction_llm_summarizer.Exact_flow_already_started
@@ -349,7 +348,6 @@ let requested_messages_with_plan
 
 let requested_messages
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       (meta : keeper_meta)
       messages
@@ -359,7 +357,6 @@ let requested_messages
       match
         Keeper_compaction_llm_summarizer.make
           ?before_dispatch_authority
-          ?exact_execution_guard
           ~base_path
           ~keeper_name:meta.name
           ()
@@ -528,7 +525,6 @@ let compact_for_request_typed_with
            reject (Invalid_structural_evidence (error, terminal))
          | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
          | Keeper_compaction_llm_summarizer.Terminalization_already_committed
-         | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed _
          | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
            reject
              (summarization_rejection
@@ -561,7 +557,6 @@ let compact_for_request_typed_with
 
 let compact_for_request_typed
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~meta
       ~trigger
@@ -571,7 +566,6 @@ let compact_for_request_typed
     ~requested_messages:
       (requested_messages
          ?before_dispatch_authority
-         ?exact_execution_guard
          ~base_path
          meta)
     ~meta

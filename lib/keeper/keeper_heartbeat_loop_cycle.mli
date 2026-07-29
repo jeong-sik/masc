@@ -44,8 +44,7 @@ val deferred_runtime_lane :
   cycle_outcome -> Keeper_turn_driver.deferred_runtime_lane option
 
 val run_keeper_cycle
-  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
-  -> admission_token:Keeper_turn_admission.token
+  :  admission_token:Keeper_turn_admission.token
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?event_bus:Agent_sdk.Event_bus.t

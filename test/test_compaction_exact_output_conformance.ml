@@ -2,38 +2,19 @@
 
     OAS owns admission, affine attempts, execute-once, advancement, and receipt
     semantics. These tests observe only MASC-owned ordered opaque slot identity,
-    durable bind/release/quarantine callbacks, domain validation, registry
-    generation, and source terminalization. *)
-
-(* #25969 removed [Keeper_heartbeat_loop.For_testing.exact_execution_guard],
-   the only constructor for a durable exact-execution guard, and no producer
-   replaced it: [quarantine_exact_execution] now always returns
-   "exact execution guard is unavailable". Seven cases that drove a real
-   persistence-backed guard were removed here rather than rewritten against
-   the permissive stub, which cannot observe durability at all. What they
-   covered is recorded in the commit message and in #25981.
-
-   Removed: same_flow_concurrent_loser_mutates_no_queue,
-   heartbeat_guard_binds_before_post,
-   post_success_restart_remains_at_most_once_and_fail_closed,
-   post_success_terminalization_is_canonical_and_durable,
-   post_success_terminalization_overlap_is_affine_and_durable,
-   post_success_terminalization_failures_preserve_full_binding,
-   visible_sync_uncertainty_seams. *)
+    source authority, domain validation, registry generation, and source
+    terminalization. *)
 
 open Masc
 
 module C = Keeper_compaction_llm_summarizer
 module F = Compaction_exact_output_fixture
-module P = Keeper_event_queue_persistence
 module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
-module State = Keeper_event_queue_state
 module T = Agent_sdk.Types
 module U = Keeper_compaction_unit
 
 exception Cancel_after_request_arrived
-exception Stop_after_oas_success of C.attempt_observation
 
 let conformance_lane_id = "compaction-exact-conformance"
 
@@ -90,14 +71,14 @@ let execute_prepared_lane
       ~keeper_name
       ~net
       ?clock
-      ?(exact_execution_guard = F.permissive_exact_execution_guard)
+      ?(before_dispatch_authority = fun _ -> Ok ())
       prepared_lane
   =
   C.execute_prepared_lane
     ~keeper_name
     ~net
     ?clock
-    ~exact_execution_guard
+    ~before_dispatch_authority
     prepared_lane
 ;;
 
@@ -186,8 +167,6 @@ let terminalized_exn = function
     Alcotest.fail "terminalization unexpectedly lost to a commit claimant"
   | C.Terminalization_already_committed ->
     Alcotest.fail "terminalization unexpectedly observed a committed checkpoint"
-  | C.Terminalization_persistence_failed (_, detail) ->
-    Alcotest.failf "terminalization persistence failed: %s" detail
   | C.Terminalization_invariant_failed detail ->
     Alcotest.failf "terminalization invariant failed: %s" detail
 ;;
@@ -418,7 +397,7 @@ let test_published_replacement_cannot_mix_prepared_generation () =
   Alcotest.(check int) "later publication B is not observed" 0 (F.post_count server_b)
 ;;
 
-let test_durable_release_precedes_successor_bind_and_post () =
+let test_source_authority_precedes_successor_post () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let events = ref [] in
@@ -445,32 +424,22 @@ let test_durable_release_precedes_successor_bind_and_post () =
       snapshot
   in
   let prepared = prepare_exn ~keeper_name:"keeper-advance-order" ~registry () in
-  let guard : C.exact_execution_guard =
-    { before_dispatch =
-        (fun observation ->
-           push_event events ("bind:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun observation ->
-           push_event events ("release:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; quarantine = (fun _ _ -> Alcotest.fail "successful flow must not quarantine")
-    }
-  in
   ignore
     (execute_prepared_lane
        ~keeper_name:"keeper-advance-order"
        ~net
        ~clock
-       ~exact_execution_guard:guard
+       ~before_dispatch_authority:
+         (fun observation ->
+            push_event events ("authorize:" ^ observation.slot_id);
+            Ok ())
        prepared
      |> completed_exn
       : C.completed_plan);
   Alcotest.(check (list string))
-    "bind A, fsync release A, bind B, then POST B"
-    [ "bind:unreachable-first"
-    ; "release:unreachable-first"
-    ; "bind:successful-second"
+    "source authority precedes each OAS dispatch"
+    [ "authorize:unreachable-first"
+    ; "authorize:successful-second"
     ; "post:second"
     ]
     !events;
@@ -478,35 +447,29 @@ let test_durable_release_precedes_successor_bind_and_post () =
   Alcotest.(check int) "success prevents another candidate" 0 (F.post_count third)
 ;;
 
-let test_bind_failure_prevents_post () =
+let test_source_authority_rejection_prevents_post () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc bind failure"
-      [ { id = "bind-failure"; base_url = server.base_url } ]
+      ~source:"masc source authority rejection"
+      [ { id = "authority-rejection"; base_url = server.base_url } ]
   in
-  let registry = publish_exn ~slot_ids:[ "bind-failure" ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-bind-failure" ~registry () in
-  let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Error "injected durable bind failure")
-    ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
-    ; quarantine = (fun _ _ -> Alcotest.fail "quarantine must not run")
-    }
-  in
+  let registry = publish_exn ~slot_ids:[ "authority-rejection" ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-authority-rejection" ~registry () in
   (match
      execute_prepared_lane
-       ~keeper_name:"keeper-bind-failure"
+       ~keeper_name:"keeper-authority-rejection"
        ~net
        ~clock
-       ~exact_execution_guard:guard
+       ~before_dispatch_authority:(fun _ -> Error "injected source rejection")
        prepared
    with
-   | Error C.Exact_execution_bind_failed -> ()
-   | Error _ -> Alcotest.fail "bind failure returned the wrong typed failure"
-   | Ok _ -> Alcotest.fail "bind failure unexpectedly executed");
-  Alcotest.(check int) "bind failure prevents POST" 0 (F.post_count server)
+   | Error C.Exact_execution_authority_rejected -> ()
+   | Error _ -> Alcotest.fail "authority rejection returned the wrong typed failure"
+   | Ok _ -> Alcotest.fail "authority rejection unexpectedly executed");
+  Alcotest.(check int) "authority rejection prevents POST" 0 (F.post_count server)
 ;;
 
 let test_dispatch_authority_without_queue_guard () =
@@ -544,59 +507,6 @@ let test_dispatch_authority_without_queue_guard () =
   Alcotest.(check int) "keeper lifecycle permits one POST" 1 (F.post_count server)
 ;;
 
-let test_release_failure_blocks_successor () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  let successor = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let first_slot = "release-failure-first" in
-  let successor_slot = "release-failure-successor" in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc release failure"
-      [ { id = first_slot; base_url = "http://127.0.0.1:9" }
-      ; { id = successor_slot; base_url = successor.base_url }
-      ]
-  in
-  let registry = publish_exn ~slot_ids:[ first_slot; successor_slot ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-release-failure" ~registry () in
-  let events = ref [] in
-  let guard : C.exact_execution_guard =
-    { before_dispatch =
-        (fun observation ->
-           push_event events ("bind:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun observation ->
-           push_event events ("release:" ^ observation.slot_id);
-           Error "injected durable release failure")
-    ; quarantine = (fun _ _ -> Alcotest.fail "release failure must not relabel")
-    }
-  in
-  let terminal =
-    match
-      execute_prepared_lane
-        ~keeper_name:"keeper-release-failure"
-        ~net
-        ~clock
-        ~exact_execution_guard:guard
-        prepared
-    with
-    | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "release failure returned the wrong terminal"
-    | Ok _ -> Alcotest.fail "release failure incorrectly advanced"
-  in
-  Alcotest.(check bool)
-    "release failure is a persistence terminal"
-    true
-    (terminal.cause = Keeper_event_queue_state.Terminal_persistence_failed);
-  Alcotest.(check string) "release failure retains A" first_slot terminal.slot_id;
-  Alcotest.(check (list string))
-    "successor is never bound"
-    [ "bind:" ^ first_slot; "release:" ^ first_slot ]
-    !events;
-  Alcotest.(check int) "release failure prevents successor POST" 0 (F.post_count successor)
-;;
-
 let test_domain_invalid_output_advances_to_declared_successor () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -616,44 +526,26 @@ let test_domain_invalid_output_advances_to_declared_successor () =
       snapshot
   in
   let prepared = prepare_exn ~keeper_name:"keeper-domain-invalid" ~registry () in
-  let quarantined = ref [] in
   let events = ref [] in
-  let guard : C.exact_execution_guard =
-    { before_dispatch =
-        (fun observation ->
-           push_event events ("bind:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun observation ->
-           push_event events ("release:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; quarantine =
-        (fun cause observation ->
-           quarantined := (cause, observation.slot_id) :: !quarantined;
-           Ok C.Fsync_completed)
-    }
-  in
   (match
      execute_prepared_lane
        ~keeper_name:"keeper-domain-invalid"
        ~net
        ~clock
-       ~exact_execution_guard:guard
+       ~before_dispatch_authority:
+         (fun observation ->
+            push_event events ("authorize:" ^ observation.slot_id);
+            Ok ())
        prepared
    with
    | Ok _ -> ()
    | Error _ -> Alcotest.fail "declared semantic successor did not complete");
   Alcotest.(check int) "domain-invalid target posts once" 1 (F.post_count invalid);
   Alcotest.(check int) "declared successor posts once" 1 (F.post_count successor);
-  Alcotest.(check bool)
-    "semantic rejection is not terminally quarantined"
-    true
-    (List.is_empty !quarantined);
   Alcotest.(check (list string))
-    "semantic successor releases A before binding B"
-    [ "bind:" ^ first_slot
-    ; "release:" ^ first_slot
-    ; "bind:declared-domain-successor"
+    "semantic successor receives its own source authority"
+    [ "authorize:" ^ first_slot
+    ; "authorize:declared-domain-successor"
     ]
     !events
 ;;
@@ -729,27 +621,15 @@ let test_summary_that_blocks_next_exact_fold_advances_to_successor () =
       ()
   in
   let events = ref [] in
-  let guard : C.exact_execution_guard =
-    { before_dispatch =
-        (fun observation ->
-           push_event events ("bind:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun observation ->
-           push_event events ("release:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; quarantine =
-        (fun _ _ ->
-           Alcotest.fail
-             "a declared future-fold successor must avoid terminal quarantine")
-    }
-  in
   let completed =
     execute_prepared_lane
       ~keeper_name:"keeper-future-fold"
       ~net
       ~clock
-      ~exact_execution_guard:guard
+      ~before_dispatch_authority:
+        (fun observation ->
+           push_event events ("authorize:" ^ observation.slot_id);
+           Ok ())
       prepared
     |> completed_exn
   in
@@ -767,10 +647,9 @@ let test_summary_that_blocks_next_exact_fold_advances_to_successor () =
     1
     (F.post_count successor);
   Alcotest.(check (list string))
-    "future-blocking output releases before successor bind"
-    [ "bind:" ^ first_slot
-    ; "release:" ^ first_slot
-    ; "bind:" ^ successor_slot
+    "future-blocking output advances under source authority"
+    [ "authorize:" ^ first_slot
+    ; "authorize:" ^ successor_slot
     ]
     !events
 ;;
@@ -792,27 +671,15 @@ let test_semantic_exhaustion_terminalizes_final_bound () =
   let registry = publish_exn ~slot_ids:[ first_slot; final_slot ] snapshot in
   let prepared = prepare_exn ~keeper_name:"keeper-semantic-exhaustion" ~registry () in
   let events = ref [] in
-  let guard : C.exact_execution_guard =
-    { before_dispatch =
-        (fun observation ->
-           push_event events ("bind:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun observation ->
-           push_event events ("release:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    ; quarantine =
-        (fun _ observation ->
-           push_event events ("quarantine:" ^ observation.slot_id);
-           Ok C.Fsync_completed)
-    }
-  in
   (match
      execute_prepared_lane
        ~keeper_name:"keeper-semantic-exhaustion"
        ~net
        ~clock
-       ~exact_execution_guard:guard
+       ~before_dispatch_authority:
+         (fun observation ->
+            push_event events ("authorize:" ^ observation.slot_id);
+            Ok ())
        prepared
    with
    | Error (C.Exact_execution_terminal terminal) ->
@@ -824,11 +691,9 @@ let test_semantic_exhaustion_terminalizes_final_bound () =
    | Error _ -> Alcotest.fail "semantic exhaustion returned the wrong typed failure"
    | Ok _ -> Alcotest.fail "semantic exhaustion unexpectedly succeeded");
   Alcotest.(check (list string))
-    "semantic exhaustion releases A and quarantines B"
-    [ "bind:" ^ first_slot
-    ; "release:" ^ first_slot
-    ; "bind:" ^ final_slot
-    ; "quarantine:" ^ final_slot
+    "semantic exhaustion retains the final authorized source"
+    [ "authorize:" ^ first_slot
+    ; "authorize:" ^ final_slot
     ]
     !events
 ;;
@@ -852,24 +717,12 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
       snapshot
   in
   let prepared = prepare_exn ~keeper_name:"keeper-flow-failure" ~registry () in
-  let quarantined = ref [] in
-  let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun _ -> Alcotest.fail "terminal OAS flow failure must not advance")
-    ; quarantine =
-        (fun cause observation ->
-           quarantined := (cause, observation.slot_id) :: !quarantined;
-           Ok C.Fsync_completed)
-    }
-  in
   let terminal =
     match
       execute_prepared_lane
         ~keeper_name:"keeper-flow-failure"
         ~net
         ~clock
-        ~exact_execution_guard:guard
         prepared
     with
     | Error (C.Exact_execution_terminal terminal) -> terminal
@@ -882,12 +735,7 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
     (terminal.cause = Keeper_event_queue_state.Exact_execution_failed);
   Alcotest.(check string) "generic terminal retains bound slot" first_slot terminal.slot_id;
   Alcotest.(check int) "failed request posts once" 1 (F.post_count failed);
-  Alcotest.(check int) "terminal flow failure never advances" 0 (F.post_count successor);
-  Alcotest.(check bool)
-    "generic terminal quarantines one identity"
-    true
-    (List.rev !quarantined
-     = [ Keeper_event_queue_state.Exact_execution_failed, first_slot ])
+  Alcotest.(check int) "terminal flow failure never advances" 0 (F.post_count successor)
 ;;
 
 let test_cancellation_preserves_lifecycle_authorized_identity () =
@@ -974,21 +822,11 @@ let test_post_success_commit_claim_blocks_reject () =
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
   let prepared = prepare_exn ~keeper_name ~registry () in
-  let quarantine_calls = ref 0 in
-  let guard : C.exact_execution_guard =
-    { F.permissive_exact_execution_guard with
-      quarantine =
-        (fun _cause _observation ->
-           incr quarantine_calls;
-           Ok C.Fsync_completed)
-    }
-  in
   let completed =
     execute_prepared_lane
       ~keeper_name
       ~net
       ~clock
-      ~exact_execution_guard:guard
       prepared
     |> completed_exn
   in
@@ -1011,7 +849,6 @@ let test_post_success_commit_claim_blocks_reject () =
     | C.Terminalization_commit_in_progress waiter -> waiter
     | C.Terminalized _
     | C.Terminalization_already_committed
-    | C.Terminalization_persistence_failed _
     | C.Terminalization_invariant_failed _ ->
       Alcotest.fail "reject crossed an installed commit claim"
   in
@@ -1020,8 +857,7 @@ let test_post_success_commit_claim_blocks_reject () =
     "installed checkpoint remains pending valid"
     true
     (pending.phase = C.Phase_installed_pending_valid);
-  Alcotest.(check int) "reject settlement has not run" 0 pending.domain_rejected_attempts;
-  Alcotest.(check int) "quarantine has not run" 0 !quarantine_calls;
+  Alcotest.(check int) "reject has not run" 0 pending.domain_rejected_attempts;
   (match C.complete_post_success_commit terminalizer with
    | Ok () -> ()
    | Error detail ->
@@ -1035,7 +871,6 @@ let test_post_success_commit_claim_blocks_reject () =
    | C.Terminalization_already_committed -> ()
    | C.Terminalized _
    | C.Terminalization_commit_in_progress _
-   | C.Terminalization_persistence_failed _
    | C.Terminalization_invariant_failed _ ->
      Alcotest.fail "committed checkpoint was downgraded by a later reject");
   let committed = C.For_testing.post_success_snapshot terminalizer in
@@ -1044,8 +879,7 @@ let test_post_success_commit_claim_blocks_reject () =
     true
     (committed.phase = C.Phase_committed);
   Alcotest.(check int) "Domain_valid runs once" 1 committed.domain_valid_attempts;
-  Alcotest.(check int) "Domain_rejected never runs" 0 committed.domain_rejected_attempts;
-  Alcotest.(check int) "quarantine never runs" 0 !quarantine_calls
+  Alcotest.(check int) "Domain_rejected never runs" 0 committed.domain_rejected_attempts
 ;;
 
 let () =
@@ -1069,23 +903,19 @@ let () =
             `Quick
             test_published_replacement_cannot_mix_prepared_generation
         ] )
-    ; ( "durable flow callbacks"
+    ; ( "source authority"
       , [ Alcotest.test_case
-            "release precedes successor bind and POST"
+            "authority precedes successor POST"
             `Quick
-            test_durable_release_precedes_successor_bind_and_post
+            test_source_authority_precedes_successor_post
         ; Alcotest.test_case
-            "bind failure prevents POST"
+            "authority rejection prevents POST"
             `Quick
-            test_bind_failure_prevents_post
+            test_source_authority_rejection_prevents_post
         ; Alcotest.test_case
-            "lifecycle authority permits dispatch without queue guard"
+            "lifecycle authority permits dispatch"
             `Quick
             test_dispatch_authority_without_queue_guard
-        ; Alcotest.test_case
-            "release failure blocks successor"
-            `Quick
-            test_release_failure_blocks_successor
         ] )
     ; ( "terminal ownership"
       , [ Alcotest.test_case

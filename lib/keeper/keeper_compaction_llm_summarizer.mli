@@ -13,8 +13,6 @@ type post_success_terminalizer
 
 type post_success_terminalization =
   | Terminalized of Keeper_event_queue_state.exact_execution_terminal
-  | Terminalization_persistence_failed of
-      Keeper_event_queue_state.exact_execution_terminal * string
   | Terminalization_commit_in_progress of unit Eio.Promise.t
   | Terminalization_already_committed
   | Terminalization_invariant_failed of string
@@ -23,9 +21,7 @@ type post_success_commit_claim =
   | Commit_claim_acquired
   | Commit_claim_in_progress of unit Eio.Promise.t
   | Commit_claim_already_committed
-  | Commit_claim_rejected of
-      Keeper_event_queue_state.exact_execution_terminal
-      * (unit, string) result
+  | Commit_claim_rejected of Keeper_event_queue_state.exact_execution_terminal
 
 type 'a post_success_commit_boundary =
   | Post_success_commit_result of 'a
@@ -33,7 +29,6 @@ type 'a post_success_commit_boundary =
   | Post_success_commit_already_committed
   | Post_success_commit_rejected of
       Keeper_event_queue_state.exact_execution_terminal
-      * (unit, string) result
 
 type post_success_phase_snapshot =
   | Phase_open
@@ -59,32 +54,12 @@ type attempt_observation =
   ; receipt_request_body_sha256 : string
   }
 
-type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
-  | Fsync_completed
-  | Visible_sync_unconfirmed of string
-
-type exact_execution_guard =
-  { before_dispatch : attempt_observation -> (exact_write_outcome, string) result
-  ; release_before_dispatch : attempt_observation -> (exact_write_outcome, string) result
-  ; quarantine :
-      Keeper_event_queue_state.exact_execution_terminal_cause ->
-      attempt_observation ->
-      (exact_write_outcome, string) result
-  }
-
 type before_dispatch_authority =
   attempt_observation -> (unit, string) result
-(** Explicit lease-scoped exact-execution persistence authority.
-    [before_dispatch] must return [Fsync_completed] before POST; this means
-    payload and parent [Unix.fsync] returned and supports process-restart
-    safety, not hardware/power-loss persistence or Darwin [F_FULLFSYNC].
-    Visible uncertainty returns a source-bound terminal without POST.
-    [release_before_dispatch] is invoked only for the failed identity selected
-    by OAS and permits OAS to advance only after [Fsync_completed]. Visible or
-    failed removal returns a terminal for that identity and cannot dispatch its
-    successor. A visible [quarantine] preserves the original terminal cause for
-    source-bound settlement. None of these callbacks selects a successor or
-    performs POST. *)
+(** Validate the caller-owned source and Keeper lifecycle immediately before
+    OAS dispatches a candidate. OAS owns execution, advancement, and exact
+    attempt provenance; this callback neither persists a parallel execution
+    claim nor interprets provider progress. *)
 
 type summarization_failure =
   | Exact_lane_unconfigured
@@ -94,9 +69,6 @@ type summarization_failure =
   | Exact_execution_context_unavailable
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
-  | Exact_execution_bind_failed
-        (** A guard was supplied and its before-dispatch bind did not reach
-            Fsync_completed. A persistence fault, unrelated to lease ownership. *)
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Invalid_plan
@@ -120,13 +92,11 @@ val prepare_lane
 
 (** Execute the immutable OAS flow exactly once. OAS exclusively decides
     whether an execution failure can advance and supplies the predetermined
-    successor. MASC only durably binds the supplied identity, durably releases
-    the failed identity, and quarantines source-bound terminal identities.
-    MASC never reads receipt phase/count or provider/admission failure causes.
-    Cancellation before a durable bind is re-raised. Once a durable bind exists,
-    cancellation is a phase-neutral source-bound terminal unless OAS first
-    invokes [release_before_dispatch]; MASC never reconstructs dispatch state
-    from cancellation or receipt details.
+    successor. MASC validates only the caller-owned source immediately before
+    dispatch and never reconstructs execution state from a second durable
+    claim. Cancellation before authorization is re-raised; cancellation after
+    authorization is projected as a source-bound terminal for that exact
+    candidate.
     Domain-invalid output is rejected by the validator and OAS advances to the
     next caller-declared candidate. The same validator applies the proposed
     rolling summary, selects the next oldest raw source, and projects that next
@@ -138,7 +108,6 @@ val execute_prepared_lane
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
   -> ?before_dispatch_authority:before_dispatch_authority
-  -> ?exact_execution_guard:exact_execution_guard
   -> prepared_lane
   -> (completed_plan, summarization_failure) result
 
@@ -148,7 +117,6 @@ val execute_prepared_lane
     MASC-owned compaction schema and domain rules after success. *)
 val make
   :  ?before_dispatch_authority:before_dispatch_authority
-  -> ?exact_execution_guard:exact_execution_guard
   -> base_path:string
   -> keeper_name:string
   -> unit
@@ -187,15 +155,11 @@ val terminalize_post_success
   :  post_success_terminalizer
   -> Keeper_event_queue_state.exact_execution_terminal_cause
   -> post_success_terminalization
-(** Durably quarantine the real retained attempt observation before returning
-    its source-bound terminal identity. The first call atomically owns the
-    canonical cause, performs the only quarantine attempt outside the mutex
-    under cancellation protection, and releases concurrent waiters. Later calls
-    return that same terminal even when they propose a different cause.
-    Persistence errors and raised exceptions are logged without replacing the
-    canonical terminal; the durable binding remains dispatch-uncertain and
-    therefore fail-closed against restart replay. A cancelled waiter can retry
-    and retrieve the same canonical terminal without repeating quarantine. *)
+(** Close the process-local post-success phase with the retained OAS attempt
+    identity. The first call atomically owns the canonical cause and releases
+    concurrent waiters; later calls return the same terminal even when they
+    propose a different cause. This does not create or persist a second
+    execution claim. *)
 
 val complete_post_success_commit
   :  post_success_terminalizer

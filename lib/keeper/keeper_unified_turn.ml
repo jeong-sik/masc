@@ -223,7 +223,6 @@ type provider_overflow_recovery =
       }
 
 let recover_provider_context_overflow_in_lane
-      ?exact_execution_guard
       ~before_dispatch_authority
       ~(config : Workspace.config)
       ~base_dir
@@ -479,7 +478,6 @@ let recover_provider_context_overflow_in_lane
                   (
                   recover_latest_checkpoint_for_compaction
                     ~before_dispatch_authority:before_compaction_dispatch
-                    ?exact_execution_guard
                     ~base_path:config.base_path
                     ~base_dir
                     ~meta
@@ -665,7 +663,6 @@ let append_provider_overflow_manifest
 ;;
 
 let run_keeper_cycle
-      ?exact_execution_guard
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -1457,7 +1454,6 @@ dominant source of the observed CAS race exhaustion after
                          it. *)
                       let overflow_recovery =
                         recover_provider_context_overflow_in_lane
-                          ?exact_execution_guard
                           ~before_dispatch_authority
                           ~config
                           ~base_dir

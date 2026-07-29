@@ -231,8 +231,7 @@ val turn_success_of_stop_reason
 (** Total typed projection used at the successful runtime boundary. *)
 
 val run_keeper_cycle
-  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
-  -> before_dispatch_authority:(unit -> (unit, string) result)
+  :  before_dispatch_authority:(unit -> (unit, string) result)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> config:Workspace.config

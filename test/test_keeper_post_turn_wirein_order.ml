@@ -256,7 +256,7 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
         in
         let preparation =
           Compact_policy.compact_for_request_typed
-            ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+            ~before_dispatch_authority:(fun _ -> Ok ())
             ~base_path:config.base_path
             ~meta
             ~trigger:Compaction_trigger.Manual
@@ -636,22 +636,13 @@ let test_prepare_commit_source_cas () =
   in
   publish_exact_fixture ~source:"post-turn prepared source CAS" exact_server;
   ensure_registered_keeper ~base_path:config.base_path meta;
-  let quarantine_calls = ref 0 in
-  let exact_execution_guard : Summarizer.exact_execution_guard =
-    { Exact_fixture.permissive_exact_execution_guard with
-      quarantine =
-        (fun _cause _observation ->
-           incr quarantine_calls;
-           Ok Summarizer.Fsync_completed)
-    }
-  in
   match
     Post_turn.prepare_compaction
+      ~before_dispatch_authority:(fun _ -> Ok ())
       ~base_path:config.base_path
       ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       ~meta
       ~trigger:Compaction_trigger.Manual
-      ~exact_execution_guard
       ()
   with
   | Error error ->
@@ -662,11 +653,11 @@ let test_prepare_commit_source_cas () =
     let stale_prepared =
       match
         Post_turn.prepare_compaction
+          ~before_dispatch_authority:(fun _ -> Ok ())
           ~base_path:config.base_path
           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
           ~meta
           ~trigger:Compaction_trigger.Manual
-          ~exact_execution_guard
           ()
       with
       | Ok stale_prepared -> stale_prepared
@@ -731,17 +722,13 @@ let test_prepare_commit_source_cas () =
       (committed_snapshot.phase
        = Masc.Keeper_compaction_llm_summarizer.Phase_committed);
     check int
-      "history cancellation retains one Domain_valid settlement"
+      "history cancellation retains one Domain_valid completion"
       1
       committed_snapshot.domain_valid_attempts;
     check int
-      "history cancellation performs no Domain_rejected settlement"
+      "history cancellation performs no Domain_rejected completion"
       0
       committed_snapshot.domain_rejected_attempts;
-    check int
-      "history cancellation performs no quarantine"
-      0
-      !quarantine_calls;
     (* Both tokens were prepared from the same source. The first commit
        advances it; the second token now proves the source-CAS rejection
        without violating the same-token affine commit contract. *)
@@ -831,23 +818,14 @@ let run_post_install_failure
        in
        publish_exact_fixture ~source:name exact_server;
        ensure_registered_keeper ~base_path:config.base_path meta;
-       let quarantine_calls = ref 0 in
-       let exact_execution_guard : Summarizer.exact_execution_guard =
-         { Exact_fixture.permissive_exact_execution_guard with
-           quarantine =
-             (fun _cause _observation ->
-                incr quarantine_calls;
-                Ok Summarizer.Fsync_completed)
-         }
-       in
        let prepared =
          match
            Post_turn.prepare_compaction
+             ~before_dispatch_authority:(fun _ -> Ok ())
              ~base_path:config.base_path
              ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
              ~meta
              ~trigger:Compaction_trigger.Manual
-             ~exact_execution_guard
              ()
          with
          | Ok prepared -> prepared
@@ -924,10 +902,6 @@ let run_post_install_failure
          0
          snapshot.domain_rejected_attempts;
        check int
-         "post-install failure never quarantines the installed checkpoint"
-         0
-         !quarantine_calls;
-       check int
          "post-install finalization performs no provider redispatch"
          1
          (Exact_fixture.post_count exact_server);
@@ -1001,19 +975,10 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
       let context =
         make_checkpoint () |> Masc.Keeper_context_core.context_of_oas_checkpoint
       in
-      let quarantine_calls = ref [] in
-      let exact_execution_guard : Summarizer.exact_execution_guard =
-        { Exact_fixture.permissive_exact_execution_guard with
-          quarantine =
-            (fun cause observation ->
-               quarantine_calls := (cause, observation) :: !quarantine_calls;
-               Ok Summarizer.Fsync_completed)
-        }
-      in
       let plan_for_units ~units =
         match
           Summarizer.make
-            ~exact_execution_guard
+            ~before_dispatch_authority:(fun _ -> Ok ())
             ~base_path:config.base_path
             ~keeper_name:meta.name
             ()
@@ -1048,17 +1013,10 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
            (String.trim slot_id <> "");
          check bool "invalid evidence terminal retains call" true
            (String.trim call_id <> "")
-       | _ -> fail "post-dispatch invalid evidence was not a typed terminal");
-      match !quarantine_calls with
-      | [ Keeper_event_queue_state.Invalid_structural_evidence, observation ] ->
-        check bool "invalid evidence quarantine retains slot" true
-          (String.trim observation.slot_id <> "");
-        check bool "invalid evidence quarantine retains call" true
-          (String.trim observation.call_id <> "")
-      | _ -> fail "invalid evidence terminal was not quarantined exactly once")
+       | _ -> fail "post-dispatch invalid evidence was not a typed terminal"))
 ;;
 
-let test_post_dispatch_non_reducing_output_is_quarantined () =
+let test_post_dispatch_non_reducing_output_is_terminal () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1083,21 +1041,12 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
             (Exact_fixture.Reply response)
         in
         publish_exact_fixture ~source:name server;
-        let quarantine_calls = ref [] in
-        let exact_execution_guard : Summarizer.exact_execution_guard =
-          { Exact_fixture.permissive_exact_execution_guard with
-            quarantine =
-              (fun cause observation ->
-                 quarantine_calls := (cause, observation) :: !quarantine_calls;
-                 Ok Summarizer.Fsync_completed)
-          }
-        in
         let meta = make_meta ~name () in
         ensure_registered_keeper ~base_path:config.base_path meta;
         let preparation =
           Compact_policy.compact_for_request_typed
             ~base_path:config.base_path
-            ~exact_execution_guard
+            ~before_dispatch_authority:(fun _ -> Ok ())
             ~meta
             ~trigger:Compaction_trigger.Manual
             (make_checkpoint ()
@@ -1114,20 +1063,13 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
              (String.trim slot_id <> "");
            check bool (name ^ " terminal retains call") true
              (String.trim call_id <> "")
-         | _ -> fail (name ^ " did not report its own non-reduction cause"));
-        match !quarantine_calls with
-        | [ (cause, observation) ] when cause = expected_cause ->
-          check bool (name ^ " quarantine retains slot") true
-            (String.trim observation.slot_id <> "");
-          check bool (name ^ " quarantine retains call") true
-            (String.trim observation.call_id <> "")
-        | _ -> fail (name ^ " was not quarantined exactly once")
+         | _ -> fail (name ^ " did not report its own non-reduction cause"))
       in
       (* The two cases reported the same cause. Only one of them should: a plan the
          domain validator rejects IS invalid output, while a summarizer that returns a
          LARGER context produced valid output that worked against the purpose. Both stay
-         terminal and quarantined and keep slot and call provenance; they no longer read
-         as the same failure. *)
+         terminal and keep slot and call provenance; they no longer read as the
+         same failure. *)
       run_case
         ~name:"invalid-boundary-plan"
         ~expected_cause:Keeper_event_queue_state.Domain_invalid_output
@@ -1434,8 +1376,8 @@ let () =
         `Quick test_post_install_cancellation_returns_committed_failure;
       test_case "ephemeral plan accounting mismatch is post-dispatch terminal"
         `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
-      test_case "non-reducing output is quarantined"
-        `Quick test_post_dispatch_non_reducing_output_is_quarantined;
+      test_case "non-reducing output is terminal"
+        `Quick test_post_dispatch_non_reducing_output_is_terminal;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
       test_case "refusal does not settle as a compaction failure"

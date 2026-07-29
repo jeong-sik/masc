@@ -134,7 +134,6 @@ type uncommitted_prepared_outcome =
 val prepare_compaction :
   ?before_dispatch_authority:
     Keeper_compaction_llm_summarizer.before_dispatch_authority ->
-  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
   base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -182,7 +181,6 @@ val no_compaction_of_uncommitted_prepared :
 val recover_latest_checkpoint_for_compaction :
   ?before_dispatch_authority:
     Keeper_compaction_llm_summarizer.before_dispatch_authority ->
-  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
   base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->

@@ -517,7 +517,6 @@ let rejection_disposition = function
   | Exact_execution_context_unavailable
   | Exact_execution_authority_absent
   | Exact_execution_authority_rejected
-  | Exact_execution_bind_failed
   | Exact_flow_already_started ->
     Nonterminal_rejection
 ;;
@@ -597,8 +596,6 @@ let no_compaction_of_uncommitted_prepared
        Uncommitted_terminalized no_compaction
      | Committed recovery ->
        Uncommitted_already_committed recovery)
-  | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed
-      (_, detail)
   | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
     let error = Checkpoint_candidate_failed detail in
     publish_prepared_commit_completion
@@ -773,7 +770,6 @@ let prepare_compaction_with
 
 let prepare_compaction
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~base_dir
       ~meta
@@ -784,7 +780,6 @@ let prepare_compaction
     ~compact_for_request:
       (Keeper_compact_policy.compact_for_request_typed
          ?before_dispatch_authority
-         ?exact_execution_guard
          ~base_path)
     ~base_dir
     ~meta
@@ -844,8 +839,6 @@ let commit_prepared_compaction_with
       commit_failure
         (Checkpoint_candidate_failed
            "commit owner observed an already-committed terminalization")
-    | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed
-        (_, detail)
     | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
       commit_failure (Checkpoint_candidate_failed detail)
   in
@@ -1057,7 +1050,6 @@ end
 
 let recover_latest_checkpoint_for_compaction
     ?before_dispatch_authority
-    ?exact_execution_guard
     ~(base_path : string)
     ~(base_dir : string)
     ~(meta : keeper_meta)
@@ -1067,7 +1059,6 @@ let recover_latest_checkpoint_for_compaction
   match
     prepare_compaction
       ?before_dispatch_authority
-      ?exact_execution_guard
       ~base_path
       ~base_dir
       ~meta

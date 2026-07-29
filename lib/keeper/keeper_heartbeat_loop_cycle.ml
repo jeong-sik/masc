@@ -105,7 +105,6 @@ let rec deferred_runtime_lane = function
    inside the slot for the same reason as the chat lane: a concurrent turn
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
-      ?exact_execution_guard
       ~before_dispatch_authority
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -124,7 +123,6 @@ let run_keeper_cycle_admitted
   let admitted_execution =
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       Keeper_unified_turn.run_keeper_cycle
-        ?exact_execution_guard
         ~before_dispatch_authority
         ?deferred_runtime_lane
         ?on_deferred_runtime_consumed
@@ -208,7 +206,6 @@ let run_keeper_cycle_admitted
 
 let run_keeper_cycle_with
       ~run_manual_compaction
-      ?exact_execution_guard
       ~admission_token
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -261,7 +258,6 @@ let run_keeper_cycle_with
   in
   let run_standard_cycle () =
     run_keeper_cycle_admitted
-      ?exact_execution_guard
       ~before_dispatch_authority:
         (fun () -> Keeper_turn_admission.validate_before_dispatch admission_token)
       ?deferred_runtime_lane
@@ -292,7 +288,6 @@ let run_keeper_cycle_with
        stimulus as Ack, so a yielded follow-up does not replay compaction. *)
     (match
        run_manual_compaction
-         ?exact_execution_guard
          ~before_dispatch_authority:
            (fun _observation ->
               Keeper_turn_admission.validate_before_dispatch admission_token)
@@ -319,7 +314,6 @@ let run_keeper_cycle_with
 ;;
 
 let run_keeper_cycle
-      ?exact_execution_guard
       ~admission_token
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -339,21 +333,18 @@ let run_keeper_cycle
 run_keeper_cycle_with
   ~run_manual_compaction:
     (fun
-      ?exact_execution_guard
       ~before_dispatch_authority:_
       ~config
       ~meta
       ()
       ->
        Keeper_manual_compaction.run_under_admission
-         ?exact_execution_guard
          ~before_dispatch_authority:
            (fun _observation ->
               Keeper_turn_admission.validate_before_dispatch admission_token)
          ~config
          ~meta
          ())
-    ?exact_execution_guard
     ~admission_token
     ?deferred_runtime_lane
     ?on_deferred_runtime_consumed

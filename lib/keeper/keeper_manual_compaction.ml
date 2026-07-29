@@ -647,7 +647,6 @@ let run_admitted_with
 ;;
 
 let run_admitted
-    ?exact_execution_guard
     ?before_dispatch_authority
     ~config
     ~meta
@@ -657,7 +656,6 @@ let run_admitted
     ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
       Keeper_context_runtime.prepare_compaction
         ?before_dispatch_authority
-        ?exact_execution_guard
         ~base_path
         ~base_dir
         ~meta
@@ -669,7 +667,6 @@ let run_admitted
 ;;
 
 let run_under_admission
-    ?exact_execution_guard
     ?before_dispatch_authority
     ~config
     ~meta
@@ -679,7 +676,6 @@ let run_under_admission
     ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
       Keeper_context_runtime.prepare_compaction
         ?before_dispatch_authority
-        ?exact_execution_guard
         ~base_path
         ~base_dir
         ~meta

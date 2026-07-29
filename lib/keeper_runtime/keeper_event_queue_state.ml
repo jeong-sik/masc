@@ -30,7 +30,6 @@ type exact_execution_terminal_cause =
   | Lifecycle_transition_failed_after_dispatch
   | Checkpoint_source_changed
   | Checkpoint_persistence_failed
-  | Terminal_persistence_failed
 
 type exact_execution_terminal =
   { cause : exact_execution_terminal_cause
@@ -447,7 +446,6 @@ let exact_execution_terminal_cause_label = function
     "lifecycle_transition_failed_after_dispatch"
   | Checkpoint_source_changed -> "checkpoint_source_changed"
   | Checkpoint_persistence_failed -> "checkpoint_persistence_failed"
-  | Terminal_persistence_failed -> "terminal_persistence_failed"
 ;;
 
 let exact_execution_terminal_cause_of_label = function
@@ -464,7 +462,6 @@ let exact_execution_terminal_cause_of_label = function
     Ok Lifecycle_transition_failed_after_dispatch
   | "checkpoint_source_changed" -> Ok Checkpoint_source_changed
   | "checkpoint_persistence_failed" -> Ok Checkpoint_persistence_failed
-  | "terminal_persistence_failed" -> Ok Terminal_persistence_failed
   | label -> Error (Printf.sprintf "unknown exact execution terminal cause: %s" label)
 ;;
 

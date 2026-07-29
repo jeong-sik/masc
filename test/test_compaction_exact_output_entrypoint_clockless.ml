@@ -130,10 +130,10 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
       in
       let decision () =
         Compact_policy.compact_for_request_typed
+          ~before_dispatch_authority:(fun _ -> Ok ())
           ~base_path:exact_flow_base_path
           ~meta
           ~trigger:Compaction_trigger.Manual
-          ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
           context
         |> fun preparation -> preparation.Compact_policy.decision
       in
@@ -182,11 +182,7 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
         (Exact_fixture.post_count before_dispatch_server))
 ;;
 
-let test_absent_guard_is_typed_at_before_dispatch () =
-  (* The existing before-dispatch callback already prevented POST when the guard
-     was absent. This test proves only that the current optional boundary reports
-     that absence separately from a supplied guard's persistence failure. It makes
-     no provider-cost claim. *)
+let test_absent_source_authority_is_typed_at_before_dispatch () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
@@ -213,7 +209,7 @@ let test_absent_guard_is_typed_at_before_dispatch () =
           ~clock:(Eio.Stdenv.clock env)
           (Exact_fixture.Reply (summarize_response "would have summarized"))
       in
-      publish_exact_fixture ~source:"absent guard" server;
+      publish_exact_fixture ~source:"absent source authority" server;
       let preparation =
         Compact_policy.compact_for_request_typed
           ~base_path:exact_flow_base_path
@@ -239,9 +235,9 @@ let () =
             `Quick
             test_domain_invalid_and_clockless_flow_failure_are_terminal
         ; test_case
-            "an absent guard is typed at before-dispatch"
+            "absent source authority is typed at before-dispatch"
             `Quick
-            test_absent_guard_is_typed_at_before_dispatch
+            test_absent_source_authority_is_typed_at_before_dispatch
         ] )
     ]
 ;;

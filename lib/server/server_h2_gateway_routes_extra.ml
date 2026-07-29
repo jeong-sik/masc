@@ -40,6 +40,14 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
          h2_respond_auth_error error;
          true)
   in
+  let board_unavailable error =
+    h2_respond_json_value
+      h2_reqd
+      (`Assoc [ ("error", `String (Board.show_board_error error)) ])
+      ~status:`Service_unavailable
+      ~extra_headers:cors;
+    true
+  in
   match httpun_meth, path with
   | `GET, "/api/v1/voice/config" ->
       let status, json = voice_config_payload () in
@@ -68,16 +76,18 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
       let voter = board_voter_query httpun_request in
       let blind_votes = bool_query_param httpun_request "blind_votes" ~default:false in
-      let posts =
+      match
         Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-          ~exclude_automation ?author_filter ~limit:base_fetch ()
-      in
-      let karma_map = Board_dispatch.get_all_karma () in
+          ~exclude_automation ?author_filter ~limit:base_fetch (),
+        Board_dispatch.get_all_karma ()
+      with
+      | Error error, _ | _, Error error -> board_unavailable error
+      | Ok posts, Ok karma_map ->
       let get_karma author =
         Option.value ~default:0 (List.assoc_opt author karma_map)
       in
       let paged = posts |> drop offset |> take limit in
-      let reaction_rows =
+      match
         board_reactions_batch
           ~targets:
             (List.map
@@ -85,7 +95,9 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
                   (Board.Reaction_post, Board.Post_id.to_string p.id))
                paged)
           ~voter:reaction_actor
-      in
+      with
+      | Error error -> board_unavailable error
+      | Ok reaction_rows ->
       let reactions_for = board_reactions_lookup reaction_rows in
       let contributor_quality_for = board_contributor_quality_lookup ?config () in
       let posts_json = List.map (fun (p : Board.post) ->
@@ -118,14 +130,16 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       true
 
   | `GET, "/api/v1/board/hearths" ->
-      let hearths = Board_dispatch.list_hearths () in
-      let json = `Assoc [
-        ("hearths", `List (List.map (fun (name, count) ->
-          `Assoc [("name", `String name); ("count", `Int count)]
-        ) hearths));
-      ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      (match Board_dispatch.list_hearths () with
+       | Error error -> board_unavailable error
+       | Ok hearths ->
+         let json = `Assoc [
+           ("hearths", `List (List.map (fun (name, count) ->
+             `Assoc [("name", `String name); ("count", `Int count)]
+           ) hearths));
+         ] in
+         h2_respond_json_value h2_reqd json ~extra_headers:cors;
+         true)
 
   | `GET, "/api/v1/board/flairs" ->
       let flairs = List.map Board.flair_to_yojson Board.available_flairs in
@@ -134,16 +148,18 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       true
 
   | `GET, "/api/v1/board/sub-boards" ->
-      let sub_boards = Board_dispatch.list_sub_boards () in
-      let json =
-        `Assoc
-          [
-            ( "sub_boards",
-              `List (List.map Board.sub_board_to_yojson sub_boards) );
-          ]
-      in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      (match Board_dispatch.list_sub_boards () with
+       | Error error -> board_unavailable error
+       | Ok sub_boards ->
+         let json =
+           `Assoc
+             [
+               ( "sub_boards",
+                 `List (List.map Board.sub_board_to_yojson sub_boards) );
+             ]
+         in
+         h2_respond_json_value h2_reqd json ~extra_headers:cors;
+         true)
 
   | `GET, "/api/v1/board/karma/ledger" ->
       (* Karma ledger contract endpoint — attributed karma events.
@@ -155,28 +171,30 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
         int_query_param httpun_request "limit" ~default:500
         |> clamp ~min_v:1 ~max_v:5000
       in
-      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-      let totals =
-        Board_dispatch.get_all_karma ()
-        |> List.sort (fun (_, a) (_, b) -> compare b a)
-      in
-      let json =
-        `Assoc
-          [
-            ("events", `List (List.map Board.karma_event_to_yojson events));
-            ("count", `Int (List.length events));
-            ("scoring_rule", `String "up=+1,down=0");
-            ( "totals",
-              `List
-                (List.map
-                   (fun (agent_name, k) ->
-                     `Assoc
-                       [ ("agent", `String agent_name); ("karma", `Int k) ])
-                   totals) );
-          ]
-      in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      (match
+         Board_dispatch.get_karma_ledger ?agent ~limit (),
+         Board_dispatch.get_all_karma ()
+       with
+       | Error error, _ | _, Error error -> board_unavailable error
+       | Ok events, Ok totals ->
+         let totals = List.sort (fun (_, a) (_, b) -> compare b a) totals in
+         let json =
+           `Assoc
+             [
+               ("events", `List (List.map Board.karma_event_to_yojson events));
+               ("count", `Int (List.length events));
+               ("scoring_rule", `String "up=+1,down=0");
+               ( "totals",
+                 `List
+                   (List.map
+                      (fun (agent_name, k) ->
+                         `Assoc
+                           [ ("agent", `String agent_name); ("karma", `Int k) ])
+                      totals) );
+             ]
+         in
+         h2_respond_json_value h2_reqd json ~extra_headers:cors;
+         true)
 
   | `GET, p
     when String.starts_with ~prefix:"/api/v1/board/" p
@@ -207,15 +225,17 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
         true)
 
   | `GET, "/api/v1/karma" ->
-      let karma_list = Board_dispatch.get_all_karma () in
-      let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
-      let json = `Assoc [
-        ("karma", `List (List.map (fun (agent, k) ->
-          `Assoc [("agent", `String agent); ("karma", `Int k)]
-        ) sorted));
-      ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true
+      (match Board_dispatch.get_all_karma () with
+       | Error error -> board_unavailable error
+       | Ok karma_list ->
+         let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+         let json = `Assoc [
+           ("karma", `List (List.map (fun (agent, k) ->
+             `Assoc [("agent", `String agent); ("karma", `Int k)]
+           ) sorted));
+         ] in
+         h2_respond_json_value h2_reqd json ~extra_headers:cors;
+         true)
 
   | `GET, "/static/css/middleware.css" ->
       (match read_file (playground_asset_path "static/css/middleware.css") with

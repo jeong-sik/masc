@@ -82,25 +82,28 @@ let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
 ;;
 
 let handle_sub_board_list ~tool_name ~start_time _args : Tool_result.result =
-  let boards = Board_dispatch.list_sub_boards () in
-  let lines =
-    List.map
-      (fun (sb : Board.sub_board) ->
-         Printf.sprintf
-           "- %s (/%s): %s | %s | %d members | %d posts"
-           sb.name
-           sb.slug
-           sb.description
-           (Board.sub_board_access_to_string sb.access)
-           (List.length sb.members)
-           sb.post_count)
-      boards
-  in
-  Tool_result.make_ok
-    ~tool_name
-    ~start_time
-    ~data:(`String (String.concat "\n" lines))
-    ()
+  match Board_dispatch.list_sub_boards () with
+  | Error error ->
+    Board_tool_format.error_of_board_error ~tool_name ~start_time error
+  | Ok boards ->
+    let lines =
+      List.map
+        (fun (sb : Board.sub_board) ->
+           Printf.sprintf
+             "- %s (/%s): %s | %s | %d members | %d posts"
+             sb.name
+             sb.slug
+             sb.description
+             (Board.sub_board_access_to_string sb.access)
+             (List.length sb.members)
+             sb.post_count)
+        boards
+    in
+    Tool_result.make_ok
+      ~tool_name
+      ~start_time
+      ~data:(`String (String.concat "\n" lines))
+      ()
 ;;
 
 let handle_sub_board_get ~tool_name ~start_time args : Tool_result.result =

@@ -113,7 +113,19 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
   let bad_age_s = 21600 in
   let slo_target_age_s = 900 in
   try
-    let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:200 () in
+    match Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:200 () with
+    | Error error ->
+      (`Assoc [
+        ("alert_level", `String "bad");
+        ("posts_total", `Null);
+        ("new_posts_24h", `Null);
+        ("unanswered_posts", `Null);
+        ("last_activity_age_s", `Null);
+        ("slo_target_age_s", `Int slo_target_age_s);
+        ("slo_breached", `Bool false);
+        ("error", `String (Board.show_board_error error));
+      ], false)
+    | Ok posts ->
     let total_posts = List.length posts in
     let new_posts_24h =
       List.fold_left

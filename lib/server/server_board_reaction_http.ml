@@ -22,6 +22,7 @@ type error_code =
   | Already_voted
   | Already_exists
   | Unauthorized
+  | Persistence_reset_required
 
 type http_status =
   [ `Bad_request
@@ -29,6 +30,7 @@ type http_status =
   | `Forbidden
   | `Internal_server_error
   | `Not_found
+  | `Service_unavailable
   | `Too_many_requests
   ]
 
@@ -51,6 +53,7 @@ let error_code_to_string = function
   | Already_voted -> "already_voted"
   | Already_exists -> "already_exists"
   | Unauthorized -> "unauthorized"
+  | Persistence_reset_required -> "persistence_reset_required"
 ;;
 
 let make_error ?(details = []) ~code ~status message =
@@ -122,6 +125,7 @@ let status_of_board_error = function
   | Board.Post_not_found _ | Board.Comment_not_found _ -> `Not_found
   | Board.Unauthorized _ -> `Forbidden
   | Board.Io_error _ -> `Internal_server_error
+  | Board.Persistence_reset_required _ -> `Service_unavailable
 ;;
 
 let code_and_details_of_board_error = function
@@ -133,6 +137,7 @@ let code_and_details_of_board_error = function
   | Board.Already_voted _ -> Already_voted, []
   | Board.Already_exists _ -> Already_exists, []
   | Board.Unauthorized _ -> Unauthorized, []
+  | Board.Persistence_reset_required _ -> Persistence_reset_required, []
 ;;
 
 let of_board_error board_error =

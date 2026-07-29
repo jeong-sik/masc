@@ -112,7 +112,9 @@ val emit_board_sse_event : board_sse_event -> unit
 
 type board_backend =
   | Jsonl of Board.store
-(** Currently single-variant; new backends would be added here. *)
+  | Unavailable of Board.board_error
+(** [Unavailable] keeps a persistence reset-required outcome inside the Board
+    boundary without aborting Keeper/server startup. *)
 
 val backend : unit -> board_backend
 (** Returns the currently-active backend, lazy-initialising it on
@@ -198,9 +200,10 @@ val list_posts :
   ?exclude_automation:bool ->
   ?limit:int ->
   unit ->
-  Board.post list
+  (Board.post list, Board.board_error) Result.t
 
-val current_post_cursor : unit -> float * string option
+val current_post_cursor :
+  unit -> (float * string option, Board.board_error) Result.t
 (** Atomic high-water mark for initializing a Board observation cursor. *)
 (** Current Board cursor head without sorting or materializing the full post
     history. *)
@@ -222,7 +225,7 @@ val set_pinned :
 val search :
   query:string ->
   limit:int ->
-  Board.post list
+  (Board.post list, Board.board_error) Result.t
 
 val post_to_yojson_with_karma :
   Board.post -> author_karma:int -> Yojson.Safe.t
@@ -249,7 +252,8 @@ val get_post_and_comments :
   unit ->
   (Board.post * Board.comment list, Board.board_error) Result.t
 
-val list_comments : ?limit:int -> unit -> Board.comment list
+val list_comments :
+  ?limit:int -> unit -> (Board.comment list, Board.board_error) Result.t
 
 (** {1 Votes} *)
 
@@ -293,7 +297,9 @@ val list_reactions_batch :
   targets:(Board.reaction_target_type * string) list ->
   ?user_id:string ->
   unit ->
-  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+  ( ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+  , Board.board_error )
+  Result.t
 
 (** {1 Karma} *)
 
@@ -305,7 +311,7 @@ val get_karma_ledger :
   ?agent:string ->
   ?limit:int ->
   unit ->
-  Board.karma_event list
+  (Board.karma_event list, Board.board_error) Result.t
 (** Return attributed karma events from the active backend.
 
     Events are drawn from the in-memory vote log via
@@ -320,21 +326,24 @@ val get_karma_ledger :
     The rebuild contract: summing [delta] over the unfiltered
     result must equal [get_all_karma ()] for every recipient. *)
 
-val get_all_karma : unit -> (string * int) list
+val get_all_karma :
+  unit -> ((string * int) list, Board.board_error) Result.t
 
-val get_agent_karma : agent_name:string -> int
+val get_agent_karma :
+  agent_name:string -> (int, Board.board_error) Result.t
 
 (** {1 Aggregates} *)
 
-val list_hearths : unit -> (string * int) list
+val list_hearths :
+  unit -> ((string * int) list, Board.board_error) Result.t
 
-val stats : unit -> Yojson.Safe.t
+val stats : unit -> (Yojson.Safe.t, Board.board_error) Result.t
 (** Board snapshot ([post_count] / [comment_count] / per-author /
     per-hearth aggregates) projected to JSON. *)
 
 (** {1 Persistence} *)
 
-val flush : unit -> unit
+val flush : unit -> (unit, Board.board_error) Result.t
 (** Force-flush dirty posts/comments to disk. *)
 
 (** {1 AI curation} *)
@@ -375,7 +384,8 @@ val get_sub_board :
   sub_board_id:string ->
   (Board.sub_board, Board.board_error) Result.t
 
-val list_sub_boards : unit -> Board.sub_board list
+val list_sub_boards :
+  unit -> (Board.sub_board list, Board.board_error) Result.t
 
 val delete_sub_board :
   sub_board_id:string ->

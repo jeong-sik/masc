@@ -14,6 +14,12 @@
 open Alcotest
 open Masc
 
+let board_store_exn () =
+  match Board.global () with
+  | Ok store -> store
+  | Error error -> fail (Board.show_board_error error)
+;;
+
 module Event_queue_persistence_source = Keeper_event_queue_persistence
 module Keeper_event_queue_persistence = struct
   include Event_queue_persistence_source
@@ -140,7 +146,6 @@ let make_meta ?(name = "fusion-keeper") () : Keeper_meta_contract.keeper_meta =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ ("name", `String name)
-         ; ("agent_name", `String name)
          ; ("trace_id", `String "test-trace-fusion")
          ])
   with
@@ -524,7 +529,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     in
     check bool "emit succeeds" true (Result.is_ok result);
     let post =
-      match Board.find_post_by_run_id (Board.global ()) ~run_id with
+      match Board.find_post_by_run_id (board_store_exn ()) ~run_id with
       | Some post -> post
       | None -> fail "fusion board post should be indexed by typed origin.fusion_run_id"
     in
@@ -619,7 +624,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     in
     check bool "same completion replay succeeds" true (Result.is_ok replay);
     let posts_for_run =
-      Board.list_posts (Board.global ()) ()
+      Board.list_posts (board_store_exn ()) ()
       |> List.filter (fun (candidate : Board.post) ->
         match candidate.origin with
         | Some { fusion_run_id = Some candidate_run_id; _ } ->
@@ -648,7 +653,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     check bool "changed completion replay is rejected" true
       (Result.is_error conflicting_replay);
     check int "conflicting replay keeps one Board post" 1
-      (Board.list_posts (Board.global ()) ()
+      (Board.list_posts (board_store_exn ()) ()
        |> List.filter (fun (candidate : Board.post) ->
          match candidate.origin with
          | Some { fusion_run_id = Some candidate_run_id; _ } ->
@@ -1006,7 +1011,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       in
       await_projection ());
     let post =
-      match Board.find_post_by_run_id (Board.global ()) ~run_id with
+      match Board.find_post_by_run_id (board_store_exn ()) ~run_id with
       | Some post -> post
       | None -> fail "background success should create a board post indexed by run_id"
     in

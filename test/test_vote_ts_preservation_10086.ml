@@ -113,7 +113,9 @@ let test_flush_preserves_cast_ts () =
     (before_flush_now > cast_ts +. 0.01);
   (* Force rewrite via the dispatch backend's Jsonl store. *)
   (match Board_dispatch.backend () with
-   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+   | Board_dispatch.Jsonl store -> Board.flush_dirty store
+   | Board_dispatch.Unavailable error ->
+     Alcotest.fail (Board.show_board_error error));
   let rewrite_rows = read_ts_rows (Board_votes.vote_log_path ()) in
   let rewritten_ts =
     match find_row ~target ~voter rewrite_rows with
@@ -170,7 +172,9 @@ let test_flip_inherits_flip_time () =
       (* Flush now and verify the latest-in-store ts matches the
          flip row's ts (and not the original up ts). *)
       (match Board_dispatch.backend () with
-       | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+       | Board_dispatch.Jsonl store -> Board.flush_dirty store
+       | Board_dispatch.Unavailable error ->
+         Alcotest.fail (Board.show_board_error error));
       let rewrite_rows = read_ts_rows (Board_votes.vote_log_path ()) in
       let rewritten_ts =
         match find_row ~target ~voter rewrite_rows with
@@ -181,6 +185,65 @@ let test_flip_inherits_flip_time () =
         "rewrite persists flip-time (not original up ts, not now)"
         flip_ts rewritten_ts
 
+let test_missing_ts_requires_board_reset () =
+  let post =
+    create_post_exn ~author:"missing-ts-author"
+      ~content:"current post beside a retired vote row"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let retired_vote =
+    `Assoc
+      [ "target", `String ("post:" ^ post_id ^ ":missing-ts-voter")
+      ; "voter", `String "missing-ts-voter"
+      ; "direction", `String "up"
+      ]
+  in
+  let vote_path = Board_votes.vote_log_path () in
+  Fs_compat.append_file vote_path (Yojson.Safe.to_string retired_vote ^ "\n");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.backend () with
+  | Board_dispatch.Unavailable (Board.Persistence_reset_required _) -> ()
+  | Board_dispatch.Unavailable error ->
+    Alcotest.failf
+      "expected Persistence_reset_required, got %s"
+      (Board.show_board_error error)
+  | Board_dispatch.Jsonl _ ->
+    Alcotest.fail "vote row without current ts was accepted"
+;;
+
+let test_namespaced_voter_survives_rewrite_and_restart () =
+  let voter = "keeper:vote-agent" in
+  let post =
+    create_post_exn
+      ~author:"namespaced-vote-author"
+      ~content:"namespaced voter snapshot"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let target = "post:" ^ post_id ^ ":" ^ voter in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match Board_dispatch.backend () with
+   | Board_dispatch.Jsonl store -> Board.flush_dirty store
+   | Board_dispatch.Unavailable error ->
+     Alcotest.fail (Board.show_board_error error));
+  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  Alcotest.(check bool)
+    "rewrite preserves the complete namespaced voter"
+    true
+    (Option.is_some (find_row ~target ~voter rows));
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.current_vote_for_post ~voter ~post_id with
+  | Ok (Some Board.Up) -> ()
+  | Ok (Some Board.Down) -> Alcotest.fail "vote direction changed after restart"
+  | Ok None -> Alcotest.fail "namespaced vote disappeared after restart"
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
 let () =
   Alcotest.run "vote_ts_preservation_10086"
     [
@@ -190,5 +253,11 @@ let () =
             (with_eio test_flush_preserves_cast_ts);
           Alcotest.test_case "flip inherits flip-time" `Quick
             (with_eio test_flip_inherits_flip_time);
+          Alcotest.test_case "missing ts requires Board reset" `Quick
+            (with_eio test_missing_ts_requires_board_reset);
+          Alcotest.test_case
+            "namespaced voter survives rewrite and restart"
+            `Quick
+            (with_eio test_namespaced_voter_survives_rewrite_and_restart);
         ] );
     ]

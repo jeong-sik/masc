@@ -171,13 +171,12 @@ val delete_post :
 
 (** {1 Global store + lifecycle} *)
 
-val global : unit -> store
+val global : unit -> (store, board_error) result
 (** Lazy singleton.  First call constructs the store via
-    {!create_store}, then runs the four loaders
-    ([load_persisted_posts] / [_comments] / [_votes] +
-    [recalculate_reply_counts]) under
+    {!create_store}, validates and loads posts, comments, votes, reactions,
+    and sub-boards, then rebuilds derived reply counts under
     [Eio.Lazy.from_fun ~cancel:`Protect] so a cancelled
-    fiber cannot leave the singleton half-initialised. *)
+    fiber cannot publish a half-initialised singleton. *)
 
 val reset_global_for_test : unit -> unit
 (** Reinstalls a fresh lazy singleton.  Safe to call only

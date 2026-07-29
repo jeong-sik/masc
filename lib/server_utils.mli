@@ -160,7 +160,9 @@ val board_reactions_for_comment :
 val board_reactions_batch :
   targets:(Board.reaction_target_type * string) list ->
   voter:string option ->
-  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+  ( ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+  , Board.board_error )
+  result
 (** [board_reactions_batch ~targets ~voter] returns dashboard reaction
     summaries for a request's target set using one board-store scan. *)
 

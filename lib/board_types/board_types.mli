@@ -28,6 +28,10 @@ type board_error =
     (** Actor attempted an owner-gated mutation (e.g. editing a post they
         do not own). Distinct from [Validation_error] so callers can map it
         to a 403-class rejection rather than a generic input error. *)
+  | Persistence_reset_required of string
+    (** The persisted Board snapshot is not the current schema. The Board
+        backend remains unavailable until the operator replaces or removes
+        that snapshot; no partial in-memory store is published. *)
 [@@deriving show]
 
 (** {1 Safe ID Modules — Parse, Don't Validate} *)

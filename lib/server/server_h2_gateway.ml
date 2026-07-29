@@ -671,7 +671,15 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/dashboard/board" ->
           with_h2_public_read h2_reqd (fun _state ->
             let json = dashboard_memory_http_json httpun_request in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            let status =
+              match json with
+              | `Assoc fields ->
+                (match List.assoc_opt "unavailable" fields with
+                 | Some (`Bool true) -> `Service_unavailable
+                 | _ -> `OK)
+              | _ -> `OK
+            in
+            h2_respond_json_value h2_reqd json ~status ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/gate" ->
           with_h2_public_read h2_reqd (fun state ->

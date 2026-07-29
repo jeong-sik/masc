@@ -1370,27 +1370,34 @@ let readiness_handler _request reqd =
 
 let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
     ~reaction_actor ~response_format ~post_id =
+  let board_error_response err =
+    let status =
+      match err with
+      | Board.Post_not_found _ | Board.Comment_not_found _ -> `Not_found
+      | Board.Persistence_reset_required _ -> `Service_unavailable
+      | _ -> `Internal_server_error
+    in
+    status,
+    Printf.sprintf
+      {|{"error":"%s"}|}
+      (String.escaped (Board_tool.board_error_to_string err))
+  in
   match Board_dispatch.get_post ~post_id with
-  | Error err ->
+  | Error err -> board_error_response err
       (* Render a human-readable message (e.g. "Post not found: <id>") via the
          shared Board_tool.board_error_to_string, matching the 404 contract in
          the .mli and the convention already used for board errors in
          server_routes_http_routes_activity.ml. The derived [show_board_error]
          leaked the internal OCaml constructor name ("Post_not_found(...)") into
          the public HTTP body. *)
-      (`Not_found, Printf.sprintf {|{"error":"%s"}|}
-         (String.escaped (Board_tool.board_error_to_string err)))
   | Ok post ->
       let author = Board.Agent_id.to_string post.author in
-      let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in
-      let comments =
-        match Board_dispatch.get_comments ~post_id with
-        | Ok cs -> cs
-        | Error err ->
-            Log.Server.warn "board_post_detail: get_comments failed for %s: %s"
-              post_id (Board_types.show_board_error err);
-            []
-      in
+      match
+        Board_dispatch.get_agent_karma ~agent_name:author,
+        Board_dispatch.get_comments ~post_id
+      with
+      | Error err, _ | _, Error err -> board_error_response err
+      | Ok author_karma, Ok comments ->
       let current_vote = board_current_vote_for_post ~voter ~post_id in
       let reaction_targets =
         (Board.Reaction_post, post_id)
@@ -1399,9 +1406,11 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
                 (Board.Reaction_comment, Board.Comment_id.to_string comment.id))
              comments
       in
-      let reaction_rows =
+      match
         board_reactions_batch ~targets:reaction_targets ~voter:reaction_actor
-      in
+      with
+      | Error err -> board_error_response err
+      | Ok reaction_rows ->
       let reactions_for = board_reactions_lookup reaction_rows in
       let reactions = reactions_for (Board.Reaction_post, post_id) in
       let contributor_quality =

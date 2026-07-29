@@ -1079,7 +1079,15 @@ let add_routes ~sw ~clock router =
          let json =
            dashboard_memory_http_json ~config:(Mcp_server.workspace_config state) req
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         let status =
+           match json with
+           | `Assoc fields ->
+             (match List.assoc_opt "unavailable" fields with
+              | Some (`Bool true) -> `Service_unavailable
+              | _ -> `OK)
+           | _ -> `OK
+         in
+         Http.Response.json_value ~status ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/link-previews" (fun request reqd ->
        with_permission_auth ~permission:Masc_domain.CanReadState

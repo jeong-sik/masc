@@ -84,6 +84,11 @@ let disposition_of_error : Board.board_error -> disposition = function
     (* Not reachable from a read path. An identity/ownership gate rejection
        is deterministic and does not resolve by retrying. *)
     Permanent
+  | Board.Persistence_reset_required _ ->
+    (* The same process keeps the typed unavailable backend until the
+       operator resets the snapshot and restarts. Retrying inside a Keeper
+       turn cannot change that state. *)
+    Permanent
 ;;
 
 let disposition_of_unavailable (unavailable : board_unavailable) =
@@ -192,10 +197,13 @@ let list_posts_after_cursor (cursor_ts, cursor_post_id) =
   let is_after_cursor post =
     compare_cursor_token (cursor_token_of_post post) (cursor_ts, cursor_post_id) > 0
   in
-  Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:max_int ()
-  |> List.filter is_after_cursor
-  |> List.sort (fun (a : Board.post) (b : Board.post) ->
-    compare_cursor_token (cursor_token_of_post a) (cursor_token_of_post b))
+  Result.map
+    (fun posts ->
+       posts
+       |> List.filter is_after_cursor
+       |> List.sort (fun (a : Board.post) (b : Board.post) ->
+         compare_cursor_token (cursor_token_of_post a) (cursor_token_of_post b)))
+    (Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:max_int ())
 ;;
 
 let text (signal : Board_dispatch.board_signal) =

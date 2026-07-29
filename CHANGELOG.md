@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking (Board persistence wire)**: Board persistence now accepts only the
+  current JSONL schema. Any invalid or retired row makes the Board backend
+  explicitly `reset-required`; valid rows from a mixed snapshot are never
+  partially published, while Keeper/server startup continues with Board-scoped
+  read/write failures. No migration or compatibility reader is included.
 - **Breaking (approval snapshot wire)**: `summary_status.failed.retryable`
   is no longer accepted and discarded while loading pending approvals. Current
   snapshots contain only `status` and `reason`; snapshots carrying the retired

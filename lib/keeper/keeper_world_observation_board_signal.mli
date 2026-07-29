@@ -61,7 +61,8 @@ val board_stimulus_of_board_signal
 val post_id_string : Board.post -> string
 val compare_cursor_token : float * string -> float * string -> int
 val cursor_token_of_post : Board.post -> float * string
-val list_posts_after_cursor : float * string option -> Board.post list
+val list_posts_after_cursor :
+  float * string option -> (Board.post list, Board.board_error) result
 val text : Board_dispatch.board_signal -> string
 val address_text : Board_dispatch.board_signal -> string
 (** Text authored by the current signal producer and therefore allowed to

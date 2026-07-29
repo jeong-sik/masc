@@ -133,7 +133,22 @@ let reaction_toggle_result_to_yojson (result : reaction_toggle_result) : Yojson.
     ]
 ;;
 
+let has_exact_fields allowed = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    List.length keys = List.length (List.sort_uniq String.compare keys)
+    && List.for_all (fun key -> List.mem key allowed) keys
+  | _ -> false
+;;
+
 let reaction_of_yojson (json : Yojson.Safe.t) : reaction option =
+  if
+    not
+      (has_exact_fields
+         [ "target_type"; "target_id"; "user_id"; "emoji"; "created_at" ]
+         json)
+  then None
+  else
   match
     ( Safe_ops.json_string_opt "target_type" json
     , Safe_ops.json_string_opt "target_id" json
@@ -145,8 +160,16 @@ let reaction_of_yojson (json : Yojson.Safe.t) : reaction option =
     (match
        reaction_target_type_of_string_opt target_type_raw, Agent_id.of_string user_id_raw
      with
-     | Some target_type, Ok user_id ->
-       Some { target_type; target_id; user_id; emoji; created_at }
+     | Some target_type, Ok user_id
+       when List.exists (String.equal emoji) board_reaction_emojis ->
+       let target_id_is_current =
+         match target_type with
+         | Reaction_post -> Result.is_ok (Post_id.of_string target_id)
+         | Reaction_comment -> Result.is_ok (Comment_id.of_string target_id)
+       in
+       if target_id_is_current
+       then Some { target_type; target_id; user_id; emoji; created_at }
+       else None
      | _ -> None)
   | _ -> None
 ;;

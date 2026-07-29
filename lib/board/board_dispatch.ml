@@ -55,6 +55,7 @@ let sort_order_of_string_opt s =
 
 type board_backend =
   | Jsonl of Board.store
+  | Unavailable of Board.board_error
 
 (** Marker carried inside [Active] tracking whether the flusher fiber has
     been spawned for the current backend.  [Eio.Fiber.fork_daemon] returns
@@ -208,8 +209,9 @@ let ensure_flusher_actor store =
         let current = Atomic.get backend_state in
         match current with
         | Uninitialized -> ()
+        | Active (Unavailable _, _) -> ()
         | Active (_, true) -> ()
-        | Active (b, false) ->
+        | Active ((Jsonl _ as b), false) ->
             let cas_won =
               if consume_forced_flusher_start_cas_conflict_for_test () then false
               else Atomic.compare_and_set backend_state current (Active (b, true))
@@ -282,12 +284,22 @@ let init_jsonl () =
   if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
     Log.BoardLog.warn "already initialized, ignoring init_jsonl"
   else begin
-    let store = Board.global () in
-    let backend = Active (Jsonl store, false) in
-    if Atomic.compare_and_set backend_state Uninitialized backend then begin
-      ensure_flusher_actor store;
-      Log.BoardLog.info "JSONL backend initialized"
-    end else
+    let backend =
+      match Board.global () with
+      | Ok store -> Active (Jsonl store, false)
+      | Error error -> Active (Unavailable error, false)
+    in
+    if Atomic.compare_and_set backend_state Uninitialized backend then
+      match backend with
+      | Active (Jsonl store, _) ->
+        ensure_flusher_actor store;
+        Log.BoardLog.info "JSONL backend initialized"
+      | Active (Unavailable error, _) ->
+        Log.BoardLog.error
+          "Board backend unavailable: %s"
+          (Board.show_board_error error)
+      | Uninitialized -> assert false
+    else
       Log.BoardLog.warn "already initialized concurrently, ignoring init_jsonl"
   end
 
@@ -304,18 +316,25 @@ let backend () =
   | Active (Jsonl store as backend, _) ->
       ensure_flusher_actor store;
       backend
+  | Active (Unavailable _ as backend, _) -> backend
   | Uninitialized ->
       Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
-      let store = Board.global () in
-      let b = Jsonl store in
+      let b =
+        match Board.global () with
+        | Ok store -> Jsonl store
+        | Error error -> Unavailable error
+      in
       let backend_val = Active (b, false) in
       let _ = Atomic.compare_and_set backend_state Uninitialized backend_val in
       match Atomic.get backend_state with
       | Active (Jsonl active_store as active_b, _) ->
           ensure_flusher_actor active_store;
           active_b
+      | Active (Unavailable _ as unavailable, _) -> unavailable
       | Uninitialized ->
-          ensure_flusher_actor store;
+          (match b with
+           | Jsonl store -> ensure_flusher_actor store
+           | Unavailable _ -> ());
           b
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
@@ -380,6 +399,7 @@ let emit_post_created ~(audience : Board.audience) (post : Board.post) =
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store ->
     (match
        Board.create_post_with_audience
@@ -405,6 +425,7 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
 let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
     ?meta_json ~visibility ~ttl_hours ~origin () =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store ->
     (match
        Board.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
@@ -431,12 +452,14 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
 
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store ->
       Board.update_post_with_outcome store ~post_id ~editor ~content ?title
         ?body ?new_author ()
 
 let get_post ~post_id =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.get_post store ~post_id
 
 let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_author_filter
@@ -469,6 +492,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
        | None -> Stdlib.Fun.id)
   in
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store ->
       let needs_full_scan =
         Option.is_some author_filter
@@ -519,23 +543,27 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
                 not (agent_matches_author_filter ~needle post.author))
               filtered
       in
-      Board.take limit filtered
+      Ok (Board.take limit filtered)
 
 let current_post_cursor () =
   match backend () with
-  | Jsonl store -> Board.current_post_cursor store
+  | Unavailable error -> Error error
+  | Jsonl store -> Ok (Board.current_post_cursor store)
 
 let get_comments ~post_id =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.get_comments store ~post_id
 
 let get_post_and_comments ~post_id ?comment_offset ?comment_limit () =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.get_post_and_comments store ~post_id ?comment_offset ?comment_limit ()
 
 let add_comment ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store ->
       (match
          Board.add_comment_with_audience store ~post_id ~author ~content ?parent_id
@@ -569,11 +597,13 @@ let add_comment ~post_id ~author ~content ?parent_id
 
 let current_vote_for_post ~voter ~post_id =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.current_vote_for_post store ~voter ~post_id
 
 let vote ~voter ~post_id ~direction =
   let result =
     match backend () with
+    | Unavailable error -> Error error
     | Jsonl store -> Board.vote store ~voter ~post_id ~direction
   in
   (match result with
@@ -593,11 +623,13 @@ let vote ~voter ~post_id ~direction =
 
 let current_vote_for_comment ~voter ~comment_id =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.current_vote_for_comment store ~voter ~comment_id
 
 let vote_comment ~voter ~comment_id ~direction =
   let result =
     match backend () with
+    | Unavailable error -> Error error
     | Jsonl store -> Board.vote_comment store ~voter ~comment_id ~direction
   in
   (match result with
@@ -660,6 +692,7 @@ let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
 let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
   let result =
     match backend () with
+    | Unavailable error -> Error error
     | Jsonl store ->
         (match Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji with
          | Ok toggled as ok ->
@@ -690,38 +723,47 @@ let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
 
 let list_reactions ~target_type ~target_id ?user_id () =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.list_reactions store ~target_type ~target_id ?user_id ()
 
 let list_reactions_batch ~targets ?user_id () =
   match backend () with
-  | Jsonl store -> Board.list_reactions_batch store ~targets ?user_id ()
+  | Unavailable error -> Error error
+  | Jsonl store -> Ok (Board.list_reactions_batch store ~targets ?user_id ())
 
 let stats () =
   match backend () with
-  | Jsonl store -> Board.stats store
+  | Unavailable error -> Error error
+  | Jsonl store -> Ok (Board.stats store)
 
 let list_comments ?(limit = 1000) () =
   match backend () with
-  | Jsonl store -> Board.list_comments store ~limit ()
+  | Unavailable error -> Error error
+  | Jsonl store -> Ok (Board.list_comments store ~limit ())
 
 let list_hearths () =
   match backend () with
-  | Jsonl store -> Board.list_hearths store
+  | Unavailable error -> Error error
+  | Jsonl store -> Ok (Board.list_hearths store)
 
 let set_thread_id ~post_id ~thread_id =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id
 
 let set_pinned ~post_id ~pinned =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.set_pinned store ~post_id ~pinned
 
 let delete_post ~post_id =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.delete_post store ~post_id
 
 let search ~query ~limit =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store ->
       let query_lower = String.lowercase_ascii query in
       let matches_str s =
@@ -733,35 +775,40 @@ let search ~query ~limit =
         || matches_str (Board.Agent_id.to_string p.author)
         || (match p.hearth with Some h -> matches_str h | None -> false)
       in
-      Board.search_posts store ~predicate ~limit
+      Ok (Board.search_posts store ~predicate ~limit)
 
 let flush () =
   match Atomic.get backend_state with
-  | Active (Jsonl store, _) -> Board.flush_dirty store
-  | Uninitialized -> ()
+  | Active (Jsonl store, _) ->
+    Board.flush_dirty store;
+    Ok ()
+  | Active (Unavailable error, _) -> Error error
+  | Uninitialized -> Ok ()
 
 let get_all_karma () =
   match backend () with
-  | Jsonl store -> Board.get_all_karma store
+  | Unavailable error -> Error error
+  | Jsonl store -> Ok (Board.get_all_karma store)
 
 let get_agent_karma ~agent_name =
   match backend () with
-  | Jsonl store -> Board.get_agent_karma store ~agent_name
+  | Unavailable error -> Error error
+  | Jsonl store -> Ok (Board.get_agent_karma store ~agent_name)
 
 let karma_score_for_direction = Board.karma_score_for_direction
 
 let get_karma_ledger ?agent ?(limit = max_int) () =
-  let events =
-    match backend () with
-    | Jsonl store -> Board.build_karma_ledger store
-  in
-  let filtered =
-    match agent with
-    | None -> events
-    | Some name ->
-        List.filter (fun (e : Board.karma_event) -> String.equal e.recipient name) events
-  in
-  Board.take limit filtered
+  match backend () with
+  | Unavailable error -> Error error
+  | Jsonl store ->
+    let events = Board.build_karma_ledger store in
+    let filtered =
+      match agent with
+      | None -> events
+      | Some name ->
+          List.filter (fun (e : Board.karma_event) -> String.equal e.recipient name) events
+    in
+    Ok (Board.take limit filtered)
 
 let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma
@@ -769,6 +816,7 @@ let post_to_yojson_with_karma (p : Board.post) ~author_karma =
 let backend_name () =
   match Atomic.get backend_state with
   | Active (Jsonl _, _) -> "jsonl"
+  | Active (Unavailable _, _) -> "unavailable"
   | Uninitialized -> "uninitialized"
 
 (* AI curation delegate — thin wrappers around Board_curation *)
@@ -798,21 +846,26 @@ let latest_curation_snapshot () =
 
 let create_sub_board ~slug ~name ~description ~owner ?members ?access () =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store ->
       Board.create_sub_board store ~slug ~name ~description ~owner ?members ?access ()
 
 let get_sub_board ~sub_board_id =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.get_sub_board store ~sub_board_id
 
 let list_sub_boards () =
   match backend () with
-  | Jsonl store -> Board.list_sub_boards store
+  | Unavailable error -> Error error
+  | Jsonl store -> Ok (Board.list_sub_boards store)
 
 let delete_sub_board ~sub_board_id =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.delete_sub_board store ~sub_board_id
 
 let update_sub_board ~sub_board_id ?name ?description ?members ?access () =
   match backend () with
+  | Unavailable error -> Error error
   | Jsonl store -> Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()

@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+let board_posts_exn () =
+  match Board_dispatch.list_posts ~limit:10 () with
+  | Ok posts -> posts
+  | Error error -> fail (Board.show_board_error error)
+;;
+
 module Registry_event_queue_source = Keeper_registry_event_queue
 module Keeper_registry_event_queue = struct
   include Registry_event_queue_source
@@ -392,7 +398,7 @@ let test_board_post_schedule_is_rejected_without_mutation () =
      check string "schedule failed" "failed"
        (Schedule_domain.schedule_status_to_string stored.status));
   check int "board remains unchanged" 0
-    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (board_posts_exn ()))
 ;;
 
 let test_keeper_wake_consumer_records_dispatch_without_work_success () =
@@ -478,7 +484,7 @@ let test_keeper_wake_consumer_records_dispatch_without_work_success () =
       | _ -> fail "expected Schedule_due payload"))
   ;
   check int "keeper wake does not create board posts" 0
-    (List.length (Board_dispatch.list_posts ~limit:10 ()));
+    (List.length (board_posts_exn ()));
   let dashboard =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in

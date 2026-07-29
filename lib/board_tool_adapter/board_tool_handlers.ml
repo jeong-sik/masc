@@ -212,8 +212,10 @@ let handle_vote ~tool_name ~start_time args =
 ;;
 
 let handle_stats ~tool_name ~start_time _args : Tool_result.result =
-  let stats = Board_dispatch.stats () in
-  Tool_result.make_ok ~tool_name ~start_time ~data:stats ()
+  match Board_dispatch.stats () with
+  | Ok stats -> Tool_result.make_ok ~tool_name ~start_time ~data:stats ()
+  | Error error ->
+    Board_tool_format.error_of_board_error ~tool_name ~start_time error
 ;;
 
 (** Search posts by keyword. *)
@@ -229,33 +231,36 @@ let handle_search ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "query required"
   else (
-    let results = Board_dispatch.search ~query ~limit in
-    if Stdlib.List.length results = 0
-    then
-      Tool_result.make_ok
-        ~tool_name
-        ~start_time
-        ~data:(`String (Printf.sprintf "'%s' 검색 결과 없음" query))
-        ()
-    else (
-      let fmt =
-        if compact
-        then Board_tool_format.format_post_compact
-        else Board_tool_format.format_post
-      in
-      let formatted = List.map fmt results in
-      let separator = if compact then "\n" else "\n---\n" in
-      Tool_result.make_ok
-        ~tool_name
-        ~start_time
-        ~data:
-          (`String
-             (Printf.sprintf
-                "'%s' 검색 결과 (%d개):\n\n%s"
-                query
-                (List.length results)
-                (String.concat separator formatted)))
-        ()))
+    match Board_dispatch.search ~query ~limit with
+    | Error error ->
+      Board_tool_format.error_of_board_error ~tool_name ~start_time error
+    | Ok results ->
+      if Stdlib.List.length results = 0
+      then
+        Tool_result.make_ok
+          ~tool_name
+          ~start_time
+          ~data:(`String (Printf.sprintf "'%s' 검색 결과 없음" query))
+          ()
+      else (
+        let fmt =
+          if compact
+          then Board_tool_format.format_post_compact
+          else Board_tool_format.format_post
+        in
+        let formatted = List.map fmt results in
+        let separator = if compact then "\n" else "\n---\n" in
+        Tool_result.make_ok
+          ~tool_name
+          ~start_time
+          ~data:
+            (`String
+               (Printf.sprintf
+                  "'%s' 검색 결과 (%d개):\n\n%s"
+                  query
+                  (List.length results)
+                  (String.concat separator formatted)))
+          ()))
 ;;
 
 (** Vote on comment. *)
@@ -354,73 +359,80 @@ let handle_profile ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "agent required"
   else (
-    let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
-    let norm s = String.lowercase_ascii (String.trim s) in
-    let agent_norm = norm agent in
-    let agent_posts =
-      List.filter
-        (fun (p : Board.post) ->
-           String.equal (norm (Board.Agent_id.to_string p.author)) agent_norm)
-        all_posts
-    in
-    let post_votes =
-      List.fold_left
-        (fun acc (p : Board.post) -> acc + p.votes_up - p.votes_down)
-        0
-        agent_posts
-    in
-    let all_comments : Board.comment list = Board_dispatch.list_comments () in
-    let agent_comments =
-      List.filter
-        (fun (c : Board.comment) ->
-           String.equal (norm (Board.Agent_id.to_string c.author)) agent_norm)
-        all_comments
-    in
-    let comment_votes =
-      List.fold_left
-        (fun acc (c : Board.comment) -> acc + c.votes_up - c.votes_down)
-        0
-        agent_comments
-    in
-    Tool_result.make_ok
-      ~tool_name
-      ~start_time
-      ~data:
-        (`String
-           (Printf.sprintf
-              "**%s** 프로필\n게시물: %d개 (%+d점)\n코멘트: %d개 (%+d점)\n총: %+d점"
-              agent
-              (List.length agent_posts)
-              post_votes
-              (List.length agent_comments)
-              comment_votes
-              (post_votes + comment_votes)))
-      ())
+    match
+      Board_dispatch.list_posts ~limit:1000 (), Board_dispatch.list_comments ()
+    with
+    | Error error, _ | _, Error error ->
+      Board_tool_format.error_of_board_error ~tool_name ~start_time error
+    | Ok all_posts, Ok all_comments ->
+      let norm s = String.lowercase_ascii (String.trim s) in
+      let agent_norm = norm agent in
+      let agent_posts =
+        List.filter
+          (fun (p : Board.post) ->
+             String.equal (norm (Board.Agent_id.to_string p.author)) agent_norm)
+          all_posts
+      in
+      let post_votes =
+        List.fold_left
+          (fun acc (p : Board.post) -> acc + p.votes_up - p.votes_down)
+          0
+          agent_posts
+      in
+      let agent_comments =
+        List.filter
+          (fun (c : Board.comment) ->
+             String.equal (norm (Board.Agent_id.to_string c.author)) agent_norm)
+          all_comments
+      in
+      let comment_votes =
+        List.fold_left
+          (fun acc (c : Board.comment) -> acc + c.votes_up - c.votes_down)
+          0
+          agent_comments
+      in
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:
+          (`String
+             (Printf.sprintf
+                "**%s** 프로필\n게시물: %d개 (%+d점)\n코멘트: %d개 (%+d점)\n총: %+d점"
+                agent
+                (List.length agent_posts)
+                post_votes
+                (List.length agent_comments)
+                comment_votes
+                (post_votes + comment_votes)))
+        ())
 ;;
 
 (** Hearth list. *)
 let handle_hearth_list ~tool_name ~start_time _args : Tool_result.result =
-  let hearths = Board_dispatch.list_hearths () in
-  if Stdlib.List.length hearths = 0
-  then
-    Tool_result.make_ok
-      ~tool_name
-      ~start_time
-      ~data:(`String "No active hearths.")
-      ()
-  else (
-    let formatted =
-      List.map
-        (fun (name, count) -> Printf.sprintf "**%s** (%d posts)" name count)
-        hearths
-    in
-    Tool_result.make_ok
-      ~tool_name
-      ~start_time
-      ~data:
-        (`String
-           (Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted)))
-      ())
+  match Board_dispatch.list_hearths () with
+  | Error error ->
+    Board_tool_format.error_of_board_error ~tool_name ~start_time error
+  | Ok hearths ->
+    if Stdlib.List.length hearths = 0
+    then
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:(`String "No active hearths.")
+        ()
+    else (
+      let formatted =
+        List.map
+          (fun (name, count) -> Printf.sprintf "**%s** (%d posts)" name count)
+          hearths
+      in
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:
+          (`String
+             (Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted)))
+        ())
 ;;
 
 (** {1 Delete / cleanup handlers} *)
@@ -475,9 +487,12 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
     | None -> true
     | Some n -> String_util.contains_substring (String.lowercase_ascii s) n
   in
-  let all_posts =
+  match
     Board_dispatch.list_posts ~sort_by:Board_tool_format.Recent ~limit:500 ()
-  in
+  with
+  | Error error ->
+    Board_tool_format.error_of_board_error ~tool_name ~start_time error
+  | Ok all_posts ->
   let candidates =
     List.filter
       (fun (p : Board.post) ->

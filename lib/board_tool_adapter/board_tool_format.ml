@@ -67,6 +67,8 @@ let board_error_to_string = function
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
   | Board.Already_exists s -> Printf.sprintf "Already exists: %s" s
   | Board.Unauthorized s -> Printf.sprintf "Unauthorized: %s" s
+  | Board.Persistence_reset_required s ->
+    Printf.sprintf "Board persistence reset required: %s" s
 ;;
 
 let board_error_failure_class = function

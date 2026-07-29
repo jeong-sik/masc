@@ -201,7 +201,7 @@ let board_reactions_for_comment ~voter ~comment_id =
 
 let board_reactions_batch ~targets ~voter =
   match targets with
-  | [] -> []
+  | [] -> Ok []
   | _ -> Board_dispatch.list_reactions_batch ~targets ?user_id:voter ()
 
 let board_reactions_lookup rows =

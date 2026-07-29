@@ -3,6 +3,10 @@ open Masc
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
+let expect_board_ok = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+
 let fresh_test_base_path () =
   let dir =
     Filename.concat
@@ -51,7 +55,12 @@ let test_identical_posts_are_distinct_writes () =
   Alcotest.(check int)
     "both persisted"
     2
-    (List.length (Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:10 ()))
+    (List.length
+       (expect_board_ok
+          (Board_dispatch.list_posts
+             ~sort_by:Board_dispatch.Recent
+             ~limit:10
+             ())))
 ;;
 
 let test_identical_comments_are_distinct_writes () =

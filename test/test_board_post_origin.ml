@@ -107,28 +107,22 @@ let test_codec_absent_origin () =
   Alcotest.(check bool) "absent origin decodes to None" true (Option.is_none decoded.origin)
 ;;
 
-let test_malformed_origin_preserves_post () =
+let test_malformed_origin_rejects_row () =
   let store = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"t" ~absolute_turn:1 in
   let post = create store ~origin:(make_origin ~turn_ref:tr ()) ~content:"malformed origin" in
   let json = Board_core.post_to_yojson post in
-  (* origin as a non-object value -> degrade to None, keep the row. *)
+  (* A malformed persisted origin invalidates the complete row; the loader
+     promotes this decoder result to Board reset-required. *)
   (match decode (replace_key json "origin" (`Int 5)) with
-   | Some p -> Alcotest.(check bool) "non-object origin -> None" true (Option.is_none p.origin)
-   | None -> Alcotest.fail "row dropped on non-object origin (must be preserved)");
-  (* malformed turn_ref string -> turn_ref None, but a valid sibling field is
-     kept (per-field degrade, not whole-origin drop, not row drop). *)
+   | None -> ()
+   | Some _ -> Alcotest.fail "non-object origin was accepted");
   let bad_origin =
     `Assoc [ "turn_ref", `String "no-separator"; "source", `String "fusion" ]
   in
   match decode (replace_key json "origin" bad_origin) with
-  | Some p ->
-    (match p.origin with
-     | Some (o : Board.post_origin) ->
-       Alcotest.(check bool) "malformed turn_ref -> None" true (Option.is_none o.turn_ref);
-       Alcotest.(check (option string)) "valid sibling kept" (Some "fusion") o.source
-     | None -> Alcotest.fail "origin fully dropped though source was valid")
-  | None -> Alcotest.fail "row dropped on malformed turn_ref (must be preserved)"
+  | None -> ()
+  | Some _ -> Alcotest.fail "malformed turn_ref was accepted"
 ;;
 
 (* Producer side (RFC-0233 §7): the keeper-authored origin constructor used by
@@ -198,7 +192,8 @@ let test_index_rebuilt_on_load () =
   (match Masc_board_handlers.Board_votes_json.load_persisted_posts store2 with
    | Ok n when n >= 1 -> ()
    | Ok n -> Alcotest.failf "expected >= 1 loaded post, got %d" n
-   | Error (p, e) -> Alcotest.failf "load failed: %s (%s)" p (Printexc.to_string e));
+   | Error error ->
+     Alcotest.failf "load failed: %s" (Board.show_board_error error));
   Alcotest.(check bool) "turn_ref index rebuilt on load" true
     (Option.is_some
        (Board_core.find_post_by_turn_ref store2 ~turn_ref:(Ids.Turn_ref.to_string tr)));
@@ -235,9 +230,9 @@ let () =
       , [ Alcotest.test_case "origin round trip" `Quick (with_eio test_codec_round_trip)
         ; Alcotest.test_case "absent origin -> None" `Quick (with_eio test_codec_absent_origin)
         ; Alcotest.test_case
-            "malformed origin -> None, post preserved"
+            "malformed origin rejects persisted row"
             `Quick
-            (with_eio test_malformed_origin_preserves_post)
+            (with_eio test_malformed_origin_rejects_row)
         ; Alcotest.test_case
             "keeper-authored origin carries turn_ref"
             `Quick

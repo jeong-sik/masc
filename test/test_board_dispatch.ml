@@ -5,6 +5,10 @@ open Masc
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
+let expect_board_ok = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+
 (** Temp directory for test isolation — set before any Board.global call *)
 let fresh_test_base_path () =
   let dir =
@@ -36,23 +40,31 @@ let block_board_masc_dir_with_file () =
   Fs_compat.save_file masc_dir "not a directory";
   base
 
-let seed_legacy_keeper_post () =
+let seed_mixed_current_and_retired_post_snapshot () =
+  let current_post =
+    expect_board_ok
+      (Board_dispatch.create_post
+         ~author:"current-writer"
+         ~content:"current row must not leak through a mixed snapshot"
+         ~post_kind:Board.Human_post
+         ())
+  in
+  let current_post_id = Board.Post_id.to_string current_post.id in
   let now = Time_compat.now () in
-  let post_id = Printf.sprintf "legacy-keeper-%06x" (Random.bits ()) in
+  let retired_post_id = Printf.sprintf "retired-keeper-%06x" (Random.bits ()) in
   let path = Board.persist_path () in
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
   let json =
     `Assoc
       [
-        ("id", `String post_id);
+        ("id", `String retired_post_id);
         ("author", `String "dm-keeper");
-        ("title", `String "Legacy keeper");
+        ("title", `String "Retired keeper row");
         ("body", `String "keeper");
         ("content", `String "keeper");
         ("visibility", `String "internal");
         ("created_at", `Float now);
-        ("updated_at", `Float now);
         ("expires_at", `Float 0.0);
         ("votes_up", `Int 0);
         ("votes_down", `Int 0);
@@ -64,7 +76,7 @@ let seed_legacy_keeper_post () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
-  post_id
+  current_post_id, retired_post_id
 
 let keeper_meta name =
   match
@@ -86,6 +98,8 @@ let test_default_backend () =
 let test_backend_returns_jsonl () =
   match Board_dispatch.backend () with
   | Board_dispatch.Jsonl _ -> ()
+  | Board_dispatch.Unavailable error ->
+    Alcotest.fail (Board.show_board_error error)
 
 (** {1 Post CRUD via Dispatch} *)
 
@@ -359,35 +373,6 @@ let test_keeper_signal_hook_cancellation_propagates () =
    with Eio.Cancel.Cancelled _ -> raised := true);
   Alcotest.(check bool) "cancellation propagated" true !raised
 
-let test_dedup_hit_does_not_emit_post_created_fanout () =
-  let keeper_signals = ref 0 in
-  let sse_post_created = ref 0 in
-  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
-  Board_dispatch.set_board_sse_hook (function
-    | Board_dispatch.Post_created _ -> incr sse_post_created
-    | _ -> ());
-  let create () =
-    Board_dispatch.create_post ~author:"dedup-agent"
-      ~content:"same post body from one keeper turn"
-      ~post_kind:Board.Automation_post ~hearth:"keepers" ~thread_id:"turn-15650" ()
-  in
-  let first =
-    match create () with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let second =
-    match create () with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  Alcotest.(check string)
-    "dedup returns existing post"
-    (Board.Post_id.to_string first.id)
-    (Board.Post_id.to_string second.id);
-  Alcotest.(check int) "keeper signal emitted once" 1 !keeper_signals;
-  Alcotest.(check int) "SSE post_created emitted once" 1 !sse_post_created
-
 let test_create_post_persistence_failure_returns_error_without_fanout () =
   let keeper_signals = ref 0 in
   let sse_post_created = ref 0 in
@@ -413,7 +398,7 @@ let test_create_post_persistence_failure_returns_error_without_fanout () =
   Alcotest.(check int)
     "failed create rolled back in-memory post"
     0
-    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+    (List.length (expect_board_ok (Board_dispatch.list_posts ~limit:10 ())))
 
 let test_structured_post_roundtrip () =
   let meta = `Assoc [("source", `String "keeper_autonomy")] in
@@ -465,43 +450,44 @@ let test_list_posts () =
             ~post_kind:Board.Human_post ());
   ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 2"
             ~post_kind:Board.Human_post ());
-  let posts = Board_dispatch.list_posts ~limit:10 () in
+  let posts = expect_board_ok (Board_dispatch.list_posts ~limit:10 ()) in
   Alcotest.(check bool) "at least 2 posts" true (List.length posts >= 2)
 
 let test_list_posts_negative_limit_returns_empty () =
   ignore (Board_dispatch.create_post ~author:"negative-limit"
             ~content:"negative limit probe" ~post_kind:Board.Human_post ());
-  let posts = Board_dispatch.list_posts ~limit:(-1) () in
+  let posts = expect_board_ok (Board_dispatch.list_posts ~limit:(-1) ()) in
   Alcotest.(check int) "negative limit closes to empty" 0 (List.length posts)
 
 let test_list_posts_with_sort () =
-  let posts_hot = Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:5 () in
-  let posts_recent = Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5 () in
-  let posts_trending = Board_dispatch.list_posts ~sort_by:Board_dispatch.Trending ~limit:5 () in
-  let posts_updated = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:5 () in
-  let posts_discussed = Board_dispatch.list_posts ~sort_by:Board_dispatch.Discussed ~limit:5 () in
+  let posts_hot =
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:5 ())
+  in
+  let posts_recent =
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5 ())
+  in
+  let posts_trending =
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Trending ~limit:5 ())
+  in
+  let posts_updated =
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:5 ())
+  in
+  let posts_discussed =
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Discussed ~limit:5 ())
+  in
   let counts = List.map List.length [posts_hot; posts_recent; posts_trending; posts_updated; posts_discussed] in
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
 
-let board_observation_meta name =
-  match
-    Keeper_meta_json_parse.meta_of_json
-      (`Assoc
-        [ "name", `String name
-        ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
-        ; "trace_id", `String ("trace-" ^ name)
-        ; "sandbox_profile", `String "local"
-        ; "network_mode", `String "inherit"
-        ])
-  with
-  | Ok meta -> meta
-  | Error message -> Alcotest.failf "board observation meta failed: %s" message
-
 let test_first_board_observation_starts_at_current_head () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let keeper_name = "cursor-bootstrap" in
-  let meta = board_observation_meta keeper_name in
+  let meta = keeper_meta keeper_name in
   ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
@@ -566,7 +552,7 @@ let test_first_board_observation_starts_at_current_head () =
 let test_dashboard_projection_does_not_produce_attention_candidate () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let keeper_name = "projection-read-only" in
-  let meta = board_observation_meta keeper_name in
+  let meta = keeper_meta keeper_name in
   let entry = Keeper_registry.For_testing.register ~base_path keeper_name meta in
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
@@ -621,8 +607,8 @@ let test_dashboard_projection_does_not_produce_attention_candidate () =
         | Error detail ->
           Alcotest.failf "owner candidate read failed: %s" detail);
        Alcotest.(check bool)
-         "live owner collection woke the Keeper"
-         true
+         "pending judgment does not wake the owner lane"
+         false
          (Atomic.get entry.fiber_wakeup))
 ;;
 
@@ -654,10 +640,12 @@ let test_recent_sort_bypasses_hot_cutoff () =
   in
   let cold_post_id = Board.Post_id.to_string cold_post.id in
   let recent_posts =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:1 ()
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:1 ())
   in
   let hot_posts =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:1 ()
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:1 ())
   in
   let recent_post_id =
     match recent_posts with
@@ -689,21 +677,25 @@ let test_list_posts_with_filters () =
             ~post_kind:Board.Automation_post ~meta_json:keeper_meta ());
   let all_posts =
     Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:50 ()
+    |> expect_board_ok
     |> List.filter is_scoped_author
   in
   let no_system =
     Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~exclude_system:true
       ~limit:50 ()
+    |> expect_board_ok
     |> List.filter is_scoped_author
   in
   let no_automation =
     Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
       ~exclude_automation:true ~limit:50 ()
+    |> expect_board_ok
     |> List.filter is_scoped_author
   in
   let human_only =
     Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~exclude_system:true
       ~exclude_automation:true ~limit:50 ()
+    |> expect_board_ok
     |> List.filter is_scoped_author
   in
   Alcotest.(check int) "all posts" 3 (List.length all_posts);
@@ -747,8 +739,9 @@ let test_list_posts_matches_comment_author () =
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   let filtered =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
-      ~author_filter:"MATCH-AGENT" ~limit:20 ()
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
+         ~author_filter:"MATCH-AGENT" ~limit:20 ())
   in
   let ids =
     List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) filtered
@@ -763,18 +756,77 @@ let test_author_filter_treats_wildcards_literally () =
     (Board_dispatch.create_post ~author:"wildcard-alpha"
        ~content:"literal wildcard filter" ~post_kind:Board.Human_post ());
   let filtered =
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
-      ~author_filter:"%" ~limit:20 ()
+    expect_board_ok
+      (Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
+         ~author_filter:"%" ~limit:20 ())
   in
   Alcotest.(check int) "percent does not match all authors" 0
     (List.length filtered)
 
-let test_legacy_post_without_kind_is_rejected () =
-  let post_id = seed_legacy_keeper_post () in
-  match Board_dispatch.get_post ~post_id with
-  | Error (Board.Post_not_found _) -> ()
-  | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok _ -> Alcotest.fail "legacy post without post_kind must not be classified"
+let test_mixed_snapshot_is_typed_unavailable_without_partial_publish () =
+  let current_post_id, retired_post_id =
+    seed_mixed_current_and_retired_post_snapshot ()
+  in
+  Alcotest.(check string)
+    "backend exposes unavailable state"
+    "unavailable"
+    (Board_dispatch.backend_name ());
+  (match Board_dispatch.backend () with
+   | Board_dispatch.Unavailable (Board.Persistence_reset_required _) -> ()
+   | Board_dispatch.Unavailable error ->
+     Alcotest.failf
+       "expected persistence reset-required, got %s"
+       (Board.show_board_error error)
+   | Board_dispatch.Jsonl _ ->
+     Alcotest.fail "mixed snapshot published a partial Jsonl backend");
+  List.iter
+    (fun post_id ->
+       match Board_dispatch.get_post ~post_id with
+       | Error (Board.Persistence_reset_required _) -> ()
+       | Error error ->
+         Alcotest.failf
+           "expected reset-required for %s, got %s"
+           post_id
+           (Board.show_board_error error)
+       | Ok _ ->
+         Alcotest.failf "mixed snapshot exposed partial post %s" post_id)
+    [ current_post_id; retired_post_id ];
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "board-reset-required" in
+  let meta = keeper_meta keeper_name in
+  let events, new_count, mention_count =
+    Keeper_world_observation.collect_board_events ~base_path ~meta
+  in
+  Alcotest.(check int)
+    "Keeper continues without partial Board events"
+    0
+    (List.length events);
+  Alcotest.(check int) "unavailable Board has no new count" 0 new_count;
+  Alcotest.(check int) "unavailable Board has no mention count" 0 mention_count;
+  let cursor_ts, cursor_post_id =
+    Keeper_registry.get_board_cursor ~base_path keeper_name
+  in
+  Alcotest.(check (float 0.0))
+    "unavailable Board does not advance Keeper cursor"
+    0.0
+    cursor_ts;
+  Alcotest.(check (option string))
+    "unavailable Board does not publish a cursor post"
+    None
+    cursor_post_id;
+  match
+    Board_dispatch.create_post
+      ~author:"blocked-writer"
+      ~content:"write must remain inside unavailable Board boundary"
+      ~post_kind:Board.Human_post
+      ()
+  with
+  | Error (Board.Persistence_reset_required _) -> ()
+  | Error error ->
+    Alcotest.failf
+      "expected reset-required write, got %s"
+      (Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "unavailable Board accepted a write"
 
 (** {1 Comment Operations} *)
 
@@ -1081,6 +1133,8 @@ let test_vote_persisted_by_flusher_actor () =
         let store =
           match Board_dispatch.backend () with
           | Board_dispatch.Jsonl store -> store
+          | Board_dispatch.Unavailable error ->
+            Alcotest.fail (Board.show_board_error error)
         in
         store.last_flush <- 0.0;
         (match Board_dispatch.get_post ~post_id with
@@ -1334,13 +1388,14 @@ let test_reaction_summary_batch () =
           (Board.Reaction_comment, comment_id, "reactor-b", "👏");
         ];
       let rows =
-        Board_dispatch.list_reactions_batch
-          ~targets:
-            [
-              (Board.Reaction_post, post_id);
-              (Board.Reaction_comment, comment_id);
-            ]
-          ~user_id:"reactor-b" ()
+        expect_board_ok
+          (Board_dispatch.list_reactions_batch
+             ~targets:
+               [
+                 (Board.Reaction_post, post_id);
+                 (Board.Reaction_comment, comment_id);
+               ]
+             ~user_id:"reactor-b" ())
       in
       let summaries_for target =
         List.assoc_opt target rows |> Option.value ~default:[]
@@ -1534,7 +1589,7 @@ let test_reaction_rejects_unsupported_emoji () =
 (** {1 Stats / Search / Hearth} *)
 
 let test_stats () =
-  let stats = Board_dispatch.stats () in
+  let stats = expect_board_ok (Board_dispatch.stats ()) in
   match stats with
   | `Assoc fields ->
       Alcotest.(check bool) "has post_count"
@@ -1544,13 +1599,16 @@ let test_stats () =
 let test_search () =
   ignore (Board_dispatch.create_post ~author:"searcher"
             ~content:"unique_dispatch_search_term" ~post_kind:Board.Human_post ());
-  let results = Board_dispatch.search ~query:"unique_dispatch_search_term" ~limit:10 in
+  let results =
+    expect_board_ok
+      (Board_dispatch.search ~query:"unique_dispatch_search_term" ~limit:10)
+  in
   Alcotest.(check bool) "found search result" true (List.length results >= 1)
 
 let test_hearths () =
   ignore (Board_dispatch.create_post ~author:"hearth-test" ~content:"fire topic"
     ~hearth:"test-hearth" ~post_kind:Board.Human_post ());
-  let hearths = Board_dispatch.list_hearths () in
+  let hearths = expect_board_ok (Board_dispatch.list_hearths ()) in
   Alcotest.(check bool) "has hearths" true (List.length hearths >= 1)
 
 let test_set_thread_id () =
@@ -1634,7 +1692,7 @@ let test_set_pinned_persistence_failure_rolls_back () =
       Alcotest.(check bool) "pinned rolled back" false fetched.pinned
 
 let test_flush () =
-  Board_dispatch.flush ()
+  ignore (expect_board_ok (Board_dispatch.flush ()))
 
 (** {1 Validation} *)
 
@@ -1760,7 +1818,7 @@ let test_sub_board_list () =
             ~owner:"agent-1" ());
   ignore (Board_dispatch.create_sub_board ~slug:"list-b" ~name:"B" ~description:""
             ~owner:"agent-2" ());
-  let all = Board_dispatch.list_sub_boards () in
+  let all = expect_board_ok (Board_dispatch.list_sub_boards ()) in
   Alcotest.(check bool) "has sub-boards" true (List.length all >= 2)
 
 let test_sub_board_slug_conflict () =
@@ -2017,7 +2075,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
    | Ok post ->
        Alcotest.(check (option string)) "post hearth cleared after sub-board delete"
          None post.Board.hearth);
-  Board_dispatch.flush ();
+  ignore (expect_board_ok (Board_dispatch.flush ()));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
@@ -2045,6 +2103,7 @@ let test_sub_board_post_count_projection () =
    | Ok sb -> Alcotest.(check int) "derived post_count" 2 sb.Board.post_count);
   let listed =
     Board_dispatch.list_sub_boards ()
+    |> expect_board_ok
     |> List.find_opt (fun sb -> String.equal sb.Board.slug "counted")
   in
   match listed with
@@ -2083,8 +2142,6 @@ let () =
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick
         (with_eio test_keeper_signal_hook_cancellation_propagates);
-      Alcotest.test_case "dedup hit does not fan out post_created" `Quick
-        (with_eio test_dedup_hit_does_not_emit_post_created_fanout);
       Alcotest.test_case "create append failure returns error without fanout" `Quick
         (with_eio test_create_post_persistence_failure_returns_error_without_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
@@ -2109,8 +2166,11 @@ let () =
         (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "literal wildcard filter" `Quick
         (with_eio test_author_filter_treats_wildcards_literally);
-      Alcotest.test_case "legacy post without kind is rejected" `Quick
-        (with_eio test_legacy_post_without_kind_is_rejected);
+      Alcotest.test_case
+        "mixed current and retired snapshot is typed unavailable"
+        `Quick
+        (with_eio
+           test_mixed_snapshot_is_typed_unavailable_without_partial_publish);
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);

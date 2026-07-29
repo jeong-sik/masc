@@ -280,23 +280,30 @@ let install () =
       || ((not (String.contains author ' ')) && String.ends_with ~suffix:"-probe" author)
     in
     let now = Time_compat.now () in
-    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5200 ()
-    |> List.fold_left
-         (fun removed (post : Board.post) ->
-            let author = Board.Agent_id.to_string post.author in
-            if
-              board_artifact_author author
-              || (String.equal (String.lowercase_ascii author) "keeper"
-                  && board_artifact_title post.title
-                  && now -. post.updated_at >= stale_system_daily_sec)
-            then (
-              match
-                Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string post.id)
-              with
-              | Ok () -> removed + 1
-              | Error _ -> removed)
-            else removed)
-         0);
+    match Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5200 () with
+    | Error error ->
+      Log.Workspace.warn
+        "board artifact cleanup skipped: %s"
+        (Board.show_board_error error);
+      0
+    | Ok posts ->
+      List.fold_left
+        (fun removed (post : Board.post) ->
+           let author = Board.Agent_id.to_string post.author in
+           if
+             board_artifact_author author
+             || (String.equal (String.lowercase_ascii author) "keeper"
+                 && board_artifact_title post.title
+                 && now -. post.updated_at >= stale_system_daily_sec)
+           then (
+             match
+               Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string post.id)
+             with
+             | Ok () -> removed + 1
+             | Error _ -> removed)
+           else removed)
+        0
+        posts);
 
   Atomic.set Workspace_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
     try

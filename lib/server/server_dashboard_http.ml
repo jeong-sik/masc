@@ -109,7 +109,7 @@ let dashboard_board_json
          without a second query. total is only emitted when the result fits
          entirely inside the fetched window — otherwise null (unknown). *)
       let probe_fetch = base_fetch + 1 in
-      let posts =
+      match
         Board_dispatch.list_posts
           ?hearth
           ~sort_by
@@ -117,9 +117,16 @@ let dashboard_board_json
           ~exclude_automation
           ?author_filter
           ~limit:probe_fetch
-          ()
-      in
-      let karma_map = Board_dispatch.get_all_karma () in
+          (),
+        Board_dispatch.get_all_karma ()
+      with
+      | Error error, _ | _, Error error ->
+        `Assoc
+          [ "generated_at", `String (Masc_domain.now_iso ())
+          ; "unavailable", `Bool true
+          ; "error", `String (Board.show_board_error error)
+          ]
+      | Ok posts, Ok karma_map ->
       let get_karma author = Option.value ~default:0 (List.assoc_opt author karma_map) in
       let fetched_len = List.length posts in
       let window_end = offset + limit in

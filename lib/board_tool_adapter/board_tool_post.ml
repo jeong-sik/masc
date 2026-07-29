@@ -244,7 +244,7 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
     (* Fetch exactly what we need: offset posts to skip + limit posts to show.
        Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
     let fetch_limit = limit + offset in
-    let sorted_posts =
+    match
       Board_dispatch.list_posts
         ~visibility_filter
         ?hearth
@@ -255,7 +255,10 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
         ~sort_by
         ~limit:fetch_limit
         ()
-    in
+    with
+    | Error error ->
+      Board_tool_format.error_of_board_error ~tool_name ~start_time error
+    | Ok sorted_posts ->
     let posts =
       if random
       then (

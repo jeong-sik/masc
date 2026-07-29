@@ -14,6 +14,7 @@ type http_status =
   | `Forbidden
   | `Internal_server_error
   | `Not_found
+  | `Service_unavailable
   | `Too_many_requests
   ]
 

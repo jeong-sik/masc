@@ -29,6 +29,41 @@ let all_vote_directions = [ Up; Down ]
 let valid_vote_direction_strings =
   List.map vote_direction_to_string all_vote_directions
 
+let has_exact_json_fields allowed = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    List.length keys = List.length (List.sort_uniq String.compare keys)
+    && List.for_all (fun key -> List.mem key allowed) keys
+  | _ -> false
+
+let parse_vote_key key =
+  match String.index_opt key ':' with
+  | None -> None
+  | Some i1 ->
+      let kind = String.sub key 0 i1 in
+      let rest1 = String.sub key (i1 + 1) (String.length key - i1 - 1) in
+      (match String.index_opt rest1 ':' with
+      | None -> None
+      | Some i2 ->
+          let target_id = String.sub rest1 0 i2 in
+          let voter =
+            String.sub rest1 (i2 + 1) (String.length rest1 - i2 - 1)
+          in
+          if kind = "" || target_id = "" || voter = "" then None
+          else Some (kind, target_id, voter))
+
+let vote_target_matches_voter ~target ~voter =
+  match parse_vote_key target, Agent_id.of_string voter with
+  | Some (kind, target_id, target_voter), Ok voter_id ->
+    let voter = Agent_id.to_string voter_id in
+    String.equal voter target_voter
+    &&
+    (match kind with
+     | "post" -> Result.is_ok (Post_id.of_string target_id)
+     | "comment" -> Result.is_ok (Comment_id.of_string target_id)
+     | _ -> false)
+  | _ -> false
+
 (* Sound partial parser — case-insensitive, trims whitespace, and
    rejects empty input. Missing direction defaults belong at the tool
    boundary, not in the wire-value parser. *)
@@ -69,9 +104,8 @@ let vote_log_jsonl store =
   Hashtbl.iter
     (fun target (direction, ts) ->
       let voter =
-        match String.rindex_opt target ':' with
-        | Some idx when idx + 1 < String.length target ->
-            String.sub target (idx + 1) (String.length target - idx - 1)
+        match parse_vote_key target with
+        | Some (_, _, voter) -> voter
         | _ -> ""
       in
       let json =
@@ -340,39 +374,76 @@ let load_persisted_votes store =
   if not (Fs_compat.file_exists path) then Ok 0
   else begin
     try
-      let loaded = ref 0 in
-      let lines = Fs_compat.load_jsonl path in
-      List.iter (fun json ->
-        match Safe_ops.json_string_opt "target" json,
-              Safe_ops.json_string_opt "direction" json with
-        | Some target, Some dir_str ->
-          (match vote_direction_of_string_opt dir_str with
-           | None -> ()
-           | Some direction ->
-             (* #10086: legacy rows persisted before this fix may have
-                [ts] overwritten by a prior flush cycle.  Use the
-                recorded value when present; fall back to 0.0 rather
-                than [Time_compat.now ()] — loading a ledger at server
-                start time must NOT advance the ts of every pre-fix
-                vote to "now".  Downstream readers treat ts=0.0 as
-                "unknown cast time". *)
-             let ts =
-               match Safe_ops.json_float_opt "ts" json with
-               | Some t -> t
-               | None -> 0.0
-             in
-             Hashtbl.replace store.vote_log target (direction, ts);
-             Stdlib.incr loaded)
-        | _ -> ()
-      ) lines;
-      if !loaded > 0 then
-        Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
-      else
-        Log.BoardLog.debug "loaded 0 vote entries from %s" path;
-      Ok !loaded
+      let lines, malformed_lines = Fs_compat.load_jsonl_diagnostics path in
+      let rec parse_current line_number acc = function
+        | [] -> Ok (List.rev acc)
+        | json :: rest ->
+          if not (has_exact_json_fields [ "target"; "voter"; "direction"; "ts" ] json)
+          then
+            Error
+              (Persistence_reset_required
+                 (Printf.sprintf
+                    "board votes snapshot is not current schema: path=%s row=%d"
+                    path
+                    line_number))
+          else
+          (match
+             ( Safe_ops.json_string_opt "target" json
+             , Safe_ops.json_string_opt "voter" json
+             , Safe_ops.json_string_opt "direction" json
+             , Safe_ops.json_float_opt "ts" json )
+           with
+           | Some target, Some voter, Some dir_str, Some ts
+             when vote_target_matches_voter ~target ~voter ->
+             (match vote_direction_of_string_opt dir_str with
+              | Some direction ->
+                parse_current (line_number + 1) ((target, direction, ts) :: acc) rest
+              | None ->
+                Error
+                  (Persistence_reset_required
+                     (Printf.sprintf
+                        "board votes snapshot is not current schema: path=%s row=%d"
+                        path
+                        line_number)))
+           | _ ->
+             Error
+               (Persistence_reset_required
+                  (Printf.sprintf
+                     "board votes snapshot is not current schema: path=%s row=%d"
+                     path
+                     line_number)))
+      in
+      (match malformed_lines with
+       | count when count > 0 ->
+         Error
+           (Persistence_reset_required
+              (Printf.sprintf
+                 "board votes snapshot contains malformed JSON: path=%s malformed_rows=%d"
+                 path
+                 count))
+       | _ ->
+      match parse_current 1 [] lines with
+       | Error _ as error -> error
+       | Ok votes ->
+         List.iter
+           (fun (target, direction, ts) ->
+              Hashtbl.replace store.vote_log target (direction, ts))
+           votes;
+         let loaded = List.length votes in
+         if loaded > 0 then
+           Log.BoardLog.info "loaded %d vote entries from %s" loaded path
+         else
+           Log.BoardLog.debug "loaded 0 vote entries from %s" path;
+         Ok loaded)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
+    | e ->
+      Error
+        (Io_error
+           (Printf.sprintf
+              "load votes failed: path=%s reason=%s"
+              path
+              (Printexc.to_string e)))
   end
 
 let load_persisted_reactions store =
@@ -380,30 +451,58 @@ let load_persisted_reactions store =
   if not (Fs_compat.file_exists path) then Ok 0
   else begin
     try
-      let loaded = ref 0 in
-      let lines = Fs_compat.load_jsonl path in
-      List.iter
-        (fun json ->
-           match reaction_of_yojson json with
+      let lines, malformed_lines = Fs_compat.load_jsonl_diagnostics path in
+      let rec parse_current line_number acc = function
+        | [] -> Ok (List.rev acc)
+        | json :: rest ->
+          (match reaction_of_yojson json with
            | Some reaction ->
-               let user_id = Agent_id.to_string reaction.user_id in
-               let key =
-                 reaction_key ~target_type:reaction.target_type
-                   ~target_id:reaction.target_id ~user_id
-                   ~emoji:reaction.emoji
-               in
-               Hashtbl.replace store.reactions key reaction;
-               Stdlib.incr loaded
-           | None -> ())
-        lines;
-      if !loaded > 0 then
-        Log.BoardLog.info "loaded %d reactions from %s" !loaded path
-      else
-        Log.BoardLog.debug "loaded 0 reactions from %s" path;
-      Ok !loaded
+             parse_current (line_number + 1) (reaction :: acc) rest
+           | None ->
+             Error
+               (Persistence_reset_required
+                  (Printf.sprintf
+                     "board reactions snapshot is not current schema: path=%s row=%d"
+                     path
+                     line_number)))
+      in
+      (match malformed_lines with
+       | count when count > 0 ->
+         Error
+           (Persistence_reset_required
+              (Printf.sprintf
+                 "board reactions snapshot contains malformed JSON: path=%s malformed_rows=%d"
+                 path
+                 count))
+       | _ ->
+      match parse_current 1 [] lines with
+       | Error _ as error -> error
+       | Ok reactions ->
+         List.iter
+           (fun (reaction : reaction) ->
+              let user_id = Agent_id.to_string reaction.user_id in
+              let key =
+                reaction_key ~target_type:reaction.target_type
+                  ~target_id:reaction.target_id ~user_id
+                  ~emoji:reaction.emoji
+              in
+              Hashtbl.replace store.reactions key reaction)
+           reactions;
+         let loaded = List.length reactions in
+         if loaded > 0 then
+           Log.BoardLog.info "loaded %d reactions from %s" loaded path
+         else
+           Log.BoardLog.debug "loaded 0 reactions from %s" path;
+         Ok loaded)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
+    | e ->
+      Error
+        (Io_error
+           (Printf.sprintf
+              "load reactions failed: path=%s reason=%s"
+              path
+              (Printexc.to_string e)))
   end
 
 let load_persisted_sub_boards store =
@@ -411,26 +510,54 @@ let load_persisted_sub_boards store =
   if not (Fs_compat.file_exists path) then Ok 0
   else begin
     try
-      let loaded = ref 0 in
-      let lines = Fs_compat.load_jsonl path in
-      List.iter
-        (fun json ->
-           match sub_board_of_yojson json with
-           | Some sb ->
-               let id = Sub_board_id.to_string sb.id in
-               Hashtbl.replace store.sub_boards id sb;
-               Hashtbl.replace store.sub_boards_by_slug sb.slug id;
-               Stdlib.incr loaded
-           | None -> ())
-        lines;
-      if !loaded > 0 then
-        Log.BoardLog.info "loaded %d sub-boards from %s" !loaded path
-      else
-        Log.BoardLog.debug "loaded 0 sub-boards from %s" path;
-      Ok !loaded
+      let lines, malformed_lines = Fs_compat.load_jsonl_diagnostics path in
+      let rec parse_current line_number acc = function
+        | [] -> Ok (List.rev acc)
+        | json :: rest ->
+          (match sub_board_of_yojson json with
+           | Some sub_board ->
+             parse_current (line_number + 1) (sub_board :: acc) rest
+           | None ->
+             Error
+               (Persistence_reset_required
+                  (Printf.sprintf
+                     "board sub-boards snapshot is not current schema: path=%s row=%d"
+                     path
+                     line_number)))
+      in
+      (match malformed_lines with
+       | count when count > 0 ->
+         Error
+           (Persistence_reset_required
+              (Printf.sprintf
+                 "board sub-boards snapshot contains malformed JSON: path=%s malformed_rows=%d"
+                 path
+                 count))
+       | _ ->
+      match parse_current 1 [] lines with
+       | Error _ as error -> error
+       | Ok sub_boards ->
+         List.iter
+           (fun (sb : sub_board) ->
+              let id = Sub_board_id.to_string sb.id in
+              Hashtbl.replace store.sub_boards id sb;
+              Hashtbl.replace store.sub_boards_by_slug sb.slug id)
+           sub_boards;
+         let loaded = List.length sub_boards in
+         if loaded > 0 then
+           Log.BoardLog.info "loaded %d sub-boards from %s" loaded path
+         else
+           Log.BoardLog.debug "loaded 0 sub-boards from %s" path;
+         Ok loaded)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
+    | e ->
+      Error
+        (Io_error
+           (Printf.sprintf
+              "load sub-boards failed: path=%s reason=%s"
+              path
+              (Printexc.to_string e)))
   end
 
 (** {1 Hearth (topic) operations} *)
@@ -621,29 +748,20 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
     [cancel:`Protect] ensures store creation completes even if the
     forcing fiber is cancelled. *)
 
-(* Loaders return [(int, string * exn) result] so the caller is forced to
-   acknowledge persistence-load failures.  Best-effort semantics live here
-   at the call site, not hidden inside the loader bodies. *)
-let log_persistence_result ~kind = function
-  | Ok _ -> ()
-  | Error (path, e) ->
-    Log.BoardLog.error
-      "load %s failed: path=%s reason=%s (continuing with best-effort partial state)"
-      kind path (Printexc.to_string e)
-
 let load_all_persisted store =
-  log_persistence_result ~kind:"posts" (load_persisted_posts store);
-  log_persistence_result ~kind:"comments" (load_persisted_comments store);
+  let ( let* ) = Result.bind in
+  let* _ = load_persisted_posts store in
+  let* _ = load_persisted_comments store in
   recalculate_reply_counts store;
-  log_persistence_result ~kind:"votes" (load_persisted_votes store);
-  log_persistence_result ~kind:"reactions" (load_persisted_reactions store);
-  log_persistence_result ~kind:"sub-boards" (load_persisted_sub_boards store)
+  let* _ = load_persisted_votes store in
+  let* _ = load_persisted_reactions store in
+  let* _ = load_persisted_sub_boards store in
+  Ok ()
 
-let global_lazy : store Eio.Lazy.t ref =
+let global_lazy : (store, board_error) result Eio.Lazy.t ref =
   ref (Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = create_store () in
-    load_all_persisted store;
-    store))
+    Result.map (fun () -> store) (load_all_persisted store)))
 
 let global () = Eio.Lazy.force !global_lazy
 
@@ -652,8 +770,7 @@ let global () = Eio.Lazy.force !global_lazy
 let reset_global_for_test () =
   global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = create_store () in
-    load_all_persisted store;
-    store)
+    Result.map (fun () -> store) (load_all_persisted store))
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss.
 
@@ -708,22 +825,6 @@ let karma_score_for_direction = function
     Both [<id>] and [<voter>] are safe for the ID character set but
     voter may contain a colon in namespace:agent form, so we split
     only on the first two colons and keep the remainder as voter. *)
-let parse_vote_key key =
-  match String.index_opt key ':' with
-  | None -> None
-  | Some i1 ->
-      let kind = String.sub key 0 i1 in
-      let rest1 = String.sub key (i1 + 1) (String.length key - i1 - 1) in
-      (match String.index_opt rest1 ':' with
-      | None -> None
-      | Some i2 ->
-          let target_id = String.sub rest1 0 i2 in
-          let voter =
-            String.sub rest1 (i2 + 1) (String.length rest1 - i2 - 1)
-          in
-          if kind = "" || target_id = "" || voter = "" then None
-          else Some (kind, target_id, voter))
-
 let canonical_vote_voter voter =
   match Agent_id.of_string voter with
   | Ok agent -> Agent_id.to_string agent

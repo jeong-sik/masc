@@ -26,6 +26,27 @@ let respond_board_reaction_result request reqd = function
       (Server_board_reaction_http.error_json error)
 ;;
 
+let respond_board_read_result reqd = function
+  | Ok json -> Http.Response.json_value json reqd
+  | Error error ->
+    Http.Response.json_value
+      ~status:`Service_unavailable
+      (`Assoc [ ("error", `String (Board.show_board_error error)) ])
+      reqd
+;;
+
+let respond_cached_board_json reqd json =
+  let status =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "unavailable" fields with
+       | Some (`Bool true) -> `Service_unavailable
+       | _ -> `OK)
+    | _ -> `OK
+  in
+  Http.Response.json_value ~status json reqd
+;;
+
 let include_moderation_projection ~base_path request =
   match auth_token_from_request request with
   | None -> false
@@ -154,33 +175,38 @@ let board_curation_json () =
   | Some snap -> `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
 
 let board_sub_boards_json () =
-  let sub_boards = Board_dispatch.list_sub_boards () in
-  `Assoc
-    [
-      ( "sub_boards",
-        `List (List.map Board.sub_board_to_yojson sub_boards) );
-    ]
+  Result.map
+    (fun sub_boards ->
+       `Assoc
+         [
+           ( "sub_boards",
+             `List (List.map Board.sub_board_to_yojson sub_boards) );
+         ])
+    (Board_dispatch.list_sub_boards ())
 
 let board_karma_ledger_json req =
   let agent = query_param req "agent" in
   let limit = int_query_param req "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000 in
-  let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-  let totals =
+  match
+    Board_dispatch.get_karma_ledger ?agent ~limit (),
     Board_dispatch.get_all_karma ()
-    |> List.sort (fun (_, a) (_, b) -> compare b a)
-  in
-  `Assoc
-    [
-      ("events", `List (List.map Board.karma_event_to_yojson events));
-      ("count", `Int (List.length events));
-      ("scoring_rule", `String "up=+1,down=0");
-      ( "totals",
-        `List
-          (List.map
-             (fun (agent_name, k) ->
-               `Assoc [ ("agent", `String agent_name); ("karma", `Int k) ])
-             totals) );
-    ]
+  with
+  | Error error, _ | _, Error error -> Error error
+  | Ok events, Ok totals ->
+    let totals = List.sort (fun (_, a) (_, b) -> compare b a) totals in
+    Ok
+      (`Assoc
+         [
+           ("events", `List (List.map Board.karma_event_to_yojson events));
+           ("count", `Int (List.length events));
+           ("scoring_rule", `String "up=+1,down=0");
+           ( "totals",
+             `List
+               (List.map
+                  (fun (agent_name, k) ->
+                     `Assoc [ ("agent", `String agent_name); ("karma", `Int k) ])
+                  totals) );
+         ])
 
 type board_context_inference_target_source =
   | Explicit_target
@@ -592,18 +618,24 @@ let add_routes ~sw ~clock router =
              ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
              (fun () ->
                 Domain_pool_ref.submit_io_or_inline (fun () ->
-                  let posts =
+                  match
                     Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-                      ~exclude_automation ?author_filter ~limit:base_fetch ()
-                  in
-                  let karma_map = Board_dispatch.get_all_karma () in
+                      ~exclude_automation ?author_filter ~limit:base_fetch (),
+                    Board_dispatch.get_all_karma ()
+                  with
+                  | Error error, _ | _, Error error ->
+                    `Assoc
+                      [ ("error", `String (Board.show_board_error error))
+                      ; ("unavailable", `Bool true)
+                      ]
+                  | Ok posts, Ok karma_map ->
                   let get_karma author =
                     match List.assoc_opt author karma_map with
                     | Some karma -> karma
                     | None -> 0
                   in
                   let paged = posts |> drop offset |> take limit in
-                  let reaction_rows =
+                  match
                     board_reactions_batch
                       ~targets:
                         (List.map
@@ -611,7 +643,13 @@ let add_routes ~sw ~clock router =
                               (Board.Reaction_post, Board.Post_id.to_string p.id))
                            paged)
                       ~voter:reaction_actor
-                  in
+                  with
+                  | Error error ->
+                    `Assoc
+                      [ ("error", `String (Board.show_board_error error))
+                      ; ("unavailable", `Bool true)
+                      ]
+                  | Ok reaction_rows ->
                   let reactions_for = board_reactions_lookup reaction_rows in
                   let contributor_quality_for =
                     board_contributor_quality_lookup ~config ()
@@ -630,15 +668,15 @@ let add_routes ~sw ~clock router =
                            ~author_karma:(get_karma author) p)
                       paged
                   in
-                  `Assoc [
-                    ("posts", `List posts_json);
-                    ("count", `Int (List.length posts_json));
-                    ("limit", `Int limit);
-                    ("offset", `Int offset);
-                    ("sort_by", `String (board_sort_label sort_by));
-                  ]))
+                    `Assoc [
+                      ("posts", `List posts_json);
+                      ("count", `Int (List.length posts_json));
+                      ("limit", `Int limit);
+                      ("offset", `Int offset);
+                      ("sort_by", `String (board_sort_label sort_by));
+                    ]))
          in
-         Http.Response.json_value json reqd)
+         respond_cached_board_json reqd json)
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/reactions/catalog" (fun request reqd ->
@@ -700,14 +738,20 @@ let add_routes ~sw ~clock router =
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
              (fun () ->
                 Domain_pool_ref.submit_io_or_inline (fun () ->
-                  let hearths = Board_dispatch.list_hearths () in
-                  `Assoc [
-                    ("hearths", `List (List.map (fun (name, count) ->
-                      `Assoc [("name", `String name); ("count", `Int count)]
-                    ) hearths));
-                  ]))
+                  match Board_dispatch.list_hearths () with
+                  | Error error ->
+                    `Assoc
+                      [ ("error", `String (Board.show_board_error error))
+                      ; ("unavailable", `Bool true)
+                      ]
+                  | Ok hearths ->
+                    `Assoc [
+                      ("hearths", `List (List.map (fun (name, count) ->
+                        `Assoc [("name", `String name); ("count", `Int count)]
+                      ) hearths));
+                    ]))
          in
-         Http.Response.json_value json reqd
+         respond_cached_board_json reqd json
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/curation" (fun request reqd ->
@@ -721,7 +765,7 @@ let add_routes ~sw ~clock router =
        Http.Response.json_value json reqd)
 
   |> Http.Router.get "/api/v1/board/sub-boards" (fun _request reqd ->
-       respond_board_json reqd (board_sub_boards_json ()))
+       respond_board_read_result reqd (board_sub_boards_json ()))
 
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_delegate"
@@ -871,9 +915,9 @@ let add_routes ~sw ~clock router =
           | Some "curation" ->
               respond_board_json reqd (board_curation_json ())
           | Some "sub-boards" ->
-              respond_board_json reqd (board_sub_boards_json ())
+              respond_board_read_result reqd (board_sub_boards_json ())
           | Some "karma/ledger" ->
-              respond_board_json reqd (board_karma_ledger_json req)
+              respond_board_read_result reqd (board_karma_ledger_json req)
           | Some post_id ->
               let config = Mcp_server.workspace_config state in
               with_optional_board_reaction_actor
@@ -1051,19 +1095,25 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let karma_list = Board_dispatch.get_all_karma () in
-         let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
-         let json = `Assoc [
-           ("karma", `List (List.map (fun (agent, k) ->
-             `Assoc [("agent", `String agent); ("karma", `Int k)]
-           ) sorted));
-         ] in
-         Http.Response.json_value json reqd
+         match Board_dispatch.get_all_karma () with
+         | Error error ->
+           Http.Response.json_value
+             ~status:`Service_unavailable
+             (`Assoc [ ("error", `String (Board.show_board_error error)) ])
+             reqd
+         | Ok karma_list ->
+           let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+           let json = `Assoc [
+             ("karma", `List (List.map (fun (agent, k) ->
+               `Assoc [("agent", `String agent); ("karma", `Int k)]
+             ) sorted));
+           ] in
+           Http.Response.json_value json reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/karma/ledger" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         respond_board_json reqd (board_karma_ledger_json req)
+         respond_board_read_result reqd (board_karma_ledger_json req)
        ) request reqd)
 
   (* Mention Inbox API *)

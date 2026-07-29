@@ -3,7 +3,7 @@
    - Access mode <-> string conversion ([sub_board_access] variant).
    - [sub_board] record <-> Yojson.Safe.t (used by HTTP routes, the
      board tool surface, and the JSONL store rewrite path).
-   - Owner-injecting member-list parser (strict + lenient).
+   - Strict owner-injecting member-list parser.
 
    Extracted from [Board_core] (godfile decomp). Pure mapping. *)
 
@@ -59,37 +59,81 @@ let parse_sub_board_members ~owner members =
   loop [] members
 ;;
 
-let parse_sub_board_members_lenient ~owner members =
-  members
-  |> List.filter_map (fun member_name ->
-    match Agent_id.of_string member_name with
-    | Ok member_id -> Some member_id
-    | Error _ -> None)
-  |> fun parsed -> dedupe_agent_ids (owner :: parsed)
+let has_exact_fields allowed = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    List.length keys = List.length (List.sort_uniq String.compare keys)
+    && List.for_all (fun key -> List.mem key allowed) keys
+  | _ -> false
 ;;
 
 let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
   let open Safe_ops in
   match json with
-  | `Assoc _ ->
-    let id_s = json_string_opt "id" json |> Option.value ~default:"" in
-    let slug = json_string_opt "slug" json |> Option.value ~default:"" in
-    let name = json_string_opt "name" json |> Option.value ~default:"" in
-    let description = json_string_opt "description" json |> Option.value ~default:"" in
-    let owner_s = json_string_opt "owner" json |> Option.value ~default:"" in
-    let access_s = json_string_opt "access" json |> Option.value ~default:"open" in
-    let created_at = json_float_opt "created_at" json |> Option.value ~default:0.0 in
-    let post_count = json_int_opt "post_count" json |> Option.value ~default:0 in
-    let member_names = json_string_list "members" json in
+  | `Assoc _
+    when has_exact_fields
+           [ "id"
+           ; "slug"
+           ; "name"
+           ; "description"
+           ; "owner"
+           ; "members"
+           ; "access"
+           ; "created_at"
+           ; "post_count"
+           ]
+           json ->
     (match
-       ( Sub_board_id.of_string id_s
-       , Agent_id.of_string owner_s
-       , sub_board_access_of_string_opt access_s )
+       ( json_string_opt "id" json
+       , json_string_opt "slug" json
+       , json_string_opt "name" json
+       , json_string_opt "description" json
+       , json_string_opt "owner" json
+       , json_member_opt "members" json
+       , json_string_opt "access" json
+       , json_float_opt "created_at" json
+       , json_int_opt "post_count" json )
      with
-     | Ok id, Ok owner, Some access when slug <> "" ->
-       let members = parse_sub_board_members_lenient ~owner member_names in
-       Some
-         { id; slug; name; description; owner; members; access; created_at; post_count }
+     | ( Some id_s
+       , Some slug
+       , Some name
+       , Some description
+       , Some owner_s
+       , Some (`List member_json)
+       , Some access_s
+       , Some created_at
+       , Some post_count ) ->
+       let member_names =
+         List.fold_right
+           (fun item acc ->
+              match item, acc with
+              | `String name, Some names -> Some (name :: names)
+              | _ -> None)
+           member_json
+           (Some [])
+       in
+       (match
+          ( Sub_board_id.of_string id_s
+          , Agent_id.of_string owner_s
+          , sub_board_access_of_string_opt access_s
+          , member_names )
+        with
+        | Ok id, Ok owner, Some access, Some member_names when slug <> "" ->
+          (match parse_sub_board_members ~owner member_names with
+           | Ok members ->
+             Some
+               { id
+               ; slug
+               ; name
+               ; description
+               ; owner
+               ; members
+               ; access
+               ; created_at
+               ; post_count
+               }
+           | Error _ -> None)
+        | _ -> None)
      | _ -> None)
   | _ -> None
 ;;

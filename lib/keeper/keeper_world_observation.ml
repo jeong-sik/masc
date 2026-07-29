@@ -709,34 +709,59 @@ let collect_board_events_with_cursor_policy
     let cursor_ts, cursor_post_id =
       Keeper_registry.get_board_cursor ~base_path meta.name
     in
-    let base_cursor =
+    let base_cursor_result =
       if cursor_ts > 0.0
-      then Some (cursor_ts, cursor_post_id)
+      then Ok (Some (cursor_ts, cursor_post_id))
       else (
-        let initial_cursor = Board_dispatch.current_post_cursor () in
-        if advance_cursor
-        then (
-          let ts, post_id = initial_cursor in
-          Keeper_registry.set_board_cursor ~base_path meta.name ts post_id;
-          (match post_id with
-           | Some post_id ->
-             Log.Keeper.info
-               "board cursor initialized at current head for %s: (%f, %s)"
-               meta.name
-               ts
-               post_id
-           | None ->
-             Log.Keeper.info
-               "board cursor initialized at empty current head for %s: (%f, no post)"
-               meta.name
-               ts));
-        None)
+        match Board_dispatch.current_post_cursor () with
+        | Error error -> Error error
+        | Ok (ts, post_id) ->
+          if advance_cursor
+          then (
+            Keeper_registry.set_board_cursor ~base_path meta.name ts post_id;
+            (match post_id with
+             | Some post_id ->
+               Log.Keeper.info
+                 "board cursor initialized at current head for %s: (%f, %s)"
+                 meta.name
+                 ts
+                 post_id
+             | None ->
+               Log.Keeper.info
+                 "board cursor initialized at empty current head for %s: (%f, no post)"
+                 meta.name
+                 ts));
+          Ok None)
     in
-    let posts =
+    match base_cursor_result with
+    | Error error ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
+        ();
+      Log.Keeper.warn
+        "board event collection retained cursor: Board unavailable for keeper=%s: %s"
+        meta.name
+        (Board.show_board_error error);
+      [], 0, 0
+    | Ok base_cursor ->
+    let posts_result =
       match base_cursor with
-      | None -> []
+      | None -> Ok []
       | Some cursor -> list_board_posts_after_cursor cursor
     in
+    match posts_result with
+    | Error error ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
+        ();
+      Log.Keeper.warn
+        "board event collection retained cursor: Board unavailable for keeper=%s: %s"
+        meta.name
+        (Board.show_board_error error);
+      [], 0, 0
+    | Ok posts ->
     let self_ids = self_ids meta in
     let recent =
       List.filter

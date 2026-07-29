@@ -5,7 +5,6 @@
 #   make check-all          Run all specs (clean + buggy)
 #   make check-bug-models   Bug models only
 #   make check-keeper       Keeper state machine only
-#   make check-ecosystem    MASC ecosystem only
 #   make check-boundary     Cross-domain boundary specs only
 #   make list               List all discoverable specs
 
@@ -51,7 +50,7 @@ BUGGY_CFGS := $(shell find . -name '*-buggy*.cfg' | sort)
 clean_cfgs_in = $(shell find $(1) -name '*.cfg' ! -name '*-buggy*.cfg' | sort)
 buggy_cfgs_in = $(shell find $(1) -name '*-buggy*.cfg' | sort)
 
-.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem check-boundary check-social check-others check-matrix-coverage list clean clean-artefacts
+.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-boundary check-others check-matrix-coverage list clean clean-artefacts
 
 clean: clean-artefacts
 
@@ -128,27 +127,18 @@ check-keeper: CLEAN_CFGS := $(call clean_cfgs_in,keeper-state-machine/)
 check-keeper: BUGGY_CFGS := $(call buggy_cfgs_in,keeper-state-machine/)
 check-keeper: check-all
 
-check-ecosystem:
-	@echo "No ecosystem policy model; concrete boundary specs run in their owning shards."
-
 check-boundary: CLEAN_CFGS := $(call clean_cfgs_in,boundary/)
 check-boundary: BUGGY_CFGS := $(call buggy_cfgs_in,boundary/)
 check-boundary: check-all
 
-# Sharding groups for CI matrix.  The four targets below partition the same
+# Sharding groups for CI matrix.  The two targets below partition the same
 # spec set that `check-all` walks; verified by the `check-matrix-coverage`
 # target which fails if anything drifts out of sync.  Tuning:
 #
 #   keeper-state-machine   lifecycle and lane-local models
-#   social-and-state-prod  reserved empty shard after state-product retirement
 #   others                 runtime depends on the remaining model set
 #
 # Wall-clock fan-out reduces TLA+ Main from ~22 min monolithic to ~7-8 min.
-
-SOCIAL_DIRS :=
-check-social: CLEAN_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call clean_cfgs_in,$(d)/))
-check-social: BUGGY_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call buggy_cfgs_in,$(d)/))
-check-social: check-all
 
 OTHER_DIRS := auth autonomous boundary bug-models \
               keeper-switch-hierarchy keeper-turn-fsm \
@@ -160,7 +150,7 @@ check-others: check-all
 
 # Coverage check: every spec directory must appear in exactly one shard.
 # Run in CI before sharded jobs to catch silent drops when new dirs land.
-SHARD_DIRS_ALL := keeper-state-machine $(SOCIAL_DIRS) $(OTHER_DIRS)
+SHARD_DIRS_ALL := keeper-state-machine $(OTHER_DIRS)
 check-matrix-coverage: SHELL := /bin/bash
 check-matrix-coverage:
 	@set -euo pipefail; \
@@ -172,7 +162,7 @@ check-matrix-coverage:
 	extra=$$(comm -13 <(printf '%s\n' "$$all_sorted") <(printf '%s\n' "$$shard_sorted")); \
 	if [ -n "$$missing" ]; then echo "::error::Spec dirs missing from CI shards:"; echo "$$missing"; exit 1; fi; \
 	if [ -n "$$extra" ]; then echo "::error::Shard references unknown dirs:"; echo "$$extra"; exit 1; fi; \
-	echo "Matrix coverage OK ($$(printf '%s\n' "$$all_sorted" | wc -l | tr -d ' ') dirs across 4 shards)"
+	echo "Matrix coverage OK ($$(printf '%s\n' "$$all_sorted" | wc -l | tr -d ' ') dirs across 2 shards)"
 
 list:
 	@echo "Clean specs ($(words $(CLEAN_CFGS))):"; \

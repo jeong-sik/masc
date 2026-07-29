@@ -43,6 +43,17 @@ val manual_compaction_followup_failure
 val deferred_runtime_lane :
   cycle_outcome -> Keeper_turn_driver.deferred_runtime_lane option
 
+module For_testing : sig
+  val run_autonomous_dispatch_unless_chat_waiting
+    :  base_path:string
+    -> keeper_name:string
+    -> (unit -> 'a)
+    -> 'a option
+  (** At the admitted cycle-entry boundary, run the autonomous callback only
+      when no chat is already parked on the keeper's actual turn mutex. A chat
+      arriving after this boundary does not preempt the admitted turn. *)
+end
+
 val run_keeper_cycle
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
   -> admission_token:Keeper_turn_admission.token

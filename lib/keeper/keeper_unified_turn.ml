@@ -153,16 +153,13 @@ let chat_yield_request ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
   | Some _ ->
+    (* A parked chat waiter owns the next turn through the actual per-Keeper
+       mutex. A durable receipt is only accepted work: reading it here would
+       recreate the removed backlog Gate inside an already-admitted turn, and
+       a queue read failure could abort unrelated autonomous progress. *)
     if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
     then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
-    else
-      match Keeper_chat_queue.has_active_receipts ~keeper_name with
-      | Error error ->
-        Error
-          ("chat queue snapshot failed: "
-           ^ Keeper_chat_queue.mutation_error_to_string error)
-      | Ok true -> Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
-      | Ok false -> Ok None
+    else Ok None
 ;;
 
 let autonomous_yield_request ~base_path ~keeper_name =

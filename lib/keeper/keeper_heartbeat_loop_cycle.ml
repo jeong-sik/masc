@@ -100,6 +100,21 @@ let rec deferred_runtime_lane = function
     None
 ;;
 
+let run_autonomous_dispatch_unless_chat_waiting ~base_path ~keeper_name f =
+  (* This is the admitted cycle-entry boundary. A waiter already registered on
+     the actual mutex wins; a chat that arrives after this non-suspending check
+     waits behind the already-admitted turn until its typed yield boundary. *)
+  if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
+  then None
+  else Some (f ())
+;;
+
+module For_testing = struct
+  let run_autonomous_dispatch_unless_chat_waiting =
+    run_autonomous_dispatch_unless_chat_waiting
+  ;;
+end
+
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
    turn slot ([Keeper_turn_admission]). The post-failure meta re-reads stay
    inside the slot for the same reason as the chat lane: a concurrent turn
@@ -227,13 +242,6 @@ let run_keeper_cycle_with
   =
   let busy_outcome block =
     (match block with
-     | Keeper_turn_admission.Chat_backlog { pending_count; inflight_count } ->
-       Log.Keeper.info
-         "%s: yielding autonomous cycle to chat backlog (pending=%d inflight=%d); \
-          skipping until next heartbeat"
-         meta_after_triage.name
-         pending_count
-         inflight_count
      | Keeper_turn_admission.Shutdown_requested operation_id ->
        Log.Keeper.info
          "%s: autonomous turn admission closed by shutdown operation %s"
@@ -260,36 +268,46 @@ let run_keeper_cycle_with
     Busy { meta = meta_after_triage; block }
   in
   let run_standard_cycle () =
-    run_keeper_cycle_admitted
-      ?exact_execution_guard
-      ~before_dispatch_authority:
-        (fun () -> Keeper_turn_admission.validate_before_dispatch admission_token)
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
-      ~ctx
-      ~meta_after_triage
-      ~stop
-      ~obs
-      ~turn_decision
-      ~shared_context
-      ~wake
-      ?event_bus
-      ?hitl_resolution
-      ?continuation_delivery_channel
-      ()
+    match
+      run_autonomous_dispatch_unless_chat_waiting
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name
+        (fun () ->
+           run_keeper_cycle_admitted
+             ?exact_execution_guard
+             ~before_dispatch_authority:
+               (fun () ->
+                  Keeper_turn_admission.validate_before_dispatch admission_token)
+             ?deferred_runtime_lane
+             ?on_deferred_runtime_consumed
+             ~ctx
+             ~meta_after_triage
+             ~stop
+             ~obs
+             ~turn_decision
+             ~shared_context
+             ~wake
+             ?event_bus
+             ?hitl_resolution
+             ?continuation_delivery_channel
+             ())
+    with
+    | Some outcome -> outcome
+    | None ->
+      Log.Keeper.info
+        ~keeper_name:meta_after_triage.name
+        "yielding autonomous dispatch to a chat already waiting on the turn slot";
+      Skipped meta_after_triage
   in
   match manual_compaction_requested with
   | Some false | None -> run_standard_cycle ()
   | Some true ->
-    (* #24865: a manual-compaction cycle is the remedy for the overflow that
-       wedges chat delivery, so its compaction-only critical section admits
-       past the durable chat backlog ([run_compaction_if_free] inside
-       [run_admitted]) and releases the slot the moment the checkpoint
-       commits. The follow-up turn then re-enters the standard lane below,
-       where a chat backlog wins — the remedy may cut the line, an arbitrary
-       LLM turn may not. [Manual_compaction_applied { followup = Busy _; _ }]
-       settles the
-       stimulus as Ack, so a yielded follow-up does not replay compaction. *)
+    (* The compaction commit and its follow-up use the same actual per-Keeper
+       turn slot. A durable chat receipt is not a second admission fence, so
+       compaction needs no separate bypass lane. If a chat parks while the
+       commit runs, [run_standard_cycle] returns [Skipped] before provider
+       dispatch; the applied outcome still acknowledges the completed
+       compaction instead of replaying it. *)
     (match
        run_manual_compaction
          ?exact_execution_guard

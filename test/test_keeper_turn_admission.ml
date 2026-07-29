@@ -552,6 +552,42 @@ let test_autonomous_yields_to_parked_chat () =
     (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name))
 ;;
 
+let test_pre_admission_yield_runs_ready_waiter_with_distractors () =
+  reset ();
+  Printf.printf
+    "Test 8b: pre-admission yield runs a ready chat before retrying the slot\n%!";
+  let ready = Eio.Condition.create () in
+  let distractor_count = ref 0 in
+  let chat_started, set_chat_started = Eio.Promise.create () in
+  let release_chat, set_release_chat = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    for _ = 1 to 8 do
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Condition.await_no_mutex ready;
+        incr distractor_count)
+    done;
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Condition.await_no_mutex ready;
+      match
+        Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
+          Eio.Promise.resolve set_chat_started ();
+          Eio.Promise.await release_chat)
+      with
+      | `Ran () -> ()
+      | `Rejected _ -> check "ready chat is not rejected" false);
+    Eio.Condition.broadcast ready;
+    (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+     | `Busy (Keeper_turn_admission.Turn_busy (Some { lane = Chat; _ })) ->
+       check "ready chat owns the slot before autonomous retry" true
+     | `Busy _ | `Ran () ->
+       check "ready chat owns the slot before autonomous retry" false);
+    check "all unrelated runnable fibers also ran before retry"
+      (!distractor_count = 8);
+    check "ready chat entered its turn body"
+      (Eio.Promise.is_resolved chat_started);
+    Eio.Promise.resolve set_release_chat ())
+;;
+
 let test_idle_loop_yields_to_parked_chat () =
   reset ();
   Printf.printf
@@ -598,18 +634,60 @@ let test_idle_loop_yields_to_parked_chat () =
   check "parked chat admitted after the autonomous turn yielded" !chat_ran
 ;;
 
-let test_autonomous_yields_to_queued_connector_message () =
+let test_cycle_dispatch_yields_to_parked_chat () =
   reset ();
   Printf.printf
-    "Test 10: autonomous lane yields while a connector/dashboard message is queued\n%!";
+    "Test 9b: cycle-entry boundary yields to an already parked chat\n%!";
+  let dispatch_ran = ref false in
+  let yielded = ref false in
+  let chat_ran = ref false in
+  Eio.Switch.run (fun sw ->
+    let autonomous_admitted, set_autonomous_admitted = Eio.Promise.create () in
+    let chat_parked, set_chat_parked = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->
+          Eio.Promise.resolve set_autonomous_admitted ();
+          Eio.Promise.await chat_parked;
+          match
+            Keeper_heartbeat_loop_cycle.For_testing
+            .run_autonomous_dispatch_unless_chat_waiting
+              ~base_path ~keeper_name (fun () -> dispatch_ran := true)
+          with
+          | None -> yielded := true
+          | Some () -> ())
+      with
+      | `Ran () -> ()
+      | `Busy _ -> check "autonomous lane admits before the chat parks" false);
+    Eio.Promise.await autonomous_admitted;
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
+          chat_ran := true)
+      with
+      | `Ran () -> ()
+      | `Rejected _ -> check "parked chat is not rejected" false);
+    check
+      "chat is parked on the actual turn mutex"
+      (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name);
+    Eio.Promise.resolve set_chat_parked ());
+  check "cycle dispatch yielded to the parked chat" !yielded;
+  check "provider dispatch did not start before yielding" (not !dispatch_ran);
+  check "parked chat ran after the autonomous slot released" !chat_ran
+;;
+
+let test_pending_receipt_does_not_fence_autonomous_admission () =
+  reset ();
+  Printf.printf
+    "Test 10: a durable chat receipt does not become a second turn gate\n%!";
   (* Sanity: an empty queue lets the autonomous lane run. *)
   (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> 7) with
    | `Ran 7 -> check "run_if_free admits when the chat queue is empty" true
    | `Ran _ | `Busy _ -> check "run_if_free admits when the chat queue is empty" false);
-  (* A busy connector (Slack/Discord) message is deferred on the chat queue
-     without parking on the admission slot, so [chat_waiting] stays false. The
-     autonomous lane must still yield, or a long/back-to-back autonomous turn
-     busy-ACKs the connector forever (the starvation this pins). *)
+  (* A durable receipt records accepted work. It does not own the turn slot:
+     the queue consumer is woken by queue/slot transitions and parks on the
+     actual mutex. An admitted autonomous turn yields at its typed turn
+     boundary only after observing that actual parked waiter. *)
   (match
      Keeper_chat_queue.enqueue ~keeper_name
        { Keeper_chat_queue.content = "deferred slack mention"
@@ -638,10 +716,10 @@ let test_autonomous_yields_to_queued_connector_message () =
     "a queued connector message is not a parked chat"
     (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
   (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Busy _ ->
-     check "run_if_free yields (Busy) while a connector message is queued" true
    | `Ran () ->
-     check "run_if_free must not admit while a connector message is queued" false);
+     check "pending receipt does not fence a free turn slot" true
+   | `Busy _ ->
+     check "pending receipt must not become a second turn gate" false);
   (* Claiming changes the receipt to Inflight but does not make it disappear.
      The actual turn mutex, not that durable receipt, is the execution fence.
      A free mutex plus an inflight receipt must stay progress-capable even when
@@ -680,14 +758,11 @@ let test_autonomous_yields_to_queued_connector_message () =
       | `Completed _ -> ()
       | `Error _ ->
         check "completion commits the terminal receipt" false));
-  (* With the inflight receipt gone, the still-pending chat is again the
-     authoritative backlog and the autonomous lane yields to its consumer. *)
+  (* With the inflight receipt gone, the still-pending receipt remains durable
+     work, not an admission authority. *)
   (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Busy (Keeper_turn_admission.Chat_backlog
-       { pending_count = 1; inflight_count = 0 }) ->
-     check "pending-only backlog still has chat priority" true
-   | `Busy _ | `Ran () ->
-     check "pending-only backlog must retain chat priority" false);
+   | `Ran () -> check "pending-only queue keeps autonomous admission live" true
+   | `Busy _ -> check "pending-only queue must not fence admission" false);
   (match Keeper_chat_queue.claim_next ~keeper_name with
    | `Claimed claim ->
      (match
@@ -735,7 +810,6 @@ let test_shutdown_reservation_fences_and_rolls_back () =
        "autonomous lane sees typed shutdown fence"
        (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
    | `Busy (Keeper_turn_admission.Turn_busy _)
-   | `Busy (Keeper_turn_admission.Chat_backlog _)
    | `Ran () ->
      check "autonomous lane cannot cross shutdown fence" false);
   (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
@@ -821,74 +895,6 @@ let test_shutdown_reservation_restores_durable_owner () =
     check "registration cannot cross restored fence" false
 ;;
 
-let test_compaction_lane_bypasses_chat_backlog () =
-  reset ();
-  Printf.printf
-    "Test 10b: manual-compaction lane admits despite a durable chat backlog (#24865)\n%!";
-  (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
-   | Ok _ -> ()
-   | Error error ->
-     check
-       ("enqueue succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
-       false);
-  (* The standard lane reports the backlog as a typed [Chat_backlog] with the
-     exact counts, not as [Turn_busy None]. Before this variant existed the
-     queue fence logged "holder info not yet published", which mis-directed
-     the #24865 diagnosis toward a stale slot. *)
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Busy (Keeper_turn_admission.Chat_backlog { pending_count = 1; inflight_count = 0 })
-     -> check "standard lane reports the backlog as typed Chat_backlog" true
-   | `Busy _ | `Ran () ->
-     check "standard lane reports the backlog as typed Chat_backlog" false);
-  (match
-     Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 7)
-   with
-   | `Ran 7 -> check "compaction lane admits despite a pending receipt" true
-   | `Ran _ | `Busy _ -> check "compaction lane admits despite a pending receipt" false);
-  (* Claiming moves the receipt to inflight. Both autonomous entry points use
-     the actual turn mutex as the execution fence; the durable receipt is not
-     a second global lock. *)
-  (match Keeper_chat_queue.claim_next ~keeper_name with
-   | `Claimed _ -> ()
-   | `Empty | `Already_claimed _ | `Error _ ->
-     check "claim_next claims the queued message" false);
-  (match
-     Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 8)
-   with
-   | `Ran 8 -> check "compaction lane admits despite an inflight receipt" true
-   | `Ran _ | `Busy _ -> check "compaction lane admits despite an inflight receipt" false);
-  (* Once the compaction admission releases the slot, a follow-up standard
-     turn also remains live despite a stranded/finalizing inflight receipt. *)
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
-   | `Ran () ->
-     check "standard lane admits past an inflight receipt after compaction" true
-   | `Busy _ ->
-     check "inflight receipt must not refence standard lane after compaction" false);
-  (* A genuinely held slot still refuses the compaction lane: it must never
-     interleave with an in-flight turn. *)
-  Keeper_turn_admission.For_testing.with_unpublished_turn_lock
-    ~base_path
-    ~keeper_name
-    (fun () ->
-       match
-         Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> ())
-       with
-       | `Busy (Keeper_turn_admission.Turn_busy _) ->
-         check "compaction lane still refuses a held slot" true
-       | `Busy _ | `Ran () -> check "compaction lane still refuses a held slot" false);
-  (* A durable shutdown reservation still fences the compaction lane. *)
-  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
-  ignore
-    (Keeper_turn_admission.begin_shutdown ~base_path ~keeper_name ~operation_id
-      : Keeper_turn_admission.begin_shutdown_result);
-  match
-    Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> ())
-  with
-  | `Busy (Keeper_turn_admission.Shutdown_requested _) ->
-    check "compaction lane still honors the shutdown fence" true
-  | `Busy _ | `Ran () -> check "compaction lane still honors the shutdown fence" false
-;;
-
 let () =
   Eio_main.run @@ fun _env ->
   test_autonomous_admits_when_chat_persistence_is_not_configured ();
@@ -906,9 +912,10 @@ let () =
   test_exception_releases_slot ();
   test_cancelled_waiter_leaves_queue ();
   test_autonomous_yields_to_parked_chat ();
+  test_pre_admission_yield_runs_ready_waiter_with_distractors ();
   test_idle_loop_yields_to_parked_chat ();
-  test_autonomous_yields_to_queued_connector_message ();
-  test_compaction_lane_bypasses_chat_backlog ();
+  test_cycle_dispatch_yields_to_parked_chat ();
+  test_pending_receipt_does_not_fence_autonomous_admission ();
   test_shutdown_reservation_fences_and_rolls_back ();
   test_shutdown_reservation_restores_durable_owner ();
   if !failures > 0

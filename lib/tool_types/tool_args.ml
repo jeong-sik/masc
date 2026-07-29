@@ -99,11 +99,7 @@ let error_code_to_string = function
     but returning the unserialized [Yojson.Safe.t] node so it can be
     composed into a larger structure or returned as
     [(Yojson.Safe.t, _) result]. *)
-let without_status_field fields =
-  List.filter (fun (key, _) -> not (String.equal key "status")) fields
-
-let error_assoc fields : Yojson.Safe.t =
-  `Assoc (("status", `String "error") :: without_status_field fields)
+let error_assoc = Json_util.error_assoc
 
 (** Build a JSON error response string: [\{"status":"error","message":"..."\}] *)
 let error_response message =

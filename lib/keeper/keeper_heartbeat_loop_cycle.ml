@@ -227,13 +227,6 @@ let run_keeper_cycle_with
   =
   let busy_outcome block =
     (match block with
-     | Keeper_turn_admission.Chat_backlog { pending_count; inflight_count } ->
-       Log.Keeper.info
-         "%s: yielding autonomous cycle to chat backlog (pending=%d inflight=%d); \
-          skipping until next heartbeat"
-         meta_after_triage.name
-         pending_count
-         inflight_count
      | Keeper_turn_admission.Shutdown_requested operation_id ->
        Log.Keeper.info
          "%s: autonomous turn admission closed by shutdown operation %s"

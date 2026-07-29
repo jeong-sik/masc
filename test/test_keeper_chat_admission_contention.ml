@@ -242,7 +242,7 @@ let test_receipts_are_admitted_in_fifo_order () =
     in
     let expected_delivery_keys =
       List.map
-        (fun (receipt, _) ->
+        (fun ((receipt : Keeper_chat_queue.enqueue_receipt), _) ->
            match
              Keeper_chat_delivery_identity.Receipt_ids.of_list
                [ receipt.Keeper_chat_queue.receipt_id ]

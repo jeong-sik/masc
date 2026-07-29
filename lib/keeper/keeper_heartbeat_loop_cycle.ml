@@ -134,7 +134,6 @@ let run_keeper_cycle_admitted
         ~observation:obs
         ~generation:meta_after_triage.runtime.nonce
         ~wake
-        ~channel:turn_decision.channel
         ?hitl_resolution
         ?continuation_delivery_channel
         (* RFC-0315: pass the whole decision, not just its channel — the

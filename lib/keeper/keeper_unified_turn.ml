@@ -711,7 +711,6 @@ let run_keeper_cycle
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
       ~(wake : Keeper_registry.wake_reason)
-      ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ?shared_context
       ?event_bus
@@ -747,6 +746,7 @@ let run_keeper_cycle
       }
   | Ok { entry; publication_recovery } ->
   let meta = entry.meta in
+  let channel = turn_decision.channel in
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
      (Cycle 8/Tier B2, PR #11412).  Action mapping:
      SubmitTask=external producers, AssignTask=channel decision below,

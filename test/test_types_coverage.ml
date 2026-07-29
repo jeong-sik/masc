@@ -804,6 +804,29 @@ let test_agent_role_of_yojson_wrong_type () =
    agent_credential Tests
    ============================================================ *)
 
+let current_agent_credential_json
+      ?(id = `Null)
+      ?(agent_id = `Null)
+      ?(expires_at = `Null)
+      ?(extra_fields = [])
+      ~agent_name
+      ~token
+      ~role
+      ~created_at
+      ()
+  =
+  `Assoc
+    ([
+       "id", id;
+       "agent_id", agent_id;
+       "agent_name", `String agent_name;
+       "token", `String token;
+       "role", `String role;
+       "created_at", `String created_at;
+       "expires_at", expires_at;
+     ]
+     @ extra_fields)
+
 let test_agent_credential_to_yojson () =
   let cred : Masc_domain.agent_credential = {
     id = None;
@@ -839,12 +862,14 @@ let test_agent_credential_to_yojson_with_expiry () =
   | _ -> fail "expected Assoc"
 
 let test_agent_credential_of_yojson_ok () =
-  let json = `Assoc [
-    ("agent_name", `String "gemini");
-    ("token", `String "xyz");
-    ("role", `String "worker");
-    ("created_at", `String "2024-01-15T12:00:00Z");
-  ] in
+  let json =
+    current_agent_credential_json
+      ~agent_name:"gemini"
+      ~token:"xyz"
+      ~role:"worker"
+      ~created_at:"2024-01-15T12:00:00Z"
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
     check string "agent_name" "gemini" cred.agent_name;
@@ -857,45 +882,51 @@ let test_agent_credential_of_yojson_error () =
   | Error _ -> ()
   | Ok _ -> fail "expected Error for missing role"
 
-(* The current credential schema stores role as a required string field.
-   Permission checks must never infer it from another field. *)
+(* The current credential schema stores role as a required string field and is
+   closed to removed or unknown fields. *)
 let test_agent_credential_of_yojson_role_string_admin () =
-  let json = `Assoc [
-    ("agent_name", `String "janitor");
-    ("token", `String "t");
-    ("role", `String "admin");
-    ("created_at", `String "2026-04-23T12:50:47Z");
-  ] in
+  let json =
+    current_agent_credential_json
+      ~agent_name:"janitor"
+      ~token:"t"
+      ~role:"admin"
+      ~created_at:"2026-04-23T12:50:47Z"
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
     check bool "role:\"admin\" parses to Admin" true (cred.role = Masc_domain.Admin)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_role_string_worker () =
-  let json = `Assoc [
-    ("agent_name", `String "nick0cave");
-    ("token", `String "t");
-    ("role", `String "worker");
-    ("created_at", `String "2026-04-23T08:07:00Z");
-  ] in
+  let json =
+    current_agent_credential_json
+      ~agent_name:"nick0cave"
+      ~token:"t"
+      ~role:"worker"
+      ~created_at:"2026-04-23T08:07:00Z"
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
     check bool "role:\"worker\" parses to Worker" true (cred.role = Masc_domain.Worker)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
-let test_agent_credential_of_yojson_role_is_authoritative () =
-  (* Unknown fields do not override the sole role authority. *)
-  let json = `Assoc [
-    ("agent_name", `String "mixed");
-    ("token", `String "t");
-    ("role", `String "admin");
-    ("admin", `Bool false);
-    ("created_at", `String "2026-04-23T00:00:00Z");
-  ] in
+let test_agent_credential_of_yojson_rejects_removed_admin_field () =
+  let json =
+    current_agent_credential_json
+      ~agent_name:"mixed"
+      ~token:"t"
+      ~role:"admin"
+      ~created_at:"2026-04-23T00:00:00Z"
+      ~extra_fields:[ "admin", `Bool false ]
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
-  | Ok cred ->
-    check bool "role string wins" true (cred.role = Masc_domain.Admin)
-  | Error e -> fail ("expected Ok, got: " ^ e)
+  | Error e ->
+    check bool "names removed field" true
+      (String_util.contains_substring e "unknown field \"admin\"")
+  | Ok _ -> fail "expected Error for removed admin field"
 
 let test_agent_credential_of_yojson_rejects_admin_only () =
   (* A removed role alias must not silently grant Admin. *)
@@ -911,12 +942,14 @@ let test_agent_credential_of_yojson_rejects_admin_only () =
 
 let test_agent_credential_of_yojson_unknown_role_fails_closed () =
   (* Fail-closed: unknown role strings return Error, never silently downgrade. *)
-  let json = `Assoc [
-    ("agent_name", `String "evil");
-    ("token", `String "t");
-    ("role", `String "root");
-    ("created_at", `String "2026-04-23T00:00:00Z");
-  ] in
+  let json =
+    current_agent_credential_json
+      ~agent_name:"evil"
+      ~token:"t"
+      ~role:"root"
+      ~created_at:"2026-04-23T00:00:00Z"
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error for unknown role"
@@ -1599,8 +1632,8 @@ let () =
         test_agent_credential_of_yojson_role_string_admin;
       test_case "of_yojson role=\"worker\" -> Worker" `Quick
         test_agent_credential_of_yojson_role_string_worker;
-      test_case "of_yojson role is authoritative" `Quick
-        test_agent_credential_of_yojson_role_is_authoritative;
+      test_case "of_yojson rejects removed admin field" `Quick
+        test_agent_credential_of_yojson_rejects_removed_admin_field;
       test_case "of_yojson rejects removed admin-only schema" `Quick
         test_agent_credential_of_yojson_rejects_admin_only;
       test_case "of_yojson rejects unknown role" `Quick

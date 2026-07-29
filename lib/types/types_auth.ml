@@ -79,24 +79,75 @@ let agent_credential_to_yojson (c : agent_credential) =
     ("expires_at", Json_util.string_opt_to_json c.expires_at);
   ]
 
-let agent_credential_of_yojson json =
-  try
-    let agent_name = Json_util.get_string_with_default json ~key:"agent_name" ~default:"" in
-    let token = Json_util.get_string_with_default json ~key:"token" ~default:"" in
-    let role =
-      match Json_util.get_string json "role" with
-      | Some s -> agent_role_of_string s
-      | None -> Error "agent_credential_of_yojson: missing required string field \"role\""
+let agent_credential_field_names =
+  [ "id"; "agent_id"; "agent_name"; "token"; "role"; "created_at"; "expires_at" ]
+
+let validate_agent_credential_fields = function
+  | `Assoc fields ->
+    let rec loop seen = function
+      | [] -> Ok fields
+      | (name, _) :: rest ->
+        if not (List.mem name agent_credential_field_names)
+        then Error (Printf.sprintf "agent_credential_of_yojson: unknown field %S" name)
+        else if List.mem name seen
+        then Error (Printf.sprintf "agent_credential_of_yojson: duplicate field %S" name)
+        else loop (name :: seen) rest
     in
-    (match role with
-     | Error e -> Error e
-     | Ok role ->
-       let created_at = Json_util.get_string_with_default json ~key:"created_at" ~default:"" in
-       let expires_at = Json_util.get_string json "expires_at" in
-       let id = Json_util.get_string json "id" |> Option.map Credential_id.of_string in
-       let agent_id = Json_util.get_string json "agent_id" |> Option.map Agent_id.of_string in
-       Ok { id; agent_id; agent_name; token; role; created_at; expires_at })
-  with e -> Error (Printexc.to_string e)
+    loop [] fields
+  | other ->
+    Error
+      (Printf.sprintf
+         "agent_credential_of_yojson: expected JSON object, got %s"
+         (Json_util.kind_name other))
+
+let require_credential_string fields name =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "agent_credential_of_yojson: field %S must be a string, got %s"
+         name
+         (Json_util.kind_name value))
+  | None ->
+    Error
+      (Printf.sprintf "agent_credential_of_yojson: missing required field %S" name)
+
+let require_credential_optional_string fields name =
+  match List.assoc_opt name fields with
+  | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "agent_credential_of_yojson: field %S must be a string or null, got %s"
+         name
+         (Json_util.kind_name value))
+  | None ->
+    Error
+      (Printf.sprintf "agent_credential_of_yojson: missing required field %S" name)
+
+let agent_credential_of_yojson json =
+  let ( let* ) = Result.bind in
+  let* fields = validate_agent_credential_fields json in
+  let* id = require_credential_optional_string fields "id" in
+  let* agent_id = require_credential_optional_string fields "agent_id" in
+  let* agent_name = require_credential_string fields "agent_name" in
+  let* token = require_credential_string fields "token" in
+  let* role_name = require_credential_string fields "role" in
+  let* role = agent_role_of_string role_name in
+  let* created_at = require_credential_string fields "created_at" in
+  let* expires_at = require_credential_optional_string fields "expires_at" in
+  Ok
+    {
+      id = Option.map Credential_id.of_string id;
+      agent_id = Option.map Agent_id.of_string agent_id;
+      agent_name;
+      token;
+      role;
+      created_at;
+      expires_at;
+    }
 
 (** Auth configuration *)
 type auth_config = {

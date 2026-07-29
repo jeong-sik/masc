@@ -37,6 +37,9 @@ let state_of row =
 let lifecycle_of row =
   Yojson.Safe.Util.(row.json |> member "lifecycle" |> to_string)
 
+let status_of row =
+  Yojson.Safe.Util.(row.json |> member "status" |> to_string)
+
 let build_one k =
   List.hd (build_continuity_briefs ~now_ts:1_000_000_000.0 [ k ] [])
 
@@ -54,22 +57,30 @@ let test_offline_with_persisted_action_stays_critical () =
   check string "lifecycle" "offline" (lifecycle_of row);
   check string "state" "critical" (state_of row)
 
-let test_running_with_action_is_healthy_active () =
+let test_running_flag_does_not_override_offline_status () =
   let row =
     build_one
       (keeper ~keepalive_running:true
          ~last_autonomous_action_at:"2001-09-09T01:46:40Z" ~turn_count:1
          ~autonomous_turn_count:1 ())
   in
-  check string "lifecycle" "active" (lifecycle_of row);
-  check string "state" "healthy" (state_of row)
+  check string "status" "offline" (status_of row);
+  check string "lifecycle" "offline" (lifecycle_of row);
+  check string "state" "critical" (state_of row)
 
-let test_running_with_heartbeat_is_healthy_idle () =
+let test_reconciled_active_status_is_healthy_active () =
   let row =
     build_one
-      (keeper ~keepalive_running:true ~updated_at:"2001-09-09T01:46:40Z" ())
+      (keeper
+         ~status:"active"
+         ~keepalive_running:true
+         ~last_autonomous_action_at:"2001-09-09T01:46:40Z"
+         ~turn_count:1
+         ~autonomous_turn_count:1
+         ())
   in
-  check string "lifecycle" "idle" (lifecycle_of row);
+  check string "status" "active" (status_of row);
+  check string "lifecycle" "active" (lifecycle_of row);
   check string "state" "healthy" (state_of row)
 
 let test_running_but_inactive_stays_critical () =
@@ -95,10 +106,10 @@ let () =
             test_offline_without_signal_is_critical;
           test_case "persisted action without runtime -> critical" `Quick
             test_offline_with_persisted_action_stays_critical;
-          test_case "running + action -> healthy active" `Quick
-            test_running_with_action_is_healthy_active;
-          test_case "running + heartbeat -> healthy idle" `Quick
-            test_running_with_heartbeat_is_healthy_idle;
+          test_case "running flag cannot override offline status" `Quick
+            test_running_flag_does_not_override_offline_status;
+          test_case "reconciled active status -> healthy active" `Quick
+            test_reconciled_active_status_is_healthy_active;
           test_case "running + inactive -> critical" `Quick
             test_running_but_inactive_stays_critical;
         ] );

@@ -2014,6 +2014,106 @@ let test_lifecycle_event_display_values () =
         (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name))
     cases
 
+let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-reconcile-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
+          ; "trace_id", `String "continuity-reconcile-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let now = Masc_domain.now_iso () in
+       let keeper_row =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "agent", `Assoc [ "status", `String "active"; "last_seen", `String now ]
+           ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
+           ; "keeper_id", `String ("k-" ^ keeper_name)
+           ; "status", `String "offline"
+           ; "keepalive_running", `Bool false
+           ; "generation", `Int 1
+           ; "turn_count", `Int 1
+           ; "autonomous_turn_count", `Int 1
+           ; "autonomous_action_count", `Int 1
+           ; "noop_turn_count", `Int 0
+           ; "active_goal_ids", `List []
+           ; "last_autonomous_action_at", `String now
+           ; "updated_at", `String now
+           ; "tool_audit_at", `String ""
+           ; "recent_tool_names", `List []
+           ; "latest_tool_names", `List []
+           ]
+       in
+       let stale_brief =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "status", `String "offline"
+           ; "state", `String "critical"
+           ; "lifecycle", `String "offline"
+           ; "related_session_id", `String "session-exact"
+           ]
+       in
+       let patched =
+         Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+           config
+           (`Assoc
+             [ "keepers", `List [ keeper_row ]
+             ; "continuity_briefs", `List [ stale_brief ]
+             ])
+       in
+       let open Yojson.Safe.Util in
+       let patched_keeper = patched |> member "keepers" |> to_list |> List.hd in
+       let patched_brief =
+         patched |> member "continuity_briefs" |> to_list |> List.hd
+       in
+       check string
+         "keeper status uses reconciled registry state"
+         "active"
+         (patched_keeper |> member "status" |> to_string);
+       check bool
+         "keeper keepalive uses reconciled registry state"
+         true
+         (patched_keeper |> member "keepalive_running" |> to_bool);
+       check string
+         "brief status is rebuilt from patched keeper"
+         "active"
+         (patched_brief |> member "status" |> to_string);
+       check string
+         "brief lifecycle is rebuilt from patched keeper"
+         "active"
+         (patched_brief |> member "lifecycle" |> to_string);
+       check string
+         "brief state is rebuilt from patched keeper"
+         "healthy"
+         (patched_brief |> member "state" |> to_string);
+       check string
+         "brief keeps exact related session"
+         "session-exact"
+         (patched_brief |> member "related_session_id" |> to_string))
+
 let test_composite_blocked_uses_terminal_contract_not_observational_metadata () =
   let execution ~terminal_reason_code ~operator_disposition_reason =
     `Assoc
@@ -2369,6 +2469,8 @@ let () =
             test_lifecycle_event_cache_patcher_coverage;
           test_case "cache patchers pin byte-identical values" `Quick
             test_lifecycle_event_display_values;
+          test_case "running keeper reconciliation rebuilds continuity brief" `Quick
+            test_running_keeper_reconciliation_rebuilds_continuity_brief;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
         [ test_case "shrink of max_context_override is detected" `Quick

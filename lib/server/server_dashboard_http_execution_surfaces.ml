@@ -653,6 +653,52 @@ let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
 ;;
 
+let rebuild_continuity_briefs ~now_ts ~keeper_rows ~existing_briefs =
+  let related_session_ids =
+    List.filter_map
+      (fun brief ->
+         match
+           Json_util.assoc_string_opt "name" brief,
+           Json_util.assoc_string_opt "related_session_id" brief
+         with
+         | Some name, Some related_session_id -> Some (name, related_session_id)
+         | _ -> None)
+      existing_briefs
+  in
+  Dashboard_execution_builders.build_continuity_briefs
+    ~now_ts
+    keeper_rows
+    []
+  |> List.map (fun (row : Dashboard_execution_helpers.continuity_context) ->
+    match Json_util.assoc_string_opt "name" row.json with
+    | Some name ->
+      (match List.assoc_opt name related_session_ids, row.json with
+       | Some related_session_id, `Assoc fields ->
+         `Assoc
+           (upsert_assoc_field
+              "related_session_id"
+              (`String related_session_id)
+              fields)
+       | None, _ | _, (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) ->
+         row.json)
+    | None -> row.json)
+;;
+
+let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fields =
+  let fields = upsert_assoc_field "keepers" keepers_json fields in
+  match List.assoc_opt "continuity_briefs" fields with
+  | Some (`List existing_briefs) ->
+    upsert_assoc_field
+      "continuity_briefs"
+      (`List
+        (rebuild_continuity_briefs
+           ~now_ts
+           ~keeper_rows
+           ~existing_briefs))
+      fields
+  | Some _ | None -> fields
+;;
+
 let running_keeper_names (config : Workspace.config) =
   Keeper_meta_store.keeper_names config
   |> List.filter_map (fun name ->
@@ -681,14 +727,26 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
       in
       match List.assoc_opt "keepers" fields with
       | Some (`List rows) ->
-        `Assoc (upsert_assoc_field "keepers" (`List (patch_rows rows)) fields)
+        let keeper_rows = patch_rows rows in
+        `Assoc
+          (replace_keeper_rows_and_rebuild_briefs
+             ~now_ts:(Time_compat.now ())
+             ~keeper_rows
+             ~keepers_json:(`List keeper_rows)
+             fields)
       | Some (`Assoc keeper_fields) ->
         (match List.assoc_opt "items" keeper_fields with
          | Some (`List rows) ->
+           let keeper_rows = patch_rows rows in
            let keeper_fields =
-             upsert_assoc_field "items" (`List (patch_rows rows)) keeper_fields
+             upsert_assoc_field "items" (`List keeper_rows) keeper_fields
            in
-           `Assoc (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
+           `Assoc
+             (replace_keeper_rows_and_rebuild_briefs
+                ~now_ts:(Time_compat.now ())
+                ~keeper_rows
+                ~keepers_json:(`Assoc keeper_fields)
+                fields)
          | _ -> json)
       | _ -> json)
   | other -> other
@@ -700,11 +758,15 @@ let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   | `Assoc fields ->
     (match List.assoc_opt "keepers" fields with
      | Some (`List rows) ->
+       let keeper_rows =
+         patch_keeper_rows ~keeper_name ~event ~keepalive_running rows
+       in
        execution_cache.json
        <- `Assoc
-            (upsert_assoc_field
-               "keepers"
-               (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
+            (replace_keeper_rows_and_rebuild_briefs
+               ~now_ts:(Time_compat.now ())
+               ~keeper_rows
+               ~keepers_json:(`List keeper_rows)
                fields)
      | Some _ -> ()
      | None -> ())

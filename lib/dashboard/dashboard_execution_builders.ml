@@ -237,16 +237,19 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let turn_count = int_field_default "turn_count" keeper in
   let generation = int_field_default "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
-  let keepalive_running =
-    match Json_util.assoc_bool_opt "keepalive_running" keeper with
-    | Some value -> value
-    | None -> false
-  in
   let continuity_offline =
     match Keeper_status_runtime.surface_status_of_string_opt status with
-    | Some Keeper_status_runtime.Surface_offline -> not keepalive_running
-    | Some Keeper_status_runtime.Surface_inactive -> true
-    | _ -> Dashboard_utils.is_keeper_offline status
+    | Some
+        ( Keeper_status_runtime.Surface_offline
+        | Keeper_status_runtime.Surface_inactive ) ->
+      true
+    | Some
+        ( Keeper_status_runtime.Surface_active
+        | Keeper_status_runtime.Surface_busy
+        | Keeper_status_runtime.Surface_listening
+        | Keeper_status_runtime.Surface_idle ) ->
+      false
+    | None -> Dashboard_utils.is_keeper_offline status
   in
   let lifecycle =
     if continuity_offline then Lc_offline

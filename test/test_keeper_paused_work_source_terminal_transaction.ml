@@ -323,6 +323,40 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
          legacy_transition_id
          transition_id
      | Some _ | None -> Alcotest.fail "v10 projected source ACK lost its replay witness");
+    let legacy_ack_transition_id = legacy_lease_id ^ ":ack" in
+    let legacy_ack_receipt =
+      `Assoc
+        [ "transition_id", `String legacy_ack_transition_id
+        ; "event_id", `String ("keeper-event-queue-transition:" ^ legacy_ack_transition_id)
+        ; "lease_id", `String legacy_lease_id
+        ; "lease_sequence", `Int 1
+        ; "settled_at_unix", `Float 2.0
+        ; "settlement", `Assoc [ "kind", `String "ack" ]
+        ]
+    in
+    let v10_generic_projected_state =
+      state_fields
+      |> remove_field "last_transition"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v10")
+      |> replace_field "transition_outbox" (`List [])
+      |> fun fields -> `Assoc (("last_settlement", legacy_ack_receipt) :: fields)
+    in
+    let recovered_generic_v11 =
+      v10_generic_projected_state
+      |> State.of_yojson
+      |> require_ok "recover v10 generic projected witness"
+      |> State.to_yojson
+      |> State.of_yojson
+      |> require_ok "reload v10 generic witness after v11 checkpoint"
+    in
+    (match State.last_transition recovered_generic_v11 with
+     | Some { transition = State.Ack; transition_id; _ } ->
+       Alcotest.(check string)
+         "v11 checkpoint preserves legacy generic transition identity"
+         legacy_ack_transition_id
+         transition_id
+     | Some _ | None ->
+       Alcotest.fail "v11 checkpoint made the recovered generic witness unreadable");
     let legacy_state =
       state_fields
       |> remove_field "last_transition"

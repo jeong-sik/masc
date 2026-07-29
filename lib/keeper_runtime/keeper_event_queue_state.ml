@@ -3077,17 +3077,21 @@ let transition_receipt_of_yojson json =
   let* applied_at = float_field ~context "applied_at_unix" fields in
   let* transition_json = required_field ~context "transition" fields in
   let* transition = transition_of_yojson transition_json in
-  let* expected_transition_id =
-    match pending_transition_id transition with
-    | Some id -> Ok id
-    | None -> Error "current transition receipt must be a pending disposition"
-  in
   if not (Float.is_finite applied_at)
   then Error "event queue receipt application time must be finite"
   else if
     not
-      (String.equal receipt_transition_id expected_transition_id
-       || legacy_transition_id_is_valid transition receipt_transition_id)
+      (match pending_transition_id transition with
+       | Some expected_transition_id ->
+         String.equal receipt_transition_id expected_transition_id
+         || legacy_transition_id_is_valid transition receipt_transition_id
+       | None ->
+         (* A v10 projected witness can contain one of the retired
+            lease-backed transitions. Once recovered and checkpointed as v11,
+            it no longer carries the lease fields, but its transition ID still
+            proves the exact historical lease identity. New v11 writers cannot
+            produce these generic transitions. *)
+         legacy_transition_id_is_valid transition receipt_transition_id)
   then Error (Printf.sprintf "event queue receipt transition id mismatch: %s" receipt_transition_id)
   else if not (String.equal event_id (event_id_of_transition receipt_transition_id))
   then Error (Printf.sprintf "event queue receipt event id mismatch: %s" event_id)

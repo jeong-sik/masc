@@ -19,6 +19,7 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
+  ; max_request_body_bytes : int
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -262,7 +263,8 @@ let run_try_provider
               Some
                 (Keeper_request_wire_observation.observer
                    ~keeper_name:ctx.keeper_name
-                   ~runtime_id:ctx.runtime_id)
+                   ~runtime_id:ctx.runtime_id
+                   ~max_request_body_bytes:ctx.max_request_body_bytes)
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool

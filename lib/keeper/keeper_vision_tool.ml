@@ -327,7 +327,7 @@ let run_candidates_outcome
           { failure_class = Tool_result.Runtime_failure
           ; detail = Runtime.request_body_cap_error_to_string error
           }
-      | Ok () ->
+      | Ok _ ->
         (match
            Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
              ~config ~messages ()

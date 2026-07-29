@@ -4,9 +4,9 @@
     keeper's real serialized wire size against its runtime's
     [max_request_body_bytes]. These tests pin that the observer records the
     exact [body_bytes] OAS reports, attributes it to the right keeper and
-    runtime, emits byte-scale histogram buckets, and admits every observation
-    — a rejection would turn measurement into typed failure evidence on the
-    provider path. *)
+    runtime and admitted cap, emits byte-scale histogram buckets, and admits
+    every observation — a rejection would turn measurement into typed failure
+    evidence on the provider path. *)
 
 open Alcotest
 
@@ -27,106 +27,161 @@ let observation ~body_bytes : Wire.observation =
 
 let metric_name = Keeper_metrics.to_string Observation.metric
 
-let observe ~keeper_name ~runtime_id body_bytes =
-  Observation.observer ~keeper_name ~runtime_id (observation ~body_bytes)
+type metric_series =
+  { keeper_name : string
+  ; runtime_id : string
+  ; max_request_body_bytes : int
+  }
+
+let observe series body_bytes =
+  Observation.observer
+    ~keeper_name:series.keeper_name
+    ~runtime_id:series.runtime_id
+    ~max_request_body_bytes:series.max_request_body_bytes
+    (observation ~body_bytes)
 ;;
 
 (* [observe_histogram] accumulates the observed sum under the bare metric key
    and the observation count under [name ^ "_count"]. *)
-let labels ~keeper_name ~runtime_id =
-  [ "keeper", keeper_name; "runtime_id", runtime_id ]
+let labels series =
+  [ "keeper", series.keeper_name
+  ; "runtime_id", series.runtime_id
+  ; "max_request_body_bytes", string_of_int series.max_request_body_bytes
+  ]
 ;;
 
-let recorded ~keeper_name ~runtime_id =
+let recorded series =
   Otel_metric_store_core.metric_value_or_zero
     metric_name
-    ~labels:(labels ~keeper_name ~runtime_id)
+    ~labels:(labels series)
     ()
 ;;
 
-let observation_count ~keeper_name ~runtime_id =
+let observation_count series =
   Otel_metric_store_core.metric_value_or_zero
     (metric_name ^ "_count")
-    ~labels:(labels ~keeper_name ~runtime_id)
+    ~labels:(labels series)
     ()
 ;;
 
 let test_records_admitted_bytes_for_the_keeper () =
-  let keeper_name = "wire-observation-alpha" in
-  let runtime_id = "wire-runtime-alpha" in
-  let before = recorded ~keeper_name ~runtime_id in
+  let series =
+    { keeper_name = "wire-observation-alpha"
+    ; runtime_id = "wire-runtime-alpha"
+    ; max_request_body_bytes = 2_097_152
+    }
+  in
+  let before = recorded series in
   check
     (result unit reject)
     "the observation is admitted"
     (Ok ())
-    (observe ~keeper_name ~runtime_id 524_288);
+    (observe series 524_288);
   check
     (float 0.5)
     "the exact admitted byte count is recorded"
     (before +. 524_288.)
-    (recorded ~keeper_name ~runtime_id);
+    (recorded series);
   check
     (result unit reject)
     "a second observation is also admitted"
     (Ok ())
-    (observe ~keeper_name ~runtime_id 1_730_708);
+    (observe series 1_730_708);
   check
     (float 0.5)
     "observations accumulate"
     (before +. 524_288. +. 1_730_708.)
-    (recorded ~keeper_name ~runtime_id);
+    (recorded series);
   check
     (float 0.5)
     "both observations are counted"
     2.
-    (observation_count ~keeper_name ~runtime_id)
+    (observation_count series)
 ;;
 
 let test_attributes_bytes_to_the_observing_keeper () =
-  let alpha = "wire-observation-attribution-alpha" in
-  let beta = "wire-observation-attribution-beta" in
-  let runtime_id = "wire-runtime-attribution" in
-  let beta_before = recorded ~keeper_name:beta ~runtime_id in
-  ignore (observe ~keeper_name:alpha ~runtime_id 262_144);
+  let alpha =
+    { keeper_name = "wire-observation-attribution-alpha"
+    ; runtime_id = "wire-runtime-attribution"
+    ; max_request_body_bytes = 524_288
+    }
+  in
+  let beta =
+    { alpha with keeper_name = "wire-observation-attribution-beta" }
+  in
+  let beta_before = recorded beta in
+  ignore (observe alpha 262_144);
   check
     (float 0.5)
     "another keeper's histogram is untouched"
     beta_before
-    (recorded ~keeper_name:beta ~runtime_id)
+    (recorded beta)
 ;;
 
 let test_separates_runtimes_for_the_same_keeper () =
-  let keeper_name = "wire-observation-runtime-attribution" in
-  let alpha = "wire-runtime-attribution-alpha" in
-  let beta = "wire-runtime-attribution-beta" in
-  let alpha_before = recorded ~keeper_name ~runtime_id:alpha in
-  let beta_before = recorded ~keeper_name ~runtime_id:beta in
-  ignore (observe ~keeper_name ~runtime_id:alpha 262_144);
+  let alpha =
+    { keeper_name = "wire-observation-runtime-attribution"
+    ; runtime_id = "wire-runtime-attribution-alpha"
+    ; max_request_body_bytes = 524_288
+    }
+  in
+  let beta = { alpha with runtime_id = "wire-runtime-attribution-beta" } in
+  let alpha_before = recorded alpha in
+  let beta_before = recorded beta in
+  ignore (observe alpha 262_144);
   check
     (float 0.5)
     "the observing runtime receives the exact byte count"
     (alpha_before +. 262_144.)
-    (recorded ~keeper_name ~runtime_id:alpha);
+    (recorded alpha);
   check
     (float 0.5)
     "another runtime's histogram is untouched"
     beta_before
-    (recorded ~keeper_name ~runtime_id:beta)
+    (recorded beta)
+;;
+
+let test_separates_changed_caps_for_the_same_runtime () =
+  let old_cap =
+    { keeper_name = "wire-observation-cap-attribution"
+    ; runtime_id = "wire-runtime-cap-attribution"
+    ; max_request_body_bytes = 262_144
+    }
+  in
+  let new_cap = { old_cap with max_request_body_bytes = 524_288 } in
+  let old_before = recorded old_cap in
+  let new_before = recorded new_cap in
+  ignore (observe old_cap 131_072);
+  check
+    (float 0.5)
+    "a different cap series stays untouched"
+    new_before
+    (recorded new_cap);
+  ignore (observe new_cap 262_144);
+  check
+    (float 0.5)
+    "the previous cap series retains only its own sample"
+    (old_before +. 131_072.)
+    (recorded old_cap)
 ;;
 
 let test_records_byte_scale_histogram_buckets () =
-  let keeper_name = "wire-observation-buckets" in
-  let runtime_id = "wire-runtime-buckets" in
+  let series =
+    { keeper_name = "wire-observation-buckets"
+    ; runtime_id = "wire-runtime-buckets"
+    ; max_request_body_bytes = 262_144
+    }
+  in
   let bucket le =
     Otel_metric_store_core.metric_value_or_zero
       (metric_name ^ "_bucket")
-      ~labels:(("le", le) :: labels ~keeper_name ~runtime_id)
+      ~labels:(("le", le) :: labels series)
       ()
   in
   let before_131072 = bucket "131072" in
   let before_262144 = bucket "262144" in
   let before_inf = bucket "+Inf" in
-  ignore (observe ~keeper_name ~runtime_id 262_144);
+  ignore (observe series 262_144);
   check
     (float 0.5)
     "smaller bucket excludes observation"
@@ -147,14 +202,17 @@ let test_records_byte_scale_histogram_buckets () =
 let test_admits_a_zero_byte_observation () =
   (* OAS owns admission; a measurement path must not invent a rejection for an
      unusual-looking value. *)
+  let series =
+    { keeper_name = "wire-observation-zero"
+    ; runtime_id = "wire-runtime-zero"
+    ; max_request_body_bytes = 262_144
+    }
+  in
   check
     (result unit reject)
     "a zero-byte observation is still admitted"
     (Ok ())
-    (observe
-       ~keeper_name:"wire-observation-zero"
-       ~runtime_id:"wire-runtime-zero"
-       0)
+    (observe series 0)
 ;;
 
 let test_metric_name_is_stable () =
@@ -181,6 +239,10 @@ let () =
             "separates runtimes for the same keeper"
             `Quick
             test_separates_runtimes_for_the_same_keeper
+        ; test_case
+            "separates changed caps for the same runtime"
+            `Quick
+            test_separates_changed_caps_for_the_same_runtime
         ; test_case
             "records byte-scale histogram buckets"
             `Quick

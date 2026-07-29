@@ -3,6 +3,7 @@
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
+  ; max_request_body_bytes : int
   ; base_path : string
   ; keeper_name : string
   ; name : string

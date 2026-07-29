@@ -20,13 +20,17 @@
 
 val metric : Keeper_metrics.t
 (** Histogram the admitted byte count lands in, labelled by keeper and the
-    exact runtime whose provider configuration admitted the request. *)
+    exact runtime and body cap whose provider configuration admitted the
+    request. *)
 
 val observer :
   keeper_name:string ->
   runtime_id:string ->
+  max_request_body_bytes:int ->
   Agent_sdk.Agent.pre_dispatch_serialization_observer
-(** [observer ~keeper_name ~runtime_id] records [body_bytes] under {!metric}
-    and admits the observation. It never rejects: this path exists only to
-    measure, and a rejection would manufacture typed failure evidence out of
-    measurement. *)
+(** [observer ~keeper_name ~runtime_id ~max_request_body_bytes] records
+    [body_bytes] under {!metric} and admits the observation. The cap is the
+    value already validated on the final provider config, so a hot-reload that
+    changes a runtime's cap starts a distinct metric series. It never rejects:
+    this path exists only to measure, and a rejection would manufacture typed
+    failure evidence out of measurement. *)

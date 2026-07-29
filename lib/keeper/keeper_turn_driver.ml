@@ -249,13 +249,13 @@ let runtime_candidate_missing_request_cap_error error =
 let validate_provider_request_cap ~runtime_id
     (provider_config : Llm_provider.Provider_config.t) =
   match Runtime.validate_request_body_cap ~runtime_id provider_config with
-  | Ok () -> Ok ()
+  | Ok cap -> Ok cap
   | Error error -> Error (runtime_candidate_missing_request_cap_error error)
 
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
   | Some runtime ->
-    let* () =
+    let* _request_body_cap =
       validate_provider_request_cap
         ~runtime_id:runtime.id
         runtime.Runtime.provider_config
@@ -670,7 +670,7 @@ let run_named
          | Error err ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
            Error err, None
-         | Ok () ->
+         | Ok max_request_body_bytes ->
           let candidate = Runtime_candidate.of_provider_config provider_config in
           (* Cached provider health is observation only. Every eligible runtime
              reaches the real provider boundary; only the resulting typed error
@@ -679,6 +679,7 @@ let run_named
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
+            ; max_request_body_bytes
             ; base_path
             ; keeper_name
             ; name

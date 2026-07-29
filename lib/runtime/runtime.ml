@@ -551,7 +551,7 @@ let request_body_cap_error_to_string = function
 let validate_request_body_cap ~runtime_id
     (provider_config : Llm_provider.Provider_config.t) =
   match provider_config.max_request_body_bytes with
-  | Some cap when cap > 0 -> Ok ()
+  | Some cap when cap > 0 -> Ok cap
   | None | Some _ ->
     Error (Missing_or_non_positive_request_body_cap { runtime_id })
 ;;
@@ -637,7 +637,7 @@ let validate_keeper_dispatch_request_caps
                 ~runtime_id:runtime.id
                 runtime.provider_config
             with
-            | Ok () -> None
+            | Ok _ -> None
             | Error _ -> Some runtime))
       ids
   with

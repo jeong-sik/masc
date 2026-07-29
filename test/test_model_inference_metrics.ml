@@ -50,6 +50,36 @@ let iso_of_unix ts =
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let write_costs base entries =
+  let costs_dir = Filename.concat base ".masc/costs" in
+  let store = Dated_jsonl.create ~base_dir:costs_dir () in
+  List.iter (Dated_jsonl.append store) entries
+
+let cost_day_file base =
+  let costs_dir = Filename.concat base ".masc/costs" in
+  let rec jsonl_files path =
+    if Sys.is_directory path
+    then
+      Sys.readdir path
+      |> Array.to_list
+      |> List.concat_map (fun name -> jsonl_files (Filename.concat path name))
+    else if Filename.check_suffix path ".jsonl"
+    then [ path ]
+    else []
+  in
+  match jsonl_files costs_dir with
+  | [ path ] -> path
+  | paths ->
+    failf "expected one cost day file, found %d" (List.length paths)
+
+let append_raw_line path line =
+  let oc = open_out_gen [ Open_append ] 0o644 path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () ->
+       output_string oc line;
+       output_char oc '\n')
+
+let write_retired_costs base entries =
   let masc_dir = Filename.concat base ".masc" in
   let rec mkdir_p dir =
     if not (Sys.file_exists dir) then begin
@@ -326,6 +356,23 @@ let test_cost_parser_uses_current_hw_decode_field_only () =
     (row "hw_decode_tokens_per_second")
     (Some 42.0);
   parse "retired cost alias ignored" (row "provider_tokens_per_second") None
+;;
+
+let test_cost_parser_requires_usage_missing () =
+  let ts = now_unix () in
+  let row =
+    match cost_entry ~model:"model" ~ts () with
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (key, _) -> not (String.equal key "usage_missing")) fields)
+    | _ -> fail "cost entry must be an object"
+  in
+  match Model_inference_metrics_parser.parse_cost_entry row ~since_unix:0.0 with
+  | Error Model_inference_metrics_entry.Missing_cost_usage_missing -> ()
+  | Error error ->
+    fail
+      ("wrong parse error: "
+       ^ Model_inference_metrics_entry.parse_error_label error)
+  | Ok _ -> fail "cost row without usage_missing must be rejected"
 ;;
 
 (* ── Tests ───────────────────────────────────────── *)
@@ -895,6 +942,68 @@ let test_costs_jsonl_dedupes_matching_decision_sample () =
     check (option (float 0.001)) "decision tok/sec preserved"
       (Some 100.0) s.avg_tok_per_sec)
 
+let test_retired_single_file_cost_store_is_ignored () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let ts = now_unix () in
+    write_retired_costs
+      base
+      [ cost_entry ~model:"retired-single-file" ~ts () ];
+    write_costs
+      base
+      [ cost_entry ~model:"current-dated-store" ~ts () ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "only current store row is loaded" 1 agg.total_entries;
+    let stats = List.hd agg.models in
+    check
+      string
+      "retired single-file row ignored"
+      "ollama:current-dated-store"
+      stats.model_id)
+;;
+
+let test_cost_read_diagnostics_reach_api () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let ts = now_unix () in
+    write_costs
+      base
+      [ cost_entry ~model:"valid" ~ts ()
+      ; `String "schema-invalid"
+      ];
+    append_raw_line (cost_day_file base) "{";
+    let json = M.compute ~base_path:base ~window_minutes:60 |> M.to_json in
+    let diagnostics = Yojson.Safe.Util.member "cost_ledger_read" json in
+    check string "cost read status" "ok"
+      Yojson.Safe.Util.(diagnostics |> member "status" |> to_string);
+    check int "malformed rows" 1
+      Yojson.Safe.Util.(diagnostics |> member "malformed_rows" |> to_int);
+    check int "schema violation rows" 1
+      Yojson.Safe.Util.(diagnostics |> member "schema_violation_rows" |> to_int))
+;;
+
+let test_cost_read_failure_is_not_empty_success () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let keeper_path = make_keeper_dir base "decision-survives-cost-error" in
+    write_decisions
+      keeper_path
+      [ success_entry ~model:"decision-model" ~ts:(now_unix ()) () ];
+    let costs_dir = Filename.concat base ".masc/costs" in
+    Unix.mkdir costs_dir 0o755;
+    let invalid_entry = Filename.concat costs_dir "not-a-month" in
+    Unix.mkdir invalid_entry 0o755;
+    let json = M.compute ~base_path:base ~window_minutes:60 |> M.to_json in
+    check int "decision metrics remain available" 1
+      Yojson.Safe.Util.(json |> member "total_entries" |> to_int);
+    let diagnostics = Yojson.Safe.Util.member "cost_ledger_read" json in
+    check string "cost read status" "error"
+      Yojson.Safe.Util.(diagnostics |> member "status" |> to_string);
+    check bool "typed read detail is surfaced" true
+      (Yojson.Safe.Util.(diagnostics |> member "detail" |> to_string)
+       |> contains_substring "not-a-month"))
+;;
+
 let test_cost_latency_json_composes_axes_and_percentiles () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -1138,10 +1247,18 @@ let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
     ]);
   ]
 
+let bucket_models = function
+  | Ok (models, _diagnostics) -> models
+  | Error error ->
+    failf "cost store read failed: %s" (Dated_jsonl.read_error_to_string error)
+
 let test_buckets_empty_dir () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
-    let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:5 in
+    let result =
+      M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:5
+      |> bucket_models
+    in
     check int "empty → no models" 0 (List.length result))
 
 let test_buckets_single_bucket () =
@@ -1153,7 +1270,10 @@ let test_buckets_single_bucket () =
     success_entry ~model:"claude" ~ts:(now -. 30.0) ();
   ];
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
-    let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60 in
+    let result =
+      M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60
+      |> bucket_models
+    in
     check int "one model" 1 (List.length result);
     let m = List.hd result in
     check string "model_id" "claude" m.mb_model_id;
@@ -1168,7 +1288,10 @@ let test_buckets_sparse () =
     success_entry ~model:"model-b" ~ts:(now -. 600.0) ();
   ];
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
-    let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:5 in
+    let result =
+      M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:5
+      |> bucket_models
+    in
     check int "one model" 1 (List.length result);
     let m = List.hd result in
     check bool "sparse → 2 distinct buckets (10min apart, 5min width)"
@@ -1182,7 +1305,10 @@ let test_buckets_cache_hit_ratio_zero_denom () =
     success_entry_with_cache ~model:"kimi-k2.6" ~ts:now ~input_tokens:0 ~cache_read:0 ();
   ];
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
-    let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60 in
+    let result =
+      M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60
+      |> bucket_models
+    in
     check int "one model" 1 (List.length result);
     let m = List.hd result in
     let b = List.hd m.mb_buckets in
@@ -1259,6 +1385,9 @@ let zero_model_stats (model_id : string) ~provider ~entry_count
     buckets = [];
   }
 
+let successful_cost_read : M.cost_read_result =
+  Ok { malformed_rows = 0; schema_violation_rows = 0 }
+
 let test_provider_rollup_empty_aggregate () =
   let agg : M.aggregate =
     { window_minutes = 30
@@ -1267,6 +1396,7 @@ let test_provider_rollup_empty_aggregate () =
     ; total_entries = 0
     ; total_error_entries = 0
     ; latency_buckets = []
+    ; cost_read = successful_cost_read
     }
   in
   check int "empty models gives empty rollup" 0
@@ -1278,7 +1408,8 @@ let test_provider_rollup_skips_unknown_provider () =
   let m2 = zero_model_stats "bare-model" ~provider:None ~entry_count:3 in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 8; total_error_entries = 0; latency_buckets = [] }
+    ; total_entries = 8; total_error_entries = 0; latency_buckets = []
+    ; cost_read = successful_cost_read }
   in
   let rollup = M.provider_rollup agg in
   check int "only provider=Some survives" 1 (List.length rollup);
@@ -1302,7 +1433,8 @@ let test_provider_rollup_weighted_mean () =
   in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 100; total_error_entries = 0; latency_buckets = [] }
+    ; total_entries = 100; total_error_entries = 0; latency_buckets = []
+    ; cost_read = successful_cost_read }
   in
   let rollup = M.provider_rollup agg in
   let stats = List.hd rollup in
@@ -1322,7 +1454,8 @@ let test_provider_rollup_all_none_yields_none () =
   let m2 = zero_model_stats "x:2" ~provider:(Some "x") ~entry_count:5 in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 10; total_error_entries = 0; latency_buckets = [] }
+    ; total_entries = 10; total_error_entries = 0; latency_buckets = []
+    ; cost_read = successful_cost_read }
   in
   let rollup = M.provider_rollup agg in
   let stats = List.hd rollup in
@@ -1339,7 +1472,8 @@ let test_provider_rollup_sort_by_entry_count_desc () =
   let c = zero_model_stats "c:1" ~provider:(Some "c") ~entry_count:7 in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [a; b; c]
-    ; total_entries = 20; total_error_entries = 0; latency_buckets = [] }
+    ; total_entries = 20; total_error_entries = 0; latency_buckets = []
+    ; cost_read = successful_cost_read }
   in
   let rollup = M.provider_rollup agg in
   let names = List.map (fun s -> s.M.ps_provider) rollup in
@@ -1355,7 +1489,8 @@ let test_provider_rollup_json_shape () =
   in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [m]
-    ; total_entries = 42; total_error_entries = 0; latency_buckets = [] }
+    ; total_entries = 42; total_error_entries = 0; latency_buckets = []
+    ; cost_read = successful_cost_read }
   in
   let json = M.provider_stats_to_json (List.hd (M.provider_rollup agg)) in
   match json with
@@ -1382,6 +1517,7 @@ let test_prompt_feedback_empty_aggregate () =
     ; total_entries = 0
     ; total_error_entries = 0
     ; latency_buckets = []
+    ; cost_read = successful_cost_read
     }
   in
   check string "empty aggregate renders empty prompt block" ""
@@ -1410,6 +1546,7 @@ let test_prompt_feedback_redacts_provider_model_identity () =
     ; total_entries = 10
     ; total_error_entries = 3
     ; latency_buckets = []
+    ; cost_read = successful_cost_read
     }
   in
   let text = M.render_keeper_prompt_feedback agg in
@@ -1433,6 +1570,7 @@ let test_prompt_feedback_is_cost_independent () =
       ; total_entries = 1
       ; total_error_entries = 0
       ; latency_buckets = []
+      ; cost_read = successful_cost_read
       }
   in
   let baseline = render None in
@@ -1521,11 +1659,19 @@ let () =
         test_hw_decode_parser_uses_current_field_only;
       test_case "cost parser uses current hw-decode field only" `Quick
         test_cost_parser_uses_current_hw_decode_field_only;
+      test_case "cost parser requires usage_missing" `Quick
+        test_cost_parser_requires_usage_missing;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
       test_case "costs.jsonl disambiguates matching model names by provider" `Quick
         test_costs_jsonl_disambiguates_matching_model_names_by_provider;
       test_case "costs.jsonl zero latency stays missing" `Quick test_costs_jsonl_zero_latency_is_missing;
       test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
+      test_case "retired single-file cost store is ignored" `Quick
+        test_retired_single_file_cost_store_is_ignored;
+      test_case "cost read diagnostics reach API" `Quick
+        test_cost_read_diagnostics_reach_api;
+      test_case "cost read failure is not empty success" `Quick
+        test_cost_read_failure_is_not_empty_success;
       test_case "cost latency json composes axes and percentiles" `Quick test_cost_latency_json_composes_axes_and_percentiles;
       test_case "public runtime lane label is stable across windows" `Quick
         test_public_runtime_lane_label_is_stable_across_windows;

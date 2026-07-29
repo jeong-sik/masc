@@ -67,6 +67,15 @@ val int_option_to_yojson : int option -> Yojson.Safe.t
 val string_option_to_yojson : string option -> Yojson.Safe.t
 (** [string_option_to_yojson] maps [Some s] to [`String s] or [None] to [`Null]. *)
 
+(** [ok_assoc fields] constructs the canonical JSON success envelope.
+    A caller-supplied [status] field is discarded so it cannot override
+    the required ["ok"] status. *)
+val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
+
+(** [error_assoc fields] constructs the canonical JSON error envelope.
+    A caller-supplied [status] field is discarded so it cannot override
+    the required ["error"] status. *)
+val error_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 
 (** {1 Diagnostic helpers} *)
 

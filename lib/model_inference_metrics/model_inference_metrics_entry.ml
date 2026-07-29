@@ -124,6 +124,14 @@ type latency_bucket =
   ; count : int
   }
 
+type cost_read_diagnostics =
+  { malformed_rows : int
+  ; schema_violation_rows : int
+  }
+
+type cost_read_result =
+  (cost_read_diagnostics, Dated_jsonl.read_error) result
+
 type aggregate =
   { window_minutes : int
   ; bucket_minutes : int
@@ -131,6 +139,7 @@ type aggregate =
   ; total_entries : int
   ; total_error_entries : int
   ; latency_buckets : latency_bucket list
+  ; cost_read : cost_read_result
   }
 
 (** Per-provider rollup of {!model_stats} aggregated across every model id
@@ -204,7 +213,8 @@ type parse_error =
   | Missing_outcome                (* telemetry.outcome absent on success-branch row *)
   | Missing_success_model          (* no selected_model / model_used / runtime_id *)
   | Missing_error_model_attribution (* no candidate_models / runtime_id on error turn *)
-  | Missing_cost_model             (* costs.jsonl row without "model" field *)
+  | Missing_cost_model             (* cost row without "model" field *)
+  | Missing_cost_usage_missing     (* costs row without current usage_missing boolean *)
 
 let parse_error_label = function
   | Not_assoc -> "not_assoc"
@@ -215,6 +225,7 @@ let parse_error_label = function
   | Missing_success_model -> "missing_success_model"
   | Missing_error_model_attribution -> "missing_error_model_attribution"
   | Missing_cost_model -> "missing_cost_model"
+  | Missing_cost_usage_missing -> "missing_cost_usage_missing"
 ;;
 
 (* [Out_of_window] and [Not_assoc] are routine in mixed jsonl streams; we never
@@ -227,7 +238,8 @@ let parse_error_is_schema_violation = function
   | Missing_outcome
   | Missing_success_model
   | Missing_error_model_attribution
-  | Missing_cost_model -> true
+  | Missing_cost_model
+  | Missing_cost_usage_missing -> true
 ;;
 
 (* ── Percentile / list helpers ──────────────────────────── *)

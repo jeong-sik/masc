@@ -101,6 +101,14 @@ type latency_bucket =
   ; count : int
   }
 
+type cost_read_diagnostics =
+  { malformed_rows : int
+  ; schema_violation_rows : int
+  }
+
+type cost_read_result =
+  (cost_read_diagnostics, Dated_jsonl.read_error) result
+
 type aggregate =
   { window_minutes : int
   ; bucket_minutes : int
@@ -108,6 +116,7 @@ type aggregate =
   ; total_entries : int
   ; total_error_entries : int
   ; latency_buckets : latency_bucket list
+  ; cost_read : cost_read_result
   }
 
 type provider_stats =
@@ -166,6 +175,7 @@ type parse_error =
   | Missing_success_model
   | Missing_error_model_attribution
   | Missing_cost_model
+  | Missing_cost_usage_missing
 
 val parse_error_label : parse_error -> string
 val parse_error_is_schema_violation : parse_error -> bool

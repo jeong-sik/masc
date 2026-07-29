@@ -2,7 +2,7 @@
     {!Model_inference_metrics}.
 
     Reads keeper [decisions.jsonl] files plus inference-level
-    [costs.jsonl] (legacy single-file + dated subtree), merges duplicate
+    date-split [costs] rows, merges duplicate
     samples between the two sources, and exposes coverage helpers used
     by the aggregate stage.
 
@@ -55,76 +55,51 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       files)
 ;;
 
-let read_cost_entries_legacy ~base_path ~since_unix : raw_entry list =
-  let path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "costs.jsonl" in
-  if not (Sys.file_exists path)
-  then []
-  else (
-    try
-      Fs_compat.fold_jsonl_lines
-        ~init:[]
-        ~f:(fun acc ~line_no json ->
-          match parse_cost_entry json ~since_unix with
-          | Ok e -> e :: acc
-          | Error err ->
-            if parse_error_is_schema_violation err
-            then
-              Log.Model_inference_metrics.warn "costs.jsonl parse drop: %s:%d reason=%s"
-                path
-                line_no
-                (parse_error_label err);
-            acc)
-        path
-    with
-    | Eio.Cancel.Cancelled _ as exn ->
-      let bt = Printexc.get_raw_backtrace () in
-      Printexc.raise_with_backtrace exn bt
-    | _ -> [])
-;;
-
-let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
+let read_cost_entries_dated ~base_path ~since_unix
+  : (raw_entry list * cost_read_diagnostics, Dated_jsonl.read_error) result
+  =
   let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "costs" in
   if not (Sys.file_exists dir)
-  then []
+  then Ok ([], { malformed_rows = 0; schema_violation_rows = 0 })
   else (
     let store = Dated_jsonl.create ~base_dir:dir () in
-    let now = Unix.gettimeofday () in
-    let since = Log.format_utc_date_of since_unix in
-    let until = Log.format_utc_date_of now in
-    try
-      Dated_jsonl.read_range store ~since ~until
-      |> List.filter_map (fun json ->
-        match
-          try Ok (parse_cost_entry json ~since_unix) with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | _ -> Error ()
-        with
-        | Ok (Ok e) -> Some e
-        | Ok (Error err) ->
-          if parse_error_is_schema_violation err
-          then
-            Log.Model_inference_metrics.warn "costs/dated parse drop: reason=%s"
-              (parse_error_label err);
-          None
-        | Error () -> None)
+    let entries = ref [] in
+    let malformed_rows = ref 0 in
+    let schema_violation_rows = ref 0 in
+    match
+      Dated_jsonl.iter_all_entries_result store (function
+        | Dated_jsonl.Parsed json ->
+          (match parse_cost_entry json ~since_unix with
+           | Ok entry -> entries := entry :: !entries
+           | Error Out_of_window -> ()
+           | Error err ->
+             incr schema_violation_rows;
+             Log.Model_inference_metrics.warn
+               "costs/dated schema drop: reason=%s"
+               (parse_error_label err))
+        | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+          incr malformed_rows;
+          let location =
+            match line_number with
+            | Some line_number -> Printf.sprintf "%s:%d" path line_number
+            | None -> path
+          in
+          Log.Model_inference_metrics.warn
+            "costs/dated malformed row: %s detail=%s"
+            location
+            detail)
     with
-    | Eio.Cancel.Cancelled _ as exn ->
-      let bt = Printexc.get_raw_backtrace () in
-      Printexc.raise_with_backtrace exn bt
-    | _ -> [])
+    | Ok () ->
+      Ok
+        ( List.rev !entries
+        , { malformed_rows = !malformed_rows
+          ; schema_violation_rows = !schema_violation_rows
+          } )
+    | Error error -> Error error)
 ;;
 
-(** Read cost ledger entries from both the legacy single-file
-    [masc_root/costs.jsonl] and the date-split
-    [masc_root/costs/YYYY-MM/DD.jsonl] tree, merging the two streams.
-
-    The public [masc-cost] CLI still owns the single-file writer and reporter.
-    Removing this reader before that documented executable is migrated would
-    split one live cost flow into two mutually invisible stores. *)
-let read_cost_entries ~base_path ~since_unix : raw_entry list =
-  let legacy = read_cost_entries_legacy ~base_path ~since_unix in
-  let dated = read_cost_entries_dated ~base_path ~since_unix in
-  legacy @ dated
+let read_cost_entries ~base_path ~since_unix =
+  read_cost_entries_dated ~base_path ~since_unix
 ;;
 
 let same_int_opt a b =
@@ -156,8 +131,14 @@ let merge_decision_and_cost_entries decisions costs =
 
 let read_all_entries ~base_path ~since_unix =
   let decisions = read_all_decisions ~base_path ~since_unix in
-  let costs = read_cost_entries ~base_path ~since_unix in
-  merge_decision_and_cost_entries decisions costs
+  match read_cost_entries ~base_path ~since_unix with
+  | Ok (costs, diagnostics) ->
+    merge_decision_and_cost_entries decisions costs, Ok diagnostics
+  | Error error ->
+    Log.Model_inference_metrics.error
+      "costs/dated read failed: %s"
+      (Dated_jsonl.read_error_to_string error);
+    decisions, Error error
 ;;
 
 (* ── Coverage helpers (used by aggregate stage) ───────────── *)

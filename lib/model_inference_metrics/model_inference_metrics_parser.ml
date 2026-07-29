@@ -2,7 +2,7 @@
     {!Model_inference_metrics}.
 
     Owns [parse_telemetry_entry] (decisions.jsonl rows) and
-    [parse_cost_entry] (costs.jsonl rows), plus the model-attribution
+    [parse_cost_entry] (date-split cost rows), plus the model-attribution
     helpers (runtime name canonicalization, candidate-model fallback,
     provider hints) that both parsers share. Produces internal
     {!Model_inference_metrics_entry.raw_entry} values tagged with the
@@ -318,7 +318,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
     | _ -> Error Not_assoc)
 ;;
 
-(* ── costs.jsonl parser ─────────────────────────────────── *)
+(* ── date-split cost row parser ─────────────────────────── *)
 
 let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
   match List.assoc_opt "hw_decode_tokens_per_second" fields with
@@ -339,15 +339,6 @@ let canonical_cost_model_id ~(provider : string option) model =
     let prefix = provider_key ^ ":" in
     if String.starts_with ~prefix model then model else prefix ^ model
 ;;
-
-(* Three-way decision for the costs.jsonl [usage_missing] field. Previous
-   code compressed [None] (field absent) with [Some false] via [Option.value
-   ~default:false]; absent now contributes a [usage_missing_field_absent]
-   anomaly reason so reconciliation can see the gap. *)
-type usage_missing_decision =
-  | Usage_missing_reported  (* usage_missing = true *)
-  | Usage_present_reported  (* usage_missing = false *)
-  | Usage_missing_field_absent  (* usage_missing field not in row *)
 
 let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
   : (raw_entry, parse_error) result
@@ -378,19 +369,9 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
            ~provider:(private_provider_hint_of_fields fields)
            raw_model
        in
-       let usage_missing_decision =
-         match json_bool_field_opt "usage_missing" fields with
-         | Some true -> Usage_missing_reported
-         | Some false -> Usage_present_reported
-         | None -> Usage_missing_field_absent
-       in
-       let usage_missing =
-         match usage_missing_decision with
-         | Usage_missing_reported -> true
-         (* Field-absent rows preserve the legacy "treat as present" behaviour
-            but are surfaced via [usage_missing_field_absent] anomaly reason. *)
-         | Usage_present_reported | Usage_missing_field_absent -> false
-       in
+       (match json_bool_field_opt "usage_missing" fields with
+        | None -> Error Missing_cost_usage_missing
+        | Some usage_missing ->
        let usage_reported = not usage_missing in
        let input_tokens_raw =
          if usage_missing then None else json_int_field_opt "input_tokens" fields
@@ -403,23 +384,12 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          | Some _ as v -> v
          | None -> json_int_field_opt "cache_read_input_tokens" fields
        in
-       let usage_trust, base_usage_anomaly_reasons =
+       let usage_trust, usage_anomaly_reasons =
          infer_usage_trust_from_fields
            fields
            ~usage_reported:(Some usage_reported)
            ~input_tokens:input_tokens_raw
            ~output_tokens:output_tokens_raw
-       in
-       (* Surface field-absent rows as an anomaly reason so reconciliation
-          can distinguish them from explicit [usage_missing = false]. *)
-       let usage_anomaly_reasons =
-         match usage_missing_decision with
-         | Usage_missing_field_absent ->
-           if List.mem "usage_missing_field_absent" base_usage_anomaly_reasons
-           then base_usage_anomaly_reasons
-           else base_usage_anomaly_reasons @ [ "usage_missing_field_absent" ]
-         | Usage_missing_reported | Usage_present_reported ->
-           base_usage_anomaly_reasons
        in
        let latency_ms = json_positive_float_field_opt "request_latency_ms" fields in
        let tok_per_sec_raw =
@@ -487,6 +457,6 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          ; streaming_ttfrc_ms = None
          ; streaming_inter_chunk_count = None
          ; streaming_inter_chunk_avg_ms = None
-         }))
+         })))
   | _ -> Error Not_assoc
 ;;

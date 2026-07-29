@@ -1,6 +1,6 @@
 (** Model_inference_metrics — per-model aggregate inference statistics.
 
-    Reads keeper decisions.jsonl files plus inference-level costs.jsonl
+    Reads keeper decisions.jsonl files plus inference-level date-split costs
     samples and computes per-model aggregates within a configurable time
     window.
 
@@ -114,6 +114,14 @@ type model_stats = {
   buckets : bucket_metric list;
 }
 
+type cost_read_diagnostics = {
+  malformed_rows : int;
+  schema_violation_rows : int;
+}
+
+type cost_read_result =
+  (cost_read_diagnostics, Dated_jsonl.read_error) result
+
 type aggregate = {
   window_minutes : int;
   bucket_minutes : int;
@@ -121,6 +129,7 @@ type aggregate = {
   total_entries : int;
   total_error_entries : int;
   latency_buckets : latency_bucket list;
+  cost_read : cost_read_result;
 }
 
 val compute : base_path:string -> window_minutes:int -> aggregate
@@ -145,7 +154,7 @@ val aggregate_buckets :
   base_path:string ->
   window_min:int ->
   bucket_min:int ->
-  model_bucketed list
+  (model_bucketed list * cost_read_diagnostics, Dated_jsonl.read_error) result
 (** [aggregate_buckets ~base_path ~window_min ~bucket_min] splits the last
     [window_min] minutes into [bucket_min]-minute buckets, groups entries
     per model, and for each non-empty bucket computes:
@@ -155,7 +164,9 @@ val aggregate_buckets :
     - Only buckets with at least one entry are emitted.
     - Buckets are returned oldest-first within each model.
     - [cache_hit_ratio] is [0.0] when the denominator is zero (never NaN).
-    - A non-positive [bucket_min] is treated as [1]. *)
+    - A non-positive [bucket_min] is treated as [1].
+    - Cost-store read failures are returned instead of being projected as an
+      empty successful cost stream. *)
 
 val to_json : aggregate -> Yojson.Safe.t
 (** Serialize [aggregate] to JSON for API responses. Compatibility fields

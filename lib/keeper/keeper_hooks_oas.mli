@@ -139,7 +139,7 @@ val emit_cost_event :
   ?usage_trust:Keeper_usage_trust.t ->
   ?telemetry:Agent_sdk.Types.inference_telemetry ->
   ?model:string -> unit -> unit
-(** Append a structured cost-ledger event to [costs.jsonl]. *)
+(** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
 
 (** PR-review / PR-work metric event types live in Keeper_hooks_oas_types
     (intra-library file split, 2026-05-16). Re-exported via include below. *)

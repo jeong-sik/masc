@@ -145,16 +145,15 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
   response
 
 let empty_model_metrics_json ~window ~bucket_min =
-  let agg =
-    { Model_inference_metrics.window_minutes = window
-    ; bucket_minutes = bucket_min
-    ; models = []
-    ; total_entries = 0
-    ; total_error_entries = 0
-    ; latency_buckets = []
-    }
-  in
-  Model_inference_metrics.to_json agg
+  `Assoc
+    [ "window_minutes", `Int window
+    ; "bucket_minutes", `Int bucket_min
+    ; "total_entries", `Int 0
+    ; "total_error_entries", `Int 0
+    ; "cost_ledger_read", `Assoc [ "status", `String "pending" ]
+    ; "latency_buckets", `List []
+    ; "models", `List []
+    ]
 
 let empty_cost_latency_json ~window =
   `Assoc
@@ -166,6 +165,7 @@ let empty_cost_latency_json ~window =
     ; "p95", `Null
     ; "total_cost_usd", `Float 0.0
     ; "window_minutes", `Int window
+    ; "cost_ledger_read", `Assoc [ "status", `String "pending" ]
     ; "generated_at", `Float (Unix.gettimeofday ())
     ]
 

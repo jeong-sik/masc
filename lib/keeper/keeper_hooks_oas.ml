@@ -107,7 +107,7 @@ include Keeper_hooks_oas_cost_events
 (** Build OAS hooks for a keeper agent.
 
     All keepers receive the full tool set unconditionally.
-    Cost events are emitted per turn to [.masc/costs.jsonl]. Cost is an
+    Cost events are emitted per turn to the date-split [.masc/costs/] store. Cost is an
     observation and is not part of the pre-tool decision surface.
 
     @param meta_ref Mutable ref to keeper metadata

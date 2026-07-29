@@ -97,6 +97,7 @@
   masc_core
   masc.host_config
   masc.config_dir_resolver
+  dated_jsonl
   unix
   yojson
   masc_types

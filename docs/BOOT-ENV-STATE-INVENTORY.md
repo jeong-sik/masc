@@ -315,7 +315,7 @@ Allowed path model:
 - `<runtime_root>/runtime_params.json`
 - `<runtime_root>/param_audit.jsonl`
 - `<runtime_root>/metrics/<agent>/YYYY-MM.jsonl`
-- `<runtime_root>/costs.jsonl`
+- `<runtime_root>/costs/YYYY-MM/DD.jsonl`
 - `<runtime_root>/autonomy_stats.jsonl`
 
 Current host note:

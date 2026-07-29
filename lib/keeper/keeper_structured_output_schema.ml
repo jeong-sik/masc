@@ -87,7 +87,13 @@ let consolidation_group_schema =
       , nullable_enum_schema librarian_claim_kind_tokens )
     ]
   in
-  object_schema ~required:(List.map fst fields) fields
+  object_schema
+    ~required:
+      [ Keeper_memory_os_consolidation.wire_field_member_indices
+      ; Keeper_memory_os_consolidation.wire_field_consolidated_claim
+      ; Keeper_memory_os_consolidation.wire_field_category
+      ]
+    fields
 ;;
 
 let consolidation_plan_output_schema =

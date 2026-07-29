@@ -145,6 +145,13 @@ type world_observation = {
   connected_surface_failures : Gate_surface.presence_failure list;
   (** Connector binding stores that could not be read during presence
       observation. Healthy connector surfaces remain available. *)
+
+  own_recent_board_posts : Board.post list;
+  (** The keeper's own latest board posts, newest first, bounded by
+      [Keeper_config.keeper_board_own_recent_max]. Cursor-independent:
+      [pending_board_events] tracks OTHER authors' unseen posts and advances
+      past them, so without this field a keeper never observes its own
+      published posts in-prompt. Raw observation only — no dedup gate. *)
 }
 
 type keeper_cycle_channel =

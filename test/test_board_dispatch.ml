@@ -769,6 +769,39 @@ let test_author_filter_treats_wildcards_literally () =
   Alcotest.(check int) "percent does not match all authors" 0
     (List.length filtered)
 
+let test_recent_author_match_applies_before_limit () =
+  let own =
+    match
+      Board_dispatch.create_post ~author:"exact-owner"
+        ~content:"owned before unrelated traffic"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  for index = 1 to 3 do
+    ignore
+      (Board_dispatch.create_post
+         ~author:(Printf.sprintf "unrelated-%d" index)
+         ~content:"newer unrelated traffic"
+         ~post_kind:Board.Human_post
+         ())
+  done;
+  let posts =
+    Board_dispatch.list_recent_posts_matching_author
+      ~author_matches:(fun author ->
+        String.equal (Board.Agent_id.to_string author) "exact-owner")
+      ~limit:1
+      ()
+  in
+  match posts with
+  | [ post ] ->
+    Alcotest.(check string)
+      "newer unrelated posts do not consume the result limit"
+      (Board.Post_id.to_string own.id)
+      (Board.Post_id.to_string post.id)
+  | _ -> Alcotest.fail "expected exactly one matching author post"
+
 let test_legacy_post_without_kind_is_rejected () =
   let post_id = seed_legacy_keeper_post () in
   match Board_dispatch.get_post ~post_id with
@@ -2109,6 +2142,8 @@ let () =
         (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "literal wildcard filter" `Quick
         (with_eio test_author_filter_treats_wildcards_literally);
+      Alcotest.test_case "author match precedes recent result limit" `Quick
+        (with_eio test_recent_author_match_applies_before_limit);
       Alcotest.test_case "legacy post without kind is rejected" `Quick
         (with_eio test_legacy_post_without_kind_is_rejected);
     ];

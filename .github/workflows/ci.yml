@@ -890,7 +890,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache"
+          operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache @test/runtest-test_model_map_of_keeper_rows"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${operator_targets}"
 
       - name: Run SSE reconnect e2e

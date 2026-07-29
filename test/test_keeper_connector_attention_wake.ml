@@ -142,6 +142,7 @@ let quiet_obs : WO.world_observation =
   ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
   ; connected_surface_failures = []
+  ; own_recent_board_posts = []
   }
 
 let reasons_of_verdict = function

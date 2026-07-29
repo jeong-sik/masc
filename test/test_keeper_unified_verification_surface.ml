@@ -18,6 +18,7 @@ let base_observation : WO.world_observation =
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
     connected_surface_failures = [];
+    own_recent_board_posts = [];
   }
 
 let sample_board_event : WO.pending_board_event =
@@ -484,6 +485,56 @@ let test_turn_effect_record () =
        ~external_delivery_routed:true
      = Masc.Keeper_run_prompt.Meaningful_turn)
 
+let post_id_exn s =
+  match Masc.Board.Post_id.of_string s with
+  | Ok id -> id
+  | Error _ -> Alcotest.fail (Printf.sprintf "invalid post_id fixture: %s" s)
+
+let agent_id_exn s =
+  match Masc.Board.Agent_id.of_string s with
+  | Ok id -> id
+  | Error _ -> Alcotest.fail (Printf.sprintf "invalid agent_id fixture: %s" s)
+
+let sample_own_post : Masc.Board.post =
+  { id = post_id_exn "own-post-1"
+  ; author = agent_id_exn "test-keeper"
+  ; title = "My earlier review"
+  ; body = "Already said this exact thing."
+  ; content = "Already said this exact thing."
+  ; post_kind = Masc.Board.Human_post
+  ; meta_json = None
+  ; visibility = Masc.Board.Public
+  ; created_at = 1_753_300_000.0
+  ; updated_at = 1_753_300_100.0
+  ; expires_at = 1_753_400_000.0
+  ; votes_up = 0
+  ; votes_down = 0
+  ; reply_count = 0
+  ; pinned = false
+  ; hearth = None
+  ; thread_id = None
+  ; origin = None
+  }
+
+let test_own_recent_board_posts_render_in_world_state () =
+  let obs = { base_observation with own_recent_board_posts = [ sample_own_post ] } in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "own posts section present" true
+    (contains_sub "### Your Recent Board Posts (1)" world_state);
+  check bool "own post id rendered for board get follow-up" true
+    (contains_sub "own-post-1" world_state);
+  check bool "own post title rendered" true
+    (contains_sub "My earlier review" world_state)
+
+let test_no_own_recent_board_posts_renders_no_section () =
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta base_observation
+  in
+  check bool "own posts section absent when empty" false
+    (contains_sub "Your Recent Board Posts" world_state)
+
 let () =
   run "keeper_unified_verification_surface"
     [
@@ -533,6 +584,12 @@ let () =
           test_case
             "prompt: scheduled wake preserves complete message"
             `Quick test_scheduled_wake_preserves_complete_message;
+          test_case
+            "prompt: own recent board posts render as neutral observation rows"
+            `Quick test_own_recent_board_posts_render_in_world_state;
+          test_case
+            "prompt: no own recent board posts renders no section"
+            `Quick test_no_own_recent_board_posts_renders_no_section;
           test_case
             "invariant: world-state frame never enters the persisted user message"
             `Quick test_world_state_never_in_persisted_user_message;

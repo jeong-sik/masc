@@ -84,7 +84,6 @@ describe('refreshDashboard bootstrap', () => {
         generated_at: '2026-05-14T06:00:01Z',
         goals: [],
         rollup: {},
-        workspace_fsm: null,
       },
       namespace_truth: {
         generated_at: '2026-05-14T06:00:02Z',
@@ -155,7 +154,6 @@ describe('refreshDashboard bootstrap', () => {
         generated_at: '2026-06-26T00:00:01Z',
         goals: [],
         rollup: {},
-        workspace_fsm: null,
       },
       namespace_truth: {
         generated_at: '2026-06-26T00:00:02Z',
@@ -184,7 +182,6 @@ describe('refreshDashboard bootstrap', () => {
       generated_at: '2026-06-25T00:00:00Z',
       goals: [],
       rollup: {},
-      workspace_fsm: null,
     })
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',
@@ -210,7 +207,6 @@ describe('refreshDashboard bootstrap', () => {
       generated_at: '2026-06-25T00:00:00Z',
       goals: [],
       rollup: {},
-      workspace_fsm: null,
     })
     const treePayload = {
       generated_at: '2026-06-25T00:00:01Z',
@@ -239,7 +235,6 @@ describe('refreshDashboard bootstrap', () => {
       generated_at: '2026-06-25T00:00:00Z',
       goals: [],
       rollup: {},
-      workspace_fsm: null,
     })
     apiMocks.fetchDashboardGoalsTree.mockRejectedValue(new Error('tree offline'))
 
@@ -289,7 +284,6 @@ describe('refreshDashboard bootstrap', () => {
       generated_at: '2026-06-25T00:00:00Z',
       goals: [],
       rollup: {},
-      workspace_fsm: null,
     })
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',

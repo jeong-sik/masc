@@ -481,13 +481,6 @@ fn parse_query_param(search: &str, key: &str) -> Option<String> {
 
 // ─── Endpoints ──────────────────────────────
 
-pub fn trpg_uses_polling() -> bool {
-    // MASC exposes both poll JSON and SSE endpoints.
-    // Current viewer runtime uses polling reliably because stream responses are
-    // JSON payloads and SSE is optional when available.
-    true
-}
-
 pub fn trpg_state_url() -> String {
     build_masc_url(&format!(
         "api/v1/trpg/state?workspace_id={}",
@@ -495,7 +488,7 @@ pub fn trpg_state_url() -> String {
     ))
 }
 
-/// Legacy JSON poll endpoint.
+/// Current TRPG event polling endpoint.
 pub fn trpg_stream_poll_url(after_seq: i64) -> String {
     build_masc_url(&format!(
         "api/v1/trpg/stream?workspace_id={}&after_seq={}",

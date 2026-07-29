@@ -98,7 +98,9 @@
   (re_export masc.keeper_usage_trust)
   (re_export masc.event_bus_slots)
   (re_export masc.keeper_toml)
-  ;; Model inference metrics + runtime provider label leaves.
+  ;; Model inference metrics + runtime provider label leaves + binding
+  ;; (Runtime_provider_binding.default_headers_for_kind, centralized by #26326).
+  (re_export masc.runtime_model)
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)
   ;; RFC-0058 Phase 1 — Declarative runtime TOML parser sub-library.

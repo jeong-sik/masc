@@ -159,10 +159,8 @@ let run_contention ~base ~clock ~gap_seconds =
        Eio.Fiber.fork ~sw (fun () ->
          for i = 1 to receipt_count do
            Eio.Time.sleep clock (turn_seconds *. 1.5);
-           match
-             let queued_message = message (Printf.sprintf "contention-%d" i) in
-             Keeper_chat_queue.enqueue ~keeper_name queued_message
-           with
+           let queued_message = message (Printf.sprintf "contention-%d" i) in
+           match Keeper_chat_queue.enqueue ~keeper_name queued_message with
            | Ok receipt -> enqueued := (receipt, queued_message) :: !enqueued
            | Error error ->
              Printf.printf "  enqueue failed: %s\n%!"
@@ -244,7 +242,7 @@ let test_receipts_are_admitted_in_fifo_order () =
     in
     let expected_delivery_keys =
       List.map
-        (fun (receipt, _) ->
+        (fun ((receipt : Keeper_chat_queue.enqueue_receipt), _) ->
            match
              Keeper_chat_delivery_identity.Receipt_ids.of_list
                [ receipt.Keeper_chat_queue.receipt_id ]

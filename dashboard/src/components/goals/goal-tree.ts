@@ -16,7 +16,6 @@ import {
   hydrateGoalTreeObservationError,
   hydrateGoalTreeSnapshot,
 } from '../../goal-tree-state'
-import { workspaceFsmSnapshot } from '../../store'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
@@ -30,7 +29,6 @@ import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
   DashboardGoalDetailResponse,
-  DashboardWorkspaceFsmViolation,
   GoalCompletionSummary,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
@@ -405,11 +403,6 @@ function TreeSummary({
   `
 }
 
-function workspaceViolationsForGoal(goalId: string): DashboardWorkspaceFsmViolation[] {
-  const violations = workspaceFsmSnapshot.value?.violations ?? []
-  return violations.filter(violation => violation.refs?.goal_id === goalId)
-}
-
 function TreeTask({ task }: { task: GoalTreeTask }) {
   return html`
     <div class="flex flex-wrap items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs">
@@ -672,8 +665,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const isExpanded = expandedNodes.value.has(node.id)
   const hasContent = node.children.length > 0 || node.tasks.length > 0
   const isSelected = selectedGoalId.value === node.id
-  const workspaceViolations = workspaceViolationsForGoal(node.id)
-  const workspaceHasError = workspaceViolations.some(v => v.severity === 'error')
   const indent = depth * 20
   const headerBase = isSelected
     ? TREE_NODE_CARD_ACTIVE
@@ -729,14 +720,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ${node.pending_approval_count > 0 ? html`
               <span class="rounded-[var(--r-1)] border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-medium text-warn">
                 approval ${node.pending_approval_count}
-              </span>
-            ` : null}
-            ${workspaceViolations.length > 0 ? html`
-              <span
-                class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-medium ${workspaceHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
-                title="Goal x Task x Board x Reward"
-              >
-                FSM ${workspaceViolations.length}
               </span>
             ` : null}
             ${node.latest_keeper_ref ? html`

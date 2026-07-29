@@ -38,7 +38,7 @@ import {
 } from './task-detail-state'
 import { TaskActivityList } from './task-activity-list'
 import { effectiveTaskPriority, goalById, priorityLabel } from './goal-helpers'
-import type { Task, TaskGateEvaluation } from '../../types'
+import type { Task } from '../../types'
 
 const CARD_BOX = 'v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-3'
 
@@ -267,41 +267,6 @@ function VerdictLineageSection() {
   `
 }
 
-function gateTone(status?: string | null): string {
-  switch (status) {
-    case 'ready': return 'text-ok border-ok/25 bg-ok/10'
-    case 'blocked': return 'text-bad border-bad/25 bg-bad/10'
-    case 'inconclusive': return 'text-warn border-warn/25 bg-warn/10'
-    default: return 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'
-  }
-}
-
-function GateSection({
-  title,
-  gate,
-}: {
-  title: string
-  gate?: TaskGateEvaluation | null
-}) {
-  if (!gate) return null
-
-  return html`
-    <div class=${CARD_BOX}>
-      <div class="flex items-center justify-between gap-3">
-        <div class="text-xs font-medium text-text-strong">${title}</div>
-        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${gateTone(gate.status)}`}>${gate.status}</span>
-      </div>
-      ${gate.reasons && gate.reasons.length > 0 ? html`
-        <div class="mt-2 flex flex-col gap-1">
-          ${gate.reasons.slice(0, 4).map(reason => html`
-            <div key=${reason} class="text-2xs leading-relaxed text-text-muted">${reason}</div>
-          `)}
-        </div>
-      ` : null}
-    </div>
-  `
-}
-
 // RFC-0323 G-9: linked re-run lineage. A task created as a re-run carries
 // the write-once predecessor_task_id (G-8); surface it as a link so the
 // operator can walk back to the original. Clicking opens the predecessor's
@@ -334,12 +299,10 @@ function PredecessorSection({ task }: { task: Task }) {
 
 function ContractSection({ task }: { task: Task }) {
   const contract = task.contract
-  const gate = task.gate
-  if (!contract && !gate) return null
+  if (!contract) return null
 
-  const completionItems = gate?.completion_contract ?? contract?.completion_contract ?? []
-  const unmetItems = gate?.unmet_completion_contract ?? []
-  const requiredEvidence = contract?.required_evidence ?? []
+  const completionItems = contract.completion_contract ?? []
+  const requiredEvidence = contract.required_evidence ?? []
   const isAwaitingVerification = task.status === 'awaiting_verification'
   const verifierAssignee = isAwaitingVerification ? task.assignee : undefined
 
@@ -347,7 +310,7 @@ function ContractSection({ task }: { task: Task }) {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">계약 게이트</div>
-        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${contract?.strict ? 'text-accent-fg border-[var(--accent-25)] bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <span class=${`rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] ${contract.strict ? 'text-accent-fg border-[var(--accent-25)] bg-[var(--accent-10)]' : 'text-text-muted border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'}`}>${contract.strict ? 'strict' : 'advisory'}</span>
         ${isAwaitingVerification ? html`
           <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">
             검증 대기
@@ -376,16 +339,12 @@ function ContractSection({ task }: { task: Task }) {
         </div>
       ` : null}
 
-      <${GateSection} title="완료 게이트" gate=${gate?.done} />
-      <${GateSection} title="검수 → 구현" gate=${gate?.inspect_to_implement} />
-      <${GateSection} title="검증 → 리뷰" gate=${gate?.verify_to_review} />
-
       ${completionItems.length > 0 ? html`
         <div class=${CARD_BOX}>
           <div class="text-xs font-medium text-text-strong">완료 계약</div>
           <div class="mt-2 flex flex-col gap-1">
             ${completionItems.map((item: string) => html`
-              <div key=${item} class=${`text-2xs ${unmetItems.includes(item) ? 'text-bad' : 'text-text-body'}`}>${item}</div>
+              <div key=${item} class="text-2xs text-text-body">${item}</div>
             `)}
           </div>
         </div>

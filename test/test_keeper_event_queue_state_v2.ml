@@ -97,7 +97,7 @@ let test_changed_selected_snapshot_fails_closed () =
     (post_ids (State.pending changed))
 ;;
 
-let test_current_schema_round_trip_and_old_schema_rejection () =
+let test_current_schema_round_trip_and_legacy_v10_recovery () =
   let state = State.with_pending (queue [ stimulus "fresh" 1.0 ]) State.empty in
   let json = State.to_yojson state in
   let decoded = State.of_yojson json |> require_ok "current schema round trip" in
@@ -118,6 +118,32 @@ let test_current_schema_round_trip_and_old_schema_rejection () =
     "fresh pending survives"
     [ "fresh" ]
     (post_ids (State.pending decoded));
+  let legacy_v10 =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        ( ("schema", `String "keeper.event_queue.state.v10")
+        :: (fields
+            |> List.remove_assoc "schema"
+            |> List.remove_assoc "accepted_transfer_projections") )
+    | _ -> Alcotest.fail "state codec did not emit an object"
+  in
+  let recovered_v10 =
+    State.of_yojson legacy_v10 |> require_ok "legacy v10 snapshot recovers"
+  in
+  Alcotest.(check (list string))
+    "legacy v10 pending survives"
+    [ "fresh" ]
+    (post_ids (State.pending recovered_v10));
+  (match State.to_yojson recovered_v10 with
+   | `Assoc fields ->
+     Alcotest.(check (option string))
+       "legacy v10 recovery checkpoints as current schema"
+       (Some State.schema)
+       (match List.assoc_opt "schema" fields with
+        | Some (`String schema) -> Some schema
+        | Some _ | None -> None)
+   | _ -> Alcotest.fail "recovered state codec did not emit an object");
   let stale =
     match json with
     | `Assoc fields -> `Assoc (("schema", `String "keeper.event_queue.state.v5") :: List.remove_assoc "schema" fields)
@@ -178,7 +204,10 @@ let () =
             "changed selected snapshot fails closed"
             `Quick
             test_changed_selected_snapshot_fails_closed
-        ; Alcotest.test_case "fresh schema only" `Quick test_current_schema_round_trip_and_old_schema_rejection
+        ; Alcotest.test_case
+            "current schema and legacy v10 recovery"
+            `Quick
+            test_current_schema_round_trip_and_legacy_v10_recovery
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart ] )

@@ -256,21 +256,22 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v10"
+let schema = "keeper.event_queue.state.v11"
+let schema_v10 = "keeper.event_queue.state.v10"
 let schema_v9 = "keeper.event_queue.state.v9"
 let schema_v8 = "keeper.event_queue.state.v8"
 
-(* v10 persists the one terminal receipt retained after transition projection
+(* v11 persists the one terminal receipt retained after transition projection
    and every accepted target transfer projection. The receipt is the durable
    replay witness for an accepted operator disposition once its outbox and
    settlement WAL have been retired. A target projection prevents replay from
-   enqueueing a transfer source that the target already consumed. v9 wrote the
-   same queue shape without either witness, so it restores with no projected
-   receipt or transfer. v9 writes [ack_source_terminal] for source-terminal
-   ACKs. v8 used the
+   enqueueing a transfer source that the target already consumed. v10 wrote the
+   same queue shape without transfer projections, so it restores with no
+   projection. v9 wrote neither the retained receipt nor transfer projections.
+   v9 writes [ack_source_terminal] for source-terminal ACKs. v8 used the
    removed [settle_from_source_terminal] wire label; its only accepted use is
    recovery of an already durable outbox, which is canonicalized during decode
-   before any v10 snapshot is written. v7 carried [schema; revision; pending]
+   before any v11 snapshot is written. v7 carried [schema; revision; pending]
    only. The transition outbox lived
    solely in the settlement WAL, which forced that WAL to stay on disk after
    its pending mutation had already been absorbed into a saved snapshot - and a
@@ -3661,6 +3662,15 @@ let of_yojson json =
         ; "transition_outbox"
         ; "accepted_transfer_projections"
         ]
+    else if String.equal schema_value schema_v10
+    then
+      Ok
+        [ "schema"
+        ; "revision"
+        ; "pending"
+        ; "last_settlement"
+        ; "transition_outbox"
+        ]
     else if String.equal schema_value schema_v9 || String.equal schema_value schema_v8
     then Ok [ "schema"; "revision"; "pending"; "transition_outbox" ]
     else if String.equal schema_value schema_v7
@@ -3674,7 +3684,10 @@ let of_yojson json =
   let* pending_json = required_field ~context "pending" fields in
   let* pending = Keeper_event_queue.queue_of_yojson pending_json in
   let* transition_outbox =
-    if String.equal schema_value schema || String.equal schema_value schema_v9
+    if
+      String.equal schema_value schema
+      || String.equal schema_value schema_v10
+      || String.equal schema_value schema_v9
     then list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     else if String.equal schema_value schema_v8
     then
@@ -3686,7 +3699,7 @@ let of_yojson json =
     else Ok []
   in
   let* last_settlement =
-    if String.equal schema_value schema
+    if String.equal schema_value schema || String.equal schema_value schema_v10
     then
       match List.assoc_opt "last_settlement" fields with
       | Some `Null -> Ok None

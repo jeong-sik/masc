@@ -190,8 +190,7 @@ let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
     looks past the cursor, so without this a keeper never observes its own
     published posts in-prompt (production: one keeper posted 23 near-duplicate
     posts in a single hour). Raw observation only — bounded by
-    [Keeper_config.keeper_board_own_recent_max], scanned within
-    [Keeper_config.keeper_board_own_recent_scan_limit]; no dedup gate. *)
+    [Keeper_config.keeper_board_own_recent_max]; no dedup gate. *)
 let collect_own_recent_board_posts ~(meta : keeper_meta) : Board.post list =
   let max_posts = Keeper_config.keeper_board_own_recent_max () in
   if max_posts <= 0
@@ -199,15 +198,11 @@ let collect_own_recent_board_posts ~(meta : keeper_meta) : Board.post list =
   else (
     let self_ids = self_ids meta in
     try
-      Board_dispatch.list_posts
-        ~sort_by:Board_dispatch.Recent
-        ~limit:(Keeper_config.keeper_board_own_recent_scan_limit ())
+      Board_dispatch.list_recent_posts_matching_author
+        ~author_matches:(fun author ->
+          is_self_author ~self_ids (Board.Agent_id.to_string author))
+        ~limit:max_posts
         ()
-      |> List.filter (fun (p : Board.post) ->
-           is_self_author ~self_ids (Board.Agent_id.to_string p.author))
-      (* [List.filteri] over [List.take]: a fresh keeper has fewer than
-         [max_posts] posts, and [List.take] raises past the list length. *)
-      |> List.filteri (fun i _ -> i < max_posts)
     with
     | exn ->
       (* Same fail-loud contract as board event collection: counted, warned,

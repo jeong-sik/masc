@@ -103,10 +103,9 @@ let keeper_memory_os_recall_max_bytes () : int =
    relevance and novelty remain model decisions; there is no dedup gate.
 
    [max] bounds how many of the keeper's own newest posts the world
-   observation carries per turn. [scan_limit] bounds how many recent board
-   posts (across all authors) the collector scans to find them, so a busy
-   board cannot push the keeper's own posts out of the window. Both default
-   small: this is standing context, not a history dump. *)
+   observation carries per turn. The Board query applies canonical ownership
+   before this result limit, so unrelated traffic cannot hide the keeper's
+   latest post. *)
 let keeper_board_own_recent_max_rp =
   _rp_int ~key:"keeper.board.own_recent.max"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_OWN_RECENT_MAX"
@@ -115,15 +114,6 @@ let keeper_board_own_recent_max_rp =
     ~description:"Own recent board posts injected into the world observation per turn (0 = disable)" ()
 let keeper_board_own_recent_max () : int =
   Runtime_params.get keeper_board_own_recent_max_rp
-
-let keeper_board_own_recent_scan_limit_rp =
-  _rp_int ~key:"keeper.board.own_recent.scan_limit"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_OWN_RECENT_SCAN_LIMIT"
-                          ~default:200 ~min_v:1 ~max_v:100_000)
-    ~min_v:1 ~max_v:100_000
-    ~description:"Recent board posts scanned to collect the keeper's own posts" ()
-let keeper_board_own_recent_scan_limit () : int =
-  Runtime_params.get keeper_board_own_recent_scan_limit_rp
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"

@@ -200,6 +200,16 @@ val list_posts :
   unit ->
   Board.post list
 
+val list_recent_posts_matching_author :
+  author_matches:(Board.Agent_id.t -> bool) ->
+  limit:int ->
+  unit ->
+  Board.post list
+(** Full-history author query with predicate-before-limit semantics. Results
+    are newest-first by [created_at]. The typed predicate lets the caller keep
+    canonical identity ownership without routing through the public
+    substring-based author search. *)
+
 val current_post_cursor : unit -> float * string option
 (** Atomic high-water mark for initializing a Board observation cursor. *)
 (** Current Board cursor head without sorting or materializing the full post

@@ -15,8 +15,6 @@ let field_schema_version = "schema_version"
 let field_keeper_id = "keeper_id"
 let field_trace_id = "trace_id"
 let field_turn = "turn"
-let field_injected_fact_keys = "injected_fact_keys"
-let field_injected_episode_keys = "injected_episode_keys"
 let field_added_fact_keys = "added_fact_keys"
 let field_removed_fact_keys = "removed_fact_keys"
 let field_added_episode_keys = "added_episode_keys"
@@ -30,22 +28,15 @@ let failure_reason_read_error = "read_error"
 let failure_reason_prompt_render_error = "prompt_render_error"
 let failure_reason_unknown_label = "unknown_failure_reason"
 
-(* Legacy rows (schema_version absent) are v1. v2 is the first delta schema. *)
-let schema_version_legacy = 1
 let schema_version_delta = 2
 
-type payload =
-  | Full_snapshot of
-      { fact_keys : string list
-      ; episode_keys : string list
-      }
-  | Delta of
-      { added_fact_keys : string list
-      ; removed_fact_keys : string list
-      ; added_episode_keys : string list
-      ; removed_episode_keys : string list
-      ; content_hash : string
-      }
+type delta =
+  { added_fact_keys : string list
+  ; removed_fact_keys : string list
+  ; added_episode_keys : string list
+  ; removed_episode_keys : string list
+  ; content_hash : string
+  }
 
 type record =
   { keeper_id : string
@@ -55,7 +46,7 @@ type record =
   ; failure_reason : string option
   ; n_facts_in_store : int option
   ; n_episodes_in_store : int option
-  ; payload : payload
+  ; delta : delta
   }
 
 type decode_error =
@@ -114,17 +105,10 @@ let json_optional_string_field fields key =
   | None -> Ok None
 ;;
 
-let payload_of_fields fields =
-  match json_optional_int_field fields field_schema_version with
+let delta_of_fields fields =
+  match json_required_int_field fields field_schema_version with
   | Error _ as e -> e
-  | Ok (None | Some 1) ->
-    (match
-       ( json_required_string_list_field fields field_injected_fact_keys
-       , json_required_string_list_field fields field_injected_episode_keys )
-     with
-     | Ok fact_keys, Ok episode_keys -> Ok (Full_snapshot { fact_keys; episode_keys })
-     | Error err, _ | _, Error err -> Error err)
-  | Ok (Some 2) ->
+  | Ok 2 ->
     (match
        ( json_required_string_list_field fields field_added_fact_keys
        , json_required_string_list_field fields field_removed_fact_keys
@@ -138,16 +122,15 @@ let payload_of_fields fields =
        , Ok removed_episode_keys
        , Ok content_hash ) ->
        Ok
-         (Delta
-            { added_fact_keys; removed_fact_keys; added_episode_keys
-            ; removed_episode_keys; content_hash
-            })
+         { added_fact_keys; removed_fact_keys; added_episode_keys
+         ; removed_episode_keys; content_hash
+         }
      | Error err, _, _, _, _
      | _, Error err, _, _, _
      | _, _, Error err, _, _
      | _, _, _, Error err, _
      | _, _, _, _, Error err -> Error err)
-  | Ok (Some other) -> Error (`Unsupported_schema_version other)
+  | Ok other -> Error (`Unsupported_schema_version other)
 ;;
 
 let record_of_json_result = function
@@ -164,14 +147,14 @@ let record_of_json_result = function
           , json_optional_string_field fields field_failure_reason
           , json_optional_int_field fields field_n_facts_in_store
           , json_optional_int_field fields field_n_episodes_in_store
-          , payload_of_fields fields )
+          , delta_of_fields fields )
         with
         | Error err, _, _, _, _
         | _, Error err, _, _, _
         | _, _, Error err, _, _
         | _, _, _, Error err, _
         | _, _, _, _, Error err -> Error err
-        | Ok ts, Ok failure_reason, Ok n_facts_in_store, Ok n_episodes_in_store, Ok payload ->
+        | Ok ts, Ok failure_reason, Ok n_facts_in_store, Ok n_episodes_in_store, Ok delta ->
           Ok
             { keeper_id
             ; trace_id
@@ -180,15 +163,9 @@ let record_of_json_result = function
             ; failure_reason
             ; n_facts_in_store
             ; n_episodes_in_store
-            ; payload
+            ; delta
             }))
   | _ -> Error `Expected_object
-;;
-
-let record_of_json json =
-  match record_of_json_result json with
-  | Ok record -> Some record
-  | Error _ -> None
 ;;
 
 let bounded_failure_reason_label = function
@@ -214,7 +191,7 @@ let apply_delta ~previous ~added ~removed =
 ;;
 
 (* Not a security digest: a cheap, order/duplicate-independent change-detection
-   and self-consistency signal (tests check that replaying a [Delta] row's
+   and self-consistency signal (tests check that replaying a delta row's
    materialized set hashes back to the row's own [content_hash]). *)
 let content_hash_of ~fact_keys ~episode_keys =
   let canon keys = keys |> SS.of_list |> SS.elements |> String.concat "\x1f" in
@@ -239,61 +216,24 @@ let materialize records =
            (Hashtbl.find_opt state record.keeper_id)
            ~default:(SS.empty, SS.empty)
        in
+       let
+         { added_fact_keys
+         ; removed_fact_keys
+         ; added_episode_keys
+         ; removed_episode_keys
+         ; content_hash = _
+         }
+         = record.delta
+       in
        let facts, episodes =
-         match record.payload with
-         | Full_snapshot { fact_keys; episode_keys } ->
-           SS.of_list fact_keys, SS.of_list episode_keys
-         | Delta
-             { added_fact_keys
-             ; removed_fact_keys
-             ; added_episode_keys
-             ; removed_episode_keys
-             ; content_hash = _
-             } ->
-           ( SS.diff (SS.union prev_facts (SS.of_list added_fact_keys)) (SS.of_list removed_fact_keys)
-           , SS.diff
-               (SS.union prev_episodes (SS.of_list added_episode_keys))
-               (SS.of_list removed_episode_keys) )
+         ( SS.diff (SS.union prev_facts (SS.of_list added_fact_keys)) (SS.of_list removed_fact_keys)
+         , SS.diff
+             (SS.union prev_episodes (SS.of_list added_episode_keys))
+             (SS.of_list removed_episode_keys) )
        in
        Hashtbl.replace state record.keeper_id (facts, episodes);
        { record; fact_keys = SS.elements facts; episode_keys = SS.elements episodes })
     records
-;;
-
-(* ── Serialisers ──────────────────────────────────────────────────────── *)
-
-(* Legacy (v1, [Full_snapshot]) serialiser. Pure. Kept for round-trip tests
-   and fixtures; [append] below writes v2 [Delta] rows exclusively. *)
-let to_json
-      ?failure_reason
-      ~keeper_id
-      ~trace_id
-      ~turn
-      ~injected_fact_keys
-      ~injected_episode_keys
-      ~n_facts_in_store
-      ~now
-      ()
-  : Yojson.Safe.t
-  =
-  let fields =
-    [ field_schema_version, `Int schema_version_legacy
-    ; field_keeper_id, `String keeper_id
-    ; field_trace_id, `String trace_id
-    ; field_turn, `Int turn
-    ; field_injected_fact_keys, `List (List.map (fun k -> `String k) injected_fact_keys)
-    ; ( field_injected_episode_keys
-      , `List (List.map (fun k -> `String k) injected_episode_keys) )
-    ; field_n_facts_in_store, `Int n_facts_in_store
-    ; field_ts, `Float now
-    ]
-  in
-  let fields =
-    match failure_reason with
-    | None -> fields
-    | Some reason -> fields @ [ field_failure_reason, `String reason ]
-  in
-  `Assoc fields
 ;;
 
 let to_json_delta
@@ -380,12 +320,6 @@ module Delta_state = struct
 
   let reset_for_testing () = Stdlib.Mutex.protect mu (fun () -> Hashtbl.reset table)
 end
-
-let error_label_of_exn exn =
-  exn
-  |> Keeper_memory_recall_exn_class.classify
-  |> Keeper_memory_recall_exn_class.to_label
-;;
 
 let append
       ?failure_reason

@@ -13,6 +13,13 @@
   `origin.fusion_run_id` are now the sole typed identity consumed by the Board
   evidence and Fusion dashboard features; posts without that current origin
   are not admitted to those surfaces.
+- **Breaking (recall injection ledger wire)**: removed the retired
+  `schema_version=1`/missing-version full-snapshot decoder, its public
+  serializer, the unused option compatibility decoder, and the unused
+  read-error labeling facade. Recall injection rows now require exact
+  `schema_version=2` Delta fields. The current writer,
+  full-history outcome-evaluation replay, invalid-row accounting, and
+  retention behavior are unchanged; no migration or repair path was added.
 - **Breaking (keeper failure wire)**: removed the bare
   `fiber_unresolved` failure-reason projection retained for historical log and
   dashboard matching. Unexpected unresolved fibers now serialize as

@@ -213,8 +213,8 @@ let parse_json_line ~path ~line_no line =
 
 (* RFC-0264 P3 / masc#25052: decode via the ledger's shared decoder (SSOT for
    field names) instead of re-spelling "keeper_id"/"trace_id"/... here. The
-   ledger now writes v2 delta rows ([Ledger.payload = Delta]) instead of a
-   full key list per turn, so a single decoded [Ledger.record] no longer
+   ledger writes current v2 delta rows ([Ledger.record.delta]), so a
+   single decoded [Ledger.record] does not
    carries the actual injected set on its own -- [evaluate] below replays
    [Ledger.materialize] over the *entire* recall_dir tree (already scanned in
    chronological order by [find_jsonl]) to reconstruct it, which is exact here

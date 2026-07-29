@@ -1,5 +1,43 @@
 module Eval = Masc.Keeper_recall_outcome_eval
 
+let recall_row
+      ?failure_reason
+      ?(extra_fields = [])
+      ?(added_fact_keys = [])
+      ?(removed_fact_keys = [])
+      ?(added_episode_keys = [])
+      ?(removed_episode_keys = [])
+      ?(n_facts_in_store = 0)
+      ?(ts = 1.0)
+      ~keeper_id
+      ~trace_id
+      ~turn
+      ()
+  =
+  let strings values = `List (List.map (fun value -> `String value) values) in
+  let fields =
+    [ "schema_version", `Int 2
+    ; "keeper_id", `String keeper_id
+    ; "trace_id", `String trace_id
+    ; "turn", `Int turn
+    ; "added_fact_keys", strings added_fact_keys
+    ; "removed_fact_keys", strings removed_fact_keys
+    ; "added_episode_keys", strings added_episode_keys
+    ; "removed_episode_keys", strings removed_episode_keys
+    ; "content_hash", `String "fixture-hash"
+    ; "n_facts_in_store", `Int n_facts_in_store
+    ; "n_episodes_in_store", `Int (List.length added_episode_keys)
+    ; "ts", `Float ts
+    ]
+  in
+  let fields =
+    match failure_reason with
+    | None -> fields
+    | Some reason -> fields @ [ "failure_reason", `String reason ]
+  in
+  Yojson.Safe.to_string (`Assoc (fields @ extra_fields))
+;;
+
 let write_lines path lines =
   Fs_compat.mkdir_p (Filename.dirname path);
   let oc = open_out_bin path in
@@ -44,9 +82,29 @@ let test_joins_recall_to_receipts () =
   with_temp_masc_root (fun masc_root ->
     write_lines
       (Filename.concat masc_root "recall_injections/2026-06/27.jsonl")
-      [ {|{"keeper_id":"alpha","trace_id":"trace-1","turn":1,"injected_fact_keys":["a","b"],"injected_episode_keys":[],"n_facts_in_store":2,"ts":1.0}|}
-      ; {|{"keeper_id":"alpha","trace_id":"trace-1","turn":2,"injected_fact_keys":["a"],"injected_episode_keys":["trace-1:g0"],"n_facts_in_store":2,"ts":2.0}|}
-      ; {|{"keeper_id":"beta","trace_id":"trace-2","turn":1,"injected_fact_keys":[],"injected_episode_keys":[],"n_facts_in_store":0,"failure_reason":"prompt_render_error","ts":3.0}|}
+      [ recall_row
+          ~keeper_id:"alpha"
+          ~trace_id:"trace-1"
+          ~turn:1
+          ~added_fact_keys:[ "a"; "b" ]
+          ~n_facts_in_store:2
+          ()
+      ; recall_row
+          ~keeper_id:"alpha"
+          ~trace_id:"trace-1"
+          ~turn:2
+          ~removed_fact_keys:[ "b" ]
+          ~added_episode_keys:[ "trace-1:g0" ]
+          ~n_facts_in_store:1
+          ~ts:2.0
+          ()
+      ; recall_row
+          ~failure_reason:"prompt_render_error"
+          ~keeper_id:"beta"
+          ~trace_id:"trace-2"
+          ~turn:1
+          ~ts:3.0
+          ()
       ];
     write_lines
       (Filename.concat
@@ -100,8 +158,16 @@ let test_surfaces_bad_rows_and_uses_typed_outcome () =
            actual list length: this schema field is dead (masc#25052 —
            no writer ever produced it) and is no longer read, so the
            divergence below asserts it is now IGNORED rather than trusted. *)
-        {|{"keeper_id":"alpha","trace_id":"trace-1","turn":1,"injected_fact_keys":["a"],"injected_fact_key_count":7,"injected_episode_keys":[],"ts":1.0}|}
-      ; {|{"keeper_id":"alpha","turn":2,"injected_fact_keys":[],"injected_episode_keys":[]}|}
+        recall_row
+          ~extra_fields:[ "injected_fact_key_count", `Int 7 ]
+          ~keeper_id:"alpha"
+          ~trace_id:"trace-1"
+          ~turn:1
+          ~added_fact_keys:[ "a" ]
+          ~n_facts_in_store:1
+          ()
+      ; {|{"schema_version":2,"keeper_id":"alpha","turn":2,"added_fact_keys":[],"removed_fact_keys":[],"added_episode_keys":[],"removed_episode_keys":[],"content_hash":"fixture-hash"}|}
+      ; {|{"schema_version":1,"keeper_id":"legacy","trace_id":"trace-old","turn":1,"injected_fact_keys":["old"],"injected_episode_keys":[]}|}
       ; {|{"keeper_id":|}
       ];
     write_lines
@@ -120,7 +186,8 @@ let test_surfaces_bad_rows_and_uses_typed_outcome () =
     Alcotest.(check int) "count derived from actual list, not the dead override field" 1
       report.injected_fact_keys;
     Alcotest.(check int) "malformed rows" 1 report.malformed_jsonl_rows;
-    Alcotest.(check int) "invalid recall rows" 1 report.invalid_recall_rows;
+    Alcotest.(check int) "invalid recall rows include retired v1" 2
+      report.invalid_recall_rows;
     Alcotest.(check int) "invalid receipt rows" 1 report.invalid_receipt_rows;
     Alcotest.(check int) "receipt metrics rows ignored" 0 report.outcome_error;
     Alcotest.(check bool) "load error details" true (report.load_errors <> []))
@@ -130,8 +197,7 @@ let test_selects_newest_receipt_by_timestamp () =
   with_temp_masc_root (fun masc_root ->
     write_lines
       (Filename.concat masc_root "recall_injections/2026-06/27.jsonl")
-      [ {|{"keeper_id":"alpha","trace_id":"trace-1","turn":1,"injected_fact_keys":[],"injected_episode_keys":[],"ts":1.0}|}
-      ];
+      [ recall_row ~keeper_id:"alpha" ~trace_id:"trace-1" ~turn:1 () ];
     write_lines
       (Filename.concat
          masc_root
@@ -148,8 +214,8 @@ let test_json_respects_trace_limit () =
   with_temp_masc_root (fun masc_root ->
     write_lines
       (Filename.concat masc_root "recall_injections/2026-06/27.jsonl")
-      [ {|{"keeper_id":"alpha","trace_id":"trace-1","turn":1,"injected_fact_keys":[],"injected_episode_keys":[],"n_facts_in_store":0}|}
-      ; {|{"keeper_id":"alpha","trace_id":"trace-2","turn":1,"injected_fact_keys":[],"injected_episode_keys":[],"n_facts_in_store":0}|}
+      [ recall_row ~keeper_id:"alpha" ~trace_id:"trace-1" ~turn:1 ()
+      ; recall_row ~keeper_id:"alpha" ~trace_id:"trace-2" ~turn:1 ()
       ];
     let json =
       Eval.evaluate ~masc_root |> Eval.to_json ~trace_limit:1 ~fact_key_limit:0
@@ -166,8 +232,20 @@ let test_writes_fact_key_summary_index () =
   with_temp_masc_root (fun masc_root ->
     write_lines
       (Filename.concat masc_root "recall_injections/2026-06/27.jsonl")
-      [ {|{"keeper_id":"alpha","trace_id":"trace-ok","turn":1,"injected_fact_keys":["shared:a"],"injected_episode_keys":[]}|}
-      ; {|{"keeper_id":"beta","trace_id":"trace-err","turn":1,"injected_fact_keys":["shared:a"],"injected_episode_keys":[]}|}
+      [ recall_row
+          ~keeper_id:"alpha"
+          ~trace_id:"trace-ok"
+          ~turn:1
+          ~added_fact_keys:[ "shared:a" ]
+          ~n_facts_in_store:1
+          ()
+      ; recall_row
+          ~keeper_id:"beta"
+          ~trace_id:"trace-err"
+          ~turn:1
+          ~added_fact_keys:[ "shared:a" ]
+          ~n_facts_in_store:1
+          ()
       ];
     write_lines
       (Filename.concat

@@ -20,7 +20,6 @@ let fact ?(valid_until = None) ~now claim =
   ; Types.category = Types.Fact
   ; Types.claim_kind = None
   ; Types.source = { Types.trace_id = "health-test"; Types.turn = 1; Types.tool_call_id = None }
-  ; Types.observed_by = []
   ; Types.first_seen = now
   ; Types.valid_until
   ; Types.last_verified_at = Some now

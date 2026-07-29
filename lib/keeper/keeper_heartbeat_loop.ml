@@ -492,7 +492,10 @@ let run_keepalive_unified_turn
            ~keeper_name:meta_after_triage.name
        with
        | Error detail ->
-         raise (Keeper_board_attention_candidate.Candidate_unavailable detail)
+         Log.Keeper.error
+           ~keeper_name:meta_after_triage.name
+           "Board attention completion remains pending; it did not block this Keeper turn: %s"
+           detail
        | Ok Keeper_board_attention_worker.No_completed_partition ->
          ()
        | Ok

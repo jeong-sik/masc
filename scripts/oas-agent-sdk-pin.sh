@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.230.0"
-# OAS #2858 hard-cuts the duplicate structured-output state. Provider requests
-# now carry only response_format = Off | JsonMode | JsonSchema; MASC no longer
-# reads or writes the removed output_schema compatibility field.
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.0"
+# v0.231.0 is a hard-cut wave: checkpoint schema is v9 only (v1-v8
+# rejected; #2867), provider_config.output_schema is removed in favor of
+# response_format = JsonSchema as the single structured-output request state
+# (#2858), legacy tool/checkpoint shapes and the typed-compat runtime are
+# removed (#2851/#2853), and eval requires explicit metric policies with
+# incomplete comparisons rejected (#2854/#2866). masc-side output_schema
+# migration lands in the same PR as this bump. Deploy note: live v8
+# checkpoints are rejected after this pin — keeper contexts rebuild from
+# Memory OS facts + board (facts/episodes stores are unaffected).
 # Previous pin: v0.230.0 (7a3f2af7).
 # MASC consumes only the public Agent SDK contract; Keeper, Gate, Board, and
 # product operation ownership remain MASC concepts.
 # The reachability guards in check-oas-pin.sh and oas-drift-check.sh track
 # main; oas-drift-check.sh also reports the public-surface delta at pin-bump
 # time.
-# Pinned to OAS main after #2858/#2862 and the adjacent current-head fixes.
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.230.0"
+# Pinned to the v0.231.0 release commit.
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.231.0"
 # TRACK_REF consumed by check-oas-pin.sh / oas-drift-check.sh /
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="50e1bf1af1af598729c2482e190f8476ecebc3f1"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.230.0"
+readonly OAS_AGENT_SDK_SHA="2cb7d9226a7ba797071cd45733d5b15789f13ff5"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.231.0"

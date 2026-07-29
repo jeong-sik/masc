@@ -242,7 +242,10 @@ get_inventory() {
   INVENTORY="$HTTP_LAST_BODY"
   jq -e '
     .schema == "masc.keeper.paused-work.inventory.v1" and
-    .operator_request_schema == "masc.keeper.paused-work.operator-request.v3"
+    .operator_request_schema == "masc.keeper.paused-work.operator-request.v3" and
+    (.queue.accepted_transfer_projection_count | type) == "number" and
+    .queue.accepted_transfer_projection_count >= 0 and
+    .queue.accepted_transfer_projection_count == (.queue.accepted_transfer_projection_count | floor)
   ' <<<"$INVENTORY" >/dev/null 2>&1
 }
 
@@ -393,8 +396,12 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
       die "target lane is not active and clean before iteration $ITERATIONS"
     get_inventory "$target_keeper" || die "target inventory unavailable for $target_keeper"
     target_generation="$(jq '.owner.generation' <<<"$INVENTORY")"
+    target_projection_before="$(jq '.queue.accepted_transfer_projection_count' <<<"$INVENTORY")"
+    target_projection_expected=$((target_projection_before + 1))
   else
     target_generation=0
+    target_projection_before=0
+    target_projection_expected=0
   fi
 
   post_pause "$source_keeper"
@@ -456,6 +463,10 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
         die "transfer source did not become paused and clean" "silent_loss"
       wait_clean_lane "$target_keeper" false ||
         die "transfer target did not consume its exact source" "silent_loss"
+      get_inventory "$target_keeper" ||
+        die "target inventory unavailable after transfer for $target_keeper"
+      [[ "$(jq '.queue.accepted_transfer_projection_count' <<<"$INVENTORY")" == "$target_projection_expected" ]] ||
+        die "transfer target projection did not advance exactly once" "duplicate"
       ;;
     cancel)
       wait_clean_lane "$source_keeper" true ||
@@ -484,12 +495,18 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
         die "transfer replay left source lane non-clean" "duplicate"
       wait_clean_lane "$target_keeper" false ||
         die "transfer replay left target lane non-clean" "duplicate"
+      get_inventory "$target_keeper" ||
+        die "target inventory unavailable after replay for $target_keeper"
+      [[ "$(jq '.queue.accepted_transfer_projection_count' <<<"$INVENTORY")" == "$target_projection_expected" ]] ||
+        die "transfer replay changed the durable target projection count" "duplicate"
       verify_receipt_file "$source_keeper" "$operation_id" ||
         die "transfer operation does not have exactly one durable disposition receipt"
       ;;
     cancel)
       wait_clean_lane "$source_keeper" true ||
         die "cancel replay left source lane non-clean" "duplicate"
+      verify_receipt_file "$source_keeper" "$operation_id" ||
+        die "cancel operation does not have exactly one durable disposition receipt"
       ;;
   esac
 

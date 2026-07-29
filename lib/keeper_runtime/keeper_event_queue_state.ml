@@ -260,11 +260,14 @@ let schema = "keeper.event_queue.state.v10"
 let schema_v9 = "keeper.event_queue.state.v9"
 let schema_v8 = "keeper.event_queue.state.v8"
 
-(* v10 persists the one terminal receipt retained after transition projection.
-   It is the durable replay witness for an accepted operator disposition once
-   its outbox and settlement WAL have been retired.  v9 wrote the same queue
-   shape without that witness, so it restores with no projected receipt.  v9
-   writes [ack_source_terminal] for source-terminal ACKs. v8 used the
+(* v10 persists the one terminal receipt retained after transition projection
+   and every accepted target transfer projection. The receipt is the durable
+   replay witness for an accepted operator disposition once its outbox and
+   settlement WAL have been retired. A target projection prevents replay from
+   enqueueing a transfer source that the target already consumed. v9 wrote the
+   same queue shape without either witness, so it restores with no projected
+   receipt or transfer. v9 writes [ack_source_terminal] for source-terminal
+   ACKs. v8 used the
    removed [settle_from_source_terminal] wire label; its only accepted use is
    recovery of an already durable outbox, which is canonicalized during decode
    before any v10 snapshot is written. v7 carried [schema; revision; pending]
@@ -3492,6 +3495,11 @@ let to_yojson state =
         | Some receipt -> transition_receipt_to_yojson receipt )
     ; ( "transition_outbox"
       , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
+    ; ( "accepted_transfer_projections"
+      , `List
+          (List.map
+             accepted_transfer_projection_to_yojson
+             state.accepted_transfer_projections) )
     ]
 ;;
 
@@ -3651,6 +3659,7 @@ let of_yojson json =
         ; "pending"
         ; "last_settlement"
         ; "transition_outbox"
+        ; "accepted_transfer_projections"
         ]
     else if String.equal schema_value schema_v9 || String.equal schema_value schema_v8
     then Ok [ "schema"; "revision"; "pending"; "transition_outbox" ]
@@ -3685,6 +3694,16 @@ let of_yojson json =
       | None -> Error "keeper event queue state missing required field last_settlement"
     else Ok None
   in
+  let* accepted_transfer_projections =
+    if String.equal schema_value schema
+    then
+      list_field
+        ~context
+        "accepted_transfer_projections"
+        accepted_transfer_projection_of_yojson
+        fields
+    else Ok []
+  in
   (* [next_lease_sequence] is a private carrier, but it is not free: the state
      invariant requires it to exceed every receipt sequence still held. A
      restored outbox brings its receipts' sequences back, so seeding a constant
@@ -3712,7 +3731,7 @@ let of_yojson json =
     ; leases = []
     ; last_settlement
     ; transition_outbox
-    ; accepted_transfer_projections = []
+    ; accepted_transfer_projections
     ; exact_execution_bindings = []
     }
 ;;

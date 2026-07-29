@@ -105,7 +105,13 @@ let test_current_schema_round_trip_and_old_schema_rejection () =
    | `Assoc fields ->
      Alcotest.(check (list string))
        "pending-only durable fields"
-       [ "pending"; "revision"; "schema" ]
+       [ "accepted_transfer_projections"
+       ; "last_settlement"
+       ; "pending"
+       ; "revision"
+       ; "schema"
+       ; "transition_outbox"
+       ]
        (List.map fst fields |> List.sort String.compare)
    | _ -> Alcotest.fail "state codec did not emit an object");
   Alcotest.(check (list string))

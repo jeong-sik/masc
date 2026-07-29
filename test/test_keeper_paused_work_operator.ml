@@ -355,7 +355,14 @@ let test_inventory_exposes_exact_durable_fences () =
       Alcotest.(check int)
         "inventory exact pending count"
         1
-        (json |> member "queue" |> member "pending" |> to_list |> List.length))
+        (json |> member "queue" |> member "pending" |> to_list |> List.length);
+      Alcotest.(check int)
+        "inventory exact accepted transfer projection count"
+        0
+        (json
+         |> member "queue"
+         |> member "accepted_transfer_projection_count"
+         |> to_int))
       (* The tail claimed a lease so the inventory would expose
          queue.active_lease, then decoded a cancel_accepted request with
          source_state="active_lease". Both are gone: no caller can claim a

@@ -15,6 +15,9 @@ owner, injects one exact `Board_signal`, then verifies all of the following:
   surviving source or transition outbox;
 - transfer reaches a clean paused source and a clean active target after the
   target has consumed the transferred source;
+- every operation has exactly one durable disposition receipt, and a transfer
+  advances the target's accepted-transfer projection count exactly once while
+  both replays leave that count unchanged;
 - a configured server restart recovers before the same exact request is
   replayed.
 

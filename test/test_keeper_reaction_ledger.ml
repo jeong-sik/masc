@@ -79,30 +79,8 @@ let manual_compaction_stimulus () : Keeper_event_queue.stimulus =
   }
 ;;
 
-let no_compaction_settlement ~turn_count reason :
-  Keeper_event_queue_state.settlement
-  =
-  let trace_id =
-    Keeper_id.Trace_id.of_string "trace-ledger-no-compaction"
-    |> require_ok "parse no-compaction trace"
-  in
-  let source =
-    Keeper_checkpoint_ref.of_persisted
-      ~trace_id
-      ~generation:3
-      ~turn_count
-      ~sha256:(String.make 64 'a')
-    |> Result.get_ok
-  in
-  Keeper_event_queue_state.No_compaction { source; reason }
-;;
-
-(* [persist_transition_outbox] staged an outbox entry by claiming a lease and
-   settling it. It served four cases asserting Ack and No_compaction
-   projections. Neither settlement can be produced any more: settle was the
-   only producer and it required a lease, which #25969 made unobtainable when
-   it moved production to peek/ack. The cancellation case below still covers
-   the live outbox projection through its pending-side commit. *)
+(* The retired lease path once produced generic ACK/no-compaction records.
+   Live projection now covers only the three typed pending operations. *)
 
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
@@ -869,20 +847,6 @@ let test_reaction_kind_string_roundtrip () =
     check string "unknown reaction decoder preserves evidence" "unknown_custom" value
   | Ok _ -> fail "unknown reaction string must not decode"
 ;;
-
-(* [test_cancelled_transition_is_projected_as_typed_history] asserted that a
-   committed Cancel_accepted reaches the reaction ledger as typed history. It
-   staged the state in memory and handed it to the projector by writing a
-   snapshot file, which worked only while the snapshot carried the transition
-   outbox. #25978 reduced Keeper_event_queue_state.to_yojson to schema,
-   revision and pending, so a commit checkpoints without the outbox and then
-   compacts the settlement WAL; reloading afterwards -- whether directly or
-   through Keeper_event_queue_recovery.project_owner_result -- sees an empty
-   outbox and projects nothing. Verified with a probe against the durable
-   path: commit returns Settled, the reloaded state reports outbox=0, and the
-   projection finds no rows. The case cannot hold from a separate call and is
-   removed rather than weakened; restating it needs a commit and projection
-   that share one state. Recorded in #26014. *)
 
 let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
   with_temp_base

@@ -135,7 +135,7 @@ type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_t
   ; source_receipt : source_terminal_receipt
   }
 
-type settlement = Keeper_event_queue_persistence.settlement =
+type transition = Keeper_event_queue_persistence.transition =
   | Ack
   | Manual_compaction_committed of
       { commit : Keeper_event_queue_state.manual_compaction_commit
@@ -155,10 +155,10 @@ type settlement = Keeper_event_queue_persistence.settlement =
 type transition_receipt = Keeper_event_queue_persistence.transition_receipt
 type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 
-type settle_result = Keeper_event_queue_persistence.settle_result =
-  | Settled of transition_receipt
-  | Already_settled of transition_receipt
-  | Committed_followup_failed of
+type transition_result = Keeper_event_queue_persistence.transition_result =
+  | Transition_applied of transition_receipt
+  | Transition_already_applied of transition_receipt
+  | Transition_committed_followup_failed of
       { receipt : transition_receipt
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
@@ -195,7 +195,7 @@ val ack_pending_result :
 val exact_execution_binding_result :
   base_path:string -> string -> (exact_execution_binding option, string) result
 
-(* claim_when_result / claim_board_result / settle_result and the lease-taking
+(* claim_when_result / claim_board_result / transition_result and the lease-taking
    exact-execution fence lived here, together with cancel_accepted_result.
    #25969 moved production to peek/ack and nothing outside tests could obtain a
    lease afterwards. The pending-side commits below need none. *)
@@ -204,9 +204,9 @@ val cancel_pending_accepted_result :
   base_path:string ->
   string ->
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   cancellation:accepted_cancellation ->
-  (settle_result, string) result
+  (transition_result, string) result
 (** Commit an exact pending accepted cancellation and publish the post-commit
     pending projection when the owner currently has a live registry lane. *)
 
@@ -214,10 +214,10 @@ val transfer_pending_accepted_result :
   base_path:string ->
   string ->
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   transfer:accepted_transfer ->
-  (settle_result, string) result
-(** Commit an exact pending accepted transfer settlement and publish the
+  (transition_result, string) result
+(** Commit an exact pending accepted transfer transition and publish the
     post-commit source pending projection when the owner is registered. *)
 
 val ack_pending_source_terminal_result :
@@ -228,8 +228,7 @@ val ack_pending_source_terminal_result :
   source_terminal:accepted_source_terminal ->
   (source_ack_result, string) result
 (** Commit one exact terminal source ACK and publish the post-commit pending
-    projection when the owner is registered. Generic queue settlement terms do
-    not cross this source-ACK boundary. *)
+    projection when the owner is registered. *)
 
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later

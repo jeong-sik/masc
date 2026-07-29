@@ -173,7 +173,7 @@ type accepted_source_terminal = Keeper_event_queue_state.accepted_source_termina
   ; source_receipt : source_terminal_receipt
   }
 
-type settlement = Keeper_event_queue_state.settlement =
+type transition = Keeper_event_queue_state.transition =
   | Ack
   | Manual_compaction_committed of
       { commit : Keeper_event_queue_state.manual_compaction_commit
@@ -193,10 +193,10 @@ type settlement = Keeper_event_queue_state.settlement =
 type transition_receipt = Keeper_event_queue_state.transition_receipt
 type outbox_entry = Keeper_event_queue_state.outbox_entry
 
-type settle_result =
-  | Settled of transition_receipt
-  | Already_settled of transition_receipt
-  | Committed_followup_failed of
+type transition_result =
+  | Transition_applied of transition_receipt
+  | Transition_already_applied of transition_receipt
+  | Transition_committed_followup_failed of
       { receipt : transition_receipt
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
@@ -269,12 +269,13 @@ val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Strict state read used by tests and operator projection. A malformed
     current envelope or stale/unknown schema is an [Error], never an empty
-    queue. Committed current-schema WAL rows are replayed idempotently,
-    checkpointed, and then compacted to the exact empty suffix before the state
-    is returned. *)
+    queue. Committed current-schema WAL rows are replayed idempotently. A row
+    already represented by the durable projected witness is compacted; an
+    unprojected source-bearing row remains authoritative until the reaction
+    projector records and retires it. *)
 
 (* The claim/settle lease surface lived here: claim_when_result,
-   claim_board_result, settle_result, the lease-taking exact-execution
+   claim_board_result, transition_result, the lease-taking exact-execution
    fence (bind / release_before_dispatch / quarantine / prepare / finalize /
    settle_bound_exact_nonterminal), and cancel_accepted_result. #25969 moved
    production to peek/ack; nothing outside tests obtained a lease afterwards,
@@ -286,11 +287,11 @@ val cancel_pending_accepted_result :
   base_path:string ->
   keeper_name:string ->
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   cancellation:accepted_cancellation ->
   unit ->
-  (settle_result, string) result
-(** Append and fsync the canonical source-bearing cancellation receipt before
+  (transition_result, string) result
+(** Append and fsync the canonical source-bearing cancellation transition before
     checkpointing removal of the exact pending source. WAL replay can complete
     the transition from the pre-removal state after a crash. *)
 
@@ -299,11 +300,11 @@ val transfer_pending_accepted_result :
   base_path:string ->
   keeper_name:string ->
   current_owner_nonce:int ->
-  settled_at:float ->
+  applied_at:float ->
   transfer:accepted_transfer ->
   unit ->
-  (settle_result, string) result
-(** Append and fsync the canonical source-bearing transfer receipt before
+  (transition_result, string) result
+(** Append and fsync the canonical source-bearing transfer transition before
     checkpointing removal of the exact pending source. *)
 
 val ack_pending_source_terminal_result :
@@ -314,34 +315,9 @@ val ack_pending_source_terminal_result :
   acked_at:float ->
   source_terminal:accepted_source_terminal ->
   unit ->
-  (settle_result, string) result
-(** Append and fsync the canonical source-bearing ACK receipt before
+  (transition_result, string) result
+(** Append and fsync the canonical source-bearing ACK transition before
     checkpointing removal of the exact pending source. *)
-
-val prepare_registration_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  settled_at:float ->
-  unit ->
-  (Keeper_event_queue.t, string) result
-(** Registration boundary for a newly-owned lane. Requeues an abandoned lease,
-    records its stable [Registration_recovery] transition, and returns the
-    resulting pending projection from the same durable transaction. A malformed
-    state is an [Error]; registration must not substitute an empty queue.
-    Post-commit [Error] names that fact; retry replays the exact WAL cursor. *)
-
-val prepare_registration_after_exact_recovery_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  settled_at:float ->
-  unit ->
-  (Keeper_event_queue.t, string) result
-(** Under one owner durable lock, replay the settlement WAL, finalize a
-    validated terminal v5 exact disposition, then and only then apply ordinary
-    registration recovery. Dispatch-uncertain bindings and source-less terminal
-    quarantines remain fail-closed. *)
 
 val project_transition_outbox_result :
   append_before_retire:(outbox_entry -> (unit, string) result) ->

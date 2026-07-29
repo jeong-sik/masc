@@ -70,12 +70,12 @@ let commit_status = function
 
 let cancellation_result_json (success : Cancellation.success) =
   let commit_status, ok, projection, receipt, error =
-    match success.settlement with
-    | Keeper_registry_event_queue.Settled receipt ->
+    match success.transition with
+    | Keeper_registry_event_queue.Transition_applied receipt ->
       "committed", true, "applied", receipt, None
-    | Keeper_registry_event_queue.Already_settled receipt ->
+    | Keeper_registry_event_queue.Transition_already_applied receipt ->
       "already_committed", true, "applied", receipt, None
-    | Keeper_registry_event_queue.Committed_followup_failed
+    | Keeper_registry_event_queue.Transition_committed_followup_failed
         { receipt; stage; detail } ->
       let stage =
         match stage with
@@ -189,9 +189,9 @@ let outcome_to_yojson = function
 let outcome_projection_complete = function
   | Resumed { projection = Resume.Applied _; _ }
   | Cancelled
-      { settlement =
-          ( Keeper_registry_event_queue.Settled _
-          | Keeper_registry_event_queue.Already_settled _ )
+      { transition =
+          ( Keeper_registry_event_queue.Transition_applied _
+          | Keeper_registry_event_queue.Transition_already_applied _ )
       ; _
       }
   | Transferred { projection = Transfer.Applied _; _ }
@@ -199,7 +199,7 @@ let outcome_projection_complete = function
     true
   | Resumed { projection = Resume.Committed_followup_failed _; _ }
   | Cancelled
-      { settlement = Keeper_registry_event_queue.Committed_followup_failed _; _ }
+      { transition = Keeper_registry_event_queue.Transition_committed_followup_failed _; _ }
   | Transferred { projection = Transfer.Committed_followup_failed _; _ }
   | Source_terminal_acked
       { projection = Source_terminal.Committed_followup_failed _; _ } ->

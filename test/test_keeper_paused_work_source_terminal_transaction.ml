@@ -154,7 +154,7 @@ let source_ack_wire_fields json =
      | Some (`List [ `Assoc outbox_fields ]) ->
        (match List.assoc_opt "receipt" outbox_fields with
         | Some (`Assoc receipt_fields) ->
-          (match List.assoc_opt "settlement" receipt_fields with
+          (match List.assoc_opt "transition" receipt_fields with
            | Some (`Assoc action_fields) ->
              state_fields, outbox_fields, receipt_fields, action_fields
            | Some _ | None -> Alcotest.fail "source ACK receipt must be an object")
@@ -165,7 +165,8 @@ let source_ack_wire_fields json =
 
 let source_ack_transition_state (request : Transaction.request) state =
   let source_terminal : State.accepted_source_terminal =
-    { source = request.source
+    State.
+      { source = request.source
     ; source_revision = request.source_revision
     ; owner_nonce = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
@@ -174,7 +175,7 @@ let source_ack_transition_state (request : Transaction.request) state =
   in
   State.ack_pending_source_terminal
     ~current_owner_nonce:request.owner_nonce
-    ~settled_at:2.0
+    ~applied_at:2.0
     ~source_terminal
     state
   |> require_ok "create source ACK transition"
@@ -194,14 +195,14 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     in
     let acknowledged, result = source_ack_transition_state request original in
     (match result with
-     | State.Settled _ -> ()
-     | State.Already_settled _ -> Alcotest.fail "first source ACK was a replay");
+     | State.Transition_applied _ -> ()
+     | State.Transition_already_applied _ -> Alcotest.fail "first source ACK was a replay");
     let canonical_json = State.to_yojson acknowledged in
     let state_fields, outbox_fields, receipt_fields, action_fields =
       source_ack_wire_fields canonical_json
     in
     Alcotest.(check (option string))
-      "source ACK writes v9 state"
+      "source ACK writes v12 state"
       (Some State.schema)
       (match List.assoc_opt "schema" state_fields with
        | Some (`String schema) -> Some schema
@@ -212,10 +213,16 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       (match List.assoc_opt "kind" action_fields with
        | Some (`String kind) -> Some kind
        | Some _ | None -> None);
+    Alcotest.(check bool)
+      "source ACK receipt does not carry a lease id"
+      true
+      (not (List.mem_assoc "lease_id" receipt_fields));
+    Alcotest.(check bool)
+      "source ACK receipt does not carry a lease sequence"
+      true
+      (not (List.mem_assoc "lease_sequence" receipt_fields));
     let canonical_transition_id =
-      match List.assoc_opt "lease_id" receipt_fields with
-      | Some (`String lease_id) -> lease_id ^ ":ack_source_terminal"
-      | Some _ | None -> Alcotest.fail "source ACK receipt omitted lease identity"
+      "pending-source-terminal-ack:" ^ request.operator_operation_id
     in
     let canonical_event_id = "keeper-event-queue-transition:" ^ canonical_transition_id in
     Alcotest.(check string)
@@ -226,44 +233,138 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       "source ACK writes its canonical event identity"
       canonical_event_id
       (required_string_field "source ACK receipt" "event_id" receipt_fields);
+    let legacy_lease_id = "lease:1" in
+    let legacy_transition_id = legacy_lease_id ^ ":settle_from_source_terminal" in
+    let legacy_event_id = "keeper-event-queue-transition:" ^ legacy_transition_id in
+    let v9_transition_id = legacy_lease_id ^ ":ack_source_terminal" in
+    let v9_event_id = "keeper-event-queue-transition:" ^ v9_transition_id in
+    let v9_receipt =
+      receipt_fields
+      |> List.map (fun (field, value) ->
+        match field with
+        | "transition_id" -> field, `String v9_transition_id
+        | "event_id" -> field, `String v9_event_id
+        | _ -> field, value)
+      |> fun fields ->
+      [ "lease_id", `String legacy_lease_id
+      ; "lease_sequence", `Int 1
+      ]
+      @ fields
+    in
+    let v9_outbox = replace_field "receipt" (`Assoc v9_receipt) outbox_fields in
     let v9_state =
       state_fields
-      |> remove_field "last_settlement"
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v9")
+      |> replace_field "transition_outbox" (`List [ `Assoc v9_outbox ])
       |> fun fields -> `Assoc fields
     in
     let recovered_v9 = State.of_yojson v9_state |> require_ok "recover v9 source ACK outbox" in
-    (match State.last_settlement recovered_v9 with
+    (match State.last_transition recovered_v9 with
      | None -> ()
      | Some _ -> Alcotest.fail "v9 snapshot invented a projected receipt");
     let recovered_v9_fields, _, _, _ =
       State.to_yojson recovered_v9 |> source_ack_wire_fields
     in
     Alcotest.(check (option string))
-      "recovery rewrites v9 as v10"
+      "recovery rewrites v9 as v12"
       (Some State.schema)
       (match List.assoc_opt "schema" recovered_v9_fields with
        | Some (`String schema) -> Some schema
        | Some _ | None -> None);
-    let legacy_transition_id =
-      match List.assoc_opt "lease_id" receipt_fields with
-      | Some (`String lease_id) -> lease_id ^ ":settle_from_source_terminal"
-      | Some _ | None -> Alcotest.fail "source ACK receipt omitted lease identity"
-    in
-    let legacy_event_id = "keeper-event-queue-transition:" ^ legacy_transition_id in
     let legacy_action =
       replace_field "kind" (`String "settle_from_source_terminal") action_fields
     in
     let legacy_receipt =
       receipt_fields
-      |> replace_field "transition_id" (`String legacy_transition_id)
-      |> replace_field "event_id" (`String legacy_event_id)
-      |> replace_field "settlement" (`Assoc legacy_action)
+      |> List.map (fun (field, value) ->
+        match field with
+        | "transition_id" -> field, `String legacy_transition_id
+        | "event_id" -> field, `String legacy_event_id
+        | "transition" -> "settlement", `Assoc legacy_action
+        | "applied_at_unix" -> "settled_at_unix", value
+        | _ -> field, value)
+      |> fun fields ->
+      [ "lease_id", `String legacy_lease_id
+      ; "lease_sequence", `Int 1
+      ]
+      @ fields
     in
     let legacy_outbox = replace_field "receipt" (`Assoc legacy_receipt) outbox_fields in
+    let v10_unprojected_state =
+      state_fields
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v10")
+      |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
+      |> fun fields -> `Assoc (("last_settlement", `Null) :: fields)
+    in
+    let recovered_v10_unprojected =
+      State.of_yojson v10_unprojected_state
+      |> require_ok "recover v10 source ACK outbox"
+    in
+    (match State.transition_outbox recovered_v10_unprojected with
+     | [ { receipt = { transition = State.Ack_source_terminal _; _ }; _ } ] -> ()
+     | [] | _ :: _ :: _ -> Alcotest.fail "v10 source ACK outbox did not recover");
+    let v10_projected_state =
+      state_fields
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v10")
+      |> replace_field "transition_outbox" (`List [])
+      |> fun fields -> `Assoc (("last_settlement", `Assoc legacy_receipt) :: fields)
+    in
+    let recovered_v10 =
+      State.of_yojson v10_projected_state
+      |> require_ok "recover v10 projected source ACK witness"
+    in
+    (match State.last_transition recovered_v10 with
+     | Some { transition = State.Ack_source_terminal _; transition_id; _ } ->
+       Alcotest.(check string)
+         "v10 projected witness preserves transition identity"
+         legacy_transition_id
+         transition_id
+     | Some _ | None -> Alcotest.fail "v10 projected source ACK lost its replay witness");
+    let legacy_ack_transition_id = legacy_lease_id ^ ":ack" in
+    let legacy_ack_receipt =
+      `Assoc
+        [ "transition_id", `String legacy_ack_transition_id
+        ; "event_id", `String ("keeper-event-queue-transition:" ^ legacy_ack_transition_id)
+        ; "lease_id", `String legacy_lease_id
+        ; "lease_sequence", `Int 1
+        ; "settled_at_unix", `Float 2.0
+        ; "settlement", `Assoc [ "kind", `String "ack" ]
+        ]
+    in
+    let v10_generic_projected_state =
+      state_fields
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
+      |> replace_field "schema" (`String "keeper.event_queue.state.v10")
+      |> replace_field "transition_outbox" (`List [])
+      |> fun fields -> `Assoc (("last_settlement", legacy_ack_receipt) :: fields)
+    in
+    let recovered_generic_v12 =
+      v10_generic_projected_state
+      |> State.of_yojson
+      |> require_ok "recover v10 generic projected witness"
+      |> State.to_yojson
+      |> State.of_yojson
+      |> require_ok "reload v10 generic witness after v12 checkpoint"
+    in
+    (match State.last_transition recovered_generic_v12 with
+     | Some { transition = State.Ack; transition_id; _ } ->
+       Alcotest.(check string)
+         "v12 checkpoint preserves legacy generic transition identity"
+         legacy_ack_transition_id
+         transition_id
+     | Some _ | None ->
+       Alcotest.fail "v12 checkpoint made the recovered generic witness unreadable");
     let legacy_state =
       state_fields
-      |> remove_field "last_settlement"
+      |> remove_field "last_transition"
+      |> remove_field "accepted_transfer_projections"
       |> replace_field "schema" (`String "keeper.event_queue.state.v8")
       |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
       |> fun fields -> `Assoc fields
@@ -274,7 +375,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       source_ack_wire_fields recovered_json
     in
     Alcotest.(check (option string))
-      "recovery rewrites v8 as v9"
+      "recovery rewrites v8 as v12"
       (Some State.schema)
       (match List.assoc_opt "schema" recovered_fields with
        | Some (`String schema) -> Some schema
@@ -331,6 +432,67 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
       "v2 WAL replay preserves event identity"
       legacy_event_id
       (required_string_field "recovered v2 WAL receipt" "event_id" recovered_wal_receipt))
+;;
+
+let test_source_ack_identity_survives_checkpoint_reload () =
+  with_source_terminal_lane (fun _config _keeper_name _meta request ->
+    let initial =
+      State.empty
+      |> State.with_revision request.source_revision
+      |> State.with_pending (Queue.enqueue Queue.empty request.source)
+    in
+    let first, first_result = source_ack_transition_state request initial in
+    let first_receipt =
+      match first_result with
+      | State.Transition_applied receipt -> receipt
+      | State.Transition_already_applied _ -> Alcotest.fail "first source ACK was a replay"
+    in
+    let projected =
+      State.mark_transition_projected ~transition_id:first_receipt.transition_id first
+      |> require_ok "project first source ACK"
+    in
+    let reloaded = State.to_yojson projected |> State.of_yojson |> require_ok "reload projected ACK" in
+    let second_resolution =
+      match request.source_receipt with
+      | State.Hitl_terminal resolution ->
+        { resolution with approval_id = "approval-terminal-2" }
+      | State.Fusion_terminal _ | State.Background_job_terminal _ ->
+        Alcotest.fail "fixture must carry a HITL terminal receipt"
+    in
+    let second_source : Queue.stimulus =
+      { post_id = Queue.hitl_resolution_post_id second_resolution
+      ; urgency = Queue.Immediate
+      ; arrived_at = 3.0
+      ; payload = Queue.Hitl_resolved second_resolution
+      }
+    in
+    let second_request : Transaction.request =
+      { source = second_source
+      ; source_revision = State.revision reloaded
+      ; owner_nonce = request.owner_nonce
+      ; source_receipt = State.Hitl_terminal second_resolution
+      ; operator_operation_id = "operator-source-terminal-2"
+      }
+    in
+    let second_state = State.with_pending (Queue.enqueue Queue.empty second_source) reloaded in
+    let _, second_result = source_ack_transition_state second_request second_state in
+    let second_receipt =
+      match second_result with
+      | State.Transition_applied receipt -> receipt
+      | State.Transition_already_applied _ -> Alcotest.fail "second source ACK was a replay"
+    in
+    Alcotest.(check string)
+      "first source ACK derives identity from its operation"
+      "pending-source-terminal-ack:operator-source-terminal-1"
+      first_receipt.transition_id;
+    Alcotest.(check string)
+      "second source ACK derives identity from its operation"
+      "pending-source-terminal-ack:operator-source-terminal-2"
+      second_receipt.transition_id;
+    Alcotest.(check bool)
+      "checkpoint reload cannot reuse the first source ACK identity"
+      true
+      (not (String.equal first_receipt.transition_id second_receipt.transition_id)))
 ;;
 
 let test_exact_terminal_receipt_acks_pending () =
@@ -413,6 +575,18 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
       |> require_ok "commit source-terminal ACK"
     in
     check_applied first.projection;
+    let staged =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load unprojected source-terminal ACK"
+    in
+    let outbox_entry =
+      match State.transition_outbox staged with
+      | [ entry ] -> entry
+      | [] | _ :: _ :: _ ->
+        Alcotest.fail "source-terminal ACK must retain one transition outbox entry"
+    in
     Persistence.project_transition_outbox_result
       ~append_before_retire:(fun _entry -> Ok ())
       ~base_path:config.Workspace.base_path
@@ -424,9 +598,35 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
         ~keeper_name
       |> require_ok "reload projected source-terminal ACK"
     in
-    (match State.last_settlement projected with
-     | Some { settlement = State.Ack_source_terminal _; _ } -> ()
+    (match State.last_transition projected with
+     | Some { transition = State.Ack_source_terminal _; _ } -> ()
      | Some _ | None -> Alcotest.fail "projected source-terminal ACK lost its replay witness");
+    let transition_wal_path =
+      Filename.concat
+        (Filename.concat
+           (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
+           keeper_name)
+        "event-queue-transitions.jsonl"
+    in
+    let residual_wal_row =
+      `Assoc
+        [ "schema", `String "masc.keeper_event_queue.transition.v2"
+        ; "base_path", `String config.Workspace.base_path
+        ; "keeper_name", `String keeper_name
+        ; "outbox_entry", State.outbox_entry_to_yojson outbox_entry
+        ]
+    in
+    write_text transition_wal_path (Yojson.Safe.to_string residual_wal_row ^ "\n");
+    let recovered_after_projection =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "replay residual transition WAL after projection"
+    in
+    (match State.last_transition recovered_after_projection with
+     | Some receipt when State.transition_receipt_equal receipt outbox_entry.receipt -> ()
+     | Some _ | None ->
+       Alcotest.fail "residual WAL did not preserve the projected source ACK witness");
     let replay =
       Transaction.ack_pending config ~keeper_name request
       |> Result.map_error Transaction.error_to_string
@@ -451,6 +651,121 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
       "post-projection replay keeps source removed"
       0
       (Queue.length (State.pending replayed)))
+;;
+
+let test_projected_wal_recovery_allows_next_source_ack () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
+    let second_resolution =
+      match request.source_receipt with
+      | State.Hitl_terminal resolution ->
+        { resolution with approval_id = "approval-terminal-after-projection" }
+      | State.Fusion_terminal _ | State.Background_job_terminal _ ->
+        Alcotest.fail "fixture must carry a HITL terminal receipt"
+    in
+    let second_source : Queue.stimulus =
+      { post_id = Queue.hitl_resolution_post_id second_resolution
+      ; urgency = Queue.Immediate
+      ; arrived_at = 3.0
+      ; payload = Queue.Hitl_resolved second_resolution
+      }
+    in
+    Persistence.update_result
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+      (fun pending -> Queue.enqueue pending second_source)
+    |> require_ok "seed second source-terminal event";
+    let first_request =
+      { request with
+        source_revision =
+          (Persistence.load_state_result
+             ~base_path:config.Workspace.base_path
+             ~keeper_name
+           |> require_ok "load first source-terminal revision"
+           |> State.revision)
+      }
+    in
+    let first =
+      Transaction.ack_pending config ~keeper_name first_request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "commit first source-terminal ACK"
+    in
+    check_applied first.projection;
+    let staged =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load first source-terminal ACK outbox"
+    in
+    let first_outbox =
+      match State.transition_outbox staged with
+      | [ entry ] -> entry
+      | [] | _ :: _ :: _ -> Alcotest.fail "first ACK must retain one transition outbox entry"
+    in
+    Persistence.project_transition_outbox_result
+      ~append_before_retire:(fun _entry -> Ok ())
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+    |> require_ok "project first source-terminal ACK";
+    let transition_wal_path =
+      Filename.concat
+        (Filename.concat
+           (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path)
+           keeper_name)
+        "event-queue-transitions.jsonl"
+    in
+    let residual_wal_row =
+      `Assoc
+        [ "schema", `String "masc.keeper_event_queue.transition.v2"
+        ; "base_path", `String config.Workspace.base_path
+        ; "keeper_name", `String keeper_name
+        ; "outbox_entry", State.outbox_entry_to_yojson first_outbox
+        ]
+    in
+    write_text transition_wal_path (Yojson.Safe.to_string residual_wal_row ^ "\n");
+    let recovered =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "recover projected first ACK WAL"
+    in
+    let residual_wal = In_channel.with_open_bin transition_wal_path In_channel.input_all in
+    Alcotest.(check string) "projected WAL is retired during recovery" "" residual_wal;
+    let second_request : Transaction.request =
+      { source = second_source
+      ; source_revision = State.revision recovered
+      ; owner_nonce = first_request.owner_nonce
+      ; source_receipt = State.Hitl_terminal second_resolution
+      ; operator_operation_id = "operator-source-terminal-after-projection"
+      }
+    in
+    let second =
+      Transaction.ack_pending config ~keeper_name second_request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "commit second source-terminal ACK"
+    in
+    check_applied second.projection;
+    Persistence.project_transition_outbox_result
+      ~append_before_retire:(fun _entry -> Ok ())
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+    |> require_ok "project second source-terminal ACK after recovery";
+    let final =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load second projected source-terminal ACK"
+    in
+    (match State.last_transition final with
+     | Some { transition = State.Ack_source_terminal _; transition_id; _ } ->
+       Alcotest.(check string)
+         "second projected transition has its own operation identity"
+         "pending-source-terminal-ack:operator-source-terminal-after-projection"
+         transition_id
+     | Some _ | None -> Alcotest.fail "second source-terminal ACK was not projected");
+    Alcotest.(check int)
+      "second source-terminal ACK removes its already-pending source"
+      0
+      (Queue.length (State.pending final)))
 ;;
 
 let test_legacy_v3_receipt_file_resumes_ack () =
@@ -624,6 +939,14 @@ let () =
             "replays after outbox projection and snapshot reload"
             `Quick
             test_terminal_ack_replays_after_projection_and_snapshot_reload
+        ; Alcotest.test_case
+            "projected WAL recovery permits a different next ACK"
+            `Quick
+            test_projected_wal_recovery_allows_next_source_ack
+        ; Alcotest.test_case
+            "source ACK identity survives checkpoint reload"
+            `Quick
+            test_source_ack_identity_survives_checkpoint_reload
         ; Alcotest.test_case
             "recovery-only v3 receipt resumes ACK"
             `Quick

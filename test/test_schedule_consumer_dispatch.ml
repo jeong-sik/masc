@@ -672,35 +672,35 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
            ~base_path
            keeper_name
           ~current_owner_nonce:generation
-          ~settled_at:203.0
+          ~applied_at:203.0
           ~cancellation
        with
-       | Ok (Keeper_registry_event_queue.Settled _) -> ()
-       | Ok (Keeper_registry_event_queue.Already_settled _) ->
+       | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+       | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
          fail "first schedule cancellation was already settled"
-       | Ok (Keeper_registry_event_queue.Committed_followup_failed _) ->
+       | Ok (Keeper_registry_event_queue.Transition_committed_followup_failed _) ->
          fail "schedule cancellation follow-up failed"
        | Error detail -> fail detail);
-      let settlement_wal_path =
+      let transition_wal_path =
         Filename.concat
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-settlements.jsonl"
+          "event-queue-transitions.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
-        (Sys.file_exists settlement_wal_path
-         && String.trim (read_file settlement_wal_path) <> "");
+        (Sys.file_exists transition_wal_path
+         && String.trim (read_file transition_wal_path) <> "");
       (* #26074: projection is driven only by the janitor, so ordinary queue
-         traffic races it. An enqueue between the settlement and the projection
-         bumps the snapshot revision; if the settlement WAL is still on disk at
+         traffic races it. An enqueue between the transition and the projection
+         bumps the snapshot revision; if the transition WAL is still on disk at
          that point, every later load replays a row whose [source_revision] no
          longer matches and the owner latches into "reset required" with no
          runtime exit - the projector itself cannot recover because it begins
          with [load_state_unlocked]. Drive that exact interleaving here. *)
       let interleaved_stimulus : Keeper_event_queue.stimulus =
         { cancellation.source with
-          post_id = "interleaved-enqueue-during-settlement"
+          post_id = "interleaved-enqueue-during-transition"
         ; arrived_at = 203.5
         }
       in
@@ -708,7 +708,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       (match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
        | Ok _ -> ()
        | Error detail ->
-         failf "enqueue after settlement made the event queue unloadable: %s" detail);
+         failf "enqueue after transition made the event queue unloadable: %s" detail);
       (* Withdraw the interleaved stimulus so the assertions below still measure
          what the cancelled retry produced rather than what this probe added. *)
       (match
@@ -731,7 +731,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
        | Error error ->
          fail (Keeper_event_queue_recovery.projection_error_to_string error));
       check string "projected cancellation retires WAL" ""
-        (read_file settlement_wal_path);
+        (read_file transition_wal_path);
       (match Schedule_store.recover_running_on_startup config ~now:204.0 with
        | Ok (_, 1) -> ()
        | Ok (_, recovered) -> failf "expected one recovered schedule, got %d" recovered

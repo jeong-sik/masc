@@ -16,7 +16,6 @@ type pending_request =
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
-  ; settled_at : float
   }
 
 type failure =
@@ -38,7 +37,7 @@ type failure =
   | Queue_commit_failed of string
 
 type success =
-  { settlement : Keeper_registry_event_queue.settle_result
+  { transition : Keeper_registry_event_queue.transition_result
   ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
   }
 

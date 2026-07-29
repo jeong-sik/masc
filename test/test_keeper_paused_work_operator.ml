@@ -178,15 +178,22 @@ let test_strict_request_codec () =
       ; "owner_nonce", `Int 7
       ; "operator_operation_id", `String "operator-cancel"
       ; "reason", `String "operator rejected retained work"
-      ; "settled_at", `Float 3.0
       ]
   in
   (match Operator.request_of_yojson cancel with
    | Ok (Operator.Cancel_pending request) ->
      Alcotest.(check bool) "cancel source exact" true (request.source = board_source);
      Alcotest.(check int64) "cancel revision exact" 11L request.source_revision
-   | Ok _ -> Alcotest.fail "pending cancellation decoded to the wrong operation"
-   | Error detail -> Alcotest.fail detail);
+  | Ok _ -> Alcotest.fail "pending cancellation decoded to the wrong operation"
+  | Error detail -> Alcotest.fail detail);
+  let cancel_with_obsolete_settled_at =
+    match cancel with
+    | `Assoc fields -> `Assoc (("settled_at", `Float 3.0) :: fields)
+    | _ -> Alcotest.fail "cancel fixture must be a JSON object"
+  in
+  (match Operator.request_of_yojson cancel_with_obsolete_settled_at with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "cancel request accepted obsolete settled_at field");
   let terminal_source, channel = terminal_source () in
   let transfer =
     common

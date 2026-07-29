@@ -93,7 +93,7 @@ type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_t
   ; source_receipt : source_terminal_receipt
   }
 
-type settlement = Keeper_event_queue_persistence.settlement =
+type transition = Keeper_event_queue_persistence.transition =
   | Ack
   | Manual_compaction_committed of
       { commit : Keeper_event_queue_state.manual_compaction_commit
@@ -113,10 +113,10 @@ type settlement = Keeper_event_queue_persistence.settlement =
 type transition_receipt = Keeper_event_queue_persistence.transition_receipt
 type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 
-type settle_result = Keeper_event_queue_persistence.settle_result =
-  | Settled of transition_receipt
-  | Already_settled of transition_receipt
-  | Committed_followup_failed of
+type transition_result = Keeper_event_queue_persistence.transition_result =
+  | Transition_applied of transition_receipt
+  | Transition_already_applied of transition_receipt
+  | Transition_committed_followup_failed of
       { receipt : transition_receipt
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
@@ -406,7 +406,7 @@ let ack_pending_result ~base_path name ~selection =
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;
-(* claim_when_result / claim_board_result / settle_result / cancel_accepted_result
+(* claim_when_result / claim_board_result / cancel_accepted_result
    took or produced a lease and became unreachable when #25969 moved production
    to peek/ack. *)
 
@@ -415,14 +415,14 @@ let cancel_pending_accepted_result
       ~base_path
       name
       ~current_owner_nonce
-      ~settled_at
+      ~applied_at
       ~cancellation
   =
   Keeper_event_queue_persistence.cancel_pending_accepted_result
     ~base_path
     ~keeper_name:name
     ~current_owner_nonce
-    ~settled_at
+    ~applied_at
     ~cancellation
     ~after_commit:(publish_pending ~base_path name)
     ()
@@ -432,14 +432,14 @@ let transfer_pending_accepted_result
       ~base_path
       name
       ~current_owner_nonce
-      ~settled_at
+      ~applied_at
       ~transfer
   =
   Keeper_event_queue_persistence.transfer_pending_accepted_result
     ~base_path
     ~keeper_name:name
     ~current_owner_nonce
-    ~settled_at
+    ~applied_at
     ~transfer
     ~after_commit:(publish_pending ~base_path name)
     ()
@@ -461,8 +461,8 @@ let ack_pending_source_terminal_result
     ~after_commit:(publish_pending ~base_path name)
     ()
   |> Result.map (function
-    | Settled receipt -> Acked receipt
-    | Already_settled receipt -> Already_acked receipt
-    | Committed_followup_failed { receipt; stage; detail } ->
+    | Transition_applied receipt -> Acked receipt
+    | Transition_already_applied receipt -> Already_acked receipt
+    | Transition_committed_followup_failed { receipt; stage; detail } ->
       Ack_committed_followup_failed { receipt; stage; detail })
 ;;

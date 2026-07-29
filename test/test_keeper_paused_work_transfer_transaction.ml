@@ -419,7 +419,7 @@ let test_replay_after_source_ack_projects_target () =
          ~base_path:config.Workspace.base_path
          from_keeper
          ~current_owner_nonce:request.owner_nonce
-         ~settled_at:receipt.requested_at
+         ~applied_at:receipt.requested_at
          ~transfer:causal
        |> require_ok "simulate committed source ACK");
     let replay =

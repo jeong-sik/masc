@@ -106,7 +106,7 @@ let test_current_schema_round_trip_and_legacy_v10_recovery () =
      Alcotest.(check (list string))
        "pending-only durable fields"
        [ "accepted_transfer_projections"
-       ; "last_settlement"
+       ; "last_transition"
        ; "pending"
        ; "revision"
        ; "schema"
@@ -121,10 +121,16 @@ let test_current_schema_round_trip_and_legacy_v10_recovery () =
   let legacy_v10 =
     match json with
     | `Assoc fields ->
+      let last_settlement =
+        List.assoc_opt "last_transition" fields
+        |> require_some "current transition witness"
+      in
       `Assoc
         ( ("schema", `String "keeper.event_queue.state.v10")
+        :: ("last_settlement", last_settlement)
         :: (fields
             |> List.remove_assoc "schema"
+            |> List.remove_assoc "last_transition"
             |> List.remove_assoc "accepted_transfer_projections") )
     | _ -> Alcotest.fail "state codec did not emit an object"
   in
@@ -144,6 +150,41 @@ let test_current_schema_round_trip_and_legacy_v10_recovery () =
         | Some (`String schema) -> Some schema
         | Some _ | None -> None)
    | _ -> Alcotest.fail "recovered state codec did not emit an object");
+  let transfer : State.accepted_transfer =
+    { source = stimulus "transferred-v11" 2.0
+    ; source_revision = 0L
+    ; owner_nonce = 0
+    ; operator_operation_id = "transfer-v11"
+    ; from_keeper = "from-v11"
+    ; to_keeper = "to-v11"
+    }
+  in
+  let transfer_state, _ =
+    State.project_accepted_transfer transfer State.empty
+    |> require_ok "seed accepted transfer projection"
+  in
+  let legacy_v11 =
+    match State.to_yojson transfer_state with
+    | `Assoc fields ->
+      let last_transition =
+        List.assoc_opt "last_transition" fields
+        |> require_some "current state carries last transition field"
+      in
+      `Assoc
+        ( ("schema", `String "keeper.event_queue.state.v11")
+        :: ("last_settlement", last_transition)
+        :: (fields
+            |> List.remove_assoc "schema"
+            |> List.remove_assoc "last_transition") )
+    | _ -> Alcotest.fail "transfer state codec did not emit an object"
+  in
+  let recovered_v11 =
+    State.of_yojson legacy_v11 |> require_ok "legacy v11 snapshot recovers"
+  in
+  Alcotest.(check int)
+    "legacy v11 preserves accepted transfer projection"
+    1
+    (List.length (State.accepted_transfer_projections recovered_v11));
   let stale =
     match json with
     | `Assoc fields -> `Assoc (("schema", `String "keeper.event_queue.state.v5") :: List.remove_assoc "schema" fields)

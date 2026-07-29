@@ -300,7 +300,7 @@ let run_owned receipt_lock config ~keeper_name request =
   in
   let projection =
     match project_receipt config receipt with
-    | Ok settlement -> Applied settlement
+    | Ok result -> Applied result
     | Error failure -> Committed_followup_failed failure
   in
   Ok (receipt, commit_status, projection)

@@ -41,13 +41,13 @@ val render_temporal_summary : ?now:float -> Agent_sdk.Context.t -> string option
 
     [time=] and [elapsed=] are recomputed from [now] (defaulting to
     {!Time_compat.now}) at render time — i.e. turn start — rather than
-    read from the stored [key_wall_time]/[key_elapsed_seconds], which
-    reflect the last tool call and go stale across idle turns. A keeper
+    read from the stored [key_wall_time], which reflects the last tool
+    call and goes stale across idle turns. A keeper
     waking after an idle gap therefore sees the current wall clock, not a
     past tool-call timestamp. For current contexts, [elapsed] is
     [now - key_session_start] (seconds since the injector/session
-    started). Legacy contexts written before [key_session_start] render
-    only when a stored [key_elapsed_seconds] value is available.
+    started). A context without the current [key_session_start] anchor does
+    not render a temporal summary.
 
     [now] is a Unix timestamp in seconds; pass it to inject a fixed clock
     in tests.
@@ -67,7 +67,6 @@ val iso8601_of_float : float -> string
 
 val key_wall_time : string
 val key_session_start : string
-val key_elapsed_seconds : string
 val key_tool_call_count : string
 val key_last_tool_name : string
 val key_last_tool_outcome : string

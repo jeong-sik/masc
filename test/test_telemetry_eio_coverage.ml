@@ -116,18 +116,6 @@ let test_event_task_completed () =
       check bool "success" true r.success
   | _ -> fail "expected Task_completed"
 
-let test_event_handoff_triggered () =
-  let e = Telemetry_eio.Handoff_triggered {
-    from_agent = "claude-001";
-    to_agent = "codex-001";
-    reason = "context limit";
-  } in
-  match e with
-  | Telemetry_eio.Handoff_triggered r ->
-      check string "from_agent" "claude-001" r.from_agent;
-      check string "to_agent" "codex-001" r.to_agent
-  | _ -> fail "expected Handoff_triggered"
-
 let test_event_error_occurred () =
   let e = Telemetry_eio.Error_occurred {
     code = "E001";
@@ -321,14 +309,12 @@ let test_metrics_type () =
     tasks_in_progress = 5;
     tasks_completed_24h = 42;
     avg_task_duration_ms = 3500.0;
-    handoff_rate = 0.15;
     error_rate = 0.02;
   } in
   check int "active_agents" 3 m.active_agents;
   check int "tasks_in_progress" 5 m.tasks_in_progress;
   check int "tasks_completed_24h" 42 m.tasks_completed_24h;
   check (float 0.01) "avg_task_duration_ms" 3500.0 m.avg_task_duration_ms;
-  check (float 0.01) "handoff_rate" 0.15 m.handoff_rate;
   check (float 0.01) "error_rate" 0.02 m.error_rate
 
 (* ============================================================
@@ -351,47 +337,28 @@ let test_event_json_roundtrip () =
        | _ -> fail "wrong event type")
   | Error e -> fail ("json decode failed: " ^ e)
 
-(* Legacy variant migration: Agent_joined → Agent_session_bound.
-   Records written before the rename must still deserialize. *)
-let test_legacy_agent_joined_migration () =
-  let legacy_json =
-    `Assoc [
-      ("timestamp", `Float 1000.0);
-      ("event", `List [
-        `String "Agent_joined";
-        `Assoc [("agent_id", `String "keeper-test"); ("capabilities", `List [])]
-      ]);
+let test_retired_agent_variants_are_rejected () =
+  let row variant payload =
+    `Assoc
+      [ "timestamp", `Float 1000.0
+      ; "event", `List [ `String variant; payload ]
+      ]
+  in
+  let cases =
+    [ ( "Agent_joined"
+      , `Assoc [ "agent_id", `String "keeper-test"; "capabilities", `List [] ] )
+    ; ( "Agent_left"
+      , `Assoc [ "agent_id", `String "keeper-test"; "reason", `String "leave" ] )
     ]
   in
-  let parsed = Telemetry_eio.parse_event_records [ legacy_json ] in
-  check int "legacy Agent_joined produces 1 record" 1 (List.length parsed);
-  let record = List.hd parsed in
-  check bool "event is Agent_session_bound" true
-    (match record.event with
-     | Telemetry_eio.Agent_session_bound r ->
-       String.equal r.agent_id "keeper-test" &&
-       List.length r.capabilities = 0
-     | _ -> false)
-
-let test_legacy_agent_left_migration () =
-  let legacy_json =
-    `Assoc [
-      ("timestamp", `Float 1000.0);
-      ("event", `List [
-        `String "Agent_left";
-        `Assoc [("agent_id", `String "keeper-test"); ("reason", `String "leave")]
-      ]);
-    ]
-  in
-  let parsed = Telemetry_eio.parse_event_records [ legacy_json ] in
-  check int "legacy Agent_left produces 1 record" 1 (List.length parsed);
-  let record = List.hd parsed in
-  check bool "event is Agent_unbound" true
-    (match record.event with
-     | Telemetry_eio.Agent_unbound r ->
-       String.equal r.agent_id "keeper-test" &&
-       String.equal r.reason "leave"
-     | _ -> false)
+  List.iter
+    (fun (variant, payload) ->
+      check
+        int
+        (variant ^ " is not repaired")
+        0
+        (List.length (Telemetry_eio.parse_event_records [ row variant payload ])))
+    cases
 
 (* Drop observability: malformed payload increments
    masc_persistence_read_drops_total{surface=telemetry_eio,reason=invalid_payload}.
@@ -424,7 +391,6 @@ let test_metrics_json_roundtrip () =
     tasks_in_progress = 7;
     tasks_completed_24h = 100;
     avg_task_duration_ms = 2500.0;
-    handoff_rate = 0.1;
     error_rate = 0.01;
   } in
   let json = Telemetry_eio.metrics_to_yojson original in
@@ -556,30 +522,6 @@ let test_avg_duration_multiple () =
   check bool "avg 1500" true (abs_float (avg -. 1500.0) < 0.01)
 
 (* ============================================================
-   calculate_handoff_rate Tests
-   ============================================================ *)
-
-let test_calculate_handoff_rate_empty () =
-  let events : Telemetry_eio.event_record list = [] in
-  let rate = Telemetry_eio.calculate_handoff_rate events in
-  check bool "zero" true (abs_float rate < 0.01)
-
-let test_calculate_handoff_rate_no_handoffs () =
-  let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Task_completed { task_id = "t1"; duration_ms = 100; success = true } };
-  ] in
-  let rate = Telemetry_eio.calculate_handoff_rate events in
-  check bool "zero" true (abs_float rate < 0.01)
-
-let test_calculate_handoff_rate_some_handoffs () =
-  let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Task_completed { task_id = "t1"; duration_ms = 100; success = true } };
-    { timestamp = 2.0; event = Handoff_triggered { from_agent = "a1"; to_agent = "a2"; reason = "x" } };
-  ] in
-  let rate = Telemetry_eio.calculate_handoff_rate events in
-  check bool "positive" true (rate > 0.0)
-
-(* ============================================================
    calculate_error_rate Tests
    ============================================================ *)
 
@@ -621,7 +563,33 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
         | None -> fail "missing stats for masc_status"
       in
       check int "usage count" 1 stats.count;
-      check bool "telemetry available" true summary.telemetry_available)
+      check bool "telemetry available" true summary.telemetry_available;
+      check
+        string
+        "telemetry path is the current date-split store"
+        (telemetry_dir base_dir)
+        summary.telemetry_path)
+
+let test_legacy_single_file_is_ignored () =
+  with_temp_dir
+  @@ fun base_dir ->
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Workspace.default_config base_dir in
+  let legacy_path =
+    Filename.concat (Filename.concat base_dir ".masc") "telemetry.jsonl"
+  in
+  Fs_compat.mkdir_p (Filename.dirname legacy_path);
+  Fs_compat.append_file
+    legacy_path
+    {|{"timestamp":1000.0,"event":["Agent_session_bound",{"agent_id":"legacy-only","capabilities":[]}]}|}
+  ;
+  check
+    int
+    "legacy single-file telemetry is not read"
+    0
+    (List.length (Telemetry_eio.read_all_events config))
 
 let test_track_applies_default_retention_days () =
   with_env "MASC_TELEMETRY_RETENTION_DAYS" "" (fun () ->
@@ -676,7 +644,6 @@ let () =
       test_case "agent_unbound" `Quick test_event_agent_unbound;
       test_case "task_started" `Quick test_event_task_started;
       test_case "task_completed" `Quick test_event_task_completed;
-      test_case "handoff_triggered" `Quick test_event_handoff_triggered;
       test_case "error_occurred" `Quick test_event_error_occurred;
       test_case "tool_called" `Quick test_event_tool_called;
     ];
@@ -699,10 +666,8 @@ let () =
       test_case "metrics" `Quick test_metrics_json_roundtrip;
       test_case "drop increments persistence_read_drops counter" `Quick
         test_parse_event_records_drop_increments_counter;
-      test_case "legacy Agent_joined migrates to Agent_session_bound" `Quick
-        test_legacy_agent_joined_migration;
-      test_case "legacy Agent_left migrates to Agent_unbound" `Quick
-        test_legacy_agent_left_migration;
+      test_case "retired agent variants are rejected" `Quick
+        test_retired_agent_variants_are_rejected;
     ];
     "event_to_json", [
       test_case "agent_session_bounded" `Quick test_event_to_json_agent_session_bounded;
@@ -729,11 +694,6 @@ let () =
       test_case "one" `Quick test_avg_duration_one;
       test_case "multiple" `Quick test_avg_duration_multiple;
     ];
-    "calculate_handoff_rate", [
-      test_case "empty" `Quick test_calculate_handoff_rate_empty;
-      test_case "no handoffs" `Quick test_calculate_handoff_rate_no_handoffs;
-      test_case "some handoffs" `Quick test_calculate_handoff_rate_some_handoffs;
-    ];
     "calculate_error_rate", [
       test_case "empty" `Quick test_calculate_error_rate_empty;
       test_case "no errors" `Quick test_calculate_error_rate_no_errors;
@@ -742,6 +702,8 @@ let () =
     "store_reads", [
       test_case "summarize_tool_usage reads date-split store" `Quick
         test_summarize_tool_usage_reads_date_split_store_without_fs;
+      test_case "legacy single telemetry file is ignored" `Quick
+        test_legacy_single_file_is_ignored;
       test_case "track applies default retention days" `Quick
         test_track_applies_default_retention_days;
       test_case "track applies telemetry max bytes" `Quick

@@ -24,7 +24,7 @@ module Float = Stdlib.Float
     Usage:
     - record_call is called on every tools/call dispatch
     - get_stats / get_top_n / get_unused_since provide reporting
-    - Data resets on server restart (telemetry.jsonl is the durable store)
+    - Data resets on server restart (the date-split Telemetry_eio store is durable)
 *)
 
 (** Call source for source-aware telemetry.

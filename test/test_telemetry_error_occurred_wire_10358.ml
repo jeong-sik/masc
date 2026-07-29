@@ -74,7 +74,6 @@ let event_kind_tag (e : T.event) =
   | T.Agent_unbound _ -> "Agent_unbound"
   | T.Task_started _ -> "Task_started"
   | T.Task_completed _ -> "Task_completed"
-  | T.Handoff_triggered _ -> "Handoff_triggered"
   | T.Error_occurred _ -> "Error_occurred"
   | T.Tool_called _ -> "Tool_called"
   | T.Tool_assigned _ -> "Tool_assigned"

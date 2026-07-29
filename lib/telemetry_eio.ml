@@ -29,7 +29,6 @@ type event =
   | Agent_unbound of { agent_id: string; reason: string }
   | Task_started of { task_id: string; agent_id: string }
   | Task_completed of { task_id: string; duration_ms: int; success: bool }
-  | Handoff_triggered of { from_agent: string; to_agent: string; reason: string }
   | Error_occurred of { code: string; message: string; context: string }
   | Tool_called of {
       tool_name: string;
@@ -75,7 +74,6 @@ type metrics = {
   tasks_in_progress: int;
   tasks_completed_24h: int;
   avg_task_duration_ms: float;
-  handoff_rate: float;
   error_rate: float;
 } [@@deriving yojson, show]
 
@@ -117,10 +115,6 @@ let update_tool_usage stats_by_tool ~tool_name ~success ~timestamp =
         | None -> timestamp);
   } in
   Hashtbl.replace stats_by_tool tool_name updated
-
-(** Legacy single-file path (for fallback reads). *)
-let telemetry_file config =
-  Filename.concat (Workspace_utils.masc_dir config) "telemetry.jsonl"
 
 (** Date-split store: [.masc/telemetry/YYYY-MM/DD.jsonl].
     Cached per base_dir so all callers share the same Eio.Mutex.
@@ -176,40 +170,10 @@ let report_telemetry_drop ~reason ~path ~detail =
     ~on_drop:(fun () -> observe_telemetry_drop ~reason)
     ~surface:telemetry_eio_surface ~reason ~path ~detail
 
-(** Schema migration: map legacy variant names to current ones.
-
-    The [event] type underwent renames ([Agent_joined] → [Agent_session_bound],
-    [Agent_left] → [Agent_unbound]) but stored JSONL records retain the old
-    names in the wire format.  This normalizes the raw JSON so the
-    auto-generated yojson codec can deserialize it.
-
-    Payload fields are identical — this is a pure rename, no field migration. *)
-let legacy_variant_aliases : (string * string) list = [
-  ("Agent_joined", "Agent_session_bound");
-  ("Agent_left", "Agent_unbound");
-]
-
-let migrate_legacy_event_variant (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields ->
-    let migrate_field (key, value) =
-      if key <> "event" then (key, value)
-      else
-        match value with
-        | `List [`String variant; payload] ->
-          (match List.assoc_opt variant legacy_variant_aliases with
-           | Some new_name -> (key, `List [`String new_name; payload])
-           | None -> (key, value))
-        | _ -> (key, value)
-    in
-    `Assoc (List.map migrate_field fields)
-  | _ -> json
-
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
   List.filter_map
     (fun json ->
-      let migrated = migrate_legacy_event_variant json in
-      match event_record_of_yojson migrated with
+      match event_record_of_yojson json with
       | Ok record -> Some record
       | Error msg ->
           report_telemetry_drop
@@ -217,28 +181,6 @@ let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
             ~path:"<in-memory>" ~detail:msg;
           None)
     jsons
-
-let read_all_events_from_path (file : string) : event_record list =
-  if not (Sys.file_exists file) then []
-  else
-    let content = Fs_compat.load_file file in
-    String.split_on_char '\n' content
-    |> List.filter (fun line -> String.trim line <> "")
-    |> List.filter_map (fun line ->
-           try
-             let json = migrate_legacy_event_variant (Yojson.Safe.from_string line) in
-             match event_record_of_yojson json with
-             | Ok record -> Some record
-             | Error msg ->
-                 report_telemetry_drop
-                   ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-                   ~path:file ~detail:msg;
-                 None
-           with Yojson.Json_error msg ->
-             report_telemetry_drop
-               ~reason:Safe_ops.persistence_read_drop_reason_json_syntax_error
-               ~path:file ~detail:msg;
-             None)
 
 let event_to_json event =
   let record = {
@@ -253,28 +195,16 @@ let track ?fs:_ config event : unit =
   let store = get_telemetry_store config in
   Dated_jsonl.append store (event_to_json event)
 
-(** Read all events.
-    Tries date-split store first; falls back to legacy single file. *)
+(** Read all current date-split events. *)
 let read_all_events ?fs:_ config : event_record list =
   let store = get_telemetry_store config in
-  let jsons = Dated_jsonl.read_recent store 100_000 in
-  if jsons <> [] then
-    parse_event_records jsons
-  else
-    read_all_events_from_path (telemetry_file config)
+  Dated_jsonl.read_recent store 100_000 |> parse_event_records
 
 let read_recent_events ?fs:_ config ~limit : event_record list =
   if limit <= 0 then []
   else
     let store = get_telemetry_store config in
-    let jsons = Dated_jsonl.read_recent store limit in
-    if jsons <> [] then
-      parse_event_records jsons
-    else
-      read_all_events_from_path (telemetry_file config)
-      |> List.rev
-      |> List.filteri (fun i _ -> i < limit)
-      |> List.rev
+    Dated_jsonl.read_recent store limit |> parse_event_records
 
 (* ── Tool usage summary cache ──────────────────────────────────────
    The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
@@ -297,12 +227,9 @@ let summarize_tool_usage ?fs config : tool_usage_summary =
   | Some entry when now -. entry.cached_at < tool_usage_cache_ttl ->
       entry.cached_summary
   | _ ->
-      let telemetry_path = telemetry_file config in
       let store = get_telemetry_store config in
-      let telemetry_available =
-        Sys.file_exists telemetry_path
-        || Sys.file_exists (Dated_jsonl.base_dir store)
-      in
+      let telemetry_path = Dated_jsonl.base_dir store in
+      let telemetry_available = Sys.file_exists telemetry_path in
       let stats_by_tool = Hashtbl.create 32 in
       let total_calls = ref 0 in
       let records = read_all_events ?fs config in
@@ -313,7 +240,7 @@ let summarize_tool_usage ?fs config : tool_usage_summary =
             update_tool_usage stats_by_tool ~tool_name ~success
               ~timestamp:record.timestamp
         | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
-        | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
+        | Error_occurred _ | Tool_assigned _ -> ()
       ) records;
       let summary = {
         telemetry_path;
@@ -362,8 +289,8 @@ let summarize_agent_activity ?fs config ~since : agent_activity list =
             Hashtbl.replace by_agent agent_id
               { agent_id; tool_calls = 0; success_count = 0; failure_count = 0;
                 first_seen = record.timestamp; last_seen = record.timestamp }
-      | Agent_unbound _ | Task_started _ | Task_completed _ | Handoff_triggered _
-      | Error_occurred _ | Tool_assigned _ -> ()
+      | Agent_unbound _ | Task_started _ | Task_completed _ | Error_occurred _
+      | Tool_assigned _ -> ()
   ) records;
   Hashtbl.fold (fun _ v acc -> v :: acc) by_agent []
   |> List.sort (fun a b -> compare b.tool_calls a.tool_calls)
@@ -400,41 +327,41 @@ let count_active_agents events =
     ~present:(fun r ->
       match r.event with
       | Agent_session_bound { agent_id; _ } -> Some agent_id
-      | Agent_unbound _ | Task_started _ | Task_completed _ | Handoff_triggered _
-      | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
+      | Agent_unbound _ | Task_started _ | Task_completed _ | Error_occurred _
+      | Tool_called _ | Tool_assigned _ -> None)
     ~absent:(fun r ->
       match r.event with
       | Agent_unbound { agent_id; _ } -> Some agent_id
-      | Agent_session_bound _ | Task_started _ | Task_completed _ | Handoff_triggered _
-      | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
+      | Agent_session_bound _ | Task_started _ | Task_completed _ | Error_occurred _
+      | Tool_called _ | Tool_assigned _ -> None)
 
 let count_tasks_in_progress events =
   Set_util.count_difference events
     ~present:(fun r ->
       match r.event with
       | Task_started { task_id; _ } -> Some task_id
-      | Agent_session_bound _ | Agent_unbound _ | Task_completed _ | Handoff_triggered _
-      | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
+      | Agent_session_bound _ | Agent_unbound _ | Task_completed _ | Error_occurred _
+      | Tool_called _ | Tool_assigned _ -> None)
     ~absent:(fun r ->
       match r.event with
       | Task_completed { task_id; _ } -> Some task_id
-      | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
-      | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
+      | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Error_occurred _
+      | Tool_called _ | Tool_assigned _ -> None)
 
 let count_completed_tasks events =
   List_util.count_if (fun r ->
     match r.event with
     | Task_completed _ -> true
-    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
-    | Error_occurred _ | Tool_called _ | Tool_assigned _ -> false
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Error_occurred _
+    | Tool_called _ | Tool_assigned _ -> false
   ) events
 
 let avg_duration events =
   let durations = List.filter_map (fun r ->
     match r.event with
     | Task_completed { duration_ms; _ } -> Some (float_of_int duration_ms)
-    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
-    | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Error_occurred _
+    | Tool_called _ | Tool_assigned _ -> None
   ) events in
   match durations with
   | [] -> 0.0
@@ -442,28 +369,12 @@ let avg_duration events =
       let sum = List.fold_left (+.) 0.0 times in
       sum /. float_of_int (List.length times)
 
-let calculate_handoff_rate events =
-  let handoffs = List_util.count_if (fun r ->
-    match r.event with
-    | Handoff_triggered _ -> true
-    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
-    | Error_occurred _ | Tool_called _ | Tool_assigned _ -> false
-  ) events in
-  let task_events = List_util.count_if (fun r ->
-    match r.event with
-    | Task_started _ | Task_completed _ -> true
-    | Agent_session_bound _ | Agent_unbound _ | Handoff_triggered _ | Error_occurred _
-    | Tool_called _ | Tool_assigned _ -> false
-  ) events in
-  if task_events = 0 then 0.0
-  else float_of_int handoffs /. float_of_int task_events
-
 let calculate_error_rate events =
   let errors = List_util.count_if (fun r ->
     match r.event with
     | Error_occurred _ -> true
     | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
-    | Handoff_triggered _ | Tool_called _ | Tool_assigned _ -> false
+    | Tool_called _ | Tool_assigned _ -> false
   ) events in
   let total = List.length events in
   if total = 0 then 0.0
@@ -479,7 +390,6 @@ let get_metrics ?fs config : metrics =
     tasks_in_progress = count_tasks_in_progress events;
     tasks_completed_24h = count_completed_tasks events;
     avg_task_duration_ms = avg_duration events;
-    handoff_rate = calculate_handoff_rate events;
     error_rate = calculate_error_rate events;
   }
 
@@ -495,15 +405,6 @@ let track_task_started ?fs config ~task_id ~agent_id =
 
 let track_task_completed ?fs config ~task_id ~duration_ms ~success =
   track ?fs config (Task_completed { task_id; duration_ms; success })
-
-(* [track_handoff] removed: 0 production callers as of #10358 (c2)
-   audit (2026-05-05). masc has no runtime-routing handoff
-   concept; the [Handoff_triggered] event variant is retained for
-   wire-schema compatibility and exhaustive-match coverage in
-   [dashboard_http_monitoring],
-   but the public emitter is dropped to prevent new code from
-   reintroducing unused telemetry. Tests construct the variant
-   directly to validate the wire schema. *)
 
 let track_error ?fs config ~code ~message ~context =
   track ?fs config (Error_occurred { code; message; context })

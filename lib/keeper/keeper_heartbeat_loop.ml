@@ -110,8 +110,8 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
 
    [cycle_crashed = true] means either the catch-all in
    [run_keepalive_unified_turn] swallowed an exception to keep the
-   keeper fiber alive, or the durable event-queue claim/settlement did
-   not commit. The failure has already been recorded via
+   keeper fiber alive, or event-queue work did not complete. The failure has
+   already been recorded via
    [Keeper_registry.increment_turn_failures] (the same counter the
    unified-turn failure path in [Keeper_unified_turn_failure] uses),
    so the caller reads a non-zero [turn_fail_count] and dispatches
@@ -151,7 +151,7 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
   | None | Some _ -> false
 ;;
 
-exception Event_queue_settlement_failed of string
+exception Event_queue_cycle_failed of string
 
 type board_attention_settlement_outcome =
   | Board_attention_settled of
@@ -197,60 +197,60 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
     stimuli
 ;;
 
-(* One turn settles its source selection exactly one way. Acking the selection
+(* One turn decides whether to ACK its source selection. Acking the selection
    and committing the scheduled occurrence terminal are two effects of that
    single decision, not two decisions: an acked selection whose occurrence is
    still [dispatched] leaks that row forever, because the stimulus that would
    have carried it back to a turn is gone. Deriving both from one value keeps
-   them from drifting — a new cycle outcome or lease disposition forces one
+   them from drifting — a new cycle outcome or source disposition forces one
    edit here instead of two that no compiler can cross-check. *)
 type scheduled_work_terminal =
   | Scheduled_work_succeeded
   | Scheduled_work_failed of string
 
-type turn_source_settlement =
-  | Settle_source of scheduled_work_terminal
-  | Retain_unacked
+type turn_source_ack =
+  | Ack_source of scheduled_work_terminal
+  | Keep_source_pending
 
-let turn_source_settlement_of_cycle_outcome = function
-  | None -> Retain_unacked
+let turn_source_ack_of_cycle_outcome = function
+  | None -> Keep_source_pending
   | Some Cycle.Completed _
   | Some Cycle.Manual_compaction_applied _
   | Some Cycle.Manual_compaction_not_applied _ ->
-    Settle_source Scheduled_work_succeeded
+    Ack_source Scheduled_work_succeeded
   | Some Cycle.Checkpointed _
   | Some Cycle.Input_required _ ->
-    Retain_unacked
+    Keep_source_pending
   | Some (Cycle.Failed { failure; _ }) ->
-    (match failure.Keeper_unified_turn.source_lease_disposition with
+    (match failure.Keeper_unified_turn.source_disposition with
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling
      | Keeper_unified_turn.Escalate_after_exact_output_terminal _ ->
-       Settle_source
+       Ack_source
          (Scheduled_work_failed
             (Agent_sdk.Error.to_string failure.Keeper_unified_turn.error))
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
      | Keeper_unified_turn.Requeue_after_context_compaction _
      | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
-       Retain_unacked)
+       Keep_source_pending)
   | Some Cycle.Cancelled _
   | Some Cycle.Skipped _
   | Some Cycle.Busy _
   | Some Cycle.Manual_compaction_failed _ ->
-    Retain_unacked
+    Keep_source_pending
 ;;
 
-(* The ack side of the same decision. A source is released only once its
-   scheduled occurrence has a terminal row on disk. *)
-let settlement_acks_source = function
-  | Settle_source _ -> true
-  | Retain_unacked -> false
+(* A source is released only once its scheduled occurrence has a terminal row
+   on disk. *)
+let source_ack_is_due = function
+  | Ack_source _ -> true
+  | Keep_source_pending -> false
 ;;
 
-let persist_scheduled_work_terminal ~ctx ~keeper_name ~settlement stimuli =
-  match settlement with
-  | Retain_unacked -> Ok ()
-  | Settle_source terminal ->
+let persist_scheduled_work_terminal ~ctx ~keeper_name ~source_ack stimuli =
+  match source_ack with
+  | Keep_source_pending -> Ok ()
+  | Ack_source terminal ->
     let now = Time_compat.now () in
     let rec loop = function
       | [] -> Ok ()
@@ -368,7 +368,7 @@ let compaction_outcome_of_cycle_outcome = function
   | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
   | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
   | Some (Cycle.Failed { failure; _ }) ->
-    (match failure.Keeper_unified_turn.source_lease_disposition with
+    (match failure.Keeper_unified_turn.source_disposition with
      | Keeper_unified_turn.Requeue_after_context_compaction
          Keeper_unified_turn.Compaction_committed ->
        (* #25538: an in-lane commit is still one provider-overflow episode.
@@ -435,8 +435,8 @@ module For_testing = struct
 
   let commit_transcript_corruption = commit_transcript_corruption
   let cycle_outcome_acks_source cycle_outcome =
-    turn_source_settlement_of_cycle_outcome (Some cycle_outcome)
-    |> settlement_acks_source
+    turn_source_ack_of_cycle_outcome (Some cycle_outcome)
+    |> source_ack_is_due
   ;;
 
 end
@@ -495,14 +495,13 @@ let run_keepalive_unified_turn
     in
     let cycle_outcome_ref = ref None in
     let selection_acked = ref false in
-    let settlement_failed = ref false in
-    let transcript_corruption_detected = ref false in
-    let record_settlement_failure message =
-      settlement_failed := true;
+    let event_queue_failed = ref false in
+    let record_event_queue_failure message =
+      event_queue_failed := true;
       match !cycle_outcome_ref with
       | Some (Cycle.Failed _) ->
-        (* The failed turn already recorded its failure counter.  The queue
-           error remains explicit in the log and active durable lease. *)
+        (* The failed turn already recorded its failure counter. The queue
+           error remains explicit in the log and durable pending state. *)
         ()
       | Some
           ( Cycle.Completed _
@@ -518,10 +517,8 @@ let run_keepalive_unified_turn
         record_crashed_cycle_failure
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name
-          (Event_queue_settlement_failed message)
+          (Event_queue_cycle_failed message)
     in
-    let retain_unacked_pending _reason = () in
-    let settle_exact_terminal_after_cancellation () = false in
     try
       (match
          Keeper_board_attention_worker.settle_one_completed
@@ -583,7 +580,7 @@ let run_keepalive_unified_turn
          when
            Stimulus_intake.event_queue_intake_error_counts_as_cycle_failure
              error ->
-         record_settlement_failure
+         record_event_queue_failure
            (Stimulus_intake.event_queue_intake_error_to_string error)
        | Some _ -> ());
       let pending_board_events = event_intake.pending_board_events in
@@ -820,9 +817,8 @@ let run_keepalive_unified_turn
       let transcript_corruption_commit =
         match !cycle_outcome_ref with
         | Some (Cycle.Failed { failure; _ }) ->
-          (match failure.Keeper_unified_turn.source_lease_disposition with
+          (match failure.Keeper_unified_turn.source_disposition with
            | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
-             transcript_corruption_detected := true;
              Log.Keeper.error
                ~keeper_name:meta_after_triage.name
                "transcript corruption retained its exact pending source without \
@@ -849,20 +845,20 @@ let run_keepalive_unified_turn
           None
       in
       let meta_after_cycle = meta_after_cycle in
-      let turn_source_settlement =
-        turn_source_settlement_of_cycle_outcome !cycle_outcome_ref
+      let turn_source_ack =
+        turn_source_ack_of_cycle_outcome !cycle_outcome_ref
       in
       let scheduled_work_terminal_committed =
         match
           persist_scheduled_work_terminal
             ~ctx
             ~keeper_name:meta_after_triage.name
-            ~settlement:turn_source_settlement
+            ~source_ack:turn_source_ack
             !consumed_stimuli
         with
         | Ok () -> true
         | Error message ->
-          record_settlement_failure message;
+          record_event_queue_failure message;
           false
       in
       (* Pending remains the authority throughout execution. Remove only an
@@ -872,7 +868,7 @@ let run_keepalive_unified_turn
          match !pending_selection with
        | None -> ()
        | Some selection ->
-         let should_ack = settlement_acks_source turn_source_settlement in
+         let should_ack = source_ack_is_due turn_source_ack in
          if should_ack && scheduled_work_terminal_committed
          then
            match
@@ -887,27 +883,12 @@ let run_keepalive_unified_turn
                ~base_path:ctx.config.base_path
                ~keeper_name:meta_after_triage.name
                (connector_attention_event_ids_of_stimuli !consumed_stimuli)
-           | Error message -> record_settlement_failure message);
-      (* RFC-0351 S0 / #25461: advance the compaction streak the ceiling reads.
-         The ceiling now lives at the trigger, not at lease settlement:
-         [Keeper_post_turn] asks [Keeper_meta_contract.compaction_retry_suspended]
-         and refuses to prepare a compaction once the streak reaches
-         [compaction_retry_escalation_threshold]. Stamping after that read keeps
-         the decision on the count before this failure. (#25969 removed
-         [settlement_of_cycle_outcome], which applied the same ceiling by
-         escalating the lease settlement instead.)
-
-         Hoisted out of the [Some lease] branch. A failure has to consume retry
-         budget whether or not the cycle happened to own an event-queue lease.
-         While this ran inside that branch, a keeper that claimed no lease could
-         neither compact — [dispatch_guard] is [None] without a lease, so the
-         summarizer rejects with an absent exact-execution guard — nor accumulate
-         the streak that would eventually suspend it. Measured 2026-07-25: two
-         keepers at 306 and 368 failed context_compacted attempts with
-         consecutive_failures = 0, retrying without bound, while keepers that did
-         hold a lease reached the ceiling at 21 and 3 and settled. Compaction
-         failures already map to [`Failed] (keeper_unified_turn.ml:448 ->
-         compaction_outcome_of_cycle_outcome), so nothing else was suppressing it. *)
+           | Error message -> record_event_queue_failure message);
+      (* RFC-0351 S0 / #25461: advance the compaction streak read by the trigger.
+         [Keeper_post_turn] refuses another compaction once the streak reaches
+         [compaction_retry_escalation_threshold]. This update is intentionally
+         independent of Event Queue source selection: every failed compaction
+         must consume retry budget, including cycles with no selected source. *)
       (let compaction_outcome =
          compaction_outcome_of_cycle_outcome !cycle_outcome_ref
        in
@@ -933,24 +914,16 @@ let run_keepalive_unified_turn
               message));
       { meta = meta_after_cycle
       ; cycle_status =
-          if !settlement_failed then Turn_cycle_crashed else Turn_cycle_completed
+          if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed
       }
     with
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      if
-        (not !transcript_corruption_detected)
-        && not (settle_exact_terminal_after_cancellation ())
-      then retain_unacked_pending Keeper_registry_event_queue.Cancelled;
       Printexc.raise_with_backtrace e backtrace
     | Keeper_registry.Keeper_fiber_crash as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      if not !transcript_corruption_detected
-      then retain_unacked_pending Keeper_registry_event_queue.Cycle_crashed;
       Printexc.raise_with_backtrace e backtrace
     | exn ->
-      if not !transcript_corruption_detected
-      then retain_unacked_pending Keeper_registry_event_queue.Cycle_crashed;
       (* T6 audit: keep the fiber alive, but surface the crash as a
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)

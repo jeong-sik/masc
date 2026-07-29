@@ -34,6 +34,16 @@ let rec remove_tree path =
 
 let int64_json value = `Intlit (Int64.to_string value)
 
+let int64_of_json label = function
+  | `Int value -> Int64.of_int value
+  | `Intlit value ->
+    (match Int64.of_string_opt value with
+     | Some parsed -> parsed
+     | None -> Alcotest.failf "%s: invalid int64 literal %S" label value)
+  | json ->
+    Alcotest.failf "%s: expected int or intlit, got %s" label (Yojson.Safe.to_string json)
+;;
+
 let board_source : Queue.stimulus =
   { post_id = "paused-work-operator-source"
   ; urgency = Queue.Normal
@@ -63,10 +73,63 @@ let terminal_source () =
 
 let common operation fields =
   `Assoc
-    ([ "schema", `String "masc.keeper.paused-work.operator-request.v1"
+    ([ "schema", `String "masc.keeper.paused-work.operator-request.v3"
      ; "operation", `String operation
      ]
      @ fields)
+;;
+
+let with_source_terminal_lane f =
+  let base_path = Filename.temp_dir "keeper-paused-work-operator-terminal" "" in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "paused-work-operator-terminal" in
+       let meta =
+         Masc_test_deps.meta_of_json_fixture
+           (`Assoc
+             [ "name", `String keeper_name
+             ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
+             ; "trace_id", `String "trace-paused-work-operator-terminal"
+             ; "autoboot_enabled", `Bool false
+             ])
+         |> require_ok "parse source-terminal metadata"
+       in
+       let meta =
+         { meta with
+           paused = true
+         ; latched_reason =
+             Some
+               (Keeper_latched_reason.Operator_paused
+                  { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
+         ; runtime = { meta.runtime with nonce = 19 }
+         }
+       in
+       Keeper_meta_store.write_meta config meta |> require_ok "persist source-terminal metadata";
+       let source, _channel = terminal_source () in
+       Persistence.update_result ~base_path ~keeper_name (fun pending ->
+         Queue.enqueue pending source)
+       |> require_ok "seed source-terminal event";
+       let source_revision =
+         Persistence.load_state_result ~base_path ~keeper_name
+         |> require_ok "load source-terminal state"
+         |> State.revision
+       in
+       let source_receipt =
+         State.source_terminal_receipt_of_stimulus source
+         |> require_ok "derive source-terminal receipt"
+       in
+       let request : Keeper_paused_work_source_terminal_transaction.request =
+         { source
+         ; source_revision
+         ; owner_nonce = meta.runtime.nonce
+         ; source_receipt
+         ; operator_operation_id = "operator-source-terminal-response"
+         }
+       in
+       f config keeper_name request)
 ;;
 
 let test_strict_request_codec () =
@@ -84,6 +147,20 @@ let test_strict_request_codec () =
      ()
    | Ok _ -> Alcotest.fail "resume request decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
+  let obsolete_v2_resume =
+    match resume with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "schema", _ -> "schema", `String "masc.keeper.paused-work.operator-request.v2"
+             | field -> field)
+           fields)
+    | _ -> Alcotest.fail "resume fixture must be a JSON object"
+  in
+  (match Operator.request_of_yojson obsolete_v2_resume with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "request codec accepted obsolete v2 schema");
   let with_extra =
     match resume with
     | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
@@ -101,15 +178,22 @@ let test_strict_request_codec () =
       ; "owner_nonce", `Int 7
       ; "operator_operation_id", `String "operator-cancel"
       ; "reason", `String "operator rejected retained work"
-      ; "settled_at", `Float 3.0
       ]
   in
   (match Operator.request_of_yojson cancel with
    | Ok (Operator.Cancel_pending request) ->
      Alcotest.(check bool) "cancel source exact" true (request.source = board_source);
      Alcotest.(check int64) "cancel revision exact" 11L request.source_revision
-   | Ok _ -> Alcotest.fail "pending cancellation decoded to the wrong operation"
-   | Error detail -> Alcotest.fail detail);
+  | Ok _ -> Alcotest.fail "pending cancellation decoded to the wrong operation"
+  | Error detail -> Alcotest.fail detail);
+  let cancel_with_obsolete_settled_at =
+    match cancel with
+    | `Assoc fields -> `Assoc (("settled_at", `Float 3.0) :: fields)
+    | _ -> Alcotest.fail "cancel fixture must be a JSON object"
+  in
+  (match Operator.request_of_yojson cancel_with_obsolete_settled_at with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "cancel request accepted obsolete settled_at field");
   let terminal_source, channel = terminal_source () in
   let transfer =
     common
@@ -122,7 +206,6 @@ let test_strict_request_codec () =
       ; ( "continuation_binding"
         , Disposition.continuation_binding_to_yojson (Disposition.Routed channel) )
       ; "operator_operation_id", `String "operator-transfer"
-      ; "settled_at", `Float 4.0
       ]
   in
   (match Operator.request_of_yojson transfer with
@@ -133,25 +216,40 @@ let test_strict_request_codec () =
        (request.source = terminal_source)
    | Ok _ -> Alcotest.fail "transfer decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
+  let transfer_with_obsolete_settled_at =
+    match transfer with
+    | `Assoc fields -> `Assoc (("settled_at", `Float 4.0) :: fields)
+    | _ -> Alcotest.fail "transfer fixture must be a JSON object"
+  in
+  (match Operator.request_of_yojson transfer_with_obsolete_settled_at with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "transfer request accepted obsolete settled_at field");
   let source_terminal =
     common
-      "settle_from_source_terminal"
+      "ack_source_terminal"
       [ "source", Queue.stimulus_to_yojson terminal_source
       ; "source_revision", int64_json 13L
       ; "owner_nonce", `Int 7
       ; "source_receipt_kind", `String "hitl_terminal"
       ; "operator_operation_id", `String "operator-source-terminal"
-      ; "settled_at", `Float 5.0
       ]
   in
   (match Operator.request_of_yojson source_terminal with
-   | Ok (Operator.Settle_from_source_terminal request) ->
+   | Ok (Operator.Ack_source_terminal request) ->
      Alcotest.(check bool)
        "source terminal exact"
        true
        (request.source = terminal_source)
    | Ok _ -> Alcotest.fail "source-terminal decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
+  let source_terminal_with_obsolete_settled_at =
+    match source_terminal with
+    | `Assoc fields -> `Assoc (("settled_at", `Float 5.0) :: fields)
+    | _ -> Alcotest.fail "source-terminal fixture must be a JSON object"
+  in
+  (match Operator.request_of_yojson source_terminal_with_obsolete_settled_at with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "source-terminal request accepted obsolete settled_at field");
   let mismatched_source_terminal =
     match source_terminal with
     | `Assoc fields ->
@@ -169,6 +267,45 @@ let test_strict_request_codec () =
    | Ok _ -> Alcotest.fail "source-terminal request accepted a mismatched receipt")
 ;;
 
+let test_source_terminal_outcome_is_ack_boundary () =
+  with_source_terminal_lane (fun config keeper_name request ->
+    let outcome =
+      match Operator.execute config ~keeper_name (Operator.Ack_source_terminal request) with
+      | Ok outcome -> outcome
+      | Error error -> Alcotest.fail (Operator.error_to_string error)
+    in
+    let json = Operator.outcome_to_yojson outcome in
+    let open Yojson.Safe.Util in
+    let receipt_fields =
+      match json |> member "receipt" with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "operator response omitted durable source-ACK receipt"
+    in
+    let source_terminal_fields =
+      match List.assoc_opt "source_terminal" receipt_fields with
+      | Some (`Assoc fields) -> fields
+      | _ -> Alcotest.fail "durable source-ACK receipt omitted source_terminal"
+    in
+    Alcotest.(check bool)
+      "source-terminal outcome projection is complete"
+      true
+      (Operator.outcome_projection_complete outcome);
+    Alcotest.(check string)
+      "operator response names source ACK"
+      "ack_source_terminal"
+      (json |> member "operation" |> to_string);
+    Alcotest.(check string)
+      "durable receipt names source ACK"
+      "ack_source_terminal"
+      (json |> member "receipt" |> member "operation" |> to_string);
+    Alcotest.(check (list string))
+      "durable source-terminal receipt has the exact hard-cut fields"
+      [ "source"; "source_receipt_kind"; "source_revision" ]
+      (source_terminal_fields
+       |> List.map fst
+       |> List.sort String.compare))
+;;
+
 let test_inventory_exposes_exact_durable_fences () =
   let base_path = Filename.temp_dir "keeper-paused-work-operator" "" in
   Fun.protect
@@ -183,7 +320,6 @@ let test_inventory_exposes_exact_durable_fences () =
             [ "name", `String keeper_name
             ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
             ; "trace_id", `String "trace-paused-work-inventory"
-            ; "runtime_id", `String "runtime.primary"
             ; "autoboot_enabled", `Bool false
             ])
         |> require_ok "parse inventory metadata"
@@ -222,16 +358,18 @@ let test_inventory_exposes_exact_durable_fences () =
       Alcotest.(check int64)
         "inventory revision fence"
         (State.revision state)
-        (Int64.of_int (json |> member "queue" |> member "revision" |> to_int));
+        (json |> member "queue" |> member "revision" |> int64_of_json "queue.revision");
       Alcotest.(check int)
         "inventory exact pending count"
         1
-        (json |> member "queue" |> member "pending" |> to_list |> List.length))
-      (* The tail claimed a lease so the inventory would expose
-         queue.active_lease, then decoded a cancel_accepted request with
-         source_state="active_lease". Both are gone: no caller can claim a
-         lease since #25969, the inventory no longer reports the field, and the
-         request arm is rejected at parse time. *)
+        (json |> member "queue" |> member "pending" |> to_list |> List.length);
+      Alcotest.(check int)
+        "inventory exact accepted transfer projection count"
+        0
+        (json
+         |> member "queue"
+         |> member "accepted_transfer_projection_count"
+         |> to_int))
 ;;
 
 let admission_error_json block =
@@ -297,6 +435,12 @@ let () =
     "keeper paused-work operator"
     [ ( "codec"
       , [ Alcotest.test_case "strict four-way request codec" `Quick test_strict_request_codec ] )
+    ; ( "source terminal"
+      , [ Alcotest.test_case
+            "outcome is ACK boundary"
+            `Quick
+            test_source_terminal_outcome_is_ack_boundary
+        ] )
     ; ( "inventory"
       , [ Alcotest.test_case
             "durable exact identity and revision"

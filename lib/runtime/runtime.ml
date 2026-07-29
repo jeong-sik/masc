@@ -558,7 +558,7 @@ let validate_request_body_cap ~runtime_id
 
 (* Keeper provider attempts originate at the configured default, an explicit
    keeper assignment, an explicit media-failover runtime, the periodic Memory
-   OS consolidation runtime, structured judge, or cross verifier. A lane is
+   OS consolidation runtime, or cross verifier. A lane is
    reachable only when its id shadows one of the configured routes; a merely
    declared lane is dormant until a routed root names it.
    Expand each lane-capable route with the same lane-over-runtime precedence as
@@ -571,7 +571,6 @@ let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
     ~(memory_os_consolidation_runtime_id : string option)
-    ~(structured_judge_runtime_id : string option)
     ~(cross_verifier_runtime_id : string option)
     ~(media_failover : string list)
     ~(lanes : Runtime_lane.t list)
@@ -601,7 +600,6 @@ let keeper_dispatch_runtime_ids
       @ (memory_os_consolidation_runtime_id
          |> Option.to_list
          |> List.concat_map expand)
-      @ (structured_judge_runtime_id |> Option.to_list |> List.concat_map expand)
       @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand) )
 ;;
 
@@ -612,7 +610,7 @@ let validate_keeper_dispatch_request_caps
     , (default_runtime : t)
     , assignments
     , memory_os_consolidation_runtime_id
-    , structured_judge_runtime_id
+    , _structured_judge_runtime_id
     , cross_verifier_runtime_id
     , media_failover
     , lanes )
@@ -622,7 +620,6 @@ let validate_keeper_dispatch_request_caps
       ~default_runtime_id:default_runtime.id
       ~assignments
       ~memory_os_consolidation_runtime_id
-      ~structured_judge_runtime_id
       ~cross_verifier_runtime_id
       ~media_failover
       ~lanes

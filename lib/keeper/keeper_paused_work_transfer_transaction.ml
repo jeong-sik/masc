@@ -5,11 +5,10 @@ type request =
   ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
-  ; settled_at : float
   }
 
 type projection_stage =
-  | Source_settlement
+  | Source_ack
   | Target_enqueue
 
 type failure =
@@ -58,10 +57,7 @@ type target_projection =
   | Already_present
 
 type projection =
-  | Applied of
-      { source_settlement : Keeper_registry_event_queue.settle_result
-      ; target_projection : target_projection
-      }
+  | Applied of target_projection
   | Committed_followup_failed of failure
 
 type success =
@@ -74,7 +70,7 @@ type success =
 let ( let* ) = Result.bind
 
 let projection_stage_to_string = function
-  | Source_settlement -> "source_settlement"
+  | Source_ack -> "source_ack"
   | Target_enqueue -> "target_enqueue"
 ;;
 
@@ -157,8 +153,6 @@ let validate_request ~from_keeper ~to_keeper request =
   then Error "source post id must not be empty"
   else if String.equal (String.trim request.operator_operation_id) ""
   then Error "operator operation ID must not be empty"
-  else if not (Float.is_finite request.settled_at)
-  then Error "settlement time must be finite"
   else if
     request.continuation_binding
     <> Keeper_paused_work_disposition_receipt.continuation_binding_of_source
@@ -217,9 +211,6 @@ let validate_source_queue config ~from_keeper request =
   in
   if not (Int64.equal (Keeper_event_queue_state.revision state) request.source_revision)
   then Error (Source_queue_validation_failed "source revision changed")
-  (* An "active lease" guard sat here. No caller can claim a lease since #25969
-     moved production to peek/ack, and [State.of_yojson] restores none, so the
-     condition could never hold. The outbox guard below still can. *)
   else if Keeper_event_queue_state.transition_outbox state <> []
   then Error (Source_queue_validation_failed "source lane has a pending transition outbox")
   else
@@ -241,7 +232,7 @@ let transfer_of_receipt receipt =
   | Keeper_paused_work_disposition_receipt.Transfer_owner transfer -> Ok transfer
   | Keeper_paused_work_disposition_receipt.Resume_owner ->
     Error (Receipt_conflict receipt)
-  | Keeper_paused_work_disposition_receipt.Settle_from_source_terminal _ ->
+  | Keeper_paused_work_disposition_receipt.Ack_source_terminal _ ->
     Error (Receipt_conflict receipt)
 ;;
 
@@ -257,7 +248,6 @@ let receipt_matches_request ~from_keeper ~to_keeper request receipt =
     && Int.equal transfer.target_generation request.target_generation
     && transfer.source = request.source
     && Int64.equal transfer.source_revision request.source_revision
-    && Float.equal transfer.settled_at request.settled_at
     && transfer.continuation_binding = request.continuation_binding
 ;;
 
@@ -274,7 +264,6 @@ let create_receipt config ~from_keeper ~to_keeper request =
     ; target_generation = request.target_generation
     ; source = request.source
     ; source_revision = request.source_revision
-    ; settled_at = request.settled_at
     ; continuation_binding = request.continuation_binding
     }
   in
@@ -301,7 +290,7 @@ let accepted_transfer receipt
   }
 ;;
 
-let source_settlement config receipt transfer =
+let ack_source config receipt transfer =
   let causal = accepted_transfer receipt transfer in
   let base_path = config.Workspace.base_path in
   let* source_state =
@@ -309,15 +298,15 @@ let source_settlement config receipt transfer =
       ~base_path
       ~keeper_name:transfer.from_keeper
     |> Result.map_error (fun detail ->
-      Committed_projection_failed { stage = Source_settlement; detail })
+      Committed_projection_failed { stage = Source_ack; detail })
   in
   let* prior =
     Keeper_event_queue_state.accepted_pending_transfer_replay causal source_state
     |> Result.map_error (fun detail ->
-      Committed_projection_failed { stage = Source_settlement; detail })
+      Committed_projection_failed { stage = Source_ack; detail })
   in
   match prior with
-  | Some prior -> Ok (Keeper_registry_event_queue.Already_settled prior)
+  | Some _ -> Ok ()
   | None ->
     let* current = read_meta config transfer.from_keeper in
     let* () =
@@ -332,14 +321,38 @@ let source_settlement config receipt transfer =
       then Error Source_owner_identity_changed
       else Ok ()
     in
-    Keeper_registry_event_queue.transfer_pending_accepted_result
-      ~base_path
-      transfer.from_keeper
-      ~current_owner_nonce:current.runtime.nonce
-      ~settled_at:transfer.settled_at
-      ~transfer:causal
-    |> Result.map_error (fun detail ->
-      Committed_projection_failed { stage = Source_settlement; detail })
+    (* The receipt is the durable transfer-acceptance boundary, so its stored
+       request time is the sole timestamp for the source ACK. *)
+    let* outcome =
+      Keeper_registry_event_queue.transfer_pending_accepted_result
+        ~base_path
+        transfer.from_keeper
+        ~current_owner_nonce:current.runtime.nonce
+        ~applied_at:receipt.requested_at
+        ~transfer:causal
+      |> Result.map_error (fun detail ->
+        Committed_projection_failed { stage = Source_ack; detail })
+    in
+    (match outcome with
+     | Keeper_registry_event_queue.Transition_applied _
+     | Keeper_registry_event_queue.Transition_already_applied _ -> Ok ()
+     | Keeper_registry_event_queue.Transition_committed_followup_failed
+         { stage; detail; _ } ->
+       let stage =
+         match stage with
+         | `Checkpoint -> "checkpoint"
+         | `Wal_compaction -> "wal_compaction"
+         | `Projection -> "projection"
+       in
+       Error
+         (Committed_projection_failed
+            { stage = Source_ack
+            ; detail =
+                Printf.sprintf
+                  "source ACK committed but %s follow-up failed: %s"
+                  stage
+                  detail
+            }))
 ;;
 
 let validate_committed_target config transfer =
@@ -374,9 +387,9 @@ let target_enqueue config receipt transfer =
 
 let project_receipt config receipt =
   let* transfer = transfer_of_receipt receipt in
-  let* source_settlement = source_settlement config receipt transfer in
+  let* () = ack_source config receipt transfer in
   let* target_projection = target_enqueue config receipt transfer in
-  Ok (Applied { source_settlement; target_projection })
+  Ok (Applied target_projection)
 ;;
 
 let run_owned receipt_lock config ~from_keeper ~to_keeper request =

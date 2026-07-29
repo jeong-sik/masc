@@ -11,10 +11,14 @@ owner, injects one exact `Board_signal`, then verifies all of the following:
 - the paused lane retains the exact source once;
 - the first request and both pre-/post-terminal replays return the same durable
   disposition receipt;
-- resume/transfer consumption advances the expected lease sequence once;
+- every source transition has its operation-derived durable identity;
+- each disposition reaches its public active/paused empty-queue state without a
+  surviving source or transition outbox;
 - cancellation has one source terminal receipt and no surviving source;
-- transfer has one source settlement and one target
-  `accepted_transfer_projections` row, including replay after target ACK;
+- transfer has one source transition and one target
+  `accepted_transfer_projections` row after target consumption; its public
+  count advances exactly once and both replays leave that count unchanged;
+- every operation has exactly one durable disposition receipt;
 - a configured server restart recovers before the same exact request is
   replayed.
 

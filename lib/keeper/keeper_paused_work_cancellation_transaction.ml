@@ -1,14 +1,9 @@
-(* [request] and [cancel] -- the active-lease arm -- lived here. They needed a
-   Keeper_registry_event_queue.lease, which no caller can obtain since #25969
-   moved production to peek/ack and which State.of_yojson never restores. *)
-
 type pending_request =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
   ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
-  ; settled_at : float
   }
 
 type failure =
@@ -25,12 +20,11 @@ type failure =
       { expected : int
       ; actual : int
       }
-  | Lease_source_invalid
   | Queue_replay_failed of string
   | Queue_commit_failed of string
 
 type success =
-  { settlement : Keeper_registry_event_queue.settle_result
+  { transition : Keeper_registry_event_queue.transition_result
   ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
   }
 
@@ -61,8 +55,6 @@ let failure_to_string = function
       "live Keeper owner generation changed: expected %d, actual %d"
       expected
       actual
-  | Lease_source_invalid ->
-    "accepted cancellation lease must carry exactly one source stimulus"
   | Queue_replay_failed detail -> "accepted cancellation replay failed: " ^ detail
   | Queue_commit_failed detail -> "accepted cancellation commit failed: " ^ detail
 ;;
@@ -181,7 +173,7 @@ let cancel_with_lifecycle
   let finish token outcome =
     let reservation_release = Keeper_lifecycle_reservation.release token in
     match outcome with
-    | Ok settlement -> Ok { settlement; reservation_release = Some reservation_release }
+    | Ok transition -> Ok { transition; reservation_release = Some reservation_release }
     | Error cause ->
       Error (Failed { cause; reservation_release = Some reservation_release })
   in
@@ -200,7 +192,7 @@ let cancel_with_lifecycle
          match replay_committed ~base_path ~keeper_name replay with
          | Error cause -> finish token (Error cause)
          | Ok (Some receipt) ->
-           finish token (Ok (Keeper_registry_event_queue.Already_settled receipt))
+           finish token (Ok (Keeper_registry_event_queue.Transition_already_applied receipt))
          | Ok None ->
            finish
              token
@@ -222,7 +214,7 @@ let cancel_with_lifecycle
   | Error cause -> Error (Failed { cause; reservation_release = None })
   | Ok (Some receipt) ->
     Ok
-      { settlement = Keeper_registry_event_queue.Already_settled receipt
+      { transition = Keeper_registry_event_queue.Transition_already_applied receipt
       ; reservation_release = None
       }
   | Ok None ->
@@ -249,6 +241,6 @@ let cancel_pending config ~keeper_name request =
         ~base_path:config.Workspace.base_path
         keeper_name
         ~current_owner_nonce
-        ~settled_at:request.settled_at
+        ~applied_at:(Time_compat.now ())
         ~cancellation)
 ;;

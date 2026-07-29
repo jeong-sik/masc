@@ -26,7 +26,7 @@ RESTART_HOOK="${RESTART_HOOK:-}"
 RUN_ID="${RUN_ID:-paused-work-soak-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 RUN_DIR="${RUN_DIR:-$REPO_ROOT/logs/paused-work-soak/$RUN_ID}"
 AUTHOR="${AUTHOR:-paused_work_soak}"
-REQUEST_SCHEMA="masc.keeper.paused-work.operator-request.v1"
+REQUEST_SCHEMA="masc.keeper.paused-work.operator-request.v3"
 MIN_ACCEPTANCE_SEC=28800
 
 usage() {
@@ -242,7 +242,10 @@ get_inventory() {
   INVENTORY="$HTTP_LAST_BODY"
   jq -e '
     .schema == "masc.keeper.paused-work.inventory.v1" and
-    .operator_request_schema == "masc.keeper.paused-work.operator-request.v1"
+    .operator_request_schema == "masc.keeper.paused-work.operator-request.v3" and
+    (.queue.accepted_transfer_projection_count | type) == "number" and
+    .queue.accepted_transfer_projection_count >= 0 and
+    .queue.accepted_transfer_projection_count == (.queue.accepted_transfer_projection_count | floor)
   ' <<<"$INVENTORY" >/dev/null 2>&1
 }
 
@@ -259,36 +262,13 @@ wait_health() {
   return 1
 }
 
-queue_path() {
-  printf '%s/.masc/keepers/%s/event-queue.json\n' "$MASC_BASE_PATH" "$1"
-}
-
-read_state() {
-  local keeper="$1" path
-  path="$(queue_path "$keeper")"
-  [[ -f "$path" ]] || return 1
-  jq -e '
-    if .schema == "keeper.event_queue.state.v4" then .
-    else error("paused-work soak requires event queue schema v4")
-    end
-  ' "$path"
-}
-
-source_count() {
-  local state="$1" source="$2"
-  jq --argjson source "$source" '[
-    .pending.items[]?, .leases[].stimuli[]?, .transition_outbox[].stimuli[]?
-    | select(. == $source)
-  ] | length' <<<"$state"
-}
-
 wait_paused_source() {
   local keeper="$1" post_id="$2" deadline=$(( $(date +%s) + WAIT_TIMEOUT_SEC )) count
   while (( $(date +%s) <= deadline )); do
     if get_inventory "$keeper"; then
       count="$(jq --arg post_id "$post_id" '[.queue.pending[] | select(.source.post_id == $post_id)] | length' <<<"$INVENTORY")"
       if [[ "$count" == "1" ]] \
-        && jq -e '.owner.paused == true and .queue.active_lease == null and .queue.transition_outbox_count == 0' \
+        && jq -e '.owner.paused == true and .queue.pending_count == 1 and .queue.transition_outbox_count == 0' \
           <<<"$INVENTORY" >/dev/null; then
         return 0
       fi
@@ -298,36 +278,16 @@ wait_paused_source() {
   return 1
 }
 
-wait_ack() {
-  local keeper="$1" expected_sequence="$2" source="$3"
-  local deadline=$(( $(date +%s) + WAIT_TIMEOUT_SEC )) state count
+wait_clean_lane() {
+  local keeper="$1" paused="$2"
+  local deadline=$(( $(date +%s) + WAIT_TIMEOUT_SEC ))
   while (( $(date +%s) <= deadline )); do
-    if state="$(read_state "$keeper" 2>/dev/null)"; then
-      count="$(source_count "$state" "$source")"
-      if [[ "$count" == "0" ]] && jq -e --arg seq "$expected_sequence" '
-        (.last_settlement.lease_sequence | tostring) == $seq and
-        .last_settlement.settlement.kind == "ack"
-      ' <<<"$state" >/dev/null; then
-        printf '%s' "$state"
-        return 0
-      fi
-    fi
-    sleep 1
-  done
-  return 1
-}
-
-wait_source_settlement() {
-  local keeper="$1" operation_id="$2" kind="$3" source="$4"
-  local deadline=$(( $(date +%s) + WAIT_TIMEOUT_SEC )) state count
-  while (( $(date +%s) <= deadline )); do
-    if state="$(read_state "$keeper" 2>/dev/null)"; then
-      count="$(source_count "$state" "$source")"
-      if [[ "$count" == "0" ]] && jq -e --arg op "$operation_id" --arg kind "$kind" '
-        .last_settlement.settlement.kind == $kind and
-        .last_settlement.settlement.operator_operation_id == $op
-      ' <<<"$state" >/dev/null; then
-        printf '%s' "$state"
+    if get_inventory "$keeper"; then
+      if jq -e --argjson paused "$paused" '
+        .owner.paused == $paused and
+        .queue.pending_count == 0 and
+        .queue.transition_outbox_count == 0
+      ' <<<"$INVENTORY" >/dev/null; then
         return 0
       fi
     fi
@@ -410,12 +370,7 @@ resume_cleanup() {
 }
 
 for keeper in "${KEEPERS[@]}"; do
-  get_inventory "$keeper" || die "preflight inventory unavailable for $keeper"
-  jq -e '
-    .owner.paused == false and .queue.pending_count == 0 and
-    .queue.active_lease == null and .queue.transition_outbox_count == 0
-  ' <<<"$INVENTORY" >/dev/null ||
-    die "preflight requires active empty lane for $keeper"
+  wait_clean_lane "$keeper" false || die "preflight requires active empty lane for $keeper"
 done
 wait_health || die "server or MCP session is unavailable"
 
@@ -432,17 +387,21 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
     2) action="cancel" ;;
   esac
 
+  wait_clean_lane "$source_keeper" false ||
+    die "source lane is not clean before iteration $ITERATIONS"
   get_inventory "$source_keeper" || die "inventory unavailable before case for $source_keeper"
-  jq -e '.owner.paused == false and .queue.pending_count == 0 and .queue.active_lease == null and .queue.transition_outbox_count == 0' \
-    <<<"$INVENTORY" >/dev/null || die "source lane is not clean before iteration $ITERATIONS"
   source_generation="$(jq '.owner.generation' <<<"$INVENTORY")"
   if [[ "$action" == "transfer" ]]; then
+    wait_clean_lane "$target_keeper" false ||
+      die "target lane is not active and clean before iteration $ITERATIONS"
     get_inventory "$target_keeper" || die "target inventory unavailable for $target_keeper"
-    jq -e '.owner.paused == false and .queue.pending_count == 0 and .queue.active_lease == null and .queue.transition_outbox_count == 0' \
-      <<<"$INVENTORY" >/dev/null || die "target lane is not active and clean before iteration $ITERATIONS"
     target_generation="$(jq '.owner.generation' <<<"$INVENTORY")"
+    target_projection_before="$(jq '.queue.accepted_transfer_projection_count' <<<"$INVENTORY")"
+    target_projection_expected=$((target_projection_before + 1))
   else
     target_generation=0
+    target_projection_before=0
+    target_projection_expected=0
   fi
 
   post_pause "$source_keeper"
@@ -452,10 +411,7 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
   source="$(jq -c --arg post_id "$post_id" '.queue.pending[] | select(.source.post_id == $post_id) | .source' <<<"$INVENTORY")"
   binding="$(jq -c --arg post_id "$post_id" '.queue.pending[] | select(.source.post_id == $post_id) | .continuation_binding' <<<"$INVENTORY")"
   source_revision="$(jq -r '.queue.revision | tostring' <<<"$INVENTORY")"
-  source_state_before="$(read_state "$source_keeper")" || die "source v4 queue state unavailable"
-  expected_sequence="$(jq -r '.next_lease_sequence | tostring' <<<"$source_state_before")"
   operation_id="$RUN_ID/$ITERATIONS/$action"
-  settled_at="$(date +%s)"
 
   case "$action" in
     resume)
@@ -468,27 +424,19 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
       request="$(jq -cn --arg schema "$REQUEST_SCHEMA" --arg op "$operation_id" \
         --argjson source "$source" --arg revision "$source_revision" \
         --argjson generation "$source_generation" --argjson target_generation "$target_generation" \
-        --arg target "$target_keeper" --argjson binding "$binding" --argjson settled_at "$settled_at" \
+        --arg target "$target_keeper" --argjson binding "$binding" \
         '{schema:$schema,operation:"transfer_owner",source:$source,source_revision:$revision,
           owner_nonce:$generation,target_generation:$target_generation,to_keeper:$target,
-          continuation_binding:$binding,operator_operation_id:$op,settled_at:$settled_at}')"
-      target_queue_path="$(queue_path "$target_keeper")"
-      if [[ -f "$target_queue_path" ]]; then
-        target_state_before="$(read_state "$target_keeper")" ||
-          die "target queue exists but is not a valid v4 state"
-        target_expected_sequence="$(jq -r '.next_lease_sequence | tostring' <<<"$target_state_before")"
-      else
-        target_expected_sequence=1
-      fi
+          continuation_binding:$binding,operator_operation_id:$op}')"
       TRANSFER_CASES=$((TRANSFER_CASES + 1))
       ;;
     cancel)
       request="$(jq -cn --arg schema "$REQUEST_SCHEMA" --arg op "$operation_id" \
         --argjson source "$source" --arg revision "$source_revision" \
-        --argjson generation "$source_generation" --argjson settled_at "$settled_at" \
+        --argjson generation "$source_generation" \
         '{schema:$schema,operation:"cancel_accepted",source_state:"pending",source:$source,
           source_revision:$revision,owner_nonce:$generation,operator_operation_id:$op,
-          reason:"paused-work soak accepted cancellation",settled_at:$settled_at}')"
+          reason:"paused-work soak accepted cancellation"}')"
       CANCEL_CASES=$((CANCEL_CASES + 1))
       ;;
   esac
@@ -506,28 +454,25 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
 
   case "$action" in
     resume)
-      terminal_state="$(wait_ack "$source_keeper" "$expected_sequence" "$source")" ||
-        die "resume source did not reach one exact ACK" "silent_loss"
+      wait_clean_lane "$source_keeper" false ||
+        die "resume source did not become active and clean" "silent_loss"
       ;;
     transfer)
-      wait_source_settlement "$source_keeper" "$operation_id" transfer_accepted "$source" >/dev/null ||
-        die "transfer source settlement was not durable" "silent_loss"
-      terminal_state="$(wait_ack "$target_keeper" "$target_expected_sequence" "$source")" ||
-        die "transfer target did not reach one exact ACK" "silent_loss"
-      projection_count="$(jq --arg op "$operation_id" --argjson source "$source" '[
-        .accepted_transfer_projections[] |
-        select(.kind == "transfer_accepted" and .operator_operation_id == $op and .source == $source)
-      ] | length' <<<"$terminal_state")"
-      [[ "$projection_count" == "1" ]] ||
-        die "transfer target projection ledger count is $projection_count, expected 1" "duplicate"
+      wait_clean_lane "$source_keeper" true ||
+        die "transfer source did not become paused and clean" "silent_loss"
+      wait_clean_lane "$target_keeper" false ||
+        die "transfer target did not consume its exact source" "silent_loss"
+      get_inventory "$target_keeper" ||
+        die "target inventory unavailable after transfer for $target_keeper"
+      [[ "$(jq '.queue.accepted_transfer_projection_count' <<<"$INVENTORY")" == "$target_projection_expected" ]] ||
+        die "transfer target projection did not advance exactly once" "duplicate"
       ;;
     cancel)
-      terminal_state="$(wait_source_settlement "$source_keeper" "$operation_id" cancel_accepted "$source")" ||
-        die "cancel source did not reach one durable terminal receipt" "silent_loss"
+      wait_clean_lane "$source_keeper" true ||
+        die "cancel source did not become paused and clean" "silent_loss"
       ;;
   esac
 
-  terminal_next_sequence="$(jq -r '.next_lease_sequence | tostring' <<<"$terminal_state")"
   post_disposition "$source_keeper" "$request" "$action replay after terminal"
   final_body="$HTTP_LAST_BODY"
   final_receipt="$(receipt_canonical "$final_body")"
@@ -537,20 +482,26 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
     die "$action post-terminal replay did not repair its projection: $final_body"
   sleep "$REPLAY_SETTLE_SEC"
 
-  if [[ "$action" == "transfer" ]]; then
-    replay_state="$(read_state "$target_keeper")" || die "target state missing after replay"
-  else
-    replay_state="$(read_state "$source_keeper")" || die "source state missing after replay"
-  fi
-  replay_next_sequence="$(jq -r '.next_lease_sequence | tostring' <<<"$replay_state")"
-  [[ "$terminal_next_sequence" == "$replay_next_sequence" ]] ||
-    die "$action replay allocated another lease sequence" "duplicate"
-  [[ "$(source_count "$replay_state" "$source")" == "0" ]] ||
-    die "$action replay restored the consumed source" "duplicate"
-  if [[ "$action" == "transfer" ]]; then
-    [[ "$(jq --arg op "$operation_id" '[.accepted_transfer_projections[] | select(.operator_operation_id == $op)] | length' <<<"$replay_state")" == "1" ]] ||
-      die "transfer replay duplicated the target projection ledger" "duplicate"
-  fi
+  case "$action" in
+    resume)
+      wait_clean_lane "$source_keeper" false ||
+        die "resume replay left source lane non-clean" "duplicate"
+      ;;
+    transfer)
+      wait_clean_lane "$source_keeper" true ||
+        die "transfer replay left source lane non-clean" "duplicate"
+      wait_clean_lane "$target_keeper" false ||
+        die "transfer replay left target lane non-clean" "duplicate"
+      get_inventory "$target_keeper" ||
+        die "target inventory unavailable after replay for $target_keeper"
+      [[ "$(jq '.queue.accepted_transfer_projection_count' <<<"$INVENTORY")" == "$target_projection_expected" ]] ||
+        die "transfer replay changed the durable target projection count" "duplicate"
+      ;;
+    cancel)
+      wait_clean_lane "$source_keeper" true ||
+        die "cancel replay left source lane non-clean" "duplicate"
+      ;;
+  esac
   verify_receipt_file "$source_keeper" "$operation_id" ||
     die "$action operation does not have exactly one durable disposition receipt"
 

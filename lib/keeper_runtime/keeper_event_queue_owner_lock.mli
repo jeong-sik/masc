@@ -43,5 +43,5 @@ val with_durable_lock : t -> (unit -> 'a) -> 'a
 (** Transaction lock for durable state changes.  Lock acquisition remains
     cancellable.  Once acquired, [f] and lock release are cancellation
     protected, and pending cancellation is deliberately not re-raised at this
-    boundary.  This lets the caller receive a committed lease/receipt and
-    settle it before cancellation propagates at the next cancellation point. *)
+    boundary. This lets the caller receive a committed result before
+    cancellation propagates at the next cancellation point. *)

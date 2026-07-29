@@ -7,11 +7,10 @@ type request =
   ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
-  ; settled_at : float
   }
 
 type projection_stage =
-  | Source_settlement
+  | Source_ack
   | Target_enqueue
 
 type failure =
@@ -60,10 +59,7 @@ type target_projection =
   | Already_present
 
 type projection =
-  | Applied of
-      { source_settlement : Keeper_registry_event_queue.settle_result
-      ; target_projection : target_projection
-      }
+  | Applied of target_projection
   | Committed_followup_failed of failure
 
 type success =
@@ -81,7 +77,7 @@ val transfer_pending :
   to_keeper:string ->
   request ->
   (success, error) result
-(** Persist a typed [Transfer_owner] receipt before terminally settling the
-    exact source event, then enqueue that receipt's original stimulus on the
+(** Persist a typed [Transfer_owner] receipt before ACKing the exact source
+    event, then enqueue that receipt's original stimulus on the
     target lane. Replaying the same receipt completes either interrupted
     projection without duplicating the target event. *)

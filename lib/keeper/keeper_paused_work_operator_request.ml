@@ -13,10 +13,10 @@ type t =
       { to_keeper : string
       ; request : Transfer.request
       }
-  | Settle_from_source_terminal of Source_terminal.request
+  | Ack_source_terminal of Source_terminal.request
 
 let ( let* ) = Result.bind
-let schema = "masc.keeper.paused-work.operator-request.v1"
+let schema = "masc.keeper.paused-work.operator-request.v3"
 
 let sorted fields =
   List.sort (fun (left, _) (right, _) -> String.compare left right) fields
@@ -29,16 +29,6 @@ let int64_of_yojson field = function
      | Some value -> Ok value
      | None -> Error (field ^ " must be an int64"))
   | _ -> Error (field ^ " must be an int64")
-;;
-
-let finite_float_of_yojson field = function
-  | `Float value when Float.is_finite value -> Ok value
-  | `Int value -> Ok (Float.of_int value)
-  | `Intlit value ->
-    (match Float.of_string_opt value with
-     | Some value when Float.is_finite value -> Ok value
-     | Some _ | None -> Error (field ^ " must be a finite number"))
-  | _ -> Error (field ^ " must be a finite number")
 ;;
 
 let nonblank field value =
@@ -78,7 +68,6 @@ let parse_cancel_pending = function
     ; ("owner_nonce", `Int owner_nonce)
     ; ("reason", `String reason)
     ; ("schema", `String request_schema)
-    ; ("settled_at", settled_at_json)
     ; ("source", source_json)
     ; ("source_revision", source_revision_json)
     ; ("source_state", `String "pending")
@@ -87,7 +76,6 @@ let parse_cancel_pending = function
     let* source = Queue.stimulus_of_yojson source_json in
     let* source_revision = int64_of_yojson "source_revision" source_revision_json in
     let* source_revision = nonnegative_int64 "source_revision" source_revision in
-    let* settled_at = finite_float_of_yojson "settled_at" settled_at_json in
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
@@ -101,7 +89,6 @@ let parse_cancel_pending = function
            ; owner_nonce
            ; operator_operation_id
            ; reason
-           ; settled_at
            })
   | _ -> Error "pending cancel_accepted request fields are not exact"
 ;;
@@ -112,7 +99,6 @@ let parse_transfer = function
     ; ("operator_operation_id", `String operator_operation_id)
     ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
-    ; ("settled_at", settled_at_json)
     ; ("source", source_json)
     ; ("source_revision", source_revision_json)
     ; ("target_generation", `Int target_generation)
@@ -122,7 +108,6 @@ let parse_transfer = function
     let* source = Queue.stimulus_of_yojson source_json in
     let* source_revision = int64_of_yojson "source_revision" source_revision_json in
     let* source_revision = nonnegative_int64 "source_revision" source_revision in
-    let* settled_at = finite_float_of_yojson "settled_at" settled_at_json in
     let* continuation_binding =
       Disposition.continuation_binding_of_yojson continuation_binding_json
     in
@@ -143,18 +128,16 @@ let parse_transfer = function
                ; target_generation
                ; continuation_binding
                ; operator_operation_id
-               ; settled_at
                }
          })
   | _ -> Error "transfer_owner request fields are not exact"
 ;;
 
 let parse_source_terminal = function
-  | [ ("operation", `String "settle_from_source_terminal")
+  | [ ("operation", `String "ack_source_terminal")
     ; ("operator_operation_id", `String operator_operation_id)
     ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
-    ; ("settled_at", settled_at_json)
     ; ("source", source_json)
     ; ("source_receipt_kind", `String source_receipt_kind)
     ; ("source_revision", source_revision_json)
@@ -163,7 +146,6 @@ let parse_source_terminal = function
     let* source = Queue.stimulus_of_yojson source_json in
     let* source_revision = int64_of_yojson "source_revision" source_revision_json in
     let* source_revision = nonnegative_int64 "source_revision" source_revision in
-    let* settled_at = finite_float_of_yojson "settled_at" settled_at_json in
     let* source_receipt = Queue_state.source_terminal_receipt_of_stimulus source in
     let* () =
       if
@@ -178,16 +160,15 @@ let parse_source_terminal = function
     in
     let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
-      (Settle_from_source_terminal
+      (Ack_source_terminal
          Source_terminal.
            { source
            ; source_revision
            ; owner_nonce
            ; source_receipt
            ; operator_operation_id
-           ; settled_at
            })
-  | _ -> Error "settle_from_source_terminal request fields are not exact"
+  | _ -> Error "ack_source_terminal request fields are not exact"
 ;;
 
 let of_yojson = function
@@ -197,13 +178,10 @@ let of_yojson = function
      | Some (`String "resume_owner"), _ -> parse_resume fields
      | Some (`String "cancel_accepted"), Some (`String "pending") ->
        parse_cancel_pending fields
-     | Some (`String "cancel_accepted"), Some (`String "active_lease") ->
-       (* The active-lease arm required an operator-supplied lease that
-          [settle_committed] then had to find in durable state; none has been
-          there since #25969 moved production to peek/ack. *)
-       Error "active-lease cancel_accepted is no longer supported"
+     | Some (`String "cancel_accepted"), Some _ ->
+       Error "cancel_accepted source_state must be pending"
      | Some (`String "transfer_owner"), _ -> parse_transfer fields
-     | Some (`String "settle_from_source_terminal"), _ ->
+     | Some (`String "ack_source_terminal"), _ ->
        parse_source_terminal fields
      | Some (`String operation), _ ->
        Error (Printf.sprintf "unsupported paused-work operation %S" operation)

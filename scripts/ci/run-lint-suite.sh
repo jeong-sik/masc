@@ -57,6 +57,7 @@ blocking_lints() {
   run_lint "Keeper turn content boundary" bash scripts/check-keeper-turn-content-boundary.sh --check
   run_lint "Compaction exact-flow boundary self-test" bash scripts/check-compaction-exact-flow-boundary.sh --self-test
   run_lint "Compaction exact-flow boundary" bash scripts/check-compaction-exact-flow-boundary.sh
+  run_lint "Credential admin-to-role migration self-test" bash scripts/migrate-auth-admin-to-role.sh --self-test
   run_lint "No Tool_result.error + Printexc (RFC-0148)" bash scripts/lint/no-tool-result-error-printexc.sh
   run_lint "Board attention exact-flow boundary self-test" bash scripts/check-board-attention-exact-flow-boundary.sh --self-test
   run_lint "Board attention exact-flow boundary" bash scripts/check-board-attention-exact-flow-boundary.sh --check

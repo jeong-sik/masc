@@ -23,7 +23,9 @@ type repair_stage =
   | Evidence_storage
   | Evidence_retrieval
   | Replay_journal
-  | Replay_effect_indeterminate_after_restart
+  | Replay_in_flight
+  | Replay_persistence_backpressure
+  | Stale_grant_retirement
   | Invalid_resolution_state
 
 type outcome =
@@ -35,11 +37,23 @@ type outcome =
       ; output : string
       ; journal : replay_journal
       }
+  | Applied_with_warning of
+      { operation : string
+      ; detail : string
+      ; journal : replay_journal
+      }
   | Failed of
       { operation : string
       ; detail : string
       ; journal : replay_journal
       }
+  | Indeterminate of
+      { operation : string
+      ; detail : string
+      ; journal : replay_journal
+      }
+      (** The effect may already have happened. This is a durable terminal
+          outcome and is never eligible for replay. *)
   | Repair_required of
       { operation : string
       ; stage : repair_stage
@@ -118,7 +132,8 @@ val replayable_of_operation : string -> replayable option
 
     Consumption is the durable one-shot grant. A repeated call after a
     successful replay returns the durable outcome without invoking the effect.
-    Consumed-without-outcome after restart is {!Repair_required}. *)
+    Consumed-without-outcome after restart is durably settled as
+    {!Indeterminate}; the effect is never run again and the wake can advance. *)
 val replay_approved_effect :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -153,4 +168,7 @@ module For_testing : sig
       -> (Tool_output.artifact_ref, string) result ) ->
     (unit -> 'a) ->
     'a
+
+  val with_replay_claim_hook :
+    (approval_id:string -> unit) -> (unit -> 'a) -> 'a
 end

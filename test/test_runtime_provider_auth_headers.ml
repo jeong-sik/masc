@@ -362,9 +362,9 @@ let test_runtime_adapter_uses_canonical_anthropic_headers () =
   let content =
     {|
 [runtime]
-default = "anthropic.claude-opus-4"
+default = "claude.claude-opus-4"
 
-[providers.anthropic]
+[providers.claude]
 display-name = "Anthropic"
 protocol = "messages-http"
 endpoint = "https://api.anthropic.com"
@@ -375,7 +375,7 @@ max-context = 200000
 tools-support = true
 streaming = true
 
-[anthropic.claude-opus-4]
+[claude.claude-opus-4]
 |}
   in
   match Runtime_toml.parse_string content with

@@ -80,7 +80,6 @@ type snapshot_load_error_kind =
   | Read_failed
   | Parse_failed
   | Startup_transition_failed
-  | Predecessor_store_reset_required
   | Durability_uncertain
   | Reconciliation_failed
   | Configuration_conflict
@@ -196,10 +195,7 @@ val continuation_channel_of_message_source :
 (** Claim the startup-only persistence ownership boundary and restore every
     per-Keeper SQLite store. Unsupported or malformed databases are retained,
     registered as unavailable, and reported here; they are never replaced by an
-    empty queue. If a predecessor queue store exists, configuration returns
-    [Predecessor_store_reset_required] and does not create or load any v3 lane
-    until an operator removes the predecessor through an explicit reset. A
-    second live configuration attempt returns a typed
+    empty queue. A second live configuration attempt returns a typed
     [Configuration_conflict] report and cannot clear or replace the active
     registry. *)
 val configure_persistence : base_path:string -> configure_report

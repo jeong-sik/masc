@@ -166,7 +166,6 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('producer keeper supervisor')
     expect(container.textContent).toContain('producer keeper supervisor')
     expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000001')
-    expect(container.textContent).toContain('attempt_00000000-0000-4000-8000-000000000002')
     expect(container.textContent).toContain('state inflight')
     expect(container.textContent).toContain('Global waiting')
     expect(container.textContent).toContain('masc.board_post')

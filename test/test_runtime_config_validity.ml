@@ -744,7 +744,7 @@ let test_repo_runtime_toml_loads () =
       , assignments
       , memory_os_consolidation
       , structured_judge
-      , _cross_verifier
+      , cross_verifier
       , media_failover
       , lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
@@ -808,6 +808,8 @@ List.iter
         ~default_runtime_id:default.id
         ~assignments
         ~memory_os_consolidation_runtime_id:memory_os_consolidation
+        ~structured_judge_runtime_id:structured_judge
+        ~cross_verifier_runtime_id:cross_verifier
         ~media_failover
         ~lanes
     in
@@ -1541,6 +1543,14 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
         ~id:"dormant-lane"
         ~strategy:Runtime_lane.Ordered
         [ "lane-c"; "lane-b" ]
+    ; Runtime_lane.make
+        ~id:"structured-d"
+        ~strategy:Runtime_lane.Ordered
+        [ "structured-a"; "lane-b" ]
+    ; Runtime_lane.make
+        ~id:"cross-e"
+        ~strategy:Runtime_lane.Ordered
+        [ "cross-a"; "lane-b" ]
     ]
   in
   let actual =
@@ -1548,14 +1558,23 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
       ~memory_os_consolidation_runtime_id:(Some "memory-os-d")
+      ~structured_judge_runtime_id:(Some "structured-d")
+      ~cross_verifier_runtime_id:(Some "cross-e")
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
   in
   check
     (list string)
-    "routed lane candidates, assignments, and media failover are deduplicated \
+    "routed lane candidates, special routes, and media failover are deduplicated \
      without admitting a dormant lane"
-    [ "lane-a"; "lane-b"; "assigned-b"; "media-c"; "memory-os-d" ]
+    [ "lane-a"
+    ; "lane-b"
+    ; "assigned-b"
+    ; "media-c"
+    ; "memory-os-d"
+    ; "structured-a"
+    ; "cross-a"
+    ]
     actual
 ;;
 
@@ -1649,6 +1668,56 @@ let test_runtime_config_validation_rejects_uncapped_memory_os_runtime () =
            (String_util.contains_substring detail "max-request-body-bytes");
          check bool "typed config diagnostic names the direct runtime" true
            (String_util.contains_substring detail "local.consolidation"))
+;;
+
+let test_runtime_config_validation_rejects_uncapped_special_runtime () =
+  let content route =
+    Printf.sprintf
+      "[providers.local]\n\
+       protocol = \"openai-compatible-http\"\n\
+       endpoint = \"http://127.0.0.1:1/v1\"\n\
+       \n\
+       [models.default]\n\
+       api-name = \"default\"\n\
+       max-context = 1024\n\
+       \n\
+       [models.special]\n\
+       api-name = \"special\"\n\
+       max-context = 1024\n\
+       \n\
+       [local.default]\n\
+       max-request-body-bytes = 65536\n\
+       \n\
+       [local.special]\n\
+       \n\
+       [runtime]\n\
+       default = \"local.default\"\n\
+       %s = \"local.special\"\n"
+      route
+  in
+  List.iter
+    (fun route ->
+       let snapshot = Runtime.For_testing.snapshot () in
+       let path = Filename.temp_file "uncapped_special_runtime_" ".toml" in
+       let config = content route in
+       let oc = open_out path in
+       output_string oc config;
+       close_out oc;
+       Fun.protect
+         ~finally:(fun () ->
+           Runtime.For_testing.restore snapshot;
+           try Sys.remove path with
+           | Sys_error _ -> ())
+         (fun () ->
+            match Runtime.save_config_text ~runtime_config_path:path config with
+            | Ok () ->
+              failf "uncapped %s runtime must fail runtime config validation" route
+            | Error detail ->
+              check bool "typed config diagnostic names the cap" true
+                (String_util.contains_substring detail "max-request-body-bytes");
+              check bool "typed config diagnostic names the special runtime" true
+                (String_util.contains_substring detail "local.special")))
+    [ "structured_judge"; "cross_verifier" ]
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
@@ -2602,6 +2671,7 @@ let test_structured_judge_runtime_routing () =
      max-request-body-bytes = 65536\n\
      \n\
      [local.judge]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"local.chat\"\n"
@@ -2921,6 +2991,7 @@ let test_save_config_text_refreshes_cross_verifier_runtime () =
      max-request-body-bytes = 65536\n\
      \n\
      [local.libr]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"local.chat\"\n\
@@ -3470,6 +3541,10 @@ let () =
             "runtime config rejects uncapped Memory OS consolidation runtime"
             `Quick
             test_runtime_config_validation_rejects_uncapped_memory_os_runtime;
+          test_case
+            "runtime config rejects uncapped structured-judge and cross-verifier runtimes"
+            `Quick
+            test_runtime_config_validation_rejects_uncapped_special_runtime;
           test_case
             "runtime config allows uncapped dormant lane candidate"
             `Quick

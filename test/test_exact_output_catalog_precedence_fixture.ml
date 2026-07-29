@@ -179,6 +179,7 @@ supports-structured-output = true
 max-request-body-bytes = 65536
 
 [replacement_provider.secondary]
+max-request-body-bytes = 65536
 
 [runtime]
 default = "replacement_provider.replacement"

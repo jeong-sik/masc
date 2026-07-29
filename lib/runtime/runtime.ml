@@ -557,11 +557,11 @@ let validate_request_body_cap ~runtime_id
 ;;
 
 (* Keeper provider attempts originate at the configured default, an explicit
-   keeper assignment, an explicit media-failover runtime, or the periodic
-   Memory OS consolidation runtime. A lane is reachable only when its id
-   shadows one of the default/assignment runtime roots; a merely declared lane
-   is dormant until a routed root names it.
-   Expand routed roots with the same lane-over-runtime precedence as
+   keeper assignment, an explicit media-failover runtime, the periodic Memory
+   OS consolidation runtime, structured judge, or cross verifier. A lane is
+   reachable only when its id shadows one of the configured routes; a merely
+   declared lane is dormant until a routed root names it.
+   Expand each lane-capable route with the same lane-over-runtime precedence as
    [resolve_assignment], keep media_failover runtime-only, then preserve first
    occurrence order. Every attempt is checked again after its final provider
    config transform in Keeper_turn_driver. No provider/model names live in
@@ -571,6 +571,8 @@ let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
     ~(memory_os_consolidation_runtime_id : string option)
+    ~(structured_judge_runtime_id : string option)
+    ~(cross_verifier_runtime_id : string option)
     ~(media_failover : string list)
     ~(lanes : Runtime_lane.t list)
   =
@@ -588,9 +590,9 @@ let keeper_dispatch_runtime_ids
     | id :: rest when List.mem id seen -> dedupe seen acc rest
     | id :: rest -> dedupe (id :: seen) (id :: acc) rest
   in
-  (* The maintenance route reaches the provider outside Keeper_turn_driver, so
-     startup must admit every configured lane candidate's request cap here as
-     well. *)
+  (* These special routes reach providers outside the ordinary keeper default
+     and assignment dispatch, so startup must admit every configured lane
+     candidate's request cap here as well. *)
   dedupe
     []
     []
@@ -598,7 +600,9 @@ let keeper_dispatch_runtime_ids
       @ media_failover
       @ (memory_os_consolidation_runtime_id
          |> Option.to_list
-         |> List.concat_map expand) )
+         |> List.concat_map expand)
+      @ (structured_judge_runtime_id |> Option.to_list |> List.concat_map expand)
+      @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand) )
 ;;
 
 (* TEL-OK: pure fail-closed validation; the load boundary surfaces its error. *)
@@ -608,8 +612,8 @@ let validate_keeper_dispatch_request_caps
     , (default_runtime : t)
     , assignments
     , memory_os_consolidation_runtime_id
-    , _structured_judge_id
-    , _cross_verifier_id
+    , structured_judge_runtime_id
+    , cross_verifier_runtime_id
     , media_failover
     , lanes )
   =
@@ -618,6 +622,8 @@ let validate_keeper_dispatch_request_caps
       ~default_runtime_id:default_runtime.id
       ~assignments
       ~memory_os_consolidation_runtime_id
+      ~structured_judge_runtime_id
+      ~cross_verifier_runtime_id
       ~media_failover
       ~lanes
   in

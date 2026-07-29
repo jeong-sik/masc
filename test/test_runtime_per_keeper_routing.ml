@@ -202,13 +202,16 @@ supports-code-execution = true
 [runpod_mtp.qwen]
 is-default = true
 max-concurrent = 4
+max-request-body-bytes = 65536
 
 [openai.gpt]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 
 [openai.small]
 max-concurrent = 1
+max-request-body-bytes = 65536
 |}
 ;;
 
@@ -254,10 +257,12 @@ supports-code-execution = true
 [runpod_mtp.qwen]
 is-default = true
 max-concurrent = 4
+max-request-body-bytes = 65536
 
 [openai.gpt]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
   |}
 ;;
 

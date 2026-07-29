@@ -242,8 +242,14 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | Some value -> value
     | None -> false
   in
+  let continuity_offline =
+    match Keeper_status_runtime.surface_status_of_string_opt status with
+    | Some Keeper_status_runtime.Surface_offline -> not keepalive_running
+    | Some Keeper_status_runtime.Surface_inactive -> true
+    | _ -> Dashboard_utils.is_keeper_offline status
+  in
   let lifecycle =
-    if Dashboard_utils.is_keeper_offline status && not keepalive_running then Lc_offline
+    if continuity_offline then Lc_offline
     else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then Lc_handoff_imminent
     else if Option.value ~default:0.0 context_ratio >= ctx_preparing then Lc_preparing
     else if Option.value ~default:0.0 context_ratio >= ctx_compacting then Lc_compacting
@@ -252,7 +258,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else Lc_idle
   in
   let (state, tone, note) =
-    if Dashboard_utils.is_keeper_offline status && not keepalive_running then
+    if continuity_offline then
       (Exec_critical, Tone_bad, "keeper 오프라인")
     else
       match lifecycle with

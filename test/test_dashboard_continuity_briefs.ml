@@ -72,6 +72,20 @@ let test_running_with_heartbeat_is_healthy_idle () =
   check string "lifecycle" "idle" (lifecycle_of row);
   check string "state" "healthy" (state_of row)
 
+let test_running_but_inactive_stays_critical () =
+  let row =
+    build_one
+      (keeper
+         ~status:"inactive"
+         ~keepalive_running:true
+         ~last_autonomous_action_at:"2001-09-09T01:46:40Z"
+         ~turn_count:1
+         ~autonomous_turn_count:1
+         ())
+  in
+  check string "lifecycle" "offline" (lifecycle_of row);
+  check string "state" "critical" (state_of row)
+
 let () =
   run "dashboard_continuity_briefs"
     [
@@ -85,5 +99,7 @@ let () =
             test_running_with_action_is_healthy_active;
           test_case "running + heartbeat -> healthy idle" `Quick
             test_running_with_heartbeat_is_healthy_idle;
+          test_case "running + inactive -> critical" `Quick
+            test_running_but_inactive_stays_critical;
         ] );
     ]

@@ -80,7 +80,6 @@ let test_context_updates_overwrite_bounded_keys () =
     [
       MCI.key_wall_time;
       MCI.key_session_start;
-      MCI.key_elapsed_seconds;
       MCI.key_tool_call_count;
       MCI.key_last_tool_name;
       MCI.key_last_tool_outcome;
@@ -128,17 +127,18 @@ let test_render_temporal_summary_empty () =
 
 let test_render_temporal_summary_populated () =
   let ctx = Agent_sdk.Context.create_sync () in
+  let now = 1_800_000_000.0 in
   Agent_sdk.Context.set ctx
     MCI.key_wall_time (`String "2026-04-06T12:00:00Z");
   Agent_sdk.Context.set ctx
-    MCI.key_elapsed_seconds (`Float 42.5);
+    MCI.key_session_start (`Float (now -. 42.5));
   Agent_sdk.Context.set ctx
     MCI.key_tool_call_count (`Int 3);
   Agent_sdk.Context.set ctx
     MCI.key_last_tool_name (`String "tool_execute");
   Agent_sdk.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
-  match MCI.render_temporal_summary ctx with
+  match MCI.render_temporal_summary ~now ctx with
   | Some summary ->
     check bool "contains time" true
       (Astring.String.is_prefix ~affix:"[Temporal]" summary);
@@ -149,8 +149,8 @@ let test_render_temporal_summary_populated () =
   | None -> fail "expected Some summary"
 
 (* Regression: turn N+1 must render the *fresh* current time, not the
-   last tool call's timestamp frozen in [key_wall_time]/[key_elapsed_seconds]
-   from turn N (the idle-wake bug). Uses a fixed [~now] far in the future
+   last tool call's timestamp frozen in [key_wall_time] from turn N
+   (the idle-wake bug). Uses a fixed [~now] far in the future
    relative to the stored (stale) values. *)
 let test_render_uses_fresh_now_not_stale () =
   let ctx = Agent_sdk.Context.create_sync () in
@@ -161,8 +161,6 @@ let test_render_uses_fresh_now_not_stale () =
     MCI.key_wall_time (`String (MCI.iso8601_of_float stale_now));
   Agent_sdk.Context.set ctx
     MCI.key_session_start (`Float session_start);
-  Agent_sdk.Context.set ctx
-    MCI.key_elapsed_seconds (`Float 100.0);
   Agent_sdk.Context.set ctx
     MCI.key_tool_call_count (`Int 2);
   Agent_sdk.Context.set ctx
@@ -184,28 +182,23 @@ let test_render_uses_fresh_now_not_stale () =
       (Astring.String.is_infix ~affix:"elapsed=100000100s" summary)
   | None -> fail "expected Some summary"
 
-(* When [key_session_start] is absent (context written before the key
-   existed), elapsed falls back to the stored value; time= is still fresh. *)
-let test_render_elapsed_fallback_without_session_start () =
+let test_render_rejects_retired_elapsed_without_session_start () =
   let ctx = Agent_sdk.Context.create_sync () in
   Agent_sdk.Context.set ctx
     MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
   Agent_sdk.Context.set ctx
-    MCI.key_elapsed_seconds (`Float 55.0);
+    "session:elapsed_seconds" (`Float 55.0);
   Agent_sdk.Context.set ctx
     MCI.key_tool_call_count (`Int 1);
   Agent_sdk.Context.set ctx
     MCI.key_last_tool_name (`String "legacy_tool");
   Agent_sdk.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
-  match MCI.render_temporal_summary ~now:1_800_000_000.0 ctx with
-  | Some summary ->
-    check bool "time= is fresh" true
-      (Astring.String.is_infix
-         ~affix:("time=" ^ MCI.iso8601_of_float 1_800_000_000.0) summary);
-    check bool "elapsed falls back to stored value" true
-      (Astring.String.is_infix ~affix:"elapsed=55s" summary)
-  | None -> fail "expected Some summary"
+  check
+    (option string)
+    "retired elapsed value is not repaired"
+    None
+    (MCI.render_temporal_summary ~now:1_800_000_000.0 ctx)
 
 let test_render_omits_malformed_elapsed_context () =
   let ctx = Agent_sdk.Context.create_sync () in
@@ -249,8 +242,8 @@ let () =
         test_render_temporal_summary_populated;
       test_case "fresh now, not stale wall_time" `Quick
         test_render_uses_fresh_now_not_stale;
-      test_case "elapsed fallback without session_start" `Quick
-        test_render_elapsed_fallback_without_session_start;
+      test_case "retired elapsed without session_start is rejected" `Quick
+        test_render_rejects_retired_elapsed_without_session_start;
       test_case "malformed elapsed context omitted" `Quick
         test_render_omits_malformed_elapsed_context;
     ];

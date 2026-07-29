@@ -52,7 +52,29 @@ type pending_board_event = {
 }
 
 (** [false] only for a scheduled-work carrier that shares the historical
-    observation container but must not be projected as Board activity. *)
+    observation container but must not be projected as Board activity.
+
+    This partition decides prompt placement, contributes to turn admission,
+    and feeds the classifier. {!Keeper_unified_prompt} renders the [false]
+    events under Scheduled Automation and the [true] events under Board
+    Activity. {!Keeper_contract_classifier} counts only the [true] ones into
+    [board_activity_count]; classifying one event [false] yields
+    [No_actionable_signal] only when there is no claimable task or other
+    [true] board event.
+
+    Admission depends on the event kind. A consumed [Schedule_due] stimulus
+    carries its own trigger:
+    [Keeper_heartbeat_stimulus_intake.event_queue_trigger_of_stimulus] maps
+    it to [Scheduled_automation_stimulus] independently of this partition
+    ([scheduled_automation.due_ready_count] is a separate live-store
+    observation, not the stimulus's trigger; it can already be zero once
+    dispatch begins). [Goal_reconciliation_ready] has no dedicated event-queue
+    trigger, so classifying an isolated reconciliation event [false] also
+    removes [Board_event_pending] and suppresses its intended reactive turn.
+
+    A new event kind placed on the wrong side compiles cleanly and fails
+    silently. Classify by whether the event carries scheduled-work dispatch,
+    and pin the answer in a test. *)
 val is_board_activity_event : pending_board_event -> bool
 
 (** Read-only projection of one schedule row that needs keeper attention. *)

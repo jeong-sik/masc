@@ -241,10 +241,25 @@ let keepers_json
                     let agent_status_cache_ttl_s = 2.0 in
                     let agent_json =
                       let cache_key = "kas:" ^ meta.agent_name in
-                      Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
-                        Keeper_status_runtime.parse_agent_status
-                          config
-                          ~agent_name:meta.agent_name)
+                      let raw_json =
+                        Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
+                          Keeper_status_runtime.parse_agent_status
+                            config
+                            ~agent_name:meta.agent_name)
+                      in
+                      (* When the on-disk agent file is missing, parse_agent_status
+                         returns an empty Assoc.  A running Keeper may not have a
+                         disk-side agent file, so we enrich the projection with an
+                         [exists] field derived from the live runtime registry. *)
+                      match raw_json with
+                      | `Assoc [] ->
+                          let exists_in_runtime =
+                            Workspace_query.active_runtime_agents config
+                            |> List.exists (fun (a : Masc_domain.agent) ->
+                                   String.equal a.name meta.agent_name)
+                          in
+                          `Assoc [ ("exists", `Bool exists_in_runtime) ]
+                      | _ -> raw_json
                     in
                     dt_agent := Time_compat.now () -. t_agent;
                     let t_ka = Time_compat.now () in

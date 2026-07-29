@@ -79,6 +79,12 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
 let test_parent_auth_facade_is_leaf_reexport () =
   let parent = read_file (source_file "lib/auth.ml") in
   let leaf_reexport = read_file (source_file "lib/auth/auth_leaf.ml") in
@@ -234,6 +240,40 @@ let test_credential_saved_private () =
           fail
             (Printf.sprintf "create_token should succeed: %s"
                (Masc_domain.masc_error_to_string e)))
+
+let test_removed_admin_field_fails_closed_through_authorization () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      match Auth.create_token dir ~agent_name:"stale-admin" ~role:Masc_domain.Admin with
+      | Error e ->
+        fail
+          (Printf.sprintf "create_token should succeed: %s"
+             (Masc_domain.masc_error_to_string e))
+      | Ok (raw_token, _) ->
+        let path = Auth.credential_file dir "stale-admin" in
+        let stale_json =
+          match Yojson.Safe.from_string (read_file path) with
+          | `Assoc fields -> `Assoc (("admin", `Bool true) :: fields)
+          | _ -> fail "credential writer must emit an object"
+        in
+        write_file path (Yojson.Safe.to_string stale_json);
+        check
+          bool
+          "load rejects removed field"
+          true
+          (Option.is_none (Auth.load_credential dir "stale-admin"));
+        check
+          bool
+          "authorization fails closed"
+          true
+          (Result.is_error
+             (Auth.authorize_tool_v2
+                dir
+                ~agent_name:"stale-admin"
+                ~token:(Some raw_token)
+                ~tool_name:"masc_status")))
 
 let test_workspace_secret_saved_private () =
   let dir = setup_test_workspace () in
@@ -1134,6 +1174,8 @@ let () =
       test_case "create credential" `Quick test_create_credential;
       test_case "credential saved private" `Quick
         test_credential_saved_private;
+      test_case "removed admin field fails closed through authorization" `Quick
+        test_removed_admin_field_fails_closed_through_authorization;
       test_case "verify token" `Quick test_verify_token;
       test_case "verify wrong token" `Quick test_verify_wrong_token;
       test_case "verify token reports token owner on agent mismatch" `Quick

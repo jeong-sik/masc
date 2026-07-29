@@ -804,6 +804,29 @@ let test_agent_role_of_yojson_wrong_type () =
    agent_credential Tests
    ============================================================ *)
 
+let current_agent_credential_json
+      ?(id = `Null)
+      ?(agent_id = `Null)
+      ?(expires_at = `Null)
+      ?(extra_fields = [])
+      ~agent_name
+      ~token
+      ~role
+      ~created_at
+      ()
+  =
+  `Assoc
+    ([
+       "id", id;
+       "agent_id", agent_id;
+       "agent_name", `String agent_name;
+       "token", `String token;
+       "role", `String role;
+       "created_at", `String created_at;
+       "expires_at", expires_at;
+     ]
+     @ extra_fields)
+
 let test_agent_credential_to_yojson () =
   let cred : Masc_domain.agent_credential = {
     id = None;
@@ -819,7 +842,8 @@ let test_agent_credential_to_yojson () =
   | `Assoc fields ->
     check bool "has agent_name" true (List.mem_assoc "agent_name" fields);
     check bool "has token" true (List.mem_assoc "token" fields);
-    check bool "has admin" true (List.mem_assoc "admin" fields)
+    check bool "has role" true (List.mem_assoc "role" fields);
+    check bool "omits removed admin field" false (List.mem_assoc "admin" fields)
   | _ -> fail "expected Assoc"
 
 let test_agent_credential_to_yojson_with_expiry () =
@@ -838,75 +862,74 @@ let test_agent_credential_to_yojson_with_expiry () =
   | _ -> fail "expected Assoc"
 
 let test_agent_credential_of_yojson_ok () =
-  let json = `Assoc [
-    ("agent_name", `String "gemini");
-    ("token", `String "xyz");
-    ("admin", `Bool false);
-    ("created_at", `String "2024-01-15T12:00:00Z");
-  ] in
+  let json =
+    current_agent_credential_json
+      ~agent_name:"gemini"
+      ~token:"xyz"
+      ~role:"worker"
+      ~created_at:"2024-01-15T12:00:00Z"
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
     check string "agent_name" "gemini" cred.agent_name;
-    check bool "admin=false maps to worker" true (cred.role = Masc_domain.Worker)
+    check bool "role=worker maps to Worker" true (cred.role = Masc_domain.Worker)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_error () =
   let json = `String "not an object" in
   match Masc_domain.agent_credential_of_yojson json with
-  | Ok cred ->
-    check string "agent_name defaults empty" "" cred.agent_name;
-    check string "token defaults empty" "" cred.token;
-    check bool "role defaults worker" true (cred.role = Masc_domain.Worker)
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for missing role"
 
-(* Regression: live fleet credential files stored role as a string field
-   (["role": "admin"|"worker"]) while the original parser only inspected
-   the legacy bool field (["admin"]). Missing lookup silently downgraded
-   admin credentials to Worker, producing Forbidden on CanAdmin tools
-   such as masc_board_delete for janitor / dashboard / qa-king. The
-   parser now reads the canonical string first, falling back to the
-   legacy bool. *)
+(* The current credential schema stores role as a required string field and is
+   closed to removed or unknown fields. *)
 let test_agent_credential_of_yojson_role_string_admin () =
-  let json = `Assoc [
-    ("agent_name", `String "janitor");
-    ("token", `String "t");
-    ("role", `String "admin");
-    ("created_at", `String "2026-04-23T12:50:47Z");
-  ] in
+  let json =
+    current_agent_credential_json
+      ~agent_name:"janitor"
+      ~token:"t"
+      ~role:"admin"
+      ~created_at:"2026-04-23T12:50:47Z"
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
     check bool "role:\"admin\" parses to Admin" true (cred.role = Masc_domain.Admin)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_role_string_worker () =
-  let json = `Assoc [
-    ("agent_name", `String "nick0cave");
-    ("token", `String "t");
-    ("role", `String "worker");
-    ("created_at", `String "2026-04-23T08:07:00Z");
-  ] in
+  let json =
+    current_agent_credential_json
+      ~agent_name:"nick0cave"
+      ~token:"t"
+      ~role:"worker"
+      ~created_at:"2026-04-23T08:07:00Z"
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
     check bool "role:\"worker\" parses to Worker" true (cred.role = Masc_domain.Worker)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
-let test_agent_credential_of_yojson_role_string_wins_over_admin_bool () =
-  (* If a file has both fields, the canonical string wins. This covers the
-     transitional period where writers emit both. *)
-  let json = `Assoc [
-    ("agent_name", `String "mixed");
-    ("token", `String "t");
-    ("role", `String "admin");
-    ("admin", `Bool false);
-    ("created_at", `String "2026-04-23T00:00:00Z");
-  ] in
+let test_agent_credential_of_yojson_rejects_removed_admin_field () =
+  let json =
+    current_agent_credential_json
+      ~agent_name:"mixed"
+      ~token:"t"
+      ~role:"admin"
+      ~created_at:"2026-04-23T00:00:00Z"
+      ~extra_fields:[ "admin", `Bool false ]
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
-  | Ok cred ->
-    check bool "role string wins" true (cred.role = Masc_domain.Admin)
-  | Error e -> fail ("expected Ok, got: " ^ e)
+  | Error e ->
+    check bool "names removed field" true
+      (String_util.contains_substring e "unknown field \"admin\"")
+  | Ok _ -> fail "expected Error for removed admin field"
 
-let test_agent_credential_of_yojson_admin_bool_legacy () =
-  (* Older admin.json files use only the bool field; must still parse. *)
+let test_agent_credential_of_yojson_rejects_admin_only () =
+  (* A removed role alias must not silently grant Admin. *)
   let json = `Assoc [
     ("agent_name", `String "admin");
     ("token", `String "t");
@@ -914,25 +937,24 @@ let test_agent_credential_of_yojson_admin_bool_legacy () =
     ("created_at", `String "2026-04-24T01:00:11Z");
   ] in
   match Masc_domain.agent_credential_of_yojson json with
-  | Ok cred ->
-    check bool "admin:true legacy parses to Admin" true (cred.role = Masc_domain.Admin)
-  | Error e -> fail ("expected Ok, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error when required role is absent"
 
 let test_agent_credential_of_yojson_unknown_role_fails_closed () =
   (* Fail-closed: unknown role strings return Error, never silently downgrade. *)
-  let json = `Assoc [
-    ("agent_name", `String "evil");
-    ("token", `String "t");
-    ("role", `String "root");
-    ("created_at", `String "2026-04-23T00:00:00Z");
-  ] in
+  let json =
+    current_agent_credential_json
+      ~agent_name:"evil"
+      ~token:"t"
+      ~role:"root"
+      ~created_at:"2026-04-23T00:00:00Z"
+      ()
+  in
   match Masc_domain.agent_credential_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error for unknown role"
 
-let test_agent_credential_to_yojson_emits_role_and_admin () =
-  (* Writer emits both fields during the transition so downstream readers
-     in either vintage see a consistent role. *)
+let test_agent_credential_to_yojson_emits_role_only () =
   let cred : Masc_domain.agent_credential = {
     id = None;
     agent_id = None;
@@ -945,11 +967,9 @@ let test_agent_credential_to_yojson_emits_role_and_admin () =
   match Masc_domain.agent_credential_to_yojson cred with
   | `Assoc fields ->
     check bool "has role" true (List.mem_assoc "role" fields);
-    check bool "has admin" true (List.mem_assoc "admin" fields);
+    check bool "omits removed admin field" false (List.mem_assoc "admin" fields);
     let role_val = List.assoc "role" fields in
-    let admin_val = List.assoc "admin" fields in
-    check bool "role=\"admin\"" true (role_val = `String "admin");
-    check bool "admin=true" true (admin_val = `Bool true)
+    check bool "role=\"admin\"" true (role_val = `String "admin")
   | _ -> fail "expected Assoc"
 
 (* ============================================================
@@ -1612,14 +1632,14 @@ let () =
         test_agent_credential_of_yojson_role_string_admin;
       test_case "of_yojson role=\"worker\" -> Worker" `Quick
         test_agent_credential_of_yojson_role_string_worker;
-      test_case "of_yojson role string wins over admin bool" `Quick
-        test_agent_credential_of_yojson_role_string_wins_over_admin_bool;
-      test_case "of_yojson legacy admin=true -> Admin" `Quick
-        test_agent_credential_of_yojson_admin_bool_legacy;
-      test_case "of_yojson unknown role fails closed to Worker" `Quick
+      test_case "of_yojson rejects removed admin field" `Quick
+        test_agent_credential_of_yojson_rejects_removed_admin_field;
+      test_case "of_yojson rejects removed admin-only schema" `Quick
+        test_agent_credential_of_yojson_rejects_admin_only;
+      test_case "of_yojson rejects unknown role" `Quick
         test_agent_credential_of_yojson_unknown_role_fails_closed;
-      test_case "to_yojson emits both role and admin fields" `Quick
-        test_agent_credential_to_yojson_emits_role_and_admin;
+      test_case "to_yojson emits role only" `Quick
+        test_agent_credential_to_yojson_emits_role_only;
     ];
     "auth_config", [
       test_case "to_yojson" `Quick test_auth_config_to_yojson;

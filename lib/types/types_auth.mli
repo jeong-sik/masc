@@ -84,13 +84,12 @@ type agent_credential = {
 (** Token-based authentication record. *)
 
 val agent_credential_to_yojson : agent_credential -> Yojson.Safe.t
-(** Emits one extra denormalised field for backward-compat:
-    [admin = (role = Admin)]. *)
+(** Emits the current credential schema. [role] is the sole role authority. *)
 
 val agent_credential_of_yojson :
   Yojson.Safe.t -> (agent_credential, string) result
-(** Accepts both [role] (string) and the legacy [admin] (bool)
-    field; missing role + [admin = true] -> [Admin], else [Worker]. *)
+(** Requires the exact current credential object. Unknown, duplicate, missing,
+    or mistyped fields are rejected; [role] is the sole role authority. *)
 
 (** {1 Auth configuration} *)
 

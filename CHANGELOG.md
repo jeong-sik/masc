@@ -55,6 +55,11 @@
   - `merge_keeper_profile_defaults` and `merge_string_list` are retained: they still implement the persona `profile.json` → keeper TOML overlay (`keeper_types_profile.ml:244`), which is a separate mechanism. Note `merge_string_list` is replace-if-non-empty, not union.
 
 ### Changed
+- Bumped the OAS Agent SDK pin to v0.231.3
+  (`e01940b14d501900b8cbfa2fbb1e0484ada5a42d`). The GLM streaming backend now
+  consumes the catalog-resolved typed reasoning dialect instead of hardcoding
+  `reasoning_content`; MASC's deployment overlay declares the exact
+  `delta:reasoning_content` capability for both GLM-5-Turbo provider bindings.
 - Provider materialization and registry/model-string resolution now share
   `Runtime_provider_binding.default_headers_for_kind` as the sole owner of
   non-credential provider header defaults. The duplicate Runtime adapter

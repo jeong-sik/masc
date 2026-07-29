@@ -1,5 +1,5 @@
 (* RFC-0264 P2 / masc#25052: unit tests for the recall-injection ledger record
-   serialiser, the v2 delta schema, and retention maintenance. The serialiser
+   serialiser, the v3 reset/delta schema, and retention maintenance. The serialiser
    checks are pure; retention checks use a temporary dated JSONL tree to keep
    append-time pruning out of the hot path. *)
 
@@ -37,6 +37,7 @@ let with_temp_masc_root name f =
 
 let current_row_json
       ?failure_reason
+      ?(reset = false)
       ~keeper_id
       ~trace_id
       ~turn
@@ -49,7 +50,8 @@ let current_row_json
       ()
   =
   let fields =
-    [ "schema_version", `Int 2
+    [ "schema_version", `Int 3
+    ; "reset", `Bool reset
     ; "keeper_id", `String keeper_id
     ; "trace_id", `String trace_id
     ; "turn", `Int turn
@@ -145,7 +147,7 @@ let test_prune_older_than_removes_old_day_file () =
        false);
   check "manual retention removes old recall file" (not (Sys.file_exists old_file))
 
-(* ── v2 delta append, via a temp masc_root + Eio (append is the only path
+(* ── v3 reset/delta append, via a temp masc_root + Eio (append is the only path
    that touches the process-local Delta_state registry and Dated_jsonl I/O) ─ *)
 
 (* This file predates Alcotest (see the [check] harness above) and uses a
@@ -191,7 +193,8 @@ let test_append_writes_delta_row_and_updates_registry () =
     ();
   match read_all_records ~masc_root with
   | [ first; second ] ->
-    let { Ledger.added_fact_keys; removed_fact_keys; _ } = first.delta in
+    let { Ledger.reset; added_fact_keys; removed_fact_keys; _ } = first.delta in
+    check "first append is an exact reset baseline" reset;
     check_string_list
       "first append (fresh registry) is a full accounting: added = [x; y]"
       [ "x"; "y" ]
@@ -199,6 +202,7 @@ let test_append_writes_delta_row_and_updates_registry () =
     check "first append has no removals (nothing prior)" (removed_fact_keys = []);
     let
       { Ledger.added_fact_keys
+      ; reset
       ; removed_fact_keys
       ; added_episode_keys
       ; removed_episode_keys
@@ -206,6 +210,7 @@ let test_append_writes_delta_row_and_updates_registry () =
       }
       = second.delta
     in
+    check "subsequent append is a patch" (not reset);
     check_string_list "second append adds only the new key" [ "z" ] added_fact_keys;
     check_string_list "second append removes only the dropped key" [ "x" ] removed_fact_keys;
     check_string_list "second append adds the new episode key" [ "trace-g:g0" ]
@@ -213,6 +218,48 @@ let test_append_writes_delta_row_and_updates_registry () =
     check "second append removes no episode keys" (removed_episode_keys = [])
   | rows ->
     check (Printf.sprintf "expected exactly 2 rows, got %d" (List.length rows)) false
+;;
+
+let test_restart_reset_replaces_durable_state () =
+  with_temp_masc_root "recall-ledger-restart-reset" @@ fun masc_root ->
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Ledger.For_testing.reset_delta_state ();
+  Ledger.append
+    ~masc_root
+    ~keeper_id:"restart-keeper"
+    ~trace_id:"trace-before"
+    ~turn:1
+    ~injected_fact_keys:[ "a"; "b" ]
+    ~injected_episode_keys:[ "trace-before:g0" ]
+    ~n_facts_in_store:2
+    ~now:1.0
+    ();
+  Ledger.For_testing.reset_delta_state ();
+  Ledger.append
+    ~masc_root
+    ~keeper_id:"restart-keeper"
+    ~trace_id:"trace-after"
+    ~turn:2
+    ~injected_fact_keys:[ "b" ]
+    ~injected_episode_keys:[]
+    ~n_facts_in_store:1
+    ~now:2.0
+    ();
+  match read_all_records ~masc_root |> Ledger.materialize with
+  | [ before_restart; after_restart ] ->
+    check_string_list "pre-restart baseline contains both keys" [ "a"; "b" ]
+      before_restart.fact_keys;
+    check "post-restart row is a reset baseline" after_restart.record.delta.reset;
+    check_string_list "post-restart replay drops the deleted key" [ "b" ]
+      after_restart.fact_keys;
+    check_string_list "post-restart replay drops deleted episodes" []
+      after_restart.episode_keys
+  | rows ->
+    check
+      (Printf.sprintf "expected exactly 2 restart rows, got %d" (List.length rows))
+      false
 ;;
 
 let test_append_no_change_produces_empty_delta_regardless_of_store_size () =
@@ -266,6 +313,7 @@ let test_append_no_change_produces_empty_delta_regardless_of_store_size () =
 
 let test_materialize_replays_current_delta_rows () =
   let delta
+        ~reset
         ~keeper_id
         ~trace_id
         ~turn
@@ -282,7 +330,8 @@ let test_materialize_replays_current_delta_rows () =
     ; n_facts_in_store = None
     ; n_episodes_in_store = None
     ; delta =
-        { added_fact_keys
+        { reset
+        ; added_fact_keys
         ; removed_fact_keys
         ; added_episode_keys
         ; removed_episode_keys
@@ -293,6 +342,7 @@ let test_materialize_replays_current_delta_rows () =
   in
   let records =
     [ delta
+        ~reset:true
         ~keeper_id:"k"
         ~trace_id:"t1"
         ~turn:1
@@ -301,6 +351,7 @@ let test_materialize_replays_current_delta_rows () =
         ~added_episode_keys:[]
         ~removed_episode_keys:[]
     ; delta
+        ~reset:false
         ~keeper_id:"k"
         ~trace_id:"t1"
         ~turn:2
@@ -330,7 +381,8 @@ let test_materialize_keeps_keepers_independent () =
     ; n_facts_in_store = None
     ; n_episodes_in_store = None
     ; delta =
-        { added_fact_keys = keys
+        { reset = true
+        ; added_fact_keys = keys
         ; removed_fact_keys = []
         ; added_episode_keys = []
         ; removed_episode_keys = []
@@ -438,7 +490,8 @@ let () =
          [ "keeper_id", `String "alpha"
          ; "trace_id", `String "trace-1"
          ; "turn", `Int 1
-         ; "schema_version", `Int 2
+         ; "schema_version", `Int 3
+         ; "reset", `Bool false
          ; "added_fact_keys", `List [ `Int 1 ]
          ; "removed_fact_keys", `List []
          ; "added_episode_keys", `List []
@@ -524,6 +577,7 @@ let () =
   test_append_does_not_prune_old_day_file ();
   test_prune_older_than_removes_old_day_file ();
   test_append_writes_delta_row_and_updates_registry ();
+  test_restart_reset_replaces_durable_state ();
   test_append_no_change_produces_empty_delta_regardless_of_store_size ();
   if !failed > 0
   then (

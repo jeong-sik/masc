@@ -4,8 +4,9 @@
    propagates into the turn. Retention is deliberately kept out of append's hot
    path and handled by server maintenance.
 
-   Schema v2 (masc#25052): see the .mli doc comment for why full key lists were
-   replaced with per-keeper deltas. *)
+   Schema v3 (masc#26314): see the .mli doc comment for why full key lists were
+   replaced with per-keeper deltas and why process baselines are explicit
+   reset rows. *)
 
 module SS = Set_util.StringSet
 
@@ -20,6 +21,7 @@ let field_removed_fact_keys = "removed_fact_keys"
 let field_added_episode_keys = "added_episode_keys"
 let field_removed_episode_keys = "removed_episode_keys"
 let field_content_hash = "content_hash"
+let field_reset = "reset"
 let field_n_facts_in_store = "n_facts_in_store"
 let field_n_episodes_in_store = "n_episodes_in_store"
 let field_ts = "ts"
@@ -28,10 +30,11 @@ let failure_reason_read_error = "read_error"
 let failure_reason_prompt_render_error = "prompt_render_error"
 let failure_reason_unknown_label = "unknown_failure_reason"
 
-let schema_version_delta = 2
+let schema_version_delta = 3
 
 type delta =
-  { added_fact_keys : string list
+  { reset : bool
+  ; added_fact_keys : string list
   ; removed_fact_keys : string list
   ; added_episode_keys : string list
   ; removed_episode_keys : string list
@@ -66,6 +69,13 @@ let json_required_string_field fields key =
 let json_required_int_field fields key =
   match List.assoc_opt key fields with
   | Some (`Int value) -> Ok value
+  | Some _ -> Error (`Invalid_field key)
+  | None -> Error (`Missing_field key)
+;;
+
+let json_required_bool_field fields key =
+  match List.assoc_opt key fields with
+  | Some (`Bool value) -> Ok value
   | Some _ -> Error (`Invalid_field key)
   | None -> Error (`Missing_field key)
 ;;
@@ -108,28 +118,31 @@ let json_optional_string_field fields key =
 let delta_of_fields fields =
   match json_required_int_field fields field_schema_version with
   | Error _ as e -> e
-  | Ok 2 ->
+  | Ok 3 ->
     (match
-       ( json_required_string_list_field fields field_added_fact_keys
+       ( json_required_bool_field fields field_reset
+       , json_required_string_list_field fields field_added_fact_keys
        , json_required_string_list_field fields field_removed_fact_keys
        , json_required_string_list_field fields field_added_episode_keys
        , json_required_string_list_field fields field_removed_episode_keys
        , json_required_string_field fields field_content_hash )
      with
-     | ( Ok added_fact_keys
+     | ( Ok reset
+       , Ok added_fact_keys
        , Ok removed_fact_keys
        , Ok added_episode_keys
        , Ok removed_episode_keys
        , Ok content_hash ) ->
        Ok
-         { added_fact_keys; removed_fact_keys; added_episode_keys
+         { reset; added_fact_keys; removed_fact_keys; added_episode_keys
          ; removed_episode_keys; content_hash
          }
-     | Error err, _, _, _, _
-     | _, Error err, _, _, _
-     | _, _, Error err, _, _
-     | _, _, _, Error err, _
-     | _, _, _, _, Error err -> Error err)
+     | Error err, _, _, _, _, _
+     | _, Error err, _, _, _, _
+     | _, _, Error err, _, _, _
+     | _, _, _, Error err, _, _
+     | _, _, _, _, Error err, _
+     | _, _, _, _, _, Error err -> Error err)
   | Ok other -> Error (`Unsupported_schema_version other)
 ;;
 
@@ -218,6 +231,7 @@ let materialize records =
        in
        let
          { added_fact_keys
+         ; reset
          ; removed_fact_keys
          ; added_episode_keys
          ; removed_episode_keys
@@ -225,10 +239,15 @@ let materialize records =
          }
          = record.delta
        in
+       let base_facts, base_episodes =
+         if reset then SS.empty, SS.empty else prev_facts, prev_episodes
+       in
        let facts, episodes =
-         ( SS.diff (SS.union prev_facts (SS.of_list added_fact_keys)) (SS.of_list removed_fact_keys)
+         ( SS.diff
+             (SS.union base_facts (SS.of_list added_fact_keys))
+             (SS.of_list removed_fact_keys)
          , SS.diff
-             (SS.union prev_episodes (SS.of_list added_episode_keys))
+             (SS.union base_episodes (SS.of_list added_episode_keys))
              (SS.of_list removed_episode_keys) )
        in
        Hashtbl.replace state record.keeper_id (facts, episodes);
@@ -238,6 +257,7 @@ let materialize records =
 
 let to_json_delta
       ?failure_reason
+      ~reset
       ~keeper_id
       ~trace_id
       ~turn
@@ -254,6 +274,7 @@ let to_json_delta
   =
   let fields =
     [ field_schema_version, `Int schema_version_delta
+    ; field_reset, `Bool reset
     ; field_keeper_id, `String keeper_id
     ; field_trace_id, `String trace_id
     ; field_turn, `Int turn
@@ -308,9 +329,7 @@ module Delta_state = struct
 
   let peek ~masc_root ~keeper_id =
     Stdlib.Mutex.protect mu (fun () ->
-      Option.value
-        (Hashtbl.find_opt table (masc_root, keeper_id))
-        ~default:(SS.empty, SS.empty))
+      Hashtbl.find_opt table (masc_root, keeper_id))
   ;;
 
   let commit ~masc_root ~keeper_id ~facts ~episodes =
@@ -334,7 +353,11 @@ let append
       ()
   =
   let store = make_store ~masc_root () in
-  let prev_facts, prev_episodes = Delta_state.peek ~masc_root ~keeper_id in
+  let previous = Delta_state.peek ~masc_root ~keeper_id in
+  let reset = Option.is_none previous in
+  let prev_facts, prev_episodes =
+    Option.value previous ~default:(SS.empty, SS.empty)
+  in
   let curr_facts = SS.of_list injected_fact_keys in
   let curr_episodes = SS.of_list injected_episode_keys in
   let added_fact_keys = SS.elements (SS.diff curr_facts prev_facts) in
@@ -347,6 +370,7 @@ let append
   let entry =
     to_json_delta
       ?failure_reason
+      ~reset
       ~keeper_id
       ~trace_id
       ~turn

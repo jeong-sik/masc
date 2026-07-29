@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Breaking (recall injection ledger)**: schema v3 adds a required typed
+  `reset` marker. The first row for each keeper process now resets replay state
+  before applying its exact current baseline, so keys deleted across a process
+  restart cannot survive durable materialization. Schema v2 rows are rejected;
+  no compatibility reader or migration path was added.
+
 ### Removed
 - **Breaking (keeper chat wire)**: removed read-time message-id synthesis for
   rows without a persisted `id` and removed the duplicate persisted `source`
@@ -24,7 +30,7 @@
   `schema_version=1`/missing-version full-snapshot decoder, its public
   serializer, the unused option compatibility decoder, and the unused
   read-error labeling facade. Recall injection rows now require exact
-  `schema_version=2` Delta fields. The current writer,
+  `schema_version=3` reset/Delta fields. The current writer,
   full-history outcome-evaluation replay, invalid-row accounting, and
   retention behavior are unchanged; no migration or repair path was added.
 - **Breaking (keeper failure wire)**: removed the bare

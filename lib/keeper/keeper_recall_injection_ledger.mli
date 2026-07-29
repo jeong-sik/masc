@@ -7,7 +7,12 @@
     forge carries PR/CI merge state), consumed offline by recall_outcome_eval
     (RFC-0264 P3) to compute recall_relevance / recall_harm.
 
-    Schema v2 (2026-07-17, masc#25052): the pre-existing schema wrote the FULL
+    Schema v3 (2026-07-29, masc#26314): rows keep the bounded delta shape from
+    v2 and add a required typed [reset] marker. A keeper's first append in each
+    process is a reset row, so replay replaces any durable pre-restart state
+    instead of incorrectly retaining keys deleted while the process was down.
+
+    Schema v2 (2026-07-17, masc#25052) replaced the pre-existing FULL
     injected fact/episode key list on every turn. Because {!Keeper_memory_os_recall}
     injects the store's *entire* current fact/episode set every turn (no
     selection budget existed before this change), every append cost was
@@ -16,14 +21,14 @@
     bytes — the same "append without compaction" class of bug diagnosed in the
     2026-07-17 board_attention_candidate boot-hang incident.
 
-    v2 rows instead carry only the fact/episode keys that changed since the
+    Delta rows instead carry only the fact/episode keys that changed since the
     keeper's immediately preceding row ({!delta}), plus a
     [content_hash] of the full injected set so a reader can detect "did the
     injected set change" without materializing it, and plus store-size
     counters ([n_facts_in_store] / [n_episodes_in_store]) that were already
     (or are now) O(1) scalars — unrelated to the growth bug and kept as-is.
 
-    Current rows require exact [schema_version = 2] and carry a [delta].
+    Current rows require exact [schema_version = 3] and carry a [delta].
     {!materialize} applies each row to the keeper's running state. A fresh
     process's first row for a keeper is diffed against the empty set, so it is
     automatically a full accounting while retaining one current wire shape.
@@ -50,13 +55,15 @@ val base_dir : masc_root:string -> string
 (** Directory that stores recall injection JSONL day files. *)
 
 type delta =
-  { added_fact_keys : string list
+  { reset : bool
+  ; added_fact_keys : string list
   ; removed_fact_keys : string list
   ; added_episode_keys : string list
   ; removed_episode_keys : string list
   ; content_hash : string
   }
-  (** Only the fact/episode keys that changed relative to the keeper's
+  (** [reset = true] clears the keeper's replay state before applying this row.
+      The remaining fields carry only the fact/episode keys that changed relative to the keeper's
       previous row. [content_hash] is {!content_hash_of} over the full
       injected set at this turn, so a reconstructed set can be checked for
       internal consistency without re-deriving it from application state. *)
@@ -140,14 +147,15 @@ val append
   -> unit
 (** Append one injection record. Computes the delta against [keeper_id]'s
     previous [injected_fact_keys]/[injected_episode_keys] (in-memory,
-    process-local, scoped by [(masc_root, keeper_id)]) and writes a v2
+    process-local, scoped by [(masc_root, keeper_id)]) and writes a v3
     delta row: this is the fix for the O(store_size) per-turn growth
     ([injected_fact_keys]/[injected_episode_keys] here are still the caller's
     full current sets — computing that live snapshot is not itself the growth
     bug; persisting a full copy of it every turn was). A keeper's first
-    append in a fresh process (no prior in-memory state) diffs against the
-    empty set, so its row's "delta" is the full current set — an accurate,
-    one-time, bounded-by-keeper-count cost, not a per-turn one.
+    append in a fresh process (no prior in-memory state) writes [reset = true]
+    and diffs against the empty set, so its row is a full current baseline.
+    Replay clears the durable pre-restart state at that row before applying the
+    baseline.
 
     Best-effort: never raises except to re-raise [Eio.Cancel.Cancelled].
     Retention is intentionally handled by server maintenance, not by append. *)
@@ -176,7 +184,6 @@ val prune_older_than
 module For_testing : sig
   val reset_delta_state : unit -> unit
   (** Clear the in-memory per-(masc_root, keeper_id) "previous injected set"
-      registry that {!append} diffs against. Test isolation only — production
-      has no reset path (a lost registry after restart just means the next
-      append per keeper is a one-time full accounting, which is safe). *)
+      registry that {!append} diffs against. Test isolation and restart
+      simulation only; the next append emits an explicit reset baseline. *)
 end

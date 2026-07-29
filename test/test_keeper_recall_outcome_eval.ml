@@ -3,6 +3,7 @@ module Eval = Masc.Keeper_recall_outcome_eval
 let recall_row
       ?failure_reason
       ?(extra_fields = [])
+      ?(reset = false)
       ?(added_fact_keys = [])
       ?(removed_fact_keys = [])
       ?(added_episode_keys = [])
@@ -16,7 +17,8 @@ let recall_row
   =
   let strings values = `List (List.map (fun value -> `String value) values) in
   let fields =
-    [ "schema_version", `Int 2
+    [ "schema_version", `Int 3
+    ; "reset", `Bool reset
     ; "keeper_id", `String keeper_id
     ; "trace_id", `String trace_id
     ; "turn", `Int turn

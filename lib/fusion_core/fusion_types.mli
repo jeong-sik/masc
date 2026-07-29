@@ -132,10 +132,6 @@ val render_skip_reason : skip_reason -> string
 val judge_skip_reason :
   panel:panel_outcome list -> min_answered:int -> skip_reason option
 
-val no_panel_answers_error : string
-(** Legacy canonical string for callers that still need the pre-quorum
-    all-panel-failed message. New code should use {!skip_reason}. *)
-
 (** {1 심판 구조화 출력}
 
     [Structured.extract]의 provider-native JSON schema로 강제 파싱되는 닫힌 타입.

@@ -141,9 +141,6 @@ let judge_skip_reason ~panel ~min_answered : skip_reason option =
     then Some (Quorum_shortfall { answered = answered_count; required = min_answered })
     else None
 
-let no_panel_answers_error =
-  "all panels failed: no answered panel to synthesize"
-
 type claim =
   { text : string
   ; supporting_models : string list

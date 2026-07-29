@@ -168,15 +168,9 @@ let publish_lane
       : Runtime_exact_output_registry.t)
 ;;
 
-let json_object_response_format body =
+let has_response_format body =
   match Yojson.Safe.from_string body with
-  | `Assoc fields ->
-    (match List.assoc_opt "response_format" fields with
-     | Some (`Assoc response_format) ->
-       (match List.assoc_opt "type" response_format with
-        | Some (`String "json_object") -> true
-        | _ -> false)
-     | _ -> false)
+  | `Assoc fields -> Option.is_some (List.assoc_opt "response_format" fields)
   | _ -> false
 ;;
 
@@ -236,7 +230,7 @@ let run_eio f =
     ~clock:(Eio.Stdenv.clock env)
 ;;
 
-let test_json_only_target_is_admitted_and_persisted () =
+let test_prompt_only_target_is_admitted_and_persisted () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _ ->
       run_eio (fun ~sw ~net ~clock ->
@@ -261,9 +255,9 @@ let test_json_only_target_is_admitted_and_persisted () =
           (match Fixture.request_bodies server with
            | [ body ] ->
              Alcotest.(check bool)
-               "OAS selected json_object for a JSON-only target"
-               true
-               (json_object_response_format body)
+               "Json_syntax stays prompt-only"
+               false
+               (has_response_format body)
            | bodies ->
              Alcotest.failf "expected one request body, got %d" (List.length bodies));
           Alcotest.(check int)
@@ -283,7 +277,7 @@ let test_json_only_target_is_admitted_and_persisted () =
                ~generation:1))))
 ;;
 
-let test_missing_json_capability_fails_before_dispatch () =
+let test_prompt_only_target_needs_no_wire_json_capability () =
   with_prompt_registry (fun () ->
   with_temp_keepers_dir (fun _ ->
     run_eio (fun ~sw ~net ~clock ->
@@ -297,22 +291,23 @@ let test_missing_json_capability_fails_before_dispatch () =
         ~supports_structured_output:false
         [ slot ];
       match
-        extract_with_exact_output_classified
+        extract_and_append_with_exact_output
           ~clock
           ~net
           ~keeper_id:"librarian-no-json-keeper"
-          ~generation:1
           (librarian_input "trace-no-json")
       with
-      | Error error
-        when Librarian_runtime.extraction_error_kind error
-             = Librarian_runtime.Exact_setup_failure ->
-        Alcotest.(check int) "no provider request" 0 (Fixture.post_count server)
-      | Error error ->
-        Alcotest.failf
-          "expected typed exact setup failure, got %s"
-          (Librarian_runtime.extraction_error_to_string error)
-      | Ok _ -> Alcotest.fail "target without a JSON guarantee must fail closed")))
+      | Ok _ ->
+        Alcotest.(check int) "one provider request" 1 (Fixture.post_count server);
+        (match Fixture.request_bodies server with
+         | [ body ] ->
+           Alcotest.(check bool)
+             "no provider-native response format"
+             false
+             (has_response_format body)
+         | bodies ->
+           Alcotest.failf "expected one request body, got %d" (List.length bodies))
+      | Error error -> Alcotest.fail error)))
 ;;
 
 let test_domain_invalid_output_does_not_fail_over () =
@@ -700,11 +695,11 @@ let () =
       , [ Alcotest.test_case
             "JSON-only target is admitted and persisted"
             `Quick
-            test_json_only_target_is_admitted_and_persisted
+            test_prompt_only_target_is_admitted_and_persisted
         ; Alcotest.test_case
             "missing JSON capability fails before dispatch"
             `Quick
-            test_missing_json_capability_fails_before_dispatch
+            test_prompt_only_target_needs_no_wire_json_capability
         ; Alcotest.test_case
             "domain-invalid output does not fail over"
             `Quick

@@ -14,8 +14,9 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.1"
 # v0.231.1 is a patch release on the same hard-cut wave: corrected 0.231.0
 # release-note contracts (#2869) and keeps Exact_output.Json_syntax prompt-only
 # (#2870), appending the JSON instruction and validating locally rather than
-# selecting a provider-native response format. Provider_schema remains explicit;
-# no additional API removals beyond 0.231.0.
+# selecting a provider-native response format. Provider_schema remains
+# explicit. It also removes the public Llm_provider.Complete.gemini_url
+# helper; MASC has no caller.
 # Previous pin: v0.231.0 (2cb7d922); before that v0.230.0 (7a3f2af7).
 # MASC consumes only the public Agent SDK contract; Keeper, Gate, Board, and
 # product operation ownership remain MASC concepts.

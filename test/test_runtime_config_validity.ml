@@ -409,6 +409,31 @@ let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
        | Some gate_caps -> expect_runpod_caps name gate_caps)
     provider_labels
 
+let test_deployment_oas_model_catalog_covers_glm_streaming_reasoning () =
+  with_deployment_oas_model_catalog @@ fun _catalog ->
+  let model_id = "GLM-5-Turbo" in
+  List.iter
+    (fun provider_label ->
+       match
+         Llm_provider.Capabilities.for_provider_model_id
+           ~allow_bare_fallback:false
+           ~provider_label
+           ~model_id
+       with
+       | None ->
+         failf
+           "expected deployment GLM streaming capability for provider=%s model=%s"
+           provider_label
+           model_id
+       | Some caps ->
+         check bool (provider_label ^ " native streaming") true
+           caps.supports_native_streaming;
+         check bool (provider_label ^ " typed reasoning delta") true
+           (Llm_provider.Capabilities.(
+              caps.reasoning_streaming_format
+              = Delta_reasoning_field "reasoning_content")))
+    [ "glm-coding"; "glm-coding-sb-exact" ]
+
 let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
   with_deployment_oas_model_catalog @@ fun catalog ->
   let model_id = "gemma4-coder-fable5-q4km" in
@@ -3248,6 +3273,10 @@ let () =
             test_runtime_json_not_in_repo_config;
           test_case "deployment OAS catalog covers live RunPod MTP runtime" `Quick
             test_deployment_oas_model_catalog_covers_live_runpod_mtp;
+          test_case
+            "deployment OAS catalog covers GLM typed streaming reasoning"
+            `Quick
+            test_deployment_oas_model_catalog_covers_glm_streaming_reasoning;
           test_case
             "deployment OAS catalog covers live RunPod RTX A6000 Gemma runtime"
             `Quick test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;

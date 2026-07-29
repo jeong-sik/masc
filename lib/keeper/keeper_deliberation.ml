@@ -597,38 +597,6 @@ let structured_result_of_json (json : Yojson.Safe.t)
       in
       Ok { action; reasoning; confidence }
 
-let structured_result_schema : structured_result Agent_sdk.Structured.schema =
-  {
-    Agent_sdk.Structured.params =
-      [
-        {
-          Agent_sdk.Types.name = "action";
-          description = "One of: noop, task_claim, task_create, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
-          param_type = Agent_sdk.Types.String;
-          required = true;
-        };
-        {
-          Agent_sdk.Types.name = "params";
-          description = "Action-specific parameters.";
-          param_type = Agent_sdk.Types.Object;
-          required = true;
-        };
-        {
-          Agent_sdk.Types.name = "reasoning";
-          description = "Optional short explanation for the chosen action.";
-          param_type = Agent_sdk.Types.String;
-          required = false;
-        };
-        {
-          Agent_sdk.Types.name = "confidence";
-          description = "Confidence score from 0.0 to 1.0.";
-          param_type = Agent_sdk.Types.Number;
-          required = false;
-        };
-      ];
-    parse = structured_result_of_json;
-  }
-
 (** Parse the MODEL's JSON response into a deliberation_action with reasoning
     and confidence. Returns [(action, reasoning, confidence)] or an error string. *)
 let parse_deliberation_response (raw : string)

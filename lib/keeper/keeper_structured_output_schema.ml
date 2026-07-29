@@ -1,4 +1,4 @@
-(** Provider-native JSON schemas for keeper LLM sub-call producers. *)
+(** Domain JSON schemas for keeper LLM sub-call parsers and exact-output flows. *)
 
 let string_schema = `Assoc [ "type", `String "string" ]
 let number_schema = `Assoc [ "type", `String "number" ]
@@ -141,11 +141,6 @@ let compaction_plan_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-let vision_analyze_output_schema =
-  let fields = [ "text", string_schema ] in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
 let board_attention_judgment_batch_output_schema =
   let item_fields =
     [ "candidate_id", string_schema
@@ -259,10 +254,6 @@ let fusion_judge_output_schema =
     fields
 ;;
 
-let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config.t) =
-  { provider_cfg with response_format = Agent_sdk.Types.JsonSchema schema }
-;;
-
 (* Ask the provider for no wire response format. The call sites that use this
    state their output contract in the prompt and re-validate it in a total
    parser, so a native schema added no guarantee the parser did not already
@@ -279,9 +270,9 @@ let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config
    json_object tier only 400s because a response_format was set at all.
 
    Note the parse path never read a provider-side structured field:
-   [Agent_sdk_response.structured_json_of_response] extracts JSON from the
-   response's visible text, so native and prompt tiers converge on the same
-   parser byte for byte. *)
+   [Agent_sdk.Structured.response_json_extractor] extracts JSON from the
+   response's visible text, so parser behavior is independent of a provider
+   response format. *)
 let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with response_format = Agent_sdk.Types.Off }
 ;;
@@ -292,31 +283,13 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
    [Task.Anti_rationalization.parse_review_verdict_from_json]. A wire
    response format constrains only the final assistant text, which this
    surface never parses — while its capability branch rejected every
-   json_object-only provider (Glm/DeepSeek/Kimi) as
-   [InvalidConfig "task.anti_rationalization.response_format"], so the gate
+   json_object-only provider (Glm/DeepSeek/Kimi), so the gate
    never ran and every task stayed nonterminal fleet-wide (live incident
    2026-07-21). Converges with the fusion-judge / consolidation /
    board-attention / librarian surfaces above: no wire
    response format; the tool schema carries the verdict enum SSOT. *)
 let anti_rationalization_reviewer_provider_config = without_response_format
 
-let validate_provider_config schema provider_cfg =
-  provider_cfg
-  |> apply_to_provider_config schema
-  |> Llm_provider.Provider_config.validate_output_schema_request
-;;
-
-let provider_config_accepts_schema schema provider_cfg =
-  match validate_provider_config schema provider_cfg with
-  | Ok () -> true
-  | Error _ -> false
-;;
-
-(* A provider is an eligible structured-lane candidate when it can enforce the
-   schema (strict) OR at least honor JSON mode (#25266). The prompt-tier
-   fallback exists but is not sufficient for eligibility: a provider with
-   neither capability is filtered out, matching the pre-#25266 fail-closed
-   behavior for that case. *)
 let for_deterministic_subcall ~max_tokens (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with
     Llm_provider.Provider_config.max_tokens

@@ -12,8 +12,10 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.231.1"
 # retained. Upgrade blast radius: OAS checkpoint artifacts below v9 are
 # rejected and must be reset.
 # v0.231.1 is a patch release on the same hard-cut wave: corrected 0.231.0
-# release-note contracts (#2869) and keeps exact-output JSON syntax
-# prompt-only (#2870); no additional API removals beyond 0.231.0.
+# release-note contracts (#2869) and keeps Exact_output.Json_syntax prompt-only
+# (#2870), appending the JSON instruction and validating locally rather than
+# selecting a provider-native response format. Provider_schema remains explicit;
+# no additional API removals beyond 0.231.0.
 # Previous pin: v0.231.0 (2cb7d922); before that v0.230.0 (7a3f2af7).
 # MASC consumes only the public Agent SDK contract; Keeper, Gate, Board, and
 # product operation ownership remain MASC concepts.

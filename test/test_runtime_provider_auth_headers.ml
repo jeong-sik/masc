@@ -1301,23 +1301,16 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     prepared.agent_config.min_p
 
 let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
-  let resume_schema : Yojson.Safe.t =
-    `Assoc
-      [ ("type", `String "object")
-      ; ("properties", `Assoc [ ("answer", `Assoc [("type", `String "string")]) ])
-      ; ("required", `List [ `String "answer" ])
-      ]
-  in
-  let provider_cfg_with_schema =
+  let provider_cfg_with_response_format =
     let base = provider_cfg () in
     { base with
-      Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonSchema resume_schema
+      Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonMode
     }
   in
   let config =
     Runtime_agent.default_config
       ~name:"oas-runpod_mtp.qwen"
-      ~provider_cfg:provider_cfg_with_schema
+      ~provider_cfg:provider_cfg_with_response_format
       ~system_prompt:""
       ~tools:[]
   in
@@ -1351,9 +1344,9 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
   in
   let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
   let expected_response_format =
-    provider_cfg_with_schema.Llm_provider.Provider_config.response_format
+    provider_cfg_with_response_format.Llm_provider.Provider_config.response_format
   in
-  check bool "resume patches checkpoint response_format to base JsonSchema" true
+  check bool "resume patches checkpoint response_format to base contract" true
     (prepared.patched_checkpoint.Agent_sdk.Checkpoint.response_format
      = expected_response_format)
 

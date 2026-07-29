@@ -264,16 +264,16 @@ let test_deliberation_meta_defaults () =
 
 (* ---------- Keeper meta deliberation fields ---------- *)
 
-let test_keeper_meta_deliberation_fields_roundtrip () =
+let test_keeper_meta_rejects_retired_deliberation_fields () =
   (* deliberation_count/cost/ts/last_triage_triggers removed from keeper_meta
-     (live in deliberation_meta). Verify that old JSON keys are silently
-     ignored and remaining fields parse correctly. *)
+     (live in deliberation_meta). Current keeper metadata must reject old
+     keys; accepting them would reintroduce a legacy compatibility contract. *)
   let json =
     `Assoc
       [
         ("name", `String "test-keeper");
         ("trace_id", `String "trace-1");
-        (* legacy keys — should be ignored by meta_of_json *)
+        (* retired keys — meta_of_json must reject them *)
         ("deliberation_count", `Int 5);
         ("deliberation_cost_total_usd", `Float 0.03);
         ("last_deliberation_ts", `Float 1710000000.0);
@@ -281,9 +281,10 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Error err -> fail ("meta parse failed: " ^ err)
-  | Ok meta ->
-      check string "name preserved" "test-keeper" meta.name
+  | Ok _ -> fail "retired deliberation fields must be rejected"
+  | Error err ->
+      check bool "error names the retired fields" true
+        (contains_substring err "fields outside the current schema")
 
 let test_keeper_meta_deliberation_fields_default () =
   let json =
@@ -468,32 +469,6 @@ let test_parse_valid_broadcast_json () =
       | D.Broadcast { message } ->
           check string "message" "Status update" message
       | _ -> fail "expected Broadcast action"
-
-(* agent_sdk 0.231.1 dropped [name] and [description] from
-   [Structured.schema]: the SDK now emits a bare object JSON schema
-   ([schema_to_json_schema]) instead of a named tool, so no schema name reaches
-   the provider. The prompt still names the schema in prose for the model, and
-   [test_prompt_contains_tool_input_instruction] pins that string. *)
-let test_structured_result_schema_requires_action () =
-  check bool "schema requires action" true
-    (List.exists
-       (fun (param : Agent_sdk.Types.tool_param) ->
-          String.equal param.name "action" && param.required)
-       D.structured_result_schema.params)
-
-let test_structured_result_schema_parse_valid_json () =
-  let json =
-    Yojson.Safe.from_string
-      {|{"action":"noop","params":{"reason":"quiet"},"reasoning":"nothing","confidence":0.9}|}
-  in
-  match D.structured_result_schema.parse json with
-  | Error msg -> fail ("expected schema parse Ok, got Error: " ^ msg)
-  | Ok result ->
-      (match result.action with
-       | D.Noop reason -> check string "noop reason" "quiet" reason
-       | _ -> fail "expected Noop action");
-      check string "reasoning" "nothing" result.reasoning;
-      check (float 0.01) "confidence" 0.9 result.confidence
 
 let test_legality_verdict_accepts_model_task_claim () =
   let obs =
@@ -1119,8 +1094,8 @@ let () =
         ] );
       ( "keeper_meta",
         [
-          test_case "deliberation fields roundtrip" `Quick
-            test_keeper_meta_deliberation_fields_roundtrip;
+          test_case "retired deliberation fields are rejected" `Quick
+            test_keeper_meta_rejects_retired_deliberation_fields;
           test_case "deliberation fields default" `Quick
             test_keeper_meta_deliberation_fields_default;
         ] );
@@ -1145,13 +1120,6 @@ let () =
             test_prompt_contains_action_list;
           test_case "prompt always includes multi_step" `Quick
             test_prompt_always_includes_multi_step;
-        ] );
-      ( "structured_result_schema",
-        [
-          test_case "schema requires action" `Quick
-            test_structured_result_schema_requires_action;
-          test_case "schema parse valid json" `Quick
-            test_structured_result_schema_parse_valid_json;
         ] );
       ( "deterministic_execution",
         [

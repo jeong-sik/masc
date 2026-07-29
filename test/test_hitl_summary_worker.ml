@@ -348,9 +348,9 @@ let test_schema_is_closed_nonhierarchical_contract () =
     (schema |> member "additionalProperties" |> to_bool)
 ;;
 
-let test_json_mode_request_carries_canonical_domain_schema () =
+let test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema () =
   run_eio @@ fun ~sw ~net ~clock ->
-  with_temp_dir "hitl-json-mode-contract" @@ fun base_path ->
+  with_temp_dir "hitl-json-syntax-contract" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
@@ -365,11 +365,11 @@ let test_json_mode_request_carries_canonical_domain_schema () =
            (F.Reply (F.openai_response (judgment_json "approve")))
        in
        publish_lane
-         [ "hitl-json-mode-contract" ]
+         [ "hitl-json-syntax-contract" ]
          (F.resolver_snapshot
             ~supports_structured_output:false
-            ~source:"hitl-json-mode-contract"
-            [ { id = "hitl-json-mode-contract"; base_url = server.base_url } ]);
+            ~source:"hitl-json-syntax-contract"
+            [ { id = "hitl-json-syntax-contract"; base_url = server.base_url } ]);
        let entry = pending_entry ~base_path () in
        Worker.For_testing.execute_prepared_flow
          ~net
@@ -381,14 +381,17 @@ let test_json_mode_request_carries_canonical_domain_schema () =
          match F.request_bodies server with
          | [ body ] -> Yojson.Safe.from_string body
          | bodies ->
-           failf "expected one JSON-mode request, got %d" (List.length bodies)
+           failf "expected one prompt-only request, got %d" (List.length bodies)
        in
        let open Yojson.Safe.Util in
-       check
-         string
-         "JSON-only target receives JsonMode"
-         "json_object"
-         (request_body |> member "response_format" |> member "type" |> to_string);
+       (match request_body with
+        | `Assoc fields ->
+          check
+            bool
+            "JSON syntax request has no provider response_format"
+            false
+            (List.mem_assoc "response_format" fields)
+        | _ -> fail "prompt-only request body is not an object");
        let message_text =
          request_body
          |> member "messages"
@@ -626,7 +629,7 @@ let test_cancellation_between_candidates_terminalizes_released_identity () =
            "between-candidate cancellation lost or misclassified the released identity")
 ;;
 
-let incapable_snapshot base_url =
+let prompt_only_snapshot base_url =
   let contents =
     Printf.sprintf
       "[[providers]]\n\
@@ -659,9 +662,9 @@ let incapable_snapshot base_url =
   | Error _ -> fail "incapable resolver snapshot did not load"
 ;;
 
-let test_all_candidates_rejected_before_network () =
+let test_json_syntax_candidate_is_admitted_without_structured_capability () =
   run_eio @@ fun ~sw:_ ~net ~clock ->
-  with_temp_dir "hitl-all-rejected" @@ fun base_path ->
+  with_temp_dir "hitl-prompt-only" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
@@ -670,47 +673,49 @@ let test_all_candidates_rejected_before_network () =
          (Masc_test_deps.source_path "config/prompts");
        publish_lane
          [ "hitl-incapable" ]
-         (incapable_snapshot "http://127.0.0.1:1");
+         (prompt_only_snapshot "http://127.0.0.1:1");
        let entry = pending_entry ~base_path () in
        let prepared = prepare_exn entry in
        let before = Worker.For_testing.flow_evidence prepared in
        check
          (list string)
-         "incapable topology remains frozen"
+         "prompt-only topology remains frozen"
          [ "hitl-incapable" ]
          (List.map candidate_id before.declared_candidate_snapshot);
        check
          (list string)
-         "incapable candidate is not pre-admitted"
+         "candidate admission remains deferred until the flow runs"
          []
          (List.map admission_id before.admissions);
        (match
           Worker.For_testing.execute_prepared_flow
             ~net
             ~clock
-            ~on_summary:(fun _ -> fail "incapable candidate delivered a summary")
+            ~on_summary:(fun _ -> fail "prompt-only candidate delivered a summary")
             prepared
         with
-        | Worker.Identity_unbound_blocked -> ()
-        | Worker.Executed ->
-          fail "identityless candidate exhaustion reported terminal success"
+        | Worker.Executed -> ()
+        | Worker.Identity_unbound_blocked ->
+          fail "prompt-only candidate lost its exact-attempt identity"
         | Worker.Exact_rejection_blocked _ ->
-          fail "identityless candidate exhaustion reported an exact rejection");
+          fail "prompt-only candidate was rejected before its attempt ran");
        check
          (list string)
-         "execution records the rejected candidate"
+         "execution records the admitted candidate"
          [ "hitl-incapable" ]
          ((Worker.For_testing.flow_evidence prepared).admissions
           |> List.map admission_id);
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
-           { exact_attempt = Q.Exact_unbound
-           ; summary_status = Q.Summary_pending
-           ; summary_attempt_disposition = Q.Summary_attempt_identity_unbound
+           { exact_attempt =
+               Q.Exact_bound
+                 { status = Q.Exact_quarantined Q.Exact_flow_execution_failed; _ }
+           ; summary_status = Q.Summary_failed _
+           ; summary_attempt_disposition = Q.Summary_attempt_settled
            ; _
            } ->
          ()
-       | _ -> fail "pre-network rejection mutated identityless terminal state")
+       | _ -> fail "prompt-only execution did not settle its failed exact attempt")
 ;;
 
 let test_visible_bind_blocks_dispatch () =
@@ -1797,9 +1802,9 @@ let () =
             `Quick
             test_schema_is_closed_nonhierarchical_contract
         ; test_case
-            "JSON-mode request carries canonical schema"
+            "JSON-syntax request is prompt-only and carries canonical schema"
             `Quick
-            test_json_mode_request_carries_canonical_domain_schema
+            test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema
         ; test_case
             "prompt is registry-owned"
             `Quick
@@ -1815,9 +1820,9 @@ let () =
             `Quick
             test_predispatch_failure_advances_only_to_oas_successor
         ; test_case
-            "all candidates reject before network"
+            "JSON-syntax candidate admits without structured capability"
             `Quick
-            test_all_candidates_rejected_before_network
+            test_json_syntax_candidate_is_admitted_without_structured_capability
         ; test_case
             "between-candidate cancellation terminalizes released identity"
             `Quick

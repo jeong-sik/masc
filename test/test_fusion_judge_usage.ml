@@ -23,32 +23,6 @@ let sample_synthesis : Fusion_types.judge_synthesis =
   ; decision = Fusion_types.Answer "ok"
   }
 
-let fusion_schema = Keeper_structured_output_schema.fusion_judge_output_schema
-
-let restore_model_catalog previous =
-  match previous with
-  | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-  | None -> Llm_provider.Model_catalog.clear_global ()
-
-let with_default_oas_model_catalog f =
-  let previous = Llm_provider.Model_catalog.global () in
-  match Llm_provider.Model_catalog.load_default () with
-  | Error msg -> fail ("packaged OAS models.toml should load: " ^ msg)
-  | Ok catalog ->
-    Fun.protect
-      ~finally:(fun () -> restore_model_catalog previous)
-      (fun () ->
-         Llm_provider.Model_catalog.set_global catalog;
-         f ())
-
-let with_empty_oas_model_catalog f =
-  let previous = Llm_provider.Model_catalog.global () in
-  Fun.protect
-    ~finally:(fun () -> restore_model_catalog previous)
-    (fun () ->
-       Llm_provider.Model_catalog.set_global Llm_provider.Model_catalog.empty;
-       f ())
-
 let provider_cfg ~kind ~model_id ~base_url =
   Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
 
@@ -61,86 +35,22 @@ let response_with_text text : Agent_sdk.Types.api_response =
   ; telemetry = None
   }
 
-let test_output_contract_keeps_native_schema_when_supported () =
+let test_output_contract_clears_wire_response_format () =
   let cfg =
-    provider_cfg
-      ~kind:Llm_provider.Provider_config.Anthropic
-      ~model_id:"claude-test"
-      ~base_url:"https://api.anthropic.test"
+    { (provider_cfg
+         ~kind:Llm_provider.Provider_config.Anthropic
+         ~model_id:"claude-test"
+         ~base_url:"https://api.anthropic.test") with
+      response_format = Agent_sdk.Types.JsonMode
+    }
   in
   match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Error msg -> fail ("expected native schema config: " ^ msg)
+  | Error msg -> fail ("prompt-only contract must not fail: " ^ msg)
   | Ok configured ->
-    check bool "response_format uses JsonSchema" true
-      (match configured.response_format with
-       | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal fusion_schema schema
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-    ()
-
-(* Prompt tier: 기본 카탈로그의 deepseek-v4-pro 항목은 native schema도 json_object
-   response format도 선언하지 않으므로, 3-tier 선택기(#25324)에서도 schema 없이
-   base config 그대로 통과한다(빌드 실패 아님). 계약은 프롬프트의
-   expected_json_doc + strict 파싱이 나른다. 2026-07-01 사고 이후 #22768의
-   "native or fail before HTTP"를 뒤집은 지점 — 근거는 fusion_judge.ml
-   [apply_fusion_judge_output_contract] 주석. *)
-let test_output_contract_prompt_tier_when_schema_is_not_native () =
-  with_default_oas_model_catalog @@ fun () ->
-  let cfg =
-    provider_cfg
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"deepseek-v4-pro"
-      ~base_url:"https://api.deepseek.com"
-  in
-  match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Error msg -> fail ("prompt tier must not fail the build: " ^ msg)
-  | Ok configured ->
-    check bool "no native schema is attached (prompt tier)" true
+    check bool "response_format is cleared for the prompt-only contract" true
       (match configured.response_format with
        | Agent_sdk.Types.Off -> true
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
-    ()
-
-(* JSON-mode tier (#25324): json_object response format을 선언한 provider는
-   [JsonMode]를 받는다 — 문법 레벨 JSON은 와이어에서 강제되고, 스키마 준수는
-   프롬프트의 expected_json_doc + strict 파싱이 나른다. 카탈로그 데이터에
-   의존하지 않도록 capability override 픽스처로 고정한다. *)
-let test_output_contract_json_mode_tier_when_json_object_is_declared () =
-  let cfg =
-    Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"json-object-only"
-      ~base_url:"https://json-object-only.invalid/v1"
-      ~model_capabilities_override:
-        { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
-          supports_structured_output = false
-        }
-      ()
-  in
-  match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Error msg -> fail ("json_mode tier must not fail the build: " ^ msg)
-  | Ok configured ->
-    check bool "json_object-only provider gets JsonMode" true
-      (match configured.response_format with
-       | Agent_sdk.Types.JsonMode -> true
-       | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false);
-    ()
-
-let test_output_contract_prompt_tier_when_no_output_contract_is_known () =
-  with_empty_oas_model_catalog @@ fun () ->
-  let cfg =
-    provider_cfg
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"unknown-json-contract"
-      ~base_url:"https://api.example.invalid/v1"
-  in
-  match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Error msg -> fail ("prompt tier must not fail the build: " ^ msg)
-  | Ok configured ->
-    check bool "no native schema is attached (prompt tier)" true
-      (match configured.response_format with
-       | Agent_sdk.Types.Off -> true
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
-    ()
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false)
 
 (* 패널 계약 = free text (2026-07-01 사고 회귀 가드). prose가 그대로 답변이 된다 —
    JSON envelope 파싱이 없으므로 "provider가 schema를 무시해 prose를 반환"하는
@@ -337,21 +247,9 @@ let () =
   run "fusion_judge_usage"
     [ ( "output_contract"
       , [ test_case
-            "keeps native schema when supported"
+            "clears wire response format"
             `Quick
-            test_output_contract_keeps_native_schema_when_supported
-        ; test_case
-            "prompt tier when native schema is not available"
-            `Quick
-            test_output_contract_prompt_tier_when_schema_is_not_native
-        ; test_case
-            "json_mode tier when json_object is declared"
-            `Quick
-            test_output_contract_json_mode_tier_when_json_object_is_declared
-        ; test_case
-            "prompt tier when no JSON output contract is known"
-            `Quick
-            test_output_contract_prompt_tier_when_no_output_contract_is_known
+            test_output_contract_clears_wire_response_format
         ] )
     ; ( "panel_outcome"
       , [ test_case "accepts free text" `Quick test_panel_outcome_accepts_free_text

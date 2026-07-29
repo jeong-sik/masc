@@ -99,7 +99,7 @@ describe('keeper API module split compatibility', () => {
 describe('Keeper chat durable receipt API', () => {
   it('parses an inflight receipt with its stale-completion attempt id', () => {
     expect(parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
+      schema: 'keeper_chat_queue.receipt.v3',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: '7',
@@ -122,7 +122,7 @@ describe('Keeper chat durable receipt API', () => {
 
   it('parses the closed terminal failure state', () => {
     expect(parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
+      schema: 'keeper_chat_queue.receipt.v3',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: '7',
@@ -151,7 +151,7 @@ describe('Keeper chat durable receipt API', () => {
     'parses the canonical %s terminal failure kind',
     (failureKind) => {
       expect(parseKeeperChatReceipt({
-        schema: 'keeper_chat_queue.receipt.v2',
+        schema: 'keeper_chat_queue.receipt.v3',
         keeper_name: 'echo',
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
         revision: '7',
@@ -168,7 +168,7 @@ describe('Keeper chat durable receipt API', () => {
 
   it('rejects an unknown receipt lifecycle instead of guessing', () => {
     expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
+      schema: 'keeper_chat_queue.receipt.v3',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: '1',
@@ -178,7 +178,7 @@ describe('Keeper chat durable receipt API', () => {
 
   it('rejects a non-canonical receipt identity', () => {
     expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
+      schema: 'keeper_chat_queue.receipt.v3',
       keeper_name: 'echo',
       receipt_id: 'receipt-echo-1',
       revision: '1',
@@ -188,7 +188,7 @@ describe('Keeper chat durable receipt API', () => {
 
   it('rejects malformed nullable outcome refs instead of coercing schema drift', () => {
     expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
+      schema: 'keeper_chat_queue.receipt.v3',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: '2',
@@ -198,7 +198,7 @@ describe('Keeper chat durable receipt API', () => {
 
   it('rejects whitespace-only failure detail', () => {
     expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
+      schema: 'keeper_chat_queue.receipt.v3',
       keeper_name: 'echo',
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
       revision: '2',
@@ -215,7 +215,7 @@ describe('Keeper chat durable receipt API', () => {
   it('fetches the exact encoded Keeper receipt route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
-        schema: 'keeper_chat_queue.receipt.v2',
+        schema: 'keeper_chat_queue.receipt.v3',
         keeper_name: 'keeper sangsu',
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
         revision: '2',
@@ -242,7 +242,7 @@ describe('Keeper chat durable receipt API', () => {
         schema: 'keeper_chat_queue.pending_cancel.result.v1',
         ok: true,
         receipt: {
-          schema: 'keeper_chat_queue.receipt.v2',
+          schema: 'keeper_chat_queue.receipt.v3',
           keeper_name: 'sangsu',
           receipt_id: receiptId,
           revision: '10',

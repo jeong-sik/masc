@@ -504,8 +504,9 @@ let dispatch_queued_turn state ~sw ~clock ~handle_turn ~keeper_name ~attempt_id
     ~delivery_key ~queued =
   Eio.Fiber.fork ~sw (fun () ->
       try
-        run_claimed_turn state ~sw ~clock ~handle_turn ~keeper_name ~attempt_id
-          ~delivery_key ~queued;
+        Eio.Switch.run (fun claim_sw ->
+          run_claimed_turn state ~sw:claim_sw ~clock ~handle_turn ~keeper_name
+            ~attempt_id ~delivery_key ~queued);
         finish_dispatching_and_reschedule state keeper_name
       with
       | Eio.Cancel.Cancelled _ as e ->

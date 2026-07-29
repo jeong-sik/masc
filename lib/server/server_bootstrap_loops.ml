@@ -1825,7 +1825,7 @@ let start_keeper_loops_owned
                    ~user_row_origin:queued_message.user_row_origin
                    ~queued_turn:true
                    ~delivery_key:(Some delivery_key)
-                   ~state ~clock ~auth_token:None
+                   ~turn_sw:sw ~state ~clock ~auth_token:None
                    ~thread_id ~continuation_channel ~closed
                    ~client_disconnects:None
                    ~payload ~run_id ~message_id ~agent_name

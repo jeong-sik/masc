@@ -592,6 +592,56 @@ let test_uncertain_claim_compensates_and_other_transitions_reconcile () =
   in
   with_base "keeper-chat-requeue-uncertain" requeue_case
 
+let test_stale_attempt_cannot_mutate_reclaimed_receipt () =
+  Printf.printf "Test: stale attempt cannot mutate a later claim\n%!";
+  with_base "keeper-chat-stale-attempt" @@ fun base_path ->
+  let keeper_name = "stale-attempt" in
+  ignore (configure_clean base_path : Keeper_chat_queue.configure_report);
+  let receipt = enqueue_exn ~keeper_name (message "claim twice") in
+  let first = claim_exn ~keeper_name in
+  (match
+     Keeper_chat_queue.requeue_claim
+       ~keeper_name
+       ~attempt_id:first.attempt_id
+   with
+   | `Requeued _ -> check "first attempt returns its receipt to Pending" true
+   | `Unknown_claim | `Error _ ->
+     check "first attempt returns its receipt to Pending" false);
+  let second = claim_exn ~keeper_name in
+  check "reclaim creates a distinct attempt comparator"
+    (not (String.equal first.attempt_id second.attempt_id));
+  (match
+     Keeper_chat_queue.complete_claim
+       ~keeper_name
+       ~attempt_id:first.attempt_id
+       ~outcome:(Mark_delivered { completed_at = 2.0; outcome_ref = Some "stale" })
+   with
+   | `Unknown_claim -> check "stale completion is rejected" true
+   | `Completed _ | `Error _ -> check "stale completion is rejected" false);
+  (match
+     Keeper_chat_queue.requeue_claim
+       ~keeper_name
+       ~attempt_id:first.attempt_id
+   with
+   | `Unknown_claim -> check "stale requeue is rejected" true
+   | `Requeued _ | `Error _ -> check "stale requeue is rejected" false);
+  (match
+     Keeper_chat_queue.lookup_receipt
+       ~keeper_name
+       ~receipt_id:receipt.receipt_id
+   with
+   | Ok
+       { receipt =
+           Some
+             { state = Inflight { attempt_id; _ }
+             ; _
+             }
+       ; _
+       } ->
+     check "second attempt remains authoritative"
+       (String.equal attempt_id second.attempt_id)
+   | Ok _ | Error _ -> check "second attempt remains authoritative" false)
+
 let test_restart_terminalizes_interrupted_claim_without_replay () =
   Printf.printf
     "Test: restart terminalizes an interrupted claim and continues FIFO\n%!";
@@ -919,6 +969,7 @@ let () =
   test_commit_observer_exception_and_cancellation ();
   test_transition_observer_outside_lock_exactly_once ();
   test_uncertain_claim_compensates_and_other_transitions_reconcile ();
+  test_stale_attempt_cannot_mutate_reclaimed_receipt ();
   test_restart_terminalizes_interrupted_claim_without_replay ();
   test_legacy_json_is_not_a_queue_authority ();
   test_runtime_root_typed_filename_authority ();

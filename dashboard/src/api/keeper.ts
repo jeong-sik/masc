@@ -742,7 +742,7 @@ const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>(
 ])
 
 export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
-  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v2') {
+  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v3') {
     throw new Error('Keeper chat receipt response has an unsupported schema')
   }
   const keeperName = asString(value.keeper_name, '').trim()

@@ -24,7 +24,7 @@ let state_json = function
 let receipt_json ~keeper_name ~revision
     (receipt : Keeper_chat_queue.receipt_view) =
   `Assoc
-    [ "schema", `String "keeper_chat_queue.receipt.v2"
+    [ "schema", `String "keeper_chat_queue.receipt.v3"
     ; "keeper_name", `String keeper_name
     ; "receipt_id", `String (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id)
     ; "revision", `String (Int64.to_string revision)

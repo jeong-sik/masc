@@ -1360,7 +1360,7 @@ let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
    message content. *)
 let process_single_turn ~user_row_origin ~queued_turn
     ~delivery_key
-    ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
+    ~turn_sw ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name ~submitted_by
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
@@ -1900,26 +1900,7 @@ let process_single_turn ~user_row_origin ~queued_turn
     push_worker_event (Stream_terminal { status; body; queued_outcome });
     persisted
   in
-  let submit_result =
-    match Keeper_msg_async.server_background_switch () with
-    | Error error ->
-        Error
-          (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-    | Ok background_sw ->
-      let on_accepted =
-        if dashboard_direct_stream
-        then Some on_direct_request_accepted
-        else None
-      in
-      Keeper_msg_async.submit
-        ?on_accepted
-        ~background_sw
-        ~on_worker_aborted
-        ~on_worker_settled:publish_committed_completion
-        ~base_path
-        ~caller:submitted_by
-        ~keeper_name:payload.name
-        ~f:(fun request_sw ->
+  let run_worker request_sw =
         let start_time = Time_compat.now () in
         let finish_projection_failure kind detail =
           let persisted = persist_failure_reply detail in
@@ -2378,20 +2359,53 @@ let process_single_turn ~user_row_origin ~queued_turn
             push_worker_event
               (Stream_terminal
                  { status = Stream_error; body = err; queued_outcome });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
-        ()
-      |> Result.map_error (fun error ->
-        Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+  in
+  let submit_result =
+    if queued_turn
+    then (
+      (* The queue receipt already owns durable acceptance and terminal state.
+         Fork only to let the bounded worker-event stream drain concurrently;
+         the claim switch owns this worker and all of its child fibers. *)
+      Eio.Fiber.fork ~sw:turn_sw (fun () -> ignore (run_worker turn_sw));
+      Ok None)
+    else
+      match Keeper_msg_async.server_background_switch () with
+      | Error error ->
+          Error
+            (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
+      | Ok background_sw ->
+        let on_accepted =
+          if dashboard_direct_stream
+          then Some on_direct_request_accepted
+          else None
+        in
+        Keeper_msg_async.submit
+          ?on_accepted
+          ~background_sw
+          ~on_worker_aborted
+          ~on_worker_settled:publish_committed_completion
+          ~base_path
+          ~caller:submitted_by
+          ~keeper_name:payload.name
+          ~f:run_worker
+          ()
+        |> Result.map Option.some
+        |> Result.map_error (fun error ->
+          Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
   in
   let request_id, durably_accepted =
     match submit_result with
+    | Ok None -> None, false
     | Ok
+        (Some
         ({ acceptance = Keeper_msg_async.Durably_accepted; request_id }
-          : Keeper_msg_async.submit_outcome) ->
+          : Keeper_msg_async.submit_outcome)) ->
         Some request_id, true
     | Ok
-        ({ acceptance = Keeper_msg_async.Reconciliation_required _; _ } as
-          outcome) ->
+        (Some
+          ({ acceptance = Keeper_msg_async.Reconciliation_required _; _ } as
+            outcome)) ->
         let body =
           Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string
         in
@@ -3029,7 +3043,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                (process_single_turn
                   ~user_row_origin:Keeper_chat_store.Needs_append
                   ~queued_turn:false ~delivery_key:None
-                  ~state ~clock
+                  ~turn_sw:stream_sw ~state ~clock
                   ~auth_token:(auth_token_from_request request)
                   ~thread_id ~continuation_channel ~closed
                   ~client_disconnects:(Some (stream_sw, client_disconnects))

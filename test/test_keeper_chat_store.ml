@@ -102,8 +102,8 @@ let test_load_records_malformed_row_drops () =
            [
              Yojson.Safe.to_string
                (`Assoc
-                  [
-                    ("role", `String "user");
+                  [ ("id", `String "valid-user")
+                  ; ("role", `String "user");
                     ("content", `String "hello");
                     ("ts", `Float 1.0);
                   ]);
@@ -111,8 +111,8 @@ let test_load_records_malformed_row_drops () =
              Yojson.Safe.to_string (`Assoc [("role", `String "assistant")]);
              Yojson.Safe.to_string
                (`Assoc
-                  [
-                    ("role", `String "assistant");
+                  [ ("id", `String "valid-assistant")
+                  ; ("role", `String "assistant");
                     ("content", `String "world");
                     ("ts", `Float 2.0);
                   ]);
@@ -172,8 +172,9 @@ let test_append_turn_roundtrip () =
       Alcotest.(check (option string)) "empty tool id gets positional fallback"
         (Some "tc-1") tool2.tool_call_id;
       Alcotest.(check string) "empty args normalised" "{}" tool2.content;
-      Alcotest.(check (option string)) "source persisted on every line"
-        (Some "dashboard") asst.source;
+      Alcotest.(check (option string)) "surface label derives on every line"
+        (Some "dashboard")
+        (Option.map Masc.Surface_ref.lane_label asst.surface);
       Alcotest.(check (option string)) "assistant has no tool id"
         None asst.tool_call_id)
 
@@ -223,23 +224,18 @@ let test_structured_only_assistant_row_survives_reload () =
         Alcotest.failf "expected one structured-only row, got %d"
           (List.length messages))
 
-let test_legacy_lines_parse_without_new_fields () =
-  let base_dir = temp_base_path "keeper-chat-store-legacy" in
+let test_missing_id_rows_are_rejected () =
+  let base_dir = temp_base_path "keeper-chat-store-missing-id" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      let keeper_name = "keeper-chat-legacy" in
+      let keeper_name = "keeper-chat-missing-id" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
         ({|{"role":"user","content":"hello","ts":1.0}|} ^ "\n"
         ^ {|{"role":"assistant","content":"world","ts":1.0}|} ^ "\n");
-      match K.load ~base_dir ~keeper_name with
-      | [ user; assistant ] ->
-          Alcotest.(check (option string)) "legacy user has no source" None user.source;
-          Alcotest.(check (option string)) "legacy assistant has no tool id"
-            None assistant.tool_call_id
-      | messages ->
-          Alcotest.failf "expected 2 messages, got %d" (List.length messages))
+      Alcotest.(check int) "rows without current id are dropped" 0
+        (K.load ~base_dir ~keeper_name |> List.length))
 
 (* R3: every persisted row carries a producer-assigned id that is
    non-empty, unique within a turn, and stable across reloads. *)
@@ -263,34 +259,29 @@ let test_message_id_minted_unique_and_stable () =
         (List.length (List.sort_uniq String.compare ids));
       Alcotest.(check (list string)) "ids stable across reloads" ids (ids_of ()))
 
-(* R3: rows written before the id field load with a deterministic id
-   derived at the read boundary, so it is stable across reloads and two
-   distinct rows get distinct ids — no index-derived synthesis. *)
-let test_legacy_row_gets_deterministic_id () =
-  let base_dir = temp_base_path "keeper-chat-store-legacy-id" in
+let test_source_field_is_not_a_surface_fallback () =
+  let base_dir = temp_base_path "keeper-chat-store-source-hard-cut" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      let keeper_name = "keeper-chat-legacy-id" in
+      let keeper_name = "keeper-chat-source-hard-cut" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"role":"user","content":"hello","ts":1.0}|} ^ "\n"
-        ^ {|{"role":"assistant","content":"world","ts":1.0}|} ^ "\n");
-      let ids_of () =
-        List.map (fun (m : K.chat_message) -> m.id) (K.load ~base_dir ~keeper_name)
-      in
-      let first = ids_of () in
-      Alcotest.(check int) "two legacy rows loaded" 2 (List.length first);
-      List.iter
-        (fun id ->
-          Alcotest.(check bool) "legacy id non-empty" true (String.length id > 0))
-        first;
-      Alcotest.(check (list string)) "legacy ids deterministic across reloads"
-        first (ids_of ());
-      match first with
-      | [ a; b ] ->
-          Alcotest.(check bool) "distinct legacy rows get distinct ids" true (a <> b)
-      | _ -> Alcotest.fail "expected 2 legacy ids")
+        ({|{"id":"row-current","role":"user","content":"hello","ts":1.0,"source":"discord"}|}
+        ^ "\n");
+      match K.load ~base_dir ~keeper_name with
+      | [ row ] ->
+          Alcotest.(check (option string))
+            "retired source does not synthesize typed surface"
+            None
+            (Option.map Masc.Surface_ref.lane_label row.surface);
+          let json = K.to_json_array [ row ] in
+          Alcotest.(check bool)
+            "retired source is not re-emitted"
+            true
+            Yojson.Safe.Util.(json |> index 0 |> member "source" = `Null)
+      | rows ->
+          Alcotest.failf "expected one current-id row, got %d" (List.length rows))
 
 (* R3: the /chat/history payload surfaces the id so the dashboard keys off
    it instead of synthesising one. *)
@@ -494,7 +485,7 @@ let test_append_turn_redacts_projected_secrets () =
       Alcotest.(check bool) "redaction marker present" true
         (contains_substring rendered "[REDACTED]"))
 
-let test_load_redacts_legacy_raw_secret_rows () =
+let test_load_redacts_raw_persisted_secret_rows () =
   let base_dir = temp_base_path "keeper-chat-store-read-redact" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
@@ -502,19 +493,20 @@ let test_load_redacts_legacy_raw_secret_rows () =
       with_env "MASC_SECRET_DIR" "" @@ fun () ->
       let keeper_name = "keeper-chat-read-redact" in
       let root = secret_root_default ~base_dir ~keeper_name in
-      let secret = "legacy.secret!" in
+      let secret = "persisted.secret!" in
       write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
         (Yojson.Safe.to_string
            (`Assoc
-              [ ("role", `String "assistant");
+              [ ("id", `String "raw-secret-row")
+              ; ("role", `String "assistant");
                 ("content", `String ("old row " ^ secret));
                 ("ts", `Float 1.0) ])
          ^ "\n");
       match K.load ~base_dir ~keeper_name with
       | [ msg ] ->
-          Alcotest.(check bool) "legacy raw value hidden on read" false
+          Alcotest.(check bool) "raw persisted value hidden on read" false
             (contains_substring msg.K.content secret);
           Alcotest.(check bool) "marker present on read" true
             (contains_substring msg.K.content "[REDACTED]")
@@ -588,8 +580,9 @@ let test_append_user_message_roundtrip () =
           Alcotest.(check string) "lone user line first" "user" (K.Role.to_label user.K.role);
           Alcotest.(check string) "content"
             "two humans chatting, no mention" user.K.content;
-          Alcotest.(check (option string)) "source"
-            (Some "discord") user.K.source;
+          Alcotest.(check (option string)) "surface-derived label"
+            (Some "discord")
+            (Option.map Masc.Surface_ref.lane_label user.K.surface);
           Alcotest.(check (option string)) "conversation id"
             (Some "discord:guild-1:channel:chan-7") user.K.conversation_id;
           Alcotest.(check (option string)) "external message id"
@@ -628,10 +621,8 @@ let test_append_user_message_roundtrip () =
               Alcotest.(check bool) "json assistant omits inbound message id" true
                 Yojson.Safe.Util.(
                   assistant_json |> member "external_message_id" = `Null);
-              (* RFC-0232 P5: the structured surface must survive the
-                 read-serve emitter, not only the derived [source] label, so
-                 the dashboard rebuilds the connector deep-link on a history
-                 reload instead of dropping it. *)
+              (* The typed surface must survive the read-serve emitter so the
+                 dashboard rebuilds the connector deep-link on reload. *)
               let user_surface = Yojson.Safe.Util.member "surface" user_json in
               Alcotest.(check bool) "json user row carries structured surface"
                 true (user_surface <> `Null);
@@ -686,7 +677,7 @@ let test_unknown_speaker_authority_reported_not_guessed () =
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"role":"user","content":"hi","ts":1.0,"speaker_id":"x","speaker_authority":"admin"}|}
+        ({|{"id":"unknown-authority","role":"user","content":"hi","ts":1.0,"speaker_id":"x","speaker_authority":"admin"}|}
         ^ "\n");
       (match K.load ~base_dir ~keeper_name with
        | [ user ] ->
@@ -711,9 +702,9 @@ let test_unknown_role_row_dropped () =
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"role":"user","content":"hi","ts":1.0}|} ^ "\n"
-        ^ {|{"role":"system","content":"injected","ts":2.0}|} ^ "\n"
-        ^ {|{"role":"assistant","content":"done","ts":3.0}|} ^ "\n");
+        ({|{"id":"role-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
+        ^ {|{"id":"role-system","role":"system","content":"injected","ts":2.0}|} ^ "\n"
+        ^ {|{"id":"role-assistant","role":"assistant","content":"done","ts":3.0}|} ^ "\n");
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "unknown role row dropped"
         [ "user"; "assistant" ] (roles messages);
@@ -731,9 +722,9 @@ let test_tool_row_missing_name_dropped () =
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"role":"user","content":"hi","ts":1.0}|} ^ "\n"
-        ^ {|{"role":"tool","content":"{}","ts":1.0,"tool_call_id":"toolu_9"}|} ^ "\n"
-        ^ {|{"role":"assistant","content":"done","ts":1.0}|} ^ "\n");
+        ({|{"id":"tool-name-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
+        ^ {|{"id":"tool-name-missing","role":"tool","content":"{}","ts":1.0,"tool_call_id":"toolu_9"}|} ^ "\n"
+        ^ {|{"id":"tool-name-assistant","role":"assistant","content":"done","ts":1.0}|} ^ "\n");
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "nameless tool row dropped"
         [ "user"; "assistant" ] (roles messages);
@@ -780,10 +771,10 @@ let test_orphan_leading_tool_lines_trimmed () =
       let keeper_name = "keeper-chat-orphan" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"role":"tool","content":"{}","ts":1.0,"tool_call_id":"t0","tool_call_name":"Read"}|}
-         ^ "\n"
-        ^ {|{"role":"user","content":"hi","ts":2.0}|} ^ "\n"
-        ^ {|{"role":"assistant","content":"yo","ts":2.0}|} ^ "\n");
+        ({|{"id":"orphan-tool","role":"tool","content":"{}","ts":1.0,"tool_call_id":"t0","tool_call_name":"Read"}|}
+        ^ "\n"
+        ^ {|{"id":"orphan-user","role":"user","content":"hi","ts":2.0}|} ^ "\n"
+        ^ {|{"id":"orphan-assistant","role":"assistant","content":"yo","ts":2.0}|} ^ "\n");
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check (list string)) "leading orphan tool trimmed"
         [ "user"; "assistant" ] (roles messages))
@@ -878,7 +869,8 @@ let test_tail_bounded_load_matches_full_scan_window () =
         let line =
           Yojson.Safe.to_string
             (`Assoc
-               [ ("role", `String role);
+               [ ("id", `String (Printf.sprintf "tail-%04d" i))
+               ; ("role", `String role);
                  ("content", `String (Printf.sprintf "msg-%04d %s" i padding));
                  ("ts", `Float (float_of_int i));
                ])
@@ -913,8 +905,8 @@ let write_numbered_lane ~path ~total ~pad_bytes =
     Buffer.add_string buf
       (Yojson.Safe.to_string
          (`Assoc
-            [
-              ("role", `String (if i mod 2 = 1 then "user" else "assistant"));
+            [ ("id", `String (Printf.sprintf "page-%04d" i))
+            ; ("role", `String (if i mod 2 = 1 then "user" else "assistant"));
               ("content", `String (Printf.sprintf "msg-%04d %s" i padding));
               ("ts", `Float (float_of_int i));
             ]));
@@ -1038,7 +1030,8 @@ let test_unknown_kind_reported_reads_utterance () =
       let before = drop_value invalid_payload in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"role":"assistant","content":"hi","ts":1.0,"kind":"weird"}|} ^ "\n");
+        ({|{"id":"unknown-kind","role":"assistant","content":"hi","ts":1.0,"kind":"weird"}|}
+        ^ "\n");
       match K.load ~base_dir ~keeper_name with
       | [ asst ] ->
           Alcotest.(check bool)
@@ -1108,7 +1101,7 @@ let test_audio_clip_expired_persists_roundtrip () =
       let keeper_name = "keeper-chat-audio-expired-rt" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"role":"assistant","content":"hello","ts":1.0,"audio":{|}
+        ({|{"id":"audio-redact","role":"assistant","content":"hello","ts":1.0,"audio":{|}
         ^ {|"token":"voice-token-rt","mime":"audio/mpeg","message_text":"hello","expired":true}|}
         ^ "}\n");
       match K.load ~base_dir ~keeper_name with
@@ -1247,7 +1240,7 @@ let test_blocks_roundtrip_and_drop_malformed () =
       let keeper_name = "keeper-chat-blocks-rt" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"role":"assistant","content":"hello","ts":1.0,"blocks":[{|}
+        ({|{"id":"block-redact","role":"assistant","content":"hello","ts":1.0,"blocks":[{|}
         ^ {|"t":"p","html":"hello"},{"t":"image","src":"https://x.com/a.png","cap":"a"},{|}
         ^ {|"t":"link","url":"https://x.com","title":"x.com","meta":"x.com"},{|}
         ^ {|"t":"unknown","x":1}]}|}
@@ -1441,20 +1434,20 @@ let test_append_turn_preserves_fusion_lookup_ids () =
 (* Read-boundary redaction: rows written before this PR (or by any path that
    bypasses the write-boundary redactors) must still have caller-supplied
    blocks and audio scrubbed before they are served by [load] / [to_json_array]. *)
-let test_load_redacts_legacy_raw_blocks_and_audio () =
-  let base_dir = temp_base_path "keeper-chat-store-legacy-blocks-audio-redact" in
+let test_load_redacts_raw_persisted_blocks_and_audio () =
+  let base_dir = temp_base_path "keeper-chat-store-raw-blocks-audio-redact" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       with_env "MASC_SECRET_DIR" "" @@ fun () ->
-      let keeper_name = "keeper-chat-legacy-blocks-audio-redact" in
+      let keeper_name = "keeper-chat-raw-blocks-audio-redact" in
       let root = secret_root_default ~base_dir ~keeper_name in
-      let secret = "legacy-blocks-audio.secret!" in
+      let secret = "raw-blocks-audio.secret!" in
       write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
       let path = chat_path ~base_dir ~keeper_name in
       let audio_json =
         `Assoc
-          [ ("token", `String "voice-token-legacy")
+          [ ("token", `String "voice-token-raw")
           ; ("mime", `String "audio/mpeg")
           ; ("message_text", `String ("caption " ^ secret))
           ; ("audio_url", `String ("https://cdn.example.com/audio?sig=" ^ secret))
@@ -1468,7 +1461,8 @@ let test_load_redacts_legacy_raw_blocks_and_audio () =
       in
       let row =
         `Assoc
-          [ ("role", `String "assistant")
+          [ ("id", `String "raw-rich-secret-row")
+          ; ("role", `String "assistant")
           ; ("content", `String ("content " ^ secret))
           ; ("ts", `Float 1.0)
           ; ("audio", audio_json)
@@ -1479,28 +1473,28 @@ let test_load_redacts_legacy_raw_blocks_and_audio () =
       let messages = K.load ~base_dir ~keeper_name in
       match messages with
       | [ msg ] ->
-        Alcotest.(check bool) "legacy content redacted on load" false
+        Alcotest.(check bool) "raw content redacted on load" false
           (contains_substring msg.K.content secret);
         (match msg.K.audio with
          | Some audio ->
-           Alcotest.(check bool) "legacy audio message_text redacted on load" false
+           Alcotest.(check bool) "raw audio message_text redacted on load" false
              (contains_substring audio.message_text secret);
            let audio_url_contains_secret =
              match audio.audio_url with
              | Some url -> contains_substring url secret
              | None -> false
            in
-           Alcotest.(check bool) "legacy audio audio_url redacted on load" false
+           Alcotest.(check bool) "raw audio audio_url redacted on load" false
              audio_url_contains_secret
-         | None -> Alcotest.fail "legacy audio missing");
-        Alcotest.(check bool) "legacy blocks redacted on load" false
+         | None -> Alcotest.fail "raw audio missing");
+        Alcotest.(check bool) "raw blocks redacted on load" false
           (match msg.K.blocks with
            | Some blocks ->
              contains_substring (Yojson.Safe.to_string (B.blocks_to_yojson blocks)) secret
            | None -> true);
         let json = K.to_json_array messages in
         let s = Yojson.Safe.to_string json in
-        Alcotest.(check bool) "to_json_array hides legacy secret" false
+        Alcotest.(check bool) "to_json_array hides raw persisted secret" false
           (contains_substring s secret);
         Alcotest.(check bool) "redaction marker present in served payload" true
           (contains_substring s "[REDACTED]")
@@ -1670,12 +1664,12 @@ let stream_contract_of row =
   member "stream_contract" row
 
 let test_to_json_array_stream_contract_without_turn_ref () =
-  let base_dir = temp_base_path "keeper-chat-store-stream-contract-legacy" in
+  let base_dir = temp_base_path "keeper-chat-store-stream-contract-unjoined" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
-      let keeper_name = "keeper-chat-stream-contract-legacy" in
-      K.append_user_message ~base_dir ~keeper_name ~content:"legacy hi" ();
+      let keeper_name = "keeper-chat-stream-contract-unjoined" in
+      K.append_user_message ~base_dir ~keeper_name ~content:"unjoined hi" ();
       let rows =
         Yojson.Safe.Util.to_list
           (K.to_json_array (K.load ~base_dir ~keeper_name))
@@ -1869,7 +1863,7 @@ let test_malformed_stream_lifecycle_reads_none () =
       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"role":"assistant","content":"x","ts":1.0,"turn_ref":"trace-life#7","stream_lifecycle":["RUN_STARTED","NOT_A_REAL_EVENT"]}|}
+        ({|{"id":"bad-lifecycle","role":"assistant","content":"x","ts":1.0,"turn_ref":"trace-life#7","stream_lifecycle":["RUN_STARTED","NOT_A_REAL_EVENT"]}|}
         ^ "\n");
       (match K.load ~base_dir ~keeper_name with
        | [ m ] ->
@@ -1893,7 +1887,7 @@ let test_turn_ref_malformed_reads_none () =
       let keeper_name = "keeper-chat-turnref-bad" in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
-        ({|{"role":"assistant","content":"x","ts":1.0,"turn_ref":"no-separator"}|}
+        ({|{"id":"bad-turn-ref","role":"assistant","content":"x","ts":1.0,"turn_ref":"no-separator"}|}
         ^ "\n");
       match K.load ~base_dir ~keeper_name with
       | [ m ] ->
@@ -2007,7 +2001,7 @@ let test_delivery_key_malformed_reads_none () =
       in
       let before = drop_value invalid_payload in
       write_file path
-        ({|{"role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"not_a_kind","request_id":"kmsg-1"}}|}
+        ({|{"id":"bad-delivery-key","role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"not_a_kind","request_id":"kmsg-1"}}|}
         ^ "\n");
       (match K.load ~base_dir ~keeper_name with
        | [ m ] ->
@@ -2127,8 +2121,8 @@ let () =
             test_append_turn_redacts_all_supplied_block_strings;
           Alcotest.test_case "fusion lookup ids survive redaction" `Quick
             test_append_turn_preserves_fusion_lookup_ids;
-          Alcotest.test_case "legacy raw blocks and audio redacted on load" `Quick
-            test_load_redacts_legacy_raw_blocks_and_audio;
+          Alcotest.test_case "raw persisted blocks and audio redacted on load"
+            `Quick test_load_redacts_raw_persisted_blocks_and_audio;
           Alcotest.test_case "assistant message audio redacted on append" `Quick
             test_append_assistant_message_redacts_audio;
           Alcotest.test_case "assistant history appends trace block" `Quick
@@ -2172,12 +2166,12 @@ let () =
             test_tool_only_continuations_do_not_fabricate_assistant_rows;
           Alcotest.test_case "structured-only assistant rows survive reload"
             `Quick test_structured_only_assistant_row_survives_reload;
-          Alcotest.test_case "legacy lines parse" `Quick
-            test_legacy_lines_parse_without_new_fields;
+          Alcotest.test_case "missing-id rows rejected" `Quick
+            test_missing_id_rows_are_rejected;
           Alcotest.test_case "message id minted unique and stable (R3)" `Quick
             test_message_id_minted_unique_and_stable;
-          Alcotest.test_case "legacy row gets deterministic id (R3)" `Quick
-            test_legacy_row_gets_deterministic_id;
+          Alcotest.test_case "source field is not a surface fallback" `Quick
+            test_source_field_is_not_a_surface_fallback;
           Alcotest.test_case "chat_path size grows on append (cache key)" `Quick
             test_chat_path_size_grows_on_append;
           Alcotest.test_case "to_json_array exposes id (R3)" `Quick
@@ -2192,8 +2186,8 @@ let () =
             test_direct_owner_context_excludes_connector_turns;
           Alcotest.test_case "append_turn redacts projected secrets" `Quick
             test_append_turn_redacts_projected_secrets;
-          Alcotest.test_case "load redacts legacy raw secret rows" `Quick
-            test_load_redacts_legacy_raw_secret_rows;
+          Alcotest.test_case "load redacts raw persisted secret rows" `Quick
+            test_load_redacts_raw_persisted_secret_rows;
           Alcotest.test_case "window counts primaries only" `Quick
             test_window_keeps_tool_lines_of_retained_turns;
           Alcotest.test_case "orphan leading tool lines trimmed" `Quick

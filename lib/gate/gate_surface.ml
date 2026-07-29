@@ -14,14 +14,6 @@ let label = function
   | Slack _ -> slack_label
   | Gate { channel; _ } -> channel
 
-let of_source ~source ~workspace_id ~channel_id =
-  if String.equal source dashboard_label then Dashboard
-  else if String.equal source discord_label then
-    Discord { workspace_id; channel_id }
-  else if String.equal source slack_label then
-    Slack { workspace_id; channel_id }
-  else Gate { channel = source; channel_id }
-
 type surface_presence = { surface : t; alive : bool }
 
 type presence_failure =
@@ -35,7 +27,12 @@ type presence_snapshot =
   }
 
 let surface_of_connector ~channel ~channel_id =
-  of_source ~source:channel ~workspace_id:None ~channel_id:(Some channel_id)
+  if String.equal channel dashboard_label then Dashboard
+  else if String.equal channel discord_label then
+    Discord { workspace_id = None; channel_id = Some channel_id }
+  else if String.equal channel slack_label then
+    Slack { workspace_id = None; channel_id = Some channel_id }
+  else Gate { channel; channel_id = Some channel_id }
 
 let connected_surfaces_for_keeper ~keeper_name =
   let connector_surfaces, failures =

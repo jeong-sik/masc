@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Removed
+- **Breaking (keeper chat wire)**: removed read-time message-id synthesis for
+  rows without a persisted `id` and removed the duplicate persisted `source`
+  lane label. Current chat rows require a nonblank producer-assigned `id` and
+  persist only typed `surface` identity; history/timeline/lane consumers derive
+  the compact source label from that typed field. The unused
+  `Gate_surface.of_source` compatibility facade was also removed. No migration,
+  repair, or string-to-surface fallback was added.
 - **Breaking (telemetry wire/storage)**: removed the retired
   `Agent_joined`/`Agent_left` decoder aliases, the `.masc/telemetry.jsonl`
   fallback reader, and the producer-less `Handoff_triggered` event plus its

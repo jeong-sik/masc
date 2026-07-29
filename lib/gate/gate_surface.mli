@@ -2,10 +2,8 @@
 
     A surface is one lane a keeper can hear from or speak to: the
     dashboard, a bound Discord/Slack channel, or any other connector
-    speaking the generic gate protocol. The type round-trips to the
-    on-disk [source] labels written by {!Keeper_chat_store.append_turn}
-    producers ("dashboard" / "discord" / "slack" / connector channel
-    labels).
+    speaking the generic gate protocol. Presence is derived from the current
+    connector registry, not from persisted chat labels.
 
     RFC names this module [Surface]; the [Gate_] prefix follows the
     masc_gate convention ([(wrapped false)] puts modules in the global
@@ -18,20 +16,12 @@ type t =
   | Gate of { channel : string; channel_id : string option }
       (** Any other connector speaking the generic gate protocol;
           [channel] is the connector's registered label, verbatim.
-          [workspace_id]/[channel_id] are [option] because chat rows
-          persist only the [source] label today — a row-derived
-          surface knows its lane label but not always the lane id. *)
+          [workspace_id]/[channel_id] are [option] because a connector
+          registry may expose only the lane label. *)
 
 val label : t -> string
-(** Round-trips to today's on-disk [source] strings: ["dashboard"],
-    ["discord"], ["slack"], or the gate channel label verbatim. *)
-
-val of_source :
-  source:string -> workspace_id:string option -> channel_id:string option -> t
-(** Parse a persisted [source] label. Unknown labels map to
-    [Gate { channel = source; _ }] — the honest reading (every
-    non-builtin source IS a gate channel label), not a permissive
-    default. *)
+(** Current connector label: ["dashboard"], ["discord"], ["slack"], or the
+    generic gate channel label verbatim. *)
 
 (** {1 Presence (RFC-0223 P2)} *)
 

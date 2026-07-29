@@ -4,12 +4,13 @@
     Lines are append-only with timestamps.
 
     Line format:
-    {v {"role":"user","content":"hello","ts":1774000000.0} v}
+    {v {"id":"msg-...","role":"user","content":"hello","ts":1774000000.0} v}
 
     Tool-call lines (persisted between the user and assistant lines of a
     turn) carry the executed tool name and accumulated arguments:
-    {v {"role":"tool","content":"{\"path\":\"x\"}","ts":...,
-        "tool_call_id":"toolu_1","tool_call_name":"Read","source":"dashboard"} v}
+    {v {"id":"msg-...","role":"tool","content":"{\"path\":\"x\"}","ts":...,
+        "tool_call_id":"toolu_1","tool_call_name":"Read",
+        "surface":{"kind":"dashboard"}} v}
 
     Connector rows may additionally carry opaque route coordinates:
     [conversation_id] for channel/thread grouping and [external_message_id]
@@ -183,19 +184,14 @@ type chat_message = {
       (* R3: producer-assigned stable message id.  Minted once at append
          by [encode_line] (the sole writer) and read back verbatim, so the
          dashboard keys off a server identity instead of synthesising an
-         index-derived id at render.  Rows written before R3 carry no
-         persisted id and are given a deterministic one at the read
-         boundary ([legacy_message_id]); the field is therefore total. *)
+         index-derived id at render. Rows without a nonblank persisted id
+         are rejected at the read boundary. *)
   role : Role.t;
   content : string;
   ts : float option;
   attachments : attachment list option;
   tool_call_id : string option;
   tool_call_name : string option;
-  source : string option;
-      (* Legacy lane label.  Derived from [surface] at write since
-         RFC-0232 P5 (writers no longer pass label strings); read
-         verbatim from the wire so pre-P5 rows keep their label. *)
   surface : Surface_ref.t option;
       (* RFC-0232 P5: the typed surface, persisted as a structured
          [surface] field.  [None] on rows written before P5. *)
@@ -508,31 +504,12 @@ let mint_message_id ~ts =
   let n = Atomic.fetch_and_add message_id_counter 1 in
   Printf.sprintf "msg-%016.0f-%d" (ts *. 1_000_000.) n
 
-(* Rows written before R3 carry no persisted id.  Derive a stable one at
-   the read boundary from the row's timestamp and content so the dashboard
-   keys off a single deterministic id and never synthesises an
-   index-derived one that shifts when history pages are merged.  Two
-   byte-identical legacy rows collapse to the same id, which is acceptable:
-   they are indistinguishable and predate the per-row identity. *)
-let legacy_message_id ~ts ~content =
-  let ts_part =
-    match ts with
-    | Some t -> Printf.sprintf "%016.0f" (t *. 1_000_000.)
-    | None -> "nots"
-  in
-  Printf.sprintf "legacy-%s-%s" ts_part
-    (String.sub (Digest.to_hex (Digest.string content)) 0 12)
-
 let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
     ?speaker
     ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
     ?stream_lifecycle ?delivery_key ?transcript_slot ()
     : string =
-  (* RFC-0232 P5: the label is a derivation of the typed surface — the
-     single site that turns a [Surface_ref.t] into the legacy [source]
-     string. *)
-  let source = Option.map Surface_ref.lane_label surface in
   let surface_field =
     match surface with
     | None -> []
@@ -603,7 +580,6 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ kind_field
     @ opt_string_field "tool_call_id" tool_call_id
     @ opt_string_field "tool_call_name" tool_call_name
-    @ opt_string_field "source" source
     @ surface_field
     @ opt_string_field "conversation_id" conversation_id
     @ opt_string_field "external_message_id" external_message_id
@@ -1353,7 +1329,6 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     let tool_call_id = opt_string "tool_call_id" in
     let tool_call_name = opt_string "tool_call_name" in
-    let source = opt_string "source" in
     let surface =
       match Json_util.assoc_member_opt "surface" json with
       | None -> None
@@ -1361,8 +1336,8 @@ let parse_line ~file_path (line : string) : chat_message option =
           match Surface_ref.of_json surface_json with
           | Ok s -> Some s
           | Error detail ->
-              (* Unknown/invalid surface payload: surface it, keep the
-                 row (the label in [source] still renders). *)
+              (* Unknown/invalid surface payload: surface it and keep the
+                 row as unscoped chat content. *)
               report_persistence_read_drop
                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                 ~path:file_path
@@ -1593,17 +1568,19 @@ let parse_line ~file_path (line : string) : chat_message option =
             ~detail:"tool chat row missing non-empty tool_call_name";
           None
       | Some role ->
-          let id =
-            match opt_string "id" with
-            | Some persisted -> persisted
-            | None -> legacy_message_id ~ts ~content
-          in
-          Some
-            { id; role; content; ts; attachments; tool_call_id; tool_call_name;
-              source; surface; conversation_id; external_message_id;
-              workspace_id; speaker;
-              audio; blocks; mentions; kind; turn_ref; stream_lifecycle;
-              delivery_key }
+          (match opt_string "id" with
+           | None ->
+               report_persistence_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path:file_path
+                 ~detail:"chat row missing nonblank id";
+               None
+           | Some id ->
+               Some
+                 { id; role; content; ts; attachments; tool_call_id;
+                   tool_call_name; surface; conversation_id;
+                   external_message_id; workspace_id; speaker; audio; blocks;
+                   mentions; kind; turn_ref; stream_lifecycle; delivery_key })
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -1942,13 +1919,11 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                      [ ("kind", `String (Row_kind.to_label m.kind)) ])
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
-              @ opt_string_field "source" m.source
-              (* RFC-0232 P5: re-emit the structured surface so a history
-                 reload restores the connector deep-link, not only the
-                 derived [source] lane label. [encode_line] persists it with
-                 the same [Surface_ref.to_json] and [load] decodes it back
-                 into [m.surface]; this read-serve site had dropped it, so
-                 [surfaceLink] in the dashboard rendered nothing on reload. *)
+              @ opt_string_field
+                  "source"
+                  (Option.map Surface_ref.lane_label m.surface)
+              (* Re-emit the typed surface for connector deep-links. [source]
+                 above is only its response projection for compact labels. *)
               @ (match m.surface with
                  | None -> []
                  | Some s -> [ ("surface", Surface_ref.to_json s) ])

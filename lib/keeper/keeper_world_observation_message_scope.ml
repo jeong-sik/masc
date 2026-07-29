@@ -92,8 +92,9 @@ let speaker_display (m : Keeper_chat_store.chat_message) : string =
   match from_speaker with
   | Some name when String.trim name <> "" -> name
   | _ ->
-    (match m.source with
-     | Some src when String.trim src <> "" -> src
+    (match m.surface with
+     | Some surface when String.trim (Surface_ref.lane_label surface) <> "" ->
+         Surface_ref.lane_label surface
      | _ -> "someone")
 ;;
 

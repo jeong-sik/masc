@@ -694,10 +694,12 @@ let test_translation_validation_policy_is_typed_for_all_descriptors () =
            (descriptor.id ^ " validates an identity payload exactly once")
            1
            ((if pre then 1 else 0) + if post then 1 else 0);
-         Alcotest.(check Yojson.Safe.equal)
+         Alcotest.(check bool)
            (descriptor.id ^ " identity translation is byte-identical")
-           probe
-           (Descriptor.translate_input_for_descriptor descriptor probe)
+           true
+           (Yojson.Safe.equal
+              probe
+              (Descriptor.translate_input_for_descriptor descriptor probe))
        | Descriptor.Schema_preserving _ ->
          Alcotest.(check int)
            (descriptor.id ^ " validates a schema-preserving payload exactly once")

@@ -231,10 +231,11 @@ let make_tool_bundle
                  ~on_deferred:mark_deferred_tool_result
                  ~on_external_effect_deferred:mark_external_effect_deferred
                  ?on_failed
-                 ~prepare_input:
-                   (Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
-                      ~tool_name:model_name
-                      descriptor)
+                 ~prepare_input:(fun input ->
+                   Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+                     ~tool_name:model_name
+                     descriptor
+                     ~input)
                  ()
              in
              Tool_bridge.oas_tool_of_masc_with_execution_env

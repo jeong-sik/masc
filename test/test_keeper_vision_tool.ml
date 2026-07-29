@@ -558,8 +558,10 @@ supports-multimodal-inputs = true
 supports-structured-output = true
 
 [p1.vision-a]
+max-request-body-bytes = 65536
 
 [p2.vision-b]
+max-request-body-bytes = 65536
 |}
 
 let single_vision_runtime_toml =
@@ -583,6 +585,7 @@ supports-multimodal-inputs = true
 supports-structured-output = true
 
 [p3.vision-c]
+max-request-body-bytes = 65536
 |}
 
 (* Vision falls back to every schema-capable image runtime after explicit

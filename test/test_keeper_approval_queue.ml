@@ -1165,9 +1165,10 @@ let test_resolution_is_durable_and_origin_scoped () =
                 evidence
                 [ Agent_sdk.Types.user_msg retry_text ]
             with
-            | Ok [ message ] ->
-              Agent_sdk.Types.text_of_content message.content
-            | Ok _ -> Alcotest.fail "replay projection changed message count"
+            | Ok [ _canonical; projected ] ->
+              Agent_sdk.Types.text_of_content projected.content
+            | Ok _ ->
+              Alcotest.fail "replay projection did not append exact evidence"
             | Error detail -> Alcotest.fail detail)
        in
        let replay_evidence =

@@ -46,19 +46,13 @@ let projected_model_text ~base_path
      | Error detail -> Alcotest.fail detail)
 ;;
 
-(* The pinned resource identity stays in the approved input and is
-   deliberately absent from the reconstructed arguments: the write handler
-   re-derives it, so a target replaced between approval and replay produces a
-   different canonical input and the approval no longer matches. *)
+(* Reconstruction carries the approved payload fields back to the write
+   handler. Capability identities remain inside the Gate effect and are not
+   copied into the model-issued write arguments. *)
 let approved_content_input =
   `Assoc
     [ ( "effect"
-      , `Assoc
-          [ "operation", `String "atomic_replace_entry"
-          ; ( "target_resource"
-            , `Assoc [ "device", `Intlit "16777232"; "inode", `Intlit "94211" ]
-            )
-          ] )
+      , `Assoc [ "operation", `String "atomic_replace_entry" ] )
     ; "requested_target", `String "/playground/executor/repos/masc/a.ml"
     ; "content", `String "let a = 1\n"
     ]
@@ -450,7 +444,12 @@ let test_large_replay_result_reaches_model_exactly () =
             Alcotest.int
             "canonical replay reference keeps exact byte count"
             artifact.bytes
-            decoded.bytes
+            decoded.bytes;
+          Alcotest.check
+            Alcotest.string
+            "canonical replay reference carries no payload preview"
+            ""
+            decoded.preview
         | Tool_output.Not_normalized_artifact_ref ->
           Alcotest.fail "canonical replay evidence lost its typed artifact reference"
         | Tool_output.Invalid_normalized_artifact_ref { detail } ->
@@ -548,46 +547,6 @@ let test_multimodal_goal_projects_exact_replay_evidence () =
        | Ok _ -> Alcotest.fail "multimodal projection did not append one message")
 ;;
 
-let test_replay_projection_fails_closed_when_artifact_is_missing () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let artifact =
-         Tool_output.make_artifact_ref
-           ~sha256:(String.make 64 '0')
-           ~bytes:12
-           ~preview:""
-           ~mime:"text/plain"
-         |> Result.get_ok
-       in
-       let message =
-         Masc.Keeper_gate_replay.append_model_evidence
-           ~approval_id:"approval-missing-artifact"
-           ~user_message:"continue"
-           (Masc.Keeper_gate_replay.Applied
-              { operation = "network_read"
-              ; output_ref = artifact
-              ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
-              })
-       in
-       let evidence =
-         match message.replay_evidence with
-         | Some evidence -> evidence
-         | None -> Alcotest.fail "replay evidence is absent"
-       in
-       match
-         Masc.Keeper_gate_replay.project_model_input
-           ~base_path
-           evidence
-           [ Agent_sdk.Types.user_msg message.text ]
-       with
-       | Error _ -> ()
-       | Ok _ ->
-         Alcotest.fail
-           "missing replay artifact allowed provider dispatch without exact evidence")
-;;
-
 let test_replay_projection_recovers_when_canonical_reference_is_absent () =
   let base_path = temp_dir () in
   Fun.protect
@@ -632,7 +591,7 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
            (Agent_sdk.Types.text_of_content original.content);
          Alcotest.check
            Alcotest.bool
-            "exact replay evidence is appended independently of text layout"
+           "exact replay evidence is appended independently of text layout"
            true
            (String_util.contains_substring
               (Agent_sdk.Types.text_of_content recovered.content)
@@ -824,10 +783,6 @@ let () =
             "canonical reference layout does not control projection"
             `Quick
             test_replay_projection_recovers_when_canonical_reference_is_absent
-        ; Alcotest.test_case
-            "missing artifact blocks provider dispatch"
-            `Quick
-            test_replay_projection_fails_closed_when_artifact_is_missing
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case

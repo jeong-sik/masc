@@ -672,7 +672,7 @@ let public_descriptors =
             ~argv:[ "program"; "--version" ]
             ()
         ]
-      ~validate_translated_input:true
+      ~validate_translated_input:false
       ~translate:translate_identity
       ()
   ; descriptor_with_public_aliases
@@ -799,7 +799,7 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_web_search
-      ~validate_translated_input:true
+      ~validate_translated_input:false
       ~translate:translate_identity
       ()
   ; descriptor
@@ -824,7 +824,7 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_web_fetch
-      ~validate_translated_input:true
+      ~validate_translated_input:false
       ~translate:translate_identity
       ()
   ]

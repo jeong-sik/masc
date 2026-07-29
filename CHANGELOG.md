@@ -7,6 +7,10 @@
   snapshots contain only `status` and `reason`; snapshots carrying the retired
   field fail closed through the existing unavailable-store path. No migration
   or repair path was added.
+- **Keeper tool admission**: identity-translated `Execute`, `WebSearch`, and
+  `WebFetch` payloads now use the public descriptor validation as their single
+  schema Gate. Shape-changing translators such as `Grep` retain post-translation
+  validation.
 - **Breaking (recall injection ledger)**: schema v3 adds a required typed
   `reset` marker. The first row for each keeper process now resets replay state
   before applying its exact current baseline, so keys deleted across a process

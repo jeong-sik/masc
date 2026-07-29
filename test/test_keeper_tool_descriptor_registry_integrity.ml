@@ -678,6 +678,22 @@ let test_read_public_descriptor_schema_is_closed () =
     (schema_forbids_additional_properties descriptor.input_schema)
 ;;
 
+let test_identity_translators_do_not_repeat_public_validation () =
+  List.iter
+    (fun name ->
+       let descriptor = required_public_descriptor name in
+       Alcotest.(check bool)
+         (name ^ " skips duplicate post-identity validation")
+         false
+         descriptor.validate_translated_input)
+    [ "Execute"; "WebSearch"; "WebFetch" ];
+  let grep = required_public_descriptor "Grep" in
+  Alcotest.(check bool)
+    "Grep retains post-translation validation"
+    true
+    grep.validate_translated_input
+;;
+
 let test_read_public_validation_rejects_line_fields () =
   let input =
     `Assoc
@@ -1490,6 +1506,10 @@ let () =
             "Read rejects unsupported line fields before translation"
             `Quick
             test_read_public_validation_rejects_line_fields
+        ; test_case
+            "identity translators validate the public payload once"
+            `Quick
+            test_identity_translators_do_not_repeat_public_validation
         ; test_case
             "Read validates then translates supported public fields"
             `Quick

@@ -80,6 +80,11 @@ val keeper_internal_history_path : Workspace.config -> string -> string
 (** Trim + lowercase a history-source label. *)
 val normalize_history_source : string -> string
 
+val hitl_resolution_history_source : string
+(** Canonical main-history source for a model-visible HITL resolution turn.
+    This differs from regenerated world-state prompt history, which is
+    deliberately dropped. *)
+
 (** Whether [source] denotes the world-state prompt history channel. *)
 val is_prompt_history_source : string -> bool
 

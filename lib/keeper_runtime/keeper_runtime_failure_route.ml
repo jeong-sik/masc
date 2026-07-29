@@ -117,7 +117,9 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
      | None -> exhaust_failure Internal_opaque)
   | Keeper_internal_error.Internal_contract_rejected _
-  | Keeper_internal_error.Receipt_persistence_failed _ ->
+  | Keeper_internal_error.Receipt_persistence_failed _
+  | Keeper_internal_error.History_persistence_failed _
+  | Keeper_internal_error.Gate_replay_repair_required _ ->
     exhaust_failure Internal_opaque
   | Keeper_internal_error.Incomplete_tool_transcript _ ->
     exhaust_failure Contract_violation

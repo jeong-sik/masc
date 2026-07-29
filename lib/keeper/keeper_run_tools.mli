@@ -54,6 +54,7 @@ type agent_setup =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; user_message : string
   ; hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection : Agent_sdk.Agent.model_input_projection
   ; acc : hook_accumulator
@@ -92,5 +93,7 @@ val prepare_agent_setup
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?on_user_message_composed:
+       (string -> (unit, Agent_sdk.Error.sdk_error) result)
   -> unit
   -> (agent_setup, Agent_sdk.Error.sdk_error) result

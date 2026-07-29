@@ -2564,11 +2564,513 @@ let test_approved_web_search_replays_without_model_resubmission () =
           ~approval_id
           ()
       with
-      | Masc.Keeper_gate_replay.Not_applicable -> ()
+      | Masc.Keeper_gate_replay.Applied
+          { journal =
+              Masc.Keeper_gate_replay.Replay_journal_already_recorded
+          ; _
+          } ->
+        ()
       | outcome ->
         failf
-          "consumed WebSearch replayed twice: %s"
+          "consumed WebSearch did not reuse its durable outcome: %s"
           (Masc.Keeper_gate_replay.outcome_to_string outcome))
+
+let approved_web_search_resolution
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~tool_call_id
+  =
+  let input =
+    `Assoc
+      [ "query", `String ("repair exact search " ^ tool_call_id)
+      ; "limit", `Int 1
+      ]
+  in
+  let deferred =
+    KET.execute_keeper_tool_call_with_outcome
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ~gate_context:(fun () ->
+        { Masc.Keeper_gate.turn_id = Some 18
+        ; snapshot = `Assoc []
+        })
+      ~name:"WebSearch"
+      ~input
+      ()
+  in
+  (match deferred.disposition with
+   | Tool_result.Deferred () -> ()
+   | Tool_result.Completed () | Tool_result.Failed _ ->
+     fail "repair fixture WebSearch did not defer");
+  let approval_id =
+    match
+      Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+        ~base_path:config.Workspace.base_path
+    with
+    | Ok [ entry ] -> entry.id
+    | Ok entries ->
+      failf "expected one repair approval, got %d" (List.length entries)
+    | Error error ->
+      fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+  in
+  (match
+     Masc.Keeper_approval_queue.resolve_with_policy
+       ~base_path:config.base_path
+       ~id:approval_id
+       ~decision:Masc.Keeper_approval_queue.Decision.Approve
+       ~source:Masc.Keeper_approval_queue.Auto_judge
+       ()
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+  let resolution : Keeper_event_queue.hitl_resolution =
+    { approval_id
+    ; decision = Keeper_event_queue.Hitl_approved
+    ; channel =
+        Keeper_continuation_channel.unrouted "Gate replay repair test"
+    }
+  in
+  input, approval_id, resolution
+;;
+
+let test_blob_failure_repairs_journal_without_second_effect () =
+  with_exec_fixture "keeper_gate_replay_blob_repair"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail detail);
+       let _, approval_id, resolution =
+         approved_web_search_resolution
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~tool_call_id:"web-search-blob-repair"
+       in
+       let grant () =
+         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None -> fail "approved repair resolution did not create a grant"
+       in
+       let first =
+         Masc.Tool_misc.with_web_search_simulation_for_test
+           ~outcomes:
+             [ ( "duckduckgo"
+               , `Hits
+                   [ ( "Exactly once"
+                     , "https://example.com/once"
+                     , "single effect"
+                     )
+                   ] )
+             ]
+         @@ fun () ->
+         Masc.Keeper_gate_replay.For_testing.with_replay_evidence_persister
+           (fun ~base_path:_ _ -> Error "forced blob failure")
+         @@ fun () ->
+         Masc.Keeper_gate_replay.replay_approved_effect
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory:None
+           ~grant:(grant ())
+           ~approval_id
+           ()
+       in
+       (match first with
+        | Masc.Keeper_gate_replay.Repair_required
+            { stage = Masc.Keeper_gate_replay.Evidence_storage; _ } ->
+          ()
+        | outcome ->
+          failf
+            "blob failure was terminalized: %s"
+            (Masc.Keeper_gate_replay.outcome_to_string outcome));
+       (match
+          Masc.Keeper_approval_queue.approved_resolution_delivery
+            ~base_path:config.base_path
+            ~id:approval_id
+        with
+        | Ok
+            { state = Masc.Keeper_approval_queue.Resolution_consumed
+            ; replay_outcome = None
+            ; _
+            } ->
+          ()
+        | Ok _ -> fail "blob failure wrote a terminal replay placeholder"
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+       match
+         Masc.Keeper_gate_replay.replay_approved_effect
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory:None
+           ~grant:(grant ())
+           ~approval_id
+           ()
+       with
+       | Masc.Keeper_gate_replay.Applied
+           { journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+           ; output
+           ; _
+           } ->
+         check bool
+           "journal-only repair persisted the exact prior outcome"
+           true
+           (contains_substring output "Exactly once")
+       | outcome ->
+         failf
+           "in-memory journal-only repair failed: %s"
+           (Masc.Keeper_gate_replay.outcome_to_string outcome))
+;;
+
+let test_journal_failure_retries_only_persistence () =
+  with_exec_fixture "keeper_gate_replay_journal_repair"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail detail);
+       let _, approval_id, resolution =
+         approved_web_search_resolution
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~tool_call_id:"web-search-journal-repair"
+       in
+       let grant () =
+         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None ->
+           fail "approved journal-repair resolution created no grant"
+       in
+       let replay_path =
+         Masc.Keeper_approval_queue.For_testing.replay_results_store_path
+           ~base_path:config.base_path
+       in
+       mkdir_p (Filename.dirname replay_path);
+       Unix.mkdir replay_path 0o755;
+       let first =
+         Masc.Tool_misc.with_web_search_simulation_for_test
+           ~outcomes:
+             [ ( "duckduckgo"
+               , `Hits
+                   [ ( "Journal once"
+                     , "https://example.com/journal-once"
+                     , "single effect before journal failure"
+                     )
+                   ] )
+             ]
+         @@ fun () ->
+         Masc.Keeper_gate_replay.replay_approved_effect
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory:None
+           ~grant:(grant ())
+           ~approval_id
+           ()
+       in
+       (match first with
+        | Masc.Keeper_gate_replay.Repair_required
+            { stage = Masc.Keeper_gate_replay.Replay_journal; _ } ->
+          ()
+        | outcome ->
+          failf
+            "journal failure entered provider flow: %s"
+            (Masc.Keeper_gate_replay.outcome_to_string outcome));
+       Unix.rmdir replay_path;
+       match
+         Masc.Keeper_gate_replay.replay_approved_effect
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory:None
+           ~grant:(grant ())
+           ~approval_id
+           ()
+       with
+       | Masc.Keeper_gate_replay.Applied
+           { journal = Masc.Keeper_gate_replay.Replay_journal_recorded; _ } ->
+         ()
+       | outcome ->
+         failf
+           "journal-only repair reran or lost the outcome: %s"
+           (Masc.Keeper_gate_replay.outcome_to_string outcome))
+;;
+
+let test_failed_effect_is_durable_and_not_replayed () =
+  with_exec_fixture "keeper_gate_replay_failed_effect"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail detail);
+       let _, approval_id, resolution =
+         approved_web_search_resolution
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~tool_call_id:"web-search-failed-effect"
+       in
+       let grant () =
+         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None ->
+           fail "approved failed-effect resolution created no grant"
+       in
+       let first =
+         Masc.Tool_misc.with_web_search_simulation_for_test
+           ~outcomes:[ "duckduckgo", `Error "forced exact failure" ]
+         @@ fun () ->
+         Masc.Keeper_gate_replay.replay_approved_effect
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory:None
+           ~grant:(grant ())
+           ~approval_id
+           ()
+       in
+       (match first with
+        | Masc.Keeper_gate_replay.Failed
+            { journal = Masc.Keeper_gate_replay.Replay_journal_recorded; _ } ->
+          ()
+        | outcome ->
+          failf
+            "failed effect was not durably recorded: %s"
+            (Masc.Keeper_gate_replay.outcome_to_string outcome));
+       match
+         Masc.Keeper_gate_replay.replay_approved_effect
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory:None
+           ~grant:(grant ())
+           ~approval_id
+           ()
+       with
+       | Masc.Keeper_gate_replay.Failed
+           { journal =
+               Masc.Keeper_gate_replay.Replay_journal_already_recorded
+           ; _
+           } ->
+         ()
+       | outcome ->
+         failf
+           "durable failure was executed again: %s"
+           (Masc.Keeper_gate_replay.outcome_to_string outcome))
+;;
+
+let test_consumed_without_outcome_requires_operator_repair () =
+  with_exec_fixture "keeper_gate_replay_unknown_restart"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail detail);
+       let input, approval_id, resolution =
+         approved_web_search_resolution
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~tool_call_id:"web-search-crash-gap"
+       in
+       let grant =
+         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None ->
+           fail "approved crash-gap resolution did not create a grant"
+       in
+       let request : Masc.Keeper_gate.request =
+         { keeper_name = meta.name
+         ; operation = "network_read"
+         ; input =
+             `Assoc
+               [ "capability", `String "web_search"
+               ; "input", input
+               ]
+         ; base_path = config.base_path
+         ; causal_context = None
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       (match
+          Masc.Keeper_gate.decide
+            ~cycle_grant:grant
+            ~keeper_always_allow:false
+            request
+        with
+        | Masc.Keeper_gate.Allow _ -> ()
+        | Masc.Keeper_gate.Deferred _ | Masc.Keeper_gate.Unavailable _ ->
+          fail "crash-gap fixture did not consume its approval");
+       let restarted_grant =
+         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None ->
+           fail "approved restart resolution did not create a grant"
+       in
+       match
+         Masc.Keeper_gate_replay.replay_approved_effect
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory:None
+           ~grant:restarted_grant
+           ~approval_id
+           ()
+       with
+       | Masc.Keeper_gate_replay.Repair_required
+           { stage =
+               Masc.Keeper_gate_replay.Replay_effect_indeterminate_after_restart
+           ; _
+           } ->
+         ()
+       | outcome ->
+         failf
+           "consumed unknown outcome entered replay: %s"
+           (Masc.Keeper_gate_replay.outcome_to_string outcome))
+;;
+
+let test_unsupported_approved_operation_fails_closed_without_large_resubmission () =
+  with_exec_fixture "keeper_gate_replay_unsupported"
+    (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail detail);
+       let exact_tail =
+         "UNSUPPORTED-BEGIN\n"
+         ^ String.make (512 * 1024) 'x'
+         ^ "\nUNSUPPORTED-END"
+       in
+       let request : Masc.Keeper_gate.request =
+         { keeper_name = meta.name
+         ; operation = "keeper_voice_speak"
+         ; input = `Assoc [ "message", `String exact_tail ]
+         ; base_path = config.base_path
+         ; causal_context = None
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       let approval_id =
+         match
+           Masc.Keeper_gate.decide
+             ~keeper_always_allow:false
+             request
+         with
+         | Masc.Keeper_gate.Deferred { approval_id; _ } -> approval_id
+         | Masc.Keeper_gate.Allow _ | Masc.Keeper_gate.Unavailable _ ->
+           fail "unsupported replay fixture did not defer"
+       in
+       (match
+          Masc.Keeper_approval_queue.resolve_with_policy
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~decision:Masc.Keeper_approval_queue.Decision.Approve
+            ~source:Masc.Keeper_approval_queue.Auto_judge
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+       let resolution : Keeper_event_queue.hitl_resolution =
+         { approval_id
+         ; decision = Keeper_event_queue.Hitl_approved
+         ; channel =
+             Keeper_continuation_channel.unrouted
+               "unsupported Gate replay test"
+         }
+       in
+       let grant =
+         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None -> fail "unsupported approval did not create a grant"
+       in
+       let outcome =
+         Masc.Keeper_gate_replay.replay_approved_effect
+           ~config
+           ~meta
+           ~publication_recovery
+           ~turn_sandbox_factory:None
+           ~grant
+           ~approval_id
+           ()
+       in
+       (match outcome with
+        | Masc.Keeper_gate_replay.Repair_required
+            { operation = "keeper_voice_speak"
+            ; stage = Masc.Keeper_gate_replay.Unsupported_operation
+            ; _
+            } ->
+          ()
+        | outcome ->
+          failf
+            "unsupported approval did not fail closed: %s"
+            (Masc.Keeper_gate_replay.outcome_to_string outcome));
+       (match
+          Masc.Keeper_approval_queue.approved_resolution_delivery
+            ~base_path:config.base_path
+            ~id:approval_id
+        with
+        | Ok
+            { state = Masc.Keeper_approval_queue.Resolution_unconsumed
+            ; replay_outcome = None
+            ; _
+            } ->
+          ()
+        | Ok _ -> fail "unsupported approval consumed its authorization"
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+       let model_message =
+         Masc.Keeper_gate_replay.compose_model_message
+           ~base_path:config.base_path
+           ~user_message:"continue"
+           ~hitl_resolution:(Some resolution)
+           ~replay_delivery:(Some (approval_id, outcome))
+       in
+       check bool
+         "unsupported exact input is absent from the model request"
+         false
+         (contains_substring model_message "UNSUPPORTED-END");
+       check bool
+         "unsupported repair message stays request-bounded"
+         true
+         (String.length model_message
+          < Masc.Keeper_approval_queue.max_replay_evidence_bytes))
+;;
 
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
@@ -3636,6 +4138,16 @@ let () =
         test_approved_web_search_grant_executes_exact_request;
       test_case "approved WebSearch replays without model resubmission" `Quick
         test_approved_web_search_replays_without_model_resubmission;
+      test_case "blob failure repairs journal without second effect" `Quick
+        test_blob_failure_repairs_journal_without_second_effect;
+      test_case "journal failure retries only persistence" `Quick
+        test_journal_failure_retries_only_persistence;
+      test_case "failed effect is durable and not replayed" `Quick
+        test_failed_effect_is_durable_and_not_replayed;
+      test_case "consumed outcome gap requires operator repair" `Quick
+        test_consumed_without_outcome_requires_operator_repair;
+      test_case "unsupported approval fails closed without large resubmission" `Quick
+        test_unsupported_approved_operation_fails_closed_without_large_resubmission;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "Manual Gate defers tool_execute before process" `Quick

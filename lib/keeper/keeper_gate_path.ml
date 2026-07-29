@@ -4,5 +4,9 @@ let dir ~base_path =
 
 let mode ~base_path = Filename.concat (dir ~base_path) "mode.json"
 let pending ~base_path = Filename.concat (dir ~base_path) "pending.json"
+let replay_results ~base_path =
+  Filename.concat (dir ~base_path) "replay-results.json"
+;;
+
 let always_allowed ~base_path = Filename.concat (dir ~base_path) "always-allowed.json"
 ;;

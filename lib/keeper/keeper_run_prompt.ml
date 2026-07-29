@@ -42,6 +42,15 @@ let user_turn_record_of_hitl_resolution : _ option -> user_turn_record
   | Some _ -> Record_user_turn
 ;;
 
+let user_turn_record_for_prompt_build
+      ~hitl_resolution_present
+      ~user_turn_record
+  =
+  if hitl_resolution_present
+  then Skip_uninformative_wake
+  else user_turn_record
+;;
+
 type turn_effect_record =
   | Meaningful_turn
   | Inert_autonomous_turn

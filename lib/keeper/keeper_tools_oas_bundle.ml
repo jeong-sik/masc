@@ -81,13 +81,17 @@ let make_tool_bundle
            ()
       in
       (match outcome with
-       | Keeper_gate_replay.Not_applicable -> ()
        | Keeper_gate_replay.Applied _ as outcome ->
          Log.Keeper.info
            "gate replay approval=%s %s"
            approval_id
            (Keeper_gate_replay.outcome_to_string outcome)
        | Keeper_gate_replay.Failed _ as outcome ->
+         Log.Keeper.error
+           "gate replay approval=%s %s"
+           approval_id
+           (Keeper_gate_replay.outcome_to_string outcome)
+       | Keeper_gate_replay.Repair_required _ as outcome ->
          Log.Keeper.error
            "gate replay approval=%s %s"
            approval_id

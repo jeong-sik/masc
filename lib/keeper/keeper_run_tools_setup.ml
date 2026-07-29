@@ -117,9 +117,11 @@ let prepare_agent_setup
       ?runtime_manifest_append
       ?continuation_channel
       ?hitl_resolution
+      ?on_user_message_composed
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
+  let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
   let manifest_keeper_turn_id =
     match runtime_manifest_context with
@@ -183,14 +185,74 @@ let prepare_agent_setup
       ?hitl_resolution
       ()
   in
+  let replay_delivery =
+    Option.map
+      (fun { Keeper_tools_oas.approval_id; outcome } ->
+         approval_id, outcome)
+      gate_replay_delivery
+  in
+  let* () =
+    match replay_delivery with
+    | Some
+        ( approval_id
+        , Keeper_gate_replay.Repair_required
+            { operation; stage; detail } ) ->
+      (try keeper_tools_cleanup () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.error
+           "keeper tool cleanup after Gate replay repair failure raised: %s"
+           (Printexc.to_string exn));
+      Error
+        (Keeper_internal_error.sdk_error_of_masc_internal_error
+           (Keeper_internal_error.Gate_replay_repair_required
+              { approval_id
+              ; operation
+              ; stage =
+                  (match stage with
+                   | Keeper_gate_replay.Resolution_lookup ->
+                     Keeper_internal_error.Replay_resolution_lookup
+                   | Keeper_gate_replay.Request_decode ->
+                     Keeper_internal_error.Replay_request_decode
+                   | Keeper_gate_replay.Grant_consumption ->
+                     Keeper_internal_error.Replay_grant_consumption
+                   | Keeper_gate_replay.Evidence_storage ->
+                     Keeper_internal_error.Replay_evidence_storage
+                   | Keeper_gate_replay.Replay_journal ->
+                     Keeper_internal_error.Replay_journal
+                   | Keeper_gate_replay.Replay_effect_indeterminate_after_restart ->
+                     Keeper_internal_error.Replay_effect_indeterminate_after_restart
+                   | Keeper_gate_replay.Invalid_resolution_state ->
+                     Keeper_internal_error.Replay_invalid_resolution_state
+                   | Keeper_gate_replay.Unsupported_operation ->
+                     Keeper_internal_error.Replay_unsupported_operation)
+              ; detail
+              }))
+    | Some (_, (Keeper_gate_replay.Applied _ | Keeper_gate_replay.Failed _))
+    | None ->
+      Ok ()
+  in
   let user_message =
-    match gate_replay_delivery with
-    | None -> user_message
-    | Some { Keeper_tools_oas.approval_id; outcome } ->
-      Keeper_gate_replay.append_model_evidence
-        ~approval_id
-        ~user_message
-        outcome
+    Keeper_gate_replay.compose_model_message
+      ~base_path:config.base_path
+      ~user_message
+      ~hitl_resolution
+      ~replay_delivery
+  in
+  let* () =
+    match on_user_message_composed with
+    | None -> Ok ()
+    | Some callback ->
+      (match callback user_message with
+       | Ok () -> Ok ()
+       | Error error ->
+         (try keeper_tools_cleanup () with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Log.Keeper.error
+              "keeper tool cleanup after composed-message failure raised: %s"
+              (Printexc.to_string exn));
+         Error error)
   in
   let prompt_metrics =
     Keeper_agent_prompt_metrics.build_prompt_metrics

@@ -7,6 +7,13 @@ let contains ~needle text =
   String_util.contains_substring text needle
 ;;
 
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_hitl_resolution_prompt_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
 let test_rejection_rationale_is_actionable_without_grant () =
   let resolution : Keeper_event_queue.hitl_resolution =
     { approval_id = "approval-rejected"
@@ -80,67 +87,77 @@ let test_edited_input_is_durable_and_not_a_grant () =
     (Option.is_none (Keeper_gate.cycle_grant_of_resolution resolution))
 ;;
 
-(* RFC-0356: the runtime replays an approved filesystem_write / tool_execute
-   during tool-bundle setup, which runs after this message is composed. Telling
-   the Keeper to spend a grant the runtime is about to spend sends it after an
-   authorization that will be gone, and the repeat call opens a new Gate
-   request. The instruction has to follow the same dispatch the replay uses. *)
+let test_large_rejection_and_edit_are_artifact_backed () =
+  let base_path = temp_dir () in
+  let exact_tail =
+    "RESOLUTION-BEGIN\n"
+    ^ String.make (512 * 1024) 'x'
+    ^ "\nRESOLUTION-END"
+  in
+  let message decision =
+    let resolution : Keeper_event_queue.hitl_resolution =
+      { approval_id = "approval-large-resolution"; decision; channel }
+    in
+    Keeper_unified_turn.user_message_with_hitl_resolution
+      ~base_path
+      ~user_message:"continue"
+      (Some resolution)
+  in
+  List.iter
+    (fun (label, rendered) ->
+       check bool
+         (label ^ " excludes the full exact tail")
+         false
+         (contains ~needle:"RESOLUTION-END" rendered);
+       check bool
+         (label ^ " carries a recoverable artifact reference")
+         true
+         (contains ~needle:"[masc:blob " rendered);
+       check bool
+         (label ^ " remains request-bounded")
+         true
+         (String.length rendered
+          < Keeper_approval_queue.max_replay_evidence_bytes))
+    [ "rejection", message (Hitl_rejected exact_tail)
+    ; "edit", message (Hitl_edited (`Assoc [ "payload", `String exact_tail ]))
+    ]
+;;
+
 let approved_message ~tool_name =
   Keeper_unified_turn.approved_resolution_message
     ~approval_id:"approval-approved"
     ~tool_name
-    ~input:(`Assoc [ "path", `String "/repo/a.ml"; "content", `String "let a = 1\n" ])
+    ~input:
+      (`Assoc
+         [ "path", `String "/repo/a.ml"
+         ; "content", `String ("APPROVED-BEGIN\n" ^ String.make (512 * 1024) 'x' ^ "\nAPPROVED-END")
+         ])
     ~user_message:"continue"
 ;;
 
-let test_replayed_operation_is_not_asked_for_again () =
+let test_approved_fallback_is_bounded_and_never_resubmits_exact_input () =
   List.iter
     (fun tool_name ->
        let message = approved_message ~tool_name in
        check bool
-         (tool_name ^ ": the exact input still reaches the model")
-         true
-         (contains ~needle:"\"path\": \"/repo/a.ml\"" message);
-       check bool
-         (tool_name ^ ": the runtime is named as the spender")
-         true
-         (contains ~needle:"runtime spends this one-shot authorization itself" message);
-       check bool
-         (tool_name ^ ": the pre-replay instruction to emit it is gone")
+         (tool_name ^ ": exact input is absent")
          false
-         (contains ~needle:"authorization belongs to this exact operation" message))
-    [ "filesystem_write"; "tool_execute" ]
-;;
-
-(* An operation the replay does not dispatch to still depends on the Keeper
-   emitting the call, so the original instruction must survive there. *)
-let test_unreplayed_operation_still_owns_its_grant () =
-  let message = approved_message ~tool_name:"network_read" in
-  check bool
-    "the Keeper is still told the grant is its to spend"
-    true
-    (contains ~needle:"authorization belongs to this exact operation" message);
-  check bool
-    "and is not told the runtime already spent it"
-    false
-    (contains ~needle:"runtime spends this one-shot authorization itself" message)
-;;
-
-(* The branch is the replay dispatch itself, not a copy of its operation list:
-   a future replayable operation must not need this renderer edited too. *)
-let test_message_follows_replay_dispatch () =
-  List.iter
-    (fun tool_name ->
-       let replayed =
-         Option.is_some (Keeper_gate_replay.replayable_of_operation tool_name)
-       in
+         (contains ~needle:"APPROVED-END" message);
        check bool
-         (tool_name ^ ": message agrees with replay dispatch")
-         replayed
-         (contains
-            ~needle:"runtime spends this one-shot authorization itself"
-            (approved_message ~tool_name)))
-    [ "filesystem_write"; "tool_execute"; "network_read"; "keeper_board_post"; "" ]
+         (tool_name ^ ": fallback requires repair")
+         true
+         (contains ~needle:"Operator repair is required" message);
+       check bool
+         (tool_name ^ ": fallback remains bounded")
+         true
+         (String.length message < Keeper_approval_queue.max_replay_evidence_bytes))
+    [ "filesystem_write"
+    ; "tool_execute"
+    ; "network_read"
+    ; "connector_post"
+    ; "keeper_voice_speak"
+    ; ""
+    ]
 ;;
 
 let () =
@@ -155,20 +172,16 @@ let () =
             "edited input is durable and not authorization"
             `Quick
             test_edited_input_is_durable_and_not_a_grant
+        ; test_case
+            "large rejection and edit are artifact-backed"
+            `Quick
+            test_large_rejection_and_edit_are_artifact_backed
         ] )
     ; ( "approved resolution"
       , [ test_case
-            "replayed operation is not asked for again"
+            "approved fallback is bounded and never resubmits exact input"
             `Quick
-            test_replayed_operation_is_not_asked_for_again
-        ; test_case
-            "unreplayed operation still owns its grant"
-            `Quick
-            test_unreplayed_operation_still_owns_its_grant
-        ; test_case
-            "message follows replay dispatch"
-            `Quick
-            test_message_follows_replay_dispatch
+            test_approved_fallback_is_bounded_and_never_resubmits_exact_input
         ] )
     ]
 ;;

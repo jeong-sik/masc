@@ -514,6 +514,11 @@ let run_turn
     Keeper_runtime_manifest.Checkpoint_loaded;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      and user message append — Keeper_run_prompt. *)
+  let prompt_user_turn_record =
+    Keeper_run_prompt.user_turn_record_for_prompt_build
+      ~hitl_resolution_present:(Option.is_some hitl_resolution)
+      ~user_turn_record
+  in
   let prompt_ctx =
     Keeper_run_prompt.build_turn_context
       ~ctx
@@ -522,7 +527,7 @@ let run_turn
       ~config
       ~meta
       ~history_user_source
-      ~user_turn_record
+      ~user_turn_record:prompt_user_turn_record
       ~is_retry
       ~start_turn_count
   in
@@ -573,6 +578,38 @@ let run_turn
       ~publication_recovery
       ?continuation_channel
       ?hitl_resolution
+      ~on_user_message_composed:
+        (fun composed_user_message ->
+           match hitl_resolution with
+           | Some resolution ->
+             (* Host replay has consumed the grant and reduced any large
+                result to bounded evidence before this durable row is
+                committed. The event identity makes retries exact-once. *)
+             let approval_id = resolution.Keeper_event_queue.approval_id in
+             let idempotency_key =
+               Keeper_event_queue.hitl_resolution_post_id resolution
+             in
+             (match
+                Keeper_context_runtime.persist_message_once
+                  ~idempotency_key
+                  ~source:Keeper_types_support.hitl_resolution_history_source
+                  session
+                  (Agent_sdk.Types.user_msg composed_user_message)
+              with
+              | Ok
+                  ( Keeper_context_core.History_message_persisted
+                  | Keeper_context_core.History_message_already_persisted ) ->
+                Ok ()
+              | Error error ->
+                let detail =
+                  Keeper_context_runtime.history_persist_once_error_to_string
+                    error
+                in
+                Error
+                  (Keeper_internal_error.sdk_error_of_masc_internal_error
+                     (Keeper_internal_error.History_persistence_failed
+                        { approval_id; detail })))
+           | None -> Ok ())
       ~turn_ctx_cell
       ~ctx_work
       ~session
@@ -604,6 +641,20 @@ let run_turn
   match setup with
   | Error e -> Error e
   | Ok s ->
+    let user_message = s.Keeper_run_tools.user_message in
+    let ctx_work =
+      match hitl_resolution with
+      | None -> ctx_work
+      | Some _ ->
+        let user_message = Agent_sdk.Types.user_msg user_message in
+        Keeper_context_runtime.append ctx_work user_message
+    in
+    let prompt_metrics =
+      Keeper_agent_prompt_metrics.build_prompt_metrics
+        ~system_prompt:turn_system_prompt
+        ~dynamic_context
+        ~user_message
+    in
     let cleanup_agent_setup () =
       Turn_helpers.cleanup_agent_setup ~keeper_name:meta.name s
     in

@@ -353,6 +353,7 @@ let compaction_outcome_of_cycle_outcome = function
      | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> Some `Failed
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling
+     | Keeper_unified_turn.Retain_unacked
      | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None)
   | Some (Cycle.Completed _) -> Some `Recovered
   | Some
@@ -794,6 +795,7 @@ let run_keepalive_unified_turn
            | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
            | Keeper_unified_turn.Requeue_after_context_compaction _
            | Keeper_unified_turn.Escalate_after_exact_output_terminal _
+           | Keeper_unified_turn.Retain_unacked
            | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
              None)
         | Some

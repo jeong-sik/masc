@@ -48,6 +48,15 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     that must not lose bytes should catch this and fall back to the inline
     payload rather than emitting a marker for bytes that were never persisted. *)
 
+val put_durable : t -> bytes:string -> mime:string -> Tool_output.t
+(** Strict variant of {!put}. The payload and its parent directory must both
+    fsync successfully before a reference is returned. This is the producer
+    boundary for a durable record that will outlive the current process and
+    point back to the blob.
+
+    Cancellation propagates. Other write or sync failures raise [Sys_error]
+    without returning a reference. *)
+
 val fetch : t -> sha256:string -> (string option, fetch_error) result
 (** Validate and retrieve bytes by sha256. Returns [Ok None] only when the
     validated path is absent. The owned-file read validates the no-follow

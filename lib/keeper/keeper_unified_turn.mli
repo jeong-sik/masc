@@ -178,6 +178,7 @@ type source_disposition =
   | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
   | Pause_after_transcript_corruption of { detail : string }
+  | Retain_unacked
   | Acknowledge_after_in_turn_handling
 (** A failed turn normally follows its typed retry/rotate/escalate route.
     [Follow_failure_route_after_no_compaction] follows the same route but
@@ -198,6 +199,9 @@ type source_disposition =
     typed transcript admission rejected before provider dispatch, so the
     heartbeat durably pauses the Keeper and consumes the selected source into an
     operator-reset-required escalation with no retry successor.
+    [Retain_unacked] is a pre-provider host replay repair failure. The exact
+    HITL wake remains the sole retry authority; no queue ACK and no effect
+    replay may be inferred from the failure route.
     [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
     the configured in-turn policy already handled the terminal failure; the
     cycle remains failed for receipts, counters, and heartbeat freshness. *)

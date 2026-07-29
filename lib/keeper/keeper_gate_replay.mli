@@ -18,10 +18,17 @@ type replay_journal =
   | Replay_grant_not_consumed
   | Replay_journal_failed of string
 
+type repair_stage =
+  | Resolution_lookup
+  | Request_decode
+  | Grant_consumption
+  | Evidence_storage
+  | Replay_journal
+  | Replay_effect_indeterminate_after_restart
+  | Invalid_resolution_state
+  | Unsupported_operation
+
 type outcome =
-  | Not_applicable
-      (** No unconsumed approval, or the approved operation is not one this
-          module replays. *)
   | Applied of
       { operation : string
       ; output : string
@@ -32,17 +39,56 @@ type outcome =
       ; detail : string
       ; journal : replay_journal
       }
+  | Repair_required of
+      { operation : string
+      ; stage : repair_stage
+      ; detail : string
+      }
+      (** Host replay cannot safely enter the provider turn. The exact wake
+          remains unacknowledged. If the raw effect result still exists in
+          process, later attempts repair persistence without rerunning it. *)
+
+val repair_stage_to_string : repair_stage -> string
 
 val outcome_to_string : outcome -> string
-(** Render operation, journal state, payload byte count, and SHA-256 only. Exact
-    replay output remains in the typed outcome and durable approval journal; it
-    is never copied into operational logs by this renderer. *)
+(** Render operation, journal state, bounded evidence byte count, and SHA-256
+    only. Full replay output lives in the content-addressed blob store and is
+    never copied into operational logs. *)
 
 val append_model_evidence :
   approval_id:string -> user_message:string -> outcome -> string
-(** Append exact host replay evidence to the current model turn. Applied tool
-    output is labelled as untrusted data, and both outcomes explicitly forbid
-    blindly requesting the same approved operation again. *)
+(** Append bounded host replay evidence to the current model turn. Applied
+    output is an artifact reference plus preview labelled as untrusted data,
+    and both outcomes explicitly forbid blindly requesting the same approved
+    operation again. *)
+
+val approved_resolution_message :
+  approval_id:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  user_message:string ->
+  string
+(** Render an unconsumed approval. Replayable operations tell the model that
+    the host spends the grant; non-replayable operations retain the ordinary
+    exact-call authorization instruction. *)
+
+val user_message_with_hitl_resolution :
+  base_path:string ->
+  user_message:string ->
+  Keeper_event_queue.hitl_resolution option ->
+  string
+(** Render a durable HITL resolution that was not freshly replayed in this
+    setup. Consumed approvals expose only bounded replay evidence. *)
+
+val compose_model_message :
+  base_path:string ->
+  user_message:string ->
+  hitl_resolution:Keeper_event_queue.hitl_resolution option ->
+  replay_delivery:(string * outcome) option ->
+  string
+(** Build the model message once, after host replay. A fresh replay starts from
+    the undecorated user message, so the pre-replay exact approval payload
+    cannot survive beside a consumed result. *)
 
 (** Reconstruct the write tool arguments from the approved Gate input.
 
@@ -65,10 +111,16 @@ val network_read_of_gate_input :
 (** Decode the producer-owned [network_read] envelope without reconstructing
     WebSearch or WebFetch arguments. *)
 
+val connector_post_of_gate_input :
+  Yojson.Safe.t ->
+  (Keeper_tool_in_process_runtime.connector_post_replay, string) result
+(** Decode the producer-owned exact connector request. *)
+
 type replayable =
   | Replay_write
   | Replay_execute
   | Replay_network_read
+  | Replay_connector_post
 
 val replayable_of_operation : string -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the
@@ -79,8 +131,10 @@ val replayable_of_operation : string -> replayable option
 
     Covers operations whose approvals a Keeper must otherwise re-earn by
     re-emitting a byte-identical call: [filesystem_write], [tool_execute], and
-    producer-typed [network_read] (WebSearch/WebFetch). Any other operation is
-    {!Not_applicable} and still requires resubmission.
+    producer-typed [network_read] (WebSearch/WebFetch), and exact
+    [connector_post] continuations. Any other operation fails closed as
+    {!Repair_required} without consuming its authorization or copying the
+    exact approved input into another provider request.
 
     [gate_context] is the same causal-context provider the model-issued write
     path supplies. A replay whose re-derived input no longer matches its
@@ -88,8 +142,9 @@ val replayable_of_operation : string -> replayable option
     causal context cannot be summarized for Auto Judge, which stalls the FIFO
     drain for every later approval.
 
-    Consumption is the durable one-shot grant, so a repeated call after a
-    successful replay reports {!Not_applicable} rather than writing twice. *)
+    Consumption is the durable one-shot grant. A repeated call after a
+    successful replay returns the durable outcome without invoking the effect.
+    Consumed-without-outcome after restart is {!Repair_required}. *)
 val replay_approved_effect :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -101,3 +156,13 @@ val replay_approved_effect :
   approval_id:string ->
   unit ->
   outcome
+
+module For_testing : sig
+  val persist_bounded_replay_evidence :
+    base_path:string -> string -> (string, string) result
+
+  val with_replay_evidence_persister :
+    (base_path:string -> string -> (string, string) result) ->
+    (unit -> 'a) ->
+    'a
+end

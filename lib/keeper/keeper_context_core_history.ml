@@ -18,6 +18,31 @@ type history_migration_stats =
   ; malformed_lines : int
   }
 
+type history_persist_once_outcome =
+  | History_message_persisted
+  | History_message_already_persisted
+
+type history_persist_once_error =
+  | Invalid_history_idempotency_key
+  | History_entry_rejected_by_policy of { source : string }
+  | History_append_failed of string
+  | History_transaction_settlement_failed of string
+  | History_io_failed of string
+
+let history_persist_once_error_to_string = function
+  | Invalid_history_idempotency_key ->
+    "history idempotency key must be nonblank and at most 512 bytes"
+  | History_entry_rejected_by_policy { source } ->
+    Printf.sprintf
+      "history entry was rejected by source policy (source=%S)"
+      source
+  | History_append_failed detail ->
+    "history durable append failed: " ^ detail
+  | History_transaction_settlement_failed detail ->
+    "history durable transaction settlement failed: " ^ detail
+  | History_io_failed detail ->
+    "history I/O failed: " ^ detail
+
 let empty_history_migration_stats =
   { moved_lines = 0; dropped_lines = 0; kept_lines = 0; malformed_lines = 0 }
 
@@ -195,8 +220,29 @@ let history_path_for_source ~(session_dir : string) ~(source : string option) :
       Filename.concat session_dir "history.internal.jsonl"
   | _ -> Filename.concat session_dir "history.jsonl"
 
-let persist_message ?source session msg =
+let history_payload ?source ?idempotency_key msg =
   let msg = Inference_utils.sanitize_message_utf8 msg in
+  let now_ts = Time_compat.now () in
+  match Keeper_context_core_message_json.message_to_json msg with
+  | `Assoc fields ->
+      let fields =
+        match source with
+        | Some source when String.trim source <> "" ->
+            ("source", `String source) :: fields
+        | None
+        | Some _ ->
+            fields
+      in
+      let fields =
+        match idempotency_key with
+        | Some key -> ("idempotency_key", `String key) :: fields
+        | None -> fields
+      in
+      `Assoc
+        (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
+  | json -> json
+
+let persist_message ?source session msg =
   let source_text =
     match source with
     | Some raw -> String.trim raw
@@ -207,19 +253,88 @@ let persist_message ?source session msg =
   then ()
   else
     let path = history_path_for_source ~session_dir:session.session_dir ~source in
-    let now_ts = Time_compat.now () in
-    let payload =
-      match Keeper_context_core_message_json.message_to_json msg with
-      | `Assoc fields ->
-          let fields =
-            match source with
-            | Some source when String.trim source <> "" ->
-                ("source", `String source) :: fields
-            | _ -> fields
-          in
-          `Assoc
-            (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
-      | j -> j
-    in
-    let line = Yojson.Safe.to_string payload ^ "\n" in
+    let line = Yojson.Safe.to_string (history_payload ?source msg) ^ "\n" in
     Fs_compat.append_file path line
+
+let history_contains_idempotency_key existing idempotency_key =
+  split_jsonl_lines existing
+  |> List.exists (fun line ->
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+        (match List.assoc_opt "idempotency_key" fields with
+         | Some (`String candidate) -> String.equal candidate idempotency_key
+         | Some _
+         | None ->
+             false)
+    | _ -> false
+    | exception Yojson.Json_error _ -> false)
+
+let persist_message_once ~idempotency_key ?source session msg =
+  let idempotency_key = String.trim idempotency_key in
+  if
+    String.equal idempotency_key ""
+    || String.length idempotency_key > 512
+  then Error Invalid_history_idempotency_key
+  else
+    let source_text =
+      match source with
+      | Some raw -> String.trim raw
+      | None -> ""
+    in
+    let content_text = Agent_sdk.Types.visible_text_of_message msg in
+    if classify_history_entry ~source:source_text ~content:content_text = Drop_line
+    then Error (History_entry_rejected_by_policy { source = source_text })
+    else
+      let path =
+        history_path_for_source ~session_dir:session.session_dir ~source
+      in
+      let line =
+        Yojson.Safe.to_string
+          (history_payload ~idempotency_key ?source msg)
+        ^ "\n"
+      in
+      let decide existing =
+        let newline_suffix =
+          if
+            String.equal existing ""
+            || Char.equal existing.[String.length existing - 1] '\n'
+          then None
+          else Some "\n"
+        in
+        if history_contains_idempotency_key existing idempotency_key
+        then newline_suffix, History_message_already_persisted
+        else
+          let separator =
+            match newline_suffix with
+            | None -> ""
+            | Some newline -> newline
+          in
+          Some (separator ^ line), History_message_persisted
+      in
+      try
+        match
+          Fs_compat.update_private_file_durable_locked_result path decide
+        with
+        | Fs_compat.Private_file_succeeded outcome -> Ok outcome
+        | Fs_compat.Private_file_succeeded_with_cleanup_failure
+            { cleanup_failure; _ } ->
+          Error
+            (History_transaction_settlement_failed
+               (Fs_compat.private_jsonl_operation_failure_to_string
+                  cleanup_failure))
+        | Fs_compat.Private_file_failed error ->
+          Error
+            (History_append_failed
+               (Fs_compat.durable_append_error_to_string error))
+        | Fs_compat.Private_file_failed_with_cleanup_failure
+            { error; cleanup_failure } ->
+          Error
+            (History_append_failed
+               (Printf.sprintf
+                  "%s; descriptor settlement failed: %s"
+                  (Fs_compat.durable_append_error_to_string error)
+                  (Fs_compat.private_jsonl_operation_failure_to_string
+                     cleanup_failure)))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (History_io_failed (Printexc.to_string exn))

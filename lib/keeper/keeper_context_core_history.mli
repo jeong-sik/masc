@@ -11,6 +11,19 @@ type history_migration_stats =
   ; malformed_lines : int
   }
 
+type history_persist_once_outcome =
+  | History_message_persisted
+  | History_message_already_persisted
+
+type history_persist_once_error =
+  | Invalid_history_idempotency_key
+  | History_entry_rejected_by_policy of { source : string }
+  | History_append_failed of string
+  | History_transaction_settlement_failed of string
+  | History_io_failed of string
+
+val history_persist_once_error_to_string : history_persist_once_error -> string
+
 val empty_history_migration_stats : history_migration_stats
 
 val split_jsonl_lines : string -> string list
@@ -37,3 +50,10 @@ val migrate_session_history_logs : session_dir:string -> history_migration_stats
 val history_path_for_source : session_dir:string -> source:string option -> string
 
 val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
+
+val persist_message_once :
+  idempotency_key:string ->
+  ?source:string ->
+  session_context ->
+  Agent_sdk.Types.message ->
+  (history_persist_once_outcome, history_persist_once_error) result

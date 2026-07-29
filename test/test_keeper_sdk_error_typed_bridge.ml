@@ -929,6 +929,56 @@ let test_receipt_persistence_failure_is_typed () =
   | None -> Alcotest.fail "typed receipt failure did not decode"
 ;;
 
+let test_history_persistence_failure_is_typed () =
+  let err =
+    KTD.sdk_error_of_masc_internal_error
+      (KTD.History_persistence_failed
+         { approval_id = "approval-typed"
+         ; detail = "history durable append failed"
+         })
+  in
+  match KTD.classify_masc_internal_error err with
+  | Some (KTD.History_persistence_failed { approval_id; detail }) ->
+    Alcotest.(check string)
+      "approval identity round-trips"
+      "approval-typed"
+      approval_id;
+    Alcotest.(check string)
+      "failure detail round-trips"
+      "history durable append failed"
+      detail
+  | Some other ->
+    Alcotest.failf
+      "expected typed history failure, got %s"
+      (KTD.kind_of_masc_internal_error other)
+  | None -> Alcotest.fail "typed history failure did not decode"
+;;
+
+let test_gate_replay_repair_failure_is_typed () =
+  let err =
+    KTD.sdk_error_of_masc_internal_error
+      (KTD.Gate_replay_repair_required
+         { approval_id = "approval-repair"
+         ; operation = "connector_post"
+         ; stage = KTD.Replay_journal
+         ; detail = "journal fsync failed"
+         })
+  in
+  match KTD.classify_masc_internal_error err with
+  | Some
+      (KTD.Gate_replay_repair_required
+         { approval_id; operation; stage; detail }) ->
+    Alcotest.(check string) "approval" "approval-repair" approval_id;
+    Alcotest.(check string) "operation" "connector_post" operation;
+    Alcotest.(check bool) "stage" true (stage = KTD.Replay_journal);
+    Alcotest.(check string) "detail" "journal fsync failed" detail
+  | Some other ->
+    Alcotest.failf
+      "expected typed Gate replay repair, got %s"
+      (KTD.kind_of_masc_internal_error other)
+  | None -> Alcotest.fail "typed Gate replay repair did not decode"
+;;
+
 let () =
   Alcotest.run
     "keeper_sdk_error_typed_bridge"
@@ -959,6 +1009,14 @@ let () =
             "receipt failure uses typed provenance"
             `Quick
             test_receipt_persistence_failure_is_typed
+        ; Alcotest.test_case
+            "HITL history failure carries approval provenance"
+            `Quick
+            test_history_persistence_failure_is_typed
+        ; Alcotest.test_case
+            "Gate replay repair carries exact provenance"
+            `Quick
+            test_gate_replay_repair_failure_is_typed
         ] )
     ; ( "user-facing error message"
       , [ Alcotest.test_case

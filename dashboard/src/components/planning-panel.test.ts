@@ -21,12 +21,10 @@ vi.mock('../router', () => ({
   }),
 }))
 
-const workspaceSignal = signal<unknown>(null)
 const tasksSignal = signal<unknown[]>([])
 const goalsSignal = signal<unknown[]>([])
 
 vi.mock('../store', () => ({
-  get workspaceFsmSnapshot() { return workspaceSignal },
   get tasks() { return tasksSignal },
   get goals() { return goalsSignal },
 }))
@@ -53,7 +51,6 @@ function setRoute(view?: string, focus?: string) {
 describe('PlanningPanel', () => {
   beforeEach(() => {
     setRoute()
-    workspaceSignal.value = null
     tasksSignal.value = []
     goalsSignal.value = []
     openTaskDetailMock.mockReset()
@@ -86,60 +83,6 @@ describe('PlanningPanel', () => {
     setRoute('nonexistent')
     render(html`<${PlanningPanel} />`)
     expect(screen.getByTestId('goal-tree')).toBeTruthy()
-  })
-
-  it('renders workspace health violations', () => {
-    workspaceSignal.value = {
-      mode: 'advisory',
-      summary: {
-        products: 1,
-        violations: 1,
-        evidence: 2,
-        severity_counts: { info: 0, warn: 0, error: 1 },
-      },
-      evidence: [
-        {
-          source: 'telemetry',
-          kind: 'task_completed',
-          label: 'task completed',
-          detail: 'success=true; duration_ms=42',
-          refs: { goal_id: 'goal-1', task_ids: ['task-1'] },
-        },
-        {
-          source: 'board',
-          kind: 'post',
-          label: 'Board post',
-          detail: 'author=keeper',
-          refs: { goal_id: 'goal-1' },
-        },
-      ],
-      violations: [
-        {
-          severity: 'error',
-          code: 'reward_without_evidence',
-          message: 'Reward missing evidence',
-          refs: { goal_id: 'goal-1', task_ids: ['task-1'] },
-          evidence: [
-            {
-              source: 'telemetry',
-              kind: 'task_completed',
-              label: 'task completed',
-              detail: 'success=true; duration_ms=42',
-            },
-          ],
-        },
-      ],
-    }
-
-    render(html`<${PlanningPanel} />`)
-
-    expect(screen.getByText('협력 상태')).toBeTruthy()
-    expect(screen.getByText('reward_without_evidence')).toBeTruthy()
-    expect(screen.getByText(/Reward missing evidence/)).toBeTruthy()
-    expect(screen.getByText(/goal: goal-1/)).toBeTruthy()
-    expect(screen.getAllByText('telemetry/task_completed').length).toBeGreaterThan(0)
-    expect(screen.getByText('board/post')).toBeTruthy()
-    expect(screen.getAllByText('task completed').length).toBeGreaterThan(0)
   })
 
   it('renders stale task focus from route param', () => {

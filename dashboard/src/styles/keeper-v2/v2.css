@@ -851,21 +851,6 @@
 .wk-task-claim:hover { background: color-mix(in oklab, var(--volt) 18%, transparent); color: var(--text-bright); }
 
 .wk-task-detail { padding: 4px 8px 10px 25px; }
-.wk-gate { border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); background: var(--bg-sunken); padding: 10px 12px; }
-.wk-gate-h { font-size: var(--fs-11); color: var(--text-mid); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.wk-gate-open { font-size: 9.5px; color: var(--status-warn); border: 1px solid color-mix(in oklab, var(--status-warn) 38%, transparent); border-radius: var(--radius-pill); padding: 1px 7px; }
-.wk-gate-ok { font-size: 9.5px; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 38%, transparent); border-radius: var(--radius-pill); padding: 1px 7px; }
-.wk-gate-row { display: flex; align-items: center; gap: 9px; padding: 4px 0; border-top: 1px solid var(--border-soft); }
-.wk-gate-row:first-of-type { border-top: 0; }
-.wk-gate-mark { flex: none; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: var(--fs-9); }
-.wk-gate-row.satisfied .wk-gate-mark { color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 40%, transparent); }
-.wk-gate-row.missing .wk-gate-mark { color: var(--text-dim); border: 1px solid var(--border-highlight); }
-.wk-gate-row.failed .wk-gate-mark { color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 45%, transparent); }
-.wk-gate-ev { flex: 1; font-size: var(--fs-12); color: var(--text-primary); }
-.wk-gate-row.missing .wk-gate-ev { color: var(--text-mid); }
-.wk-gate-out { flex: none; font-size: var(--fs-10); font-family: var(--font-mono); color: var(--text-dim); }
-.wk-gate-row.satisfied .wk-gate-out { color: var(--status-ok); }
-.wk-gate-row.failed .wk-gate-out { color: var(--status-bad); }
 
 .wk-handoff { margin-top: 8px; border: 1px solid var(--border-soft); border-left: 2px solid var(--info); border-radius: var(--radius-sm); background: color-mix(in oklab, var(--info) 5%, var(--bg-sunken)); padding: 10px 12px; }
 .wk-handoff-h { font-size: var(--fs-11); color: var(--info); margin-bottom: 7px; }

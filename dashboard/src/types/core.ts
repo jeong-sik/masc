@@ -65,7 +65,6 @@ export interface Task {
   predecessor_task_id?: string | null
   contract?: TaskContract | null
   handoff_context?: TaskHandoffContext | null
-  gate?: TaskGateSnapshot | null
   execution_links?: TaskExecutionLinks | null
 }
 
@@ -91,28 +90,6 @@ interface TaskHandoffContext {
   evidence_refs?: string[]
   updated_at?: string | null
   updated_by?: string | null
-}
-
-interface TaskGateCheck {
-  evidence: string
-  outcome: 'satisfied' | 'missing' | 'failed' | 'unsupported'
-  detail: string
-}
-
-export interface TaskGateEvaluation {
-  status: 'ready' | 'blocked' | 'inconclusive' | 'unknown'
-  status_raw?: string | null
-  checks?: TaskGateCheck[]
-  reasons?: string[]
-}
-
-interface TaskGateSnapshot {
-  strict?: boolean
-  completion_contract?: string[]
-  unmet_completion_contract?: string[]
-  done?: TaskGateEvaluation
-  inspect_to_implement?: TaskGateEvaluation | null
-  verify_to_review?: TaskGateEvaluation | null
 }
 
 export interface Message {

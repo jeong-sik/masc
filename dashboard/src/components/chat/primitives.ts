@@ -381,6 +381,8 @@ type ChatTranscriptAction = {
   label?: string
   title?: string
   onClick?: (entry: KeeperConversationEntry) => void
+  onPendingCancel?: (entry: KeeperConversationEntry) => Promise<void>
+  onPendingEdit?: (entry: KeeperConversationEntry) => Promise<void>
   onRecoveryRequeue?: (entry: KeeperConversationEntry) => Promise<void>
   onRecoveryCancel?: (entry: KeeperConversationEntry, detail: string) => Promise<void>
 }
@@ -451,14 +453,15 @@ function QueueReceiptBadge({ entry, action }: {
   action?: ChatTranscriptAction
 }) {
   const [recoveryPending, setRecoveryPending] = useState<'requeue' | 'cancel' | null>(null)
+  const [pendingAction, setPendingAction] = useState<'edit' | 'cancel' | null>(null)
   const receiptId = entry.details?.queueReceiptId?.trim()
   const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
   const queueState = entry.details?.queueState
   if (!receiptId || !queueState) return null
   const label = (() => {
     switch (queueState) {
-      case 'pending': return '서버 대기'
-      case 'inflight': return 'Keeper 처리 중'
+      case 'pending': return '대기 중'
+      case 'inflight': return '처리 중'
       case 'recovery_required': return '복구 확인 필요'
       case 'delivered': return '처리 완료'
       case 'failed': return '처리 실패'
@@ -466,6 +469,19 @@ function QueueReceiptBadge({ entry, action }: {
     }
   })()
   const shutdownLabel = shutdownOperationId ? ' · 종료 후 처리' : ''
+  const currentWorkLabel = (() => {
+    const lane = entry.details?.queueInFlightLane?.trim()
+    if (!lane) return null
+    const work = lane === 'autonomous'
+      ? '자율 작업 처리 중'
+      : lane === 'chat'
+        ? '다른 대화 처리 중'
+        : `${lane} 처리 중`
+    const startedAt = entry.details?.queueInFlightStartedAt
+    return typeof startedAt === 'number'
+      ? `${work} · ${formatTimeHms(startedAt)}부터`
+      : work
+  })()
   const title = [
     `receipt ${receiptId}`,
     label,
@@ -494,6 +510,19 @@ function QueueReceiptBadge({ entry, action }: {
     }
     void runRecovery('cancel', () => action.onRecoveryCancel!(entry, detail))
   }
+  const runPendingAction = async (
+    kind: 'edit' | 'cancel',
+    operation: () => Promise<void>,
+  ) => {
+    setPendingAction(kind)
+    try {
+      await operation()
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setPendingAction(null)
+    }
+  }
   return html`
     <span class="inline-flex flex-wrap items-center gap-1.5">
       <span
@@ -505,6 +534,35 @@ function QueueReceiptBadge({ entry, action }: {
       >
         ${label}${shutdownLabel}
       </span>
+      ${currentWorkLabel
+        ? html`<span class="text-2xs text-[var(--color-fg-muted)]">${currentWorkLabel}</span>`
+        : null}
+      ${queueState === 'pending' && action?.onPendingEdit
+        ? html`
+            <button
+              type="button"
+              disabled=${pendingAction !== null}
+              class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)] disabled:opacity-50"
+              data-chat-queue-pending-action="edit"
+              onClick=${() => {
+                void runPendingAction('edit', () => action.onPendingEdit!(entry))
+              }}
+            >${pendingAction === 'edit' ? '불러오는 중...' : '수정'}</button>
+          `
+        : null}
+      ${queueState === 'pending' && action?.onPendingCancel
+        ? html`
+            <button
+              type="button"
+              disabled=${pendingAction !== null}
+              class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-status-err)] disabled:opacity-50"
+              data-chat-queue-pending-action="cancel"
+              onClick=${() => {
+                void runPendingAction('cancel', () => action.onPendingCancel!(entry))
+              }}
+            >${pendingAction === 'cancel' ? '취소 중...' : '취소'}</button>
+          `
+        : null}
       ${queueState === 'recovery_required' && action?.onRecoveryRequeue
         ? html`
             <button

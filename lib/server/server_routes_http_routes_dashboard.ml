@@ -1664,6 +1664,19 @@ let add_routes ~sw ~clock router =
                    ~raw_receipt_id:receipt_id
                    body_str))
              request reqd
+       | Keeper_api.Keeper_post_chat_pending_cancel { keeper_name; receipt_id } ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_chat_pending_cancel_post
+                   state
+                   agent_name
+                   req
+                   reqd
+                   ~keeper_name
+                   ~raw_receipt_id:receipt_id
+                   body_str))
+             request reqd
        | Keeper_api.Keeper_post_board_attention_quarantine_recovery
            { keeper_name; partition_id } ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin

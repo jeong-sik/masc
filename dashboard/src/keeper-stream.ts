@@ -682,6 +682,10 @@ export function applyKeeperStreamEvent(
         const pendingCount = asNumber(queued?.pending_count)
         const inflightCount = asNumber(queued?.inflight_count)
         const recoveryRequiredCount = asNumber(queued?.recovery_required_count)
+        const inFlightLane = asString(queued?.in_flight_lane, '').trim()
+        const inFlightStartedAt = asNumber(queued?.in_flight_started_at)
+        const hasInFlightMetadata =
+          inFlightLane.length > 0 || typeof inFlightStartedAt === 'number'
         const shutdownOperationId = (() => {
           const raw = queued?.shutdown_operation_id
           if (raw === null) return null
@@ -701,6 +705,13 @@ export function applyKeeperStreamEvent(
           || typeof recoveryRequiredCount !== 'number'
           || !Number.isSafeInteger(recoveryRequiredCount)
           || recoveryRequiredCount < 0
+          || (hasInFlightMetadata
+            && (
+              inFlightLane.length === 0
+              || typeof inFlightStartedAt !== 'number'
+              || !Number.isFinite(inFlightStartedAt)
+              || inFlightStartedAt < 0
+            ))
         ) {
           return 'Keeper queue acceptance is missing its durable receipt metadata.'
         }
@@ -709,6 +720,11 @@ export function applyKeeperStreamEvent(
         }
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
+          text: recoveryRequiredCount > 0
+            ? `${keeperName}의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다.`
+            : shutdownOperationId
+              ? `${keeperName}가 종료 중이에요. 다시 활동을 시작하면 이 메시지를 처리합니다.`
+              : `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다.`,
           delivery: 'queued',
           streamState: null,
           details: {
@@ -719,6 +735,9 @@ export function applyKeeperStreamEvent(
             queuePendingCount: pendingCount,
             queueInflightCount: inflightCount,
             queueRecoveryRequiredCount: recoveryRequiredCount,
+            queueInFlightLane: inFlightLane || null,
+            queueInFlightStartedAt:
+              typeof inFlightStartedAt === 'number' ? inFlightStartedAt : null,
             queueState: 'pending',
           },
           streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {

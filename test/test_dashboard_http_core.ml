@@ -231,6 +231,21 @@ let test_keeper_chat_recovery_route_is_exact () =
     (Server_dashboard_http_keeper_api.classify_keeper_post_route (path ^ "/bulk")
      = Server_dashboard_http_keeper_api.Keeper_post_unknown)
   ;
+  let cancel_path =
+    "/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/cancel"
+  in
+  (match
+     Server_dashboard_http_keeper_api.classify_keeper_post_route cancel_path
+   with
+   | Server_dashboard_http_keeper_api.Keeper_post_chat_pending_cancel route ->
+     check string "pending cancel route keeper" "idealist" route.keeper_name;
+     check string "pending cancel route receipt" receipt_id route.receipt_id
+   | _ -> fail "exact pending cancel route was not classified");
+  check bool "pending cancel route rejects extra segments" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route
+       (cancel_path ^ "/bulk")
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
+  ;
   let quarantine_path =
     "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
   in

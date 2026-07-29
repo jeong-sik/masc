@@ -20,6 +20,7 @@ export interface QueuedMessage {
   blocks?: ChatBlock[]
   userBlocks?: KeeperUserInputBlock[]
   clientActionId?: string
+  editOnOpen?: boolean
 }
 
 export interface InputQueue {
@@ -85,6 +86,7 @@ export function enqueueInput(
   clientActionId?: string,
   blocks?: ChatBlock[],
   userBlocks?: KeeperUserInputBlock[],
+  editOnOpen = false,
 ): QueuedMessage {
   const q = _ensureQueue(keeperName)
   const actionId = clientActionId?.trim()
@@ -102,6 +104,7 @@ export function enqueueInput(
     ...(blocks && blocks.length > 0 ? { blocks } : {}),
     ...(userBlocks && userBlocks.length > 0 ? { userBlocks } : {}),
     ...(actionId ? { clientActionId: actionId } : {}),
+    ...(editOnOpen ? { editOnOpen: true } : {}),
   }
   q.items.push(msg)
   return msg
@@ -123,16 +126,22 @@ export function getQueuedMessages(keeperName: string): QueuedMessage[] {
   return q ? q.items.slice() : []
 }
 
-/** Update the content/attachments of a queued message. */
+/** Update the editable fields or editor presentation of a queued message. */
 export function updateQueuedMessage(
   keeperName: string,
   id: string,
-  updates: Partial<Pick<QueuedMessage, 'content' | 'attachments' | 'blocks' | 'userBlocks'>>,
+  updates: Partial<
+    Pick<QueuedMessage, 'content' | 'attachments' | 'blocks' | 'userBlocks' | 'editOnOpen'>
+  >,
 ): QueuedMessage | null {
   const q = _queues.get(keeperName)
   if (!q) return null
   const item = q.items.find(i => i.id === id)
   if (!item) return null
+  if ('editOnOpen' in updates) {
+    if (updates.editOnOpen) item.editOnOpen = true
+    else delete item.editOnOpen
+  }
   let changed = false
   if (typeof updates.content === 'string') item.content = updates.content
   if (typeof updates.content === 'string') changed = true

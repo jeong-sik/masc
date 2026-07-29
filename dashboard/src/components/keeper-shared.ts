@@ -23,6 +23,7 @@ import {
   isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
   reconcileKeeperChatReceipts,
+  cancelKeeperChatPendingEntry,
   requeueKeeperChatRecoveryEntry,
   cancelKeeperChatRecoveryEntry,
   recoverKeeperRuntime,
@@ -422,10 +423,11 @@ interface QueueItemCardProps {
   keeperName: string
   msg: QueuedMessage
   onMutate: () => void
+  onSave: () => void
 }
 
-function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
-  const [editing, setEditing] = useState(false)
+function QueueItemCard({ keeperName, msg, onMutate, onSave }: QueueItemCardProps) {
+  const [editing, setEditing] = useState(msg.editOnOpen === true)
   const [text, setText] = useState(msg.content)
   const [attachments, setAttachments] = useState(msg.attachments ?? [])
 
@@ -433,14 +435,17 @@ function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
     updateQueuedMessage(keeperName, msg.id, {
       content: text.trim(),
       attachments: attachments.length > 0 ? attachments : undefined,
+      editOnOpen: false,
     })
     setEditing(false)
     onMutate()
+    onSave()
   }
 
   const cancel = () => {
     setText(msg.content)
     setAttachments(msg.attachments ?? [])
+    updateQueuedMessage(keeperName, msg.id, { editOnOpen: false })
     setEditing(false)
   }
 
@@ -769,6 +774,31 @@ export function KeeperConversationPanel({
       ...(onInspectTurn
         ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn }
         : {}),
+      onPendingCancel: async (entry: KeeperConversationEntry) => {
+        await cancelKeeperChatPendingEntry(keeperName, entry)
+        showToast('대기 메시지를 취소했습니다.', 'success')
+      },
+      onPendingEdit: async (entry: KeeperConversationEntry) => {
+        const original = await cancelKeeperChatPendingEntry(
+          keeperName,
+          entry,
+          { requireUserInput: true },
+        )
+        if (!original) {
+          throw new Error('수정할 원문을 찾지 못했습니다.')
+        }
+        enqueueInput(
+          keeperName,
+          original.text,
+          original.attachments,
+          undefined,
+          original.blocks,
+          undefined,
+          true,
+        )
+        setQueueVersion(value => value + 1)
+        showToast('서버 대기를 취소하고 편집 화면으로 옮겼습니다.', 'success')
+      },
       onRecoveryRequeue: (entry: KeeperConversationEntry) =>
         requeueKeeperChatRecoveryEntry(keeperName, entry),
       onRecoveryCancel: (entry: KeeperConversationEntry, detail: string) =>
@@ -966,6 +996,28 @@ export function KeeperConversationPanel({
     />
   `
 
+  const browserDraftQueue = queueCount > 0
+    ? html`
+        <div class="mb-3 flex flex-col gap-2" data-chat-queue-list>
+          <div class="flex items-center justify-between gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
+            <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
+            <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
+          </div>
+          ${queuedMessages.map(msg => html`
+            <${QueueItemCard}
+              key=${msg.id}
+              keeperName=${keeperName}
+              msg=${msg}
+              onMutate=${bumpQueue}
+              onSave=${() => {
+                if (!sending) void drainQueue()
+              }}
+            />
+          `)}
+        </div>
+      `
+    : null
+
   if (layout === 'workspace') {
     // 3-pane workspace: identity + lifecycle live in the ChatHeader above
     // this panel, so the workspace layout drops the panel's own header and
@@ -1057,24 +1109,7 @@ export function KeeperConversationPanel({
         <div class="kw-composer-wrap v2-monitoring-panel">
           <div class="kw-composer-inner v2-monitoring-panel">
             ${serverQueueStatus}
-            ${queueCount > 0
-              ? html`
-                  <div class="mb-3 flex flex-col gap-2" data-chat-queue-list>
-                    <div class="flex items-center justify-between gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-                      <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
-                      <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
-                    </div>
-                    ${queuedMessages.map(msg => html`
-                      <${QueueItemCard}
-                        key=${msg.id}
-                        keeperName=${keeperName}
-                        msg=${msg}
-                        onMutate=${bumpQueue}
-                      />
-                    `)}
-                  </div>
-                `
-              : null}
+            ${browserDraftQueue}
             ${isKeeperBusy ? renderBusyToolbar() : null}
             <${ChatComposer}
               key=${keeperName}
@@ -1185,14 +1220,7 @@ export function KeeperConversationPanel({
 
         <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none v2-monitoring-panel">
         ${serverQueueStatus}
-        ${queueCount > 0
-            ? html`
-                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-                  <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
-                  <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
-                </div>
-              `
-            : null}
+        ${browserDraftQueue}
           ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
             key=${keeperName}
@@ -1299,14 +1327,7 @@ export function KeeperConversationPanel({
 
         <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 v2-monitoring-panel">
         ${serverQueueStatus}
-        ${queueCount > 0
-            ? html`
-                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-                  <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
-                  <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
-                </div>
-              `
-            : null}
+        ${browserDraftQueue}
           ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
             key=${keeperName}

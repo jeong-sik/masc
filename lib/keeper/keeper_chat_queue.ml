@@ -121,6 +121,10 @@ type persistence_publication =
       ; receipt_id : Receipt_id.t
       ; lease_id : string
       }
+  | Pending_cancel_indeterminate of
+      { revision : int64
+      ; receipt_id : Receipt_id.t
+      }
 
 type persistence_failure =
   { publication : persistence_publication
@@ -136,6 +140,10 @@ type mutation_error =
       ; state : receipt_state
       }
   | Receipt_not_recovery_required of
+      { receipt_id : Receipt_id.t
+      ; observed_state : receipt_state option
+      }
+  | Receipt_not_pending of
       { receipt_id : Receipt_id.t
       ; observed_state : receipt_state option
       }
@@ -178,6 +186,7 @@ type persistence_transition =
       { receipt_id : Receipt_id.t
       ; lease_id : string
       }
+  | Pending_cancel_transition of { receipt_id : Receipt_id.t }
 
 let persistence_transition_to_string = function
   | Enqueue_transition _ -> "enqueue"
@@ -187,6 +196,7 @@ let persistence_transition_to_string = function
   | Startup_recovery_transition _ -> "startup_recovery"
   | Recovery_requeue_transition _ -> "recovery_requeue"
   | Recovery_cancel_transition _ -> "recovery_cancel"
+  | Pending_cancel_transition _ -> "pending_cancel"
 
 let transition_receipt_id = function
   | Enqueue_transition { receipt_id }
@@ -195,7 +205,8 @@ let transition_receipt_id = function
   | Nack_transition { receipt_id; _ }
   | Startup_recovery_transition { receipt_id; _ }
   | Recovery_requeue_transition { receipt_id; _ }
-  | Recovery_cancel_transition { receipt_id; _ } -> receipt_id
+  | Recovery_cancel_transition { receipt_id; _ }
+  | Pending_cancel_transition { receipt_id } -> receipt_id
 
 let publication_transition = function
   | Not_published -> None
@@ -206,6 +217,7 @@ let publication_transition = function
   | Startup_recovery_indeterminate _ -> Some "startup_recovery"
   | Recovery_requeue_indeterminate _ -> Some "recovery_requeue"
   | Recovery_cancel_indeterminate _ -> Some "recovery_cancel"
+  | Pending_cancel_indeterminate _ -> Some "pending_cancel"
 
 let publication_evidence = function
   | Not_published -> None
@@ -215,7 +227,8 @@ let publication_evidence = function
   | Nack_indeterminate { revision; receipt_id; _ }
   | Startup_recovery_indeterminate { revision; receipt_id; _ }
   | Recovery_requeue_indeterminate { revision; receipt_id; _ }
-  | Recovery_cancel_indeterminate { revision; receipt_id; _ } ->
+  | Recovery_cancel_indeterminate { revision; receipt_id; _ }
+  | Pending_cancel_indeterminate { revision; receipt_id } ->
     Some (revision, receipt_id)
 
 let publication_lease_id = function
@@ -225,7 +238,9 @@ let publication_lease_id = function
   | Startup_recovery_indeterminate { lease_id; _ }
   | Recovery_requeue_indeterminate { lease_id; _ }
   | Recovery_cancel_indeterminate { lease_id; _ } -> Some lease_id
-  | Not_published | Enqueue_indeterminate _ -> None
+  | Not_published
+  | Enqueue_indeterminate _
+  | Pending_cancel_indeterminate _ -> None
 
 let receipt_state_kind_to_string = function
   | Pending -> "pending"
@@ -261,6 +276,13 @@ let mutation_error_to_string = function
   | Receipt_not_recovery_required { receipt_id; observed_state } ->
     Printf.sprintf
       "chat queue receipt %s is not recovery-required (observed=%s)"
+      (Receipt_id.to_string receipt_id)
+      (match observed_state with
+       | None -> "absent"
+       | Some state -> receipt_state_kind_to_string state)
+  | Receipt_not_pending { receipt_id; observed_state } ->
+    Printf.sprintf
+      "chat queue receipt %s is not pending (observed=%s)"
       (Receipt_id.to_string receipt_id)
       (match observed_state with
        | None -> "absent"
@@ -315,6 +337,16 @@ let mutation_error_to_json = function
           | None -> `Null
           | Some state -> `String (receipt_state_kind_to_string state) )
       ; "message", `String "chat queue receipt is not recovery-required"
+      ]
+  | Receipt_not_pending { receipt_id; observed_state } ->
+    `Assoc
+      [ "error", `String "chat_queue_receipt_not_pending"
+      ; "receipt_id", `String (Receipt_id.to_string receipt_id)
+      ; ( "observed_state"
+        , match observed_state with
+          | None -> `Null
+          | Some state -> `String (receipt_state_kind_to_string state) )
+      ; "message", `String "chat queue receipt is not pending"
       ]
   | Recovery_revision_mismatch
       { receipt_id; expected_revision; observed_revision } ->
@@ -2009,6 +2041,8 @@ let indeterminate_publication revision = function
     Recovery_requeue_indeterminate { revision; receipt_id; lease_id }
   | Recovery_cancel_transition { receipt_id; lease_id } ->
     Recovery_cancel_indeterminate { revision; receipt_id; lease_id }
+  | Pending_cancel_transition { receipt_id } ->
+    Pending_cancel_indeterminate { revision; receipt_id }
 
 let published_indeterminate_failure plan detail =
   { publication =
@@ -3009,6 +3043,125 @@ let lookup_receipt ~keeper_name ~receipt_id =
                 | Ok (revision, _, _, row) ->
                   Ok (receipt_lookup_of_row revision row))))
 
+type pending_cancellation =
+  { cancelled_at : float
+  ; detail : string
+  }
+
+type pending_cancellation_report =
+  { receipt_id : Receipt_id.t
+  ; revision : int64
+  ; state : receipt_state
+  }
+
+let find_pending_row entry receipt_id =
+  Sequence_map.fold
+    (fun _ row found ->
+       match found with
+       | Some _ -> found
+       | None ->
+         if Receipt_id.equal row.receipt.receipt_id receipt_id
+         then Some row
+         else None)
+    entry.pending
+    None
+
+let receipt_not_pending ~base_path ~path entry ~receipt_id =
+  match observe_receipt_in_store ~base_path ~path receipt_id with
+  | Error detail ->
+    quarantine_entry entry (load_error Read_failed ~path detail)
+  | Ok (revision, next_sequence, terminal_count, row) ->
+    if not (cache_matches_meta entry revision next_sequence terminal_count)
+    then
+      quarantine_entry entry
+        (load_error Reconciliation_failed ~path
+           "chat queue database metadata diverged during pending cancellation")
+    else
+      Error
+        (Receipt_not_pending
+           { receipt_id
+           ; observed_state =
+               Option.map
+                 (fun row -> receipt_state_of_stored row.receipt.state)
+                 row
+           })
+
+let cancel_pending
+    ~keeper_name
+    ~receipt_id
+    ~cancellation =
+  match
+    canonical_terminal_state
+      (Mark_failed
+         { completed_at = cancellation.cancelled_at
+         ; kind = Cancelled
+         ; detail = cancellation.detail
+         ; outcome_ref = None
+         })
+  with
+  | Error detail -> Error (Invalid_input detail)
+  | Ok terminal_state ->
+    (match mutation_context ~keeper_name ~create:false with
+       | Error _ as error -> error
+       | Ok (_, _, None) ->
+         Error (Receipt_not_pending { receipt_id; observed_state = None })
+       | Ok (base_path, path, Some entry) ->
+         let result =
+           with_entry_lock keeper_name entry (fun () ->
+               match check_entry_store ~base_path ~path entry ~allow_absent:false with
+               | Error _ as error -> error
+               | Ok Store_absent ->
+                 quarantine_entry entry
+                   (load_error Read_failed ~path
+                      "chat queue database is absent during pending cancellation")
+               | Ok Store_present ->
+                 match find_pending_row entry receipt_id with
+                   | None ->
+                     receipt_not_pending
+                       ~base_path ~path entry ~receipt_id
+                   | Some row ->
+                     if Int64.equal entry.terminal_count Int64.max_int
+                     then Error Revision_exhausted
+                     else
+                       let target_row =
+                         { row with
+                           receipt = { receipt_id; state = terminal_state }
+                         }
+                       in
+                       (match
+                          make_plan entry
+                            ~before_row:(Some row)
+                            ~target_row:(Some target_row)
+                            ~target_next_sequence:entry.next_sequence
+                            ~target_terminal_count:(Int64.succ entry.terminal_count)
+                            ~transition:(Pending_cancel_transition { receipt_id })
+                        with
+                        | Error _ as error -> error
+                        | Ok plan ->
+                          let execution =
+                            run_transaction
+                              ~ownership_root:base_path
+                              ~path
+                              ~create_if_missing:false
+                              plan
+                          in
+                          Result.map
+                            (fun revision ->
+                               { receipt_id
+                               ; revision
+                               ; state = receipt_state_of_stored terminal_state
+                               })
+                            (apply_transaction_result
+                               ~path entry plan execution)))
+         in
+         (match result with
+          | Ok ({ revision; _ } as report) ->
+            notify_transition ~keeper_name ~revision;
+            Ok report
+          | Error _ as error ->
+            notify_indeterminate ~keeper_name error;
+            error))
+
 type reconciliation_outcome =
   | Already_consistent
   | Reconciled
@@ -3199,7 +3352,8 @@ let reconcile_persistence ~keeper_name =
                        | Nack_transition _
                        | Startup_recovery_transition _
                        | Recovery_requeue_transition _
-                       | Recovery_cancel_transition _ ), false, true ->
+                       | Recovery_cancel_transition _
+                       | Pending_cancel_transition _ ), false, true ->
                        set_entry_to_plan_target entry plan;
                        entry.load_errors <- [];
                        entry.reconciliation_plan <- None;
@@ -3209,7 +3363,8 @@ let reconcile_persistence ~keeper_name =
                        | Nack_transition _
                        | Startup_recovery_transition _
                        | Recovery_requeue_transition _
-                       | Recovery_cancel_transition _ ), true, false ->
+                       | Recovery_cancel_transition _
+                       | Pending_cancel_transition _ ), true, false ->
                        let execution =
                          run_transaction
                            ~ownership_root:base_path

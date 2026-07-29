@@ -7,6 +7,7 @@ const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
   refreshDashboard: vi.fn(async () => undefined),
 }))
 const {
+  cancelKeeperChatPendingReceipt,
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
@@ -17,6 +18,7 @@ const {
   queuedKeeperMessageToReply,
   streamKeeperMessage,
 } = vi.hoisted(() => ({
+  cancelKeeperChatPendingReceipt: vi.fn(),
   cancelQueuedKeeperMessage: vi.fn(
     async (requestId: string): Promise<{
       requestId: string
@@ -51,6 +53,7 @@ const { fetchKeeperToolCalls } = vi.hoisted(() => ({
 vi.mock('./api/mcp', () => ({ callMcpTool }))
 vi.mock('./api/core', () => ({ runOperatorAction }))
 vi.mock('./api/keeper', () => ({
+  cancelKeeperChatPendingReceipt,
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchKeeperChatReceipt,
@@ -84,6 +87,7 @@ import {
   _resetKeeperThreadMessageSendGuardsForTests,
   _resetChatHydrationForTests,
   cancelActiveKeeperThreadMessage,
+  cancelKeeperChatPendingEntry,
   dispatchKeeperInterjectAction,
   hydrateKeeperChatHistory,
   hydrateKeeperStatus,
@@ -239,6 +243,7 @@ describe('reconcileKeeperChatReceipts', () => {
     fetchKeeperChatHistory.mockReset()
     fetchKeeperChatHistory.mockResolvedValue([])
     fetchKeeperChatReceipt.mockReset()
+    cancelKeeperChatPendingReceipt.mockReset()
     resolveKeeperChatRecovery.mockReset()
   })
 
@@ -263,6 +268,52 @@ describe('reconcileKeeperChatReceipts', () => {
     expect(entry?.delivery).toBe('queued')
     expect(entry?.details?.queueState).toBe('recovery_required')
     expect(entry?.error).toBeFalsy()
+  })
+
+  it('cancels a pending receipt and returns its optimistic user input for editing', async () => {
+    const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
+    keeperThreads.value = {
+      echo: [
+        {
+          id: 'queued-user-1',
+          role: 'user',
+          source: 'direct_user',
+          label: 'You',
+          text: '원문',
+          timestamp: null,
+          delivery: 'queued',
+          details: { queueReceiptId: receiptId },
+        },
+        keeperThreads.value.echo![0]!,
+      ],
+    }
+    cancelKeeperChatPendingReceipt.mockResolvedValue({
+      receipt: {
+        keeperName: 'echo',
+        receiptId,
+        revision: '2',
+        state: {
+          kind: 'failed',
+          failureKind: 'cancelled',
+          detail: 'cancelled by dashboard user before delivery',
+          completedAt: 42,
+          outcomeRef: null,
+        },
+      },
+      audit: { recorded: true },
+    })
+
+    const original = await cancelKeeperChatPendingEntry(
+      'echo',
+      keeperThreads.value.echo![1]!,
+    )
+
+    expect(cancelKeeperChatPendingReceipt).toHaveBeenCalledWith(
+      'echo',
+      receiptId,
+    )
+    expect(original?.text).toBe('원문')
+    expect(keeperThreads.value.echo).toEqual([])
   })
 
   it('requeues only with the freshly observed revision and lease', async () => {
@@ -1679,7 +1730,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       'chatq_00000000-0000-4000-8000-000000000001',
     )
     expect(reply?.delivery).toBe('queued')
-    expect(reply?.text).toContain('message is queued')
+    expect(reply?.text).toContain('메시지는 대기열에 추가했습니다')
     expect(reply?.details).toMatchObject({
       queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
       queueRevision: '4',

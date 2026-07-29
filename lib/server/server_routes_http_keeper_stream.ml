@@ -207,37 +207,18 @@ let dashboard_deferred_ack_text ~keeper_name deferred =
   else if deferred.recovery_required_count > 0
   then
     Printf.sprintf
-      "%s accepted your message durably (receipt_id=%s, pending_count=%d, \
-       inflight_count=%d, recovery_required_count=%d). This Keeper lane has an \
-       earlier delivery whose external effect is unconfirmed; it will remain \
-       non-dispatchable until an operator resolves that exact receipt."
+      "%s의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다."
       keeper_name
-      deferred.receipt_id
-      deferred.pending_count
-      deferred.inflight_count
-      deferred.recovery_required_count
   else
     match deferred.shutdown_operation_id with
-    | Some operation_id ->
+    | Some _ ->
       Printf.sprintf
-        "%s is stopping under operation %s; your message was durably accepted \
-         (receipt_id=%s, pending_count=%d, inflight_count=%d) for the next active \
-         lane. The Dashboard will track it through Pending, Inflight, and a \
-         terminal Delivered or Failed state."
+        "%s가 종료 중이에요. 다시 활동을 시작하면 이 메시지를 처리합니다."
         keeper_name
-        (Keeper_shutdown_types.Operation_id.to_string operation_id)
-        deferred.receipt_id
-        deferred.pending_count
-        deferred.inflight_count
     | None ->
       Printf.sprintf
-        "%s is busy; your message was durably accepted (receipt_id=%s, \
-         pending_count=%d, inflight_count=%d). The Dashboard will track it through \
-         Pending, Inflight, and a terminal Delivered or Failed state."
+        "%s가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다."
         keeper_name
-        deferred.receipt_id
-        deferred.pending_count
-        deferred.inflight_count
 
 let dashboard_deferred_chat_to_json ~keeper_name
     ({ in_flight

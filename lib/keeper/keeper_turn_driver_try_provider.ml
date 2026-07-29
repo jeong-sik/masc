@@ -260,14 +260,8 @@ let run_try_provider
                result. *)
           ; pre_dispatch_serialization_observer =
               Some
-                (fun observation ->
-                  Otel_metric_store.observe_histogram
-                    Keeper_metrics.(to_string RuntimeRequestWireBytes)
-                    ~labels:[ "keeper", ctx.keeper_name ]
-                    (Float.of_int
-                       observation
-                         .Llm_provider.Request_wire_observer.body_bytes);
-                  Ok ())
+                (Keeper_request_wire_observation.observer
+                   ~keeper_name:ctx.keeper_name)
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool

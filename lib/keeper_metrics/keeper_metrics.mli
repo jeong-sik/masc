@@ -102,7 +102,6 @@ type t =
   | WorkspaceInitFailures
   | PresenceSyncFailures
   | StaleStormPaused
-  | TurnFailureStreakPaused
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures

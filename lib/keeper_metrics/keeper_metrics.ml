@@ -111,7 +111,6 @@ type t =
   | WorkspaceInitFailures
   | PresenceSyncFailures
   | StaleStormPaused
-  | TurnFailureStreakPaused
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures
@@ -328,7 +327,6 @@ let to_string = function
   | WorkspaceInitFailures -> "masc_keeper_workspace_init_failures_total"
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"
   | StaleStormPaused -> "masc_keeper_stale_storm_paused_total"
-  | TurnFailureStreakPaused -> "masc_keeper_turn_failure_streak_paused_total"
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotReadFailures -> "masc_keeper_snapshot_read_failures_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"

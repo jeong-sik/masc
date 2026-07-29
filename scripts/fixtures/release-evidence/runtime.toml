@@ -50,3 +50,7 @@ streaming = true
 [ollama_cloud.deepseek-v4-flash]
 is-default = true
 max-concurrent = 1
+# Mandatory since #26175: Keeper dispatch refuses a runtime that has no
+# positive request-body admission ceiling, so the release-evidence server
+# starts at all. Mirrors production config/runtime.toml for this runtime.
+max-request-body-bytes = 524288

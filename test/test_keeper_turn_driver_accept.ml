@@ -114,6 +114,7 @@ streaming = true
 [test_provider.test_model]
 is-default = true
 max-concurrent = 1
+max-request-body-bytes = 65536
 |}
 
 let with_direct_retry_runtime f =
@@ -135,6 +136,54 @@ let direct_no_progress_retry_decision err =
     ~effective_runtime:"runtime.direct-empty"
     ~attempted_runtimes:[ "runtime.direct-empty" ]
     err
+
+let test_dispatch_rejects_runtime_without_serialized_request_cap () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "uncapped_keeper_runtime_" ".toml" in
+  let uncapped =
+    String.concat
+      "\n"
+      [ "[runtime]"
+      ; "default = \"test_provider.test_model\""
+      ; ""
+      ; "[providers.test_provider]"
+      ; "protocol = \"openai-compatible-http\""
+      ; "endpoint = \"http://127.0.0.1:1/v1\""
+      ; ""
+      ; "[models.test_model]"
+      ; "api-name = \"test-model\""
+      ; "max-context = 8192"
+      ; "tools-support = true"
+      ; "streaming = true"
+      ; ""
+      ; "[test_provider.test_model]"
+      ]
+  in
+  write_file path uncapped;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       match Runtime.init_default ~config_path:path with
+       | Error error -> Alcotest.failf "fixture load failed: %s" error
+       | Ok () ->
+         (match
+            Masc.Keeper_turn_driver.For_testing.resolve_runtime_candidate_for_attempt
+              "test_provider.test_model"
+          with
+          | Error
+              (Agent_sdk.Error.Config
+                (Agent_sdk.Error.InvalidConfig
+                  { field = "max-request-body-bytes"; _ })) ->
+            ()
+          | Error error ->
+            Alcotest.failf
+              "wrong typed cap rejection: %s"
+              (Agent_sdk.Error.to_string error)
+          | Ok _ ->
+            Alcotest.fail
+              "uncapped Keeper runtime must be rejected before provider dispatch"))
 
 type direct_retry_observed_attempt =
   { observed_runtime_id : string
@@ -1790,6 +1839,10 @@ let () =
             "session conflict preserves typed terminal exhaustion"
             `Quick
             test_session_conflict_exhaustion_preserves_typed_terminal_reason;
+          Alcotest.test_case
+            "dispatch rejects runtime without serialized-request cap"
+            `Quick
+            test_dispatch_rejects_runtime_without_serialized_request_cap;
           Alcotest.test_case
             "runtime exhaustion labels cap free-text detail"
             `Quick

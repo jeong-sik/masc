@@ -744,8 +744,9 @@ let test_repo_runtime_toml_loads () =
       , assignments
       , memory_os_consolidation
       , structured_judge
-      , _cross_verifier
-      , _media_failover , _lanes ) ->
+      , cross_verifier
+      , media_failover
+      , lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
@@ -802,6 +803,32 @@ List.iter
       default.provider_config.connect_timeout_s;
     check int "public seed has no keeper assignments" 0
       (List.length assignments);
+    let keeper_dispatch_ids =
+      Runtime.For_testing.keeper_dispatch_runtime_ids
+        ~default_runtime_id:default.id
+        ~assignments
+        ~memory_os_consolidation_runtime_id:memory_os_consolidation
+        ~structured_judge_runtime_id:structured_judge
+        ~cross_verifier_runtime_id:cross_verifier
+        ~media_failover
+        ~lanes
+    in
+    List.iter
+      (fun runtime_id ->
+         match
+           List.find_opt
+             (fun (runtime : Runtime.t) -> String.equal runtime.id runtime_id)
+             runtimes
+         with
+         | None -> failf "expected bounded Keeper runtime in seed: %s" runtime_id
+         | Some runtime ->
+           (match runtime.provider_config.max_request_body_bytes with
+            | Some cap when cap > 0 -> ()
+            | None | Some _ ->
+              failf
+                "%s must declare a positive exact request body budget"
+                runtime_id))
+      keeper_dispatch_ids;
     check int "Ollama Cloud canonical seed count"
       (List.length ollama_cloud_seed_cases)
       (List.length
@@ -1506,6 +1533,238 @@ let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
          binding.Runtime_schema.max_request_body_bytes
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
+let test_keeper_dispatch_runtime_graph_enumeration () =
+  let lanes =
+    [ Runtime_lane.make
+        ~id:"default-a"
+        ~strategy:Runtime_lane.Ordered
+        [ "lane-a"; "lane-b" ]
+    ; Runtime_lane.make
+        ~id:"dormant-lane"
+        ~strategy:Runtime_lane.Ordered
+        [ "lane-c"; "lane-b" ]
+    ; Runtime_lane.make
+        ~id:"structured-d"
+        ~strategy:Runtime_lane.Ordered
+        [ "structured-a"; "lane-b" ]
+    ; Runtime_lane.make
+        ~id:"cross-e"
+        ~strategy:Runtime_lane.Ordered
+        [ "cross-a"; "lane-b" ]
+    ]
+  in
+  let actual =
+    Runtime.For_testing.keeper_dispatch_runtime_ids
+      ~default_runtime_id:"default-a"
+      ~assignments:[ "keeper-a", "assigned-b" ]
+      ~memory_os_consolidation_runtime_id:(Some "memory-os-d")
+      ~structured_judge_runtime_id:(Some "structured-d")
+      ~cross_verifier_runtime_id:(Some "cross-e")
+      ~media_failover:[ "media-c"; "lane-a" ]
+      ~lanes
+  in
+  check
+    (list string)
+    "routed lane candidates, special routes, and media failover are deduplicated \
+     without admitting a dormant lane"
+    [ "lane-a"
+    ; "lane-b"
+    ; "assigned-b"
+    ; "media-c"
+    ; "memory-os-d"
+    ; "structured-a"
+    ; "cross-a"
+    ]
+    actual
+;;
+
+let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.lane]\n\
+     api-name = \"lane\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [local.lane]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     [runtime.lanes.\"local.sample\"]\n\
+     strategy = \"ordered\"\n\
+     candidates = [\"local.lane\"]\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "uncapped_runtime_" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match Runtime.save_config_text ~runtime_config_path:path content with
+       | Ok () ->
+         fail "uncapped Keeper lane candidate must fail runtime config validation"
+       | Error detail ->
+         check bool "typed config diagnostic names the cap" true
+           (String_util.contains_substring detail "max-request-body-bytes");
+         check bool "typed config diagnostic names the candidate" true
+           (String_util.contains_substring detail "local.lane"))
+;;
+
+let test_runtime_config_validation_rejects_uncapped_memory_os_runtime () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.default]\n\
+     api-name = \"default\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.consolidation]\n\
+     api-name = \"consolidation\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.default]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [local.consolidation]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.default\"\n\
+     memory_os_consolidation = \"local.consolidation\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "uncapped_memory_os_runtime_" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match Runtime.save_config_text ~runtime_config_path:path content with
+       | Ok () ->
+         fail
+           "uncapped Memory OS consolidation runtime must fail runtime config validation"
+       | Error detail ->
+         check bool "typed config diagnostic names the cap" true
+           (String_util.contains_substring detail "max-request-body-bytes");
+         check bool "typed config diagnostic names the direct runtime" true
+           (String_util.contains_substring detail "local.consolidation"))
+;;
+
+let test_runtime_config_validation_rejects_uncapped_special_runtime () =
+  let content route =
+    Printf.sprintf
+      "[providers.local]\n\
+       protocol = \"openai-compatible-http\"\n\
+       endpoint = \"http://127.0.0.1:1/v1\"\n\
+       \n\
+       [models.default]\n\
+       api-name = \"default\"\n\
+       max-context = 1024\n\
+       \n\
+       [models.special]\n\
+       api-name = \"special\"\n\
+       max-context = 1024\n\
+       \n\
+       [local.default]\n\
+       max-request-body-bytes = 65536\n\
+       \n\
+       [local.special]\n\
+       \n\
+       [runtime]\n\
+       default = \"local.default\"\n\
+       %s = \"local.special\"\n"
+      route
+  in
+  List.iter
+    (fun route ->
+       let snapshot = Runtime.For_testing.snapshot () in
+       let path = Filename.temp_file "uncapped_special_runtime_" ".toml" in
+       let config = content route in
+       let oc = open_out path in
+       output_string oc config;
+       close_out oc;
+       Fun.protect
+         ~finally:(fun () ->
+           Runtime.For_testing.restore snapshot;
+           try Sys.remove path with
+           | Sys_error _ -> ())
+         (fun () ->
+            match Runtime.save_config_text ~runtime_config_path:path config with
+            | Ok () ->
+              failf "uncapped %s runtime must fail runtime config validation" route
+            | Error detail ->
+              check bool "typed config diagnostic names the cap" true
+                (String_util.contains_substring detail "max-request-body-bytes");
+              check bool "typed config diagnostic names the special runtime" true
+                (String_util.contains_substring detail "local.special")))
+    [ "structured_judge"; "cross_verifier" ]
+;;
+
+let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.dormant]\n\
+     api-name = \"dormant\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [local.dormant]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     [runtime.lanes.dormant]\n\
+     strategy = \"ordered\"\n\
+     candidates = [\"local.dormant\"]\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "dormant_uncapped_runtime_" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       match Runtime.save_config_text ~runtime_config_path:path content with
+       | Ok () -> ()
+       | Error detail ->
+         failf
+           "uncapped dormant lane must not block unrelated Keeper routing: %s"
+           detail)
+;;
+
 let test_runtime_toml_rejects_non_positive_max_request_body_bytes () =
   let template n =
     Printf.sprintf
@@ -1765,6 +2024,7 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
      thinking-support = true\n\
      \n\
      [ollama_cloud.shared]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"ollama_cloud.shared\"\n"
@@ -1926,6 +2186,7 @@ let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [ollama.missing]\n\
      \n\
@@ -2087,6 +2348,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      api-name = \"missing-from-oas-catalog\"\n\
      \n\
      [ollama.good]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [ollama.missing]\n\
      \n\
@@ -2406,8 +2668,10 @@ let test_structured_judge_runtime_routing () =
      supports-structured-output = true\n\
      \n\
      [local.chat]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [local.judge]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"local.chat\"\n"
@@ -2724,8 +2988,10 @@ let test_save_config_text_refreshes_cross_verifier_runtime () =
      supports-response-format-json = true\n\
      \n\
      [local.chat]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [local.libr]\n\
+     max-request-body-bytes = 65536\n\
      \n\
      [runtime]\n\
      default = \"local.chat\"\n\
@@ -2774,8 +3040,10 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        max-context = 1024\n\
        \n\
        [local.chat]\n\
+       max-request-body-bytes = 65536\n\
        \n\
        [local.libr]\n\
+       max-request-body-bytes = 65536\n\
        \n\
        [runtime]\n\
        default = \"%s\"\n\
@@ -3263,6 +3531,24 @@ let () =
             test_runtime_toml_parses_optional_max_request_body_bytes;
           test_case "omitted max-request-body-bytes stays None" `Quick
             test_runtime_toml_omitted_max_request_body_bytes_is_none;
+          test_case
+            "keeper dispatch graph enumeration"
+            `Quick test_keeper_dispatch_runtime_graph_enumeration;
+          test_case
+            "runtime config rejects uncapped keeper candidate"
+            `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
+          test_case
+            "runtime config rejects uncapped Memory OS consolidation runtime"
+            `Quick
+            test_runtime_config_validation_rejects_uncapped_memory_os_runtime;
+          test_case
+            "runtime config rejects uncapped structured-judge and cross-verifier runtimes"
+            `Quick
+            test_runtime_config_validation_rejects_uncapped_special_runtime;
+          test_case
+            "runtime config allows uncapped dormant lane candidate"
+            `Quick
+            test_runtime_config_validation_allows_uncapped_dormant_lane_candidate;
           test_case "non-positive max-request-body-bytes is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case

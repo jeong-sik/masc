@@ -26,6 +26,8 @@ let consolidation_max_tokens = 8192
 
 type outcome =
   | Skipped_too_few of int
+  | Provider_config_invalid of Runtime.request_body_cap_error
+  | Provider_transport_failed of string
   | Transport_failed of string
   | Unparseable of string
   | Empty_response
@@ -144,21 +146,28 @@ let consolidate_keeper
       ~keeper_id
       ()
   =
-  match Io.read_facts_all_strict ~keeper_id with
-  | Error msg -> Unparseable ("consolidation fact store read failed: " ^ msg)
-  | Ok facts ->
-    let before = List.length facts in
-    if before = 0
-    then Skipped_too_few before
-    else
-      match messages_for_consolidation facts with
-      | Error msg -> Unparseable msg
-      | Ok messages ->
-        (match
+  match Runtime.validate_request_body_cap ~runtime_id provider_cfg with
+  | Error error -> Provider_config_invalid error
+  | Ok () ->
+    match Io.read_facts_all_strict ~keeper_id with
+    | Error msg -> Unparseable ("consolidation fact store read failed: " ^ msg)
+    | Ok facts ->
+      let before = List.length facts in
+      if before = 0
+      then Skipped_too_few before
+      else
+        match messages_for_consolidation facts with
+        | Error msg -> Unparseable msg
+        | Ok messages ->
+          (match
            Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
              ~config:provider_cfg ~messages ()
          with
-         | Error _ -> Transport_failed "consolidation provider transport error"
+         | Error error ->
+           let detail = Provider_http_error.to_message error in
+           if Runtime_attempt_fsm.should_try_next error
+           then Provider_transport_failed detail
+           else Transport_failed detail
          | Ok response ->
            if String.trim (Agent_sdk_response.text_of_response response) = ""
            then Empty_response
@@ -228,5 +237,5 @@ let consolidate_keeper
                     ~after
                     ()
               | Ok _ -> invalid_structured_response Consolidation.Non_object_json)
-        )
+          )
 ;;

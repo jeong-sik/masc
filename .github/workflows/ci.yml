@@ -837,6 +837,19 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_runtime_provider_auth_headers"
 
+      - name: Run Keeper request-cap suite
+        id: keeper_request_cap_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          request_cap_targets="@test/runtest-test_runtime_config_validity @test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_vision_tool @test/runtest-test_keeper_memory_os_consolidation_runtime @test/runtest-test_server_bootstrap_maintenance_memory_os"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${request_cap_targets}"
+
       - name: Run operator control suite
         id: operator_control_suite
         # Run regardless of earlier test failures, but only after a successful

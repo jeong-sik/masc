@@ -533,6 +533,132 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
          r.model.id)
 ;;
 
+type request_body_cap_error = Missing_or_non_positive_request_body_cap of
+  { runtime_id : string
+  }
+
+let request_body_cap_error_to_string = function
+  | Missing_or_non_positive_request_body_cap { runtime_id } ->
+    Printf.sprintf
+      "Keeper runtime %S has no positive serialized-request ceiling"
+      runtime_id
+;;
+
+(* The capability is checked at configuration admission and again immediately
+   before each concrete provider call. The latter is required because feature
+   owners may transform a materialized provider config after runtime.toml has
+   been accepted. *)
+let validate_request_body_cap ~runtime_id
+    (provider_config : Llm_provider.Provider_config.t) =
+  match provider_config.max_request_body_bytes with
+  | Some cap when cap > 0 -> Ok ()
+  | None | Some _ ->
+    Error (Missing_or_non_positive_request_body_cap { runtime_id })
+;;
+
+(* Keeper provider attempts originate at the configured default, an explicit
+   keeper assignment, an explicit media-failover runtime, the periodic Memory
+   OS consolidation runtime, structured judge, or cross verifier. A lane is
+   reachable only when its id shadows one of the configured routes; a merely
+   declared lane is dormant until a routed root names it.
+   Expand each lane-capable route with the same lane-over-runtime precedence as
+   [resolve_assignment], keep media_failover runtime-only, then preserve first
+   occurrence order. Every attempt is checked again after its final provider
+   config transform in Keeper_turn_driver. No provider/model names live in
+   this policy. *)
+(* TEL-OK: pure reachability projection; callers own config-load diagnostics. *)
+let keeper_dispatch_runtime_ids
+    ~(default_runtime_id : string)
+    ~(assignments : (string * string) list)
+    ~(memory_os_consolidation_runtime_id : string option)
+    ~(structured_judge_runtime_id : string option)
+    ~(cross_verifier_runtime_id : string option)
+    ~(media_failover : string list)
+    ~(lanes : Runtime_lane.t list)
+  =
+  let expand id =
+    match find_declared_lane lanes id with
+    | Some lane -> Runtime_lane.ordered_candidates lane
+    | None -> [ id ]
+  in
+  let routed_roots =
+    default_runtime_id :: List.map snd assignments
+    |> List.concat_map expand
+  in
+  let rec dedupe seen acc = function
+    | [] -> List.rev acc
+    | id :: rest when List.mem id seen -> dedupe seen acc rest
+    | id :: rest -> dedupe (id :: seen) (id :: acc) rest
+  in
+  (* These special routes reach providers outside the ordinary keeper default
+     and assignment dispatch, so startup must admit every configured lane
+     candidate's request cap here as well. *)
+  dedupe
+    []
+    []
+    ( routed_roots
+      @ media_failover
+      @ (memory_os_consolidation_runtime_id
+         |> Option.to_list
+         |> List.concat_map expand)
+      @ (structured_judge_runtime_id |> Option.to_list |> List.concat_map expand)
+      @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand) )
+;;
+
+(* TEL-OK: pure fail-closed validation; the load boundary surfaces its error. *)
+let validate_keeper_dispatch_request_caps
+    ~(config_path : string)
+    ( runtimes
+    , (default_runtime : t)
+    , assignments
+    , memory_os_consolidation_runtime_id
+    , structured_judge_runtime_id
+    , cross_verifier_runtime_id
+    , media_failover
+    , lanes )
+  =
+  let ids =
+    keeper_dispatch_runtime_ids
+      ~default_runtime_id:default_runtime.id
+      ~assignments
+      ~memory_os_consolidation_runtime_id
+      ~structured_judge_runtime_id
+      ~cross_verifier_runtime_id
+      ~media_failover
+      ~lanes
+  in
+  let runtime_by_id id =
+    List.find_opt (fun (runtime : t) -> String.equal runtime.id id) runtimes
+  in
+  match
+    List.find_map
+      (fun id ->
+         match runtime_by_id id with
+         | None -> None
+         | Some runtime ->
+           (match
+              validate_request_body_cap
+                ~runtime_id:runtime.id
+                runtime.provider_config
+            with
+            | Ok () -> None
+            | Error _ -> Some runtime))
+      ids
+  with
+  | None -> Ok ()
+  | Some runtime ->
+    Error
+      (Printf.sprintf
+         "%s: Keeper-dispatch runtime %S has no positive \
+          max-request-body-bytes; declare [%s.%s].max-request-body-bytes before \
+          dispatch so the exact serialized request has an explicit admission \
+          ceiling"
+         config_path
+         runtime.id
+         runtime.binding.provider_id
+         runtime.binding.model_id)
+;;
+
 (* Every runtime binding's provider/model pair must be known to the OAS
    capability catalog. Use the materialized [Provider_config.t] so
    provider-qualified catalog rows are considered before bare model rows; this
@@ -1043,8 +1169,11 @@ let init_default_strict_report ~config_path =
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
-       set_loaded ~config_path loaded;
-       Ok ())
+       (match validate_keeper_dispatch_request_caps ~config_path loaded with
+        | Error msg -> Error (Runtime_config_error msg)
+        | Ok () ->
+          set_loaded ~config_path loaded;
+          Ok ()))
 
 let init_default_strict ~config_path =
   init_default_strict_report ~config_path
@@ -1059,8 +1188,11 @@ let init_default_degraded_report ~config_path =
        (match validate_runtime_max_context ~config_path runtimes with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok () ->
-          set_loaded ~config_path loaded;
-          Ok Initialized)
+          (match validate_keeper_dispatch_request_caps ~config_path loaded with
+           | Error msg -> Error (Runtime_config_error msg)
+           | Ok () ->
+             set_loaded ~config_path loaded;
+             Ok Initialized))
      | Some report ->
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
@@ -1070,11 +1202,18 @@ let init_default_degraded_report ~config_path =
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
-             set_loaded
-               ~startup_degradation:degradation
-               ~config_path
-               degraded_loaded;
-             Ok (Initialized_degraded degradation))))
+             (match
+                validate_keeper_dispatch_request_caps
+                  ~config_path
+                  degraded_loaded
+              with
+              | Error msg -> Error (Runtime_config_error msg)
+              | Ok () ->
+                set_loaded
+                  ~startup_degradation:degradation
+                  ~config_path
+                  degraded_loaded;
+                Ok (Initialized_degraded degradation)))))
 
 let runtime_state () = Atomic.get loaded_state_ref
 
@@ -1134,38 +1273,60 @@ type dashboard_runtime_defaults_snapshot =
    immutable loaded-state snapshot. Only an absent task route inherits the
    default. A configured id missing from the same snapshot is an invariant
    violation, never permission to execute on a different runtime. *)
-let resolve_memory_os_consolidation_from_state (state : loaded_state) =
+let resolve_memory_os_consolidation_runtime_candidates_from_state
+    (state : loaded_state)
+  =
   match state.default_runtime, state.memory_os_consolidation_runtime_id with
   | None, _ ->
     Error
       "Memory OS consolidation runtime cannot resolve before runtime initialization"
   | Some default_runtime, None ->
-    Ok
-      { effective_runtime = default_runtime
-      ; resolution_source = Consolidation_inherited_default
-      }
-  | Some _, Some runtime_id ->
-    (match
-       List.find_opt
-         (fun (runtime : t) -> String.equal runtime.id runtime_id)
-         state.runtimes
-     with
-     | Some runtime ->
-       Ok
-         { effective_runtime = runtime
-         ; resolution_source = Consolidation_configured
-         }
-     | None ->
-       Error
-         (Printf.sprintf
-            "configured [runtime].memory_os_consolidation id %S is absent from \
-             the loaded runtime snapshot"
-            runtime_id))
+    Ok [ default_runtime ]
+  | Some _, Some route_id ->
+    let candidate_ids =
+      match find_declared_lane state.lanes route_id with
+      | Some lane -> Runtime_lane.ordered_candidates lane
+      | None -> [ route_id ]
+    in
+    let rec resolve acc = function
+      | [] -> Ok (List.rev acc)
+      | runtime_id :: rest ->
+        (match
+           List.find_opt
+             (fun (runtime : t) -> String.equal runtime.id runtime_id)
+             state.runtimes
+         with
+         | Some runtime -> resolve (runtime :: acc) rest
+         | None ->
+           Error
+             (Printf.sprintf
+                "configured [runtime].memory_os_consolidation candidate %S is \
+                 absent from the loaded runtime snapshot"
+                runtime_id))
+    in
+    resolve [] candidate_ids
+;;
+
+let resolve_memory_os_consolidation_from_state (state : loaded_state) =
+  let source =
+    match state.memory_os_consolidation_runtime_id with
+    | None -> Consolidation_inherited_default
+    | Some _ -> Consolidation_configured
+  in
+  match resolve_memory_os_consolidation_runtime_candidates_from_state state with
+  | Error _ as error -> error
+  | Ok [] ->
+    Error "Memory OS consolidation route resolved to an empty runtime candidate list"
+  | Ok (effective_runtime :: _) -> Ok { effective_runtime; resolution_source = source }
 ;;
 
 let resolve_memory_os_consolidation_runtime () =
   resolve_memory_os_consolidation_from_state (runtime_state ())
   |> Result.map (fun resolution -> resolution.effective_runtime)
+;;
+
+let resolve_memory_os_consolidation_runtime_candidates () =
+  resolve_memory_os_consolidation_runtime_candidates_from_state (runtime_state ())
 ;;
 
 let dashboard_runtime_defaults_snapshot () =
@@ -1636,8 +1797,10 @@ let materialize_runtime_config_text ~config_path content =
 ;;
 
 let validate_runtime_config_text ~config_path content =
-  let* _loaded = materialize_runtime_config_text ~config_path content in
-  Ok ()
+  let* loaded, _exact_output_lanes =
+    materialize_runtime_config_text ~config_path content
+  in
+  validate_keeper_dispatch_request_caps ~config_path loaded
 ;;
 
 let runtime_config_write_mutex = Mutex.create ()
@@ -1693,6 +1856,8 @@ let commit_runtime_config_text
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path:path content
   in
+  (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
+  let* () = validate_keeper_dispatch_request_caps ~config_path:path loaded in
   match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
   with
@@ -1757,9 +1922,12 @@ let save_config_text ?runtime_config_path content =
 
 module For_testing = struct
   type snapshot = loaded_state
+  (* TEL-OK: this module only exposes pure state and validation test helpers. *)
 
   let snapshot () = runtime_state ()
   let restore snapshot = Atomic.set loaded_state_ref snapshot
+  (* TEL-OK: test-only alias of the pure reachability projection above. *)
+  let keeper_dispatch_runtime_ids = keeper_dispatch_runtime_ids
 
   let save_config_text_with_sync_parent
       ?runtime_config_path

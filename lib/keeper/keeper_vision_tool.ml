@@ -332,10 +332,21 @@ let run_candidates_outcome
           rest
       in
       let config = provider_for_vision rt.Runtime.provider_config in
-      (match
-         Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
-           ~config ~messages ()
-       with
+      match Runtime.validate_request_body_cap ~runtime_id config with
+      | Error error ->
+        record_vision_candidate_attempt
+          ~runtime_id
+          ~result:"error"
+          ~reason:"missing_request_body_cap";
+        Vo_provider
+          { failure_class = Tool_result.Runtime_failure
+          ; detail = Runtime.request_body_cap_error_to_string error
+          }
+      | Ok () ->
+        (match
+           Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
+             ~config ~messages ()
+         with
        | Error (Llm_provider.Http_client.TimeoutError _) ->
             record_vision_candidate_attempt
               ~runtime_id

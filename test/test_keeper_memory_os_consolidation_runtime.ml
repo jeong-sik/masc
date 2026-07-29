@@ -4,6 +4,7 @@
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Consolidation = Masc.Keeper_memory_os_consolidation
+module Runtime_config = Runtime
 module Runtime = Masc.Keeper_memory_os_consolidation_runtime
 module Structured_schema = Masc.Keeper_structured_output_schema
 module Agent_sdk_response = Masc.Agent_sdk_response
@@ -71,12 +72,14 @@ let text_of_message (message : Atypes.message) =
 
 (* The fake completion ignores the config, so any valid one works. *)
 let provider_cfg ?max_tokens () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Anthropic
-    ~model_id:"fake"
-    ~base_url:"http://localhost"
-    ?max_tokens
-    ()
+  { (Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~model_id:"fake"
+      ~base_url:"http://localhost"
+      ?max_tokens
+      ()) with
+    max_request_body_bytes = Some 65_536
+  }
 ;;
 
 let with_temp_keepers f =
@@ -444,7 +447,46 @@ let test_consolidate_classifies_invalid_structured_response () =
             "expected Invalid_structured_response for malformed provider output"))))
 ;;
 
-let test_consolidate_requires_clock_before_provider_call () =
+let test_consolidate_keeps_non_retryable_provider_admission_terminal () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        let called = ref false in
+        let complete : Runtime.complete_fn =
+          fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+          called := true;
+          Error
+            (Llm_provider.Http_client.AcceptRejected
+               { reason = "local request admission rejected" })
+        in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        Alcotest.(check bool) "provider boundary was called" true !called;
+        match outcome with
+        | Runtime.Transport_failed msg ->
+          Alcotest.(check bool)
+            "message preserves local admission reason"
+            true
+            (contains "local request admission rejected" msg)
+        | _ ->
+          Alcotest.fail "non-retryable admission failure must remain terminal"))))
+;;
+
+let test_consolidate_rejects_uncapped_provider_before_call () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
@@ -459,29 +501,35 @@ let test_consolidate_requires_clock_before_provider_call () =
           called := true;
           Ok (fake_response {|{"groups":[],"drop_indices":[]}|})
         in
+        let uncapped_provider_cfg =
+          { (provider_cfg ()) with
+            Llm_provider.Provider_config.max_request_body_bytes = None
+          }
+        in
         let outcome =
           Runtime.consolidate_keeper
             ~complete
             ~sw
             ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
             ~runtime_id:unconfigured_runtime_id
-            ~provider_cfg:(provider_cfg ())
+            ~provider_cfg:uncapped_provider_cfg
             ~now
             ~keeper_id
             ()
         in
         Alcotest.(check bool) "provider was not called" false !called;
         match outcome with
-        | Runtime.Transport_failed msg ->
+        | Runtime.Provider_config_invalid error ->
           Alcotest.(check bool)
-            "message names unavailable clock"
+            "message names request body cap"
             true
-            (contains "clock unavailable" msg);
-          Alcotest.(check bool)
-            "message names timeout"
-            true
-            (contains "timeout_sec=1.0" msg)
-        | _ -> Alcotest.fail "expected Transport_failed for missing clock"))))
+            (contains
+               "serialized-request ceiling"
+               (Runtime_config.request_body_cap_error_to_string error))
+        | _ ->
+          Alcotest.fail
+            "uncapped consolidation config must fail before provider dispatch"))))
 ;;
 
 let test_consolidate_respects_provider_config_and_prompt_template () =
@@ -657,9 +705,13 @@ let () =
             `Quick
             test_consolidate_classifies_invalid_structured_response
         ; Alcotest.test_case
-            "requires clock before provider call"
+            "keeps non-retryable provider admission terminal"
             `Quick
-            test_consolidate_requires_clock_before_provider_call
+            test_consolidate_keeps_non_retryable_provider_admission_terminal
+        ; Alcotest.test_case
+            "rejects uncapped provider before call"
+            `Quick
+            test_consolidate_rejects_uncapped_provider_before_call
         ; Alcotest.test_case
             "respects provider config and prompt template"
             `Quick

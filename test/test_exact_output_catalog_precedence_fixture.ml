@@ -176,8 +176,10 @@ supports-response-format-json = true
 supports-structured-output = true
 
 [replacement_provider.replacement]
+max-request-body-bytes = 65536
 
 [replacement_provider.secondary]
+max-request-body-bytes = 65536
 
 [runtime]
 default = "replacement_provider.replacement"
@@ -205,6 +207,7 @@ api-name = "replacement-model"
 max-context = 8192
 
 [replacement_provider.alternate]
+max-request-body-bytes = 65536
 
 [runtime]
 default = "replacement_provider.alternate"
@@ -314,6 +317,7 @@ api-name = "replacement-model"
 max-context = 8192
 
 [replacement_provider.%s]
+max-request-body-bytes = 65536
 
 [runtime]
 default = %S

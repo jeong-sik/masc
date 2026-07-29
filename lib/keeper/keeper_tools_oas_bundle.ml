@@ -56,10 +56,9 @@ let make_tool_bundle
      the same cycle replays nothing.
 
      Replay carries the same causal context the model-issued path carries: a
-     replay whose re-derived input no longer matches its approval falls back
-     to an ordinary Gate request, and a request without causal context cannot
-     be summarized, which stalls the FIFO drain for every later approval
-     (#25966). *)
+     replay whose re-derived input no longer matches its approval follows the
+     producer's ordinary Gate behavior instead of inventing another replay
+     constraint. *)
   let gate_replay_delivery =
     match hitl_resolution, gate_grant with
     | ( Some
@@ -81,6 +80,7 @@ let make_tool_bundle
            ()
       in
       (match outcome with
+       | Keeper_gate_replay.Not_applicable -> ()
        | Keeper_gate_replay.Applied _ as outcome ->
          Log.Keeper.info
            "gate replay approval=%s %s"

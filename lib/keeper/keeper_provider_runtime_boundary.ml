@@ -216,7 +216,6 @@ let classify_masc_internal_error = function
       | Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Receipt_persistence_failed _
-      | Keeper_internal_error.History_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->
     Not_provider_runtime_failure

@@ -100,7 +100,6 @@ let transcript_corruption error =
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Receipt_persistence_failed _
-      | Keeper_internal_error.History_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->
     None
@@ -113,11 +112,10 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
   with
   | Some _, (Some _ | None) ->
     Keeper_runtime_failure_route.Masc_execution
-  | None, Some (Keeper_internal_error.History_persistence_failed _)
   | None, Some (Keeper_internal_error.Gate_replay_repair_required _) ->
-    (* Both failures are produced by MASC after host replay and before provider
+    (* This failure is produced by MASC after host replay and before provider
        dispatch. The shared [Agent_sdk.Error.Internal] carrier must not
-       misattribute that local persistence boundary to OAS. *)
+       misattribute that local replay boundary to OAS. *)
     Keeper_runtime_failure_route.Masc_execution
   | None,
     Some
@@ -1413,8 +1411,7 @@ dominant source of the observed CAS race exhaustion after
                         | Keeper_internal_error.Internal_contract_rejected _
                         | Keeper_internal_error.Incomplete_tool_transcript _
                         | Keeper_internal_error.Terminal_effect_failed _
-                        | Keeper_internal_error.Receipt_persistence_failed _
-                        | Keeper_internal_error.History_persistence_failed _ )
+                        | Keeper_internal_error.Receipt_persistence_failed _ )
                     | None ->
                       false
                   in

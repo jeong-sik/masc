@@ -90,12 +90,11 @@ type transcript_quarantine_reason =
 type gate_replay_repair_stage =
   | Replay_resolution_lookup
   | Replay_request_decode
-  | Replay_grant_consumption
   | Replay_evidence_storage
+  | Replay_evidence_retrieval
   | Replay_journal
   | Replay_effect_indeterminate_after_restart
   | Replay_invalid_resolution_state
-  | Replay_unsupported_operation
 
 type masc_internal_error =
   | Runtime_exhausted of {
@@ -149,10 +148,6 @@ type masc_internal_error =
       diagnostic : string;
     }
   | Receipt_persistence_failed of { detail : string }
-  | History_persistence_failed of {
-      approval_id : string;
-      detail : string;
-    }
   | Gate_replay_repair_required of {
       approval_id : string;
       operation : string;

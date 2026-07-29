@@ -117,7 +117,6 @@ let prepare_agent_setup
       ?runtime_manifest_append
       ?continuation_channel
       ?hitl_resolution
-      ?on_user_message_composed
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
@@ -214,21 +213,23 @@ let prepare_agent_setup
                      Keeper_internal_error.Replay_resolution_lookup
                    | Keeper_gate_replay.Request_decode ->
                      Keeper_internal_error.Replay_request_decode
-                   | Keeper_gate_replay.Grant_consumption ->
-                     Keeper_internal_error.Replay_grant_consumption
                    | Keeper_gate_replay.Evidence_storage ->
                      Keeper_internal_error.Replay_evidence_storage
+                   | Keeper_gate_replay.Evidence_retrieval ->
+                     Keeper_internal_error.Replay_evidence_retrieval
                    | Keeper_gate_replay.Replay_journal ->
                      Keeper_internal_error.Replay_journal
                    | Keeper_gate_replay.Replay_effect_indeterminate_after_restart ->
                      Keeper_internal_error.Replay_effect_indeterminate_after_restart
                    | Keeper_gate_replay.Invalid_resolution_state ->
-                     Keeper_internal_error.Replay_invalid_resolution_state
-                   | Keeper_gate_replay.Unsupported_operation ->
-                     Keeper_internal_error.Replay_unsupported_operation)
+                     Keeper_internal_error.Replay_invalid_resolution_state)
               ; detail
               }))
-    | Some (_, (Keeper_gate_replay.Applied _ | Keeper_gate_replay.Failed _))
+    | Some
+        ( _
+        , ( Keeper_gate_replay.Not_applicable
+          | Keeper_gate_replay.Applied _
+          | Keeper_gate_replay.Failed _ ) )
     | None ->
       Ok ()
   in
@@ -238,21 +239,6 @@ let prepare_agent_setup
       ~user_message
       ~hitl_resolution
       ~replay_delivery
-  in
-  let* () =
-    match on_user_message_composed with
-    | None -> Ok ()
-    | Some callback ->
-      (match callback user_message with
-       | Ok () -> Ok ()
-       | Error error ->
-         (try keeper_tools_cleanup () with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-            Log.Keeper.error
-              "keeper tool cleanup after composed-message failure raised: %s"
-              (Printexc.to_string exn));
-         Error error)
   in
   let prompt_metrics =
     Keeper_agent_prompt_metrics.build_prompt_metrics

@@ -578,38 +578,6 @@ let run_turn
       ~publication_recovery
       ?continuation_channel
       ?hitl_resolution
-      ~on_user_message_composed:
-        (fun composed_user_message ->
-           match hitl_resolution with
-           | Some resolution ->
-             (* Host replay has consumed the grant and reduced any large
-                result to bounded evidence before this durable row is
-                committed. The event identity makes retries exact-once. *)
-             let approval_id = resolution.Keeper_event_queue.approval_id in
-             let idempotency_key =
-               Keeper_event_queue.hitl_resolution_post_id resolution
-             in
-             (match
-                Keeper_context_runtime.persist_message_once
-                  ~idempotency_key
-                  ~source:Keeper_types_support.hitl_resolution_history_source
-                  session
-                  (Agent_sdk.Types.user_msg composed_user_message)
-              with
-              | Ok
-                  ( Keeper_context_core.History_message_persisted
-                  | Keeper_context_core.History_message_already_persisted ) ->
-                Ok ()
-              | Error error ->
-                let detail =
-                  Keeper_context_runtime.history_persist_once_error_to_string
-                    error
-                in
-                Error
-                  (Keeper_internal_error.sdk_error_of_masc_internal_error
-                     (Keeper_internal_error.History_persistence_failed
-                        { approval_id; detail })))
-           | None -> Ok ())
       ~turn_ctx_cell
       ~ctx_work
       ~session

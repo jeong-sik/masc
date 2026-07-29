@@ -43,16 +43,6 @@ val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
 val serialize_context : working_context -> string
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
-val persist_message_once :
-  idempotency_key:string ->
-  ?source:string ->
-  session_context ->
-  Agent_sdk.Types.message ->
-  ( Keeper_context_core.history_persist_once_outcome
-  , Keeper_context_core.history_persist_once_error )
-  result
-val history_persist_once_error_to_string :
-  Keeper_context_core.history_persist_once_error -> string
 
 (** {1 Inference Utilities} *)
 

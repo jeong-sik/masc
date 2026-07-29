@@ -86,25 +86,17 @@ type grant_error =
   | Grant_resolution_missing of string
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
-  | Grant_replay_evidence_too_large of
-      { approval_id : string
-      ; actual_bytes : int
-      ; max_bytes : int
-      }
 
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
 
 type resolution_replay_outcome =
-  | Replay_applied of string
-  | Replay_failed of string
-(** The string is bounded replay evidence, normally a content-addressed
-    {!Tool_output.Stored} marker. Full external-effect bytes live in
-    {!Tool_blob_store}; durable queue state and model input carry only the
-    recoverable reference and preview. *)
-
-val max_replay_evidence_bytes : int
+  | Replay_applied of Tool_output.artifact_ref
+  | Replay_failed of Tool_output.artifact_ref
+(** Derived replay evidence points to exact bytes in {!Tool_blob_store}. The
+    Gate sidecar owns only this typed content address; provider input is
+    rehydrated from it and is never replaced with a size-based preview. *)
 
 type approved_resolution_delivery =
   { request : approved_resolution_request
@@ -130,6 +122,7 @@ type install_report =
   { loaded_pending : int
   ; replayed_deliveries : int
   ; delivery_replay_failures : delivery_replay_failure list
+  ; replay_projection_error : storage_error option
   }
 
 type install_error = Install_storage_failed of storage_error
@@ -153,6 +146,10 @@ val install_error_to_string : install_error -> string
     Snapshot read and in-memory installation are one serialized transition, so
     a concurrent mutation for the same workspace cannot be overwritten by the
     loaded snapshot.
+    A malformed or unreadable derived replay projection is reported in
+    [replay_projection_error] without making the authorization store
+    unavailable. The projection stays untouched and replay-result writes remain
+    scoped unavailable until operator repair.
     In-flight summaries retain their durable state. Independent delivery replay
     failures are returned in [delivery_replay_failures] and never prevent later
     journals or Gate recovery from being attempted. *)
@@ -191,10 +188,11 @@ val consume_approved_resolution :
   input:Yojson.Safe.t ->
   (grant_consumption, grant_error) result
 
-(** Durably attach bounded, recoverable host replay evidence to a consumed
-    approval. Outcomes live in an additive sidecar rather than inflating the
-    pending snapshot. Identical writes are idempotent; conflicting, oversized,
-    or not-fully-synced writes fail closed. *)
+(** Durably attach a typed content address for exact host replay evidence to a
+    consumed approval. The derived replay projection is separate from
+    authorization state, so a write failure affects this approval's replay
+    delivery only. Identical writes are idempotent; conflicting or
+    not-fully-synced writes fail visibly. *)
 val record_consumed_resolution_replay :
   base_path:string ->
   id:string ->

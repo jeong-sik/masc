@@ -5,8 +5,10 @@ val dir : base_path:string -> string
 val mode : base_path:string -> string
 val pending : base_path:string -> string
 val replay_results : base_path:string -> string
-(** Durable host-replay outcomes live beside [pending.json]. Keeping them in
-    an additive sidecar preserves the pending snapshot wire contract while
-    allowing blob-backed evidence to survive process restart. *)
+(** Derived host-replay result references live beside [pending.json].
+    Source: one consumed approval plus its exact effect result. Purpose: recover
+    that result after restart without executing the effect again. Blast radius:
+    one approval's replay delivery; this projection is not authorization state
+    and its write failure does not make the pending Gate store unavailable. *)
 
 val always_allowed : base_path:string -> string

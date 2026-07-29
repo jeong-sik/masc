@@ -16,19 +16,20 @@ type replay_journal =
   | Replay_journal_recorded
   | Replay_journal_already_recorded
   | Replay_grant_not_consumed
-  | Replay_journal_failed of string
 
 type repair_stage =
   | Resolution_lookup
   | Request_decode
-  | Grant_consumption
   | Evidence_storage
+  | Evidence_retrieval
   | Replay_journal
   | Replay_effect_indeterminate_after_restart
   | Invalid_resolution_state
-  | Unsupported_operation
 
 type outcome =
+  | Not_applicable
+      (** The approved operation has no producer-owned host replay
+          continuation and retains its existing model-issued path. *)
   | Applied of
       { operation : string
       ; output : string
@@ -51,16 +52,16 @@ type outcome =
 val repair_stage_to_string : repair_stage -> string
 
 val outcome_to_string : outcome -> string
-(** Render operation, journal state, bounded evidence byte count, and SHA-256
-    only. Full replay output lives in the content-addressed blob store and is
-    never copied into operational logs. *)
+(** Render operation, journal state, exact evidence byte count, and SHA-256
+    only. Full replay output is never copied into operational logs. *)
 
 val append_model_evidence :
   approval_id:string -> user_message:string -> outcome -> string
-(** Append bounded host replay evidence to the current model turn. Applied
-    output is an artifact reference plus preview labelled as untrusted data,
-    and both outcomes explicitly forbid blindly requesting the same approved
-    operation again. *)
+(** Append exact host replay evidence to the current model turn, labelled as
+    untrusted data. Runtime request-body admission, not a local byte heuristic,
+    owns capacity. Replay outcomes explicitly forbid blindly requesting the
+    same approved operation again. [Not_applicable] leaves the message
+    unchanged. *)
 
 val approved_resolution_message :
   approval_id:string ->
@@ -69,8 +70,9 @@ val approved_resolution_message :
   user_message:string ->
   string
 (** Render an unconsumed approval. Replayable operations tell the model that
-    the host spends the grant; non-replayable operations retain the ordinary
-    exact-call authorization instruction. *)
+    missing host evidence requires repair. Non-replayable operations retain
+    the existing exact-call authorization and exact input without adding a
+    second replay restriction. *)
 
 val user_message_with_hitl_resolution :
   base_path:string ->
@@ -78,7 +80,8 @@ val user_message_with_hitl_resolution :
   Keeper_event_queue.hitl_resolution option ->
   string
 (** Render a durable HITL resolution that was not freshly replayed in this
-    setup. Consumed approvals expose only bounded replay evidence. *)
+    setup. Consumed approvals rehydrate their exact replay evidence from the
+    typed content-addressed reference. *)
 
 val compose_model_message :
   base_path:string ->
@@ -89,32 +92,6 @@ val compose_model_message :
 (** Build the model message once, after host replay. A fresh replay starts from
     the undecorated user message, so the pre-replay exact approval payload
     cannot survive beside a consumed result. *)
-
-(** Reconstruct the write tool arguments from the approved Gate input.
-
-    The Gate input carries the resolved target under [requested_target]
-    plus the payload fields; the write handler reads the same payload
-    under [path]. Only fields present in the approved input are carried,
-    so an approved content write never gains edit fields and vice versa. *)
-val write_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
-
-val execute_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
-(** Recover the execute tool arguments from the approved Gate input. Nothing is
-    reconstructed: the Gate request wraps the arguments with execution context
-    rather than re-encoding them, and the approved [cwd] the submitting handler
-    upserted into those arguments rides along. The envelope's own sandbox
-    fields stay behind for the handler to re-derive. *)
-
-val network_read_of_gate_input :
-  Yojson.Safe.t ->
-  (Keeper_tool_in_process_runtime.network_read_replay, string) result
-(** Decode the producer-owned [network_read] envelope without reconstructing
-    WebSearch or WebFetch arguments. *)
-
-val connector_post_of_gate_input :
-  Yojson.Safe.t ->
-  (Keeper_tool_in_process_runtime.connector_post_replay, string) result
-(** Decode the producer-owned exact connector request. *)
 
 type replayable =
   | Replay_write
@@ -132,15 +109,12 @@ val replayable_of_operation : string -> replayable option
     Covers operations whose approvals a Keeper must otherwise re-earn by
     re-emitting a byte-identical call: [filesystem_write], [tool_execute], and
     producer-typed [network_read] (WebSearch/WebFetch), and exact
-    [connector_post] continuations. Any other operation fails closed as
-    {!Repair_required} without consuming its authorization or copying the
-    exact approved input into another provider request.
+    [connector_post] continuations. Any other operation is
+    {!Not_applicable}; its existing model-issued path remains authoritative.
 
     [gate_context] is the same causal-context provider the model-issued write
-    path supplies. A replay whose re-derived input no longer matches its
-    approval falls back to an ordinary Gate request, and a request without
-    causal context cannot be summarized for Auto Judge, which stalls the FIFO
-    drain for every later approval.
+    path supplies. A re-derived input mismatch follows that producer's existing
+    ordinary Gate semantics; replay adds no second authorization constraint.
 
     Consumption is the durable one-shot grant. A repeated call after a
     successful replay returns the durable outcome without invoking the effect.
@@ -158,11 +132,15 @@ val replay_approved_effect :
   outcome
 
 module For_testing : sig
-  val persist_bounded_replay_evidence :
-    base_path:string -> string -> (string, string) result
+  val persist_replay_artifact :
+    base_path:string ->
+    string ->
+    (Tool_output.artifact_ref, string) result
 
   val with_replay_evidence_persister :
-    (base_path:string -> string -> (string, string) result) ->
+    ( base_path:string
+      -> string
+      -> (Tool_output.artifact_ref, string) result ) ->
     (unit -> 'a) ->
     'a
 end

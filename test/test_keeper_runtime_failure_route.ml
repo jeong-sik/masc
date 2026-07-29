@@ -228,25 +228,7 @@ let test_masc_internal_terminal_classes () =
     (KFR.Rotate_now { rotate = KFR.Runtime_exhausted })
     (internal_err
        (Keeper_internal_error.Runtime_exhausted
-          { runtime_id = "r"; reason = Keeper_internal_error.Session_conflict }));
-  match
-    route_of_masc_error
-      (internal_err
-         (Keeper_internal_error.History_persistence_failed
-            { approval_id = "approval-route"
-            ; detail = "history append failed"
-            }))
-  with
-  | KFR.Exhausted_visible_alive
-      { terminal = KFR.Internal_opaque
-      ; provenance = KFR.Masc_internal_error
-      ; _
-      } ->
-    ()
-  | other ->
-    Alcotest.failf
-      "post-replay history failure must retain its MASC boundary, got %s"
-      (KFR.route_kind_label other)
+          { runtime_id = "r"; reason = Keeper_internal_error.Session_conflict }))
 
 let test_non_provider_families_judge () =
   let raw_internal = Agent_sdk.Error.Internal "boom" in

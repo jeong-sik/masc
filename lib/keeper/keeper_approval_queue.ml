@@ -73,21 +73,14 @@ type grant_error =
   | Grant_resolution_missing of string
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
-  | Grant_replay_evidence_too_large of
-      { approval_id : string
-      ; actual_bytes : int
-      ; max_bytes : int
-      }
 
 type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
 
 type resolution_replay_outcome =
-  | Replay_applied of string
-  | Replay_failed of string
-
-let max_replay_evidence_bytes = 4096
+  | Replay_applied of Tool_output.artifact_ref
+  | Replay_failed of Tool_output.artifact_ref
 
 type approved_resolution_delivery =
   { request : approved_resolution_request
@@ -113,6 +106,7 @@ type install_report =
   { loaded_pending : int
   ; replayed_deliveries : int
   ; delivery_replay_failures : delivery_replay_failure list
+  ; replay_projection_error : storage_error option
   }
 
 type install_error = Install_storage_failed of storage_error
@@ -278,12 +272,6 @@ let grant_error_to_string = function
     Printf.sprintf
       "approval %s already has a different durable replay outcome"
       approval_id
-  | Grant_replay_evidence_too_large { approval_id; actual_bytes; max_bytes } ->
-    Printf.sprintf
-      "approval %s replay evidence is %d bytes; maximum durable evidence is %d bytes"
-      approval_id
-      actual_bytes
-      max_bytes
 ;;
 
 let install_error_to_string = function
@@ -297,6 +285,10 @@ let replay_results_store_surface = "keeper_gate_replay_results"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
+let replay_projection_errors : storage_error SMap.t Atomic.t =
+  Atomic.make SMap.empty
+;;
+
 let store_revisions : int SMap.t Atomic.t = Atomic.make SMap.empty
 (** Process projection of the next value persisted in each workspace snapshot. *)
 let next_sequences : int SMap.t Atomic.t = Atomic.make SMap.empty
@@ -429,10 +421,16 @@ let approval_decision_to_yojson = function
 ;;
 
 let resolution_replay_outcome_to_yojson = function
-  | Replay_applied output ->
-    `Assoc [ "kind", `String "applied"; "output", `String output ]
-  | Replay_failed detail ->
-    `Assoc [ "kind", `String "failed"; "detail", `String detail ]
+  | Replay_applied output_ref ->
+    `Assoc
+      [ "kind", `String "applied"
+      ; "output_ref", Tool_output.normalized_artifact_ref_to_json output_ref
+      ]
+  | Replay_failed detail_ref ->
+    `Assoc
+      [ "kind", `String "failed"
+      ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
+      ]
 ;;
 
 (* [request_context] is the Auto Judge / HITL summary input: request-local
@@ -1002,23 +1000,21 @@ let approval_decision_of_yojson json =
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
 
-let replay_evidence_bytes = function
-  | Replay_applied evidence
-  | Replay_failed evidence ->
-    String.length evidence
-;;
-
-let validate_replay_evidence_size ~approval_id outcome =
-  let actual_bytes = replay_evidence_bytes outcome in
-  if actual_bytes <= max_replay_evidence_bytes
-  then Ok ()
-  else
-    Error
-      (Grant_replay_evidence_too_large
-         { approval_id
-         ; actual_bytes
-         ; max_bytes = max_replay_evidence_bytes
-         })
+let replay_artifact_ref_of_yojson ~surface field fields =
+  match List.assoc_opt field fields with
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+  | Some json ->
+    (match Tool_output.normalized_artifact_ref_of_json json with
+     | Tool_output.Decoded_normalized_artifact_ref artifact_ref ->
+       Ok artifact_ref
+     | Tool_output.Not_normalized_artifact_ref ->
+       Error
+         (Printf.sprintf
+            "%s.%s must be a normalized artifact reference"
+            surface
+            field)
+     | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+       Error (Printf.sprintf "%s.%s: %s" surface field detail))
 ;;
 
 let resolution_replay_outcome_of_yojson ~surface = function
@@ -1030,25 +1026,24 @@ let resolution_replay_outcome_of_yojson ~surface = function
        let* () =
          reject_unknown_fields
            ~surface
-           ~allowed:[ "kind"; "output" ]
+           ~allowed:[ "kind"; "output_ref" ]
            fields
        in
-       let* output =
-         match List.assoc_opt "output" fields with
-         | Some (`String output) -> Ok output
-         | Some _ -> Error (surface ^ ".output must be a string")
-         | None -> Error (surface ^ ".output is required")
+       let* output_ref =
+         replay_artifact_ref_of_yojson ~surface "output_ref" fields
        in
-       Ok (Replay_applied output)
+       Ok (Replay_applied output_ref)
      | "failed" ->
        let* () =
          reject_unknown_fields
            ~surface
-           ~allowed:[ "kind"; "detail" ]
+           ~allowed:[ "kind"; "detail_ref" ]
            fields
        in
-       let* detail = required_string ~surface "detail" fields in
-       Ok (Replay_failed detail)
+       let* detail_ref =
+         replay_artifact_ref_of_yojson ~surface "detail_ref" fields
+       in
+       Ok (Replay_failed detail_ref)
      | other ->
        Error
          (Printf.sprintf
@@ -1173,10 +1168,6 @@ let replay_result_row_of_yojson json =
       resolution_replay_outcome_of_yojson
         ~surface:(surface ^ ".outcome")
         outcome_json
-    in
-    let* () =
-      validate_replay_evidence_size ~approval_id outcome
-      |> Result.map_error grant_error_to_string
     in
     Ok (approval_id, outcome)
   | _ -> Error "gate_replay_results.outcomes[] must be a JSON object"
@@ -1478,7 +1469,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
   let path = replay_results_store_path ~base_path in
   try
     if not (Sys.file_exists path)
-    then Ok delivery_map
+    then delivery_map, None
     else (
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
@@ -1486,7 +1477,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
           ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
           ~path
           ~detail:reason;
-        Error { path; reason }
+        delivery_map, Some { path; reason }
       | Ok json ->
         (match replay_results_of_yojson json with
          | Error reason ->
@@ -1494,16 +1485,16 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
              ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
              ~path
              ~detail:reason;
-           Error { path; reason }
+           delivery_map, Some { path; reason }
          | Ok replay_results ->
            (match attach_replay_results ~delivery_map replay_results with
-            | Ok _ as ok -> ok
+            | Ok delivery_map -> delivery_map, None
             | Error reason ->
               report_replay_results_read_drop
                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                 ~path
                 ~detail:reason;
-              Error { path; reason })))
+              delivery_map, Some { path; reason })))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1512,7 +1503,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
       ~path
       ~detail:reason;
-    Error { path; reason }
+    delivery_map, Some { path; reason }
 ;;
 
 let remove_base_entries ~base_path map project =
@@ -2073,33 +2064,6 @@ let approved_delivery_unlocked ~base_path ~id =
         | None -> Error (Grant_resolution_missing id)))
 ;;
 
-let approved_delivery_for_replay_unlocked ~base_path ~id =
-  let replay_store_path = replay_results_store_path ~base_path in
-  match SMap.find_opt base_path (Atomic.get unavailable_stores) with
-  | Some error when String.equal error.path replay_store_path ->
-    (* A replay-sidecar write failure latches the whole Gate store closed.
-       The exact consumed delivery is still present in this process, so allow
-       only this same sidecar transition to repair the latch. Other store
-       failures continue through [approved_delivery_unlocked] and fail closed. *)
-    (match SMap.find_opt id (Atomic.get deliveries) with
-     | Some delivery ->
-       let stored_base_path = delivery.entry.audit_base_path in
-       if not (String.equal stored_base_path base_path)
-       then
-         Error
-           (grant_workspace_mismatch ~base_path id stored_base_path)
-       else
-         (match delivery.decision with
-          | Decision.Approve ->
-            if delivery.grant_consumed
-            then Ok (Approved_delivery_consumed delivery)
-            else Ok (Approved_delivery_unconsumed delivery)
-          | Decision.Reject _ | Decision.Edit _ ->
-            Error (Grant_resolution_not_approved id))
-     | None -> Error (Grant_resolution_missing id))
-  | Some _ | None -> approved_delivery_unlocked ~base_path ~id
-;;
-
 let approved_resolution_request ~base_path ~id =
   with_pending_store_lock (fun () ->
     match approved_delivery_unlocked ~base_path ~id with
@@ -2152,61 +2116,49 @@ let resolution_replay_outcome_equal left right =
   match left, right with
   | Replay_applied left, Replay_applied right
   | Replay_failed left, Replay_failed right ->
-    String.equal left right
+    left = right
   | Replay_applied _, Replay_failed _
   | Replay_failed _, Replay_applied _ ->
     false
 ;;
 
 let record_consumed_resolution_replay ~base_path ~id ~outcome =
-  match validate_replay_evidence_size ~approval_id:id outcome with
-  | Error _ as error -> error
-  | Ok () ->
-    with_pending_store_lock (fun () ->
-      let recovering_replay_store =
-        match SMap.find_opt base_path (Atomic.get unavailable_stores) with
-        | Some error ->
-          String.equal error.path (replay_results_store_path ~base_path)
-        | None -> false
-      in
-      match approved_delivery_for_replay_unlocked ~base_path ~id with
-      | Error _ as error -> error
-      | Ok (Approved_delivery_unconsumed _) ->
-        Error (Grant_replay_not_consumed id)
-      | Ok (Approved_delivery_consumed delivery) ->
-        (match delivery.replay_outcome with
-         | Some existing when resolution_replay_outcome_equal existing outcome ->
-           Ok Replay_already_recorded
-         | Some _ -> Error (Grant_replay_outcome_conflict id)
-         | None ->
-           let updated_delivery =
-             { delivery with replay_outcome = Some outcome }
-           in
-           let updated_deliveries =
-             SMap.add id updated_delivery (Atomic.get deliveries)
-           in
-           (match
-              save_replay_results_file_unlocked
-                ~base_path
-                ~delivery_map:updated_deliveries
-            with
-            | Error error ->
-              mark_store_unavailable_unlocked ~base_path error;
-              Error (Grant_store_unavailable error)
-            | Ok Fsync_completed ->
-              Atomic.set deliveries updated_deliveries;
-              if recovering_replay_store
-              then clear_store_unavailable_unlocked ~base_path;
-              Ok Replay_recorded
-            | Ok (Visible_sync_unconfirmed reason) ->
-              Atomic.set deliveries updated_deliveries;
-              let error =
-                { path = replay_results_store_path ~base_path
-                ; reason
-                }
-              in
-              mark_store_unavailable_unlocked ~base_path error;
-              Error (Grant_store_unavailable error))))
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get replay_projection_errors) with
+    | Some error -> Error (Grant_store_unavailable error)
+    | None ->
+      (match approved_delivery_unlocked ~base_path ~id with
+       | Error _ as error -> error
+       | Ok (Approved_delivery_unconsumed _) ->
+         Error (Grant_replay_not_consumed id)
+       | Ok (Approved_delivery_consumed delivery) ->
+         (match delivery.replay_outcome with
+          | Some existing when resolution_replay_outcome_equal existing outcome ->
+            Ok Replay_already_recorded
+          | Some _ -> Error (Grant_replay_outcome_conflict id)
+          | None ->
+            let updated_delivery =
+              { delivery with replay_outcome = Some outcome }
+            in
+            let updated_deliveries =
+              SMap.add id updated_delivery (Atomic.get deliveries)
+            in
+            (match
+               save_replay_results_file_unlocked
+                 ~base_path
+                 ~delivery_map:updated_deliveries
+             with
+             | Error error -> Error (Grant_store_unavailable error)
+             | Ok Fsync_completed ->
+               Atomic.set deliveries updated_deliveries;
+               Ok Replay_recorded
+             | Ok (Visible_sync_unconfirmed reason) ->
+               let error =
+                 { path = replay_results_store_path ~base_path
+                 ; reason
+                 }
+               in
+               Error (Grant_store_unavailable error))))
 ;;
 
 let consume_approved_resolution
@@ -3844,21 +3796,27 @@ let install_persistence_internal ~after_load ~base_path =
         match load_snapshot_unlocked ~base_path with
         | Error _ as error -> error
         | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
-          (match
-             load_replay_results_unlocked
-               ~base_path
-               ~delivery_map:loaded_deliveries
-           with
-           | Error _ as error -> error
-           | Ok loaded_deliveries ->
-             Ok (loaded_pending, loaded_deliveries, loaded_next_sequence))
+          let loaded_deliveries, replay_projection_error =
+            load_replay_results_unlocked
+              ~base_path
+              ~delivery_map:loaded_deliveries
+          in
+          Ok
+            ( loaded_pending
+            , loaded_deliveries
+            , loaded_next_sequence
+            , replay_projection_error )
       in
       after_load ();
       match loaded_snapshot with
       | Error storage_error ->
         mark_store_unavailable_unlocked ~base_path storage_error;
         Error storage_error
-      | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
+      | Ok
+          ( loaded_pending
+          , loaded_deliveries
+          , loaded_next_sequence
+          , replay_projection_error ) ->
         let current_pending =
           remove_base_entries ~base_path (Atomic.get pending) Fun.id
         in
@@ -3905,6 +3863,18 @@ let install_persistence_internal ~after_load ~base_path =
               Error error
             | None ->
               clear_store_unavailable_unlocked ~base_path;
+              Atomic.set
+                replay_projection_errors
+                (match replay_projection_error with
+                 | None ->
+                   SMap.remove
+                     base_path
+                     (Atomic.get replay_projection_errors)
+                 | Some error ->
+                   SMap.add
+                     base_path
+                     error
+                     (Atomic.get replay_projection_errors));
               Atomic.set pending pending_map;
               Atomic.set deliveries delivery_map;
               Atomic.set
@@ -3918,17 +3888,19 @@ let install_persistence_internal ~after_load ~base_path =
                 , SMap.bindings loaded_deliveries
                   |> List.map snd
                   |> List.sort (fun left right ->
-                    compare_pending_order left.entry right.entry) ))))
+                    compare_pending_order left.entry right.entry)
+                , replay_projection_error ))))
   in
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
-  | Ok (loaded_pending, loaded_deliveries) ->
+  | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
     let rec replay count failures = function
       | [] ->
         Ok
           { loaded_pending
           ; replayed_deliveries = count
           ; delivery_replay_failures = List.rev failures
+          ; replay_projection_error
           }
       | delivery :: rest ->
         if delivery.grant_consumed
@@ -3971,6 +3943,7 @@ module For_testing = struct
       Atomic.set pending SMap.empty;
       Atomic.set deliveries SMap.empty;
       Atomic.set unavailable_stores SMap.empty;
+      Atomic.set replay_projection_errors SMap.empty;
       Atomic.set store_revisions SMap.empty;
       Atomic.set next_sequences SMap.empty)
   ;;

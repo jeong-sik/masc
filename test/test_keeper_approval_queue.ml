@@ -59,6 +59,14 @@ let rec ensure_dir path =
     Unix.mkdir path 0o755)
 ;;
 
+let store_replay_artifact ~base_path payload =
+  let store = Tool_blob_store.create ~base_path in
+  Tool_blob_store.put_durable
+    store
+    ~bytes:payload
+    ~mime:"text/plain"
+;;
+
 let durable_resolution_opt ~base_path ~keeper_name ~approval_id =
   match Registry_queue.snapshot_result ~base_path keeper_name with
   | Error reason ->
@@ -1000,13 +1008,16 @@ let test_resolution_is_durable_and_origin_scoped () =
         | Ok AQ.Consumption_committed -> ()
         | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
           Alcotest.fail "exact request did not consume its grant"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        let replay_output = {|{"result":"durable replay"}|} in
+       let replay_output_ref =
+         store_replay_artifact ~base_path replay_output
+       in
        (match
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(AQ.Replay_applied replay_output)
+            ~outcome:(AQ.Replay_applied replay_output_ref)
         with
         | Ok AQ.Replay_recorded -> ()
         | Ok AQ.Replay_already_recorded ->
@@ -1016,17 +1027,20 @@ let test_resolution_is_durable_and_origin_scoped () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(AQ.Replay_applied replay_output)
+            ~outcome:(AQ.Replay_applied replay_output_ref)
         with
         | Ok AQ.Replay_already_recorded -> ()
         | Ok AQ.Replay_recorded ->
           Alcotest.fail "identical replay outcome was rewritten as new"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let different_ref =
+         store_replay_artifact ~base_path "different outcome"
+       in
        (match
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(AQ.Replay_failed "different outcome")
+            ~outcome:(AQ.Replay_failed different_ref)
         with
         | Error (AQ.Grant_replay_outcome_conflict actual_id) ->
           Alcotest.(check string) "conflict identifies approval" id actual_id
@@ -1045,7 +1059,7 @@ let test_resolution_is_durable_and_origin_scoped () =
        (match delivery_wire with
         | `Assoc fields ->
           Alcotest.(check bool)
-            "rollback-safe delivery has no replay_outcome field"
+            "authorization delivery has no derived replay field"
             true
             (Option.is_none (List.assoc_opt "replay_outcome" fields))
         | _ -> Alcotest.fail "delivery wire is not an object");
@@ -1053,7 +1067,7 @@ let test_resolution_is_durable_and_origin_scoped () =
          AQ.For_testing.replay_results_store_path ~base_path
        in
        Alcotest.(check bool)
-         "replay outcome is isolated in an additive sidecar"
+         "replay outcome is isolated in its derived projection"
          true
          (Sys.file_exists replay_results_path);
        let replay_results = Yojson.Safe.from_file replay_results_path in
@@ -1061,6 +1075,21 @@ let test_resolution_is_durable_and_origin_scoped () =
          "replay sidecar v1"
          1
          (replay_results |> member "version" |> to_int);
+       let replay_outcome_wire =
+         replay_results
+         |> member "outcomes"
+         |> to_list
+         |> List.hd
+         |> member "outcome"
+       in
+       Alcotest.(check bool)
+         "current sidecar uses a typed output reference"
+         true
+         (replay_outcome_wire |> member "output_ref" <> `Null);
+       Alcotest.(check bool)
+         "current sidecar carries no raw legacy output field"
+         true
+         (replay_outcome_wire |> member "output" = `Null);
        let fresh_replay_message =
          Masc.Keeper_gate_replay.compose_model_message
            ~base_path
@@ -1093,26 +1122,20 @@ let test_resolution_is_durable_and_origin_scoped () =
        (match AQ.approved_resolution_delivery ~base_path ~id with
         | Ok
             { state = AQ.Resolution_consumed
-            ; replay_outcome = Some (AQ.Replay_applied output)
+            ; replay_outcome = Some (AQ.Replay_applied output_ref)
             ; _
             } ->
-          Alcotest.(check string) "replay output survives restart" replay_output output
+          Alcotest.(check string)
+            "replay output identity survives restart"
+            replay_output_ref.sha256
+            output_ref.sha256
         | Ok _ -> Alcotest.fail "restart lost the consumed replay outcome"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        let retry_message =
-         Masc.Keeper_gate_replay.compose_model_message
+         Masc.Keeper_gate_replay.user_message_with_hitl_resolution
            ~base_path
            ~user_message:"continue"
-           ~hitl_resolution:(Some resolution)
-           ~replay_delivery:
-             (Some
-                ( id
-                , Masc.Keeper_gate_replay.Applied
-                    { operation = "filesystem_write"
-                    ; output = replay_output
-                    ; journal =
-                        Masc.Keeper_gate_replay.Replay_journal_already_recorded
-                    } ))
+           (Some resolution)
        in
        Alcotest.(check bool)
          "retry reads durable replay evidence without stale authorization"
@@ -1126,6 +1149,10 @@ let test_resolution_is_durable_and_origin_scoped () =
          (String_util.contains_substring
             retry_message
             "Do not request the approved operation again");
+       Alcotest.(check bool)
+         "retry rehydrates the exact replay output"
+         true
+         (String_util.contains_substring retry_message replay_output);
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
@@ -2872,57 +2899,7 @@ let test_unreadable_snapshot_fails_closed_and_is_preserved () =
          (Sys.file_exists store_path))
 ;;
 
-let test_oversized_replay_evidence_is_rejected_before_sidecar_write () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       ignore (install_exn ~base_path);
-       let keeper_name = "queue-oversized-replay-evidence" in
-       let input = `Assoc [ "target", `String "bounded" ] in
-       let id = submit ~base_path ~keeper_name ~input in
-       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
-        | Ok () -> ()
-        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
-       (match
-          AQ.consume_approved_resolution
-            ~base_path
-            ~id
-            ~keeper_name
-            ~tool_name:"external-effect"
-            ~input
-        with
-        | Ok AQ.Consumption_committed -> ()
-        | Ok _ -> Alcotest.fail "approved grant was not consumed"
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
-       let actual_bytes = AQ.max_replay_evidence_bytes + 1 in
-       (match
-          AQ.record_consumed_resolution_replay
-            ~base_path
-            ~id
-            ~outcome:(AQ.Replay_applied (String.make actual_bytes 'x'))
-        with
-        | Error
-            (AQ.Grant_replay_evidence_too_large
-              { approval_id; actual_bytes = actual; max_bytes }) ->
-          Alcotest.(check string) "approval id" id approval_id;
-          Alcotest.(check int) "actual bytes" actual_bytes actual;
-          Alcotest.(check int)
-            "maximum bytes"
-            AQ.max_replay_evidence_bytes
-            max_bytes
-        | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
-        | Ok _ -> Alcotest.fail "oversized replay evidence was persisted");
-       Alcotest.(check bool)
-         "rejected evidence creates no sidecar"
-         false
-         (Sys.file_exists
-            (AQ.For_testing.replay_results_store_path ~base_path)))
-;;
-
-let test_malformed_replay_sidecar_fails_closed_and_is_preserved () =
+let test_malformed_replay_sidecar_is_scoped_and_preserved () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -2942,12 +2919,21 @@ let test_malformed_replay_sidecar_fails_closed_and_is_preserved () =
          output_string channel "{not-json");
        AQ.For_testing.reset_runtime_state ();
        (match AQ.install_persistence ~base_path with
-        | Error (AQ.Install_storage_failed { path; _ }) ->
+        | Ok
+            { loaded_pending = 1
+            ; replay_projection_error = Some { path; _ }
+            ; _
+            } ->
           Alcotest.(check string)
-            "malformed sidecar owns the failure path"
+            "malformed sidecar owns only the projection error path"
             sidecar_path
             path
-        | Ok _ -> Alcotest.fail "malformed replay sidecar installed");
+        | Ok _ ->
+          Alcotest.fail "malformed replay sidecar was not reported"
+        | Error error ->
+          Alcotest.fail
+            ("malformed replay sidecar blocked the authorization store: "
+             ^ AQ.install_error_to_string error));
        Alcotest.(check bool)
          "malformed sidecar remains for operator repair"
          true
@@ -2956,6 +2942,109 @@ let test_malformed_replay_sidecar_fails_closed_and_is_preserved () =
          "malformed sidecar is preserved byte-for-byte"
          "{not-json"
          (In_channel.with_open_bin sidecar_path In_channel.input_all))
+;;
+
+let test_replay_sidecar_rejects_raw_output_wire () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let sidecar_path =
+         AQ.For_testing.replay_results_store_path ~base_path
+       in
+       Yojson.Safe.to_file
+         sidecar_path
+         (`Assoc
+            [ "version", `Int 1
+            ; ( "outcomes"
+              , `List
+                  [ `Assoc
+                      [ "approval_id", `String "approval-raw-output"
+                      ; ( "outcome"
+                        , `Assoc
+                            [ "kind", `String "applied"
+                            ; "output", `String "legacy raw output"
+                            ] )
+                      ]
+                  ] )
+            ]);
+       AQ.For_testing.reset_runtime_state ();
+       (match AQ.install_persistence ~base_path with
+        | Ok
+            { replay_projection_error = Some { path; _ }; _ } ->
+          Alcotest.(check string)
+            "raw output wire owns only the projection error"
+            sidecar_path
+            path
+        | Ok _ ->
+          Alcotest.fail "raw replay output wire was not rejected"
+        | Error error ->
+          Alcotest.fail
+            ("raw replay output wire blocked the authorization store: "
+             ^ AQ.install_error_to_string error));
+       let keeper_name = "queue-ready-despite-raw-replay-wire" in
+       let input = `Assoc [ "target", `String "current" ] in
+       let approval_id = submit ~base_path ~keeper_name ~input in
+       (match
+          aq_resolve
+            ~base_path
+            ~id:approval_id
+            ~decision:AQ.Decision.Approve
+        with
+        | Ok () -> ()
+        | Error error ->
+          Alcotest.fail
+            ("projection error blocked Gate resolution: "
+             ^ AQ.resolve_error_to_string error));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id:approval_id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok AQ.Consumption_committed -> ()
+        | Ok _ ->
+          Alcotest.fail "projection error blocked exact grant consumption"
+        | Error error ->
+          Alcotest.fail
+            ("projection error blocked the authorization store: "
+             ^ AQ.grant_error_to_string error));
+       let output_ref =
+         store_replay_artifact ~base_path "current replay result"
+       in
+       (match
+          AQ.record_consumed_resolution_replay
+            ~base_path
+            ~id:approval_id
+            ~outcome:(AQ.Replay_applied output_ref)
+        with
+        | Error (AQ.Grant_store_unavailable { path; _ }) ->
+          Alcotest.(check string)
+            "only replay-result publication remains unavailable"
+            sidecar_path
+            path
+        | Error error ->
+          Alcotest.fail
+            ("wrong scoped replay projection error: "
+             ^ AQ.grant_error_to_string error)
+        | Ok _ ->
+          Alcotest.fail "invalid projection was overwritten automatically");
+       let persisted = Yojson.Safe.from_file sidecar_path in
+       Alcotest.(check string)
+         "rejected raw output remains untouched"
+         "legacy raw output"
+         Yojson.Safe.Util.(
+           persisted
+           |> member "outcomes"
+           |> index 0
+           |> member "outcome"
+           |> member "output"
+           |> to_string))
 ;;
 
 let test_persisted_delivery_replays_before_origin_wake () =
@@ -3605,13 +3694,13 @@ let () =
             `Quick
             test_unreadable_snapshot_fails_closed_and_is_preserved
         ; Alcotest.test_case
-            "oversized replay evidence is rejected"
-            `Quick
-            test_oversized_replay_evidence_is_rejected_before_sidecar_write
-        ; Alcotest.test_case
             "malformed replay sidecar is preserved"
             `Quick
-            test_malformed_replay_sidecar_fails_closed_and_is_preserved
+            test_malformed_replay_sidecar_is_scoped_and_preserved
+        ; Alcotest.test_case
+            "raw replay output wire is rejected"
+            `Quick
+            test_replay_sidecar_rejects_raw_output_wire
         ; Alcotest.test_case
             "delivery journal replays"
             `Quick

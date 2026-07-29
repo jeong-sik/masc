@@ -107,16 +107,20 @@ let put_with_atomic_replace ~atomic_replace ~operation t ~bytes ~mime =
     Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
       ~preview:(make_preview bytes) ~mime
   with
-  | Ok artifact_ref -> Tool_output.Stored artifact_ref
+  | Ok artifact_ref -> artifact_ref
   | Error err ->
     invalid_arg
       (Printf.sprintf "tool_blob_store.%s: %s" operation
          (Tool_output.make_error_to_string err))
 
-let put =
-  put_with_atomic_replace
-    ~atomic_replace:Fs_compat.save_file_atomic
-    ~operation:"put"
+let put t ~bytes ~mime =
+  Tool_output.Stored
+    (put_with_atomic_replace
+       ~atomic_replace:Fs_compat.save_file_atomic
+       ~operation:"put"
+       t
+       ~bytes
+       ~mime)
 ;;
 
 let put_durable =

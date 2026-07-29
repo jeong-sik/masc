@@ -228,35 +228,32 @@ let transcript_quarantine_reason_of_string = function
 type gate_replay_repair_stage =
   | Replay_resolution_lookup
   | Replay_request_decode
-  | Replay_grant_consumption
   | Replay_evidence_storage
+  | Replay_evidence_retrieval
   | Replay_journal
   | Replay_effect_indeterminate_after_restart
   | Replay_invalid_resolution_state
-  | Replay_unsupported_operation
 
 let gate_replay_repair_stage_to_string = function
   | Replay_resolution_lookup -> "resolution_lookup"
   | Replay_request_decode -> "request_decode"
-  | Replay_grant_consumption -> "grant_consumption"
   | Replay_evidence_storage -> "evidence_storage"
+  | Replay_evidence_retrieval -> "evidence_retrieval"
   | Replay_journal -> "replay_journal"
   | Replay_effect_indeterminate_after_restart ->
     "effect_indeterminate_after_restart"
   | Replay_invalid_resolution_state -> "invalid_resolution_state"
-  | Replay_unsupported_operation -> "unsupported_operation"
 ;;
 
 let gate_replay_repair_stage_of_string = function
   | "resolution_lookup" -> Some Replay_resolution_lookup
   | "request_decode" -> Some Replay_request_decode
-  | "grant_consumption" -> Some Replay_grant_consumption
   | "evidence_storage" -> Some Replay_evidence_storage
+  | "evidence_retrieval" -> Some Replay_evidence_retrieval
   | "replay_journal" -> Some Replay_journal
   | "effect_indeterminate_after_restart" ->
     Some Replay_effect_indeterminate_after_restart
   | "invalid_resolution_state" -> Some Replay_invalid_resolution_state
-  | "unsupported_operation" -> Some Replay_unsupported_operation
   | _ -> None
 ;;
 
@@ -317,10 +314,6 @@ type masc_internal_error =
       diagnostic : string;
     }
   | Receipt_persistence_failed of {
-      detail : string;
-    }
-  | History_persistence_failed of {
-      approval_id : string;
       detail : string;
     }
   | Gate_replay_repair_required of {
@@ -523,13 +516,6 @@ let masc_internal_error_to_json = function
         ("kind", `String "receipt_persistence_failed");
         ("detail", `String detail);
       ]
-  | History_persistence_failed { approval_id; detail } ->
-    `Assoc
-      [
-        ("kind", `String "history_persistence_failed");
-        ("approval_id", `String approval_id);
-        ("detail", `String detail);
-      ]
   | Gate_replay_repair_required { approval_id; operation; stage; detail } ->
     `Assoc
       [ "kind", `String "gate_replay_repair_required"
@@ -658,7 +644,6 @@ let summary_of_masc_internal_error = function
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
   | Receipt_persistence_failed _
-  | History_persistence_failed _
   | Gate_replay_repair_required _ -> None
 
 let kind_of_masc_internal_error = function
@@ -672,7 +657,6 @@ let kind_of_masc_internal_error = function
   | Incomplete_tool_transcript _ -> incomplete_tool_transcript_kind
   | Terminal_effect_failed _ -> "terminal_effect_failed"
   | Receipt_persistence_failed _ -> "receipt_persistence_failed"
-  | History_persistence_failed _ -> "history_persistence_failed"
   | Gate_replay_repair_required _ -> "gate_replay_repair_required"
 
 let runtime_id_of_masc_internal_error = function
@@ -690,7 +674,6 @@ let runtime_id_of_masc_internal_error = function
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
   | Receipt_persistence_failed _
-  | History_persistence_failed _
   | Gate_replay_repair_required _ -> "unknown"
 
 let accept_no_progress_retry_kind = function
@@ -724,7 +707,6 @@ let accept_no_progress_retry_kind = function
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
   | Receipt_persistence_failed _
-  | History_persistence_failed _
   | Gate_replay_repair_required _ ->
     None
 
@@ -925,14 +907,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with
           | Some detail -> Some (Receipt_persistence_failed { detail })
-          | _ -> None)
-      | Some (`String "history_persistence_failed") -> (
-          match
-            string_opt_of_assoc "approval_id" json,
-            string_opt_of_assoc "detail" json
-          with
-          | Some approval_id, Some detail ->
-            Some (History_persistence_failed { approval_id; detail })
           | _ -> None)
       | Some (`String "gate_replay_repair_required")
         when exact_fields

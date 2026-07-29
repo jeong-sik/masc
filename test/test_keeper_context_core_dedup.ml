@@ -210,96 +210,6 @@ let test_legacy_thinking_type_is_not_promoted_to_signature () =
       Alcotest.(check string) "content" "signed" content
   | _ -> Alcotest.fail "expected legacy thinking block"
 
-(* --- history persistence: post-replay idempotency --- *)
-
-let test_history_persist_once_recovers_from_failure_without_duplication () =
-  Eio_main.run @@ fun env ->
-  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = Filename.temp_dir "keeper-history-once-" "" in
-  Fun.protect
-    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
-    (fun () ->
-       let session_id = "history-once" in
-       let session = C.create_session ~session_id ~base_dir in
-       let history_path = Filename.concat session.session_dir "history.jsonl" in
-       let idempotency_key = "hitl-approval:approval-history-once" in
-       Unix.mkdir history_path 0o700;
-       (match
-          C.persist_message_once
-            ~idempotency_key
-            ~source:Masc.Keeper_types_support.hitl_resolution_history_source
-            session
-            (T.user_msg "fresh host replay rendering")
-        with
-        | Error (C.History_io_failed _) -> ()
-        | Error error ->
-          Alcotest.failf
-            "append failure returned the wrong typed error: %s"
-            (C.history_persist_once_error_to_string error)
-        | Ok _ -> Alcotest.fail "a directory was accepted as history.jsonl");
-       Unix.rmdir history_path;
-       (match
-          C.persist_message_once
-            ~idempotency_key
-            ~source:Masc.Keeper_types_support.hitl_resolution_history_source
-            session
-            (T.user_msg "durable replay outcome")
-        with
-        | Ok C.History_message_persisted -> ()
-        | Ok C.History_message_already_persisted ->
-          Alcotest.fail "failed append was treated as a completed history row"
-        | Error error ->
-          Alcotest.fail (C.history_persist_once_error_to_string error));
-       let completed_without_newline =
-         match Fs_compat.file_size history_path with
-         | Some size when size > 0 -> size - 1
-         | Some _
-         | None ->
-           Alcotest.fail "successful history append has no bytes"
-       in
-       Unix.truncate history_path completed_without_newline;
-       let restarted = C.create_session ~session_id ~base_dir in
-       (match
-          C.persist_message_once
-            ~idempotency_key
-            ~source:Masc.Keeper_types_support.hitl_resolution_history_source
-            restarted
-            (T.user_msg "retry rendering must not duplicate the outcome")
-        with
-        | Ok C.History_message_already_persisted -> ()
-        | Ok C.History_message_persisted ->
-          Alcotest.fail "restart duplicated the HITL history row"
-        | Error error ->
-          Alcotest.fail (C.history_persist_once_error_to_string error));
-       let rows =
-         let history = Fs_compat.load_file history_path in
-         Alcotest.(check char)
-           "restart repairs a completed row's missing newline"
-           '\n'
-           history.[String.length history - 1];
-         history
-         |> String.split_on_char '\n'
-         |> List.filter (fun line -> not (String.equal (String.trim line) ""))
-         |> List.map Yojson.Safe.from_string
-       in
-       Alcotest.(check int) "one durable HITL history row" 1 (List.length rows);
-       match rows with
-       | [ (`Assoc fields as row) ] ->
-         Alcotest.(check (option string))
-           "row carries the durable event identity"
-           (Some idempotency_key)
-           (match List.assoc_opt "idempotency_key" fields with
-            | Some (`String key) -> Some key
-            | Some _
-            | None ->
-              None);
-         Alcotest.(check string)
-           "the successful retry is the persisted model message"
-           "durable replay outcome"
-           (C.text_of_history_jsonl_json row)
-       | _ -> Alcotest.fail "expected exactly one history object")
-;;
-
 (* --- checkpoint projection: exact message preservation --- *)
 
 let text_message text : T.message =
@@ -542,13 +452,6 @@ let () =
             test_history_jsonl_text_uses_blocks_first;
           Alcotest.test_case "empty when neither" `Quick
             test_history_jsonl_text_empty_when_neither;
-        ] );
-      ( "history_persistence",
-        [
-          Alcotest.test_case
-            "append failure then retry/restart is exactly once"
-            `Quick
-            test_history_persist_once_recovers_from_failure_without_duplication;
         ] );
       ( "checkpoint_projection",
         [

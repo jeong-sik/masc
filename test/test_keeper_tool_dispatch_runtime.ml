@@ -2528,15 +2528,23 @@ let test_approved_web_search_replays_without_model_resubmission () =
        | Ok
            { state = Masc.Keeper_approval_queue.Resolution_consumed
            ; replay_outcome =
-               Some (Masc.Keeper_approval_queue.Replay_applied output)
+               Some (Masc.Keeper_approval_queue.Replay_applied output_ref)
            ; _
            } ->
-         check bool
-           "replayed WebSearch output survives in the durable approval journal"
-           true
-           (contains_substring output "Replayed result");
+         let replay_store = Tool_blob_store.create ~base_path:config.base_path in
+         (match
+            Tool_blob_store.fetch replay_store ~sha256:output_ref.sha256
+          with
+          | Ok (Some output) ->
+            check bool
+              "replayed WebSearch output survives behind the durable reference"
+              true
+              (contains_substring output "Replayed result")
+          | Ok None -> fail "durable replay output artifact is missing"
+          | Error error ->
+            fail (Tool_blob_store.fetch_error_to_string error));
          let model_message =
-           Masc.Keeper_unified_turn.user_message_with_hitl_resolution
+           Masc.Keeper_gate_replay.user_message_with_hitl_resolution
              ~base_path:config.base_path
              ~user_message:"continue"
              (Some resolution)
@@ -2550,7 +2558,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
            true
            (contains_substring
               model_message
-              "Do not request this approved operation again")
+              "Do not request the approved operation again")
        | Ok _ -> fail "durable WebSearch replay result was missing"
        | Error error ->
          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
@@ -2789,10 +2797,27 @@ let test_journal_failure_retries_only_persistence () =
         | Masc.Keeper_gate_replay.Repair_required
             { stage = Masc.Keeper_gate_replay.Replay_journal; _ } ->
           ()
-        | outcome ->
+       | outcome ->
+         failf
+           "journal failure entered provider flow: %s"
+           (Masc.Keeper_gate_replay.outcome_to_string outcome));
+       (match
+          Masc.Keeper_approval_queue.approved_resolution_delivery
+            ~base_path:config.base_path
+            ~id:approval_id
+        with
+        | Ok
+            { state = Masc.Keeper_approval_queue.Resolution_consumed
+            ; replay_outcome = None
+            ; _
+            } ->
+          ()
+        | Ok _ ->
+          fail "journal failure changed the exact approval state"
+        | Error error ->
           failf
-            "journal failure entered provider flow: %s"
-            (Masc.Keeper_gate_replay.outcome_to_string outcome));
+            "replay sidecar failure blocked the whole Gate store: %s"
+            (Masc.Keeper_approval_queue.grant_error_to_string error));
        Unix.rmdir replay_path;
        match
          Masc.Keeper_gate_replay.replay_approved_effect
@@ -2958,7 +2983,7 @@ let test_consumed_without_outcome_requires_operator_repair () =
            (Masc.Keeper_gate_replay.outcome_to_string outcome))
 ;;
 
-let test_unsupported_approved_operation_fails_closed_without_large_resubmission () =
+let test_unsupported_approved_operation_retains_exact_model_issued_path () =
   with_exec_fixture "keeper_gate_replay_unsupported"
     (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
        (match
@@ -3030,15 +3055,10 @@ let test_unsupported_approved_operation_fails_closed_without_large_resubmission 
            ()
        in
        (match outcome with
-        | Masc.Keeper_gate_replay.Repair_required
-            { operation = "keeper_voice_speak"
-            ; stage = Masc.Keeper_gate_replay.Unsupported_operation
-            ; _
-            } ->
-          ()
+        | Masc.Keeper_gate_replay.Not_applicable -> ()
         | outcome ->
           failf
-            "unsupported approval did not fail closed: %s"
+            "unsupported approval did not retain its model-issued path: %s"
             (Masc.Keeper_gate_replay.outcome_to_string outcome));
        (match
           Masc.Keeper_approval_queue.approved_resolution_delivery
@@ -3062,14 +3082,13 @@ let test_unsupported_approved_operation_fails_closed_without_large_resubmission 
            ~replay_delivery:(Some (approval_id, outcome))
        in
        check bool
-         "unsupported exact input is absent from the model request"
-         false
+         "unsupported exact input remains in the model-issued path"
+         true
          (contains_substring model_message "UNSUPPORTED-END");
        check bool
-         "unsupported repair message stays request-bounded"
-         true
-         (String.length model_message
-          < Masc.Keeper_approval_queue.max_replay_evidence_bytes))
+         "unsupported approval does not invent operator repair"
+         false
+         (contains_substring model_message "Operator repair is required"))
 ;;
 
 let workflow_rejection_message =
@@ -4146,8 +4165,8 @@ let () =
         test_failed_effect_is_durable_and_not_replayed;
       test_case "consumed outcome gap requires operator repair" `Quick
         test_consumed_without_outcome_requires_operator_repair;
-      test_case "unsupported approval fails closed without large resubmission" `Quick
-        test_unsupported_approved_operation_fails_closed_without_large_resubmission;
+      test_case "unsupported approval retains exact model-issued path" `Quick
+        test_unsupported_approved_operation_retains_exact_model_issued_path;
       test_case "task FSM errors require explicit failure_class" `Quick
         test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "Manual Gate defers tool_execute before process" `Quick

@@ -41,9 +41,6 @@ let message_of_json = Keeper_context_core.message_of_json
 let serialize_context = Keeper_context_core.serialize_context
 let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
-let persist_message_once = Keeper_context_core.persist_message_once
-let history_persist_once_error_to_string =
-  Keeper_context_core.history_persist_once_error_to_string
 
 let timed = Keeper_context_core.timed
 let zero_usage = Keeper_context_core.zero_usage

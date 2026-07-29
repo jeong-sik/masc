@@ -68,7 +68,8 @@ let test_content_write () =
            ; "mode", `String "overwrite"
            ; "content", `String "let a = 1\n"
            ]))
-    (Masc.Keeper_gate_replay.write_args_of_gate_input approved_content_input)
+    (Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
+       approved_content_input)
 ;;
 
 let test_edit_write () =
@@ -84,14 +85,16 @@ let test_edit_write () =
            ; "new_string", `String "let b = 2"
            ; "replace_all", `Bool true
            ]))
-    (Masc.Keeper_gate_replay.write_args_of_gate_input approved_edit_input)
+    (Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
+       approved_edit_input)
 ;;
 
 (* A content write must not acquire edit fields: reconstruction carries only
    what the approval contained, so replay cannot widen the approved effect. *)
 let test_absent_fields_are_not_invented () =
   match
-    Masc.Keeper_gate_replay.write_args_of_gate_input approved_content_input
+    Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
+      approved_content_input
   with
   | Error detail -> Alcotest.fail detail
   | Ok (`Assoc fields) ->
@@ -127,12 +130,13 @@ let test_append_stays_append () =
            ; "mode", `String "append"
            ; "content", `String "one more line\n"
            ]))
-    (Masc.Keeper_gate_replay.write_args_of_gate_input approved_append_input)
+    (Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
+       approved_append_input)
 ;;
 
 let test_unreproducible_effect_is_rejected () =
   match
-    Masc.Keeper_gate_replay.write_args_of_gate_input
+    Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
       (`Assoc
           [ "effect", `Assoc [ "operation", `String "create_entry_exclusive" ]
           ; "requested_target", `String "/playground/executor/new.txt"
@@ -146,7 +150,7 @@ let test_unreproducible_effect_is_rejected () =
 
 let test_missing_target_is_rejected () =
   match
-    Masc.Keeper_gate_replay.write_args_of_gate_input
+    Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
       (`Assoc [ "content", `String "orphan" ])
   with
   | Ok _ -> Alcotest.fail "input without requested_target must not reconstruct"
@@ -154,7 +158,10 @@ let test_missing_target_is_rejected () =
 ;;
 
 let test_non_object_input_is_rejected () =
-  match Masc.Keeper_gate_replay.write_args_of_gate_input (`String "opaque") with
+  match
+    Masc.Keeper_tool_filesystem_runtime.replay_args_of_gate_input
+      (`String "opaque")
+  with
   | Ok _ -> Alcotest.fail "non-object input must not reconstruct"
   | Error _ -> ()
 ;;
@@ -196,7 +203,8 @@ let test_execute_args_are_the_approved_arguments () =
           ; "timeout_sec", `Int 30
           ; "cwd", `String "/repo"
           ]))
-    (Masc.Keeper_gate_replay.execute_args_of_gate_input approved_execute_input)
+    (Masc.Keeper_tool_execute_runtime.replay_args_of_gate_input
+       approved_execute_input)
 ;;
 
 (* The approved [cwd] is part of the effect the operator authorized, so it
@@ -204,7 +212,8 @@ let test_execute_args_are_the_approved_arguments () =
    current turn's default directory — an effect nobody approved. *)
 let test_approved_cwd_is_replayed () =
   match
-    Masc.Keeper_gate_replay.execute_args_of_gate_input approved_execute_input
+    Masc.Keeper_tool_execute_runtime.replay_args_of_gate_input
+      approved_execute_input
   with
   | Error detail -> Alcotest.fail detail
   | Ok (`Assoc fields) ->
@@ -222,7 +231,8 @@ let test_approved_cwd_is_replayed () =
    under a profile the approval never described. *)
 let test_execute_envelope_is_not_replayed () =
   match
-    Masc.Keeper_gate_replay.execute_args_of_gate_input approved_execute_input
+    Masc.Keeper_tool_execute_runtime.replay_args_of_gate_input
+      approved_execute_input
   with
   | Error detail -> Alcotest.fail detail
   | Ok (`Assoc fields) ->
@@ -239,7 +249,7 @@ let test_execute_envelope_is_not_replayed () =
 
 let test_execute_without_input_is_rejected () =
   match
-    Masc.Keeper_gate_replay.execute_args_of_gate_input
+    Masc.Keeper_tool_execute_runtime.replay_args_of_gate_input
       (`Assoc [ "cwd", `String "/repo" ])
   with
   | Ok _ -> Alcotest.fail "a Gate input with no arguments replayed anyway"
@@ -259,7 +269,8 @@ let approved_web_search_input =
 
 let test_network_read_preserves_exact_web_search_arguments () =
   match
-    Masc.Keeper_gate_replay.network_read_of_gate_input approved_web_search_input
+    Masc.Keeper_tool_in_process_runtime.network_read_replay_of_gate_input
+      approved_web_search_input
   with
   | Ok
       (Masc.Keeper_tool_in_process_runtime.Replay_web_search
@@ -274,7 +285,7 @@ let test_network_read_preserves_exact_web_search_arguments () =
 
 let test_network_read_rejects_unknown_capability () =
   match
-    Masc.Keeper_gate_replay.network_read_of_gate_input
+    Masc.Keeper_tool_in_process_runtime.network_read_replay_of_gate_input
       (`Assoc
         [ "capability", `String "invented"
         ; "input", `Assoc [ "query", `String "must not run" ]
@@ -286,7 +297,7 @@ let test_network_read_rejects_unknown_capability () =
 
 let test_network_read_rejects_unknown_envelope_fields () =
   match
-    Masc.Keeper_gate_replay.network_read_of_gate_input
+    Masc.Keeper_tool_in_process_runtime.network_read_replay_of_gate_input
       (`Assoc
         [ "capability", `String "web_search"
         ; "input", `Assoc [ "query", `String "must stay exact" ]
@@ -318,10 +329,10 @@ let test_applied_replay_result_is_model_visible () =
   in
   Alcotest.check
     Alcotest.string
-    "bounded replay evidence reaches the current model turn"
+    "exact replay evidence reaches the current model turn"
     output
     Yojson.Safe.Util.(
-      evidence |> member "untrusted_tool_output_ref" |> to_string);
+      evidence |> member "untrusted_tool_output" |> to_string);
   Alcotest.check
     Alcotest.bool
     "current model turn cannot request the approved effect again"
@@ -331,7 +342,7 @@ let test_applied_replay_result_is_model_visible () =
        "Do not request the approved operation again")
 ;;
 
-let test_large_replay_result_is_recoverable_but_request_bounded () =
+let test_large_replay_result_reaches_model_exactly () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -341,28 +352,14 @@ let test_large_replay_result_is_recoverable_but_request_bounded () =
          ^ String.make (512 * 1024) 'x'
          ^ "\nLARGE-REPLAY-END"
        in
-       let evidence =
+       let artifact =
          match
-           Masc.Keeper_gate_replay.For_testing.persist_bounded_replay_evidence
+           Masc.Keeper_gate_replay.For_testing.persist_replay_artifact
              ~base_path
              raw_output
          with
-         | Ok evidence -> evidence
+         | Ok artifact -> artifact
          | Error detail -> Alcotest.fail detail
-       in
-       Alcotest.check
-         Alcotest.bool
-         "artifact evidence is bounded"
-         true
-         (String.length evidence
-          < Masc.Keeper_approval_queue.max_replay_evidence_bytes);
-       let artifact =
-         match Tool_output.decode_from_oas evidence with
-         | Tool_output.Decoded artifact -> artifact
-         | Tool_output.Not_marker ->
-           Alcotest.fail "large replay evidence stayed inline"
-         | Tool_output.Invalid_marker { detail } ->
-           Alcotest.fail ("invalid replay artifact marker: " ^ detail)
        in
        Alcotest.check
          Alcotest.int
@@ -386,34 +383,28 @@ let test_large_replay_result_is_recoverable_but_request_bounded () =
            ~user_message:"continue"
            (Masc.Keeper_gate_replay.Applied
               { operation = "network_read"
-              ; output = evidence
+              ; output = raw_output
               ; journal =
                   Masc.Keeper_gate_replay.Replay_journal_recorded
               })
        in
        Alcotest.check
          Alcotest.bool
-         "large replay cannot inflate the next model request"
+         "model receives the exact replay tail"
          true
-         (String.length message
-          < Masc.Keeper_approval_queue.max_replay_evidence_bytes);
+         (String_util.contains_substring message "LARGE-REPLAY-END");
        Alcotest.check
          Alcotest.bool
-         "model receives artifact identity"
-         true
-         (String_util.contains_substring message artifact.sha256);
-       Alcotest.check
-         Alcotest.bool
-         "model request excludes the full replay tail"
+         "model output is not replaced with a blob marker"
          false
-         (String_util.contains_substring message "LARGE-REPLAY-END"))
+         (String_util.contains_substring message Tool_output.marker_prefix))
 ;;
 
 
 (* The decode functions above are only reachable if dispatch routes to them.
    An operation that has a decoder but is never dispatched to is
    indistinguishable from a working replay at the call site. *)
-let test_dispatch_covers_both_replayable_operations () =
+let test_dispatch_covers_all_replayable_operations () =
   let open Masc.Keeper_gate_replay in
   Alcotest.check
     Alcotest.bool
@@ -471,7 +462,10 @@ let test_large_connector_post_preserves_exact_durable_request () =
       ; "blocks", `List blocks
       ]
   in
-  match Masc.Keeper_gate_replay.connector_post_of_gate_input input with
+  match
+    Masc.Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
+      input
+  with
   | Ok
       (Replay_slack_post
          { input = decoded_input
@@ -495,7 +489,10 @@ let test_large_connector_post_preserves_exact_durable_request () =
 let test_connector_post_rejects_heuristic_or_truncated_input () =
   List.iter
     (fun input ->
-       match Masc.Keeper_gate_replay.connector_post_of_gate_input input with
+       match
+         Masc.Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
+           input
+       with
        | Error _ -> ()
        | Ok _ ->
          Alcotest.fail
@@ -517,7 +514,7 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
 let () =
   Alcotest.run
     "keeper_gate_replay"
-    [ ( "write_args_of_gate_input"
+    [ ( "filesystem producer replay decoder"
       , [ Alcotest.test_case "content write" `Quick test_content_write
         ; Alcotest.test_case "edit write" `Quick test_edit_write
         ; Alcotest.test_case
@@ -574,15 +571,15 @@ let () =
             `Quick
             test_applied_replay_result_is_model_visible
         ; Alcotest.test_case
-            "large result is recoverable and request-bounded"
+            "large result reaches model exactly"
             `Quick
-            test_large_replay_result_is_recoverable_but_request_bounded
+            test_large_replay_result_reaches_model_exactly
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case
-            "covers both replayable operations"
+            "covers all replayable operations"
             `Quick
-            test_dispatch_covers_both_replayable_operations
+            test_dispatch_covers_all_replayable_operations
         ; Alcotest.test_case
             "refuses operations it cannot replay"
             `Quick

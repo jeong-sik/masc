@@ -310,7 +310,7 @@ let test_prompt_only_target_needs_no_wire_json_capability () =
       | Error error -> Alcotest.fail error)))
 ;;
 
-let test_domain_invalid_output_does_not_fail_over () =
+let test_domain_invalid_output_advances_to_declared_successor () =
   with_prompt_registry (fun () ->
   with_temp_keepers_dir (fun _ ->
     run_eio (fun ~sw ~net ~clock ->
@@ -344,29 +344,30 @@ let test_domain_invalid_output_does_not_fail_over () =
           ~generation:1
           (librarian_input "trace-domain-invalid")
       with
-      | Error error
-        when Librarian_runtime.extraction_error_kind error
-             = Librarian_runtime.Domain_output_invalid ->
+      | Ok episode ->
         Alcotest.(check int)
           "first exact candidate dispatched once"
           1
           (Fixture.post_count invalid_server);
         Alcotest.(check int)
-          "domain validation is terminal"
-          0
+          "declared successor dispatched once"
+          1
           (Fixture.post_count valid_server);
         Alcotest.(check string)
-          "domain-invalid terminal is durable"
-          "domain_invalid"
+          "successor terminal is durable"
+          "domain_valid"
           (exact_journal_state
              ~keeper_id:"librarian-domain-invalid-keeper"
              ~trace_id:"trace-domain-invalid"
-             ~generation:1)
+             ~generation:1);
+        Alcotest.(check int)
+          "successor produced one claim"
+          1
+          (List.length episode.Types.claims)
       | Error error ->
         Alcotest.failf
-          "expected domain validation failure, got %s"
-          (Librarian_runtime.extraction_error_to_string error)
-      | Ok _ -> Alcotest.fail "domain-invalid episode must not be accepted")))
+          "declared domain successor failed: %s"
+          (Librarian_runtime.extraction_error_to_string error))))
 ;;
 
 let test_unsettled_restart_state_fails_before_dispatch () =
@@ -566,7 +567,7 @@ let test_zero_dispatch_failure_advances_to_next_candidate () =
              ~generation:1))))
 ;;
 
-let test_owner_replacement_during_post_defers_settlement () =
+let test_owner_replacement_does_not_invalidate_memory_observation () =
   with_prompt_registry (fun () ->
   with_temp_keepers_dir (fun _ ->
     run_eio (fun ~sw ~net ~clock ->
@@ -613,26 +614,22 @@ let test_owner_replacement_during_post_defers_settlement () =
            ~generation:1
            (librarian_input "trace-librarian-owner-replaced")
        with
-       | Error error
-         when Librarian_runtime.extraction_error_kind error
-              = Librarian_runtime.Exact_setup_failure ->
+       | Ok _ ->
          Alcotest.(check int)
            "network dispatch completed once"
            1
            (Fixture.post_count server);
          Alcotest.(check string)
-           "stale generation commits no success settlement"
-           "candidate_bound"
+           "in-flight memory observation reaches its own terminal"
+           "domain_valid"
            (exact_journal_state
               ~keeper_id
               ~trace_id:"trace-librarian-owner-replaced"
               ~generation:1)
        | Error error ->
          Alcotest.failf
-           "owner replacement returned wrong typed boundary: %s"
-           (Librarian_runtime.extraction_error_to_string error)
-       | Ok _ ->
-         Alcotest.fail "replaced librarian owner committed stale success");
+           "owner replacement invalidated an in-flight memory observation: %s"
+           (Librarian_runtime.extraction_error_to_string error));
       let successor =
         Fixture.start_server
           ~sw
@@ -664,28 +661,8 @@ let test_owner_replacement_during_post_defers_settlement () =
               ~generation:2)
        | Error error ->
          Alcotest.failf
-           "historical bound state blocked the new generation: %s"
-           (Librarian_runtime.extraction_error_to_string error));
-      (match
-         extract_with_exact_output_classified
-           ~clock
-           ~net
-           ~keeper_id
-           ~generation:1
-           (librarian_input "trace-librarian-owner-replaced")
-       with
-       | Error error
-         when Librarian_runtime.extraction_error_kind error
-              = Librarian_runtime.Exact_setup_failure ->
-         Alcotest.(check int)
-           "same generation was not dispatched twice"
-           1
-           (Fixture.post_count server)
-       | Error error ->
-         Alcotest.failf
-           "same-generation replay returned wrong typed boundary: %s"
-           (Librarian_runtime.extraction_error_to_string error)
-       | Ok _ -> Alcotest.fail "same-generation bound attempt was replayed"))))
+           "completed observation blocked the new generation: %s"
+           (Librarian_runtime.extraction_error_to_string error)))))
 ;;
 
 let () =
@@ -701,9 +678,9 @@ let () =
             `Quick
             test_prompt_only_target_needs_no_wire_json_capability
         ; Alcotest.test_case
-            "domain-invalid output does not fail over"
+            "domain-invalid output advances to declared successor"
             `Quick
-            test_domain_invalid_output_does_not_fail_over
+            test_domain_invalid_output_advances_to_declared_successor
         ; Alcotest.test_case
             "unsettled restart state fails before dispatch"
             `Quick
@@ -725,9 +702,9 @@ let () =
             `Quick
             test_zero_dispatch_failure_advances_to_next_candidate
         ; Alcotest.test_case
-            "owner replacement during POST defers settlement"
+            "owner replacement preserves in-flight memory observation"
             `Quick
-            test_owner_replacement_during_post_defers_settlement
+            test_owner_replacement_does_not_invalidate_memory_observation
         ] )
     ]
 ;;

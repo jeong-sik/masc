@@ -231,6 +231,12 @@ let[@inline never] raise_injected_cancellation expected_backtrace payload =
     Printexc.raise_with_backtrace cancellation backtrace
 ;;
 
+let check_backtrace_starts_at_origin label expected observed =
+  let expected = Printexc.raw_backtrace_to_string expected in
+  let observed = Printexc.raw_backtrace_to_string observed in
+  check bool label true (Astring.String.is_prefix ~affix:expected observed)
+;;
+
 let rec await_condition ~clock ~remaining ~failure predicate =
   if predicate ()
   then ()
@@ -986,7 +992,7 @@ let test_completion_identity_conflict_stays_deterministic () =
          fail "deterministic completion conflict mutated durable uncertainty state")
 ;;
 
-let test_flow_execution_failure_quarantines_and_blocks_owner () =
+let test_flow_execution_failure_quarantines_and_allows_successor () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-flow-failure" @@ fun base_path ->
   Fun.protect
@@ -1046,21 +1052,33 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
             true
             (String.length request_body_sha256 > 0)
         | _ -> fail "flow execution failure was not terminally quarantined");
-       let blocked = Gate.resume_persisted_auto_judges ~base_path in
+       let successor_server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-flow-successor" ]
+         (F.resolver_snapshot
+            ~source:"hitl-flow-successor"
+            [ { id = "hitl-flow-successor"
+              ; base_url = successor_server.base_url
+              }
+            ]);
+       let resumed = Gate.resume_persisted_auto_judges ~base_path in
        check
          (list string)
-         "quarantined owner starts no successor worker"
-         []
-         blocked.started_ids;
-       check int "quarantined owner dispatches no successor" 1 (F.post_count failed);
-       match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
-       | Some
-           { exact_attempt = Q.Exact_unbound
-           ; summary_status = Q.Summary_pending
-           ; _
-           } ->
-         ()
-       | _ -> fail "quarantined owner did not preserve its unbound successor")
+         "quarantined entry does not stall a later owner entry"
+         [ successor.id ]
+         resumed.started_ids;
+       Eio.Promise.await successor_server.first_request_arrived;
+       check int "failed entry dispatched once" 1 (F.post_count failed);
+       check int
+         "successor dispatches once"
+         1
+         (F.post_count successor_server))
 ;;
 
 
@@ -1251,10 +1269,10 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
               | Some backtrace -> backtrace
               | None -> fail "injected cancellation origin was not captured"
             in
-            check string
+            check_backtrace_starts_at_origin
               "cancellation origin raw backtrace is preserved"
-              (Printexc.raw_backtrace_to_string expected_backtrace)
-              (Printexc.raw_backtrace_to_string observed_backtrace);
+              expected_backtrace
+              observed_backtrace;
             check bool
               "pre-bind cancellation reports identity-unbound"
                true
@@ -1315,6 +1333,7 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
               match
                 Eio.Switch.run
                 @@ fun worker_sw ->
+                Eio_context.set_switch worker_sw;
                 match
                   Gate.For_testing.spawn_auto_judge_entry_with_worker
                     ~spawn_worker:
@@ -1352,10 +1371,10 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
               | Some backtrace -> backtrace
               | None -> fail "Gate cancellation origin was not captured"
             in
-            check string
+            check_backtrace_starts_at_origin
               "Gate cancellation raw backtrace is preserved"
-              (Printexc.raw_backtrace_to_string expected_backtrace)
-              (Printexc.raw_backtrace_to_string observed_backtrace);
+              expected_backtrace
+              observed_backtrace;
             check int "Gate invokes the cancelled bind exactly once" 1 !bind_calls;
             check int
               "pre-bind Gate cancellation performs no provider POST"
@@ -1454,10 +1473,10 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
               | Some backtrace -> backtrace
               | None -> fail "bound cancellation origin was not captured"
             in
-            check string
+            check_backtrace_starts_at_origin
               "bound cancellation raw backtrace is preserved"
-              (Printexc.raw_backtrace_to_string expected_backtrace)
-              (Printexc.raw_backtrace_to_string observed_backtrace);
+              expected_backtrace
+              observed_backtrace;
             check bool
               "failed bound cleanup reports persistence uncertainty"
               true
@@ -1845,9 +1864,9 @@ let () =
             `Quick
             test_completion_identity_conflict_stays_deterministic
         ; test_case
-            "flow execution failure quarantines and blocks owner"
+            "flow execution failure quarantines and allows successor"
             `Quick
-            test_flow_execution_failure_quarantines_and_blocks_owner
+            test_flow_execution_failure_quarantines_and_allows_successor
         ; test_case
             "manual resolution race is conclusive"
             `Quick

@@ -256,19 +256,12 @@ let make_hooks
              Otel_metric_store.inc_counter
                Otel_metric_store.metric_provider_prefix_cache_creation_tokens
                ~delta:(Float.of_int cc) ();
-        if cr > 0 then begin
-          Otel_metric_store.inc_counter
-            Otel_metric_store.metric_provider_prefix_cache_read_tokens
-            ~delta:(Float.of_int cr) ();
-          (* Per-provider/model cache-read counter for Otel_metric_store
-             dashboards.  The legacy unlabelled counter above
-             remains for backward compatibility. *)
+        if cr > 0 then
           Otel_metric_store.inc_counter
             Otel_metric_store.metric_llm_provider_cache_read_tokens
             ~labels:[ ("provider", provider_label); ("model", model) ]
             ~delta:(Float.of_int cr)
-            ()
-        end;
+            ();
         (* Per-provider/model reasoning-token counter.  Available via
            [inference_telemetry.reasoning_tokens] on select providers
            (Anthropic extended thinking, DeepSeek, etc.). *)

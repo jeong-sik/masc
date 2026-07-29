@@ -25,35 +25,6 @@ let terminal_verdict_noop_message ~task_id ~action ~status =
     "Stale verification verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op."
     task_id status action
 
-let workflow_rejection_payload
-      ?rule_id
-      ?scope_policy
-      ?recoverable
-      ?extra_fields
-      message
-  =
-  Workflow_rejection_payload.payload
-    ?rule_id
-    ?scope_policy
-    ?recoverable
-    ?extra_fields
-    message
-
-let workflow_rejection_payload_json
-      ?rule_id
-      ?scope_policy
-      ?recoverable
-      ?extra_fields
-      message
-  =
-  workflow_rejection_payload
-    ?rule_id
-    ?scope_policy
-    ?recoverable
-    ?extra_fields
-    message
-  |> Yojson.Safe.to_string
-
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
     ~(task_id : string) ~(scope_widened : bool) : Yojson.Safe.t =
   `Assoc

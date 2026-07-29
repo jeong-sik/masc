@@ -25,15 +25,13 @@ let workflow_rejection_result
       ~tool_name
       ~start_time
       ?rule_id
-      ?scope_policy
       ?recoverable
       ?extra_fields
       message
   =
   let data =
-    workflow_rejection_payload
+    Workflow_rejection_payload.payload
       ?rule_id
-      ?scope_policy
       ?recoverable
       ?extra_fields
       message
@@ -56,7 +54,6 @@ let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id
     ~tool_name
     ~start_time
     ~rule_id:"stale_task_id_not_found"
-    ~scope_policy:"observe"
     ~extra_fields:
       [ "task_id", `String task_id
       ; "action", `String action_s
@@ -220,7 +217,6 @@ and handle_transition ~tool_name ~start_time ctx args =
               ~tool_name
               ~start_time
               ~rule_id:"task_release_requires_current_owner"
-              ~scope_policy:"observe"
               ~extra_fields:
                 [ "task_id", `String task_id
                 ; "task_status", `String status
@@ -297,7 +293,6 @@ and handle_transition ~tool_name ~start_time ctx args =
         (match rule_id with
          | Some "task_done_requires_claimed_or_started" -> Some true
          | _ -> None)
-      ~scope_policy:"observe"
       message
   | None ->
   match handoff_context with
@@ -530,7 +525,6 @@ and handle_transition ~tool_name ~start_time ctx args =
         ~tool_name
         ~start_time
         ~rule_id:"task_transition_invalid_state"
-        ~scope_policy:"observe"
         ~recoverable:false
         ~extra_fields:
           [ "task_id", `String task_id

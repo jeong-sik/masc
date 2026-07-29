@@ -296,6 +296,8 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
                   ; content_blocks = None
                   }
               ]
+          ; block_message Agent_sdk.Types.Assistant
+              [ Agent_sdk.Types.Text "raw suffix" ]
           ]
         (summarize_response "done");
       run_case
@@ -307,6 +309,8 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
                   { content = String.make 4096 'p'; signature = None }
               ; Agent_sdk.Types.Text "visible"
               ]
+          ; block_message Agent_sdk.Types.User
+              [ Agent_sdk.Types.Text "follow-up" ]
           ]
         (summarize_response "visible"))
 ;;

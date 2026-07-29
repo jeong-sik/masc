@@ -273,16 +273,39 @@ let test_whole_tool_cycle_is_summarized_atomically () =
     ]
   in
   let compacted_plan =
-    plan (window units) ~summary:"cycle result retained" ~keep_from_unit_index:6
+    plan (window units) ~summary:"cycle result retained" ~keep_from_unit_index:5
   in
   Alcotest.(check (list int))
-    "all bounded typed units are summarized"
-    [ 2; 3; 4; 5 ]
+    "the complete tool cycle is summarized before one exact suffix"
+    [ 2; 3; 4 ]
     (C.summarized_indices compacted_plan);
   Alcotest.(check int)
-    "one summary replaces assistant plus complete cycle plus tail"
-    3
+    "one summary replaces assistant plus complete cycle and keeps the tail"
+    4
     (List.length (C.apply compacted_plan))
+;;
+
+let test_plan_must_leave_a_future_rolling_source () =
+  let planning_window =
+    window
+      [ ordinary (text T.Assistant "oldest")
+      ; ordinary (text T.Assistant "newest")
+      ]
+  in
+  Alcotest.(check bool)
+    "the terminal source cannot be swallowed without a later rolling source"
+    true
+    (Result.is_error
+       (C.plan_of_json
+          ~window:planning_window
+          (plan_json ~summary:"all gone" ~keep_from_unit_index:2)));
+  Alcotest.(check bool)
+    "keeping the newest exact source remains valid"
+    true
+    (Result.is_ok
+       (C.plan_of_json
+          ~window:planning_window
+          (plan_json ~summary:"bounded" ~keep_from_unit_index:1)))
 ;;
 
 let test_derived_summary_folds_hierarchically () =
@@ -317,7 +340,7 @@ let test_derived_summary_folds_hierarchically () =
       (Astring.String.is_infix ~affix:"next-run" wire);
     let folded =
       C.apply
-        (plan next ~summary:"one rolling memory" ~keep_from_unit_index:6)
+        (plan next ~summary:"one rolling memory" ~keep_from_unit_index:5)
     in
     let summaries =
       List.filter
@@ -399,6 +422,8 @@ let () =
             test_apply_preserves_exact_outside_state_and_cycle
         ; Alcotest.test_case "tool cycle is summarized atomically" `Quick
             test_whole_tool_cycle_is_summarized_atomically
+        ; Alcotest.test_case "plan leaves a future rolling source" `Quick
+            test_plan_must_leave_a_future_rolling_source
         ; Alcotest.test_case "derived summary folds hierarchically" `Quick
             test_derived_summary_folds_hierarchically
         ; Alcotest.test_case "multiple current summaries are rejected" `Quick

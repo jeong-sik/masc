@@ -128,7 +128,11 @@ val prepare_lane
     invokes [release_before_dispatch]; MASC never reconstructs dispatch state
     from cancellation or receipt details.
     Domain-invalid output is rejected by the validator and OAS advances to the
-    next caller-declared candidate. Exhaustion is source-terminal. *)
+    next caller-declared candidate. The same validator applies the proposed
+    rolling summary, selects the next oldest raw source, and projects that next
+    request through every frozen slot's OAS serializer. A summary that would
+    make the next fold exceed any declared request-body cap is domain-invalid
+    before checkpoint installation. Exhaustion is source-terminal. *)
 val execute_prepared_lane
   :  keeper_name:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

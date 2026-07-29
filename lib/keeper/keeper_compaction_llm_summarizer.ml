@@ -450,6 +450,19 @@ let planning_window_last_index (window : planning_window) =
     window.first_source.source_index
     window.remaining_sources
 
+let planning_window_has_later_source (window : planning_window) =
+  let last_index = planning_window_last_index window in
+  eligible_sources window.source_units
+  |> List.exists (fun (source : eligible_source) ->
+    source.source_index > last_index)
+
+let planning_window_max_keep_from window =
+  let last_index = planning_window_last_index window in
+  if planning_window_has_later_source window then last_index + 1 else last_index
+
+let planning_window_has_valid_boundary window =
+  window.first_source.source_index + 1 <= planning_window_max_keep_from window
+
 let eligible_units_json (sources : eligible_source list) =
   `List
     (List.map
@@ -476,6 +489,7 @@ let messages_for_plan ~window =
   let sources = planning_window_sources window in
   let first_index = window.first_source.source_index in
   let last_index = planning_window_last_index window in
+  let max_keep_from = planning_window_max_keep_from window in
   let prior_summary =
     match window.prior_summary with
     | None -> `Null
@@ -507,7 +521,8 @@ let messages_for_plan ~window =
        window_units=%s\n\
        Return {\"%s\":string,\"%s\":integer}. The summary must be non-empty. \
        keep_from_unit_index must be in [%d,%d], so at least the oldest unit is \
-       summarized."
+       summarized and one current or later raw unit remains available for the \
+       next rolling fold."
       (Yojson.Safe.to_string prior_summary)
       first_index
       last_index
@@ -515,7 +530,7 @@ let messages_for_plan ~window =
       Schema.compaction_plan_field_summary
       Schema.compaction_plan_field_keep_from_unit_index
       (first_index + 1)
-      (last_index + 1)
+      max_keep_from
   in
   [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
 
@@ -578,15 +593,15 @@ let plan_of_json ~window json =
       keep_from_json
   in
   let first_index = window.first_source.source_index in
-  let last_index = planning_window_last_index window in
-  if keep_from_unit_index <= first_index || keep_from_unit_index > last_index + 1
+  let max_keep_from = planning_window_max_keep_from window in
+  if keep_from_unit_index <= first_index || keep_from_unit_index > max_keep_from
   then
     Error
       (Printf.sprintf
          "keep_from_unit_index %d is outside [%d,%d]"
          keep_from_unit_index
          (first_index + 1)
-         (last_index + 1))
+         max_keep_from)
   else Ok { window; summary; keep_from_unit_index }
 
 let summary_message summary =
@@ -607,7 +622,7 @@ let summarized_indices plan =
 let dropped_indices _ = []
 let has_changes plan = summarized_indices plan <> []
 
-let apply (plan : compaction_plan) =
+let apply_units (plan : compaction_plan) =
   let first_index = plan.window.first_source.source_index in
   let summary_index =
     match plan.window.prior_summary with
@@ -618,10 +633,16 @@ let apply (plan : compaction_plan) =
   |> List.mapi (fun index unit_ -> index, unit_)
   |> List.concat_map (fun (index, unit_) ->
     if index = summary_index
-    then [ summary_message plan.summary ]
+    then
+      [ Keeper_compaction_unit.Ordinary_message
+          (summary_message plan.summary)
+      ]
     else if index >= first_index && index < plan.keep_from_unit_index
     then []
-    else messages_of_unit unit_)
+    else [ unit_ ])
+
+let apply plan =
+  apply_units plan |> List.concat_map messages_of_unit
 
 let exact_output_requirement =
   Exact_output.make_output_requirement
@@ -633,6 +654,14 @@ let planning_window_with_sources window = function
   | [] -> None
   | first_source :: remaining_sources ->
     Some { window with first_source; remaining_sources }
+;;
+
+let next_progress_window plan =
+  let* next_window =
+    planning_window_for_units (apply_units plan)
+  in
+  planning_window_with_sources next_window [ next_window.first_source ]
+  |> Option.to_result ~none:"compacted plan has no next rolling source"
 ;;
 
 let window_prefix sources count =
@@ -674,9 +703,14 @@ let project_window_fits_all
 let largest_fitting_window ~keeper_name ~selected_slots window =
   let sources = planning_window_sources window |> Array.of_list in
   let candidate count =
-    window_prefix sources count
-    |> planning_window_with_sources window
-    |> Option.to_result ~none:Invalid_plan
+    let* candidate =
+      window_prefix sources count
+      |> planning_window_with_sources window
+      |> Option.to_result ~none:Invalid_plan
+    in
+    if planning_window_has_valid_boundary candidate
+    then Ok candidate
+    else Error Invalid_plan
   in
   (* Every candidate contains the same prior summary and an exact prefix of the
      same raw JSON window. Increasing [count] only appends source bytes to the
@@ -701,10 +735,35 @@ let largest_fitting_window ~keeper_name ~selected_slots window =
   search None 1 (Array.length sources)
 ;;
 
+let plan_preserves_exact_future_progress
+      ~keeper_name
+      selected_slots
+      plan
+  =
+  match next_progress_window plan with
+  | Error detail -> Error detail
+  | Ok next_window ->
+    (match
+       project_window_fits_all
+         ~keeper_name
+         selected_slots
+         next_window
+     with
+     | Ok true -> Ok ()
+     | Ok false ->
+       Error
+         "replacement summary leaves no exact request-body capacity for the \
+          next oldest source"
+     | Error _ ->
+       Error
+         "replacement summary next-fold request projection was rejected")
+;;
+
 type prepared_lane =
   { window : planning_window
   ; registry_generation : int64
   ; ordered_slot_ids : string list
+  ; selected_slots : Runtime_exact_output_registry.selected_slot list
   ; flow_attempt : Exact_output.flow_attempt
   }
 
@@ -1180,6 +1239,7 @@ let prepare_lane
                      (fun (slot : Runtime_exact_output_registry.selected_slot) ->
                         slot.slot_id)
                      selected_slots
+               ; selected_slots
                ; flow_attempt
                })))
 ;;
@@ -1341,7 +1401,28 @@ let execute_prepared_lane_current
   let validate flow_success =
     let success = Exact_output.flow_success_output flow_success in
     match plan_of_json ~window:prepared_lane.window success.output with
-    | Ok plan -> Exact_output.Accept plan
+    | Ok plan ->
+      (match
+         plan_preserves_exact_future_progress
+           ~keeper_name
+           prepared_lane.selected_slots
+           plan
+       with
+       | Ok () -> Exact_output.Accept plan
+       | Error detail ->
+         let observation =
+           flow_success
+           |> Exact_output.flow_success_candidate
+           |> observe_flow_attempt_receipt
+         in
+         Log.Keeper.warn
+           ~keeper_name
+           "compaction exact output blocked future rolling admission slot=%s \
+            call_id=%s: %s"
+           observation.slot_id
+           observation.call_id
+           detail;
+         Exact_output.Reject_and_advance detail)
     | Error detail ->
       let observation =
         flow_success

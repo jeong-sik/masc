@@ -658,6 +658,123 @@ let test_domain_invalid_output_advances_to_declared_successor () =
     !events
 ;;
 
+let test_summary_that_blocks_next_exact_fold_advances_to_successor () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let first_slot = "future-fold-blocked" in
+  let successor_slot = "future-fold-successor" in
+  let blocked_response =
+    F.openai_response
+      (plan_json
+         ~summary:(String.make 20_000 'x')
+         ~keep_from_unit_index:1)
+  in
+  let blocked = F.start_server ~sw ~net ~clock (F.Reply blocked_response) in
+  let successor = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let fixtures : F.target_fixture list =
+    [ { id = first_slot; base_url = blocked.base_url }
+    ; { id = successor_slot; base_url = successor.base_url }
+    ]
+  in
+  let slot_ids = [ first_slot; successor_slot ] in
+  let uncapped_snapshot =
+    F.resolver_snapshot
+      ~source:"future fold request projection"
+      fixtures
+  in
+  let uncapped_registry = publish_exn ~slot_ids uncapped_snapshot in
+  let first_target =
+    match
+      Registry.resolve_lane
+        uncapped_registry
+        ~lane_id:conformance_lane_id
+    with
+    | Ok { selected_slots = first :: _ } -> first.admitted_target
+    | Ok _ | Error _ ->
+      Alcotest.fail "future-fold fixture did not resolve its first slot"
+  in
+  let initial_window =
+    match C.For_testing.planning_window_for_units units with
+    | Ok window -> window
+    | Error detail ->
+      Alcotest.failf "future-fold initial window failed: %s" detail
+  in
+  let requirement =
+    Agent_sdk.Exact_output.make_output_requirement
+      ~schema:S.compaction_plan_output_schema
+      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+  in
+  let initial_request_bytes =
+    match
+      Agent_sdk.Exact_output.project_request_body
+        ~target:first_target
+        ~messages:(C.For_testing.messages_for_plan ~window:initial_window)
+        requirement
+    with
+    | Ok projection -> projection.actual_bytes
+    | Error _ ->
+      Alcotest.fail "future-fold initial request projection failed"
+  in
+  let bounded_snapshot =
+    F.resolver_snapshot
+      ~request_body_limits:[ first_slot, initial_request_bytes ]
+      ~source:"future fold exact cap"
+      fixtures
+  in
+  let bounded_registry = publish_exn ~slot_ids bounded_snapshot in
+  let prepared =
+    prepare_exn
+      ~keeper_name:"keeper-future-fold"
+      ~registry:bounded_registry
+      ()
+  in
+  let events = ref [] in
+  let guard : C.exact_execution_guard =
+    { before_dispatch =
+        (fun observation ->
+           push_event events ("bind:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun observation ->
+           push_event events ("release:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; quarantine =
+        (fun _ _ ->
+           Alcotest.fail
+             "a declared future-fold successor must avoid terminal quarantine")
+    }
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name:"keeper-future-fold"
+      ~net
+      ~clock
+      ~exact_execution_guard:guard
+      prepared
+    |> completed_exn
+  in
+  Alcotest.(check string)
+    "the smaller summary owns the completed exact evidence"
+    successor_slot
+    (C.completed_exact_execution_evidence completed
+     |> C.exact_execution_evidence_slot_id);
+  Alcotest.(check int)
+    "future-blocking summary posts once"
+    1
+    (F.post_count blocked);
+  Alcotest.(check int)
+    "declared smaller-summary successor posts once"
+    1
+    (F.post_count successor);
+  Alcotest.(check (list string))
+    "future-blocking output releases before successor bind"
+    [ "bind:" ^ first_slot
+    ; "release:" ^ first_slot
+    ; "bind:" ^ successor_slot
+    ]
+    !events
+;;
+
 let test_semantic_exhaustion_terminalizes_final_bound () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -975,6 +1092,10 @@ let () =
             "domain invalidity advances to declared successor"
             `Quick
             test_domain_invalid_output_advances_to_declared_successor
+        ; Alcotest.test_case
+            "future-fold blocking summary advances to successor"
+            `Quick
+            test_summary_that_blocks_next_exact_fold_advances_to_successor
         ; Alcotest.test_case
             "final OAS failure is generic terminal"
             `Quick

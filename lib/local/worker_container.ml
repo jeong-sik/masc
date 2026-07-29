@@ -213,17 +213,54 @@ let load_worker_checkpoint ~base_path ~worker_name =
   let path =
     worker_checkpoint_path ~base_path ~worker_name
   in
-  if Sys.file_exists path then
-    try
-      let raw = In_channel.with_open_text path In_channel.input_all in
-      (match Agent_sdk.Checkpoint.of_string raw with
-       | Ok v -> Some v
+  match Unix.openfile path [ Unix.O_RDONLY ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (match Unix.lstat path with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+     | exception Unix.Unix_error (error, _, _) ->
+       Error
+         (sprintf
+            "failed to inspect worker checkpoint for %s: %s"
+            worker_name
+            (Unix.error_message error))
+     | _ ->
+       Error
+         (sprintf
+            "failed to open worker checkpoint for %s: path exists after open reported missing"
+            worker_name))
+  | exception Unix.Unix_error (error, _, _) ->
+    Error
+      (sprintf
+         "failed to open worker checkpoint for %s: %s"
+         worker_name
+         (Unix.error_message error))
+  | descriptor ->
+    let channel = Unix.in_channel_of_descr descriptor in
+    (try
+       let raw =
+         Fun.protect
+           ~finally:(fun () -> close_in_noerr channel)
+           (fun () -> In_channel.input_all channel)
+       in
+       match Agent_sdk.Checkpoint.of_string raw with
+       | Ok v -> Ok (Some v)
        | Error detail ->
-         Log.LocalWorker.warn "checkpoint parse error discarded for %s: %s" worker_name (Agent_sdk.Error.to_string detail);
-         None)
-    with Sys_error _ -> None
-  else
-    None
+         Error
+           (sprintf
+              "failed to load worker checkpoint for %s: %s"
+              worker_name
+              (Agent_sdk.Error.to_string detail))
+     with
+     | Sys_error msg ->
+       close_in_noerr channel;
+       Error (sprintf "failed to read worker checkpoint for %s: %s" worker_name msg)
+     | Unix.Unix_error (error, _, _) ->
+       close_in_noerr channel;
+       Error
+         (sprintf
+            "failed to read worker checkpoint for %s: %s"
+            worker_name
+            (Unix.error_message error)))
 
 let save_worker_checkpoint ~base_path ~worker_name checkpoint =
   try

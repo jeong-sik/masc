@@ -4,10 +4,8 @@
    acting lost:
    1. [?current_task] renders a "Current Task" layer for the task whose claim
       admitted the turn (before: current_task_id only suppressed guidance).
-   2. [?turn_decision] threads the scheduler's real cycle decision into the
-      wake-reason section (before: build_prompt recomputed with
-      reactive_wake=false / event_queue_triggers=[], so stimulus-driven wakes
-      rendered no reason).
+   2. [turn_decision] threads the scheduler's real cycle decision into the
+      wake-reason section, so stimulus-driven wakes render their reason.
    3. [?active_goal_summaries] renders goal titles next to ids, and a keeper
       WITH goals receives a self-direction directive (parity with the
       pre-existing no-goal branch). *)
@@ -177,8 +175,13 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
   }
 
 let user_message ?turn_decision ?current_task ?active_goal_summaries observation =
+  let turn_decision =
+    Option.value
+      turn_decision
+      ~default:(WO.keeper_cycle_decision ~meta observation)
+  in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?turn_decision
+    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~turn_decision
       ?current_task ?active_goal_summaries ~observation ()
   in
   user
@@ -280,7 +283,7 @@ let test_direct_turn_has_no_synthetic_task_context () =
 
 let test_threaded_stimulus_decision_renders_wake_reason () =
   (* A bootstrap event-queue stimulus on an otherwise empty world: the real
-     scheduler decision knows the trigger, the legacy recompute cannot. *)
+     scheduler decision knows the trigger; a local recompute cannot. *)
   let decision =
     WO.keeper_cycle_decision
       ~event_queue_triggers:[ WO.Bootstrap_stimulus ]
@@ -294,14 +297,6 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
     (contains ~needle:"- Scheduler: reactive turn (external stimulus)." threaded);
   check bool "bootstrap reason listed" true
     (contains ~needle:"bootstrap" threaded)
-
-let test_unthreaded_recompute_renders_no_reason_on_empty_world () =
-  (* Same empty world without the threaded decision: the recompute sees no
-     trigger, so no wake-reason section renders — the pre-RFC-0315 blindness
-     this change removes for stimulus wakes. *)
-  let user = user_message base_observation in
-  check bool "no reactive scheduler line" false
-    (contains ~needle:"- Scheduler: reactive turn (external stimulus)." user)
 
 (* --- 3. Goal titles + self-direction parity --- *)
 
@@ -346,17 +341,23 @@ let test_goal_holder_gets_self_direction_directive () =
           ("active_goal_ids", `List [ `String "goal-x" ]);
         ])
   in
+  let goal_turn_decision =
+    WO.keeper_cycle_decision ~meta:meta_with_goal base_observation
+  in
   let { Prompt.system_prompt = system; _ } =
     Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
-      ~observation:base_observation ()
+      ~turn_decision:goal_turn_decision ~observation:base_observation ()
   in
   check bool "goal-holder directive present" true
     (contains ~needle:"advance one of your active" system);
   check bool "defer is stated as valid" true
     (contains ~needle:"Deferring is a valid choice" system);
+  let no_goal_turn_decision =
+    WO.keeper_cycle_decision ~meta base_observation
+  in
   let { Prompt.system_prompt = no_goal_system; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
-      ~observation:base_observation ()
+      ~turn_decision:no_goal_turn_decision ~observation:base_observation ()
   in
   check bool "no-goal branch keeps its own directive" true
     (contains ~needle:"You have no active goal" no_goal_system);
@@ -383,8 +384,6 @@ let () =
         [
           test_case "stimulus decision renders wake reason" `Quick
             test_threaded_stimulus_decision_renders_wake_reason;
-          test_case "unthreaded recompute stays blind on empty world" `Quick
-            test_unthreaded_recompute_renders_no_reason_on_empty_world;
         ] );
       ( "goal titles and parity directive",
         [

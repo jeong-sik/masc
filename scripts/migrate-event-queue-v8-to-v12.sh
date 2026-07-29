@@ -318,8 +318,9 @@ run_migration() {
         }' > "${backup_dir}/manifest.json"
 
     local migration_active=true
-    rollback_on_error() {
-        local exit_code=$?
+    rollback_and_exit() {
+        local exit_code="$1"
+        trap - ERR INT TERM HUP
         if [[ "$migration_active" == true ]]; then
             echo "Migration failed; restoring original snapshot bytes..." >&2
             RESTORE_DIR="$backup_dir"
@@ -327,17 +328,26 @@ run_migration() {
         fi
         exit "$exit_code"
     }
-    trap rollback_on_error ERR
+    trap 'rollback_and_exit $?' ERR
+    trap 'rollback_and_exit 130' INT
+    trap 'rollback_and_exit 143' TERM
+    trap 'rollback_and_exit 129' HUP
 
+    local replaced_count=0
     for file in "${V8_SNAPSHOTS[@]}"; do
         keeper_name="$(basename "$(dirname "$file")")"
         rendered_file="${backup_dir}/rendered/${keeper_name}.json"
         atomic_copy "$rendered_file" "$file"
         validate_v12_snapshot "$file"
+        replaced_count=$((replaced_count + 1))
+        if [[ "${MASC_EVENT_QUEUE_MIGRATION_SELF_TEST_FAIL_AFTER_REPLACE:-}" == "$replaced_count" ]]
+        then
+            false
+        fi
     done
 
     migration_active=false
-    trap - ERR
+    trap - ERR INT TERM HUP
     echo "Migrated ${#V8_SNAPSHOTS[@]} snapshot(s) to v12."
     echo "Backup: $backup_dir"
     echo "Rollback: $0 --base-path \"$BASE_PATH\" --restore \"$backup_dir\" --confirm-stopped"
@@ -382,6 +392,14 @@ self_test() {
         "$0" --base-path "$fixture" --apply --confirm-stopped >/dev/null
     MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
         "$0" --base-path "$fixture" --restore "$backup_dir" --confirm-stopped >/dev/null
+    validate_v8_snapshot "$snapshot"
+
+    if MASC_EVENT_QUEUE_MIGRATION_SELF_TEST=1 \
+        MASC_EVENT_QUEUE_MIGRATION_SELF_TEST_FAIL_AFTER_REPLACE=1 \
+        "$0" --base-path "$fixture" --apply --confirm-stopped >/dev/null 2>&1
+    then
+        die "self-test: injected post-replacement failure did not fail"
+    fi
     validate_v8_snapshot "$snapshot"
 
     jq '.transition_outbox = [{"sentinel":"unprojected"}]' "$snapshot" > "${snapshot}.tmp"

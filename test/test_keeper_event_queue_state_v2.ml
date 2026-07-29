@@ -163,12 +163,17 @@ let test_projected_disposition_ledger_replays_older_operation () =
     "both disposition witnesses survive"
     2
     (List.length (State.projected_dispositions projected_transfer));
+  let reloaded =
+    State.to_yojson projected_transfer
+    |> State.of_yojson
+    |> require_ok "reload projected disposition ledger"
+  in
   (match
      State.cancel_pending_accepted
        ~current_owner_nonce:7
        ~applied_at:5.0
        ~cancellation
-       projected_transfer
+       reloaded
      |> require_ok "replay older cancellation"
    with
    | replayed, State.Transition_already_applied receipt ->
@@ -178,7 +183,7 @@ let test_projected_disposition_ledger_replays_older_operation () =
        receipt.transition_id;
      Alcotest.(check int64)
        "older operation replay does not revise"
-       (State.revision projected_transfer)
+       (State.revision reloaded)
        (State.revision replayed)
    | _, State.Transition_applied _ ->
      Alcotest.fail "older cancellation was applied twice")

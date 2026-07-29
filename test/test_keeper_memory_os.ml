@@ -402,7 +402,13 @@ let test_persisted_memory_decoders_reject_unknown_fields () =
     "fact wire is closed"
     true
     (Option.is_none (Types.fact_of_json fact_with_unknown));
-  let episode = episode_fixture ~summary:"closed wire" ~now:1_000_000.0 [ fact ] in
+  let episode =
+    episode_fixture
+      ~summary:"closed wire"
+      ~now:1_000_000.0
+      ~trace_id:"trace-closed-wire"
+      ~generation:0
+  in
   let episode_with_unknown =
     match Types.episode_to_json episode with
     | `Assoc fields -> `Assoc (("retired_field", `String "value") :: fields)

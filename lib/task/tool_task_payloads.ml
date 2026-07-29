@@ -25,17 +25,7 @@ let terminal_verdict_noop_message ~task_id ~action ~status =
     "Stale verification verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op."
     task_id status action
 
-let workflow_rejection_payload
-      ?rule_id
-      ?recoverable
-      ?extra_fields
-      message
-  =
-  Workflow_rejection_payload.payload
-    ?rule_id
-    ?recoverable
-    ?extra_fields
-    message
+let workflow_rejection_payload = Workflow_rejection_payload.payload
 
 let workflow_rejection_payload_json
       ?rule_id
@@ -43,7 +33,7 @@ let workflow_rejection_payload_json
       ?extra_fields
       message
   =
-  workflow_rejection_payload
+  Workflow_rejection_payload.payload
     ?rule_id
     ?recoverable
     ?extra_fields

@@ -30,17 +30,3 @@ let payload
   in
   `Assoc fields
 ;;
-
-let payload_json
-      ?rule_id
-      ?recoverable
-      ?extra_fields
-      message
-  =
-  payload
-    ?rule_id
-    ?recoverable
-    ?extra_fields
-    message
-  |> Yojson.Safe.to_string
-;;

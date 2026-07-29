@@ -1046,11 +1046,29 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
   let turn_outcome = Keeper_turn_outcome.of_reply_payload payload_json_opt in
   match (turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks) with
   | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
+  | Keeper_turn_outcome.External_effect_pending, _, _ -> None
   | Keeper_turn_outcome.No_visible_reply, _, true -> None
   | Keeper_turn_outcome.Visible_reply, None, true -> None
   | Keeper_turn_outcome.No_visible_reply, _, false -> Some empty_direct_reply_error
   | Keeper_turn_outcome.Visible_reply, None, false -> Some empty_direct_reply_error
   | Keeper_turn_outcome.Visible_reply, Some _, _ -> None
+
+let persisted_reply_blocks ~turn_outcome media_blocks =
+  match turn_outcome, media_blocks with
+  | Keeper_turn_outcome.External_effect_pending, Some media_blocks ->
+    Some
+      (Keeper_chat_blocks.Status
+         { kind = Keeper_chat_blocks.External_effect_pending }
+       :: media_blocks)
+  | Keeper_turn_outcome.External_effect_pending, None ->
+    Some
+      [ Keeper_chat_blocks.Status
+          { kind = Keeper_chat_blocks.External_effect_pending }
+      ]
+  | ( Keeper_turn_outcome.Visible_reply
+    | Keeper_turn_outcome.Continuation_checkpoint
+    | Keeper_turn_outcome.No_visible_reply ), media_blocks ->
+    media_blocks
 
 type keeper_stream_terminal_status =
   | Stream_done
@@ -2066,7 +2084,11 @@ let process_single_turn ~user_row_origin ~queued_turn
                this turn's stream) as reload-visible chat blocks so a dashboard
                reload shows media-only replies too, not just text-bearing
                replies. *)
-            let blocks = accumulated_media_blocks () in
+            let blocks =
+              persisted_reply_blocks
+                ~turn_outcome:canonical_reply.turn_outcome
+                (accumulated_media_blocks ())
+            in
             let has_visible_blocks = Option.is_some blocks in
             (match
                direct_reply_terminal_error ~has_visible_blocks payload_json_opt
@@ -2264,11 +2286,7 @@ let process_single_turn ~user_row_origin ~queued_turn
                                  ~source:chat_source
                                  ();
                                if queued_turn
-                               then
-                                 Ok
-                                   (Some
-                                      (Failed
-                                         { kind = No_visible_reply; detail }))
+                               then Ok (Some (queued_delivery_outcome_of_turn_ref turn_ref))
                                else Ok None)
                         | `Failure ->
                           persist_failure_reply ?turn_ref detail
@@ -2280,6 +2298,9 @@ let process_single_turn ~user_row_origin ~queued_turn
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
+                   | Keeper_turn_outcome.External_effect_pending, _ ->
+                       persist_assistant_reply ~assistant_content:""
+                       |> delivered_after_persist
                  in
                  (match delivery_result with
                   | Error persist_error ->
@@ -2643,6 +2664,7 @@ let process_single_turn ~user_row_origin ~queued_turn
           let suppress_terminal_reply =
             match turn_outcome with
             | Keeper_turn_outcome.Continuation_checkpoint
+            | Keeper_turn_outcome.External_effect_pending
             | Keeper_turn_outcome.No_visible_reply ->
                 true
             | Keeper_turn_outcome.Visible_reply -> false
@@ -3130,6 +3152,7 @@ module For_testing = struct
 
   let canonical_reply_payload_of_body = canonical_reply_payload_of_body
   let direct_reply_terminal_error = direct_reply_terminal_error
+  let persisted_reply_blocks = persisted_reply_blocks
   let queued_delivery_outcome_of_turn_ref =
     queued_delivery_outcome_of_turn_ref
   let committed_delivery_outcome = committed_delivery_outcome

@@ -394,6 +394,13 @@ let test_fusion_block_tolerates_missing_run_id () =
   | Some [ B.Fusion { board_post_id = "p-1"; run_id = "" } ] -> ()
   | _ -> Alcotest.fail "fusion block with board_post_id only should decode with empty run_id"
 
+let test_status_block_roundtrip () =
+  let original = [ B.Status { kind = B.External_effect_pending } ] in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some [ B.Status { kind = B.External_effect_pending } ] -> ()
+  | Some _ -> Alcotest.fail "status block changed shape across round-trip"
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid status block"
+
 (* RFC-0302: the thinking block wire shape is the contract the dashboard
    schema mirrors (t=thinking, content required, redacted omitted when
    false). Pin it so a drift breaks here. *)
@@ -519,6 +526,8 @@ let () =
             test_fusion_block_requires_board_post_id;
           Alcotest.test_case "fusion block tolerates missing run_id" `Quick
             test_fusion_block_tolerates_missing_run_id;
+          Alcotest.test_case "status block roundtrip" `Quick
+            test_status_block_roundtrip;
           Alcotest.test_case "thinking block roundtrip" `Quick
             test_thinking_block_roundtrip;
           Alcotest.test_case "redacted thinking block roundtrip" `Quick

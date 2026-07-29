@@ -381,6 +381,8 @@ let redact_block redaction = function
        decision. This is a structural exclusion of an id field, not a
        string-pattern exception. *)
     Keeper_chat_blocks.Fusion { board_post_id; run_id }
+  | Keeper_chat_blocks.Status { kind } ->
+    Keeper_chat_blocks.Status { kind }
   | Keeper_chat_blocks.Trace { trace } ->
     Keeper_chat_blocks.Trace
       { trace = List.map (redact_trace_step redaction) trace }

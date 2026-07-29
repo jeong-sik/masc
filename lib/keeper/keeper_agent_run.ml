@@ -30,12 +30,11 @@ let normalize_response_text_for_finalization
       ()
   =
   match run_result.stop_reason with
-  | Runtime_agent.Awaiting_external_effect _ ->
-    Ok Keeper_agent_run_response_text.external_effect_deferred_acknowledgement
-  | Runtime_agent.Completed
+  | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_to_chat_waiting _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Completed
   | Runtime_agent.InputRequired _ ->
   if
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response

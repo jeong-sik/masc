@@ -175,6 +175,7 @@ let result_contract_of_status = function
   | Keeper_msg_async.Done { ok = true; data; _ } ->
     (match Keeper_turn_outcome.of_reply_payload data with
      | Keeper_turn_outcome.Continuation_checkpoint -> Yielded
+     | Keeper_turn_outcome.External_effect_pending -> Yielded
      | Keeper_turn_outcome.Visible_reply
      | Keeper_turn_outcome.No_visible_reply -> Completed)
 ;;

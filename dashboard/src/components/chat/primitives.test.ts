@@ -148,6 +148,45 @@ describe('ChatTranscript', () => {
     expect(bubble?.textContent).toContain('✓')
   })
 
+  it('renders a typed external-effect wait as an actionable status, not assistant prose', () => {
+    const originalHash = window.location.hash
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'gate-wait-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            blocks: [{ t: 'status', kind: 'external_effect_pending' }],
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_pending"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('승인 대기')
+    expect(status?.textContent).toContain('자동으로 계속합니다')
+    expect(status?.textContent).not.toContain('External effect is awaiting')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
+
+    const openGate = Array.from(status?.querySelectorAll('button') ?? [])
+      .find(button => button.textContent?.includes('승인 화면 열기'))
+    expect(openGate).toBeDefined()
+    fireEvent.click(openGate!)
+    expect(window.location.hash).toContain('command')
+    expect(window.location.hash).toContain('view=gate')
+    window.location.hash = originalHash
+  })
+
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
     const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(

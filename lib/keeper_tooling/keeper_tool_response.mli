@@ -1,11 +1,9 @@
 (** Keeper_tool_response - provider response acceptance and keeper reply text
     normalization. *)
 
-(** Keep [text] when non-blank; otherwise synthesize a
-    "No textual reply was produced. Tools invoked: ..." line if [tool_names]
-    is non-empty, else error. The fallback reports only observed invocation;
-    it does not claim that tools succeeded or the turn completed. Hidden
-    reasoning is never user-facing fallback text. *)
+(** Keep [text] when non-blank. A blank tool-only turn remains blank because
+    its tool timeline is the user-facing progress surface; a blank turn with no
+    tools is an error. Hidden reasoning is never user-facing fallback text. *)
 val normalize_response_text
   :  text:string
   -> tool_names:string list

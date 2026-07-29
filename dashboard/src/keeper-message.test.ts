@@ -203,6 +203,15 @@ describe('normalizeKeeperConversationDetails', () => {
     // Then reply || null: '' is falsy => null
     expect(result!.replyText).toBeNull()
   })
+
+  it('decodes the typed external-effect wait without reply prose', () => {
+    const result = normalizeKeeperConversationDetails({
+      reply: '',
+      turn_outcome: 'external_effect_pending',
+    })
+    expect(result?.turnOutcome).toBe('external_effect_pending')
+    expect(result?.replyText).toBeNull()
+  })
 })
 
 // ================================================================

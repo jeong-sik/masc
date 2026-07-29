@@ -547,6 +547,7 @@ let resolve_keeper_name ctx args =
 let direct_reply_visible_text json =
   match Keeper_turn_outcome.of_reply_payload (Some json) with
   | Keeper_turn_outcome.Continuation_checkpoint -> None
+  | Keeper_turn_outcome.External_effect_pending -> None
   | Keeper_turn_outcome.No_visible_reply -> None
   | Keeper_turn_outcome.Visible_reply -> (
       match Json_util.get_string json "reply" with

@@ -100,6 +100,10 @@ type fusion_block = {
   run_id : string;
 }
 
+type status_kind = External_effect_pending
+
+type status_block = { kind : status_kind }
+
 type trace_tool_status =
   | Trace_tool_pending
   | Trace_tool_ok
@@ -160,6 +164,7 @@ type chat_block =
   | Image of image_block
   | Link of link_block
   | Fusion of fusion_block
+  | Status of status_block
   | Trace of trace_block
   | Thinking of thinking_block
 

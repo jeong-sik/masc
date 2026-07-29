@@ -10,11 +10,7 @@ let normalize_response_text ~(text : string) ~(tool_names : string list) ()
   else (
     match tool_names with
     | [] -> Error "keeper turn completed with no textual reply"
-    | _ ->
-      Ok
-        (Printf.sprintf
-           "No textual reply was produced. Tools invoked: %s."
-           (String.concat ", " tool_names)))
+    | _ -> Ok "")
 ;;
 
 type accept_rejection_kind =

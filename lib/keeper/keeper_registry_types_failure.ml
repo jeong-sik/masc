@@ -79,14 +79,7 @@ let failure_reason_to_string = function
     Printf.sprintf "provider_runtime_error(%s:%s%s%s)" code detail prov http
   | Fiber_unresolved Graceful_shutdown -> "fiber_unresolved(graceful_shutdown)"
   | Fiber_unresolved Cancelled_by_parent -> "fiber_unresolved(cancelled_by_parent)"
-  | Fiber_unresolved Unexpected -> "fiber_unresolved"
-  (* Backward-compat string form: [Unexpected] preserves the legacy
-     "fiber_unresolved" wire value so existing log-line / dashboard
-     greps and persisted crash_log rows continue to match. Graceful
-     and cancelled-by-parent variants get distinct suffixes so 24h
-     fleet audits can split the noise:signal ratio (Issue #18901) and
-     supervisor restart/back-off can treat parent-cancel differently
-     from genuine missed-resolution. *)
+  | Fiber_unresolved Unexpected -> "fiber_unresolved(unexpected)"
   | Exception s -> Printf.sprintf "exception(%s)" s
   | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"

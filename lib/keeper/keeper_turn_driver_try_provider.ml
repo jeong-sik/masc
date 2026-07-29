@@ -29,8 +29,7 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
-  ; model_input_projection :
-      (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option
+  ; model_input_projection : Agent_sdk.Agent.model_input_projection option
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float option

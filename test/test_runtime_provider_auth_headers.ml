@@ -1444,6 +1444,48 @@ let with_native_count_server f =
   let result = f ~sw ~net ~base_url in
   result, List.rev !paths
 
+let with_native_projection_server f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let requests = ref [] in
+  let handler _conn request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    requests := (path, body) :: !requests;
+    if String.equal path "/v1/messages/count_tokens"
+    then Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":64}|} ()
+    else if String.equal path "/v1/messages"
+    then
+      Cohttp_eio.Server.respond_string
+        ~status:`OK
+        ~body:
+          {|{"id":"msg-projection","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"context-fit-fixture","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":64,"output_tokens":1}}|}
+        ()
+    else
+      Cohttp_eio.Server.respond_string
+        ~status:`Not_found
+        ~body:{|{"error":"unexpected path"}|}
+        ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, List.rev !requests
+
 let context_fit_provider_config base_url =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Anthropic
@@ -1535,6 +1577,74 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
       (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
+
+let projection_messages marker messages =
+  let project_block = function
+    | Agent_sdk.Types.Text _ -> Agent_sdk.Types.Text marker
+    | block -> block
+  in
+  List.map
+    (fun (message : Agent_sdk.Types.message) ->
+      { message with content = List.map project_block message.content })
+    messages
+
+let run_projection_case ~resume =
+  let canonical_marker = "canonical-unprojected-message" in
+  let projected_marker = "projected-provider-message" in
+  let projection_calls = ref 0 in
+  let (), requests =
+    with_native_projection_server
+    @@ fun ~sw ~net ~base_url ->
+    let config =
+      { (context_fit_runtime_config base_url) with
+        model_input_projection =
+          Some
+            (fun messages ->
+               incr projection_calls;
+               Ok (projection_messages projected_marker messages))
+      }
+    in
+    let agent =
+      if resume
+      then
+        Runtime_agent.resume_from_checkpoint
+          ~sw
+          ~net
+          ~config
+          ~checkpoint:(context_fit_checkpoint ())
+      else Runtime_agent.build ~sw ~net ~config
+    in
+    let agent =
+      match agent with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_sdk.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      (fun () ->
+         match Agent_sdk.Agent.run ~sw agent canonical_marker with
+         | Ok _ -> ()
+         | Error error -> fail (Agent_sdk.Error.to_string error))
+  in
+  check int "projection executes once" 1 !projection_calls;
+  check
+    (list string)
+    "measurement and completion both execute"
+    [ "/v1/messages/count_tokens"; "/v1/messages" ]
+    (List.map fst requests);
+  List.iter
+    (fun (path, body) ->
+       check bool (path ^ " sees projected input") true
+         (String_util.contains_substring body projected_marker);
+       check bool (path ^ " excludes canonical input") false
+         (String_util.contains_substring body canonical_marker))
+    requests
+
+let test_runtime_agent_fresh_projection_precedes_measurement () =
+  run_projection_case ~resume:false
+
+let test_runtime_agent_resume_projection_precedes_measurement () =
+  run_projection_case ~resume:true
 
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
@@ -1760,6 +1870,14 @@ let () =
             "runtime resume enforces native context fit"
             `Quick
             test_runtime_agent_resume_enforces_native_context_fit
+        ; test_case
+            "fresh projection precedes measurement and dispatch"
+            `Quick
+            test_runtime_agent_fresh_projection_precedes_measurement
+        ; test_case
+            "resumed projection precedes measurement and dispatch"
+            `Quick
+            test_runtime_agent_resume_projection_precedes_measurement
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

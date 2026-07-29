@@ -575,7 +575,7 @@ let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
                   { content =
                       redact_text
                         (busy_ack_reply_text_queued ~admission_rejection
-                           ~keeper_name ~receipt_id:message_request.request_id
+                           ~keeper_name ~receipt_id:message_request.request_id)
                   ; structured = None
                   ; stats = None
                   ; message_request = Some message_request

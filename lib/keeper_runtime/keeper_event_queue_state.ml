@@ -796,10 +796,16 @@ let transition_label = function
   | Escalate _ -> "escalate"
 ;;
 
+let settle_exact_transition_id ~lease_id ~disposition_id =
+  Printf.sprintf "%s:settle_exact:%s" lease_id disposition_id
+;;
+
 let transition_id ~lease_id transition =
   match transition with
   | Settle_exact disposition ->
-    Printf.sprintf "%s:settle_exact:%s" lease_id disposition.disposition_id
+    settle_exact_transition_id
+      ~lease_id
+      ~disposition_id:disposition.disposition_id
   | Ack
   | Manual_compaction_committed _
   | No_compaction _
@@ -1802,21 +1808,13 @@ let finalize_exact_source_disposition
   | Some { status = Terminal_quarantined _; _ } ->
     Error "source-less terminal quarantine has no source disposition"
   | None ->
-    let prior_receipts =
-      List.map
-        (fun (entry : outbox_entry) -> entry.receipt)
-        state.transition_outbox
-      @ Option.to_list state.last_transition
-    in
-    let prior =
-      List.find_opt
-        (fun receipt ->
-           String.equal
-             receipt.transition_id
-             (transition_id ~lease_id:lease.lease_id receipt.transition))
-        prior_receipts
-    in
-    (match prior with
+    (match
+       find_prior_receipt
+         (settle_exact_transition_id
+            ~lease_id:lease.lease_id
+            ~disposition_id)
+         state
+     with
      | Some ({ transition = Settle_exact disposition; _ } as receipt)
        when String.equal disposition.disposition_id disposition_id ->
        Ok (state, Transition_already_applied receipt)

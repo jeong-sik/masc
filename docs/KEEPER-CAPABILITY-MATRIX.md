@@ -93,7 +93,7 @@ Excluded from keeper exposure:
 
 | Need | Use | Avoid |
 |------|-----|-------|
-| Identity, sandbox, context, or active schema uncertainty | `keeper_context_status`, `keeper_tools_list`, `keeper_tool_search` | Guessing hidden tools or reconstructing paths from memory |
+| Identity, sandbox, checkpoint/session, or active schema uncertainty | `keeper_context_status`, `keeper_tools_list`, `keeper_tool_search` | Guessing hidden tools, treating unobserved context occupancy as known, or reconstructing paths from memory |
 | Durable workspace discussion, findings, votes, or shared decisions | board tools | Connected-surface replies for long-lived workspace state |
 | Current dashboard/Discord/Slack/connector lane context or reply | `keeper_surface_read`, `keeper_surface_post`, `keeper_person_note_set` | Treating surfaces as repo files, board posts, or connector-wide registries |
 | Backlog ownership and completion | `keeper_tasks_list`, `keeper_task_claim`, `keeper_task_done`, `keeper_task_create` | Claiming work just to show activity when the right outcome is no-op/blocker reporting |

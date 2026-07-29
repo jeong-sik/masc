@@ -105,7 +105,10 @@ This RFC authorizes one hard-cut implementation slice:
    event, and history surfaces instead of filling them with defaults.
 7. Delete the dormant context-bearing OAS keeper snapshot publisher and its
    Dashboard decoder/state.
-8. Correct the Dashboard, Keeper manual, inventory, and regression fixtures.
+8. Make the direct `keeper_context_status` tool output and both of its
+   descriptors state checkpoint/session facts without promising unobserved
+   context-window occupancy.
+9. Correct the Dashboard, Keeper manual, inventory, and regression fixtures.
 
 The implementation changes observation writers and read models. It does not
 change Keeper turn scheduling, heartbeat cadence, compaction admission,
@@ -267,6 +270,7 @@ Implementation blast radius:
 - current-only metrics readers: Keeper status/detail, Dashboard series/cost/
   harness, and operator tool audit;
 - shared missing-context projection and operator/status call sites;
+- direct `keeper_context_status` output, model schema, and internal descriptor;
 - Dashboard Keeper/OAS types, normalizers, telemetry panels, and focused tests;
 - deletion of the private context snapshot decoder, producer-less compaction
   history options, tool-alias facade, dormant OAS snapshot publisher/decoder,

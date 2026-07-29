@@ -608,7 +608,7 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_heartbeat':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Heartbeat gen=${event.generation ?? '?'} ctx=${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'}`,
+        `Heartbeat gen=${event.generation ?? '?'}`,
         'keepers',
         'keeper_heartbeat',
         {
@@ -616,7 +616,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`
-            + ` (gen ${event.generation ?? '?'}, ctx ${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'})`,
+            + ` (gen ${event.generation ?? '?'})`,
         },
       )
       break

@@ -163,7 +163,9 @@
   rows are not decoded and no migration path was added. Removed fabricated
   context occupancy, producer-less metrics fields/compaction history,
   tool-name aliases and decision-log guessing, duplicate handoff generation
-  keys, and the dormant context-bearing OAS keeper snapshot publisher/decoder.
+  keys, the dormant context-bearing OAS keeper snapshot publisher/decoder, and
+  the `keeper_context_status.last_model_used = null` placeholder. Both current
+  context-status descriptors now state that occupancy is not observed.
 - Removed the zero-consumer Keeper compaction policy authoring record: profile aliases, hardcoded threshold tables, ratio/message/token Runtime params and env knobs, keeper-up/schema/meta fields, status/config projections, and dashboard controls. Retired inputs and persisted fields now fail explicitly; the typed compaction runtime, owner-lane execution, provider-overflow recovery, and durable observations remain unchanged.
 - Removed dead compaction ratio/message/token gates from Keeper status, metrics, TUI, dashboard config, and PATCH surfaces, including the unused `context_within_budget` FSM condition and inferred dashboard threshold marker. Observable compaction transitions now name the typed `Compaction_started` event; no UI fallback manufactures a gate.
 - Removed the superseded `Runtime_agent.media_reroute_candidates` helper (the live reroute path builds candidates inline) and narrowed `Keeper_runtime`'s interface by dropping five internal-only exported vals (`supervisor_sweeps`, `supervisor_sweeps_mu`, `with_sweeps_ro`, `with_sweeps_rw`, `existing_keepalive_bootstrap_done`). No replacement: zero external consumers.

@@ -169,7 +169,7 @@ let test_records_byte_scale_histogram_buckets () =
   let series =
     { keeper_name = "wire-observation-buckets"
     ; runtime_id = "wire-runtime-buckets"
-    ; max_request_body_bytes = 262_144
+    ; max_request_body_bytes = 2_097_152
     }
   in
   let bucket le =
@@ -178,20 +178,26 @@ let test_records_byte_scale_histogram_buckets () =
       ~labels:(("le", le) :: labels series)
       ()
   in
-  let before_131072 = bucket "131072" in
-  let before_262144 = bucket "262144" in
+  let before_524288 = bucket "524288" in
+  let before_1048576 = bucket "1048576" in
+  let before_rounded_1048576 = bucket "1.04858e+06" in
   let before_inf = bucket "+Inf" in
-  ignore (observe series 262_144);
+  ignore (observe series 1_048_576);
   check
     (float 0.5)
     "smaller bucket excludes observation"
-    before_131072
-    (bucket "131072");
+    before_524288
+    (bucket "524288");
   check
     (float 0.5)
-    "matching cap bucket includes observation"
-    (before_262144 +. 1.)
-    (bucket "262144");
+    "exact MiB bucket includes observation"
+    (before_1048576 +. 1.)
+    (bucket "1048576");
+  check
+    (float 0.5)
+    "rounded MiB label is not emitted"
+    before_rounded_1048576
+    (bucket "1.04858e+06");
   check
     (float 0.5)
     "+Inf bucket includes observation"

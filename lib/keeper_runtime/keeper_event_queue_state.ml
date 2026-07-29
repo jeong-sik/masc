@@ -256,13 +256,18 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v9"
+let schema = "keeper.event_queue.state.v10"
+let schema_v9 = "keeper.event_queue.state.v9"
 let schema_v8 = "keeper.event_queue.state.v8"
 
-(* v9 writes [ack_source_terminal] for source-terminal ACKs. v8 used the
+(* v10 persists the one terminal receipt retained after transition projection.
+   It is the durable replay witness for an accepted operator disposition once
+   its outbox and settlement WAL have been retired.  v9 wrote the same queue
+   shape without that witness, so it restores with no projected receipt.  v9
+   writes [ack_source_terminal] for source-terminal ACKs. v8 used the
    removed [settle_from_source_terminal] wire label; its only accepted use is
    recovery of an already durable outbox, which is canonicalized during decode
-   before any v9 snapshot is written. v7 carried [schema; revision; pending]
+   before any v10 snapshot is written. v7 carried [schema; revision; pending]
    only. The transition outbox lived
    solely in the settlement WAL, which forced that WAL to stay on disk after
    its pending mutation had already been absorbed into a saved snapshot - and a
@@ -3481,6 +3486,10 @@ let to_yojson state =
     [ "schema", `String schema
     ; "revision", int64_json state.revision
     ; "pending", Keeper_event_queue.queue_to_yojson state.pending
+    ; ( "last_settlement"
+      , match state.last_settlement with
+        | None -> `Null
+        | Some receipt -> transition_receipt_to_yojson receipt )
     ; ( "transition_outbox"
       , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
     ]
@@ -3634,7 +3643,16 @@ let of_yojson json =
   let* fields = assoc_fields ~context json in
   let* schema_value = string_field ~context "schema" fields in
   let* expected_fields =
-    if String.equal schema_value schema || String.equal schema_value schema_v8
+    if String.equal schema_value schema
+    then
+      Ok
+        [ "schema"
+        ; "revision"
+        ; "pending"
+        ; "last_settlement"
+        ; "transition_outbox"
+        ]
+    else if String.equal schema_value schema_v9 || String.equal schema_value schema_v8
     then Ok [ "schema"; "revision"; "pending"; "transition_outbox" ]
     else if String.equal schema_value schema_v7
     then Ok [ "schema"; "revision"; "pending" ]
@@ -3647,7 +3665,7 @@ let of_yojson json =
   let* pending_json = required_field ~context "pending" fields in
   let* pending = Keeper_event_queue.queue_of_yojson pending_json in
   let* transition_outbox =
-    if String.equal schema_value schema
+    if String.equal schema_value schema || String.equal schema_value schema_v9
     then list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     else if String.equal schema_value schema_v8
     then
@@ -3658,16 +3676,29 @@ let of_yojson json =
         fields
     else Ok []
   in
+  let* last_settlement =
+    if String.equal schema_value schema
+    then
+      match List.assoc_opt "last_settlement" fields with
+      | Some `Null -> Ok None
+      | Some json -> transition_receipt_of_yojson json |> Result.map Option.some
+      | None -> Error "keeper event queue state missing required field last_settlement"
+    else Ok None
+  in
   (* [next_lease_sequence] is a private carrier, but it is not free: the state
      invariant requires it to exceed every receipt sequence still held. A
      restored outbox brings its receipts' sequences back, so seeding a constant
      here would reject the very snapshot this decoder just read. Derive it from
-     what was restored; an empty outbox yields 1L, the pre-v8 seed. *)
+     what was restored; an empty state yields 1L, the pre-v8 seed. *)
   let next_lease_sequence =
     List.fold_left
       (fun acc (entry : outbox_entry) -> Int64.max acc entry.receipt.lease_sequence)
       0L
       transition_outbox
+    |> fun maximum ->
+    match last_settlement with
+    | None -> maximum
+    | Some receipt -> Int64.max maximum receipt.lease_sequence
     |> Int64.succ
   in
   validate_state
@@ -3675,7 +3706,7 @@ let of_yojson json =
     ; next_lease_sequence
     ; pending
     ; leases = []
-    ; last_settlement = None
+    ; last_settlement
     ; transition_outbox
     ; accepted_transfer_projections = []
     ; exact_execution_bindings = []

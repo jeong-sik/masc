@@ -144,6 +144,9 @@ let replace_field name value fields =
   List.map (fun (field, current) -> if String.equal field name then field, value else field, current) fields
 ;;
 
+let remove_field name fields = List.filter (fun (field, _) -> not (String.equal field name)) fields
+;;
+
 let source_ack_wire_fields json =
   match json with
   | `Assoc state_fields ->
@@ -241,6 +244,7 @@ let test_source_ack_wire_is_canonical_and_recovers_v8 () =
     let legacy_outbox = replace_field "receipt" (`Assoc legacy_receipt) outbox_fields in
     let legacy_state =
       state_fields
+      |> remove_field "last_settlement"
       |> replace_field "schema" (`String "keeper.event_queue.state.v8")
       |> replace_field "transition_outbox" (`List [ `Assoc legacy_outbox ])
       |> fun fields -> `Assoc fields
@@ -380,6 +384,54 @@ let test_exact_terminal_receipt_acks_pending () =
       "replay keeps source removed"
       0
       (Queue.length (State.pending replayed_state)))
+;;
+
+let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
+  with_source_terminal_lane (fun config keeper_name _meta request ->
+    let first =
+      Transaction.ack_pending config ~keeper_name request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "commit source-terminal ACK"
+    in
+    check_applied first.projection;
+    Persistence.project_transition_outbox_result
+      ~append_before_retire:(fun _entry -> Ok ())
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+    |> require_ok "project source-terminal ACK transition";
+    let projected =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "reload projected source-terminal ACK"
+    in
+    (match State.last_settlement projected with
+     | Some { settlement = State.Ack_source_terminal _; _ } -> ()
+     | Some _ | None -> Alcotest.fail "projected source-terminal ACK lost its replay witness");
+    let replay =
+      Transaction.ack_pending config ~keeper_name request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "replay source-terminal ACK after projection"
+    in
+    (match replay.commit_status with
+     | Transaction.Already_committed -> ()
+     | Transaction.Committed ->
+       Alcotest.fail "post-projection replay replaced the source-terminal receipt");
+    check_applied replay.projection;
+    let replayed =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "reload replayed projected source-terminal ACK"
+    in
+    Alcotest.(check int64)
+      "post-projection replay does not append a second transition"
+      (State.revision projected)
+      (State.revision replayed);
+    Alcotest.(check int)
+      "post-projection replay keeps source removed"
+      0
+      (Queue.length (State.pending replayed)))
 ;;
 
 let test_legacy_v3_receipt_file_resumes_ack () =
@@ -549,6 +601,10 @@ let () =
             "exact receipt ACKs pending"
             `Quick
             test_exact_terminal_receipt_acks_pending
+        ; Alcotest.test_case
+            "replays after outbox projection and snapshot reload"
+            `Quick
+            test_terminal_ack_replays_after_projection_and_snapshot_reload
         ; Alcotest.test_case
             "recovery-only v3 receipt resumes ACK"
             `Quick

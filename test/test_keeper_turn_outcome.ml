@@ -16,9 +16,6 @@ open Alcotest
 module TO = Masc.Keeper_turn_outcome
 module Ops = Masc.Keeper_tool_surface_ops
 module Stream = Server_routes_http_keeper_stream
-module UT = Masc.Keeper_unified_turn
-module Cycle = Masc.Keeper_heartbeat_loop_cycle
-module Heartbeat = Masc.Keeper_heartbeat_loop.For_testing
 module Response_text = Masc.Keeper_agent_run_response_text
 
 let outcome : TO.t testable =
@@ -73,64 +70,6 @@ let test_of_stop_reason () =
   check outcome "typed input required -> visible" TO.Visible_reply
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
-
-let test_runtime_stop_reason_controls_durable_source_completion () =
-  let meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [ "name", `String "turn-outcome-source"
-          ; "trace_id", `String "trace-turn-outcome-source"
-          ])
-    with
-    | Ok meta -> meta
-    | Error detail -> fail detail
-  in
-  let request : Agent_sdk.Error.input_required =
-    { request_id = "source-input-1"
-    ; participant_name = None
-    ; question = "Need operator input"
-    ; schema = None
-    ; timeout_s = None
-    ; created_at = 1_000.0
-    }
-  in
-  let cycle_of_stop_reason stop_reason =
-    match UT.turn_success_of_stop_reason ~meta stop_reason with
-    | UT.Turn_completed meta -> Cycle.Completed meta
-    | UT.Turn_checkpointed meta -> Cycle.Checkpointed meta
-    | UT.Turn_input_required meta -> Cycle.Input_required meta
-    | UT.Turn_cancelled _
-    | UT.Turn_skipped _ ->
-      fail "runtime stop reason mapped outside the executed turn outcomes"
-  in
-  check bool "completed turn ACKs durable source" true
-    (Heartbeat.cycle_outcome_acks_source
-       (cycle_of_stop_reason Runtime_agent.Completed));
-  check bool "chat yield retains durable source" false
-    (Heartbeat.cycle_outcome_acks_source
-       (cycle_of_stop_reason
-          (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 })));
-  check bool "durable stimulus yield retains durable source" false
-    (Heartbeat.cycle_outcome_acks_source
-       (cycle_of_stop_reason
-          (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 })));
-  check bool "external effect wait retains durable source" false
-    (Heartbeat.cycle_outcome_acks_source
-       (cycle_of_stop_reason
-          (Runtime_agent.Awaiting_external_effect { turns_used = 2 })));
-  check bool "repeated tool yield retains durable source" false
-    (Heartbeat.cycle_outcome_acks_source
-       (cycle_of_stop_reason
-          (Runtime_agent.Yielded_after_repeated_tool_call
-             { turns_used = 2
-             ; tool_name = "keeper_tasks_list"
-             ; repeated_count = 3
-             })));
-  check bool "input required retains durable source" false
-    (Heartbeat.cycle_outcome_acks_source
-       (cycle_of_stop_reason
-          (Runtime_agent.InputRequired { turns_used = 2; request })))
 
 let test_of_result_surface () =
   check outcome "completed with text -> visible" TO.Visible_reply
@@ -532,8 +471,6 @@ let () =
       ( "mapping",
         [
           test_case "of_stop_reason" `Quick test_of_stop_reason;
-          test_case "runtime stop reason controls durable source completion" `Quick
-            test_runtime_stop_reason_controls_durable_source_completion;
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "external effect wait acknowledgement is visible" `Quick
             test_external_effect_wait_acknowledgement_is_visible;

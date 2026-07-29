@@ -17,8 +17,6 @@ let ensure_attention_dir ~base_path =
 
 let persistence_surface = "keeper_external_attention"
 
-let default_claim_stale_after_s = 900.0
-
 (* Dedup scan window for [record]. The store is append-only and
    unbounded, so parsing the whole file on every record is O(file) per
    call — O(N^2) across N inbound messages on the Discord hot path. The
@@ -90,12 +88,6 @@ type item = {
 
 type event =
   | Recorded of item
-  | Claimed_for_turn of {
-      event_id : string;
-      claim_id : string;
-      turn_id : int option;
-      claimed_at : float;
-    }
   | Resolved of {
       event_id : string;
       resolved_at : float;
@@ -133,10 +125,6 @@ let opt_string_field key = function
   | None -> []
   | Some value -> [ (key, `String value) ]
 
-let opt_int_field key = function
-  | None -> []
-  | Some value -> [ (key, `Int value) ]
-
 let string_assoc_json fields =
   `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
 
@@ -163,14 +151,6 @@ let optional_string key = function
       match List.assoc_opt key fields with
       | Some (`String value) when String.trim value <> "" -> Some value
       | Some (`String _) | Some `Null | None -> None
-      | Some _ -> None)
-  | _ -> None
-
-let optional_int key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`Int value) -> Some value
-      | Some `Null | None -> None
       | Some _ -> None)
   | _ -> None
 
@@ -315,14 +295,6 @@ let item_of_json json =
 
 let event_to_json = function
   | Recorded item -> `Assoc [ ("event", `String "recorded"); ("item", item_to_json item) ]
-  | Claimed_for_turn { event_id; claim_id; turn_id; claimed_at } ->
-      `Assoc
-        ([ ("event", `String "claimed_for_turn");
-           ("event_id", `String event_id);
-           ("claim_id", `String claim_id);
-           ("claimed_at", `Float claimed_at);
-         ]
-        @ opt_int_field "turn_id" turn_id)
   | Resolved { event_id; resolved_at; reason } ->
       `Assoc
         [
@@ -347,18 +319,6 @@ let event_of_json json =
       let* item_json = required_object "item" json in
       let* item = item_of_json item_json in
       Ok (Recorded item)
-  | "claimed_for_turn" ->
-      let* event_id = required_string "event_id" json in
-      let* claim_id = required_string "claim_id" json in
-      let* claimed_at = required_float "claimed_at" json in
-      Ok
-        (Claimed_for_turn
-           {
-             event_id;
-             claim_id;
-             turn_id = optional_int "turn_id" json;
-             claimed_at;
-           })
   | "resolved" ->
       let* event_id = required_string "event_id" json in
       let* resolved_at = required_float "resolved_at" json in
@@ -474,7 +434,7 @@ let recorded_item_by_event_id events event_id =
   List.find_map
     (function
       | Recorded item when String.equal item.event_id event_id -> Some item
-      | Recorded _ | Claimed_for_turn _ | Resolved _ | Ignored _ -> None)
+      | Recorded _ | Resolved _ | Ignored _ -> None)
     events
 
 (* Events from the last [dedup_window_bytes] of the store, for the
@@ -536,15 +496,6 @@ let append_many ~base_path ~keeper_name events =
         (sanitize_name keeper_name) detail;
       Error detail
 
-let claim_for_turn ~base_path ~keeper_name ~event_ids ~claim_id ~turn_id ?now () =
-  let claimed_at = now_or_default now in
-  let events =
-    List.map
-      (fun event_id -> Claimed_for_turn { event_id; claim_id; turn_id; claimed_at })
-      event_ids
-  in
-  append_many ~base_path ~keeper_name events
-
 let mark_resolved ~base_path ~keeper_name ~event_ids ~reason ?now () =
   let resolved_at = now_or_default now in
   let events =
@@ -565,22 +516,17 @@ let mark_ignored ~base_path ~keeper_name ~event_ids ~reason ?now () =
 
 type projected_state =
   | Pending of item
-  | Claimed of item * float
   | Terminal
 
-let project_pending events ~now ~claim_stale_after =
+let project_pending events =
   let tbl : (string, projected_state) Hashtbl.t = Hashtbl.create 16 in
   List.iter
     (function
       | Recorded item -> (
           match Hashtbl.find_opt tbl item.event_id with
           | Some Terminal -> ()
-          | Some (Claimed _ | Pending _) | None ->
+          | Some (Pending _) | None ->
               Hashtbl.replace tbl item.event_id (Pending item))
-      | Claimed_for_turn { event_id; claimed_at; _ } -> (
-          match Hashtbl.find_opt tbl event_id with
-          | Some (Pending item) -> Hashtbl.replace tbl event_id (Claimed (item, claimed_at))
-          | Some (Claimed _ | Terminal) | None -> ())
       | Resolved { event_id; _ } | Ignored { event_id; _ } ->
           Hashtbl.replace tbl event_id Terminal)
     events;
@@ -588,10 +534,7 @@ let project_pending events ~now ~claim_stale_after =
     (fun _ state acc ->
       match state with
       | Pending item -> item :: acc
-      | Claimed (item, claimed_at)
-        when now -. claimed_at > claim_stale_after ->
-          item :: acc
-      | Claimed _ | Terminal -> acc)
+      | Terminal -> acc)
     tbl []
   |> List.sort (fun a b -> compare a.received_at b.received_at)
 
@@ -603,20 +546,13 @@ let take limit items =
   in
   loop limit [] items
 
-let pending_for_keeper_result ~base_path ~keeper_name ?now ?claim_stale_after ~limit () =
-  let now = now_or_default now in
-  let claim_stale_after =
-    match claim_stale_after with
-    | Some seconds -> seconds
-    | None -> default_claim_stale_after_s
-  in
+let pending_for_keeper_result ~base_path ~keeper_name ~limit () =
   let* events = load_events_result ~base_path ~keeper_name in
-  Ok (events |> project_pending ~now ~claim_stale_after |> take (max 0 limit))
+  Ok (events |> project_pending |> take (max 0 limit))
 
-let pending_for_keeper ~base_path ~keeper_name ?now ?claim_stale_after ~limit () =
+let pending_for_keeper ~base_path ~keeper_name ~limit () =
   match
-    pending_for_keeper_result ~base_path ~keeper_name ?now ?claim_stale_after
-      ~limit ()
+    pending_for_keeper_result ~base_path ~keeper_name ~limit ()
   with
   | Ok pending -> pending
   | Error msg ->

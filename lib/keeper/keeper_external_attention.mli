@@ -71,12 +71,6 @@ type item = {
 
 type event =
   | Recorded of item
-  | Claimed_for_turn of {
-      event_id : string;
-      claim_id : string;
-      turn_id : int option;
-      claimed_at : float;
-    }
   | Resolved of {
       event_id : string;
       resolved_at : float;
@@ -87,9 +81,6 @@ type event =
       ignored_at : float;
       reason : string;
     }
-
-(** Default stale claim timeout used by {!pending_for_keeper}. *)
-val default_claim_stale_after_s : float
 
 val event_id_of_dedupe_key : string -> string
 
@@ -141,16 +132,6 @@ val record : base_path:string -> item -> record_result
 
 val attention_path : base_path:string -> keeper_name:string -> string
 
-val claim_for_turn :
-  base_path:string ->
-  keeper_name:string ->
-  event_ids:string list ->
-  claim_id:string ->
-  turn_id:int option ->
-  ?now:float ->
-  unit ->
-  (unit, string) result
-
 val mark_resolved :
   base_path:string ->
   keeper_name:string ->
@@ -177,20 +158,14 @@ val load_events : base_path:string -> keeper_name:string -> event list
 val pending_for_keeper :
   base_path:string ->
   keeper_name:string ->
-  ?now:float ->
-  ?claim_stale_after:float ->
   limit:int ->
   unit ->
   item list
-(** Returns pending items ordered by [received_at], capped to [limit].
-    A non-terminal claim older than [claim_stale_after] is projected back
-    to pending instead of dropped. *)
+(** Returns pending items ordered by [received_at], capped to [limit]. *)
 
 val pending_for_keeper_result :
   base_path:string ->
   keeper_name:string ->
-  ?now:float ->
-  ?claim_stale_after:float ->
   limit:int ->
   unit ->
   (item list, string) result

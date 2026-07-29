@@ -678,6 +678,48 @@ let test_read_public_descriptor_schema_is_closed () =
     (schema_forbids_additional_properties descriptor.input_schema)
 ;;
 
+let test_translation_validation_policy_is_typed_for_all_descriptors () =
+  let probe = `Assoc [ "probe", `String "byte-identical" ] in
+  List.iter
+    (fun (descriptor : Descriptor.t) ->
+       match descriptor.input_translation with
+       | Descriptor.Identity _ ->
+         Alcotest.(check bool)
+           (descriptor.id ^ " identity translation is byte-identical")
+           true
+           (Yojson.Safe.equal
+              probe
+              (Descriptor.translate_input_for_descriptor descriptor probe))
+       | Descriptor.Shape_changing _ ->
+         ignore (Descriptor.translate_input_for_descriptor descriptor probe))
+    (Descriptor.all_descriptors ())
+;;
+
+let test_shape_changing_post_validation_is_executed () =
+  let descriptor = required_public_descriptor "Grep" in
+  let descriptor =
+    { descriptor with
+      input_translation =
+        Descriptor.Shape_changing
+          { translate = (fun _ -> `Assoc [])
+          ; validation = Descriptor.Validate_before_and_after_translation
+          }
+    }
+  in
+  match
+    Resolution.prepare_model_input_for_descriptor
+      ~tool_name:"Grep"
+      descriptor
+      ~input:(`Assoc [ "pattern", `String "needle" ])
+  with
+  | Error validation_result ->
+    check_contains
+      "translated payload is validated"
+      ~sub:"pattern"
+      (Tool_result.data validation_result |> Yojson.Safe.to_string)
+  | Ok _ -> Alcotest.fail "translated payload skipped descriptor validation"
+;;
+
 let test_read_public_validation_rejects_line_fields () =
   let input =
     `Assoc
@@ -686,7 +728,11 @@ let test_read_public_validation_rejects_line_fields () =
       ; "end_line", `Int 280
       ]
   in
-  match Resolution.validate_public_input_for_tool_call ~tool_name:"Read" ~input with
+  match
+    Resolution.validated_descriptor_and_input_for_tool_call
+      ~tool_name:"Read"
+      ~input
+  with
   | Some (Error validation_result) ->
     let data = Tool_result.data validation_result |> Yojson.Safe.to_string in
     check_contains
@@ -1490,6 +1536,14 @@ let () =
             "Read rejects unsupported line fields before translation"
             `Quick
             test_read_public_validation_rejects_line_fields
+        ; test_case
+            "translation validation policy is typed for all descriptors"
+            `Quick
+            test_translation_validation_policy_is_typed_for_all_descriptors
+        ; test_case
+            "shape-changing translations validate their output"
+            `Quick
+            test_shape_changing_post_validation_is_executed
         ; test_case
             "Read validates then translates supported public fields"
             `Quick

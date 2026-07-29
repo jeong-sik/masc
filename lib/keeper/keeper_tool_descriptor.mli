@@ -55,6 +55,26 @@ type input_schema_source =
 
 type readonly_of_input = Yojson.Safe.t -> bool option
 
+type identity_validation =
+  | Validate_once_before_translation
+  | Validate_once_after_translation
+(** Validation owner for translations that preserve the public schema. Exactly
+    one descriptor validation boundary is selected. *)
+
+type shape_changing_validation =
+  | Validate_before_and_after_translation
+  | Validate_before_then_runtime_handler
+(** Validation owner for shape-changing translations. Public input is always
+    validated before translation; the translated shape is then validated by
+    either the descriptor schema or the runtime handler's typed boundary. *)
+
+type input_translation =
+  | Identity of identity_validation
+  | Shape_changing of
+      { translate : Yojson.Safe.t -> Yojson.Safe.t
+      ; validation : shape_changing_validation
+      }
+
 type runtime_handler =
   | Tool_execute
   | Tool_search_files
@@ -119,12 +139,7 @@ type t =
   ; backend : backend
   ; sandbox : sandbox
   ; runtime_handler : runtime_handler
-  ; translate : Yojson.Safe.t -> Yojson.Safe.t
-  ; validate_translated_input : bool
-  (** Whether alias dispatch should validate [translate input] against the
-      internal handler schema. Defaults to true; false is reserved for
-      descriptor-owned public aliases whose runtime schema still differs from
-      the public schema. *)
+  ; input_translation : input_translation
   ; receipt_labels : (string * string) list
   (** Evaluation-only semantic tags emitted in route evidence. These tags
       support replay/harness scoring and are not runtime selection policy. *)
@@ -191,6 +206,7 @@ val descriptors_for_internal : string -> t list
 
 val readonly_static_hint : t -> bool option
 val readonly_for_input : t -> input:Yojson.Safe.t -> bool option
+val translate_input_for_descriptor : t -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Descriptor-owned read-only projection. The returned names are internal
     handler names whose descriptor policy declares a static read-only hint. *)

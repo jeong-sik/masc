@@ -48,14 +48,7 @@ let assoc_string key = function
   | other -> failwith ("expected object: " ^ Yojson.Safe.to_string other)
 
 let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
-  let json =
-    `Assoc
-      [ "name", `String name
-      ; "agent_name", `String (name ^ "-agent")
-      ; "trace_id", `String (name ^ "-trace")
-      ; "allowed_paths", `List [ `String "*" ]
-      ]
-  in
+  let json = `Assoc [ "name", `String name ] in
 match Masc_test_deps.meta_of_json_fixture json with
 | Ok meta -> meta
 | Error e -> failwith e

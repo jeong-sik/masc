@@ -228,6 +228,7 @@ module For_testing : sig
 
   val planning_window_source_indices : planning_window -> int list
 
+  val prepared_window_source_indices : prepared_lane -> int list
   val flow_slot_ids : prepared_lane -> string list
   val registry_generation : prepared_lane -> int64
 

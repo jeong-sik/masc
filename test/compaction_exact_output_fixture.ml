@@ -79,6 +79,7 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
 
 let target_fixture_toml
       ?connect_timeout_s
+      ?max_request_body_bytes
       ~supports_response_format_json
       ~supports_structured_output
       ~api_key_env
@@ -92,6 +93,12 @@ let target_fixture_toml
       ~none:""
       ~some:(fun value -> Printf.sprintf "connect_timeout_s = %.6g\n" value)
       connect_timeout_s
+  in
+  let request_body_limit =
+    Option.fold
+      ~none:""
+      ~some:(fun value -> Printf.sprintf "max_request_body_bytes = %d\n" value)
+      max_request_body_bytes
   in
   Printf.sprintf
     "[[providers]]\n\
@@ -111,6 +118,7 @@ let target_fixture_toml
      id = %S\n\
      provider_ref = %S\n\
      model_id = %S\n\
+     %s\
      %s"
     provider_id
     fixture.base_url
@@ -123,10 +131,12 @@ let target_fixture_toml
     provider_id
     model_id
     timeout
+    request_body_limit
 ;;
 
 let resolver_snapshot
       ?(connect_timeouts = [])
+      ?(request_body_limits = [])
       ?(api_key_env = "")
       ?(api_key_envs = [])
       ?(supports_response_format_json = true)
@@ -135,6 +145,7 @@ let resolver_snapshot
       fixtures
   =
   let timeout_for id = List.assoc_opt id connect_timeouts in
+  let request_body_limit_for id = List.assoc_opt id request_body_limits in
   let api_key_env_for id =
     List.assoc_opt id api_key_envs |> Option.value ~default:api_key_env
   in
@@ -145,6 +156,7 @@ let resolver_snapshot
         |> List.mapi (fun index fixture ->
             target_fixture_toml
               ?connect_timeout_s:(timeout_for fixture.id)
+              ?max_request_body_bytes:(request_body_limit_for fixture.id)
               ~supports_response_format_json
               ~supports_structured_output
               ~api_key_env:(api_key_env_for fixture.id)

@@ -285,7 +285,7 @@ let test_whole_tool_cycle_is_summarized_atomically () =
     (List.length (C.apply compacted_plan))
 ;;
 
-let test_derived_summary_is_not_recompacted () =
+let test_derived_summary_folds_hierarchically () =
   let units =
     [ ordinary (text T.System "system")
     ; ordinary (text T.User "goal")
@@ -309,12 +309,57 @@ let test_derived_summary_is_not_recompacted () =
   | Ok partition ->
     let next = window partition.closed_prefix in
     let wire = wire_of_window next in
-    Alcotest.(check bool) "derived summary does not re-enter planner" false
+    Alcotest.(check bool) "derived summary re-enters as prior memory" true
       (Astring.String.is_infix ~affix:"already compacted" wire);
     Alcotest.(check bool) "later User state enters the next window" true
       (Astring.String.is_infix ~affix:"next-user-state" wire);
     Alcotest.(check bool) "later run becomes the next window" true
-      (Astring.String.is_infix ~affix:"next-run" wire)
+      (Astring.String.is_infix ~affix:"next-run" wire);
+    let folded =
+      C.apply
+        (plan next ~summary:"one rolling memory" ~keep_from_unit_index:6)
+    in
+    let summaries =
+      List.filter
+        (fun (message : T.message) ->
+           message.metadata
+           = [ "masc.compaction.bounded_summary", `Bool true ])
+        folded
+    in
+    Alcotest.(check int) "hierarchical fold keeps one summary" 1
+      (List.length summaries);
+    Alcotest.(check bool) "old summary is replaced" false
+      (List.exists
+         (fun message -> T.text_of_message message = "already compacted")
+         folded);
+    Alcotest.(check bool) "new rolling summary is installed" true
+      (List.exists
+         (fun message -> T.text_of_message message = "one rolling memory")
+         folded);
+    Alcotest.(check bool) "protected barrier stays exact" true
+      (List.exists
+         (fun message -> T.text_of_message message = "barrier")
+         folded)
+;;
+
+let test_multiple_current_summaries_are_rejected () =
+  let summary value =
+    ordinary
+      (message
+         ~metadata:[ "masc.compaction.bounded_summary", `Bool true ]
+         T.Assistant
+         [ T.Text value ])
+  in
+  let units =
+    [ ordinary (text T.System "system")
+    ; ordinary (text T.User "goal")
+    ; summary "first"
+    ; summary "second"
+    ; ordinary (text T.Assistant "raw")
+    ]
+  in
+  Alcotest.(check bool) "ambiguous rolling-summary state fails closed" true
+    (Result.is_error (C.For_testing.planning_window_for_units units))
 ;;
 
 let test_open_cycle_remains_protected () =
@@ -354,8 +399,10 @@ let () =
             test_apply_preserves_exact_outside_state_and_cycle
         ; Alcotest.test_case "tool cycle is summarized atomically" `Quick
             test_whole_tool_cycle_is_summarized_atomically
-        ; Alcotest.test_case "derived summary is not re-compacted" `Quick
-            test_derived_summary_is_not_recompacted
+        ; Alcotest.test_case "derived summary folds hierarchically" `Quick
+            test_derived_summary_folds_hierarchically
+        ; Alcotest.test_case "multiple current summaries are rejected" `Quick
+            test_multiple_current_summaries_are_rejected
         ] )
     ]
 ;;

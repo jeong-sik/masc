@@ -23,8 +23,14 @@ type eligible_source =
   ; payload : eligible_payload
   }
 
+type prior_summary =
+  { source_index : int
+  ; text : string
+  }
+
 type planning_window =
-  { first_source : eligible_source
+  { prior_summary : prior_summary option
+  ; first_source : eligible_source
   ; remaining_sources : eligible_source list
   ; source_units : Keeper_compaction_unit.closed_unit list
   }
@@ -156,6 +162,8 @@ type summarization_failure =
 type summarizer =
   units:Keeper_compaction_unit.closed_unit list ->
   (completed_plan, summarization_failure) result
+
+let compaction_summary_metadata_key = "masc.compaction.bounded_summary"
 
 let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
@@ -374,10 +382,34 @@ let eligible_sources units =
 
 let has_eligible_units units = eligible_sources units <> []
 
-let oldest_contiguous_run = function
+let prior_summary source_index = function
+  | Keeper_compaction_unit.Ordinary_message
+      { role = Agent_sdk.Types.Assistant
+      ; content = [ Agent_sdk.Types.Text text ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = [ key, `Bool true ]
+      }
+    when String.equal key compaction_summary_metadata_key
+         && String.trim text <> "" ->
+    Some { source_index; text }
+  | Keeper_compaction_unit.Ordinary_message _
+  | Keeper_compaction_unit.Closed_tool_cycle _ ->
+    None
+
+let prior_summaries units =
+  units |> List.mapi prior_summary |> List.filter_map Fun.id
+
+let oldest_contiguous_run (sources : eligible_source list) =
+  match sources with
   | [] -> []
   | first :: rest ->
-    let rec loop previous_index sources_rev = function
+    let rec loop
+          previous_index
+          (sources_rev : eligible_source list)
+          (remaining_sources : eligible_source list)
+      =
+      match remaining_sources with
       | source :: remaining when source.source_index = previous_index + 1 ->
         loop source.source_index (source :: sources_rev) remaining
       | _ -> List.rev sources_rev
@@ -385,24 +417,43 @@ let oldest_contiguous_run = function
     loop first.source_index [ first ] rest
 
 let planning_window_for_units source_units =
-  match eligible_sources source_units |> oldest_contiguous_run with
-  | [] -> Error "source contains no eligible contiguous compaction window"
-  | first_source :: remaining_sources ->
-    Ok { first_source; remaining_sources; source_units }
+  let sources = eligible_sources source_units in
+  let make prior_summary sources =
+    match oldest_contiguous_run sources with
+    | [] -> Error "source contains no eligible contiguous compaction window"
+    | first_source :: remaining_sources ->
+      Ok { prior_summary; first_source; remaining_sources; source_units }
+  in
+  match prior_summaries source_units with
+  | [] -> make None sources
+  | [ prior_summary ] ->
+    if
+      List.exists
+        (fun (source : eligible_source) ->
+           source.source_index < prior_summary.source_index)
+        sources
+    then Error "eligible source precedes the current-format compaction summary"
+    else
+      sources
+      |> List.filter (fun (source : eligible_source) ->
+        source.source_index > prior_summary.source_index)
+      |> make (Some prior_summary)
+  | _ :: _ :: _ ->
+    Error "source contains multiple current-format compaction summaries"
 
-let planning_window_sources window =
+let planning_window_sources (window : planning_window) =
   window.first_source :: window.remaining_sources
 
-let planning_window_last_index window =
+let planning_window_last_index (window : planning_window) =
   List.fold_left
-    (fun _ source -> source.source_index)
+    (fun _ (source : eligible_source) -> source.source_index)
     window.first_source.source_index
     window.remaining_sources
 
-let eligible_units_json sources =
+let eligible_units_json (sources : eligible_source list) =
   `List
     (List.map
-       (fun source ->
+       (fun (source : eligible_source) ->
          match source.payload with
          | Message_text { role; text_blocks } ->
            `Assoc
@@ -425,26 +476,39 @@ let messages_for_plan ~window =
   let sources = planning_window_sources window in
   let first_index = window.first_source.source_index in
   let last_index = planning_window_last_index window in
+  let prior_summary =
+    match window.prior_summary with
+    | None -> `Null
+    | Some prior ->
+      `Assoc
+        [ Schema.compaction_plan_field_unit_index, `Int prior.source_index
+        ; "text", `String prior.text
+        ]
+  in
   let system =
-    "You compact only the supplied contiguous window of atomic eligible units. \
-     Choose one keep_from_unit_index. Every supplied unit below that boundary \
-     is replaced in place by one faithful Assistant memory; the boundary and \
-     later supplied units remain exact. Units outside this window remain exact \
-     by construction. Each closed_tool_cycle is one indivisible unit. The \
-     summary must preserve goals, constraints, decisions, evidence, tool \
-     outcomes, unresolved work, corrections, and state needed by future turns. \
-     Choose the latest boundary you can summarize faithfully; keep exact only \
-     the minimal recent suffix whose details must remain verbatim. Do not \
-     invent facts, reference unseen units, split tool cycles, emit markdown \
-     fences, or enumerate per-unit decisions. Respond with one JSON object and \
-     no other text."
+    "You hierarchically compact one optional prior Assistant memory plus the \
+     supplied contiguous window of raw atomic eligible units. Choose one \
+     keep_from_unit_index. Fold the prior memory, when present, and every raw \
+     unit below that boundary into one faithful replacement Assistant memory. \
+     The boundary and later raw units remain exact. Units outside the raw \
+     window, including any exact units between the prior memory and the raw \
+     window, remain exact by construction. Each closed_tool_cycle is one \
+     indivisible unit. The replacement memory must preserve goals, constraints, \
+     decisions, evidence, tool outcomes, unresolved work, corrections, and \
+     state needed by future turns. Choose the latest boundary you can summarize \
+     faithfully; keep exact only the minimal recent suffix whose details must \
+     remain verbatim. Do not invent facts, reference unseen units, split tool \
+     cycles, emit markdown fences, or enumerate per-unit decisions. Respond \
+     with one JSON object and no other text."
   in
   let user =
     Printf.sprintf
-      "window_first_unit_index=%d\nwindow_last_unit_index=%d\nwindow_units=%s\n\
+      "prior_summary=%s\nwindow_first_unit_index=%d\nwindow_last_unit_index=%d\n\
+       window_units=%s\n\
        Return {\"%s\":string,\"%s\":integer}. The summary must be non-empty. \
        keep_from_unit_index must be in [%d,%d], so at least the oldest unit is \
        summarized."
+      (Yojson.Safe.to_string prior_summary)
       first_index
       last_index
       (eligible_units_json sources |> Yojson.Safe.to_string)
@@ -525,20 +589,17 @@ let plan_of_json ~window json =
          (last_index + 1))
   else Ok { window; summary; keep_from_unit_index }
 
-let compaction_summary_metadata_key = "masc.compaction.bounded_summary"
-
 let summary_message summary =
-  (* Current-format derived state, not a compatibility marker. Eligibility
-     already protects metadata-bearing messages, so this single field prevents
-     the next pass from repeatedly compacting the same summary and advances the
-     oldest-window scan. Its blast radius ends at [eligible_source]. *)
+  (* Current-format derived state, not a compatibility marker. The exact field
+     identifies the one rolling summary consumed by [planning_window_for_units].
+     Its blast radius is planning and in-place replacement only. *)
   { (message Agent_sdk.Types.Assistant summary) with
     metadata = [ compaction_summary_metadata_key, `Bool true ]
   }
 
 let summarized_indices plan =
   planning_window_sources plan.window
-  |> List.filter_map (fun source ->
+  |> List.filter_map (fun (source : eligible_source) ->
     if source.source_index < plan.keep_from_unit_index
     then Some source.source_index
     else None)
@@ -548,12 +609,17 @@ let has_changes plan = summarized_indices plan <> []
 
 let apply (plan : compaction_plan) =
   let first_index = plan.window.first_source.source_index in
+  let summary_index =
+    match plan.window.prior_summary with
+    | Some prior -> prior.source_index
+    | None -> first_index
+  in
   plan.window.source_units
   |> List.mapi (fun index unit_ -> index, unit_)
   |> List.concat_map (fun (index, unit_) ->
-    if index = first_index
+    if index = summary_index
     then [ summary_message plan.summary ]
-    else if index > first_index && index < plan.keep_from_unit_index
+    else if index >= first_index && index < plan.keep_from_unit_index
     then []
     else messages_of_unit unit_)
 
@@ -561,6 +627,78 @@ let exact_output_requirement =
   Exact_output.make_output_requirement
     ~schema:Schema.compaction_plan_output_schema
     ~minimum_guarantee:Exact_output.Json_syntax
+;;
+
+let planning_window_with_sources window = function
+  | [] -> None
+  | first_source :: remaining_sources ->
+    Some { window with first_source; remaining_sources }
+;;
+
+let window_prefix sources count =
+  Array.sub sources 0 count |> Array.to_list
+;;
+
+let project_window_fits_all
+      ~keeper_name
+      (selected_slots : Runtime_exact_output_registry.selected_slot list)
+      window
+  =
+  let messages = messages_for_plan ~window in
+  let rec loop
+        (slots : Runtime_exact_output_registry.selected_slot list)
+    =
+    match slots with
+    | [] -> Ok true
+    | slot :: rest ->
+      (match
+         Exact_output.project_request_body
+           ~target:slot.admitted_target
+           ~messages
+           exact_output_requirement
+       with
+       | Error _ ->
+         Log.Keeper.warn
+           ~keeper_name
+           "compaction request-body projection rejected opaque slot=%s"
+           slot.slot_id;
+         Error Exact_admission_failed
+       | Ok projection ->
+         if projection.within_limit
+         then loop rest
+         else Ok false)
+  in
+  loop selected_slots
+;;
+
+let largest_fitting_window ~keeper_name ~selected_slots window =
+  let sources = planning_window_sources window |> Array.of_list in
+  let candidate count =
+    window_prefix sources count
+    |> planning_window_with_sources window
+    |> Option.to_result ~none:Invalid_plan
+  in
+  (* Every candidate contains the same prior summary and an exact prefix of the
+     same raw JSON window. Increasing [count] only appends source bytes to the
+     messages handed to OAS, so the exact serialized size is monotone. Binary
+     search avoids repeatedly serializing every growing prefix. *)
+  let rec search best low high =
+    if low > high
+    then
+      match best with
+      | Some window -> Ok window
+      | None -> Error Exact_admission_failed
+    else
+      let midpoint = low + ((high - low) / 2) in
+      let* window = candidate midpoint in
+      let* fits =
+        project_window_fits_all ~keeper_name selected_slots window
+      in
+      if fits
+      then search (Some window) (midpoint + 1) high
+      else search best low (midpoint - 1)
+  in
+  search None 1 (Array.length sources)
 ;;
 
 type prepared_lane =
@@ -1001,6 +1139,9 @@ let prepare_lane
         empty_lane_id;
       Error Exact_target_selection_failed
   | Ok { selected_slots } ->
+    let* window =
+      largest_fitting_window ~keeper_name ~selected_slots window
+    in
     let messages = messages_for_plan ~window in
     let* candidates = make_flow_candidates ~keeper_name selected_slots in
     (match candidates with
@@ -1513,8 +1654,12 @@ module For_testing = struct
   let planning_window_for_units = planning_window_for_units
   let planning_window_source_indices window =
     List.map
-      (fun source -> source.source_index)
+      (fun (source : eligible_source) -> source.source_index)
       (planning_window_sources window)
+  ;;
+
+  let prepared_window_source_indices prepared_lane =
+    planning_window_source_indices prepared_lane.window
   ;;
 
   let flow_slot_ids prepared_lane = prepared_lane.ordered_slot_ids

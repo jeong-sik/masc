@@ -167,7 +167,6 @@ let test_usage_does_not_create_context_snapshot () =
             ("name", `String "ctx-ratio-demo");
             ("agent_name", `String "keeper-ctx-ratio-demo-agent");
             ("trace_id", `String "trace-ctx-ratio-demo");
-            ("runtime_id", `String "primary");
           ])
     with
     | Ok meta -> meta
